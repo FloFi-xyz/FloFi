@@ -2,6 +2,7 @@
 'use client';
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
+import { flightWalletAccess } from '../app/flight-wallet-action';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { ownerByRecord } from '../domain/sequence-restore';
@@ -319,6 +320,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : modeB.status?.prepared && !modeB.retired ? { kind: 'delegated-swap', state: modeB }
     : { kind: 'fork-swap', state: modeA };
   const reviewBinding = useReviewAuthorization(simulationSource.kind);
+  // P0 (owner test 2026-11-12): the Flight decision for the signing wallet, read before each simulation (`flightWalletAccess`). A refusal is shown
+  // as this simulation's own classified blocker ("Wallet not linked to your FloFi account"), never as a failed simulation; it applies only while
+  // the same wallet is connected, and nothing was quoted, simulated or sent for it.
+  const [flightBlock, setFlightBlock] = useState<{ readonly owner: string; readonly code: string } | null>(null);
+  if (flightBlock && flightBlock.owner === reviewBinding.wallet.account && !simulationSource.state.busy)
+    simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock.code } } as SimulationSource;
   const [restoredBinding, setRestoredBinding] = useState({ epoch: restorationEpoch, key: null as string | null });
   if (restoredBinding.epoch !== restorationEpoch) setRestoredBinding({ epoch: restorationEpoch, key: reviewBinding.authorization.key });
   if (restorationEpoch > 0 && (restoredBinding.epoch !== restorationEpoch || restoredBinding.key === reviewBinding.authorization.key))
@@ -367,7 +374,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }
   }
   const solanaReview = solanaLiquidity.record?.review;
-  const simulateAgain = simulationSource.kind === 'universal' ? () => refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired) ? universal.refresh() : universal.simulate()
+  const simulateRuntime = simulationSource.kind === 'universal' ? () => refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired) ? universal.refresh() : universal.simulate()
     : simulationSource.kind === 'router' ? () => refreshBridgeAfterApproval(routerState.record, runtimeWorkflow, routerState.retired) ? routerState.refresh() : routerState.simulate()
     : simulationSource.kind === 'solana-transfer' ? solanaTransfer.simulate
     : simulationSource.kind === 'transfer' ? transfer.simulate
@@ -392,6 +399,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-SOLANA-TRANSFER-UX-001: a proposal loaded for one proven wallet is authorized by that same signer only. A different connected
   // account is never substituted: its simulation and Review would bind another owner, so the action waits for the right wallet.
   const signer = reviewBinding.wallet.account;
+  // P0: Flight first, for the same wallet the API binds; the runtime simulates only when that wallet may act (a refusal is a value, not a throw).
+  const simulateAgain = async (): Promise<unknown> => {
+    if (signer) {
+      const access = await flightWalletAccess(signer).catch(() => null);
+      if (access && !access.ok) { setFlightBlock({ owner: signer, code: access.code }); return; }
+    }
+    setFlightBlock(null);
+    return simulateRuntime();
+  };
   const walletConnection = useWalletConnection();
   const walletIssue = approvalWallet && signer && !sameAccount(approvalWallet, signer)
     ? tr('This proposal was loaded for {0}. Switch your wallet to that account to authorize it.', shortAccount(approvalWallet)) : null;

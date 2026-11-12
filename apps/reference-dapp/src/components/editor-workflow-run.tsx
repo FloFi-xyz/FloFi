@@ -27,6 +27,7 @@ import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workf
 import { useLocale } from '../i18n/locale';
 import { batchHandout, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
+import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
 
 /**
  * The whole-workflow runs this browser started and has not closed, by approval id. A page load gives the Canvas a new workflow id, so a run is
@@ -689,6 +690,8 @@ const PREPARED_EXPIRED_CHECK_WALLET = 'The request FloFi prepared expired at {0}
  * Review's own refusal that names its step uses `STEP_REFUSAL` instead.
  */
 export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
+  // P0: Flight Beta refusals (wallet not linked to the account, session ended, access not active) in plain words.
+  ...FLIGHT_REFUSAL_MESSAGES,
   BORROW_UNSAFE_HEALTH_FACTOR: 'This Borrow would leave your Aave health factor below 2.0 after the batch. Lower the Borrow amount or supply more collateral.',
   SIMULATION_REVERTED: 'FloFi simulated the whole batch and one of its calls would fail on chain now, so your wallet was not asked. Check the amounts, balances and allowances, then try again.',
   SWAP_MINIMUM_NOT_MET: 'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.',

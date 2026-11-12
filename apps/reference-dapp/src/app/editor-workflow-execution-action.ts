@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { withFlightAccess } from '../server/flight-access';
+import { flightWalletRefusal, withFlightAccess } from '../server/flight-access';
 /**
  * P0 workflow execution: the Editor runs a multi-step Canvas workflow as ONE workflow run, in place, with the lowest-friction authorization the
  * owner's own wallet really supports (an EIP-5792 atomic batch where it reports one), instead of a sequence of separate per-step flows.
@@ -64,6 +64,9 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
     const accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
     if (!session) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
     if (typeof owner !== 'string' || !EVM_ADDRESS.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
+    // P0: the Review is computed for the wallet the API will bind, so its Flight decision is the API's (a value, before any quote or simulation).
+    const flight = await flightWalletRefusal(owner, env);
+    if (flight) return { ok: false, code: flight };
     const host = await platformStateHost(env);
     if (!await fixedWindow(host.db, host.tenantId).allow(`editor-review:${session.accountId}`, REVIEW_LIMIT, REVIEW_WINDOW_SECONDS, new Date()))
       return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };

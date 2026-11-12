@@ -57,9 +57,22 @@ export type UserFundedDeps = {
 export type GroupInput = { readonly runId: string; readonly groupIndex: number; readonly strategy: GroupStrategy; readonly chain: string; readonly feePayer: string;
   readonly stepFrom: number; readonly stepTo: number };
 export type Prepared = Readonly<Record<string, unknown>> & { readonly kind: GroupStrategy };
-export type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly stepIndex?: number | null };
+/**
+ * P0 approved UX (board 07): the numbers behind USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE, exactly as this module already read and computed them
+ * (no new chain read): the owner's native balance, the fee ceiling and any native value the group sends, in wei. A read-only projection for the
+ * blocker screen and the assistant's explanation; it authorizes nothing and is never an input to a later preparation.
+ */
+export type NativeFeeShortfall = { readonly kind: 'NATIVE_FEE_SHORTFALL'; readonly chainId: string; readonly owner: string; readonly unit: 'wei';
+  readonly balance: string; readonly maxFee: string; readonly nativeSpend: string; readonly required: string; readonly shortfall: string };
+export type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly stepIndex?: number | null; readonly evidence?: NativeFeeShortfall };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const no = (code: string, stepIndex: number | null = null): Result<never> => ({ ok: false, code, stepIndex });
+const nativeShortfall = (group: { readonly chainId: number; readonly owner: string }, balance: bigint, maxFee: bigint, spend: bigint): Result<never> => {
+  const required = maxFee + spend;
+  return { ok: false, code: 'USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE', stepIndex: null, evidence: { kind: 'NATIVE_FEE_SHORTFALL', chainId: `eip155:${group.chainId}`,
+    owner: group.owner, unit: 'wei', balance: balance.toString(), maxFee: maxFee.toString(), nativeSpend: spend.toString(), required: required.toString(),
+    shortfall: (required > balance ? required - balance : 0n).toString() } };
+};
 const codeOf = (cause: unknown, fallback: string) => cause instanceof Error && /^[A-Z][A-Z0-9_:]{2,100}$/.test(cause.message) ? cause.message : fallback;
 const hex = (v: bigint) => '0x' + v.toString(16);
 const big = (v: unknown) => BigInt(String(v));
@@ -131,7 +144,7 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   }
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas + l1FeeUpperBound;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
-  if (fees.balance < maxCost + nativeSpend(group)) return no('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+  if (fees.balance < maxCost + nativeSpend(group)) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
   // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
   // after a lost answer, a reload, a re-preparation after expiry) and lets the owner's browser read the first batch back instead.
   const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls, walletBatchId(g.runId, g.groupIndex));
@@ -187,7 +200,7 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   const op = erc4337.packedUserOperation({ sender: group.owner, nonce, callData, gas });
   erc4337.assertUserFundedOperation(op);
   const maxCost = erc4337.maxPrefund(gas);
-  if (!delayed && fees.balance < maxCost + nativeSpend(group)) return no('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+  if (!delayed && fees.balance < maxCost + nativeSpend(group)) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
   return ok({ kind: 'EVM_USER_OPERATION', chainId: group.chainId, owner: group.owner, group, upgraded,
     op: serialOp(op), userOpHash: erc4337.userOpHash(op, group.chainId), typedData: erc4337.delegatorUserOpTypedData(group.chainId, op),
     fee: { payer: group.owner, unit: 'wei', maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: !delayed } });

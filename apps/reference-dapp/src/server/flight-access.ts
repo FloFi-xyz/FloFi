@@ -56,6 +56,25 @@ export async function requireFlightAccess(principal?: WalletPrincipal, env: Read
   }
 }
 
+/** A wallet address the caller names, as a Flight principal (EVM lower-cased), or null when it is not a wallet address. Grants nothing. */
+export function walletPrincipalOf(address: unknown): WalletPrincipal | null {
+  if (typeof address !== 'string') return null;
+  if (/^0x[0-9a-fA-F]{40}$/.test(address)) return { namespace: 'eip155', address: address.toLowerCase() };
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? { namespace: 'solana', address } : null;
+}
+/**
+ * P0 (owner test 2026-11-12): the Flight decision for the SAME owner wallet the API checks on every flow call (`backend/app.ts`
+ * `betaFlowOwnerRefusal`), returned as a value. Server Action errors are redacted in production builds, so a thrown `BETA_*` reached the
+ * Editor as an anonymous failure ("Simulation failed"); this answer reaches it intact, before any quote, simulation or wallet request.
+ * Read-only: it creates no grant, wallet binding or session and proves nothing about an address (only the caller's own account is consulted).
+ */
+export async function flightWalletRefusal(owner: unknown, env: Readonly<Record<string, string | undefined>> = process.env): Promise<string | null> {
+  if (betaAccessMode(env) === 'open') return null;
+  const principal = walletPrincipalOf(owner);
+  try { await requireFlightAccess(principal ?? undefined, env); return null; }
+  catch (error) { return error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message) ? error.message : 'BETA_UNAVAILABLE'; }
+}
+
 /**
  * Authenticated owner session for recovery of existing work. Does not require an active Flight grant.
  * Public/open rollout stays inert. Closed and beta modes both require a live signed-in account session.

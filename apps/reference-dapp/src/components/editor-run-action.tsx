@@ -10,9 +10,11 @@ import { useEffect, useRef, useState } from 'react';
 import { editorWorkflowRunAvailability, startEditorWorkflowRun } from '../app/editor-run-action';
 import type { EditorRunReadiness } from '../domain/editor-run';
 import { useLocale } from '../i18n/locale';
+import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
 
 /** Refusals the owner can act on, in plain words; any other code is shown with the generic sentence. */
 const REFUSAL_TEXT: Readonly<Record<string, string>> = {
+  ...FLIGHT_REFUSAL_MESSAGES,
   ACCOUNT_SESSION_REQUIRED: 'Sign in to FloFi to run this workflow from the Editor.',
   EDITOR_RUNS_NOT_ENABLED: 'Running a whole workflow is not enabled on this FloFi deployment.',
   WORKFLOW_RUNS_NOT_ENABLED: 'Running a whole workflow is not enabled on this FloFi deployment.',

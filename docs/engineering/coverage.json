@@ -614,6 +614,14 @@
       "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
       "stage": "unit"
     },
+    "app.domain.flight-refusal": {
+      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
+      "stage": "unit"
+    },
+    "app.server.bridge-build-estimate": {
+      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
+      "stage": "unit"
+    },
     "app.server.flight-access": {
       "path": "apps/reference-dapp/src/server/flight-access.test.ts",
       "stage": "unit"
@@ -3819,6 +3827,7 @@
         "apps/reference-dapp/src/domain/secondary-workspaces.ts",
         "apps/reference-dapp/src/domain/sequence-presentation.ts",
         "apps/reference-dapp/src/domain/simulation-presentation.ts",
+        "apps/reference-dapp/src/domain/flight-refusal.ts",
         "apps/reference-dapp/src/domain/simulation-unavailable.ts",
         "apps/reference-dapp/src/domain/solana-refusal.ts",
         "apps/reference-dapp/src/domain/usd-estimate.ts",
@@ -3847,7 +3856,8 @@
         "app.domain.observation-schedule",
         "app.domain.wallet-portfolio",
         "app.domain.editor-overview",
-        "app.domain.editor-run"
+        "app.domain.editor-run",
+        "app.domain.flight-refusal"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5947,6 +5957,7 @@
         "apps/reference-dapp/src/server/across-adapter.ts",
         "apps/reference-dapp/src/server/across-service.ts",
         "apps/reference-dapp/src/server/bridge-build-estimate.ts",
+        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/bridge-discovery.ts",
         "apps/reference-dapp/src/server/bridge-read-rpc.ts",
         "apps/reference-dapp/src/server/bridge-service.ts",
@@ -5980,7 +5991,8 @@
         "reference-compiler.bridge",
         "reference-executor.bridge",
         "reference-reconciler.bridge",
-        "app.server.universal-router.discovery"
+        "app.server.universal-router.discovery",
+        "app.server.bridge-build-estimate"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -7190,6 +7202,7 @@
         "apps/reference-dapp/src/flight/beta-access.ts",
         "apps/reference-dapp/src/flight/beta-context.ts",
         "apps/reference-dapp/src/server/flight-access.ts",
+        "apps/reference-dapp/src/app/flight-wallet-action.ts",
         "apps/reference-dapp/src/server/execution-guard.ts"
       ],
       "suites": [
@@ -7197,7 +7210,8 @@
         "app.flight.beta-access.pg",
         "app.server.flight-access",
         "app.server.execution-guard",
-        "app.backend.beta-access.pg"
+        "app.backend.beta-access.pg",
+        "app.domain.flight-refusal"
       ],
       "gaps": [
         "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",

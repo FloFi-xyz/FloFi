@@ -8,7 +8,7 @@ vi.mock('../flight/host.ts', () => ({ flightCalendar: () => ({ listClosesAt: 1, 
 vi.mock('./platform-state-host.ts', () => ({ platformStateHost: () => h.host() }));
 vi.mock('../flight/beta-access.ts', async importOriginal => ({ ...await importOriginal<typeof import('../flight/beta-access.ts')>(),
   createBetaAccessStore: () => ({ require: h.require }) }));
-import { isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from './flight-access';
+import { flightWalletRefusal, isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, walletPrincipalOf, withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from './flight-access';
 import { currentBetaIdentity } from '../flight/beta-context';
 beforeEach(() => { vi.clearAllMocks(); h.session = null; h.wallets = []; h.host.mockResolvedValue({}); h.require.mockResolvedValue({ ok: true }); });
 describe('server request authorization before private work', () => {
@@ -89,5 +89,36 @@ describe('server request authorization before private work', () => {
       h.require.mockResolvedValue({ ok: false, code: 'BETA_SESSION_REQUIRED' }); const work = vi.fn();
       await expect(withFlightAccess(work)).rejects.toThrow('BETA_SESSION_REQUIRED'); expect(work).not.toHaveBeenCalled();
     } finally { vi.unstubAllEnvs(); }
+  });
+});
+
+/**
+ * P0 (owner test 2026-11-12): the API refused the owner's Swap simulation with BETA_WALLET_NOT_LINKED and the Editor showed "Simulation failed".
+ * The Editor now asks for the same decision first, for the same wallet the API binds, and receives it as a VALUE (a thrown Server Action error is
+ * redacted in production builds). Nothing here creates a grant, binding or session.
+ */
+describe('Flight decision for the signing wallet, as a value', () => {
+  const metaMask = '0x' + 'B'.repeat(40);
+  it('is inert in open mode (no storage) and names EVM/Solana principals exactly as the API does', async () => {
+    expect(await flightWalletRefusal(metaMask, {})).toBeNull();
+    expect(h.host).not.toHaveBeenCalled(); expect(h.require).not.toHaveBeenCalled();
+    expect(walletPrincipalOf(metaMask)).toEqual({ namespace: 'eip155', address: metaMask.toLowerCase() });
+    expect(walletPrincipalOf('a'.repeat(32))).toEqual({ namespace: 'solana', address: 'a'.repeat(32) });
+    for (const bad of ['', '0x12', 42, null, undefined, 'not a wallet!']) expect(walletPrincipalOf(bad)).toBeNull();
+  });
+  it('returns the refusal code for a connected wallet that is not linked to the signed-in account, never throwing', async () => {
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' };
+    h.require.mockImplementation(async input => input.principal?.address === metaMask.toLowerCase() ? { ok: false, code: 'BETA_WALLET_NOT_LINKED' } : { ok: true });
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBe('BETA_WALLET_NOT_LINKED');
+    expect(h.require).toHaveBeenLastCalledWith({ ...h.session, now: 3, sessionNow: expect.any(Number), principal: { namespace: 'eip155', address: metaMask.toLowerCase() } });
+    // A linked wallet passes; the same account's decision is reused, nothing is granted.
+    h.require.mockResolvedValue({ ok: true });
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBeNull();
+  });
+  it('classifies a missing session, a closed gate and an unexpected failure without leaking error text', async () => {
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBe('BETA_SIGN_IN_REQUIRED');
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'closed' })).toBe('BETA_ACCESS_CLOSED');
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' }; h.require.mockRejectedValue(new Error('database exploded: secret detail'));
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBe('BETA_UNAVAILABLE');
   });
 });

@@ -24,6 +24,7 @@ import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
+import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -68,6 +69,9 @@ export type SimulationPresentation = {
 /** Labels and visual emphasis only. The existing projection remains the readiness source. */
 export function simulationStatusPresentation(view: SimulationPresentation, invalidWorkflow = false, busy?: boolean | string | null) {
   if (invalidWorkflow) return { label: 'Check workflow', message: 'Check the workflow configuration on the Canvas before continuing.', tone: 'blocked' };
+  // P0: a Flight Beta refusal is named ("Wallet not linked to your FloFi account"), never shown as a failed simulation.
+  const flight = flightRefusalTitleOf(view.message);
+  if (flight) return { label: flight, message: view.message, tone: 'blocked' };
   if (!view.steps.length && view.status !== 'blocked') return { label: 'No workflow', message: 'Create a workflow in the Editor first.', tone: 'neutral' };
   if (view.message === 'Updating the simulation…') return { label: typeof busy === 'string' && /review/i.test(busy) ? 'Preparing authorization…' : 'Simulating workflow…', message: 'Checking the current workflow before continuing.', tone: 'neutral' };
   if (view.message === 'Run a simulation to see the expected result.') return { label: 'No simulation yet', message: 'Run a simulation to see expected execution.', tone: 'neutral' };
@@ -79,6 +83,9 @@ export function simulationStatusPresentation(view: SimulationPresentation, inval
   if (/Connect the wallet that will sign/i.test(view.message)) return { label: 'Connect your wallet', message: view.message, tone: 'blocked' };
   if (/destination address|token details do not match|token feature FloFi cannot verify|Check the amount/i.test(view.message)) return { label: 'Check the workflow', message: view.message, tone: 'blocked' };
   if (/route is not available/i.test(view.message)) return { label: 'Route unavailable', message: view.message, tone: 'blocked' };
+  if (/below the bridge provider’s minimum/.test(view.message)) return { label: 'Below the provider minimum', message: view.message, tone: 'blocked' };
+  if (/No bridge route that FloFi can verify and execute/.test(view.message)) return { label: 'No executable bridge route', message: view.message, tone: 'blocked' };
+  if (/does not have enough liquidity/.test(view.message)) return { label: 'Liquidity unavailable', message: view.message, tone: 'blocked' };
   return { label: view.status === 'ready' ? 'Ready' : view.status === 'blocked' ? 'Cannot proceed' : 'Needs attention', message: view.message, tone: view.status };
 }
 
@@ -109,9 +116,18 @@ const providerNames: Record<string, string> = {
 export const simulationProvider = (id: string) => providerNames[id] ?? null;
 /** Only known error meanings reach the primary UI; never echo provider responses or validation paths. */
 export function simulationError(error: string): string {
+  // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
+  const flight = flightRefusalMessage(error);
+  if (flight) return flight;
   // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi Wallet (Privy) refusals keep their own sentence, as on the Canvas.
   const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
   if (floFiWallet) return floFiWallet;
+  // P0 (2026-11-12): a provider's liquidity and minimum answers before the balance rules (`RELAY_INSUFFICIENT_LIQUIDITY` read "your balance is too
+  // low", `RELAY_AMOUNT_TOO_LOW` the generic failure). Only refusals before anything was prepared: delivery outcomes such as
+  // ROUTER_FILL_BELOW_MINIMUM / UNIVERSAL_DELIVERY_BELOW_MINIMUM are reconciliation results and never match here.
+  if (/(?:^|_)INSUFFICIENT_LIQUIDITY$/.test(error)) return 'The provider does not have enough liquidity for this amount right now, so nothing was simulated or sent. Try a smaller amount or try again later.';
+  if (/(?:^|_)AMOUNT_TOO_LOW$|^(?:BRIDGE_)?BELOW_MINIMUM$/.test(error)) return 'The amount is below the bridge provider’s minimum for this route, so nothing was simulated or sent. Choose a larger amount, then simulate again.';
+  if (/(?:^|_)NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so nothing was simulated or sent. Try again later or change the amount.';
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
