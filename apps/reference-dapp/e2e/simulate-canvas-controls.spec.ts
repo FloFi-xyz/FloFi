@@ -5,9 +5,9 @@
  * tablet and phone widths in both themes, every control stays clickable (it is the element under its own centre) and keyboard reachable,
  * no control covers a card, and element screenshots of the controls are kept as visual baselines. Nothing is simulated or signed.
  * P0 approved UX (boards 04, 06): in the chat-first workspace the simulated canvas carries no action — the one lifecycle control (Simulate) lives in
- * the Editor footer and the stepper's Create returns to the Canvas — so the canvas's bottom-right group is the navigator alone (Fit, Zoom out,
- * Zoom in; the slider and percentage are gone). The contract below is that shape: the navigator stays inside the graph and never covers a card or
- * a step note, each of its controls is the element under its own centre and keyboard reachable, and the footer's Simulate stays in the footer.
+ * the Editor footer and the stepper's Create returns to the Canvas — so the canvas's bottom control group is the navigator alone, centred (Fit,
+ * Zoom out, Zoom in; the slider and percentage are gone). The contract below is that shape: the navigator stays inside the graph and never covers a
+ * card or a step note, each of its controls is the element under its own centre and keyboard reachable, and the footer's Simulate stays there.
  */
 import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
@@ -44,10 +44,11 @@ function expectControls(m: Awaited<ReturnType<typeof measure>>, context: string)
   const { surface, navigator } = m;
   expect(navigator, context).toBeTruthy();
   expect(m.actions, context).toBe(0);
-  // Bottom-right, inside the graph.
+  // Inside the graph, on its own centred line at the bottom (the group has no action beside it).
   expect(navigator!.left, context).toBeGreaterThanOrEqual(surface.left); expect(navigator!.right, context).toBeLessThanOrEqual(surface.right);
   expect(navigator!.top, context).toBeGreaterThanOrEqual(surface.top); expect(navigator!.bottom, context).toBeLessThanOrEqual(surface.bottom);
-  expect(navigator!.left + (navigator!.right - navigator!.left) / 2, context).toBeGreaterThan(surface.left + (surface.right - surface.left) / 2);
+  expect(Math.abs((navigator!.left + navigator!.right) / 2 - (surface.left + surface.right) / 2), context).toBeLessThanOrEqual(1);
+  expect(navigator!.top, context).toBeGreaterThan(surface.top + (surface.bottom - surface.top) / 2);
   for (const card of m.cards) expect(overlaps(card, navigator!), context).toBe(false);
   for (const note of m.notes) expect(overlaps(note, navigator!), context).toBe(false);
   expect(m.hits, context).toEqual({ fit: true, zoomOut: true, zoomIn: true });

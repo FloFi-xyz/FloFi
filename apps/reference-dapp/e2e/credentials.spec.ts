@@ -56,7 +56,12 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(phantom).toContainText('Phantom wallet · Solana'); await expect(phantom).toContainText('Solana Devnet'); await expect(phantom).toContainText('Active');
     await expect(phantom.locator('code')).toHaveAttribute('title', WALLET_ACCOUNTS.phantomSolana);
     await expect(rabby).toContainText('Active'); await expect(rabby.locator('code')).toHaveAttribute('title', WALLET_ACCOUNTS.rabby);
-    await expect(rabby).toHaveCSS('background-color', theme === 'dark' ? 'rgb(28, 32, 41)' : 'rgb(255, 255, 255)');
+    // Board 13: wallet rows sit on their panel, which carries the theme's surface (graphite #15181F in Dark).
+    await expect(rabby).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    const wallets = page.locator('section[aria-labelledby="credentials-wallets"]');
+    await expect(wallets).toHaveCSS('background-color', theme === 'dark' ? 'rgb(21, 24, 31)' : await wallets.evaluate(() => {
+      const sample = document.createElement('span'); sample.style.backgroundColor = 'var(--surface)'; document.body.append(sample);
+      const color = getComputedStyle(sample).backgroundColor; sample.remove(); return color; }));
 
     // Adding wallets only connected them: no signature, transaction or authorization request reached any wallet.
     expect(await promptingCalls(page)).toEqual([{ wallet: 'MetaMask', method: 'eth_requestAccounts' }, { wallet: 'Phantom Solana', method: 'standard:connect' },

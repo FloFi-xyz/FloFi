@@ -134,7 +134,7 @@ for (const value of ['light', 'dark'] as const) {
     // Board 11: one list; the records that need attention come first and are what the "Needs attention" chip lists.
     await filterRecords(page, 'Needs attention');
     const attention = index.getByRole('list', { name: 'Needs attention', exact: true });
-    await expect(attention.getByRole('listitem')).toHaveCount(3);
+    await expect(attention.locator(':scope > li')).toHaveCount(3);
     for (const row of await index.locator('.ux-record').all()) await row.getByRole('button', { name: /^Show details for / }).click();
     await expect(attention).toContainText('Execution status unresolved');
     await expect(attention.locator('.dashboard-run-message').first()).toBeVisible();
@@ -157,12 +157,17 @@ for (const value of ['light', 'dark'] as const) {
       });
     });
     for (const check of checks) { expect(check.size, check.text ?? '').toBeGreaterThanOrEqual(12); expect(check.ratio, check.text ?? '').toBeGreaterThanOrEqual(4.5); }
-    const run = index.locator('.ux-workflow-rows .ux-record').first();
-    const border = await run.evaluate(element => getComputedStyle(element).borderColor);
-    const link = run.getByRole('link'); await link.hover();
-    expect(await run.evaluate(element => getComputedStyle(element).borderColor)).not.toBe(border);
+    // P0 approved UX (boards 10–11): a record is a quiet row; its visible Open control is what answers the pointer. The page frame that styles it is
+    // the Dashboard's (in the product, Your workflows gives its records the same frame), so the Dashboard's current execution row is used here.
+    await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
+    const run = index.locator('.dashboard-current .ux-record').first();
+    const link = run.getByRole('link');
+    const background = await link.evaluate(element => getComputedStyle(element).backgroundColor);
+    await link.hover();
+    await expect.poll(() => link.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(background);
     await link.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
     expect(await link.evaluate(element => { const style = getComputedStyle(element); return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2; })).toBe(true);
+    await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
     const refresh = index.getByRole('button', { name: 'Refresh history', exact: true }); await refresh.hover();
     expect(await refresh.evaluate(element => { const style = getComputedStyle(element); return style.backgroundImage === 'none' && style.boxShadow === 'none'; })).toBe(true);
     await page.mouse.move(0, 0);
@@ -226,7 +231,11 @@ for (const value of ['light', 'dark'] as const) {
     await page.evaluate(() => window.flofiDashboardAcceptance.view('dashboard'));
     await page.evaluate(() => { window.flofiDashboardAcceptance.mode('history'); window.flofiDashboardAcceptance.longTitle(); });
     await noOverflow(page);
-    expect(await workspace(page).locator('.ux-record-current h3 button > span[title]').evaluate(element => element.getAttribute('title') === element.textContent && element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1)).toBe(true);
+    // P0 approved UX (board 11): a long name is shown in full (it wraps inside its row; never clipped), with the same name as its title.
+    expect(await workspace(page).locator('.ux-record-current h3 button > span[title]').evaluate(element => {
+      const row = element.closest('.ux-row')!.getBoundingClientRect(), name = element.getBoundingClientRect();
+      return element.getAttribute('title') === element.textContent && name.right <= row.right + 1 && element.scrollWidth <= element.clientWidth + 1;
+    })).toBe(true);
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-dashboard-${value}-320.png`, fullPage: true });
     await fixture(page, 'Details');
     for (const mode of ['completed', 'partial', 'unresolved', 'bridge-completed', 'cow-pending', 'legacy', 'not-found', 'unavailable'] as const) {

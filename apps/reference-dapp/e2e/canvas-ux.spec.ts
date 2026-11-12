@@ -255,7 +255,9 @@ test('marquee follows the pointer, stays clipped, and selects exactly the inters
   const second = await graph.locator('.react-flow__node[data-id="node-003"]').boundingBox();
   const third = await graph.locator('.react-flow__node[data-id="node-004"]').boundingBox();
   if (!surface || !second || !third) throw new Error('Canvas geometry missing');
-  const start = { x: surface.x + 5, y: surface.y + 5 };
+  // P0 approved UX (board 04): the action rail sits inside the graph's left edge, so the marquee starts on the empty canvas just right of it.
+  const rail = await graph.locator('.floating-toolbox').boundingBox();
+  const start = { x: Math.max(surface.x + 5, rail ? rail.x + rail.width + 5 : 0), y: surface.y + 5 };
   const end = { x: Math.min(second.x + second.width + 5, third.x - 5), y: second.y + second.height + 5 };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
@@ -272,9 +274,11 @@ test('marquee follows the pointer, stays clipped, and selects exactly the inters
   const firstSelected = graph.locator('.react-flow__node[data-id="node-002"]');
   const before = await firstSelected.boundingBox();
   if (!before) throw new Error('Selected node missing');
-  await page.mouse.move(before.x + 60, before.y + 55);
+  // The restyled card is dragged by its title (its value boxes are controls).
+  const grab = (await firstSelected.locator('.composer-action-title').boundingBox())!;
+  await page.mouse.move(grab.x + 10, grab.y + grab.height / 2);
   await page.mouse.down();
-  await page.mouse.move(before.x + 95, before.y + 80, { steps: 8 });
+  await page.mouse.move(grab.x + 45, grab.y + grab.height / 2 + 25, { steps: 8 });
   await page.mouse.up();
   const moved = await firstSelected.boundingBox();
   expect(moved!.x).toBeGreaterThan(before.x + 20);

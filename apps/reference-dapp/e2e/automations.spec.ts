@@ -63,7 +63,8 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     await expect(f).toContainText('Every Monday at 09:00 (Europe/Lisbon)');
     await expect(f).toContainText('Prepare 50 USDC → WETH on Base Sepolia');
     await expect(f).toContainText('Max per execution50');
-    await expect(f).toContainText('Slippage (bps)100');
+    // P0 approved UX (board 12): the route's slippage reads as "Max price difference" in percent (100 bps = 1%).
+    await expect(f).toContainText('Max price difference1%');
     await expect(f).toContainText('Execution: Ask me before every execution');
     await f.screenshot({ path: '/tmp/flofi-ux004-automations-review.png' });
     await f.getByRole('button', { name: 'Create automation', exact: true }).click();

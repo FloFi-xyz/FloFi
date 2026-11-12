@@ -143,7 +143,11 @@ test('UX-009 fits committed insertions 1–5; proposals and ordinary edits do no
   await page.getByRole('region', { name: 'Source token picker', exact: true }).locator('label:has(input[aria-label="WETH"])').click();
   await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   expect(await viewport(page).getAttribute('style')).toBe(after);
-  await expect(page.locator('.canvas-navigator-slider').first()).toHaveAttribute('max', '1.4');
+  // P0 approved UX (board 04): the zoom slider is gone; Zoom in (+) still stops at the engine's maximum, 1.4.
+  const zoomIn = page.locator('.build-flow-surface .canvas-navigator').getByRole('button', { name: 'Zoom in', exact: true });
+  for (let step = 0; step < 12 && await zoomIn.isEnabled(); step++) { await zoomIn.click(); await settledViewport(page); }
+  await expect(zoomIn).toBeDisabled();
+  expect(await viewport(page).evaluate(element => new DOMMatrixReadOnly(getComputedStyle(element).transform).a)).toBeCloseTo(1.4, 2);
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
 
@@ -183,7 +187,8 @@ test('UX-009/010 repeated Send cards retain links and the manual viewport throug
   const nodes = (await ir(page)).nodes.filter(n => n.actionType === 'asset.transfer');
   const [a, b] = nodes; expect(a!.nodeId).not.toBe(b!.nodeId);
   await connect(page, b!.nodeId, a!.nodeId);
-  const slider = page.locator('.build-flow-surface .canvas-navigator-slider'); await slider.focus(); await page.keyboard.press('ArrowDown');
+  // P0 approved UX (board 04): a manual zoom through the navigator's Zoom out (−) (the slider is gone).
+  await page.locator('.build-flow-surface .canvas-navigator').getByRole('button', { name: 'Zoom out', exact: true }).click();
   await settledViewport(page); const manual = await viewport(page).getAttribute('style');
   const card = page.locator(`.build-flow-surface .react-flow__node[data-id="${a!.nodeId}"]`);
   await card.locator('.composer-action-title').click();

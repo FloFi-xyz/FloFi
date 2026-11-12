@@ -66,6 +66,10 @@ for (const width of widths) {
 }
 });
 
+// P0 approved UX (board 16 §7–§8): touch sizing (44 px targets, a 16 px chat field that keeps mobile browsers from zooming on focus) applies to coarse
+// pointers, so these phone-width checks run as a touch screen does (`hasTouch`), not as a narrow mouse window.
+test.describe('on a touch screen', () => {
+test.use({ hasTouch: true });
 for (const width of [320, 375, 390, 430]) {
   test(`touch controls, proposal and wallet dismissal at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 740 });
@@ -127,7 +131,9 @@ for (const width of [320, 375, 390, 430]) {
     await openEditorSection(page, 'Simulate');
     await expect(page.getByRole('main', { name: 'Simulation workspace', exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Simulation workspace navigation', exact: true }).getByRole('button', { name: 'Review', exact: true }).click();
-    await expect(page.locator('.simulation-summary')).toBeFocused();
+    // P0 approved UX (board 06): on a phone the shortcut opens the collapsed Review panel and focuses it (the Simulation Summary sits in its
+    // Technical details).
+    await expect(page.locator('.review-panel-approved')).toBeFocused();
     await noOverflow(page);
     await openEditorSection(page, 'Execute');
     await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).toBeVisible();
@@ -137,6 +143,7 @@ for (const width of [320, 375, 390, 430]) {
     await noOverflow(page);
   });
 }
+});
 
 // BUILD-FLOFI-SITE-001: the approved site has no scroll-driven motion; every section is visible and nothing is pinned.
 test('the landing shows every section at once, without pinning', async ({ page }) => {

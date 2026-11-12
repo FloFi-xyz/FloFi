@@ -134,7 +134,7 @@ test('new Send authoring controls and lifecycle copy use Portuguese', async ({ p
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(card.getByRole('button', { name: 'Aplicar proposta', exact: true })).toHaveCount(0);
   // The explicit network switch (the wallet is on Base Sepolia), then the lifecycle CTA, both in Portuguese.
-  await expect(page.locator('.canvas-primary-action button')).toHaveText('Mudar para Robinhood Chain Testnet');
+  await expect(page.locator('.canvas-primary-action button')).toHaveText('Trocar para Robinhood Chain Testnet');
   await page.locator('.canvas-primary-action button').click();
   await expect(page.locator('.canvas-primary-action button')).toHaveText('Simular fluxo');
   expect(await supplySendCount(page)).toBe(0);

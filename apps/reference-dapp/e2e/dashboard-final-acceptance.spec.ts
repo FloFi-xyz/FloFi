@@ -171,8 +171,10 @@ test('current-run navigation remains a read-only path to Execute and survives un
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(1, 'unavailable'));
   await expect(index.getByRole('status')).toContainText('Execution history temporarily unavailable');
   await expect(index.locator('.dashboard-current')).toBeVisible();
-  await index.getByRole('button', { name: 'Build workflow', exact: true }).click();
-  expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.navigation())).toEqual(['/app/dashboard/runs/fixture-detail-run', 'Execute', '/app/dashboard', 'Build']);
+  // P0 approved UX (board 10): while an execution is current, the Dashboard offers that run (not a second "Create workflow"); the Editor is the
+  // drawer's. Nothing here navigated anywhere else.
+  await expect(index.getByRole('button', { name: /^(Build workflow|Create workflow)$/ })).toHaveCount(0);
+  expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.navigation())).toEqual(['/app/dashboard/runs/fixture-detail-run', 'Execute', '/app/dashboard']);
 });
 
 for (const value of ['light', 'dark'] as const) test(`${value} long recorded amounts, costs, provider references, orders and technical details fit acceptance widths`, async ({ page }) => {

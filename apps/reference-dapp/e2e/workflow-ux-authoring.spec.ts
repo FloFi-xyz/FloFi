@@ -42,7 +42,8 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
   test('the toolbar and card say Send; the To field is network-aware and its address becomes the canonical recipient', async ({ page, networkGuard }) => {
     await open(page);
     const add = page.getByRole('button', { name: 'Add send', exact: true });
-    await expect(add).toHaveAttribute('title', 'Add Send'); await expect(add).toContainText('Send');
+    // P0 approved UX (board 04): the rail button's visible name is "Send" (its accessible name stays "Add send"; the rail shows its own tooltip).
+    await expect(add.locator('.canvas-rail-label')).toHaveText('Send'); await expect(add).toContainText('Send');
     await expect(page.getByRole('button', { name: /transfer/i })).toHaveCount(0);
     await add.click();
     const card = cards(page).first(), to = card.getByRole('textbox', { name: 'To', exact: true });
@@ -250,7 +251,8 @@ test.describe('UX-007 fast live quote feedback', () => {
       await input.fill(width === 1440 ? '0.997401' : '0.00065');
       await expect(destination.locator('.composer-amount-loading')).toBeVisible();
       const pending = (await card.boundingBox())!;
-      await expect(destination.locator('.composer-amount-value')).toHaveText('1.549809');
+      // P0 approved UX (board 04): a quoted output shows at most six significant digits; the exact value stays in its title (checked below).
+      await expect(destination.locator('.composer-amount-value')).toHaveText('1.54981');
       const settled = (await card.boundingBox())!;
       // The quote's arrival never resizes the card (the placeholder holds the value's line).
       expect(Math.abs(settled.height - pending.height)).toBeLessThan(1);
@@ -265,7 +267,7 @@ test.describe('UX-007 fast live quote feedback', () => {
         expect(geometry.fontSize).toBeGreaterThanOrEqual(12);
         expect(geometry.clipped).toBe(false);
       }
-      // The exact value is never rounded for display.
+      // The owner's amount is never rounded; the quoted output's exact value stays available in its title.
       await expect(input).toHaveValue(width === 1440 ? '0.997401' : '0.00065');
       await expect(destination.locator('.composer-amount-value')).toHaveAttribute('title', '1.549809');
     }
@@ -285,11 +287,12 @@ test.describe('UX-007 fast live quote feedback', () => {
       const card = cards(page).first(); await chooseNetwork(page, card, 'Arbitrum One');
       await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('250');
       const destination = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
-      // Clipped on one line, so it is a disclosure; its accessible name is the whole, unrounded value.
-      const value = destination.getByRole('button', { name: LONG, exact: true });
+      // P0 approved UX (board 04): shown with six significant digits on one line, so it is a disclosure; the whole, unrounded value is its title
+      // and what it opens.
+      const value = destination.getByRole('button', { name: '0.123457', exact: true });
       await expect(value).toHaveAttribute('aria-expanded', 'false');
-      expect(await value.evaluate(element => ({ clipped: element.scrollWidth > element.clientWidth + 1, oneLine: element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1 })))
-        .toEqual({ clipped: true, oneLine: true });
+      await expect(value).toHaveAttribute('title', LONG);
+      expect(await value.evaluate(element => element.getBoundingClientRect().height <= parseFloat(getComputedStyle(element).lineHeight) + 1)).toBe(true);
       const token = (await destination.locator('.composer-token-chip, .composer-token-pill').first().innerText()).trim().split(/\s+/)[0]!;
       const before = (await card.boundingBox())!;
       const exact = page.getByRole('note', { name: 'Exact amount', exact: true });
@@ -305,8 +308,8 @@ test.describe('UX-007 fast live quote feedback', () => {
       await value.tap(); await expect(exact).toHaveCount(0); await expect(value).toHaveAttribute('aria-expanded', 'false');
       await value.tap(); await expect(exact).toBeVisible();
       await card.locator('.composer-action-title').tap(); await expect(exact).toHaveCount(0);
-      // The bubble replaces the hover title (no duplicate tooltip or name).
-      await expect(value).not.toHaveAttribute('title', /./);
+      // Board 04: the exact value also stays in the title (the bubble adds no second name).
+      await expect(value).toHaveAttribute('title', LONG);
       // Keyboard: Enter opens, Escape closes and returns focus to the value; Space opens too.
       await value.focus(); await page.keyboard.press('Enter'); await expect(exact).toHaveText(`${LONG} ${token}`);
       await page.keyboard.press('Escape'); await expect(exact).toHaveCount(0); await expect(value).toBeFocused();

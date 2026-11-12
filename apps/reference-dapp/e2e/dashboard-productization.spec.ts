@@ -70,16 +70,16 @@ test('current execution and saved cards retain status, evidence and distinct rev
   await page.evaluate(() => window.flofiDashboardAcceptance.view('records'));
   // Each run is listed once: executed history, or the records that need attention (unresolved, incomplete or in progress).
   await filterRecords(page, 'Executed');
-  await expect(page.getByRole('list', { name: 'Executed', exact: true }).getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByRole('list', { name: 'Executed', exact: true }).locator(':scope > li')).toHaveCount(1);
   await filterRecords(page, 'Needs attention');
   const attention = page.getByRole('list', { name: 'Needs attention', exact: true });
-  await expect(attention.getByRole('listitem')).toHaveCount(3);
+  await expect(attention.locator(':scope > li')).toHaveCount(3);
   for (const row of await attention.locator('.ux-record').all()) await row.getByRole('button', { name: /^Show details for / }).click();
   await expect(attention).toContainText('Execution status unresolved');
   await expect(attention).toContainText('Review the incomplete action');
   await expect(page.locator('.ux-record')).toHaveCount(3);
   await filterRecords(page, 'All');
-  await expect(page.getByRole('list', { name: 'All', exact: true }).getByRole('listitem')).toHaveCount(4);
+  await expect(page.getByRole('list', { name: 'All', exact: true }).locator(':scope > li')).toHaveCount(4);
   // The completed run is the one executed record (its row's Open names the workflow).
   await filterRecords(page, 'Executed');
   await page.getByRole('list', { name: 'Executed', exact: true }).getByRole('link', { name: 'Open record: Swap', exact: true }).click();

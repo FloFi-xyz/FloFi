@@ -147,7 +147,9 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect(page.getByRole('status')).toContainText('Workflow saved.');
   const workflow = await savedCanonical(A.address);
   expect(workflow.nodes.some(n => n.actionType === 'asset.bridge' && n.chainId === 'eip155:84532')).toBe(true);
-  let library = await libraryWorkspace(page); await expect(library.getByRole('button', { name, exact: true })).toHaveCount(1);
+  // P0 approved UX (board 11): a saved workflow is a row named by its (untranslated) name, opened by its row's Open.
+  let library = await libraryWorkspace(page); await expect(library.getByRole('heading', { name, exact: true })).toHaveCount(1);
+  await expect(library.getByRole('button', { name: `Open workflow: ${name}`, exact: true })).toHaveCount(1);
   await stage(page, 'Build');
   const card = page.locator('.build-flow-surface .composer-card').first();
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('2');
