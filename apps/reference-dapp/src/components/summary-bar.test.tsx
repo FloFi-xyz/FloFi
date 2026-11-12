@@ -31,7 +31,7 @@ describe('footer after Build CTA relocation', () => {
     const setTab = vi.fn();
     const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab }));
     expect(html).toContain('data-workflow-revision="0"');
-    expect(html).toContain('0 actions');
+    expect(html).toContain('0 steps'); // P0 approved UX (board 04): "WORKFLOW · n steps"
     expect(html).not.toMatch(/<button|Simular Fees|Continue to Simulate/);
     expect(setTab).not.toHaveBeenCalled();
   });
@@ -120,13 +120,16 @@ describe('Editor footer', () => {
     for (const tab of ['Build', 'Simulate'] as const) expect(renderToStaticMarkup(createElement(SummaryBar, { tab, setTab: vi.fn(), canvasOwnsAction: true }))).not.toMatch(/summary-sections|View simulation|View execution/);
   });
 
-  it('hosts the existing Canvas lifecycle control once, on the Canvas only, keeping its wrapper class', () => {
+  // P0 approved UX (boards 06–08): the footer hosts the ONE lifecycle control on Create and on Simulate (it left the canvas corner).
+  it('hosts the existing Canvas lifecycle control once, on Create and Simulate, keeping its wrapper class', () => {
     const control = createElement('button', { type: 'button', className: 'primary', 'data-lifecycle-action': 'simulate' }, 'Simulate workflow');
     const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control, overview: overview() }));
     expect(html.match(/data-lifecycle-action="simulate"/g)).toHaveLength(1);
     expect(html).toContain('<div class="canvas-primary-action summary-primary-action"><button type="button" class="primary" data-lifecycle-action="simulate">Simulate workflow</button></div>');
     expect(html).toContain('class="summary-bar editor-bar"');
-    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control }))).not.toContain('data-lifecycle-action');
+    const simulate = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control }));
+    expect(simulate.match(/data-lifecycle-action="simulate"/g)).toHaveLength(1);
+    expect(renderToStaticMarkup(createElement(SummaryBar, { tab: 'Execute', setTab: vi.fn(), canvasOwnsAction: true, primaryAction: control }))).not.toContain('data-lifecycle-action');
   });
 
   it('states only real notices: steps that need attention, unapplied changes, or none', () => {
@@ -139,7 +142,7 @@ describe('Editor footer', () => {
     expect(show?.props.children).toBe('Show step'); show!.props.onClick();
     expect(showStep).toHaveBeenCalledExactlyOnceWith('b');
     expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview({ state: 'draft', drafts: 2 }) }))).toContain('2 changes not applied yet');
-    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview() }))).toContain('No step warnings');
+    expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview() }))).toContain('No warnings');
     // Simulate closed for a reason its control states: the footer claims nothing about warnings.
     expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview(), simulationBlocked: true }))).not.toContain('summary-notice');
     // One live region: attention is announced, an unapplied change is read on demand.
@@ -148,5 +151,24 @@ describe('Editor footer', () => {
     expect(renderToStaticMarkup(createElement(SummaryBar, { ...props, overview: overview({ state: 'empty', count: 0, steps: [] }) }))).not.toContain('summary-notice');
     // A notice never claims a simulation, an approval or an executable transaction.
     expect(html).not.toMatch(/Simulated|Approved|Ready to execute/);
+  });
+});
+
+/** P0 approved UX (boards 06–07): the Simulate footer states the validity countdown or the blocker, as a status line. */
+describe('Simulate footer status', () => {
+  const sim = { busy: false, status: 'ready' as const, label: 'Ready', expiresAt: Date.now() + 52_000, executionStarted: false };
+  it('counts the simulation validity down in a status line', () => {
+    const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, simulation: sim }));
+    expect(html).toMatch(/<p class="summary-status-line" data-tone="ready" role="status">[\s\S]*Simulation valid for 0:5[12]/);
+  });
+  it('names a blocker and says nothing was sent only before any execution', () => {
+    const blocked = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, simulation: { ...sim, status: 'blocked', label: 'Insufficient balance', expiresAt: null } }));
+    expect(blocked).toContain('Insufficient balance'); expect(blocked).toContain('Nothing was sent');
+    const started = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Simulate', setTab: vi.fn(), canvasOwnsAction: true, simulation: { ...sim, status: 'blocked', label: 'Insufficient balance', expiresAt: null, executionStarted: true } }));
+    expect(started).not.toContain('Nothing was sent');
+  });
+  it('on Create, a pending network question is the one notice', () => {
+    const html = renderToStaticMarkup(createElement(SummaryBar, { tab: 'Build', setTab: vi.fn(), overview: overview(), networkQuestion: true }));
+    expect(html).toContain('Choose the network in the chat to simulate'); expect(html).not.toContain('No warnings');
   });
 });

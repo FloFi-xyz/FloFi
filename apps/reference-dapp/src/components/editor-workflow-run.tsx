@@ -23,6 +23,7 @@ import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, prepareUserFundedGr
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
+import { walletRequestView } from '../domain/approved-ux';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import { batchHandout, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
@@ -874,6 +875,17 @@ export function EditorWorkflowRunPanel({ state }: { state: EditorWorkflowRunStat
   const counts = review?.counts;
   return <section className="editor-workflow-run panel" aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}>
     <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>
+    {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
+    {review && (phase === 'wallet' || phase === 'confirming') && (() => {
+      const view = walletRequestView(review, run?.currentStep ?? null);
+      return view && <div className="execution-wallet-request" data-phase={phase}>
+        <p className="eyebrow">{view.of === null ? tr('EXECUTION · REQUEST {0}', String(view.request)) : tr('EXECUTION · REQUEST {0} OF {1}', String(view.request), String(view.of))}</p>
+        <h4>{tr(phase === 'wallet' ? 'Confirm in your wallet' : 'Waiting for your wallet')}</h4>
+        {view.calls.length > 0 && <><p className="muted">{tr(view.calls.length === 1 ? 'Your wallet shows 1 call:' : 'Your wallet shows {0} calls in one request:', String(view.calls.length))}</p>
+          <ol className="execution-wallet-calls">{view.calls.map((call, index) => <li key={index}>{tr(call.text, ...call.parameters.map((value, at) => at === 1 ? tr(ACTION[value] ?? value) : value))}</li>)}</ol></>}
+        <p className="muted">{tr('Editing paused during execution')}</p>
+      </div>;
+    })()}
     {state.earlier && <div className="editor-run-earlier" role="status"><p>{tr('A workflow you authorized earlier in this browser has not been closed. Its progress, and any batch your wallet already has, are read from FloFi and your wallet.')}</p>
       <button type="button" className="secondary" disabled={busy} onClick={() => void state.followEarlier()}>{tr('Show its progress')}</button></div>}
     {!review && !run && state.canReview && <p>{tr('FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p>}

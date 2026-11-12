@@ -26,7 +26,8 @@ describe('Simulate product workspace', () => {
     const html = renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', simulationReason: reason }));
     const status = html.slice(html.indexOf('role="status"'), html.indexOf('aria-label="Expected result"'));
     expect(status).toContain(reason);
-    expect(html.match(/simulation-workspace-actions/g)).toHaveLength(2);
+    // P0 approved UX: the lifecycle action lives in the footer; without one passed here the canvas carries no action row.
+    expect(html.match(/simulation-workspace-actions/g)).toHaveLength(1);
   });
   it('keeps the empty-workflow guidance when a generic simulation blocker is supplied', () => {
     const reason = 'Complete the amount, assets, networks and recipient on the Canvas before simulating.';

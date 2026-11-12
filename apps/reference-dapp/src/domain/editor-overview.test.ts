@@ -71,7 +71,7 @@ describe('BUILD-FLOFI-BUILDER-UX-002 Editor overview and card status', () => {
     for (const label of [...Object.values(CARD_STATUS_LABEL), ...Object.values(EDITOR_STATE_LABEL), ...Object.values(EDITOR_STATE_DETAIL), CONFIGURED_DETAIL, 'Not applied to the workflow yet.',
       UNREVIEWED_DETAIL, EDITOR_INVALID_DETAIL, 'Check this step’s slippage limit.', 'The slippage limit is above what FloFi accepts for review.', 'Set one slippage limit for this step.'])
       expect(translate('PT', label), label).not.toBe(label);
-    expect(translate('PT', 'Configured')).toBe('Configurado');
+    expect(translate('PT', 'Configured')).toBe('Pronto para simular'); // P0 approved UX (board 16 §4): the configured state reads "ready to simulate"
     expect(translate('PT', 'Draft')).toBe('Rascunho');
     expect(translate('PT', 'Needs attention')).toBe('Requer atenção');
   });

@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
-import { BUILD_ENTRY_SUGGESTIONS, buildEntryOutcome, type BuildEntryOutcome, type BuildEntrySnapshot, type BuildEntrySuggestion } from '../domain/build-entry';
+import { BUILD_ENTRY_SUGGESTIONS, buildEntryOutcome, firstPlaceholder, type BuildEntryOutcome, type BuildEntrySnapshot, type BuildEntrySuggestion } from '../domain/build-entry';
 import type { FlofiConversation } from '../state/flofi-conversation';
 import styles from './build-entry.module.css';
 
@@ -93,9 +93,16 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); }
   }
+  // P0 approved UX (board 03): a chip fills an editable sentence template and focuses it, with its first bracketed part selected so typing
+  // replaces it. It never submits: the person completes the sentence and chooses Create workflow.
   function suggest(item: BuildEntrySuggestion) {
-    setDraft(item.example[language === 'PT' ? 'PT' : 'EN']); setRefused(null);
-    field.current?.focus();
+    const text = item.template[language === 'PT' ? 'PT' : 'EN'];
+    setDraft(text); setRefused(null);
+    const element = field.current;
+    if (!element) return;
+    element.focus();
+    const range = firstPlaceholder(text);
+    requestAnimationFrame(() => { if (range && field.current === element && element.value === text) element.setSelectionRange(range.start, range.end); });
   }
   const refusal = refused?.message ? refused.language ? refused.message : tr(refused.message) : null;
   return <section className={styles.root} aria-labelledby="build-entry-title" data-build-entry="">
@@ -105,21 +112,20 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
         <Image className={styles.mascotDark} src="/brand/flofi-droplet-wave-dark.svg" alt="" width={168} height={168} priority unoptimized draggable={false}/>
         <span className={styles.mascotShadow}/>
       </div>
-      <h1 id="build-entry-title" className={styles.title}>{tr('What do you ')}<span>{tr('want to do?')}</span></h1>
-      <p className={styles.description}>{tr('Describe your goal in one sentence. FloFi turns it into a workflow you can review before simulating or executing.')}</p>
+      {/* P0 approved UX (board 03): solid colors, the final words in the accent token; no subtitle (the placeholder and chips show how to start). */}
+      <h1 id="build-entry-title" className={styles.title}>{tr('What do you want to ')}<span>{tr('do?')}</span></h1>
 
       <form className={styles.composer} onSubmit={onSubmit} aria-busy={busy}>
-        <Icon className={styles.spark}><path d="M10 1.8c.5 4.2 2.3 6.4 7.2 8.2-4.9 1.8-6.7 4-7.2 8.2-.5-4.2-2.3-6.4-7.2-8.2 4.9-1.8 6.7-4 7.2-8.2Z" fill="currentColor" stroke="none"/></Icon>
-        <label className="sr-only" htmlFor="build-entry-request">{tr('Describe your strategy')}</label>
+        <label className="sr-only" htmlFor="build-entry-request">{tr('Describe what you want to do')}</label>
         <textarea ref={field} id="build-entry-request" value={draft} rows={2} maxLength={1024} disabled={busy}
-          placeholder={tr('I want to put 2,000 USDC to work on Solana with low risk.')}
+          placeholder={tr('e.g. swap 10 USDC for ETH on Base')}
           aria-describedby={refusal || refused ? 'build-entry-error' : 'build-entry-hint'}
           onChange={event => { fitHeight(event.target); setDraft(event.target.value); setRefused(null); }} onKeyDown={onKeyDown}/>
         <button className={styles.create} type="submit" disabled={!draft.trim() || busy || !interactive}>
-          <Icon className={styles.createIcon}><path d="M6 14 14 6M7.5 6H14v6.5"/></Icon>{tr(busy ? 'Preparing…' : 'Create strategy')}
+          {tr(busy ? 'Preparing…' : 'Create workflow')}
         </button>
       </form>
-      <p id="build-entry-hint" className="sr-only">{tr('Press Enter to create the strategy, or Shift+Enter for a new line.')}</p>
+      <p id="build-entry-hint" className="sr-only">{tr('Press Enter to create the workflow, or Shift+Enter for a new line.')}</p>
       {busy && <p className={styles.status} role="status">{tr('Understanding your request and preparing the workflow…')}</p>}
       {refused && <div id="build-entry-error" className={styles.error} role="alert">
         <p>{refusal ?? tr('FloFi could not build this strategy yet. Try describing it differently or start manually.')}</p>
@@ -127,17 +133,12 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
         <div><button type="button" onClick={() => void submit()} disabled={!draft.trim() || busy}>{tr('Try again')}</button>
           <button type="button" onClick={openBuilder}>{tr('Build manually')}</button></div>
       </div>}
-      {actions > 0 && !refused && <p className={styles.context} role="note">{tr(actions === 1 ? 'Your workflow already has 1 action. A new request is added to it.' : 'Your workflow already has {0} actions. A new request is added to it.', actions)}{' '}
-        <button type="button" onClick={openBuilder}>{tr('Open the editor')}</button></p>}
+      {/* The Editor is reached from the ☰ drawer (board 03: no duplicate Editor link); the note still says where a new request goes. */}
+      {actions > 0 && !refused && <p className={styles.context} role="note">{tr(actions === 1 ? 'Your workflow already has 1 action. A new request is added to it.' : 'Your workflow already has {0} actions. A new request is added to it.', actions)}</p>}
 
       <div className={styles.suggestions} role="group" aria-label={tr('Example requests')}>
         {BUILD_ENTRY_SUGGESTIONS.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => suggest(item)}>
           <Icon className={styles.chipIcon}>{icons[item.icon]}</Icon>{tr(item.label)}</button>)}
-      </div>
-      <button className={styles.manual} type="button" onClick={openBuilder}>{tr('Prefer the editor? Build manually')} <span aria-hidden="true">→</span></button>
-      <div className={styles.trust}>
-        <span className={styles.check} aria-hidden="true"><Icon><path d="m5.5 10.4 3 3 6-7"/></Icon></span>
-        <div><strong>{tr('Nothing executes without your review and authorization.')}</strong><p>{tr('You can start without connecting a wallet.')}</p></div>
       </div>
     </div>
   </section>;

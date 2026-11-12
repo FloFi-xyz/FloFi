@@ -11,7 +11,13 @@ import { useAccountsOffered, useFloFiPrivy } from '../accounts/privy-context';
 import { forgetAccountPresence, useAccountPresence } from '../state/account-presence';
 import { useProductBootstrap } from '../state/product-bootstrap';
 
-export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void }) {
+/**
+ * P0 approved UX (board 03b): Settings holds preferences and the account — Language, Theme, My account, Privacy and memory, Support. Log out lives
+ * once, in the ☰ drawer; only surfaces without a drawer (the compact /approve signing surface, the MCP route states) keep Disconnect here
+ * (`showDisconnect`, the documented exception).
+ */
+export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, showDisconnect = true }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void;
+  showDisconnect?: boolean }) {
   const { t: tr } = useLocale();
   const [open, setOpen] = useState(false);
   // Language remains a presentation preference.
@@ -136,6 +142,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
       <button type="button" className="header-settings-action" onClick={() => { onSupport?.(); setOpen(false); toggle.current?.focus(); }}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6M5.6 18.4l3.6-3.6m5.6-5.6 3.6-3.6"/></svg><span>{tr("Support")}</span>
       </button>
+      {showDisconnect && <>
       <span id={disconnectDescriptionId} className="sr-only">{tr(signedIn ? 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.'
         : 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.')}</span>
       <button type="button" className="header-settings-action header-disconnect" disabled={disconnectDisabled && !signedIn} aria-describedby={disconnectDescriptionId}
@@ -144,6 +151,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
         onClick={() => { void disconnect(); setOpen(false); toggle.current?.focus(); }}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M10 12h11m-4-4 4 4-4 4"/></svg><span>{tr("Disconnect")}</span>
       </button>
+      </>}
     </div>}
   </div>;
 }

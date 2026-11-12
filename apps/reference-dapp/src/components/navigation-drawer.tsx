@@ -7,13 +7,17 @@ import Link from 'next/link';
 import { SECONDARY_WORKSPACES as items, secondaryWorkspaceRoute, type SecondaryWorkspace } from '../domain/secondary-workspaces';
 import { dashboardRoute } from '../lib/dashboard/routes';
 import type { WorkflowStage } from '../domain/product-shell';
+import { automationsAvailability } from '../app/automation-action';
+import { delegationEnabled } from '../app/delegation-action';
 
 type NavigationItem = SecondaryWorkspace['id'] | 'dashboard' | 'chat' | 'build' | 'logout';
+/** P0 approved UX (board 03b): a status next to an item that is not available yet (never a disabled control that looks clickable). */
+type ItemStatus = 'Coming soon' | 'In testing' | null;
 
 function NavigationIcon({ item }: { item: NavigationItem }) {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    {item === 'dashboard' ? <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>
-      : item === 'chat' ? <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5Z"/><path d="M8.5 8.5h7M8.5 11.5h4"/></>
+    {item === 'chat' ? <><path d="M12 5v14M5 12h14"/></>
+      : item === 'dashboard' ? <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>
       : item === 'build' ? <><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v7a3.5 3.5 0 0 0 3.5 3.5h4M14 5.5h7m-3-3 3 3-3 3"/></>
         : item === 'logout' ? <><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M10 12h11m-4-4 4 4-4 4"/></>
           : item === 'workflows' ? <><path d="M4 3h12l4 4v14H4Z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></>
@@ -35,6 +39,21 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
 }) {
   const { t: tr, language } = useLocale();
   const [open, setOpen] = useState(false);
+  // Accurate availability tags, read once the drawer is first opened (the same server answers the pages themselves use; nothing is enabled here).
+  const [status, setStatus] = useState<{ readonly automations: ItemStatus; readonly passkeys: ItemStatus } | null>(null);
+  useEffect(() => {
+    if (!open || status) return;
+    let live = true;
+    void Promise.all([automationsAvailability().then(r => r.enabled, () => null), delegationEnabled().then(r => r.enabled, () => null)])
+      .then(([automations, passkeys]) => { if (live) setStatus({ automations: automations === false ? 'Coming soon' : null, passkeys: passkeys === false ? 'Coming soon' : null }); });
+    return () => { live = false; };
+  }, [open, status]);
+  const itemStatus = (id: SecondaryWorkspace['id']): ItemStatus => id === 'agents' ? 'In testing' : id === 'automations' ? status?.automations ?? null
+    : id === 'passkeys' ? status?.passkeys ?? null : null;
+  const row = (item: typeof items[number]) => <Link key={item.id} href={item.href} className="navigation-row" aria-current={selected === item.id ? 'page' : undefined} onClick={() => close(true)}>
+    <NavigationIcon item={item.id}/><span>{tr(item.label)}</span>
+    {itemStatus(item.id) && <span className="navigation-status" data-status={itemStatus(item.id) === 'In testing' ? 'testing' : 'soon'}>{tr(itemStatus(item.id)!)}</span>}
+  </Link>;
   const workspace = !pathname || pathname === '/app';
   const selected = secondaryWorkspaceRoute(pathname)?.id
     ?? (dashboardRoute(pathname) || (!pathname && section === 'Dashboard') ? 'dashboard'
@@ -110,31 +129,29 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
       <div className="navigation-backdrop" aria-hidden="true" onClick={() => close(true)}/>
       <aside ref={drawer} id={drawerId} className="navigation-drawer" aria-label={tr("FloFi navigation")}>
         <div ref={navigation} className="navigation-content">
-          <p className="navigation-section-label">{tr("Workspace")}</p>
-          <nav aria-label={tr("Workspace navigation")}>
-            <Link ref={firstItem} href="/app/dashboard" className="navigation-row" aria-current={selected === 'dashboard' ? 'page' : undefined} onClick={() => close(true)}>
-              <NavigationIcon item="dashboard"/><span>{tr("Dashboard")}</span>
-            </Link>
-            {onChat && <Link href="/app" className="navigation-row" aria-current={selected === 'chat' ? 'page' : undefined}
+          {/* P0 approved UX (board 03b): New workflow (the Chat entry), Editor, Dashboard; Library; Access. The only place navigation lives. */}
+          <nav aria-label={tr("FloFi navigation")}>
+            {onChat && <Link ref={firstItem} href="/app" className="navigation-row" aria-current={selected === 'chat' ? 'page' : undefined}
               onClick={event => { event.preventDefault(); onChat(); close(true); }}>
-              <NavigationIcon item="chat"/><span>{tr("Chat")}</span>
+              <NavigationIcon item="chat"/><span>{tr("New workflow")}</span>
             </Link>}
-            <Link href="/app" className="navigation-row" aria-current={selected === 'build' ? 'page' : undefined}
+            <Link ref={onChat ? undefined : firstItem} href="/app" className="navigation-row" aria-current={selected === 'build' ? 'page' : undefined}
               onClick={event => { event.preventDefault(); onBuild(); close(true); }}>
               <NavigationIcon item="build"/><span>{tr("Editor")}</span>
             </Link>
-            <hr className="navigation-separator"/>
-            {items.map(item => <Link key={item.id} href={item.href}
-              className="navigation-row" aria-current={selected === item.id ? 'page' : undefined} onClick={() => close(true)}>
-              <NavigationIcon item={item.id}/><span>{tr(item.label)}</span>
-            </Link>)}
+            <Link href="/app/dashboard" className="navigation-row" aria-current={selected === 'dashboard' ? 'page' : undefined} onClick={() => close(true)}>
+              <NavigationIcon item="dashboard"/><span>{tr("Dashboard")}</span>
+            </Link>
+            <p className="navigation-section-label" id={`${drawerId}-library`}>{tr("Library")}</p>
+            <div role="group" aria-labelledby={`${drawerId}-library`}>{items.filter(item => item.id === 'workflows' || item.id === 'automations').map(row)}</div>
+            <p className="navigation-section-label" id={`${drawerId}-access`}>{tr("Access")}</p>
+            <div role="group" aria-labelledby={`${drawerId}-access`}>{items.filter(item => item.id === 'credentials' || item.id === 'agents' || item.id === 'passkeys').map(row)}</div>
           </nav>
         </div>
         <div className="navigation-footer">
-          <button type="button" className="navigation-row" aria-label={tr("Logout")} disabled={disconnectDisabled}
-            onClick={() => { onDisconnect(); close(true); }}><NavigationIcon item="logout"/><span>{tr("Logout")}</span></button>
-          <a href="/terms" className="navigation-row">{language === 'PT' ? 'Termos' : 'Terms'}</a>
-          <a href="/privacy" className="navigation-row">{language === 'PT' ? 'Privacidade' : 'Privacy'}</a>
+          <button type="button" className="navigation-row" disabled={disconnectDisabled}
+            onClick={() => { onDisconnect(); close(true); }}><NavigationIcon item="logout"/><span>{tr("Log out")}</span></button>
+          <p className="navigation-legal"><a href="/terms">{language === 'PT' ? 'Termos' : 'Terms'}</a><span aria-hidden="true"> · </span><a href="/privacy">{language === 'PT' ? 'Privacidade' : 'Privacy'}</a></p>
         </div>
       </aside>
     </div>

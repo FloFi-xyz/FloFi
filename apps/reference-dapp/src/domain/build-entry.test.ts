@@ -98,8 +98,9 @@ describe('BUILD0-UX-001 Build 0 outcome (read from the stored workflow and FloFi
 
 describe('BUILD0-UX-001 suggestion chips', () => {
   it('fill editable examples that never name a test network, in English and Portuguese', () => {
-    expect(BUILD_ENTRY_SUGGESTIONS.map(item => item.label)).toEqual(['Earn yield', 'Swap assets', 'Provide liquidity', 'Use collateral', 'Multi-step strategy']);
-    for (const item of BUILD_ENTRY_SUGGESTIONS) for (const text of [item.example.EN, item.example.PT]) {
+    // P0 approved UX (board 03): the five intents in the board's order and wording.
+    expect(BUILD_ENTRY_SUGGESTIONS.map(item => item.label)).toEqual(['Swap tokens', 'Earn yield', 'Provide liquidity', 'Use as collateral', 'Multi-step workflow']);
+    for (const item of BUILD_ENTRY_SUGGESTIONS) for (const text of [item.example.EN, item.example.PT, item.template.EN, item.template.PT]) {
       expect(text).not.toMatch(/sepolia|devnet|testnet|\btest\b|dev(USDC|SOL)/i);
       expect(text.length).toBeGreaterThan(10);
     }

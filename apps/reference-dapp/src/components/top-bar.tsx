@@ -13,7 +13,7 @@ import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { useLending } from '../state/lending-store';
 import { useBridgeSwap } from '../state/bridge-swap-store';
 import { useWorkflow } from '../state/workflow-store';
-import { WORKFLOW_STAGES, workflowShellContext, shellChainLabel, type WorkflowStage } from '../domain/product-shell';
+import { workflowShellContext, type WorkflowStage } from '../domain/product-shell';
 import { isPristineDraft } from '../domain/initial-workflow';
 import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
 import { activeNetworkScope, networkAllowed } from '../domain/network-scope';
@@ -24,10 +24,10 @@ import { FloFiLogo } from './flofi-logo';
 import { HeaderSettings } from './header-settings';
 import { useExecutionEnvironment } from '../state/capability-store';
 import { NavigationDrawer } from './navigation-drawer';
-import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
 import { useWalletConnection } from '../state/wallet-connection';
 import { WalletMark } from './wallet-selector';
 import { BUILD_ENTRY, type BuildEntrySection } from '../domain/build-entry';
+import type { ReactNode } from 'react';
 
 export type Tab = WorkflowStage;
 /**
@@ -43,9 +43,15 @@ const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.sl
 /** `compact` (BUILD-SOLANA-TRANSFER-UX-001, the `/approve` signing surface): brand, wallet and settings only — no stage navigation and no
  * Mainnet/Testnet switch, because the proposal fixes its own network. `entry` (BUILD0-UX-001) offers Chat (the intent entry) before the Editor
  * in the public chat-first workspace only. */
-export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean }) {
+/**
+ * P0 approved UX (board 03b): navigation lives only in the ☰ drawer (the Dashboard | Chat | Editor tabs repeated it); the center of the bar holds
+ * the Editor's Create → Simulate → Execute stepper when the Editor is open (`center`), nothing on the Chat entry and the secondary pages; the right
+ * side keeps the wallet identity and Settings. The passive "Workflow network" label is gone (the Canvas header chip shows it); its row keeps the
+ * real jobs: the attention strip and switch button when the wallet is on another network, and provider errors.
+ */
+export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false, center }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean;
+  /** The Editor stepper, only while the Editor (Create, Simulate, Execute) is open. */ center?: ReactNode }) {
   const { t: tr } = useLocale();
-  const secondaryWorkspace = secondaryWorkspaceRoute(pathname);
   const { walletKind } = useExecutionEnvironment();
   const { info, wallet } = useModeA();
   const modeB = useModeB();
@@ -92,29 +98,29 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     ? `${jupiter.session.wallet.name} · ${solanaAddress} · ${jupiter.session.chain === 'solana:devnet' ? 'Solana Devnet' : jupiter.session.chain === 'solana:mainnet' ? 'Solana mainnet-beta' : jupiter.session.chain}`
     : undefined;
   const evmTitle = build009.account ? `${provider?.name ?? 'EVM'} · ${build009.account} · ${chainName(build009.chainId)}` : undefined;
-  const editor = (WORKFLOW_STAGES as readonly ProductSection[]).includes(tab);
+  // The wallet is on another network than the workflow's: the one attention strip with the existing user-driven switch (never automatic).
+  const networkAttention = Boolean(!solanaActive && build009.account && switchTarget && build009.chainId !== switchTarget.hex);
+  const walletProviderError = Boolean(!solanaActive && !build009.account && build009.providerError);
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
     <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? () => setTab(BUILD_ENTRY) : undefined}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
-    {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>
-      {/* BUILD-FLOFI-CHAT-EDITOR-UX-001: Dashboard | Chat | Editor, unnumbered. The Editor is current on each of its sections (Canvas, simulation and
-          Review, execution); choosing it opens the Canvas, exactly as Build did. */}
-      {entry && <button type="button" onClick={() => setTab(BUILD_ENTRY)} title={tr('Describe what you want to do')} aria-current={!secondaryWorkspace && tab === BUILD_ENTRY ? 'page' : undefined} className={!secondaryWorkspace && tab === BUILD_ENTRY ? 'selected' : ''}>{tr('Chat')}</button>}
-      <button type="button" onClick={() => setTab('Build')} title={tr(entry ? 'Edit the workflow on the Canvas and in the chat' : undefined)} aria-current={!secondaryWorkspace && editor ? 'page' : undefined} className={!secondaryWorkspace && editor ? 'selected' : ''}>{tr('Editor')}</button></nav>}
+    {!compact && <div className="top-bar-center">{center}</div>}
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
       {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><span className="numeric wallet-address">{shortAddress(solanaAddress)}</span></span>
-        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="numeric wallet-address">{shortAddress(build009.account)}</span></span>
+        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="wallet-status-dot" aria-hidden="true"/><span className="numeric wallet-address">{shortAddress(build009.account)}</span>
+          {build009.chainId && <span className="wallet-network">{' · '}{tr(chainName(build009.chainId))}</span>}</span>
           : restoring ? <span className="wallet-connection" role="status">{tr("Restoring wallet…")}</span>
             : <><span className="wallet-connection">{tr(solanaActive ? 'Solana wallet not connected' : 'Wallet not connected')}</span><button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>}
       </div>
-      <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>
+      {/* Log out lives in the drawer; only the compact /approve signing surface (no drawer) keeps Disconnect in Settings. */}
+      <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled} showDisconnect={compact}/>
     </div>
-    {!compact && <div className="shell-network-row">
-      {requiredChain && <span className="build009-required">{tr("Workflow network: ")}{tr(shellChainLabel(requiredChain))}</span>}
-      {!solanaActive && build009.account && switchTarget && build009.chainId !== switchTarget.hex && <><span className="network-mismatch" role="status">{tr("Switch networks before execution")}</span><button type="button" onClick={() => void connection.switchNetwork(switchTarget.chain)} disabled={build009.busy}>{tr("Switch to ")}{tr(chainName(switchTarget.hex))}</button></>}
-      {!solanaActive && !build009.account && build009.providerError && <span role="status">{tr(build009.providerError)}</span>}
+    {!compact && <div className="shell-network-row" data-empty={networkAttention || walletProviderError || engineering ? undefined : 'true'}>
+      {networkAttention && <p className="network-attention" role="status"><span>{tr('Your wallet is on {0}. Switch to {1} to continue.', tr(chainName(build009.chainId)), tr(chainName(switchTarget!.hex)))}</span>
+        <button type="button" className="secondary" onClick={() => void connection.switchNetwork(switchTarget!.chain)} disabled={build009.busy}>{tr('Switch to {0}', tr(chainName(switchTarget!.hex)))}</button></p>}
+      {walletProviderError && <span role="status">{tr(build009.providerError!)}</span>}
       {engineering && (fork || modeB.info?.available) && <details className="shell-technical"><summary>{tr("Technical connection details")}</summary><div>
         {fork && <span className="fork-badge"><StatusBadge label={`Local fork · ${fork.environment}`} tone="warning"/></span>}
         {modeB.info?.available && <StatusBadge label="Wallet permissions · local fork" tone="warning"/>}
