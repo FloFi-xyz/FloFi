@@ -98,7 +98,7 @@ for (const theme of ['Light', 'Dark'] as const) test(`${theme} approved fonts an
   await nav.getByRole('button', { name: 'Build', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).first()).toHaveValue('1');
-  expect(await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--blue').trim().toLowerCase())).toBe(theme === 'Light' ? '#1d5fca' : '#93a6ff');
+  expect(await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--blue').trim().toLowerCase())).toBe(theme === 'Light' ? '#2343d9' : '#93a6ff'); // P0 approved UX: Design System light primary/accent
   expect(await page.evaluate(() => performance.getEntriesByType('resource').filter(entry => /fonts\.(googleapis|gstatic)\.com/.test(entry.name)))).toEqual([]);
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /send|sign/i.test(request.method)))).toEqual([]);
   expect(errors).toEqual([]);

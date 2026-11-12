@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-:root{color-scheme:light;--ink:#14233a;--muted:#52627a;--line:#dce4ef;--soft:#f4f7fb;--paper:#fff;--blue:#1d5fca;--blue-soft:#eaf2ff;--grid:#dae4f1;--amber:#915e08;--amber-soft:#fff5de;--red:#a11c29;--on-accent:#fff;--page:#f8fafd;--canvas-start:#fbfdff;--canvas-end:#f4f8ff;--flow-line:#b5c8e6;--card-line:#bdcadb;--accent-line:#c9ddff;--accent-ink:#174d9f;--accent-border:#8db5ff;--accent-hover:#dce9ff;--accent-selected:#edf4ff;--accent-quiet:#f8fbff;--accent-review:#e6efff;--message-line:#d2e2ff;--warning-line:#f2dfb3;--warning-border:#e6cf9c;--warning-paper:#fffcf4;--danger-soft:#fff1f2;--danger-line:#edc4c9;--neutral-soft:#eef1f6;--neutral-line:#c7d0dd;--neutral-ink:#334155;--neutral-paper:#f5f7fa;--range-line:#93a7c4;--range-track:#d9e2ef;--range-handle:#7ba7ed;--edge-active:#2466c2;--edge-line:#6b809b;--edge-label:#536780;}
-:root{--primary:var(--blue);--success:#22c55e}
-/* BUILD-FLOFI-PRODUCT-UX-001: Beta Mainnet notice stays yellow with dark ink in both themes (not redefined for dark). */
-:root{--beta-notice-bg:#fde68a;--beta-notice-line:#f2c94c;--beta-notice-ink:#14233a}
+:root{color-scheme:light;--ink:#041B3D;--muted:#4B5B73;--line:#D9E2EC;--soft:#F5F8FB;--paper:#FFFFFF;--blue:#2343D9;--blue-soft:#E9EDFD;--grid:#E3E9F2;--amber:#8A5A00;--amber-soft:#FFF4E0;--red:#B42318;--on-accent:#fff;--page:#F7F9FC;--canvas-start:#fbfdff;--canvas-end:#f4f8ff;--flow-line:#b5c8e6;--card-line:#bdcadb;--accent-line:#c9ddff;--accent-ink:#1A33B8;--accent-border:#8db5ff;--accent-hover:#dce9ff;--accent-selected:#edf4ff;--accent-quiet:#f8fbff;--accent-review:#e6efff;--message-line:#d2e2ff;--warning-line:#f2dfb3;--warning-border:#e6cf9c;--warning-paper:#fffcf4;--danger-soft:#FDECEA;--danger-line:#edc4c9;--neutral-soft:#eef1f6;--neutral-line:#c7d0dd;--neutral-ink:#334155;--neutral-paper:#f5f7fa;--range-line:#93a7c4;--range-track:#d9e2ef;--range-handle:#7ba7ed;--edge-active:#2466c2;--edge-line:#6b809b;--edge-label:#536780;}
+/* P0 approved UX (board 16 §5): the FloFi Design System light column, with the semantic names the dark theme already uses. */
+:root{--primary:#2343D9;--accent:#2343D9;--accent-soft:#E9EDFD;--app-bg:var(--page);--surface:var(--paper);--surface-raised:var(--soft);--border:var(--line);
+  --text-primary:var(--ink);--text-secondary:var(--muted);--success:#137A3F;--success-surface:#E6F5EC;--warning-text:#8A5A00;--warning-surface:#FFF4E0;--danger-surface:var(--danger-soft)}
+/* P0 approved UX (board 16 §5): the Beta Mainnet notice uses the attention pair of the active theme (amber text on its own surface). */
+:root{--beta-notice-bg:var(--warning-surface);--beta-notice-line:var(--warning-surface);--beta-notice-ink:var(--warning-text)}
 /* Animate the canvas gradient's colors without changing its approved final appearance. */
 @property --canvas-start{syntax:"<color>";inherits:true;initial-value:#fbfdff}
 @property --canvas-end{syntax:"<color>";inherits:true;initial-value:#f4f8ff}
@@ -35,8 +37,8 @@
   --accent-quiet:var(--surface);--accent-review:var(--accent-soft);--message-line:var(--border);
   --amber:var(--warning-text);--amber-soft:var(--warning-surface);
   --warning-line:var(--border);--warning-border:var(--warning-text);--warning-paper:var(--warning-surface);
-  /* Preserve the established failure red; only its surrounding surface changes. */
-  --red:#ff9fae;--danger-soft:color-mix(in srgb,var(--red) 8%,var(--surface));--danger-line:#70414e;
+  /* P0 approved UX (board 16 §5): error and delete use the Design System pair #FF8A80 on #3A1614. */
+  --red:#FF8A80;--danger-soft:#3A1614;--danger-surface:#3A1614;--danger-line:#70414e;--success-surface:#11301F;
   --neutral-soft:var(--surface-raised);--neutral-line:var(--border);
   --neutral-ink:var(--text-secondary);--neutral-paper:var(--surface-raised);
   --range-line:var(--muted);--range-track:var(--border);--range-handle:var(--accent);

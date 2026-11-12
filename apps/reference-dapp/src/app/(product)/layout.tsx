@@ -21,6 +21,10 @@ import '@xyflow/react/dist/style.css';
 import '../globals.css';
 // BUILD-FLOFI-BUILDER-UX-002: the Editor (stepper, workflow header, rail, cards, FloFi summary, footer), after the shared product styles.
 import '../editor.css';
+// P0 approved UX (boards 03–16): shell, lifecycle and Review styles, then the Editor and secondary-page workstreams.
+import '../approved-ux.css';
+import '../approved-ux-editor.css';
+import '../approved-ux-pages.css';
 
 /**
  * One persistent workspace for /app, its deep links, /approve and /connections.

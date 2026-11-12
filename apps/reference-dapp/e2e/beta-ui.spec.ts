@@ -27,7 +27,8 @@ test('the landing header CTA opens sign-in and the builder stays reachable witho
 });
 });
 
-// BUILD-FLOFI-PRODUCT-UX-001: restore the yellow Beta Mainnet notice under the header (real funds enabled, review before signing).
+// BUILD-FLOFI-PRODUCT-UX-001: the Beta Mainnet notice under the header (real funds enabled, review before signing). P0 approved UX (board 16 §5):
+// it uses the Design System attention pair of the theme — light #8A5A00 on #FFF4E0 (was the older yellow #fde68a / #14233a).
 for (const width of [320, 1440]) {
   test(`/app shows the Beta Mainnet notice between the header and the workflow canvas at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -40,7 +41,7 @@ for (const width of [320, 1440]) {
     expect(await notice.evaluate(element => [
       getComputedStyle(element).backgroundColor,
       getComputedStyle(element).color,
-    ])).toEqual(['rgb(253, 230, 138)', 'rgb(20, 35, 58)']);
+    ])).toEqual(['rgb(255, 244, 224)', 'rgb(138, 90, 0)']);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     const top = (await page.locator('.top-bar').boundingBox())!;
     const banner = (await notice.boundingBox())!;

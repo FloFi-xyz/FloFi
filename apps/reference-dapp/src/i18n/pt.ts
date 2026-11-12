@@ -45,6 +45,9 @@ import { portugueseBuilderCanvas } from './pt-builder-canvas';
 import { portugueseAaveExpansion } from './pt-aave-expansion';
 import { portugueseEditorRuns } from './pt-editor-runs';
 import { portugueseFlight } from './pt-flight';
+import { portugueseApprovedUx } from './pt-approved-ux';
+import { portugueseApprovedUxPages } from './pt-approved-ux-pages';
+import { portugueseApprovedUxEditor } from './pt-approved-ux-editor';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseCatalogReliability,
@@ -299,4 +302,8 @@ export const portuguese: Readonly<Record<string, string>> = {
   'No wallet found. Install or enable a browser wallet.': 'Nenhuma carteira encontrada. Instale ou ative uma carteira no navegador.',
   'Could not connect. Check your wallet and try again.': 'Não foi possível ligar. Verifique a carteira e tente novamente.',
   'Connect your wallet first.': 'Ligue primeiro a carteira.', 'Could not switch networks. Check your wallet and try again.': 'Não foi possível mudar de rede. Verifique a carteira e tente novamente.',
+  // P0 approved UX: new copy of the two helper workstreams, then the final-precedence PT-BR catalog (overrides older PT-PT forms).
+  ...portugueseApprovedUxPages,
+  ...portugueseApprovedUxEditor,
+  ...portugueseApprovedUx,
 };
