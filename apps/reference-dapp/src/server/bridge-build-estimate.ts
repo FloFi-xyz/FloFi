@@ -16,7 +16,7 @@ export { certifiedRouterRoute };
 export async function readBridgeBuildEstimate(workflow: SemanticWorkflow, nodeId: string, workflowHash: string,
   owner: string | null, destinationWallet: string | null, env: Readonly<Record<string, string | undefined>>,
   now: () => Date, discover: typeof readBridgeDiscovery = readBridgeDiscovery, correlationId?: string, signal?: AbortSignal,
-  routerExecution: (network: RouterNetwork) => Promise<boolean> = network => certifiedRouterExecution(network, env)): Promise<BuildEstimateResult> {
+  routerExecution: (network: RouterNetwork, signal?: AbortSignal) => Promise<boolean> = (network, abort) => certifiedRouterExecution(network, env, { signal: abort })): Promise<BuildEstimateResult> {
   const node = workflow.nodes.find(n => n.nodeId === nodeId);
   const input = node && bridgeEstimateRequest(node, owner, destinationWallet);
   if (!input) return quoteFailure(new Error('ESTIMATE_UNSUPPORTED'), correlationId);
@@ -33,7 +33,7 @@ export async function readBridgeBuildEstimate(workflow: SemanticWorkflow, nodeId
     !Array.isArray(result.candidates) || result.candidates.some(c => !request.providers.includes(c.provider))) return quoteFailure(new Error('ESTIMATE_RESPONSE_MISMATCH'), correlationId);
   // A certified Router Bridge card: its pair's own flow executes Across routes when this deployment allows owner execution (read, never assumed).
   const router = node ? routerDetails(node) : null, routerNetwork = router?.network ?? null;
-  const certified = routerNetwork && result.candidates.some(certifiedRouterRoute) ? await routerExecution(routerNetwork).catch(() => false) : false;
+  const certified = routerNetwork && result.candidates.some(certifiedRouterRoute) ? await routerExecution(routerNetwork, signal).catch(() => false) : false;
   const executable = (c: DiscoveryCandidate) => c.status === 'EXECUTABLE' || certified && c.status === 'LIVE_QUOTE' && certifiedRouterRoute(c);
   const eligible = result.candidates.map((c, index) => ({ c, index })).filter(({ c }) => ['EXECUTABLE', 'LIVE_QUOTE'].includes(c.status) &&
     typeof c.expectedOutput === 'string' && /^[1-9][0-9]{0,77}$/.test(c.expectedOutput) && typeof c.minimumOutput === 'string' && /^[1-9][0-9]{0,77}$/.test(c.minimumOutput) &&

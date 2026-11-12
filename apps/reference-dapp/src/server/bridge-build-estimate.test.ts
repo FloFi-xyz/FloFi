@@ -85,7 +85,7 @@ describe('certified Router Bridge estimate executability (MOCKED)', () => {
   it('is executable through the Router flow when it allows owner execution, choosing only a Router-verified Across route', async () => {
     const workflow = routerWorkflow(), routerExecution = vi.fn(async () => true);
     const result = await readBuildEstimate({ workflow, nodeId: 'bridge' }, {}, { now, routerExecution, discover: async () => ({ ok: true, value: quoted(workflow, routes) }) });
-    expect(routerExecution).toHaveBeenCalledWith('arbitrum-to-base');
+    expect(routerExecution).toHaveBeenCalledWith('arbitrum-to-base', undefined);
     // AUTO asks LI.FI first, Across direct only as its fallback: the card shows the route the Router's Simulate asks first.
     expect(result).toMatchObject({ ok: true, estimate: { provider: 'lifi', expected: '1.996276', minimum: '1.98', bridge: { execution: 'SIMULATION_AND_REVIEW_REQUIRED', selected: 1 } } });
     // The browser's own economic check accepts it (the card shows the amount), only for this Router node's Across route.

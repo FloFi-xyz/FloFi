@@ -151,6 +151,9 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
   'Editing is paused while this workflow executes. You can change it once the run finishes or is ended.': 'A edição está pausada enquanto este fluxo é executado. Você pode alterá-lo quando a execução terminar ou for encerrada.',
   'Your workflow already has 1 step. A new request is added to it.': 'Seu fluxo já tem 1 passo. Um novo pedido é adicionado a ele.',
   'Your workflow already has {0} steps. A new request is added to it.': 'Seu fluxo já tem {0} passos. Um novo pedido é adicionado a ele.',
+  'Sign in to FloFi': 'Entrar na FloFi',
+  'You are not signed in to FloFi, so FloFi stopped this request. Sign in to continue; anything already sent stays tracked.':
+    'Você não está conectado à FloFi, por isso a FloFi interrompeu este pedido. Entre para continuar; o que já foi enviado continua sendo acompanhado.',
   'Steps in this request:': 'Passos deste pedido:', 'This request has 1 call, for this step:': 'Este pedido tem 1 chamada, para este passo:',
   'This request has {0} calls, for these steps:': 'Este pedido tem {0} chamadas, para estes passos:',
   'Expiry check: the request is refused after its deadline': 'Verificação de prazo: o pedido é recusado depois do prazo',

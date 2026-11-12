@@ -86,7 +86,7 @@ async function readBuildEstimateValue(input: unknown, env: Env = process.env,
     /** P0 catalog reliability: the browser cancelled this estimate (a newer edit superseded it): the API abandons the preview it started. */
     signal?: AbortSignal;
     /** P0 (2026-11-12): whether a certified Router pair executes for the owner here (default: the Router flow's own `info`). */
-    routerExecution?: (network: import('./router-runtime.ts').RouterNetwork) => Promise<boolean> } = {}): Promise<BuildEstimateResult> {
+    routerExecution?: (network: import('./router-runtime.ts').RouterNetwork, signal?: AbortSignal) => Promise<boolean> } = {}): Promise<BuildEstimateResult> {
   try {
     const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');

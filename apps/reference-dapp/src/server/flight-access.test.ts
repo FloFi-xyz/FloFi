@@ -115,6 +115,16 @@ describe('Flight decision for the signing wallet, as a value', () => {
     h.require.mockResolvedValue({ ok: true });
     expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBeNull();
   });
+  it('also checks every wallet this browser proved, exactly as the flow actions\' own boundary does', async () => {
+    const phantom = 'S'.repeat(32);
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' };
+    h.wallets = [{ namespace: 'eip155', address: metaMask.toLowerCase() }, { namespace: 'solana', address: phantom }];
+    h.require.mockImplementation(async input => input.principal?.address === phantom ? { ok: false, code: 'BETA_WALLET_NOT_LINKED' } : { ok: true });
+    // The named EVM signer is linked, but the browser's other proven wallet is not: the simulation's own boundary would refuse it.
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBe('BETA_WALLET_NOT_LINKED');
+    h.require.mockResolvedValue({ ok: true });
+    expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBeNull();
+  });
   it('classifies a missing session, a closed gate and an unexpected failure without leaking error text', async () => {
     expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBe('BETA_SIGN_IN_REQUIRED');
     expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'closed' })).toBe('BETA_ACCESS_CLOSED');

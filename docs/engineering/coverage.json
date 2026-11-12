@@ -1093,6 +1093,10 @@
     "app.domain.p0-swap-bridge-connections": {
       "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
       "stage": "unit"
+    },
+    "app.server.router-capability": {
+      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -6009,7 +6013,8 @@
         "reference-executor.bridge",
         "reference-reconciler.bridge",
         "app.server.universal-router.discovery",
-        "app.server.bridge-build-estimate"
+        "app.server.bridge-build-estimate",
+        "app.server.router-capability"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."

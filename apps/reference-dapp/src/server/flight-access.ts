@@ -71,7 +71,13 @@ export function walletPrincipalOf(address: unknown): WalletPrincipal | null {
 export async function flightWalletRefusal(owner: unknown, env: Readonly<Record<string, string | undefined>> = process.env): Promise<string | null> {
   if (betaAccessMode(env) === 'open') return null;
   const principal = walletPrincipalOf(owner);
-  try { await requireFlightAccess(principal ?? undefined, env); return null; }
+  try {
+    await requireFlightAccess(principal ?? undefined, env);
+    // The flow actions' own boundary (`withFlightAccess()`, no principal) also requires every wallet this browser proved: checked here too, so a
+    // refusal there (e.g. a second, unlinked wallet of a mixed EVM/Solana workflow) is named instead of reaching the Editor redacted.
+    if (principal) await requireFlightAccess(undefined, env);
+    return null;
+  }
   catch (error) { return error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message) ? error.message : 'BETA_UNAVAILABLE'; }
 }
 

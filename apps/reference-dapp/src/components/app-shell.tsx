@@ -3,7 +3,7 @@
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { flightWalletAccess } from '../app/flight-wallet-action';
-import { flightRefusal } from '../domain/flight-refusal';
+import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { ownerByRecord } from '../domain/sequence-restore';
@@ -616,8 +616,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const leaveEntry = tab === BUILD_ENTRY && entryAuto && !entryFresh && !canvasRestoring && !entryDraft.trim() && !conversation.busy;
   useEffect(() => { if (leaveEntry) { setEntryAuto(false); setSection('Build'); } }, [leaveEntry]);
   // Every shell that calls `simulateAgain` (the workspace and the /approve signing surface) states a Flight refusal the run keeps its words over.
+  const flightHref = flightNotice ? FLIGHT_REFUSAL_HREF[flightNotice.action] : null;
   const flightNoticeView = flightNotice && <div className="error-banner flight-run-notice" role="alert"><strong>{tr(flightNotice.title)}</strong>
-    <span>{tr(flightNotice.message)}{/already sent stays tracked/.test(flightNotice.message) ? null : <> {tr('Anything already sent stays tracked.')}</>}</span></div>;
+    <span>{tr(flightNotice.message)}{/already sent stays tracked/.test(flightNotice.message) ? null : <> {tr('Anything already sent stays tracked.')}</>}</span>
+    {flightHref && <a className="secondary" href={flightHref} {...surface === 'signing' ? { target: '_blank', rel: 'noopener noreferrer' } : {}}>
+      {tr(flightNotice.action === 'LINK_WALLET' ? 'Open Credentials' : flightNotice.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}</div>;
   const entry = chatFirst;
   if (surface === 'signing') return <div className="app-shell signing-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a>
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>

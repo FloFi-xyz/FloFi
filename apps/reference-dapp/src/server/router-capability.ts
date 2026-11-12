@@ -10,7 +10,7 @@
  */
 import type { RouterNetwork } from './router-runtime.ts';
 import { routerNetworkMode, routerNetworkRuntime } from './router-runtime.ts';
-import { cloudFlow } from './flow-runtime.ts';
+import { cloudFlow, flowRuntimeKind } from './flow-runtime.ts';
 import type { FlowName } from '../../backend/flows.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -20,11 +20,18 @@ const cache = new Map<string, { readonly at: number; readonly value: boolean }>(
 export const routerFlowName = (network: RouterNetwork): FlowName =>
   (network === 'mainnet' ? 'crosschain-router' : `crosschain-router-${network}`) as FlowName;
 
-export async function certifiedRouterExecution(network: RouterNetwork, env: Env = process.env, now: () => number = Date.now): Promise<boolean> {
-  const key = `${network}`, hit = cache.get(key);
+/**
+ * `signal`: the estimate's own cancellation (a cancelled estimate stops waiting for this read). The cache is per runtime and API, so a different
+ * deployment configuration in one process never reuses another's answer.
+ */
+export async function certifiedRouterExecution(network: RouterNetwork, env: Env = process.env,
+  options: { readonly now?: () => number; readonly signal?: AbortSignal | undefined; readonly read?: typeof cloudFlow } = {}): Promise<boolean> {
+  const now = options.now ?? Date.now, read = options.read ?? cloudFlow;
+  const key = `${flowRuntimeKind(env)}|${env.API_BASE_URL ?? ''}|${network}`, hit = cache.get(key);
   if (hit && now() - hit.at < TTL_MS) return hit.value;
   try {
-    const cloud = await cloudFlow<{ readonly executionEnabled?: unknown }>(routerFlowName(network), 'info', [], { env, principal: null, timeoutMs: 5_000, maxAttempts: 1 });
+    const cloud = await read<{ readonly executionEnabled?: unknown }>(routerFlowName(network), 'info', [], { env, principal: null, timeoutMs: 5_000, maxAttempts: 1,
+      ...options.signal ? { signal: options.signal } : {} });
     // A refused or failed read (this caller's access, an outage) is "not executable" for this answer only: never cached for other callers.
     if (cloud && !cloud.ok) return false;
     const mode = cloud ? null : routerNetworkMode(network, env);

@@ -21,8 +21,9 @@ const REFUSALS: Readonly<Record<string, Omit<FlightRefusal, 'code'>>> = Object.f
     message: `Your FloFi account has no wallet linked for Flight access yet, ${STOPPED} Link the wallet you will sign with in Credentials, then choose Board now on the Board page.` },
   BETA_SESSION_REQUIRED: { title: 'Sign in again', action: 'SIGN_IN',
     message: 'Your FloFi session ended, so FloFi stopped this request. Sign in again to continue; anything already sent stays tracked.' },
-  BETA_SIGN_IN_REQUIRED: { title: 'Sign in again', action: 'SIGN_IN',
-    message: 'Your FloFi session ended, so FloFi stopped this request. Sign in again to continue; anything already sent stays tracked.' },
+  // No session at all (a first visit, or a page framed where FloFi's cookie never existed): never "your session ended".
+  BETA_SIGN_IN_REQUIRED: { title: 'Sign in to FloFi', action: 'SIGN_IN',
+    message: 'You are not signed in to FloFi, so FloFi stopped this request. Sign in to continue; anything already sent stays tracked.' },
   BETA_ACCESS_DENIED: { title: 'Flight access not active for this account', action: 'BOARD',
     message: `This FloFi account does not have active Flight access, ${STOPPED} Open the Board page to check your access.` },
   BETA_ACCESS_REVOKED: { title: 'Flight access ended', action: 'NONE',
