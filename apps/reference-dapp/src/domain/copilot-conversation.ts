@@ -948,7 +948,9 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
   // P0 approved UX: FloFi composes its reply in the interface language, not the language the model detected.
-  if (env.interfaceLanguage && 'language' in intent && intent.language !== env.interfaceLanguage) intent = { ...intent, language: env.interfaceLanguage } as CopilotIntentV2;
+  // P0 hotfix (locale contract): a model text written in another language than the person's (a closed replay fixture, or a model that ignored the
+  // reply-language note) is never shown; FloFi's own copy in the person's language stands instead. The values it offered (networks, assets) stay.
+  if (env.interfaceLanguage && 'language' in intent && intent.language !== env.interfaceLanguage) intent = { ...withoutForeignProse(intent), language: env.interfaceLanguage } as CopilotIntentV2;
   // BUILD-FLOFI-INTELLIGENCE-001 (defense in depth): a model explanation shows only when every number in it is one of FloFi's facts — the user's words,
   // the workflow facts and context FloFi holds, and the numbers FloFi's tools returned this turn. Otherwise FloFi's own answer stands alone.
   if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) {
@@ -968,6 +970,13 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   return withAdaptation({ ...resolved, next: { ...resolved.next, languageObserved: true } }, env, { ...NO_ADAPTATION, observations: [{ kind: 'LANGUAGE', language: said }] });
 }
 
+/** The intent without the model's own sentences (question, reason, explanation): used when they are not in the person's language. */
+function withoutForeignProse(intent: CopilotIntentV2): CopilotIntentV2 {
+  if (intent.kind === 'CLARIFICATION_REQUIRED') return { ...intent, question: '' };
+  if (intent.kind === 'UNSUPPORTED') return { ...intent, reason: '' };
+  if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) return { ...intent, answer: null };
+  return intent;
+}
 /** One validated intent → reply and next state. `forced` is a step the user picked from Flofi's own buttons. */
 function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, forced: Resolved | null, extras: Extras): Result {
   const language = intent.language, m = copilotCopy(language);
@@ -981,11 +990,11 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
     }
 
     // PR B: a short, contextual reason; the full capability list is only the answer to a CAPABILITIES question.
-    case 'UNSUPPORTED': return refused(state, m, publicText(safeCopilotProse(intent.reason)) ?? m.cannotAuthor);
+    case 'UNSUPPORTED': return refused(state, m, publicText(safeCopilotProse(intent.reason)) || m.cannotAuthor);
     case 'GOAL': return resolveGoal(intent, state, env, extras);
     case 'POSITION': return resolvePosition(intent, state, env, extras);
     case 'CLARIFICATION_REQUIRED': {
-      const text = publicText(safeCopilotProse(intent.question)) ?? m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
+      const text = publicText(safeCopilotProse(intent.question)) || m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
       // BUILD-FLOFI-UX-FIX-003: an option the model wrote that names a test network is never offered in the public product.
       return question(state, m, text, intent.options.flatMap(option => publicText(safeCopilotProse(option)) ?? []),
         { intent: state.draft?.intent ?? intent, expected: intent.missing.map(field => field === 'asset' && state.draft?.expected?.length === 1 ? state.draft.expected[0]! : field), options: [], amountFill: false, snapshot: snapshotOf(env), ...state.draft?.extras ? { extras: state.draft.extras } : {} });

@@ -48,10 +48,10 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
         {message.role === 'ai' || message.role === 'flofi' ? <>
           <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} disabled={busy} onPick={send}/>
           {message.review && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
-          {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{note}</li>)}</ul>}
-          {message.question && <p className="conversation-question"><strong>{message.question}</strong></p>}
+          {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
+          {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(option)}>{option}</button>)}</div>}
+            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(tr(option))}>{tr(option)}</button>)}</div>}
           {networks && <NetworkChoices options={networks} disabled={busy} onPick={send}/>}
         </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text)}</p>}
       </div>);
