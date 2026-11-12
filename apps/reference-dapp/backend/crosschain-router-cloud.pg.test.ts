@@ -63,12 +63,21 @@ describe('BUILD-ROUTER-001 router on durable cloud state (MOCKED Base / Arbitrum
     ok(await d.call('review', run.id, run.review.commitment, w));
     const approval = ok<RouterBegin>(await d.call('begin', run.id, ROUTER_OWNER, w));
     ok(await d.call('handoff', run.id));
-    ok(await d.call('report', run.id, { kind: 'HASH', hash: h.wallet.send(approval.transaction), attemptId: approval.attempt.attemptId }));
+    const approvalHash = h.wallet.send(approval.transaction);
+    ok(await d.call('report', run.id, { kind: 'HASH', hash: approvalHash, attemptId: approval.attempt.attemptId }));
     ok(await d.call('observe', run.id));
     const deposit = ok<RouterBegin>(await d.call('begin', run.id, ROUTER_OWNER, w));
     ok(await d.call('handoff', run.id));
     const hash = h.wallet.send(deposit.transaction);
     expect(await d.call('report',run.id,{kind:'HASH',hash,attemptId:approval.attempt.attemptId})).toEqual({ok:false,code:'ROUTER_ATTEMPT_ID_MISMATCH'});
+    // P0 hotfix (production 2026-11-12): the browser outbox re-delivering the approval's already-recorded hash after the deposit began is an
+    // idempotent no-op answered with the durable record (unchanged); nothing is recorded for the approval or the deposit by it.
+    const beforeRedelivery = ok<RouterRecord>(await d.call('status', run.id));
+    const redelivered = ok<RouterRecord>(await d.call('report', run.id, { kind: 'HASH', hash: approvalHash, attemptId: approval.attempt.attemptId }));
+    expect(redelivered.attempts).toEqual(beforeRedelivery.attempts);
+    expect(redelivered.attempts.find(a => a.attemptId === approval.attempt.attemptId)?.transactionHash).toBe(approvalHash);
+    expect(redelivered.attempts.at(-1)).toMatchObject({ attemptId: deposit.attempt.attemptId, transactionHash: null });
+    expect(await d.call('report', run.id, { kind: 'HASH', hash: '0x' + '3'.repeat(64), attemptId: approval.attempt.attemptId })).toEqual({ ok: false, code: 'ROUTER_ATTEMPT_ID_MISMATCH' });
     const outage = await deployment(h, { sourceRpc: async (method, params) => {
       if (method === 'eth_getLogs' || method === 'eth_getTransactionReceipt') throw Error('PUBLIC_RPC_UNAVAILABLE');
       return h.baseRpc(method, params);

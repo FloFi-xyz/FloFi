@@ -555,7 +555,12 @@ describe('FIX-FINANCIAL-EXECUTION-TRUTH-001 submission safety', () => {
     await c.service.handoff(run.id); const hash = base.wallet.send(approval.transaction).hash;
     await c.service.report(run.id, { kind: 'HASH', hash }); await c.service.observe(run.id);
     const deposit = await c.service.begin(run.id, EVM_OWNER, w); await c.service.handoff(run.id);
-    await expect(c.service.report(run.id, { kind: 'HASH', hash, attemptId: approval.attempt.attemptId })).rejects.toThrow('UNIVERSAL_ATTEMPT_ID_MISMATCH');
+    // P0 hotfix: the approval's own, already-recorded hash delivered again (the browser outbox) is an idempotent no-op answered with the record
+    // (before the hotfix it was refused, so the outbox re-delivered it forever); it is never bound to the deposit, and any other hash is refused.
+    const before = await c.service.load(run.id);
+    expect(await c.service.report(run.id, { kind: 'HASH', hash, attemptId: approval.attempt.attemptId })).toEqual(before);
+    await expect(c.service.report(run.id, { kind: 'HASH', hash: '0x' + 'cd'.repeat(32), attemptId: approval.attempt.attemptId })).rejects.toThrow('UNIVERSAL_ATTEMPT_ID_MISMATCH');
+    await expect(c.service.report(run.id, { kind: 'UNKNOWN', attemptId: approval.attempt.attemptId })).rejects.toThrow('UNIVERSAL_ATTEMPT_ID_MISMATCH');
     expect((await c.service.load(run.id)).attempts.at(-1)?.attemptId).toBe(deposit.attempt.attemptId);
     expect((await c.service.load(run.id)).attempts.at(-1)?.transactionHash).toBeNull();
   });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
-import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports } from './wallet-request-lifecycle';
+import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports, walletReportRecorded } from './wallet-request-lifecycle';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
@@ -92,7 +92,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
         const r = report.kind === 'HASH' ? await universalReport(report.runId, { kind: 'HASH', hash: report.hash!, attemptId: report.attemptId }).catch(() => null)
           : await universalWalletFailure('EVM', report.runId, { invoked: true, attemptId: report.attemptId, code: report.code ?? 'UNIVERSAL_REJECTED', rejectionCode: report.rejectionCode!,
             calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: report.rejectionCode } }] }).catch(() => null);
-        if (r?.ok) forgetWalletReport(walletResultStorage(), report.attemptId);
+        // P0 hotfix: a hash leaves the outbox only once the record holds exactly that hash on that attempt (never an unrecorded one).
+        if (r?.ok && (report.kind !== 'HASH' || walletReportRecorded(r.value, report))) forgetWalletReport(walletResultStorage(), report.attemptId);
       }
   }
   useEffect(() => {
@@ -260,8 +261,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('UNIVERSAL_SUBMISSION_UNKNOWN');
       rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: current.owner, kind: 'HASH', hash: hash.toLowerCase() });
       try { if (visibleRun.current === id) window.localStorage.setItem(KEY, JSON.stringify({ id, ecosystem: 'EVM', owner: current.owner, attemptId, hash: hash.toLowerCase() })); } catch { /* Reported next. */ }
-      acceptCurrent(unwrap(await universalReport(id, { kind: 'HASH', hash: hash.toLowerCase(), attemptId })));
-      forgetWalletReport(walletResultStorage(), attemptId);
+      const reported = unwrap(await universalReport(id, { kind: 'HASH', hash: hash.toLowerCase(), attemptId }));
+      acceptCurrent(reported);
+      if (walletReportRecorded(reported, { attemptId, kind: 'HASH', hash: hash.toLowerCase() })) forgetWalletReport(walletResultStorage(), attemptId);
     } catch (cause) {
       const send = diagnostic.calls.find(c => c.submission), sendError = send?.error as { code?: unknown } | undefined;
       const refused = Boolean(send) && send!.result === undefined && typeof sendError?.code === 'number' && REFUSALS.includes(sendError.code);
