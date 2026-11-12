@@ -57,9 +57,9 @@ describe('P0 hotfix (execution continuity): the Editor Canvas survives reloads, 
   });
   it('is put back only on the untouched initial Canvas, with its own identity; an authored Canvas is never replaced', () => {
     const workflow = author('swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 2 USDC from Base to Arbitrum') as unknown as SemanticWorkflow;
-    const restored = editorHistoryReducer(initialEditorHistory(), { type: 'RESTORE_PERSISTED_CANVAS', workflowId: workflow.workflowId, workflow, layout: { 'node-002': { x: 10, y: 20 } } });
+    const restored = editorHistoryReducer(initialEditorHistory(), { type: 'RESTORE_PERSISTED_CANVAS', workflowId: workflow.workflowId, workflow, layout: { 'node-002': { x: 10, y: 20, actionType: 'asset.bridge' } } });
     expect(JSON.stringify(restored.editor.workflow)).toBe(JSON.stringify(workflow));
-    expect(restored.layout).toEqual({ 'node-002': { x: 10, y: 20 } });
+    expect(restored.layout).toEqual({ 'node-002': { x: 10, y: 20, actionType: 'asset.bridge' } });
     expect(restored.past).toEqual([]);
     // The owner already started authoring in this visit: nothing is replaced.
     const authored = editorHistoryReducer(initialEditorHistory(), { type: 'COMMAND', command: parseLocalCommand('swap 0.002 ETH to USDC on Base slippage 100 bps', initialEditor().workflow, context, OWNER), context });

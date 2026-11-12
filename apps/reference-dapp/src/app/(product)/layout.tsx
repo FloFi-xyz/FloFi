@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReactNode } from 'react';
 import { randomUUID } from 'node:crypto';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
 import { requireFlightAccess } from '../../server/flight-access';

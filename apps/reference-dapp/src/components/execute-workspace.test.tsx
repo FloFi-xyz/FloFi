@@ -233,7 +233,7 @@ describe('P0 hotfix (execution continuity): a step-by-step workflow continues in
   });
   it('a live step of the sequence counts the WHOLE workflow (never the step run\'s own "1 of 1")', () => {
     const data = fixture(), live = projectExecutionLifecycle(data.workflow, data.context, { kind: 'public', state: { ...data.source.state,
-      run: { ...('run' in data.source.state ? data.source.state.run : {}), attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: '0x' + 'a'.repeat(64) }] } } } as ExecutionLifecycleSource);
+      run: { ...('run' in data.source.state ? data.source.state.run : {}), attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: '0x' + 'a'.repeat(64) }] } } } as unknown as ExecutionLifecycleSource);
     expect(live.started).toBe(true);
     const html = render({ ...data, detailsOnly: true, progress: live, workflowProgress: progress(1, ['RECONCILED', 'AWAITING_AUTHORIZATION']) });
     expect(html).toContain('1 of 2 steps completed'); expect(html).not.toContain('steps confirmed');
