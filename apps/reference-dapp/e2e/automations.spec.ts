@@ -235,7 +235,8 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     await expect(workspace.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
     await expect(workspace.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
     expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
-    await workspace.getByRole('button', { name: 'Create with FloFi Chat', exact: true }).click();
+    // P0 approved UX (board 12): "Prefer to describe? Create with chat" opens the Chat entry.
+    await workspace.getByRole('button', { name: 'Create with chat', exact: true }).click();
     await expectChatSection(page);
     await expect(page.locator('#build-entry-request')).toBeVisible();
     expect((await walletRequests(page)).filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);

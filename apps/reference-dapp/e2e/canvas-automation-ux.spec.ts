@@ -87,7 +87,8 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
   for (const [index, value] of ['0.000001', '0.000002'].entries()) {
     await amount.fill(value); await amount.press('Enter');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(index + 1));
-    await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', `ETH on ${network} (${network === 'Ethereum Sepolia' ? '11155111' : '46630'})`);
+    // P0 approved UX (board 16 §9): titles name the network without its chain number.
+    await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', `ETH on ${network}`);
   }
   const workflow = JSON.parse(await readWorkflowIr(page));
   const transfer = workflow.nodes.find((node: { actionType: string }) => node.actionType === 'asset.transfer');

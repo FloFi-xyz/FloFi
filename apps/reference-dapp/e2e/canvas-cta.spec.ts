@@ -45,7 +45,8 @@ test('the Build CTA lives once in the Editor footer, beside the real notices, an
       if (width > 1100) {
         expect(await page.locator('main').evaluate(element => getComputedStyle(element).paddingLeft)).toBe('20px');
         const assistantBox = (await page.getByRole('complementary', { name: 'FloFi Assistant' }).boundingBox())!, canvasBox = (await canvas.boundingBox())!;
-        expect(assistantBox.width).toBe(320);
+        // P0 approved UX (board 16 §7): the FloFi panel is 380 px wide from 1200 px.
+        expect(assistantBox.width).toBe(380);
         expect(assistantBox.x).toBeGreaterThanOrEqual(canvasBox.x + canvasBox.width);
         // The Canvas fills the viewport above the footer (a 900 px window leaves it at least 560 px tall).
         expect(canvasBox.height).toBeGreaterThanOrEqual(560);
@@ -85,12 +86,14 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   await configureCanvasAction(page, '1');
   await page.locator('footer.summary-bar').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expectEditorSection(page, 'Simulate');
-  const primary = page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action');
+  // P0 approved UX (board 06): the one lifecycle control stays in the Editor footer on Simulate too (the simulated canvas carries no action); no
+  // section button of its own (the stepper opens Execute).
+  await expect(page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action')).toHaveCount(0);
+  const primary = page.locator('footer.summary-bar .canvas-primary-action');
   await expect(primary.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Simulate Supply', exact: true })).toHaveCount(0);
-  // The simulation section's footer has no lifecycle control or section button of its own (the stepper opens Execute).
-  await expect(page.locator('.summary-bar button')).toHaveCount(0);
+  await expect(page.locator('.summary-bar button[data-lifecycle-action]')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(0);
   await openEditorSection(page, 'Build');

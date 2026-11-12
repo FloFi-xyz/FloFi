@@ -139,8 +139,9 @@ test('the Copilot resolves a company name to its Stock Token: Tesla (EN and PT) 
     await expect(said).toContainText('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
     const english = await committedStep(page);
     await ask(page, 'Compre ações da Tesla com 50 USDG na Robinhood');
-    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpretado como “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
-    await expect(conversation(page).locator('.message.ai').last()).toContainText('“Tesla” é TSLA (Tesla) no catálogo oficial da Robinhood Chain.');
+    // P0 approved UX: FloFi answers in the interface language (English here); a Portuguese request is still understood.
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
     const portuguese = await committedStep(page);
     // Chat's exact grammar (no model) commits the very same step.
     await ask(page, 'Swap 50 USDG for TSLA on Robinhood Chain');
