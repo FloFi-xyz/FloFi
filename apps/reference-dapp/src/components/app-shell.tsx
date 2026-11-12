@@ -345,6 +345,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const flightPlacement = flightRefusalPlacement({ applies: flightHere, busy: Boolean(sourceState.busy), recoveryOnly: Boolean(sourceState.recoveryOnly),
     recordAttention: recordNeedsAttention(sourceState.record), executionStarted: executionStart.started || Boolean(currentExecution(executionProgress)) });
   if (flightPlacement === 'SOURCE') simulationSource = { ...simulationSource, state: { ...simulationSource.state, error: flightBlock!.code } } as SimulationSource;
+  // While Flight is being asked the simulation is already under way for the owner: the lifecycle control shows "Simulating workflow…" (locked),
+  // so a second click can never start a second simulation (e2e: workflow-ux-execution held server actions).
+  const [preflighting, setPreflighting] = useState(false);
+  const preflight = useRef(false);
+  if (preflighting && !simulationSource.state.busy) simulationSource = { ...simulationSource, state: { ...simulationSource.state, busy: true } } as SimulationSource;
   // Where the run keeps its own words, the refusal is still said — never swallowed — as a notice that keeps what was already sent tracked.
   const flightNotice = flightPlacement === 'NOTICE' ? flightRefusal(flightBlock!.code) : null;
   const [restoredBinding, setRestoredBinding] = useState({ epoch: restorationEpoch, key: null as string | null });
@@ -418,12 +423,19 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const signer = reviewBinding.wallet.account;
   // P0: Flight first, for the same wallet the API binds; the runtime simulates only when that wallet may act (a refusal is a value, not a throw).
   const simulateAgain = async (): Promise<void> => {
-    if (flightSigner) {
-      const access = await flightWalletAccess(flightSigner).catch(() => null);
-      if (access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code, workflowId: state.workflow.workflowId }); return; }
-    }
-    setFlightBlock(null);
-    await simulateRuntime();
+    if (preflight.current) return; // a click while Flight is being asked starts nothing more
+    preflight.current = true; setPreflighting(true);
+    let simulation: Promise<unknown> | undefined;
+    try {
+      if (flightSigner) {
+        const access = await flightWalletAccess(flightSigner).catch(() => null);
+        if (access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code, workflowId: state.workflow.workflowId }); return; }
+      }
+      setFlightBlock(null);
+      // Started before the lock lifts, so the runtime's own busy state takes over in the same update (no enabled gap between the two).
+      simulation = Promise.resolve(simulateRuntime());
+    } finally { preflight.current = false; setPreflighting(false); }
+    await simulation;
   };
   const walletConnection = useWalletConnection();
   const walletIssue = approvalWallet && signer && !sameAccount(approvalWallet, signer)
