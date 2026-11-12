@@ -33,7 +33,7 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
  */
 /** P0 approved UX (board 06/07): what the Simulate footer states, from the shell's existing projections (see `simulateFooterStatus`). */
 export type FooterSimulation = { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string; readonly expiresAt: number | null;
-  readonly executionStarted: boolean; readonly networkQuestion?: boolean };
+  readonly executionStarted: boolean; readonly networkQuestion?: boolean; readonly subject?: 'simulation' | 'review' };
 export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
   primaryAction?: ReactNode; overview?: EditorOverview; showStep?: (nodeId: string) => void;
   /** Simulate is closed for a reason its control states; the footer then claims nothing about warnings. */
@@ -50,7 +50,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     return () => window.clearInterval(timer);
   }, [counting]);
   const status = tab !== 'Build' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
-  const ticking = status?.text === 'Simulation valid for {0}';
+  const ticking = status?.text === 'Simulation valid for {0}' || status?.text === 'Review valid for {0}';
   const spokenNow = !status ? '' : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
   // What the live region says changes only with the meaning (valid, under 15 s, expired, a blocker); it then includes the time left at that moment.
   const meaning = !status ? '' : ticking ? `tick:${status.tone}` : spokenNow;

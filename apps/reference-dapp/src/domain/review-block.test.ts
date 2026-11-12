@@ -32,6 +32,10 @@ describe('board 06: what the owner is authorizing, in plain words', () => {
     expect(later.fee).toMatchObject({ key: '{0} + later requests, quoted when due', parameters: ['0.000454 ETH'] });
     expect(later.permissions.map(p => p.key)).toEqual(['{0} uses up to {1}', 'Later steps ask when they are due']);
     expect(later.walletRequests).toEqual({ key: 'at least {0}', parameters: ['2'], full: null });
+    expect(reviewBlockView(swapBridgeReview({ counts: { ...base.counts, networkSwitches: 1 } })).walletRequests).toEqual({ key: '{0} + {1} network switch(es)', parameters: ['1', '1'], full: null });
+    // An approval it cannot word is never reported as "no new permission".
+    expect(reviewBlockView(swapBridgeReview({ steps: base.steps.map(s => ({ ...s, spend: null })) })).permissions.map(p => p.key))
+      .toEqual(['A token approval is in this request (see Technical details)']);
     const unprepared = reviewBlockView(swapBridgeReview({ groups: base.groups.map(g => ({ ...g, calls: null, approvals: null, fee: null })),
       steps: base.steps.map(s => ({ ...s, minimum: null, expected: null })) }));
     expect(unprepared.fee?.key).toBe('Quoted when each request is due');
@@ -39,6 +43,6 @@ describe('board 06: what the owner is authorizing, in plain words', () => {
     expect(unprepared.minimum?.key).toBe('Quoted when this step becomes due');
     expect(unprepared.steps[0]).toEqual({ key: 'Swap {0} · {1}', parameters: ['2 USDC', 'Base'], full: null });
     expect(reviewBlockView(swapBridgeReview({ groups: base.groups.map(g => ({ ...g, calls: [{ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', step: 0 }], approvals: 0 })) })).permissions
-      .map(p => p.key)).toEqual(['None needed']);
+      .map(p => p.key)).toEqual(['No new token permission']);
   });
 });

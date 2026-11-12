@@ -1022,25 +1022,35 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   </>;
   const block = review ? reviewBlockView(review) : null;
   // One amber line at the top of the block: what stops or invalidates this Review now (never an extra paragraph).
-  const alert = errorText ?? refusal ?? (review?.validUntil && expired ? tr('Expired at {0}: review again to refresh them before authorizing.', fmtTime(review.validUntil, language)) : null);
+  // The Review's own refusal and an action's error both stay said (one line); expired prices in a sentence of their own.
+  const alert = [refusal, errorText !== refusal ? errorText : null].filter(Boolean).join(' ')
+    || (review?.validUntil && expired ? tr(EXECUTION_REFUSAL.REVIEW_EXPIRED!) : null);
   const feeBlocked = Boolean(review?.refusal?.evidence && !run && !state.started && !state.unloaded);
+  const priced = Boolean(review?.groups.some(g => g.fee));
+  // "Review again" stays reachable before a run, never as a second primary: the footer's when it offers it (expired, or not groupable), else a quiet
+  // control beside the amber line (a refusal may ask for a fresh quote) or under "Technical details".
+  const footerReviews = footerActions && (!state.grouped || expired);
+  const quietReview = !fresh || !review || !state.canReview || footerReviews ? null : alert ? 'alert' : 'details';
+  const reviewAgain = <button type="button" className="quiet review-block-again" disabled={busy} aria-busy={phase === 'reviewing' || undefined}
+    onClick={() => void state.startReview()}>{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : 'Review again')}</button>;
   return <section className={`editor-workflow-run panel${fresh ? ' editor-review-block' : ''}`} aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}
     data-review-state={fresh ? feeBlocked ? 'blocked' : busy ? 'busy' : review ? alert ? 'attention' : 'ready' : 'pending' : undefined}>
     {fresh && !feeBlocked && <>
-      {alert && <p className="review-block-alert" role="alert">{alert}</p>}
+      {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
       <p className="eyebrow">{tr('REVIEW')}</p>
-      <h2>{tr('You are authorizing')}</h2>
+      <h3>{tr(block ? 'You are authorizing' : 'Review the whole workflow')}</h3>
+      {review?.mode === 'STEP_BY_STEP' && <p className="review-panel-note">{tr('This workflow needs a confirmation in your wallet for each step on its own.')}</p>}
       {!block ? <p className="review-panel-status" role="status">{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…'
         : 'FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p> : <>
         <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
         <dl className="review-panel-rows review-block-rows">
           {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
-          {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span></dd></div>}
+          {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span>{priced && <small className="review-block-qualifier">{tr('at today\'s prices; your wallet sets the final fee')}</small>}</dd></div>}
           <div><dt>{tr('Token permission')}</dt><dd>{block.permissions.map((line, index) => <span key={index} className="review-block-permission" title={line.full ?? undefined}>{rich(tr, line)}</span>)}</dd></div>
-          <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>
+          <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span>{block.setup && <small className="review-block-qualifier">{rich(tr, block.setup)}</small>}</dd></div>
         </dl>
         <p className="review-panel-note">{tr('Your wallet pays the network fees. FloFi never signs or sends for you.')}</p>
-        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
+        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{quietReview === 'details' && <p>{reviewAgain}</p>}{technical}</details>
       </>}
     </>}
     {!fresh && <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>}
@@ -1114,7 +1124,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     {phase === 'confirming' && <p role="status">{tr('Waiting for your wallet to report the batch…')}</p>}
     {phase === 'proving' && <p role="status">{tr('Sign the FloFi sign-in message in your wallet (once per session). It authorizes no transaction.')}</p>}
     <div className="approval-actions">
-      {state.canReview && !footerActions && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
+      {state.canReview && !footerActions && !(fresh && review) && <button type="button" className={review ? 'secondary' : 'primary'} disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
         {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : review ? 'Review again' : 'Review whole workflow')}</button>}
       {state.unloaded && <button type="button" className="primary" disabled={busy} onClick={() => void state.checkWallet()}>{tr('Load workflow progress')}</button>}
       {state.following && !busy && <button type="button" className="quiet" onClick={state.hide}>{tr('Hide this workflow')}</button>}

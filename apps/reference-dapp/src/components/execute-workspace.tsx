@@ -147,11 +147,12 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   // BUILD0-UX-001: the chat-first status panel — the run's state and progress, what needs the owner's action, and where to go next. The wallet,
   // network, provider and cost lines of the side summary and the run's technical evidence are in the Dashboard, never duplicated here.
   // Board 06: the Review before authorization — one amber line when the step-by-step path's own state needs attention, then the Review.
-  const reviewPanel = <section className="execution-summary execution-status-panel panel review-block-host" aria-label={tr('Execution status')}>
+  const reviewPanel = <div className="execution-summary execution-status-panel panel review-block-host">
     {!grouped && ['attention', 'blocked'].includes(tone) && <p className="review-block-alert" role="status">{tr(statusMessage)}</p>}
+    {!grouped && notices}
     {props.workflowRun}
     {(connectWallet || startNew) && <div className="execute-actions simulation-workspace-actions execution-status-actions">{stageActions}</div>}
-  </section>;
+  </div>;
   const statusPanel = reviewBlock ? reviewPanel : <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
     {!grouped && status}
     {!live && !grouped && !continuation && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}

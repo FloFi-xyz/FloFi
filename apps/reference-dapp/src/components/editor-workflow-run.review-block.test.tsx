@@ -40,11 +40,11 @@ describe('board 06: the Review before authorization', () => {
   it('shows only: REVIEW, "You are authorizing", one line per step, the four summary rows and the wallet line; the rest is collapsed', () => {
     const html = render(state({}));
     const shown = visible(html);
-    expect(shown).toContain('<p class="eyebrow">REVIEW</p><h2>You are authorizing</h2>');
+    expect(shown).toContain('<p class="eyebrow">REVIEW</p><h3>You are authorizing</h3>');
     expect(shown).toContain('Swap <span class="numeric">2 USDC</span> → <span class="numeric">WETH</span> · <span class="numeric">Base</span>');
     expect(shown).toContain('title="0.000796123456789123 WETH">Bridge <span class="numeric">0.000796124 WETH</span> to <span class="numeric">Arbitrum One</span>');
     expect(shown).toContain('<dt>Minimum you receive</dt><dd title="0.000790555555555555 WETH"><span><span class="numeric">0.000790555 WETH</span></span></dd>');
-    expect(shown).toContain('<dt>Network fee, at most</dt><dd><span><span class="numeric">0.000454 ETH</span></span></dd>');
+    expect(shown).toContain('<dt>Network fee, at most</dt><dd><span><span class="numeric">0.000454 ETH</span></span><small class="review-block-qualifier">at today&#x27;s prices; your wallet sets the final fee</small></dd>');
     expect(shown).toContain('<span class="numeric">Uniswap</span> uses up to <span class="numeric">2 USDC</span>');
     expect(shown).toContain('<span class="numeric">Across</span> uses up to <span class="numeric">0.000796124 WETH</span>');
     expect(shown).toContain('<dt>Wallet requests</dt><dd><span><span class="numeric">1</span></span></dd>');
@@ -61,7 +61,7 @@ describe('board 06: the Review before authorization', () => {
   });
   it('in Brazilian Portuguese', () => {
     const shown = visible(render(state({}), 'PT'));
-    expect(shown).toContain('<p class="eyebrow">REVISÃO</p><h2>Você está autorizando</h2>');
+    expect(shown).toContain('<p class="eyebrow">REVISÃO</p><h3>Você está autorizando</h3>');
     expect(shown).toContain('Trocar <span class="numeric">2 USDC</span> → <span class="numeric">WETH</span> · <span class="numeric">Base</span>');
     expect(shown).toContain('Levar <span class="numeric">0.000796124 WETH</span> para <span class="numeric">Arbitrum One</span>');
     expect(shown).toContain('<dt>Mínimo que você recebe</dt>');
@@ -74,7 +74,14 @@ describe('board 06: the Review before authorization', () => {
   });
   it('has no button of its own in the chat-first Editor: the footer hosts the ONE primary action, with the same handlers', () => {
     const html = render(state({}));
-    expect(html).not.toContain('<button');
+    // Before the collapsed details: no button at all. "Review again" stays reachable, as a quiet control under Technical details only.
+    expect(visible(html)).not.toContain('<button');
+    expect(html.match(/<button/g)).toHaveLength(1);
+    expect(html).toContain('<button type="button" class="quiet review-block-again">Review again</button>');
+    // Expired: the footer offers "Review again", so the block has no second one.
+    expect(render(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) }))).not.toContain('<button');
+    // A refusal asks for a fresh quote: the quiet control sits beside the amber line.
+    expect(visible(render(state({ error: 'SWAP_MINIMUM_NOT_MET' })))).toMatch(/class="review-block-alert" role="alert">[^<]*<button type="button" class="quiet review-block-again">Review again<\/button><\/p>/);
     // The engineering workspace (no footer) keeps the panel's own buttons.
     expect(render(state({}), 'EN', false)).toContain('>Authorize workflow</button>');
     const s = state({});
@@ -89,7 +96,7 @@ describe('board 06: the Review before authorization', () => {
   });
   it('states what invalidates it in ONE amber line at the top; a missing native fee is board 07 instead', () => {
     const expired = visible(render(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) })));
-    expect(expired).toMatch(/^<section[^>]*data-review-state="attention"><p class="review-block-alert" role="alert">Expired at [^<]+: review again to refresh them before authorizing\.<\/p><p class="eyebrow">/);
+    expect(expired).toMatch(/^<section[^>]*data-review-state="attention"><p class="review-block-alert" role="alert">The reviewed prices expired\. Review the workflow again to refresh them\.<\/p><p class="eyebrow">/);
     const refused = visible(render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) })));
     expect(refused.match(/review-block-alert/g)).toHaveLength(1);
     expect(refused).toContain('step 2 would fail on chain now');
@@ -101,9 +108,17 @@ describe('board 06: the Review before authorization', () => {
     expect(blocked).not.toContain('You are authorizing');
     expect(blocked).toContain('<summary>Technical details, for support</summary>');
   });
+  it('a step-by-step Review says each step asks the wallet on its own; a smart-account upgrade and every network switch are said', () => {
+    const steps = visible(render(state({ grouped: false, stepByStep: true, review: swapBridgeReview({ mode: 'STEP_BY_STEP' }) }), 'EN', false));
+    expect(steps).toContain('This workflow needs a confirmation in your wallet for each step on its own.');
+    const upgrade = visible(render(state({ review: swapBridgeReview({ counts: { walletPrompts: 1, atLeast: false, signatures: 1, transactions: 1, batchedCalls: 4,
+      networkSwitches: 1, oneTimeSetup: ['EVM_SMART_ACCOUNT_UPGRADE'] } }) }), 'PT'));
+    expect(upgrade).toContain('<span class="numeric">1</span> + <span class="numeric">1</span> troca(s) de rede');
+    expect(upgrade).toContain('inclui uma atualização única desta conta para conta inteligente');
+  });
   it('while the Review is prepared it says so, in the same block', () => {
     const html = render(state({ review: null, phase: 'reviewing' }));
-    expect(html).toContain('<h2>You are authorizing</h2><p class="review-panel-status" role="status">Reviewing the whole workflow…</p>');
+    expect(html).toContain('<h3>Review the whole workflow</h3><p class="review-panel-status" role="status">Reviewing the whole workflow…</p>');
     expect(html).not.toContain('<button');
   });
 });

@@ -18,6 +18,8 @@ export type ReviewBlockView = {
   /** One sentence per token approval in the prepared request ("Uniswap uses up to 2 USDC"); a fallback sentence when none is known. */
   readonly permissions: readonly ReviewBlockText[];
   readonly walletRequests: ReviewBlockText;
+  /** A one-time account change inside a wallet confirmation (EIP-7702 smart-account upgrade), or null. */
+  readonly setup: ReviewBlockText | null;
 };
 
 const SIGNIFICANT = 6;
@@ -53,6 +55,8 @@ const ethUp = (wei: bigint) => {
   return `${shown / ETH}${fraction ? `.${fraction}` : ''} ETH`;
 };
 /** Who a token approval lets spend: the protocol the step's call goes to (a batched bridge is always a direct Across deposit). */
+/** Catalog labels of the actions without a sentence of their own (translated where the line is shown). */
+const ACTION_LABEL: ReadonlyMap<string, string> = new Map([['add_liquidity', 'Add liquidity'], ['transfer', 'Transfer']]);
 const SPENDER: ReadonlyMap<string, string> = new Map([['swap', 'Uniswap'], ['bridge', 'Across'], ['supply', 'Aave'], ['repay', 'Aave']]);
 
 /** One plain line per step: verb, amount, asset, network. */
@@ -68,9 +72,11 @@ function stepLine(step: EditorExecutionReview['steps'][number]): ReviewBlockText
     case 'repay': return spent ? text('Repay {0} to Aave · {1}', [spent, step.network], full) : text('Repay to Aave · {0}', [step.network]);
     case 'borrow': return out ? text('Borrow {0} from Aave · {1}', [amount(out, 'down'), step.network], fullOf([out], 'down')) : text('Borrow from Aave · {0}', [step.network]);
     case 'withdraw': return out ? text('Withdraw {0} from Aave · {1}', [amount(out, 'down'), step.network], fullOf([out], 'down')) : text('Withdraw from Aave · {0}', [step.network]);
-    case 'transfer': return spent && step.recipient ? text('Send {0} to {1} · {2}', [spent, `${step.recipient.slice(0, 6)}…${step.recipient.slice(-4)}`, step.network], full)
+    // The recipient in full (a shortened address invites look-alike mistakes).
+    case 'transfer': return spent && step.recipient ? text('Send {0} to {1} · {2}', [spent, step.recipient, step.network], full)
       : text('Send · {0}', [step.network]);
-    default: return spent ? text('{0} {1} · {2}', [step.action, spent, step.network], full) : text('{0} · {1}', [step.action, step.network]);
+    default: return spent ? text('{0} {1} · {2}', [ACTION_LABEL.get(step.action) ?? step.action, spent, step.network], full)
+      : text('{0} · {1}', [ACTION_LABEL.get(step.action) ?? step.action, step.network]);
   }
 }
 
@@ -93,9 +99,15 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
     return [text('{0} uses up to {1}', [spender, amount(step.spend, 'up')], fullOf([step.spend], 'up'))];
   });
   const laterGroups = prepared.length < review.groups.length;
-  const permissionLines = permissions.length ? [...permissions, ...laterGroups ? [text('Later steps ask when they are due')] : []]
-    : [text(laterGroups ? 'Asked when each step is due' : 'None needed')];
+  // An approval this view cannot word (no planned spend) is never hidden behind "no new permission" (fails closed).
+  const unworded = approving.length > permissions.length ? [text('A token approval is in this request (see Technical details)')] : [];
+  const permissionLines = permissions.length || unworded.length ? [...permissions, ...unworded, ...laterGroups ? [text('Later steps ask when they are due')] : []]
+    : [text(laterGroups ? 'Asked when each step is due' : 'No new token permission')];
   const counts = review.counts;
   return { steps: review.steps.map(stepLine), minimum, fee, permissions: permissionLines,
-    walletRequests: counts.atLeast ? text('at least {0}', [String(counts.walletPrompts)]) : text('{0}', [String(counts.walletPrompts)]) };
+    // The one-time smart-account upgrade happens inside a confirmation: it is an account change the owner approves, so it is said here.
+    setup: counts.oneTimeSetup.includes('EVM_SMART_ACCOUNT_UPGRADE') ? text('includes a one-time smart-account upgrade of this account') : null,
+    walletRequests: counts.networkSwitches > 0
+      ? text(counts.atLeast ? 'at least {0} + {1} network switch(es)' : '{0} + {1} network switch(es)', [String(counts.walletPrompts), String(counts.networkSwitches)])
+      : counts.atLeast ? text('at least {0}', [String(counts.walletPrompts)]) : text('{0}', [String(counts.walletPrompts)]) };
 }

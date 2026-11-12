@@ -99,7 +99,7 @@
 .review-block-host>.editor-review-block{margin:0}
 .editor-workflow-run.editor-review-block{display:flex;flex-direction:column;gap:12px;padding:20px;border:1px solid var(--line);border-radius:18px;background:var(--surface);box-shadow:none;color:var(--ink);font-size:15px}
 .editor-review-block .eyebrow{margin:0;font-family:var(--font-ibm-plex-mono),monospace;font-size:13px;letter-spacing:.08em;color:var(--muted)}
-.editor-workflow-run.editor-review-block h2{margin:0;font-size:20px;line-height:1.25;font-weight:600;color:var(--ink)}
+.editor-workflow-run.editor-review-block h3{margin:0;font-size:20px;line-height:1.25;font-weight:600;color:var(--ink)}
 /* The block's rows always read as one column (label left, value right), whatever the dock's width. */
 .canvas-review-dock .editor-review-block .review-panel-rows{display:flex;flex-direction:column}
 .canvas-review-dock .editor-review-block .review-panel-rows>div{border-top:0;border-bottom:1px solid var(--line)}
@@ -109,6 +109,9 @@
 .editor-review-block .review-block-rows dt{font-size:14px}
 .editor-review-block .review-block-rows dd{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .review-block-permission{display:block}
+.review-block-qualifier{color:var(--muted);font-size:13px;text-align:right}
+.review-block-again{min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--ink);font:inherit;font-size:14px;font-weight:500;cursor:pointer}
+.review-block-alert .review-block-again{margin-left:8px;vertical-align:middle}
 .editor-review-block .numeric{font-family:var(--font-ibm-plex-mono),monospace;font-variant-numeric:tabular-nums}
 .review-block-alert{margin:0;padding:10px 12px;border:1px solid var(--warning-border);border-radius:12px;background:var(--warning-surface);color:var(--warning-text);font-size:14px;line-height:1.45}
 .review-block-technical>:not(summary){color:var(--ink)}

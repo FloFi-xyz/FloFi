@@ -763,7 +763,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const runReviewed = workflowRunHere.review;
   const reviewFooter = { busy: workflowRunHere.phase === 'reviewing', status: runReviewed?.refusal ? 'blocked' as const : 'ready' as const,
     label: runReviewed?.refusal?.evidence ? 'Not enough ETH for the network fee' : 'This workflow cannot be authorized yet',
-    expiresAt: runReviewed?.validUntil && Number.isFinite(Date.parse(runReviewed.validUntil)) ? Date.parse(runReviewed.validUntil) : null, executionStarted: false };
+    expiresAt: runReviewed?.validUntil && Number.isFinite(Date.parse(runReviewed.validUntil)) ? Date.parse(runReviewed.validUntil) : null, executionStarted: workflowStarted,
+    subject: 'review' as const };
   const reviewFooterAction = groupedPrimary ? <EditorWorkflowRunPrimaryAction state={workflowRunHere}/> : simulateActionFor(null);
   return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} center={editorStepper}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
@@ -778,7 +779,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary} reviewBlock={reviewBlock}
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         workflowProgress={workflowProgress} continuation={groupedPrimary ? null : executeContinuation} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock}/>
+        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={chatFirst ? undefined : () => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview}
