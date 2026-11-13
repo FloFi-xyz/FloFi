@@ -205,3 +205,24 @@ describe('review B1/LQ1: a later step that needs the native coin is named before
       .not.toContain('A later step on Solana needs SOL');
   });
 });
+
+describe('owner requirement: the Editor\'s step-by-step Review with FloFi Wallet says where its USDC fee is available', () => {
+  const ON_APPROVAL = 'Paying the network fee in USDC through Circle with FloFi Wallet is available when a workflow is approved through a FloFi approval link (/approve) and authorized in groups. Here each step runs on its own and pays its network fee in ETH.';
+  /** FloFi Wallet's two Base transfers: one owner-step group, nothing prepared by the Review (each step runs through its own flow). */
+  const floFiWallet = (patch: Partial<EditorExecutionReview> = {}): EditorExecutionReview => {
+    const base = swapBridgeReview();
+    return { ...base, mode: 'STEP_BY_STEP', reasons: ['WALLET_ATOMIC_BATCH_UNKNOWN'], groups: [{ ...base.groups[0]!, strategy: 'EVM_OWNER_STEP', interactions: 2, calls: null,
+      approvals: null, fee: null, signing: 'WHEN_DUE' }], counts: { ...base.counts, walletPrompts: 2, atLeast: true, signatures: 2, transactions: 2, batchedCalls: 0 }, ...patch };
+  };
+  it('names /approve and that each step run here pays its fee in ETH (EN/PT); never a USDC fee or Circle\'s signatures for these steps', () => {
+    const html = render(state({ review: floFiWallet({ circleOnApproval: true }), grouped: false, stepByStep: true }));
+    expect(visible(html)).toContain(`<p class="review-panel-note" role="note" data-circle-on-approval="">${ON_APPROVAL}</p>`);
+    for (const wrong of ['paid from your USDC through Circle', 'Two signatures: a USDC permit', 'Circle paymaster', 'Circle&#x27;s paymaster may take']) expect(html, wrong).not.toContain(wrong);
+    expect(visible(render(state({ review: floFiWallet({ circleOnApproval: true }), grouped: false, stepByStep: true }), 'PT')))
+      .toContain('Pagar a taxa de rede em USDC pela Circle com a FloFi Wallet está disponível quando um fluxo é aprovado por um link de aprovação da FloFi (/approve) e autorizado em grupos. Aqui, cada etapa roda sozinha e paga a taxa de rede em ETH.');
+  });
+  it('absent for another wallet or a deployment without Circle (no flag), and never on a grouped Review', () => {
+    expect(render(state({ review: floFiWallet(), grouped: false, stepByStep: true }))).not.toContain('data-circle-on-approval');
+    expect(render(state({ review: swapBridgeReview({ circleOnApproval: true }) }))).not.toContain('data-circle-on-approval');
+  });
+});

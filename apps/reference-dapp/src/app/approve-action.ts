@@ -21,7 +21,8 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
+import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
+  workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -191,6 +192,16 @@ export async function permitUserFundedGroup(approvalId: string, groupIndex: numb
 export async function consentUserFundedGroupUpgrade(approvalId: string, groupIndex: number): Promise<Result<PreparedGroupView>> {
   return withFlightAccess(async () => {
   return runAction((s, w) => workflowRunUserFundedConsent(s, approvalId, w, groupIndex));
+
+  });
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner answered "Not now" on FloFi's consent card. The group's Circle preparation (nothing of it signed)
+ * is withdrawn and its first owner step is loaded into its own flow, which pays its network fee in ETH exactly as before. Nothing is signed or sent.
+ */
+export async function declineUserFundedGroupCircle(approvalId: string, groupIndex: number): Promise<Result<ClaimedProposal>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedDecline(s, approvalId, w, groupIndex));
 
   });
 }

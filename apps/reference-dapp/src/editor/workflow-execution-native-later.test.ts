@@ -54,12 +54,14 @@ describe('review LQ1/B1 in the Editor: only a step that can really pay in a toke
       steps: [{ index: 2, action: 'bridge' }] }]);
   });
   it('a Circle-chain transfer, then Uniswap liquidity: the Editor runs it step by step, where every EVM fee is native, so nothing is token-paid first', async () => {
-    // The liquidity step runs through its own flow, so the Review is step by step; single-step pages keep native gas (ADR-0010 §3), so even with
-    // no ETH and the first group's fee shown in USDC, no step of this run is paid through Circle: the first one stops for lack of ETH, not midway.
+    // The liquidity step runs through its own flow, so the Review is step by step; single-step pages keep native gas (ADR-0010 §3), so no step of
+    // this run is paid through Circle — and the Review never shows the first group's fee in USDC (with no ETH it is the native shortfall): the
+    // first step stops for lack of ETH, not midway.
     for (const eth of [0n, 10n ** 17n]) {
       const review = await reviewWith(eth, [BASE]);
       expect(review.mode, String(eth)).toBe('STEP_BY_STEP');
       expect(review.nativeLater, String(eth)).toEqual([]);
+      expect(review.groups.some(g => g.gasPayment), String(eth)).toBe(false);
     }
   });
 });

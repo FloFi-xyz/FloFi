@@ -19,7 +19,8 @@ const transfers = (network: string) => ({ version: 2, steps: [
   { action: 'transfer', network, asset: 'USDC', amount: '1', recipient: '0x' + '2'.repeat(40) },
   { action: 'transfer', network, asset: 'USDC', amount: '2', recipient: '0x' + '3'.repeat(40) }] });
 
-async function reviewOn(chainId: 1 | 8453, eth: bigint, options: { readonly tokenGasChains?: readonly string[]; readonly strategy?: unknown; readonly chains?: readonly string[] } = {}) {
+async function reviewOn(chainId: 1 | 8453, eth: bigint, options: { readonly tokenGasChains?: readonly string[]; readonly strategy?: unknown; readonly chains?: readonly string[];
+  readonly wallet?: 'INJECTED' | 'FLOFI_WALLET' } = {}) {
   const chain = `eip155:${chainId}`, profile = chainId === 1 ? ETHEREUM_MAINNET_SWAP : BASE_MAINNET_SWAP;
   const evm = createEvmDouble(chainId, () => Math.floor(NOW.getTime() / 1000), { profile }), circle = createCircleDouble(evm, { chainId });
   evm.control.upgrade(OWNER); evm.control.fundToken(OWNER, profile.usdc, 50_000_000n); evm.control.fundNative(OWNER, eth);
@@ -29,7 +30,9 @@ async function reviewOn(chainId: 1 | 8453, eth: bigint, options: { readonly toke
   const canvas = canvasWorkflowOfStrategy(options.strategy ?? transfers(chainId === 1 ? 'ethereum' : 'base'));
   if (!canvas.ok) throw new Error(canvas.code);
   const chains = options.chains ?? [chain];
-  const r = await reviewEditorExecution({ workflow: canvas.workflow, owner: OWNER, profile: { eip155: { wallet: 'INJECTED', atomic: Object.fromEntries(chains.map(c => [c, 'supported'])),
+  // FloFi Wallet reports no atomic batching (`walletProfileOf`): its groups are owner steps.
+  const atomic = options.wallet === 'FLOFI_WALLET' ? {} : Object.fromEntries(chains.map(c => [c, 'supported' as const]));
+  const r = await reviewEditorExecution({ workflow: canvas.workflow, owner: OWNER, profile: { eip155: { wallet: options.wallet ?? 'INJECTED', atomic,
     typedData: true } }, facts: { enabled: true, code: null, chains, bundlerChains: chains, solanaNonceAccounts: false,
     ...options.tokenGasChains ? { tokenGasChains: options.tokenGasChains } : {} }, deps, now: NOW });
   if (!r.ok) throw new Error(r.code);
@@ -72,5 +75,47 @@ describe('ADR-0010: the Editor\'s Review with a Circle-paid first group', () => 
     const { review } = await reviewOn(1, 0n);
     expect(review.refusal).toMatchObject({ code: 'USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE', evidence: { chainId: 'eip155:1',
       unavailable: [{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED' }] } });
+  });
+});
+
+describe('a workflow the Editor runs step by step is never shown as paid in USDC through Circle', () => {
+  // A transfer, then Uniswap liquidity on Base: the liquidity step runs through its own flow, so the Review is step by step and the Editor runs each
+  // step on its own single-step flow, which pays its network fee in ETH (ADR-0010 §3) — whatever the first group's batch could have paid.
+  const TRANSFER_THEN_LIQUIDITY = { version: 2, steps: [
+    { action: 'transfer', network: 'base', asset: 'USDC', amount: '1', recipient: '0x' + '2'.repeat(40) },
+    { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '10', WETH: '0.004' }, range: { unit: 'full' } }] };
+  it('no ETH on Base: the first group is the native shortfall (Circle not even considered), never a USDC fee; nothing is relayed', async () => {
+    const { review, circle } = await reviewOn(8453, 0n, { strategy: TRANSFER_THEN_LIQUIDITY, tokenGasChains: ['eip155:8453'] });
+    expect(review.mode).toBe('STEP_BY_STEP');
+    expect(review.groups[0]).not.toHaveProperty('gasPayment');
+    expect(review.groups.some(g => g.gasPayment)).toBe(false);
+    expect(review.refusal).toMatchObject({ code: 'USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE', evidence: { chainId: 'eip155:8453' } });
+    expect(review.refusal?.evidence).not.toHaveProperty('unavailable');
+    expect(review.counts.signatures).toBe(2);
+    expect(circle.control.estimates()).toBe(0);
+    expect(circle.control.sends()).toBe(0);
+  });
+  it('ETH on Base: the native fee, exactly as before', async () => {
+    const { review } = await reviewOn(8453, 10n ** 17n, { strategy: TRANSFER_THEN_LIQUIDITY, tokenGasChains: ['eip155:8453'] });
+    expect(review).toMatchObject({ mode: 'STEP_BY_STEP', refusal: null });
+    expect(review.groups[0]).toMatchObject({ fee: { payer: OWNER } });
+    expect(review.groups[0]).not.toHaveProperty('gasPayment');
+  });
+  it('the same workflow run grouped (two transfers) keeps its Circle-paid first group', async () => {
+    expect((await reviewOn(8453, 0n, { tokenGasChains: ['eip155:8453'] })).review.groups[0]).toMatchObject({ gasPayment: { mechanism: 'CIRCLE_USDC_PAYMASTER' } });
+  });
+});
+
+describe('owner requirement: FloFi Wallet in the Editor runs step by step; its USDC fee is available on /approve only', () => {
+  it('the Review is step by step, says where Circle is available (circleOnApproval), shows no Circle fee and prepares nothing', async () => {
+    const { review, circle } = await reviewOn(8453, 0n, { wallet: 'FLOFI_WALLET', tokenGasChains: ['eip155:8453'] });
+    expect(review).toMatchObject({ mode: 'STEP_BY_STEP', refusal: null, circleOnApproval: true });
+    expect(review.groups.map(g => g.strategy)).toEqual(['EVM_OWNER_STEP']);
+    expect(review.groups.some(g => g.gasPayment || g.fee)).toBe(false);
+    expect(circle.control.estimates()).toBe(0);
+  });
+  it('not for another wallet, nor where this deployment offers no Circle', async () => {
+    expect((await reviewOn(8453, 0n, { tokenGasChains: ['eip155:8453'] })).review).not.toHaveProperty('circleOnApproval');
+    expect((await reviewOn(8453, 0n, { wallet: 'FLOFI_WALLET' })).review).not.toHaveProperty('circleOnApproval');
   });
 });

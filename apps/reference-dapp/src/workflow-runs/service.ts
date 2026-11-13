@@ -514,6 +514,29 @@ export async function consentUserFundedGroupUpgrade(deps: WorkflowRunDeps, run: 
     ?? refuse('WORKFLOW_RUN_CHANGED');
   return view(moved.prepared as Prepared, moved.validUntil ?? g.validUntil!);
 }
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner answered "Not now" on FloFi's consent card. A group's Circle preparation planned from owner
+ * steps, NOTHING of which was signed yet (no upgrade authorization, no USDC permit, no operation), is withdrawn: its steps go back to their own
+ * flows exactly as before (`expireTokenGasPreparation`, code CIRCLE_FEE_DECLINED), and the run is advanced so its current step is ready for its own
+ * flow (native gas). Nothing is signed or sent. A preparation of any other wallet or plan, or one already signed in part, is refused unchanged.
+ */
+export async function declineUserFundedGroupCircle(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<RunRecord> {
+  assertRunWallets(run, wallets);
+  if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
+  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const c = circleFactsOf(g.prepared);
+  if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
+  if (!c || c.plannedStrategy !== 'EVM_OWNER_STEP') refuse('CIRCLE_DECLINE_NOT_APPLICABLE');
+  if (g.authorization !== null || c!.stage === 'OPERATION' || c!.permitSignature || c!.upgrade?.signature) refuse('CIRCLE_DECLINE_ALREADY_SIGNED');
+  await expireTokenGasPreparation(deps, run.runId, g, CIRCLE_FEE_DECLINED);
+  const back = (await deps.store.groups(run.runId))[groupIndex];
+  if (!back || back.state !== 'PLANNED' || back.strategy !== 'EVM_OWNER_STEP') refuse('WORKFLOW_RUN_CHANGED');
+  deps.log('workflow_run.circle_declined', { run: run.runId, group: groupIndex, upgrade: Boolean(c!.upgrade) });
+  await advanceRun(runnerDeps(deps), run.runId);
+  return (await deps.store.byId(run.runId))!;
+}
+/** The closed code an owner's "Not now" leaves on the withdrawn Circle preparation (its group's history only). */
+export const CIRCLE_FEE_DECLINED = 'CIRCLE_FEE_DECLINED';
 /** Refusals of an upgrade authorization that leave the preparation usable (a signature to retry, a read or relay to retry); others expire it. */
 const CIRCLE_AUTHORIZATION_RETRYABLE: ReadonlySet<string> = new Set(['CIRCLE_AUTHORIZATION_INVALID', 'CIRCLE_UPGRADE_CONSENT_REQUIRED', 'CIRCLE_AUTHORIZATION_STAGE_INVALID',
   'USER_FUNDED_RPC_UNAVAILABLE', 'DELEGATION_RPC_UNAVAILABLE', 'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);

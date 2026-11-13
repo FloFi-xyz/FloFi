@@ -13,14 +13,16 @@
  * every wallet signature and confirmation stays the owner's own, and FloFi re-verifies each of them on the server.
  */
 import { useEffect, useRef, useState } from 'react';
-import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, consentUserFundedGroupUpgrade, continueWorkflowRunHandoff, permitUserFundedGroup,
-  prepareUserFundedGroup, upgradeUserFundedGroup,
+import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, consentUserFundedGroupUpgrade, continueWorkflowRunHandoff,
+  declineUserFundedGroupCircle, permitUserFundedGroup, prepareUserFundedGroup, upgradeUserFundedGroup,
   reportUserFundedBatch, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
   signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
-import { CIRCLE_NOTHING_SENT, CIRCLE_UPGRADE_CONSENT, CIRCLE_UPGRADE_SIGNATURES, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
+import { CIRCLE_CONSENT_DECLINE, CIRCLE_NOTHING_SENT, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
+import { askCircleFirst, circlePaidGroup, floFiWalletCircleGroup, type CircleConsentOffer, type OwnerStepCircleSteps, type PreparedCircleGroup } from './flofi-wallet-circle-flow';
+import { CircleConsentCard } from './circle-consent-card';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -162,6 +164,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a batch the wallet is still reporting, and cancellations of signed operations sent from this page.
   const [waitingBatch, setWaitingBatch] = useState(false), [revocations, setRevocations] = useState<Readonly<Record<number, string>>>({});
   const { run, plan } = claim;
+  // Owner requirement (FloFi Wallet + Circle): FloFi's consent card while it waits for the owner's answer (the action in flight awaits it), and the
+  // step a "Not now" sent to its own flow (said once, until the next action).
+  const [consentOffer, setConsentOffer] = useState<CircleConsentOffer | null>(null), [declinedStep, setDeclinedStep] = useState<number | null>(null);
+  const consentAnswer = useRef<((agreed: boolean) => void) | null>(null);
+  const askConsent = (offer: CircleConsentOffer) => new Promise<boolean>(resolve => { consentAnswer.current = resolve; setConsentOffer(offer); });
+  const answerConsent = (agreed: boolean) => { const resolve = consentAnswer.current; consentAnswer.current = null; setConsentOffer(null); resolve?.(agreed); };
   const open = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'].includes(run.state);
   // A status poll: the server observes the run (a reconciled step shows at once) but never loads or resolves a step for it.
   useEffect(() => {
@@ -174,14 +182,16 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   }, [approvalId, open, onProposal]);
 
   async function act(work: () => Promise<{ ok: true; value: ClaimedProposal } | { ok: false; code: string }>) {
-    if (acting.current) return; acting.current = true; setBusy(true);
+    if (acting.current) return; acting.current = true; setBusy(true); setDeclinedStep(null);
     try {
       const result = await work();
       if (result.ok) { unknownOutcome.current = null; setReview(null); onProposal(result.value); }
       else { unknownOutcome.current = result.code === 'DELEGATION_OUTCOME_UNKNOWN' ? lastSent.current : null; onError(result.code); }
     }
     catch (cause) {
-      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
+      // ADR-0010: a Circle refusal (the page's own check, or the server's permit/upgrade step) keeps its closed code and its words (CIRCLE_REFUSAL).
+      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+|CIRCLE_[A-Z_]+)$/.test(cause.message)
+        ? cause.message : 'APPROVAL_UNAVAILABLE';
       onError(code);
     }
     finally { acting.current = false; setBusy(false); }
@@ -212,8 +222,42 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     const chains = [...new Set(plan.userFunded.groups.map(g => g.chain))];
     const profile = await walletProfile(plan.confirmEachStep.walletNamespaces.includes('eip155') ? await evmAddress() : null, chains,
       plan.confirmEachStep.walletNamespaces.includes('solana'));
-    return startUserFundedWorkflowRun(approvalId, profile);
+    const started = await startUserFundedWorkflowRun(approvalId, profile);
+    // Owner requirement (FloFi Wallet + Circle): the server left a FloFi Wallet owner-step group's first step unloaded so it can be asked about
+    // first: the started run is shown, then the server prepares it — ETH covers: the step loads exactly as before; Circle: FloFi's consent card.
+    const runClaim = started.ok ? started.value.view?.workflowRun ?? null : null;
+    const candidate = runClaim && !runClaim.step ? floFiWalletCircleGroup(runClaim.run, profile.eip155?.wallet) : null;
+    if (!started.ok || !runClaim || candidate === null) return started;
+    onProposal(started.value);
+    return askCircleFirst(ownerStepCircle(candidate, runClaim.run.currentStep));
   });
+  /** "Continue to step N": a FloFi Wallet owner-step group whose fee Circle may pay is asked about first; any other step loads exactly as before. */
+  const continueNext = () => act(async () => {
+    const candidate = floFiWalletCircleGroup(run, evmWalletKind());
+    return candidate === null ? continueWorkflowRunHandoff(approvalId) : askCircleFirst(ownerStepCircle(candidate, run.currentStep));
+  });
+  /**
+   * Owner requirement (FloFi Wallet + Circle): the server actions a Circle-paid group of this run is continued with (`flofi-wallet-circle-flow.ts`):
+   * FloFi's consent card, "Not now" (withdrawn, the step loaded into its own flow), or the signatures — the upgrade authorization on first use (FloFi
+   * Wallet bound to this run, after the consent was recorded), the USDC permit, then the operation, each checked by this page first.
+   */
+  const circleSteps = (index: number, step: number) => ({
+    consent: askConsent,
+    decline: async () => {
+      const declined = await declineUserFundedGroupCircle(approvalId, index);
+      if (declined.ok) setDeclinedStep(step + 1);
+      return declined;
+    },
+    authorize: async (group: PreparedCircleGroup, agreed: boolean) => {
+      const p = group.prepared as Record<string, unknown>;
+      const signature = await signCirclePaidGroup(group.feePayer, p, permit => permitUserFundedGroup(approvalId, index, permit),
+        { runId: run.workflowRunId, consent: async () => agreed, recordConsent: () => consentUserFundedGroupUpgrade(approvalId, index),
+          upgrade: signed => upgradeUserFundedGroup(approvalId, index, signed) }, { runId: run.workflowRunId });
+      return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
+    },
+  });
+  const ownerStepCircle = (index: number, step: number): OwnerStepCircleSteps<ClaimedProposal> => ({ ...circleSteps(index, step),
+    prepare: () => prepareUserFundedGroup(approvalId, index, undefined, 'FLOFI_WALLET'), loadStep: () => continueWorkflowRunHandoff(approvalId) });
   /** Prepares one group on the server, asks the owner's wallet for exactly that, and relays the answer (verified by the server). */
   const authorizeGroup = (index: number) => act(async () => {
     const attemptKey = `${approvalId}:${index}`, view = run.groups?.find(g => g.index === index) ?? null;
@@ -270,14 +314,10 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     if (isCirclePaid(p)) {
       // ADR-0010: the fee is paid from the owner's USDC through Circle — the permit, then the operation, each checked by this page first.
-      // Owner requirement (FloFi Wallet + Circle): FloFi Wallet signs bound to this run; on its first use, FloFi's own consent comes first (a
-      // separate, explicit confirmation: Privy shows none for the EIP-7702 upgrade) — declined, nothing is signed or sent.
-      const network = (chainId: number) => chainId === 1 ? 'Ethereum' : chainId === 8453 ? 'Base' : chainId === 42161 ? 'Arbitrum One' : `eip155:${chainId}`;
-      const signature = await signCirclePaidGroup(prepared.value.feePayer, p, permit => permitUserFundedGroup(approvalId, index, permit),
-        { runId: run.workflowRunId, consent: async upgrade => window.confirm(`${tr(CIRCLE_UPGRADE_CONSENT, tr(network(upgrade.chainId)))}\n\n${tr(CIRCLE_UPGRADE_SIGNATURES)}`),
-          recordConsent: () => consentUserFundedGroupUpgrade(approvalId, index), upgrade: signed => upgradeUserFundedGroup(approvalId, index, signed) },
-        { runId: run.workflowRunId });
-      return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
+      // Owner requirement (FloFi Wallet + Circle): a FloFi Wallet owner-step group's preparation shows FloFi's consent card first (Privy shows no
+      // confirmation for the EIP-7702 upgrade); "Not now" withdraws it and loads the step into its own flow, nothing signed. Any other wallet's
+      // Circle-paid group goes straight to its wallet's own two prompts, as before.
+      return circlePaidGroup(circleSteps(index, view?.steps[0] ?? run.currentStep), { prepared: p, feePayer: prepared.value.feePayer });
     }
     if (p.kind === 'EVM_USER_OPERATION') {
       const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
@@ -428,8 +468,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     </div>}
     {run.mode === 'USER_FUNDED' && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
       {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
-        <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation'
-          : GROUP_HOW[g.strategy] ?? g.strategy)}</span>
+        <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(g.gasPayment?.upgrade
+          ? 'Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation'
+          : g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation' : GROUP_HOW[g.strategy] ?? g.strategy)}</span>
         <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
           ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
           : tr(stateText(GROUP_STATE, g))}</span>
@@ -456,6 +497,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {g.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>}
+    {/* Owner requirement (FloFi Wallet + Circle): FloFi's own consent card, before FloFi Wallet is asked anything for a Circle-paid group. */}
+    {consentOffer && <CircleConsentCard offer={consentOffer} network={NETWORK[`eip155:${consentOffer.chainId}`] ?? `eip155:${consentOffer.chainId}`} onAnswer={answerConsent}/>}
+    {declinedStep !== null && <p role="status">{tr(CIRCLE_CONSENT_DECLINE.DONE, String(declinedStep))}</p>}
     {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && <div className="approval-actions">
       <button type="button" disabled={busy} onClick={() => void authorizeGroup(currentGroup.index)}>
         {tr('Authorize {0} now', stepsOf(tr, currentGroup.steps[0], currentGroup.steps[1]))}</button>
@@ -492,7 +536,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" className="secondary" disabled={busy} onClick={() => void recoverBatch(currentGroup.index, currentGroup.batchId!)}>{tr('Check my wallet for the batch')}</button>
     </div>}
     {nextStep !== null && <div className="approval-actions">
-      <button type="button" disabled={busy} onClick={() => void act(() => continueWorkflowRunHandoff(approvalId))}>{tr('Continue to step {0}', String(nextStep))}</button>
+      <button type="button" disabled={busy} onClick={() => void continueNext()}>{tr('Continue to step {0}', String(nextStep))}</button>
     </div>}
     {run.state === 'HALTED' && <div className="workflow-run-choice">
       <p role="status">{halted === 'NOTHING_SENT'
