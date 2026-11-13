@@ -25,7 +25,7 @@ import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
 import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
-import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
+import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, copilotNetworksMentioned, networkIdentity, networkOfCopilot } from './network-registry';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
 const lendingChatNetworks = LENDING_NETWORKS.map(name => networkIdentity(name)?.chatName?.source ?? name).map(name => `(?:${name})`).join('|');
@@ -36,6 +36,18 @@ const lendingNetwork = (text: string): SupplyInput['network'] => {
   return network;
 };
 const assetReference = '([^\\x00-\\x1f\\x7f]{1,160}?)';
+/** Where a request continues with another step ("…, then bridge", "… and then …", "… e depois …"). */
+const SEQUENCED = /[,;]|\b(?:and|then|after|afterwards|next|e|depois|ent[aã]o)\b/i;
+/**
+ * Whether the network a native-ETH swap is on has native-ETH swaps: the text before any next step is a catalog network's chat name, or names
+ * only catalog networks ("Base mainnet", "base with 1% slippage"). A test network or an unknown name there keeps the deterministic refusal.
+ */
+function nativeSwapNetwork(tail: string): boolean {
+  const head = tail.split(SEQUENCED)[0]!.trim();
+  if (catalogNetworkOfChatName(head)) return true;
+  const named = copilotNetworksMentioned(head);
+  return named.length > 0 && named.every(id => networkOfCopilot(id).catalog);
+}
 const lendingAsset = (network: SupplyInput['network'], text: string): SupplyInput['asset'] =>
   lendingProfileFor(network, text).symbol;
 /**
@@ -150,8 +162,11 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   const SYMBOL = assetReference;
   // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: ETH and WETH are different assets. Native ETH swaps on a catalog network (Base,
   // Arbitrum One, Ethereum, Robinhood Chain) are their own catalog swaps below; elsewhere a native-ETH swap is refused, never authored as WETH.
+  // P0 hotfix (FIX 1, production 2026-11-13): the refusal names the network the swap is ON — the first one named, before any next step. "swap 1 usdc
+  // to eth on base and then bridge to arbitrum" is Base (native-ETH swaps exist) followed by another step, never one network called "base and then
+  // bridge to arbitrum": it falls through to the Copilot's sequence authoring, which authors Base's native-ETH swap and asks what the bridge needs.
   const nativeSwap = /^swap [0-9]+(?:\.[0-9]+)? (\S+) (?:for|to) (\S+) on (.+?)(?: (?:with )?slippage [0-9]+ bps)?$/i.exec(input);
-  if (nativeSwap && [nativeSwap[1], nativeSwap[2]].some(asset => /^eth$/i.test(asset!)) && !/solana/i.test(nativeSwap[3]!) && !catalogNetworkOfChatName(nativeSwap[3]!))
+  if (nativeSwap && [nativeSwap[1], nativeSwap[2]].some(asset => /^eth$/i.test(asset!)) && !/solana/i.test(nativeSwap[3]!) && !nativeSwapNetwork(nativeSwap[3]!))
     throw new Error('SWAP_NATIVE_ASSET_UNSUPPORTED');
   // "wrap 0.01 ETH [to WETH] on Base" / "unwrap 0.01 WETH [to ETH] on Ethereum": a 1:1 WETH9 conversion of the network's own WETH9 (no slippage).
   const wrap = new RegExp(`^(wrap|unwrap) ([0-9]+(?:\\.[0-9]+)?) (ETH|WETH)(?: (?:to|into|for) (ETH|WETH))?(?: on (${CATALOG_CHAT_NETWORKS}))?$`, 'i').exec(input);

@@ -64,7 +64,9 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     // P0 hotfix (execution continuity): the certified Router's pointer is restorable now (the bridge of Swap → Bridge is re-proven after a
     // reload instead of being dropped, which offered the executed bridge again); a runtime with no run-id reader still is not.
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'router', runKey: 'xroute-' + 'a'.repeat(32) }] }, 'w')).toEqual([{ ...item, kind: 'router', runKey: 'xroute-' + 'a'.repeat(32) }]);
-    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'universal' }] }, 'w')).toEqual([]);
+    // P0 hotfix (FIX 2): the universal Router's pointer is restorable too; a runtime with no run-id reader still is not.
+    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'universal' }] }, 'w')).toEqual([{ ...item, kind: 'universal' }]);
+    expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, kind: 'uniswap-pool' }] }, 'w')).toEqual([]);
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, received: '-1' }] }, 'w')).toEqual([]);
     expect(storedCompletions({ workflowId: 'w', completed: [{ ...item, runKey: 'x' }] }, 'w')).toEqual([]);
     expect(storedCompletions('garbage', 'w')).toEqual([]);
@@ -74,7 +76,7 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(completedByRecord('supply', supply('RECONCILED'), 'w', 'node-003')).toBe(true);
     expect(completedByRecord('supply', supply('PENDING'), 'w', 'node-003')).toBe(false);
     expect(completedByRecord('supply', supply('DIVERGENT'), 'w', 'node-003')).toBe(false);
-    expect(completedByRecord('universal', supply('RECONCILED'), 'w', 'node-003')).toBe(false);
+    expect(completedByRecord('uniswap-pool', supply('RECONCILED'), 'w', 'node-003')).toBe(false);
   });
   it('P0 hotfix: a Router bridge counts again only from its own reconciled record (its owner read from that record)', () => {
     const bridge = (verdict: string, workflowId = 'w') => ({ verdict, owner: OWNER, workflow: { workflowId, nodes: [{ nodeId: 'node-003' }] } });
@@ -84,5 +86,42 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     expect(completedByRecord('router', bridge('RECONCILED', 'other'), 'w', 'node-003')).toBe(false);
     expect(completedByRecord('router', bridge('RECONCILED'), 'w', 'node-009')).toBe(false);
     expect(ownerByRecord('router', bridge('RECONCILED'))).toBe(OWNER);
+  });
+  it('P0 FIX 2: a universal bridge (Swap USDC → WETH, then Bridge WETH Base → Arbitrum One) is re-proven after a reload, never offered again', async () => {
+    const s = new CopilotSession(); s.walletChainId = 'eip155:8453';
+    s.say('swap 2 USDC to WETH on Base then bridge 0.0003 WETH from Base to Arbitrum', intent.composition([
+      act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' }),
+      act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'WETH', amount: '0.0003', routing: 'BEST' })]));
+    s.apply();
+    const sequence = workflowSequence(s.workflow, candidate => lintWorkflow(candidate, s.context))!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    const [swapStep, bridgeStep] = sequence.steps, swapNode = s.workflow.nodes.find(node => node.nodeId === swapStep!.nodeId)!;
+    const bridgeNode = s.workflow.nodes.find(node => node.nodeId === bridgeStep!.nodeId)!;
+    const universal = (verdict: string, extra: Record<string, unknown> = {}) => ({ format: 'flofi.universal-bridge-run.v1', verdict, owner: OWNER,
+      workflow: { workflowId: s.workflow.workflowId, nodes: [{ nodeId: bridgeNode.nodeId }] }, received: '299000000000000',
+      review: { route: { sourceChain: 'eip155:8453', destinationChain: 'eip155:42161',
+        outputToken: { chainId: 'eip155:42161', kind: 'TOKEN', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 } } }, ...extra });
+    const stored: StoredCompletion[] = [
+      { nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), kind: 'public', runKey: 'exec-0001', received: '600000000000000' },
+      { nodeId: bridgeNode.nodeId, node: stepNodeKey(bridgeNode), kind: 'universal', runKey: 'xuni-' + 'a'.repeat(32), received: null }];
+    const reads: string[] = [];
+    const read = (bridge: unknown): RecordReader => async (kind, runKey, sourceChain) => { reads.push(`${kind}:${runKey}:${sourceChain}`);
+      return kind === 'public' ? swapRecord(s.workflow.workflowId, swapNode.nodeId, '600000000000000', { quote: { executionId: 'exec-0001', chainId: 8453, inputToken: USDC, outputToken: WETH },
+        outcome: { inputSpent: '2000000', outputReceived: '600000000000000' } }) : bridge; };
+    const both = await proveCompletions(stored, s.workflow, sequence, read(universal('RECONCILED')));
+    // Each record is read with its step's source chain (the universal reader asks as that ecosystem's wallet only).
+    expect(reads).toEqual(['public:exec-0001:eip155:8453', 'universal:xuni-' + 'a'.repeat(32) + ':eip155:8453']);
+    expect(both.unreadable).toBe(false);
+    expect(both.proven.map(step => [step.kind, step.owner])).toEqual([['public', OWNER], ['universal', OWNER]]);
+    // Both proven: the workflow is finished after the reload; the bridge is never current again.
+    expect(validCompletions(sequence, s.workflow, both.proven)).toHaveLength(2);
+    // A bridge that is not reconciled (pending, refunded, divergent) or not this workflow's stays withheld; the swap alone is restored.
+    for (const record of [universal('PENDING'), universal('REFUNDED'), universal('DIVERGENT'), universal('RECONCILED', { workflow: { workflowId: 'other', nodes: [{ nodeId: bridgeNode.nodeId }] } })])
+      expect((await proveCompletions(stored, s.workflow, sequence, read(record))).proven.map(step => step.kind)).toEqual(['public']);
+    // A bridge record that cannot be read is reported as unreadable (retry), never as a new step.
+    expect(await proveCompletions(stored, s.workflow, sequence, read(null))).toMatchObject({ unreadable: true, proven: [{ kind: 'public' }] });
+    expect(ownerByRecord('universal', universal('RECONCILED'))).toBe(OWNER);
+    // Across ecosystems the source wallet is not the one that received (flofi-workflow review): no owner is named.
+    expect(ownerByRecord('universal', universal('RECONCILED', { review: { route: { sourceChain: 'eip155:8453', destinationChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } } }))).toBeNull();
   });
 });

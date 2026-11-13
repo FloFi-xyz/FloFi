@@ -88,6 +88,31 @@ test('suggestion chips only fill editable text; nothing is authored until the ow
   networkGuard.assertClean();
 });
 
+test('CI 2026-11-13 ("Supply Supply 250 USDC … [token] …"): a chip selects its first bracketed part with the text, never a frame later', async ({ page, networkGuard }) => {
+  // A loaded runner: every animation frame arrives 400 ms late. A selection applied in a frame could land between a select-all and the typed
+  // text (Playwright's fill, or a fast person), so only "[amount]" would be replaced; it must already be in place when the click returns.
+  await page.addInitScript(() => {
+    const frame = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = callback => frame(time => { setTimeout(() => callback(time), 400); });
+  });
+  await open(page);
+  const selection = () => request(page).evaluate(field => { const input = field as HTMLTextAreaElement; return input.value.slice(input.selectionStart, input.selectionEnd); });
+  for (const [chip, template] of [['Earn yield', 'Supply [amount] [token] to Aave on [network]'], ['Earn yield', 'Supply [amount] [token] to Aave on [network]'],
+    ['Swap tokens', 'Swap [amount] [token] for [token] on [network]']] as const) {
+    // The caret is moved away first, so a repeated click must select again by itself.
+    await request(page).evaluate(field => { const input = field as HTMLTextAreaElement; input.setSelectionRange(input.value.length, input.value.length); });
+    await entry(page).getByRole('button', { name: chip, exact: true }).click();
+    await expect(request(page)).toHaveValue(template);
+    // Read once, without waiting for any frame (the same chip clicked again selects again).
+    expect(await selection(), chip).toBe('[amount]');
+  }
+  await request(page).fill('Supply 250 USDC to Aave on Base');
+  // Let any late frame fire (frames run in order), then the typed text is still exactly what was typed.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => resolve(null))));
+  await expect(request(page)).toHaveValue('Supply 250 USDC to Aave on Base');
+  networkGuard.assertClean();
+});
+
 test('the request field grows with its text, has no resize handle, scrolls inside at its limit and still submits', async ({ page, networkGuard }) => {
   for (const width of [1240, 390]) {
     await page.setViewportSize({ width, height: 900 });

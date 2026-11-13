@@ -27,7 +27,7 @@ export type WorkflowProgressView = {
   readonly steps: readonly WorkflowStepProgress[]; readonly completed: number; readonly total: number;
   /** 1-based number of the step the workflow is on (null once every step completed). */ readonly current: number | null;
   /** Every step reconciled: the workflow's COMPLETED (written once, never before the last reconciliation). */ readonly finished: boolean;
-  /** Something needs the owner: a step failed or its outcome is unknown. */ readonly attention: boolean;
+  /** Something needs the owner: a step failed, its outcome is unknown, or the current step's preparation was refused. */ readonly attention: boolean;
 };
 
 const FAILED = ['failed', 'cancelled', 'expired', 'not-submitted'];
@@ -89,8 +89,10 @@ export const runReconciled = (live: ExecutionLifecycle): boolean => reconciledRu
  * current runtime's execution (its current step's run, or the whole workflow's when one runtime serves it); `prepared`: the current step's own
  * simulation is ready and nothing was requested for it yet. Null when nothing ran and no sequence has started.
  */
-export function workflowProgressView(input: { readonly sequence: SequencePresentation | null | undefined; readonly live: ExecutionLifecycle | null | undefined; readonly prepared?: boolean }): WorkflowProgressView | null {
-  const { sequence, prepared = false } = input, live = input.live?.started && input.live.matchesWorkflow !== false ? input.live : null;
+export function workflowProgressView(input: { readonly sequence: SequencePresentation | null | undefined; readonly live: ExecutionLifecycle | null | undefined; readonly prepared?: boolean;
+  /** P0 hotfix (FIX 2): why the current step of a step-by-step workflow could not be prepared (its simulation's refusal, a catalog key), or null. */
+  readonly refusal?: string | null }): WorkflowProgressView | null {
+  const { sequence, prepared = false, refusal = null } = input, live = input.live?.started && input.live.matchesWorkflow !== false ? input.live : null;
   let steps: WorkflowStepProgress[];
   if (sequence && sequence.total > 0) {
     steps = sequence.steps.map((step, index): WorkflowStepProgress => {
@@ -98,7 +100,10 @@ export function workflowProgressView(input: { readonly sequence: SequencePresent
       const runStep = current && live ? live.steps[0] ?? null : null;
       const phase: ExecutionPhase | null = step.state === 'COMPLETED' ? 'RECONCILED' : !current ? null
         : runStep ? lifecycleStepPhase(runStep, stepReconciled(live!, runStep.id)) ?? (prepared ? 'PREPARED' : null) : prepared ? 'PREPARED' : null;
-      return { number: index + 1, action: step.action, network: step.network, phase, text: phaseText(phase, runStep), current, delivered: step.delivered };
+      // A current step that nothing was requested for and whose preparation was refused says so (still no phase: nothing was sent). The refusal's
+      // own sentence is shown once, by the surface that ran the simulation (the Editor's continuation panel, the chat's reply).
+      const text = current && !phase && refusal ? { key: STEP_REFUSED, args: [] } : phaseText(phase, runStep);
+      return { number: index + 1, action: step.action, network: step.network, phase, text, current, delivered: step.delivered };
     });
   } else if (live) {
     steps = live.steps.map((step): WorkflowStepProgress => {
@@ -111,7 +116,9 @@ export function workflowProgressView(input: { readonly sequence: SequencePresent
   const finished = total > 0 && completed === total;
   const at = steps.findIndex(step => !step.phase || !phaseCompletesStep(step.phase));
   return { steps, completed, total, current: finished || at < 0 ? null : at + 1, finished,
-    attention: steps.some(step => step.phase === 'FAILED' || step.phase === 'OUTCOME_UNKNOWN') };
+    attention: steps.some(step => step.phase === 'FAILED' || step.phase === 'OUTCOME_UNKNOWN' || step.current && !step.phase && step.text.key === STEP_REFUSED) };
 }
+/** P0 hotfix (FIX 2): a current step whose simulation was refused (EN catalog key). */
+export const STEP_REFUSED = 'Not started: its simulation was refused';
 /** "X of N steps completed" (EN catalog key; `{0}`/`{1}` as parameters). */
 export const STEPS_COMPLETED = '{0} of {1} steps completed';

@@ -270,3 +270,48 @@ describe('P0-1: the public product never offers a test network', () => {
     expect(JSON.stringify(s.state.draft?.intent ?? null)).not.toMatch(/SEPOLIA|DEVNET/);
   });
 });
+
+describe('P0 FIX 1 (production 2026-11-13): "swap 1 usdc to eth on base and then bridge to arbitrum"', () => {
+  const SWAP = act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' });
+  it('the bridge\'s missing details are asked for; the swap is never refused; the answer proposes Swap → Bridge with native ETH, never WETH', () => {
+    const s = new CopilotSession([]);
+    const asked = s.say('swap 1 usdc to eth on base and then bridge to arbitrum',
+      intent.composition([SWAP, act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM' })]))!;
+    expectMainnetOnly(asked);
+    expect(asked.kind).toBe('CLARIFICATION');
+    expect(asked.command ?? null).toBeNull();
+    expect(asked.text).toMatch(/bridge/i);
+    expect(asked.text).not.toMatch(/native ETH swap|WETH/);
+    const proposed = s.say('0.0003', intent.composition([SWAP, act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'ETH', amount: '0.0003' })]))!;
+    expectMainnetOnly(proposed);
+    expect(proposed.kind).toBe('PROPOSAL');
+    const steps = proposed.command as unknown as { type: string; steps: { type: string; input: Record<string, unknown> }[] };
+    expect(steps.type).toBe('ADD_SEQUENCE');
+    expect(steps.steps.map(step => step.type)).toEqual(['ADD_CRYPTO_ACTION', 'ADD_UNIVERSAL_BRIDGE']);
+    expect(steps.steps[0]!.input).toMatchObject({ selection: { action: 'swap', network: 'Base', from: 'USDC', to: 'ETH' }, amount: '1' });
+    expect(steps.steps[1]!.input).toMatchObject({ source: 'base', destination: 'arbitrum-one', inputAsset: 'ETH', amount: '0.0003' });
+  });
+  it('the user\'s "weth" is never authored as native ETH, even when the model reports ETH (flofi-chat review)', () => {
+    const s = new CopilotSession([]);
+    const reply = s.say('swap 1 usdc to weth on base and then bridge 0.0003 of it to arbitrum',
+      intent.composition([act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }),
+        act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'ETH', amount: '0.0003' })]))!;
+    const authored = JSON.stringify(reply.command ?? null);
+    expect(authored).not.toMatch(/"to":"ETH"|"inputAsset":"ETH"/);
+    expect(reply.kind).not.toBe('PROPOSAL');
+    // Every way of writing WETH (flofi-security review): "wrapped ether" (native ETH's catalog name "Ether" is inside it), "w-eth", "w eth".
+    for (const written of ['wrapped ether', 'w-eth', 'w eth', 'Wrapped Ether']) {
+      const other = new CopilotSession([]).say(`swap 1 usdc to ${written} on base and then bridge 0.0003 of it to arbitrum`,
+        intent.composition([act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }),
+          act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'ETH', amount: '0.0003' })]))!;
+      expect(other.kind, written).not.toBe('PROPOSAL');
+      expect(JSON.stringify(other.command ?? null), written).not.toMatch(/"to":"ETH"/);
+    }
+    // The same model answer for the user's own "eth" is native ETH (the distinction is the user's word, not the model's label).
+    const native = new CopilotSession([]).say('swap 1 usdc to eth on base and then bridge 0.0003 of it to arbitrum',
+      intent.composition([act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }),
+        act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'ETH', amount: '0.0003' })]))!;
+    expect(native.kind).toBe('PROPOSAL');
+    expect(JSON.stringify(native.command)).toMatch(/"to":"ETH"/);
+  });
+});

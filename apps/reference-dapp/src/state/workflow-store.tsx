@@ -28,6 +28,7 @@ import { publicStatus } from '../app/public-testnet-action';
 import { supplyStatus } from '../app/supply-action';
 import { jupiterStatus } from '../app/jupiter-action';
 import { routerStatus } from '../app/router-action';
+import { universalStatus } from '../app/universal-router-action';
 import { ROUTER_NETWORK_OPTIONS, type RouterNetwork } from '../domain/router-authoring';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
@@ -123,7 +124,7 @@ const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks
   introducedTestNetworks(before, after, activeNetworkScope());
 
 /** A sequence step's durable record, read back from its own runtime by run id (BUILD AAVE-V3-EXPANSION-001). Null when unreadable. */
-async function readSequenceRecord(kind: string, runKey: string): Promise<unknown> {
+async function readSequenceRecord(kind: string, runKey: string, sourceChain?: string | null): Promise<unknown> {
   if (kind === 'router') {
     // The Router keeps one store per network; the run id names no network, so each is asked (read-only) until one holds it.
     for (const network of Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]) {
@@ -131,6 +132,11 @@ async function readSequenceRecord(kind: string, runKey: string): Promise<unknown
       if (result?.ok) return result.value;
     }
     return null;
+  }
+  if (kind === 'universal') {
+    // P0 hotfix (FIX 2): read as the wallet of the step's source ecosystem (that session is the run's owner; the server enforces it). Read-only.
+    const result = await universalStatus(sourceChain?.startsWith('solana:') ? 'SOLANA' : 'EVM', runKey).catch(() => null);
+    return result?.ok ? result.value : null;
   }
   const result = kind === 'public' ? await publicStatus(runKey) : kind === 'supply' ? await supplyStatus(runKey) : kind === 'solana-swap' ? await jupiterStatus(runKey) : null;
   return result && result.ok ? result.value : null;

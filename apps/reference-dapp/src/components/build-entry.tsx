@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import Image from 'next/image';
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
 import { BUILD_ENTRY_SUGGESTIONS, buildEntryOutcome, firstPlaceholder, type BuildEntryOutcome, type BuildEntrySnapshot, type BuildEntrySuggestion } from '../domain/build-entry';
 import type { FlofiConversation } from '../state/flofi-conversation';
@@ -76,6 +76,14 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   useEffect(() => { if (refused) field.current?.focus(); }, [refused]);
   // A draft set from outside the field (a suggestion, a cleared request, the one kept from another section) and a new width refit it.
   useEffect(() => { fitHeight(field.current); }, [draft]);
+  /** The bracketed part a suggestion selects, applied in the commit that writes its template (see `suggest`). */
+  const selectAfterFill = useRef<{ readonly text: string; readonly start: number; readonly end: number } | null>(null);
+  useLayoutEffect(() => {
+    const pending = selectAfterFill.current, element = field.current;
+    if (!pending || !element) return;
+    selectAfterFill.current = null;
+    if (element.value === pending.text) element.setSelectionRange(pending.start, pending.end);
+  }, [draft]);
   useEffect(() => {
     const view = globalThis.window, element = field.current;
     if (!view || !element) return;
@@ -95,14 +103,17 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
   }
   // P0 approved UX (board 03): a chip fills an editable sentence template and focuses it, with its first bracketed part selected so typing
   // replaces it. It never submits: the person completes the sentence and chooses Create workflow.
+  // P0 hotfix (CI 2026-11-13, "Supply Supply 250 USDC … [token] …"): the selection is applied in the same commit that writes the template (a layout
+  // effect, before the browser handles any later input), never a frame later — a frame-late selection could land after the person (or a test)
+  // had already selected the whole text, and the next keystrokes then replaced only "[amount]".
   function suggest(item: BuildEntrySuggestion) {
-    const text = item.template[language === 'PT' ? 'PT' : 'EN'];
+    const text = item.template[language === 'PT' ? 'PT' : 'EN'], range = firstPlaceholder(text), element = field.current;
+    selectAfterFill.current = range ? { text, ...range } : null;
     setDraft(text); setRefused(null);
-    const element = field.current;
     if (!element) return;
     element.focus();
-    const range = firstPlaceholder(text);
-    requestAnimationFrame(() => { if (range && field.current === element && element.value === text) element.setSelectionRange(range.start, range.end); });
+    // The same template again writes nothing new (no commit follows): select it now.
+    if (range && element.value === text) { selectAfterFill.current = null; element.setSelectionRange(range.start, range.end); }
   }
   const refusal = refused?.message ? refused.language ? refused.message : tr(refused.message) : null;
   return <section className={styles.root} aria-labelledby="build-entry-title" data-build-entry="">

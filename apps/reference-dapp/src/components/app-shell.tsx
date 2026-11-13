@@ -532,7 +532,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // One progress truth for the whole workflow (Execute, the FloFi Assistant and the Dashboard read these same numbers). A workflow one runtime
   // serves as a whole already counts its own steps in its run; a step-by-step workflow is counted here, over all of its steps.
   const stepPrepared = Boolean(authorization.key && !simulationSource.state.busy && (canvasAction.kind === 'approve' || canvasAction.kind === 'execute'));
-  const workflowProgress = sequence ? workflowProgressView({ sequence: sequencePresentation, live: liveStep, prepared: stepPrepared }) : null;
+  // P0 hotfix (FIX 2, production 2026-11-13: Swap RECONCILED, Bridge "Not started" with no reason): the next step's refused simulation is shown.
+  const stepRefusal = sequenceContinuing && !simulationSource.state.busy && simulationSource.state.error ? simulationError(simulationSource.state.error) : null;
+  const workflowProgress = sequence ? workflowProgressView({ sequence: sequencePresentation, live: liveStep, prepared: stepPrepared, refusal: stepRefusal }) : null;
   const continuationSimulation = sequenceContinuing ? projectSimulation(runtimeWorkflow, context, simulationSource).steps[0] ?? null : null;
   const continuationStep = sequence && sequencePresentation ? sequencePresentation.steps[sequence.cursor] ?? null : null;
   const previousStep = sequence && sequence.cursor > 0 && sequencePresentation ? sequencePresentation.steps[sequence.cursor - 1] ?? null : null;

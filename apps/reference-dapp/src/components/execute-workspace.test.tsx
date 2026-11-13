@@ -211,8 +211,8 @@ describe('P0 hotfix (execution continuity): a step-by-step workflow continues in
     steps: phases.map((phase, index) => ({ number: index + 1, action: index === 0 ? 'Swap' : 'Bridge', network: 'Arbitrum', phase, current: index === completed,
       text: { key: phase === 'RECONCILED' ? 'Reconciled' : phase === 'PREPARED' ? 'Prepared' : phase === 'AWAITING_AUTHORIZATION' ? 'Waiting for your authorization' : 'Not started', args: [] },
       delivered: phase === 'RECONCILED' ? '2.5 USDC' : null })) });
-  const continuation = (status: 'SIMULATING' | 'READY' | 'SIMULATE' | 'BLOCKED' | 'COMPLETED') => ({ current: 2, total: 2, action: 'Bridge', network: 'Arbitrum → Base', spends: '2 USDC',
-    receives: status === 'READY' ? '1.99 USDC' : null, previous: { number: 1, delivered: '2.5 USDC' }, status, reason: null });
+  const continuation = (status: 'SIMULATING' | 'READY' | 'SIMULATE' | 'BLOCKED' | 'COMPLETED', reason: string | null = null) => ({ current: 2, total: 2, action: 'Bridge', network: 'Arbitrum → Base', spends: '2 USDC',
+    receives: status === 'READY' ? '1.99 USDC' : null, previous: { number: 1, delivered: '2.5 USDC' }, status, reason });
   it('presents step 2 inline (what it spends and receives, the one action, the whole progress) — never "Review required" or "Back to simulation"', () => {
     const data = fixture(); data.authorization.accepted = false; data.authorization.key = null;
     const html = render({ ...data, detailsOnly: true, continuation: continuation('READY'), workflowProgress: progress(1, ['RECONCILED', 'PREPARED']),
@@ -221,6 +221,15 @@ describe('P0 hotfix (execution continuity): a step-by-step workflow continues in
       '1 of 2 steps completed', 'data-workflow-progress="1/2"', 'data-continuation-status="READY"', 'Delivered 2.5 USDC', 'Return to the Canvas']) expect(html).toContain(text);
     expect(html.match(/>Authorize in wallet</g)).toHaveLength(1);
     expect(html).not.toMatch(/Review required|Back to simulation|Simulate again|execution-authorization-attention|Execution plan</);
+  });
+  it('P0 FIX 2: step 2 whose simulation was refused shows the refusal with its retry action, never only "needs its own simulation"', () => {
+    const refusal = 'FloFi cannot bridge WETH on this route: the bridge provider converts it to native ETH through contracts FloFi does not verify, so this step was not simulated or sent. Bridge ETH (unwrap the WETH first) or USDC instead.';
+    const html = render({ ...fixture(), detailsOnly: true, continuation: continuation('SIMULATE', refusal), workflowProgress: progress(1, ['RECONCILED', null]),
+      primaryAction: createElement('button', { type: 'button', 'data-lifecycle-action': 'simulate' }, 'Simulate workflow') });
+    for (const text of [refusal, 'data-continuation-status="SIMULATE"', 'Simulate workflow', 'Step 1 is completed and reconciled: it delivered 2.5 USDC.']) expect(html).toContain(text);
+    expect(html).not.toContain('Step 2 needs its own simulation before you authorize it.');
+    expect(render({ ...fixture(), detailsOnly: true, continuation: continuation('SIMULATE'), workflowProgress: progress(1, ['RECONCILED', null]) }))
+      .toContain('Step 2 needs its own simulation before you authorize it. Nothing is signed or sent.');
   });
   it('while step 2 simulates it says so (nothing is signed or sent); a finished workflow is Completed with every step', () => {
     const simulating = render({ ...fixture(), detailsOnly: true, continuation: continuation('SIMULATING'), workflowProgress: progress(1, ['RECONCILED', null]) });
