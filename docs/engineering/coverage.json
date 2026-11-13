@@ -1273,6 +1273,18 @@
     "reference-compiler.eip7702-upgrade": {
       "path": "packages/reference-compiler/test/eip7702-upgrade.test.ts",
       "stage": "unit"
+    },
+    "app.components.circle-consent-card": {
+      "path": "apps/reference-dapp/src/components/circle-consent-card.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.flofi-wallet-circle-flow": {
+      "path": "apps/reference-dapp/src/components/flofi-wallet-circle-flow.test.ts",
+      "stage": "unit"
+    },
+    "app.components.workflow-run-panel-flofi-circle": {
+      "path": "apps/reference-dapp/src/components/workflow-run-panel.flofi-circle.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1375,7 +1387,10 @@
     "app.server.managed-signing-circle",
     "app.user-funded.circle-bridge",
     "app.user-funded.circle-flofi-wallet",
-    "reference-compiler.eip7702-upgrade"
+    "reference-compiler.eip7702-upgrade",
+    "app.components.circle-consent-card",
+    "app.components.flofi-wallet-circle-flow",
+    "app.components.workflow-run-panel-flofi-circle"
   ],
   "modules": [
     {
@@ -7052,7 +7067,9 @@
         "app.user-funded.circle-bridge",
         "app.user-funded.circle-flofi-wallet",
         "app.workflow-runs.flofi-wallet-circle-run.pg",
-        "app.workflow-runs.kora-gas-run.pg"
+        "app.workflow-runs.kora-gas-run.pg",
+        "app.components.flofi-wallet-circle-flow",
+        "app.components.workflow-run-panel-flofi-circle"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
@@ -7579,7 +7596,9 @@
         "apps/reference-dapp/src/server/zeroex-gasless/swap.ts",
         "apps/reference-dapp/src/server/zeroex-gasless/transport.ts",
         "apps/reference-dapp/src/server/testdata/zeroex/gasless-official-examples.json",
-        "apps/reference-dapp/src/gas-abstraction/native-later.ts"
+        "apps/reference-dapp/src/gas-abstraction/native-later.ts",
+        "apps/reference-dapp/src/components/circle-consent-card.tsx",
+        "apps/reference-dapp/src/components/flofi-wallet-circle-flow.ts"
       ],
       "suites": [
         "app.gas-abstraction.gas-abstraction",
@@ -7618,7 +7637,10 @@
         "app.user-funded.circle-flofi-wallet",
         "app.workflow-runs.flofi-wallet-circle-run.pg",
         "app.workflow-runs.kora-gas-run.pg",
-        "reference-compiler.eip7702-upgrade"
+        "reference-compiler.eip7702-upgrade",
+        "app.components.circle-consent-card",
+        "app.components.flofi-wallet-circle-flow",
+        "app.components.workflow-run-panel-flofi-circle"
       ],
       "gaps": [
         "ADR-0010: token-paid network fees (Circle Paymaster, Pimlico Kora, 0x Gasless) are proven with deterministic loopback doubles only; no provider, bundler, wallet or mainnet is reached in CI, and no real-funds token-paid transaction has been recorded."

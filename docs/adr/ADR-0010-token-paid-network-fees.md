@@ -117,6 +117,13 @@ re-checked before each signature: `CIRCLE_AUTHORIZATION_STALE`); FloFi's own exp
 place the owner reads what the upgrade does; three signatures on first use (upgrade, USDC permit, operation), two afterwards; reconciliation
 requires the account code to be `0xef0100 ‖ Simple7702Account` (`CIRCLE_DELEGATION_NOT_LANDED`). The upgrade stays after a failed operation
 (it is applied at the start of the bundler's transaction), as the consent says. FloFi Wallet's traditional owner-paid path is unchanged.
+Where it is reachable: `/approve` (every MCP, channel, chat, developer and Editor *Run workflow* link) when the owner authorizes **in groups**:
+before the first step of a FloFi Wallet group on a Circle chain is loaded, FloFi asks for its preparation; ETH covers → the step runs through its
+own flow exactly as before; Circle eligible → FloFi's consent card ("Upgrade and continue" / "Not now"); *Not now* withdraws the unsigned Circle
+preparation (`CIRCLE_FEE_DECLINED`) and the step pays in ETH or shows the shortfall, with nothing signed. The Editor reviews a FloFi Wallet
+workflow step by step (FloFi Wallet has no EIP-5792 batches), pays each step in ETH and says that USDC fees are available through `/approve`.
+Not covered: *Confirm each step* mode (no groups), a page reload between the start and the browser's check (that group pays in ETH), and the
+resume of a halted owner-step group.
 
 **MetaMask on Ethereum: native ETH (provider/wallet limit, with evidence).** MetaMask's `EIP7702StatelessDeleGator` v1.3.0 takes its EntryPoint as
 an immutable constructor argument, includes it in its user-operation typehash and accepts `validateUserOp` only from it (`EIP7702DeleGatorCore.sol`
@@ -129,7 +136,8 @@ MetaMask would need: a v0.8 DeleGator, a dapp-requested authorization to a v0.8 
 flow. Until then MetaMask on Ethereum pays in ETH (Base and Arbitrum One work through the v0.7 paymaster).
 
 **Not offered:** Coinbase Smart Wallet (EntryPoint v0.6), Robinhood Chain, delayed user operations signed upfront (a permit could be overtaken by
-a later permit of the same owner), and single-step pages (they keep native gas; the Editor's whole-workflow execution and `/approve` carry it).
+a later permit of the same owner), and single-step pages (they keep native gas; workflow runs — the Editor's whole-workflow execution for
+injected wallets and `/approve` in groups for every wallet — carry it).
 
 ## 4. Pimlico hosted Kora (Solana)
 

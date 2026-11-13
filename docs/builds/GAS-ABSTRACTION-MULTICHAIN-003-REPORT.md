@@ -29,13 +29,14 @@ S1 second narrowing: a non-owner native payer only with a pinned-relayer `tokenF
 
 | Network | MetaMask | Other injected EVM (Rabby, …) | Coinbase Smart Wallet | FloFi Wallet (Privy) | Phantom / Solflare |
 | --- | --- | --- | --- | --- | --- |
-| **Base** | ETH; **Circle v0.7** when the account is already a MetaMask smart account (2 signatures) | ETH; Circle only if delegated to `Simple7702Account` v0.8 | ETH (EntryPoint v0.6: `CIRCLE_ACCOUNT_UNSUPPORTED`) | ETH; **Circle v0.8** after an explicit EIP-7702 upgrade (3 then 2 signatures) | — |
+| **Base** | ETH; **Circle v0.7** when the account is already a MetaMask smart account (2 signatures) | ETH; Circle only if delegated to `Simple7702Account` v0.8 | ETH (EntryPoint v0.6: `CIRCLE_ACCOUNT_UNSUPPORTED`) | ETH; **Circle v0.8** after an explicit EIP-7702 upgrade, through `/approve` in groups (3 then 2 signatures) | — |
 | **Arbitrum One** | same as Base | same as Base | same as Base | same as Base | — |
-| **Ethereum** | **ETH only** (`CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED`: DeleGator is v0.7, Circle on Ethereum is v0.8 only; evidence in ADR-0010 §3) | ETH; Circle v0.8 if delegated to `Simple7702Account` | ETH | ETH; **Circle v0.8** after the explicit upgrade | — |
+| **Ethereum** | **ETH only** (`CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED`: DeleGator is v0.7, Circle on Ethereum is v0.8 only; evidence in ADR-0010 §3) | ETH; Circle v0.8 if delegated to `Simple7702Account` | ETH | ETH; **Circle v0.8** after the explicit upgrade (`/approve`, in groups) | — |
 | **Robinhood Chain** | ETH (Uniswap v3); **0x Gasless** for ERC-20 swaps from a plain EOA (a 7702-delegated MetaMask account: `ZEROX_OWNER_NOT_EOA`) | ETH; 0x Gasless (EOA) | ETH; `ZEROX_OWNER_NOT_EOA` | ETH; **0x Gasless** (bound typed-data signing) | — |
 | **Solana** | — | — | — | SOL; **Kora** USDC/USDT (owner signs slot 1) | SOL; **Kora** USDC/USDT (sign-only of the owner's slot) |
 
-Every "ETH/SOL" cell is the unchanged traditional path. A plain MetaMask EOA that was never upgraded is `CIRCLE_SMART_ACCOUNT_REQUIRED` on Base and
+Every "ETH/SOL" cell is the unchanged traditional path. FloFi Wallet's Circle path is reachable from `/approve` when the owner authorizes in groups
+(the Editor runs FloFi Wallet workflows step by step in ETH and points to `/approve`); *Confirm each step* mode has no groups and stays native. A plain MetaMask EOA that was never upgraded is `CIRCLE_SMART_ACCOUNT_REQUIRED` on Base and
 Arbitrum (the MetaMask upgrade itself is a type-4 transaction paid in ETH). Wallet behaviour marked here was verified against the wallets'
 published sources and the doubles, **not** live: Phantom/Solflare partial signing with a foreign fee payer, Privy's EIP-7702 signing and each
 wallet's typed-data prompts need the owner's live acceptance.
