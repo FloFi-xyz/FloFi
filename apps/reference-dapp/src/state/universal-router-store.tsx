@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports, walletReportRecorded } from './wallet-request-lifecycle';
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
@@ -36,7 +36,9 @@ type Store = { available: boolean; /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until
   connect(): Promise<void>; signIn(): Promise<void>; discover(): Promise<void>; simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>;
   execute(): Promise<void>; observe(): Promise<void>; open(runId: string): Promise<void>; loadRuns(): Promise<void>; switchNetwork(): Promise<void>;
   /** BUILD-FLOFI-MAINNET-EXEC-002: the last automatic in-place re-quote (the refusal code and the material values it changed), or null. */
-  requoted: { readonly code: string; readonly runId: string; readonly changes: readonly BridgeReviewChange[] } | null };
+  requoted: { readonly code: string; readonly runId: string; readonly changes: readonly BridgeReviewChange[] } | null;
+  /** Review round 3: the owner's wallets connected in this session or on the FloFi account (not the device's saved Credentials addresses). */
+  ownDestinations?: readonly string[] };
 const Context = createContext<Store | null>(null);
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string; correlationId?: string }): T => { if (!result.ok) throw Object.assign(new Error(result.code), { correlationId: result.correlationId }); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
@@ -75,6 +77,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const destinations = useDestinationWallets(wallet);
   const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem
     ? resolvedAddress(destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana) : null;
+  // Review round 3: only these may be called "your wallet" in the chat Review; a saved Credentials address is the device's, not proof of control.
+  const ownDestinations = useMemo(() => [...destinations.inventory.session, ...destinations.inventory.account].map(entry => entry.address), [destinations.inventory]);
   const latest = useRef(workflow); latest.current = workflow;
   const discoveryScope = JSON.stringify([workflow, owner, destinationWallet]);
   const latestDiscoveryScope = useRef(discoveryScope); latestDiscoveryScope.current = discoveryScope;
@@ -350,7 +354,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }); }
   return <Context.Provider value={{ available, availabilityKnown, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
     signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork,
-    requoted: requoted && requoted.runId === record?.id ? requoted : null }}>
+    requoted: requoted && requoted.runId === record?.id ? requoted : null, ownDestinations }}>
     {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
     <div data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

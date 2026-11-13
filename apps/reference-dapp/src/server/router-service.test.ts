@@ -300,6 +300,19 @@ describe('BUILD-ROUTER-001 authorization invalidation (ROUTE_CHANGED and friends
     await service.observe(run.id);
     expect((await service.load(run.id)).attempts[0]).toMatchObject({ state: 'CONFIRMED', note: begun.attempt.note });
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): a deposit first reported as unknown and then proven on chain drops the uncertainty note', async () => {
+    const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
+    await execute(service, h, run.id, w); await service.observe(run.id);
+    const begun = await service.begin(run.id, ROUTER_OWNER, w);
+    await service.handoff(run.id);
+    h.wallet.send(begun.transaction, { hold: true });
+    expect((await service.report(run.id, { kind: 'UNKNOWN', code: 'ROUTER_SUBMISSION_UNKNOWN' })).attempts.at(-1)).toMatchObject({ state: 'SUBMISSION_RESULT_UNKNOWN', note: 'ROUTER_SUBMISSION_UNKNOWN' });
+    h.wallet.mine();
+    const confirmed = await service.observe(run.id);
+    expect(confirmed.phase).toBe('SOURCE_CONFIRMED');
+    expect(confirmed.attempts.at(-1)).toMatchObject({ step: 'DEPOSIT', state: 'CONFIRMED', note: null });
+    expect(h.counters.sends).toBe(2);
+  });
   it('public provider fallback after Review is never used: LI.FI now routing via another bridge is ROUTE_CHANGED, not a silent switch', async () => {
     const { service, h } = await setup(), w = workflow();
     const run = await reviewed(service, w);

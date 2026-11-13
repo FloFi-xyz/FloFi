@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { readUniversalBridgeNode } from '@defi-workflow-engine/workflow-contracts';
 import { actionReviewValue, canvasAmountCommand, canvasAmountMessage, keptBridgeRecipient } from './canvas-action-setup';
-import { checkDestinationAddress, destinationLabel, resolveDestinationWallet, type DestinationCandidate } from './destination-wallet';
+import { boundRecipientOwned, checkDestinationAddress, destinationLabel, resolveDestinationWallet, type DestinationCandidate } from './destination-wallet';
 import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
 import { createRouterNode, routerDetails } from './router-authoring';
 import { universalBridgeDetails } from './universal-bridge-authoring';
@@ -126,5 +126,19 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 Arbitrum WETH → Solana USDC on a Bridge
     const wrong = editorHistoryReducer(h, { type: 'EDIT_CANVAS_RECIPIENT', id, recipient: PHANTOM, context });
     expect(() => canvasAmountCommand(wrong.editor, wrong.actionSetup, wrong.amountInputs, id, context, wrong.bridgeNetworkInputs, wrong.cryptoSelections, wrong.recipientInputs)).toThrow('DESTINATION_WRONG_ECOSYSTEM');
     expect(editorHistoryReducer(typed, { type: 'REMOVE_ACTION_SETUP' }).recipientInputs[id]).toBeUndefined();
+  });
+});
+
+describe('Review round 3: which bound recipients the chat Review may call the owner\'s own wallet', () => {
+  const SOL = 'BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3', EVM = '0x4b21000000000000000000000000000000b3ce';
+  it('claims the connected owner, and a destination wallet only when it is connected or on the FloFi account', () => {
+    expect(boundRecipientOwned('CONNECTED_OWNER', EVM, [])).toBe(true);
+    expect(boundRecipientOwned('CONNECTED_DESTINATION_WALLET', SOL, [SOL])).toBe(true);
+    expect(boundRecipientOwned('CONNECTED_DESTINATION_WALLET', EVM, [EVM.toUpperCase().replace('0X', '0x')])).toBe(true);
+  });
+  it('never claims an address resolved only from saved Credentials, nor a typed one', () => {
+    expect(boundRecipientOwned('CONNECTED_DESTINATION_WALLET', SOL, [])).toBe(false);
+    expect(boundRecipientOwned('CONNECTED_DESTINATION_WALLET', SOL, [SOL.toLowerCase()])).toBe(false);
+    expect(boundRecipientOwned('EXPLICIT', SOL, [SOL])).toBe(false);
   });
 });

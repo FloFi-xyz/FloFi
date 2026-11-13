@@ -51,6 +51,17 @@ export function resolveDestinationWallet(ecosystem: DestinationEcosystem, invent
   return { kind: 'NONE' };
 }
 
+/**
+ * Review round 3: whether a Review's bound recipient may be called the owner's own wallet. The connected owner is; a destination wallet is only
+ * when it is connected in this session or on the FloFi account (`own`). An address resolved from the device's saved Credentials is not proof
+ * of control, and a typed (EXPLICIT) address is never claimed.
+ */
+export function boundRecipientOwned(kind: string, recipient: string, own: readonly string[]): boolean {
+  if (kind === 'CONNECTED_OWNER') return true;
+  if (kind !== 'CONNECTED_DESTINATION_WALLET') return false;
+  return own.some(address => address === recipient || (address.startsWith('0x') && address.toLowerCase() === recipient.toLowerCase()));
+}
+
 /** The ecosystem of a universal network (`'EVM' | 'SOLANA'` in the contracts, lower case in the wallet stores). */
 export const destinationEcosystemOf = (network: UniversalNetworkKey): DestinationEcosystem => UNIVERSAL_NETWORKS[network].ecosystem === 'SOLANA' ? 'solana' : 'evm';
 

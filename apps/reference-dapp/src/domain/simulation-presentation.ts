@@ -20,6 +20,7 @@ import type { useLiquidity } from '../state/liquidity-store';
 import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
+import { boundRecipientOwned } from './destination-wallet';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
@@ -353,7 +354,12 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         .replace('{0}', route.inputToken.symbol));
       else if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
       // Review round 2: the Review bound the recipient as the owner's own wallet (connected owner, or their destination wallet) or as an explicit address.
-      if (s) { s.destination = q.recipient; s.destinationOwned = q.recipientKind !== 'EXPLICIT'; }
+      // Review round 3: a destination wallet counts as the owner's only when it is connected in this session or on the FloFi account; one resolved
+      // from the device's saved Credentials addresses is shown in full without that claim (the bridge panel asks the owner to check it).
+      if (s) {
+        const own = 'ownDestinations' in source.state ? (source.state as { readonly ownDestinations?: readonly string[] }).ownDestinations ?? [] : [];
+        s.destination = q.recipient; s.destinationOwned = boundRecipientOwned(q.recipientKind, q.recipient, own);
+      }
       warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.', true);
       break;
     }

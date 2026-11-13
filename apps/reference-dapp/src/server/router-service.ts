@@ -593,6 +593,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const chargedFee = { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee };
     const feeNote = verified.direct && !chargedNetworkFeeWithinAuthorization(authorizedFee, chargedFee)
       ? `ROUTER_NETWORK_FEE_ABOVE_AUTHORIZED:${chargedFee.gasUsed * chargedFee.effectiveGasPrice + chargedFee.l1Fee}:${authorizedNetworkFee(authorizedFee)}` : null;
+    // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a verified receipt keeps only the tolerated-drift fact recorded at begin. An earlier
+    // uncertainty note (ROUTER_SUBMISSION_UNKNOWN, ROUTER_REPORTED_REJECTED_UNPROVEN) no longer applies to a transaction proven on chain.
+    const confirmedNote = feeNote ?? (attempt.note?.startsWith('ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:') ? attempt.note : null);
     const receipt: RouterReceipt = { transactionHash: hash, status: verified.status, blockNumber: verified.blockNumber, blockHash: hex(raw.blockHash), from: verified.txFrom,
       gasCostWei: (verified.gasUsed * verified.effectiveGasPrice + verified.l1Fee).toString(), submissionKind: verified.delegated ? 'DELEGATED_SINGLE' : 'DIRECT', contentHash: digest(raw) };
     if (verified.status === 0) {
@@ -608,7 +611,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (approvals.length !== 1 || approvals[0]!.owner !== record.owner || approvals[0]!.spender !== spender || approvals[0]!.amount !== amount) fail('ROUTER_APPROVAL_MISMATCH');
         const effective = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(record.owner) + addrWord(spender), tag(verified.blockNumber)), 0);
         if (effective !== amount) fail('ROUTER_APPROVAL_NOT_EFFECTIVE');
-        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note }));
+        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: confirmedNote }));
       }
       const { deposit, ownerDebit } = depositMatches(record.review.route, logs, record.owner);
       const block = await rpc('eth_getBlockByNumber', [tag(verified.blockNumber), false]);
@@ -619,7 +622,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         ownerDebit: ownerDebit.toString(), safe: false };
       // The authorization is consumed by the confirmed deposit; it can never authorize another one.
       return save(replaceAttempt({ ...transition(record, 'SOURCE_CONFIRMED'), authorization: null, source: settled, error: null },
-        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note }));
+        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: confirmedNote }));
     } catch (cause) {
       const code = cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : null;
       if (!code || code === 'ROUTER_RPC_INVALID') throw cause;

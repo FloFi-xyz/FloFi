@@ -207,7 +207,11 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.refund) amount('destination', 'Verified refund', record.refund.amount, route.inputToken.decimals, route.inputToken.symbol);
       // BUILD-FLOFI-MAINNET-EXEC-002 review round 2: an unwrapping route (its source calls unwrap WETH to ETH and approve nothing) grants no token
       // allowance, so it shows no allowance facts and its pending-deposit note speaks of the unwrap, never of an approval or an open allowance.
-      const unwrapping = review.source.ecosystem === 'EVM' && review.source.calls.some(call => call.purpose === 'UNWRAP') && !review.source.calls.some(call => call.purpose === 'APPROVAL');
+      // Review round 3: after a confirmed unwrap a re-quote in place plans only the deposit, so the route's own unwrap (or the run's UNWRAP
+      // attempt) also marks it as unwrapping.
+      const unwrapping = review.source.ecosystem === 'EVM' && !review.source.calls.some(call => call.purpose === 'APPROVAL')
+        && (review.source.calls.some(call => call.purpose === 'UNWRAP') || (route.source?.ecosystem === 'EVM' && route.source.unwrap !== undefined)
+          || record.attempts.some(attempt => attempt.step === 'UNWRAP'));
       if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN' && !unwrapping) allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);
       if (!record.attempts.some(a => a.step === 'DEPOSIT')) op('DEPOSIT').note = unwrapping
         ? 'The source deposit has not been requested. A confirmed unwrap can still have network costs; its ETH stays in your wallet.'
