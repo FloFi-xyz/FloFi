@@ -507,7 +507,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         note: reverted }));
     }
     const logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as evm.EvmLog[] : fail('UNIVERSAL_RECEIPT_INVALID');
-    const confirmed = { ...attempt, state: 'CONFIRMED' as const, transactionHash: attempt.transactionHash ?? hash, receipt, reconciled: true };
+    // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a transaction proven on chain drops an earlier uncertainty note (UNIVERSAL_SUBMISSION_UNKNOWN,
+    // UNIVERSAL_REPORTED_REJECTED_UNPROVEN), as the router does; its evidence must never call a confirmed request uncertain.
+    const confirmed = { ...attempt, state: 'CONFIRMED' as const, transactionHash: attempt.transactionHash ?? hash, receipt, reconciled: true, note: null };
     try {
       if (attempt.step === 'UNWRAP') {
         // BUILD-FLOFI-MAINNET-EXEC-002: proof is the pinned contract's own burn of exactly the input from the owner (the native value is then the owner's).

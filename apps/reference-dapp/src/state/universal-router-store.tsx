@@ -290,7 +290,11 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
         : 'UNIVERSAL_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'UNIVERSAL_SUBMISSION_UNKNOWN';
       if (refused) rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: current.owner, kind: 'REJECTED', code: diagnostic.code, rejectionCode: diagnostic.rejectionCode! });
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await universalWalletFailure('EVM', id, diagnostic); if (failure.ok) { acceptCurrent(failure.value); forgetWalletReport(walletResultStorage(), attemptId); }
+        const failure = await universalWalletFailure('EVM', id, diagnostic); if (failure.ok) forgetWalletReport(walletResultStorage(), attemptId);
+        // Review round 3: a hand-off refusal that execute() re-quotes in place shows no interim record (its cancelled attempt would read "needs
+        // attention" while the fresh quote is fetched); execute() accepts the refreshed run, or this record when no re-quote happens.
+        if (failure.ok && !diagnostic.invoked && REQUOTE_IN_PLACE.test(diagnostic.code)) throw Object.assign(new Error(diagnostic.code, { cause }), { interim: failure.value });
+        if (failure.ok) acceptCurrent(failure.value);
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
@@ -337,8 +341,10 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       // BUILD-FLOFI-MAINNET-EXEC-002: a refusal before any wallet request (route or fee moved, Review expired) leaves the run re-quotable in place:
       // fresh quote, simulation and Review on the same run and workflow; only the material values that moved are shown, then a new authorization.
       if (cause instanceof Error && REQUOTE_IN_PLACE.test(cause.message)) {
-        const current = await universalStatus(eco, reviewed.id);
-        if (current.ok && requotableInPlace(current.value)) {
+        const current = await universalStatus(eco, reviewed.id), interim = (cause as { interim?: UniversalRecord }).interim ?? null;
+        const fallback = () => { const value = current.ok ? current.value : interim; if (value) accept(value); };
+        if (!current.ok || !requotableInPlace(current.value)) fallback();
+        else {
           // Review P2: an automatic re-quote keeps the REVIEWED recipient (the server reuses it); only the owner's own Refresh may pick another.
           const refreshed = await universalRefresh(eco, reviewed.id, undefined);
           if (refreshed.ok) {
@@ -346,6 +352,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
             setRequoted({ code: cause.message, runId: reviewed.id, changes: bridgeReviewChanges(reviewed.review, refreshed.value.review) });
             throw new Error('UNIVERSAL_REQUOTED_REVIEW_REQUIRED', { cause });
           }
+          fallback();
         }
       }
       throw cause;

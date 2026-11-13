@@ -16,7 +16,7 @@ export type ConversationCopy = {
   readonly executedKept: (executed: number) => string; readonly executedAgain: string;
   readonly undone: string; readonly undoUnavailable: string; readonly emptyWorkflow: string; readonly reviewStarting: string; readonly reviewBlocked: (reason: string) => string;
   readonly reviewFailed: (reason: string) => string; readonly reviewReady: string; readonly reviewNotApprovable: (reason: string) => string; readonly confirmWorkflow: string;
-  readonly confirmYes: string; readonly confirmNo: string; readonly workflowConfirmed: (revision: number, account: string) => string; readonly executeQuestion: string;
+  readonly confirmYes: string; readonly confirmNo: string; readonly workflowConfirmed: (revision: number, account: string) => string; readonly workflowConfirmedContinuing: (revision: number, account: string) => string; readonly executeQuestion: string;
   readonly executeYes: string; readonly executeNo: string; readonly walletRequests: (requests: string) => string; readonly walletRequestsUnknown: string;
   readonly executing: string; readonly continueQuestion: string; readonly continueYes: string; readonly declined: string;
   readonly unclear: string; readonly invalidated: Readonly<Record<BindingIssue, string>>; readonly executeNeedsReview: string; readonly executeConfirmedFirst: string;
@@ -92,6 +92,7 @@ const en: ConversationCopy = {
   reviewNotApprovable: reason => `This review cannot be confirmed yet: ${reason}`,
   confirmWorkflow: 'Do you confirm this workflow?', confirmYes: 'Yes, I confirm', confirmNo: 'No',
   workflowConfirmed: (revision, account) => `Workflow confirmed (revision ${revision}, wallet ${account}). Nothing has been signed or sent.`,
+  workflowConfirmedContinuing: (revision, account) => `Workflow confirmed (revision ${revision}, wallet ${account}). Your earlier confirmed request stays in place; nothing new has been signed or sent.`,
   executeQuestion: 'Would you like to execute this workflow now?', executeYes: 'Yes, execute', executeNo: 'Not now',
   walletRequests: requests => `Your wallet will ask you to confirm each request separately: ${requests}.`,
   walletRequestsUnknown: 'Your wallet shows each request before you confirm it; FloFi never signs for you.',
@@ -198,6 +199,7 @@ const pt: ConversationCopy = {
   reviewNotApprovable: reason => `Esta revisão ainda não pode ser confirmada: ${reason}`,
   confirmWorkflow: 'Você confirma este fluxo?', confirmYes: 'Sim, confirmo', confirmNo: 'Não',
   workflowConfirmed: (revision, account) => `Fluxo confirmado (revisão ${revision}, carteira ${account}). Nada foi assinado nem enviado.`,
+  workflowConfirmedContinuing: (revision, account) => `Fluxo confirmado (revisão ${revision}, carteira ${account}). O seu pedido anterior já confirmado continua válido; nada novo foi assinado nem enviado.`,
   executeQuestion: 'Quer executar este fluxo agora?', executeYes: 'Sim, executar', executeNo: 'Agora não',
   walletRequests: requests => `A sua carteira vai pedir a confirmação de cada pedido separadamente: ${requests}.`,
   walletRequestsUnknown: 'A sua carteira mostra cada pedido antes de você confirmar; a FloFi nunca assina por você.',

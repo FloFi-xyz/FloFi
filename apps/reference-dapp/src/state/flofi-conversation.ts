@@ -111,9 +111,9 @@ function questionOptions(kind: Question['open']['kind'], c: ReturnType<typeof co
     : kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
 }
 /** The runtime's in-place re-quote, when its state carries one (Router and universal bridges: BUILD-FLOFI-MAINNET-EXEC-002). */
-function requotedOf(state: unknown): { readonly code: string } | null {
+function requotedOf(state: unknown): { readonly code: string; readonly runId?: string } | null {
   const value = state && typeof state === 'object' ? (state as { readonly requoted?: unknown }).requoted : null;
-  return value && typeof value === 'object' && typeof (value as { code?: unknown }).code === 'string' ? value as { readonly code: string } : null;
+  return value && typeof value === 'object' && typeof (value as { code?: unknown }).code === 'string' ? value as { readonly code: string; readonly runId?: string } : null;
 }
 
 export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLanguage }: {
@@ -538,7 +538,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const review = conversationReview(view);
       setQuestion({ open: { kind: 'CONFIRM_EXECUTION', binding: open.open.binding }, language });
       const account = short(open.open.binding.account), sequence = view.sequence, revision = view.workflow.revision;
-      say(scope, language, (language, c) => [c.workflowConfirmed(revision, account), {
+      // Review round 3: a fresh Review of a run whose earlier request already landed (router/universal re-quote) never says nothing was sent.
+      const landed = Boolean(currentExecution(view.progress)?.steps.some(step => step.operations.some(operation => operation.state === 'confirmed')));
+      say(scope, language, (language, c) => [landed ? c.workflowConfirmedContinuing(revision, account) : c.workflowConfirmed(revision, account), {
         notes: [review.walletRequests.length ? c.walletRequests(review.walletRequests.map(item => translate(language, item)).join(', ')) : c.walletRequestsUnknown,
           ...review.approvals.length || review.walletRequests.some(item => /^Approve\b/.test(item)) ? [c.approvalIfNeeded] : [],
           ...review.providerSteps.length ? [c.providerSettles(review.providerSteps.map(item => translate(language, item).toLowerCase()).join(', '))] : []],
@@ -624,8 +626,13 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a refusal at the wallet hand-off, after begin had recorded the attempt (so neither this start
     // nor a continuation is still pending), that the runtime re-quoted in place: FloFi says why once and presents that fresh Review of the same
     // run, as at the start. Never "needs attention" for a request that was never sent, never a second simulation; the owner authorizes again.
+    // It is presented only once the controls settled (the wallet request lock is released in the render after the re-quote lands; presenting
+    // earlier would report "still working" and consume it), and only for the run this conversation started.
     const inPlace = requotedOf(bridge.source.state);
-    if (inPlace && inPlace !== followed.inPlace && !followed.start && !followed.continuing && followed.auto) {
+    const settled = !bridge.controls.authorizing && !bridge.controls.requesting && !bridge.source.state.busy;
+    const ours = !followed.runKey || !inPlace?.runId || inPlace.runId === followed.runKey;
+    if (inPlace && inPlace !== followed.inPlace && !followed.start && !followed.continuing && followed.auto && ours) {
+      if (!settled) return;
       followed.inPlace = inPlace;
       const earlier = Boolean(live?.steps.some(step => step.operations.some(operation => operation.state === 'confirmed')));
       if (live) followed.phase = conversationExecution(bridge)?.phase ?? followed.phase;
@@ -647,7 +654,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): the runtime already re-quoted this run in place (nothing was sent): FloFi says why once and
         // presents that fresh Review with what changed — it never simulates again over it, and the owner confirms it again.
         const rq = requotedOf(bridge.source.state);
-        if (rq && rq !== start?.requoted) {
+        if (rq && rq !== start?.requoted && rq !== followed.inPlace) {
           say(followed.scope, language, language => translate(language, requotedMessage(rq.code)));
           requote.current = { scope: followed.scope };
           startReview(followed.scope, language);

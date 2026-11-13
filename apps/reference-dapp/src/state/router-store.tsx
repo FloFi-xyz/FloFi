@@ -303,20 +303,24 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       // BUILD-FLOFI-MAINNET-EXEC-002: nothing was sent and the reviewed quote no longer stands (refused at begin, or at the wallet hand-off). The
       // same run is re-quoted at once (fresh quote, simulation and Review, same workflow); only the material values that moved are shown, and the
       // owner authorizes the new Review again.
-      const requoteInPlace = async (code: string) => {
-        if (!REQUOTE_IN_PLACE.test(code)) return;
-        const latestRun = await routerStatus(net, id); if (latestRun.ok) acceptCurrent(latestRun.value);
-        if (!latestRun.ok || !requotableInPlace(latestRun.value)) return;
+      // Review round 3: while it re-quotes in place, the store shows no interim record (its cancelled attempt would read "needs attention" for
+      // the seconds the fresh quote takes): only the refreshed run, or, when no re-quote happens, the latest record it read.
+      const requoteInPlace = async (code: string, interim: RouterRecord | null = null) => {
+        if (!REQUOTE_IN_PLACE.test(code)) { if (interim) acceptCurrent(interim); return; }
+        const latestRun = await routerStatus(net, id);
+        const fallback = () => { const value = latestRun.ok ? latestRun.value : interim; if (value) acceptCurrent(value); };
+        if (!latestRun.ok || !requotableInPlace(latestRun.value)) { fallback(); return; }
         const refreshed = await routerRefresh(net, id);
-        if (!refreshed.ok) return;
+        if (!refreshed.ok) { fallback(); return; }
         acceptCurrent(refreshed.value);
         setRequoted({ code, runId: id, changes: bridgeReviewChanges(record.review, refreshed.value.review) });
         throw new Error('ROUTER_REQUOTED_REVIEW_REQUIRED', { cause });
       };
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) { acceptCurrent(failure.value); forgetWalletReport(walletResultStorage(), attemptId); }
+        const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) forgetWalletReport(walletResultStorage(), attemptId);
         // Review P2: a refusal at the hand-off (the wallet was never asked) is re-quoted in place too, exactly as one at begin.
-        if (!diagnostic.invoked) await requoteInPlace(diagnostic.code);
+        if (!diagnostic.invoked) await requoteInPlace(diagnostic.code, failure.ok ? failure.value : null);
+        else if (failure.ok) acceptCurrent(failure.value);
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {

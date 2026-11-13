@@ -7,6 +7,10 @@ export const portugueseRound2Requote: Readonly<Record<string, string>> = {
     'Sua revisão expirou antes do pedido à carteira, então nada foi enviado. A FloFi buscou uma nova cotação para o mesmo fluxo: confira o que mudou e autorize de novo.',
   'Your WETH is now ETH in your wallet. Nothing was bridged yet: the bridge deposit needs its own wallet request.':
     'Seu WETH agora é ETH na sua carteira. Nada foi enviado pela ponte ainda: o depósito da ponte precisa do seu próprio pedido à carteira.',
+  'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.':
+    'Um pedido anterior à carteira não foi enviado e a rota recebeu uma nova cotação. Revise a nova cotação e autorize de novo.',
+  'Awaiting authorization': 'Aguardando autorização',
+  'Earlier request not sent (re-quoted)': 'Pedido anterior não enviado (nova cotação)',
   '(a wallet of your FloFi account)': '(uma carteira da sua conta FloFi)',
   '(saved in Credentials on this device: check it is yours)': '(salva em Credenciais neste dispositivo: confira se é sua)',
   '(your destination wallet)': '(sua carteira de destino)',

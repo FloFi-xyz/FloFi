@@ -140,9 +140,10 @@ describe('recorded execution evidence projection', () => {
     expect(result.operations.transfer?.values[0]?.value).toBe('0.001 ETH'); expect(result.knownCosts[0]?.value).toBe('0.000021 ETH');
   });
   // BUILD-FLOFI-MAINNET-EXEC-002 review round 2: an unwrapping universal route (WETH → ETH, then a deposit paid in ETH) approves nothing.
-  function universal(calls: readonly string[], attempts: unknown[]) {
+  function universal(calls: readonly string[], attempts: unknown[], unwrapRoute = false) {
     return observed('universal', { record: { owner: 'wallet', verdict: null, attempts, source: null, destination: null, refund: null, observation: null, allowanceObservation: undefined,
       review: { source: { ecosystem: 'EVM', calls: calls.map(purpose => ({ purpose })) }, route: { sourceChain: 'eip155:42161', destinationChain: 'solana:mainnet',
+        source: unwrapRoute ? { ecosystem: 'EVM', unwrap: { token: 'weth', amount: '500000000000000' } } : { ecosystem: 'EVM' },
         order: { orderId: 'relay-order' }, inputToken: { kind: 'TOKEN', decimals: 18, symbol: 'WETH' }, outputToken: { kind: 'TOKEN', decimals: 6, symbol: 'USDC' },
         inputAmount: '500000000000000', expectedOutput: '1900000' } } } });
   }
@@ -154,11 +155,17 @@ describe('recorded execution evidence projection', () => {
     expect(unwrap.operations.DEPOSIT?.note).toBe('The source deposit has not been requested. A confirmed unwrap can still have network costs; its ETH stays in your wallet.');
     expect(JSON.stringify(unwrap)).not.toMatch(/allowance/i);
     expect(unwrap.knownCosts[0]?.value).toBe('0.000001 ETH');
-    // Review round 3: re-quoted in place after the confirmed unwrap, the Review plans only the deposit; it is still an unwrapping route.
-    const requoted = universal(['BRIDGE_DEPOSIT'], [{ step: 'UNWRAP', ecosystem: 'EVM', state: 'CONFIRMED', transactionHash: approvalHash,
-      receipt: { transactionHash: approvalHash, gasCostWei: '1000000000000', from: 'wallet' } }]);
+    // Review round 3: re-quoted in place after the confirmed unwrap, the Review plans only the deposit; the route itself still unwraps.
+    const confirmedUnwrap = { step: 'UNWRAP', ecosystem: 'EVM', state: 'CONFIRMED', transactionHash: approvalHash, receipt: { transactionHash: approvalHash, gasCostWei: '1000000000000', from: 'wallet' } };
+    const requoted = universal(['BRIDGE_DEPOSIT'], [confirmedUnwrap], true);
     expect(requoted.operations.DEPOSIT?.note).toBe('The source deposit has not been requested. A confirmed unwrap can still have network costs; its ETH stays in your wallet.');
     expect(JSON.stringify(requoted)).not.toMatch(/allowance/i);
+    // A declined unwrap re-quoted to a plain token route (allowance already sufficient) is not an unwrapping route.
+    const declinedUnwrap = universal(['BRIDGE_DEPOSIT'], [{ ...confirmedUnwrap, state: 'CANCELLED', transactionHash: null, receipt: null }]);
+    expect(declinedUnwrap.operations.DEPOSIT?.note).toBe('The source deposit has not been requested. A confirmed approval can still have network costs and an open allowance.');
+    // An approval of an earlier Review keeps its allowance facts even when the re-quote unwraps.
+    const approvedThenUnwrap = universal(['UNWRAP', 'BRIDGE_DEPOSIT'], [{ step: 'APPROVAL', ecosystem: 'EVM', state: 'CONFIRMED', transactionHash: approvalHash }], true);
+    expect(approvedThenUnwrap.operations.APPROVAL?.values).toContainEqual({ label: 'Current allowance', value: 'Unknown · no current on-chain observation' });
     // A route that approves the token keeps its allowance facts and its approval note.
     const approve = universal(['APPROVAL', 'BRIDGE_DEPOSIT'], [{ step: 'APPROVAL', ecosystem: 'EVM', state: 'CONFIRMED', transactionHash: approvalHash }]);
     expect(approve.operations.APPROVAL?.values).toContainEqual({ label: 'Current allowance', value: 'Unknown · no current on-chain observation' });

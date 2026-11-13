@@ -396,8 +396,11 @@ describe('N: wrong chain, wrong recipient, modified quote, changed bytes, unexpe
     expect(fresh.id).toBe(run.id); expect(fresh.attempts.at(-1)).toMatchObject({ step: 'APPROVAL', state: 'CANCELLED' });
     // Re-quoted in place: the never-sent attempt stays recorded (and in the evidence), and the run waits for the fresh Review's authorization.
     const view = financialView(fresh);
-    expect(view.progress).toMatchObject({ started: false, state: 'idle' });
-    expect(view.evidence.operations.APPROVAL?.failure).toBe('declined');
+    expect(view.progress).toMatchObject({ started: false, state: 'idle', message: 'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.' });
+    expect(view.progress.steps[0]?.label).toBe('Awaiting authorization');
+    // The declined request stays in the evidence as an earlier request, never as the failure of the fresh approval.
+    expect(view.evidence.operations.APPROVAL?.failure).toBeUndefined();
+    expect(JSON.stringify(view.evidence)).toContain('APPROVAL · UNIVERSAL_REJECTED');
     await c.service.review(run.id, fresh.review.commitment, w);
     expect((await c.service.begin(run.id, EVM_OWNER, w)).attempt.step).toBe('APPROVAL');
   });
@@ -546,7 +549,8 @@ describe('FIX-FINANCIAL-EXECUTION-TRUTH-001 submission safety', () => {
     const recovered = await c.service.observe(run.id);
     expect(recovered.attempts[0]).toMatchObject({ state: 'PENDING', transactionHash: sent.hash });
     await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow();
-    sent.land(); expect((await c.service.observe(run.id)).attempts[0]?.state).toBe('CONFIRMED');
+    // Review round 3: proven on chain, the attempt no longer carries the earlier uncertainty note (its evidence would call it uncertain).
+    sent.land(); expect((await c.service.observe(run.id)).attempts[0]).toMatchObject({ state: 'CONFIRMED', note: null });
   });
   it('quarantines and reopens a legacy approval closed only by the unsafe timeout, preserving its original log', async () => {
     const c = await setup(), w = bridge(), run = await reviewed(c, w, EVM_OWNER);

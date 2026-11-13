@@ -521,12 +521,18 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its 
     (began as unknown as { active: unknown }).active = began.steps[0];
     reviewedPatch = { ...reviewedPatch, progress: began as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
     // The superseded, never-sent attempt no longer holds the run (no live execution); the fresh Review waits for the owner's authorization.
+    // As in the stores, the re-quote lands in the render where the wallet request lock is still held: nothing is said until it is released.
+    (controls as Record<string, unknown>).requesting = true;
     const fresh = requoted('24990000000000000', '24865050000000000');
     reviewedPatch = { ...fresh, progress: null, source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
       requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as unknown as SimulationSource };
     lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); let chat = render();
     const texts = () => chat.messages.map(message => message.text);
     const notice = 'The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
+    expect(texts()).not.toContain(notice);
+    expect(texts().some(text => /still working|needs attention/i.test(text ?? ''))).toBe(false);
+    (controls as Record<string, unknown>).requesting = false;
+    lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); chat = render();
     expect(texts().filter(text => text === notice)).toHaveLength(1);
     expect(texts().some(text => /needs attention|could not complete/i.test(text ?? ''))).toBe(false);
     expect(simulate).not.toHaveBeenCalled();
@@ -544,9 +550,12 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its 
     controls.authorizing = false;
     reviewedPatch = { ...reviewedPatch, progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
     const fresh = requoted('24990000000000000', '24865050000000000');
-    reviewedPatch = { ...fresh, progress: approvalLanded as unknown as ConversationBridge['progress'], source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
-      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as unknown as SimulationSource };
-    lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); const chat = render();
+    const withRequote = (runId: string) => ({ ...fresh, progress: approvalLanded as unknown as ConversationBridge['progress'], source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
+      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId, changes: [] } } } as unknown as SimulationSource });
+    // Another run's re-quote (e.g. one started from the Canvas) is never presented as this conversation's.
+    reviewedPatch = withRequote('another-run'); lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
+    expect(render().messages.some(message => /fresh quote for the same workflow/.test(message.text))).toBe(false);
+    reviewedPatch = withRequote('bas-1'); lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); const chat = render();
     const texts = chat.messages.map(message => message.text);
     expect(texts.filter(text => text === 'Your earlier confirmed request stays in place. The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.')).toHaveLength(1);
     expect(texts.some(text => /needs attention|could not complete/i.test(text ?? ''))).toBe(false);
