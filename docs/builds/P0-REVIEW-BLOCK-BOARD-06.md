@@ -58,6 +58,19 @@ for m:ss", "Review expired, review again"); the refusal and an action error shar
 
 ## Evidence
 
-Unit: `editor-workflow-run.review-block.test.tsx`, `domain/review-block.test.ts`, the existing panel/bridge/footer tests. Browser (MOCKED
-loopback): `editor-wallet-batch` (ONE `wallet_sendCalls`, reconciled, never resent — now through the footer action) and the profiles listed in
-the PR. Before/after screenshots (1440 px, PT and EN, light and dark): [evidence](evidence/p0-review-block-board-06/).
+Unit: `editor-workflow-run.review-block.test.tsx`, `domain/review-block.test.ts`, the existing panel/bridge/footer tests.
+
+Local results at the PR head (Node 24.21.0, pnpm 11.22.0, the approved headless shell 1243 and anvil 1.8.3, disposable loopback PostgreSQL):
+
+| Gate | Result |
+|---|---|
+| `pnpm check` (typecheck, lint, build, schema drift, unit) | PASS — 615 test files passed, 2 skipped; 7419 tests passed, 2 skipped |
+| `python3 scripts/governance_lite.py` + `unittest discover -s scripts -p 'test_governance_lite.py'` | PASS (21 tests) |
+| `git diff --check` against main | PASS after removing a blank line at the end of `review-block-test-harness.ts` (the cause of the governance failure on CircleCI at `23f76ad`) |
+| Browser `editor-wallet-batch` (MOCKED) | PASS (1) — ONE `wallet_sendCalls` through the footer action, reconciled, never resent |
+| Browser `approve-workflow-run` (MOCKED) | PASS (2) |
+| Browser `review-execute-recovery-components` (MOCKED) | PASS (39) |
+| Browser `execution-continuity` (MOCKED) | PASS (38) |
+| Browser `default-product` | Not re-run locally; locally its `toHaveScreenshot` baselines (CircleCI renders from PR #186) differ by ~1 % in glyph rendering on screens this PR does not touch. CircleCI passed `default-product` with those baselines at `8aba719`; CircleCI on this PR is the authority. |
+
+Before/after screenshots (1440 px, PT and EN, light and dark; MOCKED loopback): [evidence](evidence/p0-review-block-board-06/).

@@ -17,4 +17,3 @@ export const swapBridgeReview = (patch: Partial<EditorExecutionReview> = {}): Ed
   { index: 1, action: 'bridge', network: 'Base', chain: BASE, provider: null, spend: weth(BASE, '796123456789123'), basis: 'GUARANTEED_MINIMUM', boundTo: 0,
     expected: weth(ARB, '790555555555555'), minimum: weth(ARB, '790555555555555'), recipient: null, destination: 'Arbitrum One' }],
   counts: { walletPrompts: 1, atLeast: false, signatures: 1, transactions: 1, batchedCalls: 4, networkSwitches: 0, oneTimeSetup: [] }, ...patch });
-
