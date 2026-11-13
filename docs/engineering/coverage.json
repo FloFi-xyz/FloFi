@@ -4172,6 +4172,8 @@
         "apps/reference-dapp/src/i18n/pt-local-runtime.ts",
         "apps/reference-dapp/src/i18n/pt-locale-contract.ts",
         "apps/reference-dapp/src/i18n/pt-mainnet-exec.ts",
+        "apps/reference-dapp/src/i18n/pt-round2-requote.ts",
+        "apps/reference-dapp/src/i18n/pt-round2-frontend.ts",
         "apps/reference-dapp/src/i18n/pt-mainnet-product.ts",
         "apps/reference-dapp/src/i18n/pt-networks.ts",
         "apps/reference-dapp/src/i18n/pt-permissions.ts",

@@ -500,7 +500,7 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its 
     controls.authorizing = false;
     const fresh = requoted('24990000000000000', '24865050000000000');
     reviewedPatch = { ...fresh, source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
-      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as SimulationSource };
+      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as unknown as SimulationSource };
     lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); const chat = render();
     const texts = chat.messages.map(message => message.text);
     expect(texts).toContain('The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.');

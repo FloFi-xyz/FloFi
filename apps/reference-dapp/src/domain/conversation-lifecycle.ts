@@ -203,7 +203,8 @@ export function conversationPhase(view: LifecycleView, question: PendingQuestion
 export type ConversationReviewStep = { readonly number: number; readonly action: string; readonly input: string; readonly pair: string | null; readonly networks: string;
   readonly provider: string | null; readonly result: string | null; readonly resultLabel: string; readonly minimum: string | null; readonly slippage: string | null;
   readonly priceImpact: string | null; readonly details: readonly SimulationLine[];
-  /** BUILD-FLOFI-MAINNET-EXEC-002: the full destination address (bridges, transfers), or null. */ readonly destination: string | null };
+  /** BUILD-FLOFI-MAINNET-EXEC-002: the full destination address (bridges, transfers), or null. */ readonly destination: string | null;
+  /** Review round 2: whether that destination is one of the owner's own wallets, when the runtime knows it. */ readonly destinationOwned?: boolean };
 export type ConversationReview = {
   readonly status: string; readonly label: string; readonly message: string; readonly canConfirm: boolean; readonly steps: readonly ConversationReviewStep[];
   readonly fees: readonly SimulationLine[]; readonly limits: readonly SimulationLine[]; readonly warnings: readonly SimulationWarning[];
@@ -309,7 +310,8 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
     // A sequence simulates its current step alone: number it as that step of the whole workflow.
     return { number: sequence ? sequence.current : step.number, action: step.action, input: step.input, pair: step.pair, networks: step.networks.join(' → ') || reviewed?.network || '—',
       provider: step.provider ?? reviewed?.provider ?? null, result: step.result, resultLabel: step.resultLabel, minimum: step.minimum,
-      slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details, destination: step.destination ?? null };
+      slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details, destination: step.destination ?? null,
+      ...step.destinationOwned !== undefined ? { destinationOwned: step.destinationOwned } : {} };
   });
   const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee } = payableCosts(fees);
   const later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];

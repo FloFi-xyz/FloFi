@@ -5,6 +5,7 @@ import { requotedMessage } from '../domain/simulation-presentation';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
 import { localizedProvider, useDestinationWallets } from '../state/destination-wallets';
+import type { DestinationInventory } from '../domain/destination-wallet';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeFailureMessage } from '../domain/bridge-failure';
@@ -164,8 +165,9 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
   const destinationResolution = destinationEcosystem === 'evm' ? destinations.evm : destinations.solana;
   const sessionDestination = destinations.inventory.session.find(entry => entry.ecosystem === destinationEcosystem) ?? null;
   const autoDestination = cross ? destinationResolution.kind === 'RESOLVED' ? destinationResolution.wallet : null : sessionDestination;
+  // Review round 2: only addresses valid for the destination are suggested (a mislabelled saved entry never is).
   const destinationChoices = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved]
-    .filter((entry, index, all) => entry.ecosystem === destinationEcosystem && all.findIndex(other => other.ecosystem === entry.ecosystem &&
+    .filter((entry, index, all) => entry.ecosystem === destinationEcosystem && checkDestinationAddress(input.destination, entry.address).ok && all.findIndex(other => other.ecosystem === entry.ecosystem &&
       (entry.ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index);
   const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null, destinationMessageId = useId();
   const destinationMessage = destinationCheck && !destinationCheck.ok ? tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)
@@ -253,9 +255,21 @@ function RouteDiscovery() {
   </section>;
 }
 
+/**
+ * Review round 2: where the Review's recipient comes from, said plainly (a saved Credentials address is the device's, not proof of control; the
+ * owner checks it here before signing). EXPLICIT: a typed address, no claim.
+ */
+function recipientOrigin(kind: string, address: string, inventory: DestinationInventory): string {
+  if (kind === 'EXPLICIT') return '';
+  if (kind === 'CONNECTED_OWNER') return ' (your connected wallet)';
+  const same = (entry: { readonly address: string }) => entry.address.toLowerCase() === address.toLowerCase();
+  return inventory.session.some(same) ? ' (your connected wallet)' : inventory.account.some(same) ? ' (a wallet of your FloFi account)'
+    : inventory.saved.some(same) ? ' (saved in Credentials on this device: check it is yours)' : ' (your destination wallet)';
+}
 export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
   const router = useUniversalRouter(), record = router.record, r = record?.review, route = r?.route, d = router.details;
+  const recipientInventory = useDestinationWallets(useOptionalBuild009Wallet()).inventory;
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const fresh = r ? Math.max(0, Math.round((Date.parse(r.expiresAt) - clock) / 1000)) : 0;
@@ -281,7 +295,9 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
     {router.retired && <p role="alert">{tr('The workflow changed. Prior authorization is invalid. Simulate the current bridge again.')}</p>}
     {router.recovered && record && <p role="status">{tr('Recovered run')} {record.id}{tr('. Its state comes from the server; nothing is resent automatically.')}</p>}
     <div aria-label={tr('Wallets')}>
-      {router.owner ? <p>{tr('Source wallet:')} <code>{router.owner}</code>{router.destinationWallet && <> · {tr('destination wallet:')} <code>{router.destinationWallet}</code></>}</p>
+      {/* Review round 2: once a Review exists, the wallet it bound (never the current resolution, which may have moved on). */}
+      {router.owner ? <p>{tr('Source wallet:')} <code>{router.owner}</code>{(record?.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? record.review.recipient : record ? null : router.destinationWallet) &&
+        <> · {tr('destination wallet:')} <code>{record?.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? record.review.recipient : router.destinationWallet}</code></>}</p>
         : <button type="button" disabled={router.busy} onClick={() => void router.connect()}>{tr('Connect wallets')}</button>}
       {router.owner && !router.signedIn && <p><button type="button" disabled={router.busy} onClick={() => void router.signIn()}>{tr('Sign in with source wallet')}</button>{' '}
         <small>{tr('One signature proves this wallet is yours. It moves no funds and authorizes no transaction.')}</small></p>}
@@ -306,7 +322,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr('Estimated duration')}</dt><dd>{tr('about')} {route.quote.estimatedDurationSeconds}s {tr('after the deposit confirms (provider estimate)')}</dd>
       <dt>{tr('Signatures')}</dt><dd>{r.authorizations.sourceSignatures} {tr(r.authorizations.sourceSignatures === 1 ? 'wallet signature on the source network' : 'wallet signatures on the source network (an exact approval, then the deposit)')}{tr('; nothing to sign on the destination network.')}</dd>
       {src.ecosystem === 'EVM' && src.approvals.map((a, i) => <dd key={i}>{tr(a.required ? 'Approval: exactly the amount, never unlimited, to the Relay Depository' : 'Existing allowance is sufficient; no approval')}</dd>)}
-      <dt>{tr('Recipient')}</dt><dd><code>{r.recipient}</code> {tr('on')} {net(route.destinationChain)}{tr(r.recipientKind === 'EXPLICIT' ? '' : ' (your connected wallet)')}{tr(r.recipientHasCode ? ' · this address is a contract' : '')}</dd>
+      <dt>{tr('Recipient')}</dt><dd><code>{r.recipient}</code> {tr('on')} {net(route.destinationChain)}{tr(recipientOrigin(r.recipientKind, r.recipient, recipientInventory))}{tr(r.recipientHasCode ? ' · this address is a contract' : '')}</dd>
       <dt>{tr('Refunds')}</dt><dd>{tr('If the order is not filled, the provider refunds to')} <code>{short(route.refundAddress)}</code> {tr('on')} {net(route.sourceChain)}.</dd>
       <dt>{tr('Simulation')}</dt><dd>{src.ecosystem === 'EVM' ? `eth_simulateV1 · block ${src.simulation.block}` : `simulateTransaction · slot ${src.simulation.slot}`} · {tr('debit')} {inp(src.simulation.ownerDebit)}{tr('. Not simulated: the destination delivery and refunds.')}</dd>
       <dt>{tr('Review valid')}</dt><dd>{fresh > 0 ? `${fresh}s` : tr('no longer — get a fresh route')}</dd>

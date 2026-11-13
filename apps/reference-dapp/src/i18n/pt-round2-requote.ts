@@ -7,4 +7,7 @@ export const portugueseRound2Requote: Readonly<Record<string, string>> = {
     'Sua revisão expirou antes do pedido à carteira, então nada foi enviado. A FloFi buscou uma nova cotação para o mesmo fluxo: confira o que mudou e autorize de novo.',
   'Your WETH is now ETH in your wallet. Nothing was bridged yet: the bridge deposit needs its own wallet request.':
     'Seu WETH agora é ETH na sua carteira. Nada foi enviado pela ponte ainda: o depósito da ponte precisa do seu próprio pedido à carteira.',
+  '(a wallet of your FloFi account)': '(uma carteira da sua conta FloFi)',
+  '(saved in Credentials on this device: check it is yours)': '(salva em Credenciais neste dispositivo: confira se é sua)',
+  '(your destination wallet)': '(sua carteira de destino)',
 };

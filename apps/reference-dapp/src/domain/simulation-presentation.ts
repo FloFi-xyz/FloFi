@@ -64,6 +64,8 @@ export type SimulationStep = {
   configuredSlippage: string | null; slippage: string | null; priceImpact: string | null; details: SimulationLine[];
   /** BUILD-FLOFI-MAINNET-EXEC-002: the full destination address the reviewed step pays (bridges and transfers); absent elsewhere. */
   destination?: string | null;
+  /** Review round 2: the destination is one of the owner's own wallets (bound by the Review as such), not an address typed for someone else. */
+  destinationOwned?: boolean;
 };
 export type SimulationPresentation = {
   status: 'ready' | 'attention' | 'blocked'; message: string; expiresAt: number | null;
@@ -350,7 +352,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (unwrapping) warn('attention', 'The provider is paid in ETH: your {0} is first unwrapped 1:1 into ETH in your wallet (its own wallet request), then deposited. A refund, if any, arrives as ETH.'
         .replace('{0}', route.inputToken.symbol));
       else if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
-      if (s) s.destination = q.recipient;
+      // Review round 2: the Review bound the recipient as the owner's own wallet (connected owner, or their destination wallet) or as an explicit address.
+      if (s) { s.destination = q.recipient; s.destinationOwned = q.recipientKind !== 'EXPLICIT'; }
       warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.', true);
       break;
     }
