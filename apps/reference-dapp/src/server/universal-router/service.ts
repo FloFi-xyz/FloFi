@@ -136,6 +136,11 @@ export type UniversalRouterServiceInput = {
   readonly providers: { readonly relay: UniversalProviderAdapter };
   readonly provenance: UniversalProvenance; readonly executionEnabled?: boolean; readonly now?: () => Date;
   /** MOCKED harness only: synthetic deployment pins. A public run always uses the verified deployment. */ readonly mockedDeployment?: UniversalRouterDeployment;
+  /**
+   * ADR-0010 §4: whether this deployment offers Pimlico's Kora fee payer (FLOFI_KORA_TOKEN_GAS). A Relay Solana deposit is not built with Kora in
+   * this build: when its owner's SOL cannot pay, it is refused explicitly (KORA_OPERATION_UNSUPPORTED) instead of offering a token fee.
+   */
+  readonly koraEnabled?: boolean;
 };
 
 export function createUniversalRouterService(input: UniversalRouterServiceInput) {
@@ -323,7 +328,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const program = await sol.assertSolanaRelayProgram(input.solanaRpc, S);
     const { route, considered } = await selectRoute(f, quoteRequest(f, inputFacts, outputFacts, owner, recipient));
     if (route.source.ecosystem !== 'SOLANA' || route.source.instruction.programId !== S.relayProgram) fail('UNIVERSAL_UNEXPECTED_CONTRACT');
-    const deposit = await sol.simulateSolanaDeposit(input.solanaRpc, S, route, programIdOf(inputFacts));
+    const deposit = await sol.simulateSolanaDeposit(input.solanaRpc, S, route, programIdOf(inputFacts)).catch((cause: unknown) => {
+      // ADR-0010 §4: the owner's SOL cannot pay the deposit's fee; where Kora is offered, say plainly that this step cannot pay it in a token.
+      const code = cause instanceof Error ? cause.message : '';
+      if (input.koraEnabled && (code === 'UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES' || code === 'UNIVERSAL_OWNER_NOT_WALLET')) fail('KORA_OPERATION_UNSUPPORTED');
+      throw cause;
+    });
     const expiresMs = Math.min(observed.getTime() + D.reviewTtlSeconds * 1000, Date.parse(route.quote.expiresAt));
     if (expiresMs <= observed.getTime()) fail('UNIVERSAL_QUOTE_EXPIRED');
     const expiresAt = new Date(expiresMs).toISOString(), commitment = universalRouteCommitment(route);

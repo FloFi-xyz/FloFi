@@ -7,6 +7,7 @@ import { isAbsolute, join } from 'node:path';
 import { UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createUniversalRouterService, UNIVERSAL_RUN_ID, type UniversalRecord, type UniversalRouterService, type UniversalWalletDiagnostic } from '../server/universal-router/service';
+import { readKoraGasConfig } from '../gas-abstraction/config';
 import { createRelayProvider } from '../server/universal-router/relay-provider';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import { readBridgeDiscovery } from '../server/bridge-discovery';
@@ -41,7 +42,9 @@ function current(): UniversalRouterService {
     const runtime = universalRouterRuntime(mode, process.env);
     service = createUniversalRouterService({ storage: createFileExecutionStorage(journalDir(), 'UNIVERSAL_BUSY'), evmRpcs: runtime.evmRpcs, solanaRpc: runtime.solanaRpc,
       providers: { relay: createRelayProvider({ http: runtime.http, ...runtime.apis.relay ? { api: runtime.apis.relay } : {}, ...runtime.keys.relay ? { apiKey: runtime.keys.relay } : {} }) },
-      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {} });
+      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {},
+      // ADR-0010 §4: a Relay Solana deposit is refused explicitly (KORA_OPERATION_UNSUPPORTED) when Kora is offered and the owner's SOL cannot pay.
+      koraEnabled: readKoraGasConfig(process.env).enabled });
   }
   return service;
 }

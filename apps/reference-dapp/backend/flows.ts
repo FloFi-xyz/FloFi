@@ -30,6 +30,7 @@ import { createJupiterHttp } from '../src/server/jupiter-http.ts';
 import { createJupiterService, createSolanaDevnetService, type JupiterRecord, type JupiterWalletDiagnostic } from '../src/server/jupiter-service.ts';
 import { createSolanaTransferService, type SolanaTransferRecord, type SolanaTransferWalletDiagnostic } from '../src/server/solana-transfer-service.ts';
 import { koraGasForFlow } from '../src/gas-abstraction/kora/runtime.ts';
+import { readKoraGasConfig } from '../src/gas-abstraction/config.ts';
 import { createOrcaLiquidityService, type OrcaLiquidityRecord, type OrcaLiquidityWalletDiagnostic } from '../src/server/orca-liquidity-service.ts';
 import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionRecord } from '../src/server/solana-composition-service.ts';
 import { createUniswapLiquidityService, uniswapNeedsObservation, type UniswapLiquidityRecord,
@@ -843,7 +844,8 @@ const crosschainUniversal: FlowDefinition = {
     const runtime = universalRouterRuntime(mode, env, universal);
     const s = createUniversalRouterService({ storage, evmRpcs: runtime.evmRpcs, solanaRpc: runtime.solanaRpc,
       providers: { relay: createRelayProvider({ http: runtime.http, ...runtime.apis.relay ? { api: runtime.apis.relay } : {}, ...runtime.keys.relay ? { apiKey: runtime.keys.relay } : {} }) },
-      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {} });
+      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {},
+      koraEnabled: readKoraGasConfig(env).enabled });
     const discovery = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys });
     const conversational = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys, window: CONVERSATIONAL_DISCOVERY_WINDOW });
     const table: Record<string, (args: Args) => Promise<unknown>> = {
