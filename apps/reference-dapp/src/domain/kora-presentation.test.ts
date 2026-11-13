@@ -7,6 +7,9 @@ import { editorReducer, initialEditor } from './editor';
 import { projectSimulation, simulationError, type SimulationSource } from './simulation-presentation';
 import { MATERIAL_STEP_DETAILS } from '../components/conversation-cards';
 import { translate } from '../i18n/translate';
+import { projectExecutionEvidence } from './execution-evidence';
+import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
+import { reviewFixture } from '../test-utils/review-fixture';
 
 const context = createBaseSepoliaReviewContext(), now = Date.parse('2026-11-13T12:00:00Z'), expiry = new Date(now + 60_000).toISOString();
 const workflow = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '100', slippage: '50', source: 'CHAT', baseRevision: 0 }, context).workflow;
@@ -35,6 +38,15 @@ describe('Kora network fee in the Review', () => {
       token: { program: 'spl-token' }, estimatedFeeLamports: '10000', accountCreationLamports: '0', maximumAccountCreationLamports: '0',
       gas: { ...gas, token: { symbol: 'USDT', mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6 } } } } }), now);
     expect(result.fees).toEqual([{ label: 'Network fee', value: '0.0031 USDT', note: 'Paid from your USDT to Pimlico.', treatment: 'CEILING' }]);
+  });
+  it('records the token the owner repaid as the known network cost of a reconciled Kora swap, never Kora\'s SOL fee', () => {
+    const fixture = reviewFixture(), current = (state: unknown) => ({ kind: 'solana-swap', state }) as ExecutionLifecycleSource;
+    const progress = projectExecutionLifecycle(fixture.workflow, fixture.context, current({ record: null }));
+    const review = { owner: 'wallet', chain: 'solana:mainnet', input: { decimals: 6, symbol: 'USDC' }, output: { decimals: 9, symbol: 'SOL' }, amount: '100000000', quote: { outAmount: '1010000000' } };
+    const observation = { signature: 'real-signature', verdict: 'RECONCILED', inputSpent: '100000000', outputReceived: '1000000000', feeLamports: '10000', accountCreationLamports: '0',
+      tokenFee: { mechanism: 'PIMLICO_KORA_SPL_FEE', feePayer: gas.feePayer, feeLamports: '10000', token: gas.token, amount: '3100', payee: gas.paymentAddress, paymentAccount: 'x' } };
+    const result = projectExecutionEvidence(current({ record: { review, attempt: { signature: 'real-signature', reconciled: true }, observations: [observation] } }), progress);
+    expect(result.knownCosts.map(cost => cost.value)).toEqual(['0.0031 USDC']);
   });
   it('explains every Kora refusal in plain words, in English and Portuguese, never as free or sponsored', () => {
     for (const code of ['KORA_FEE_TOKEN_BALANCE_INSUFFICIENT', 'KORA_PAYMENT_INSUFFICIENT', 'KORA_OPERATION_UNSUPPORTED', 'KORA_PROVIDER_UNAVAILABLE', 'KORA_UNREACHABLE',
