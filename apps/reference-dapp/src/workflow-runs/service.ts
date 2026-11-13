@@ -34,6 +34,8 @@ import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../u
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
+import { circleFactsOf, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
+import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
 import type { GroupRecord } from './pg-store.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
 import { presentedDeliveryState } from './run-step-phase.ts';
@@ -370,8 +372,9 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   if (g.state === 'PREPARED' && !rewrite) g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' })
     ?? refuse('WORKFLOW_RUN_CHANGED');
   // The earlier preparations stay on the PLANNED group (history only, no artifact): a preparation that fails now must not lose them.
+  // ADR-0010: an expired Circle-paid preparation gives the group back the strategy it was planned with (native gas is decided afresh).
   if (g.state === 'EXPIRED') g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED',
-    { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: null }) ?? refuse('WORKFLOW_RUN_CHANGED');
+    { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: null, ...plannedStrategyPatch(g) }) ?? refuse('WORKFLOW_RUN_CHANGED');
   if (!rewrite && g.state !== 'PLANNED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   const due = run.currentStep === g.stepFrom;
   if (g.signing === 'WHEN_DUE' && !due) refuse('WORKFLOW_RUN_GROUP_NOT_DUE');
@@ -418,20 +421,68 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
     if (!gates.handoff.allowed) return refuse(gates.handoff.reason ?? 'WORKFLOW_STEP_NOT_EXECUTABLE');
     if (handoffFindings(step).blockers.length) return refuse('REVIEW_BLOCKED');
   }
+  // ADR-0010: the group's fee may be paid in the owner's USDC through Circle when native gas falls short — only for a group no wallet batch was
+  // ever handed out for (that batch could still execute: the group keeps it), and only when due (never an operation signed upfront).
   const r = await prepareGroup(userFunded, composition, req.value, { runId: run.runId, groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
-    stepFrom: g.stepFrom, stepTo: g.stepTo }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
+    stepFrom: g.stepFrom, stepTo: g.stepTo, tokenGas: due && !rewrite && superseded.length === 0 }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
   if (!r.ok) return blockable && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
+  // ADR-0010: the only strategy a preparation may change is a due group's to a Circle-paid user operation (stored with it; restored on expiry).
+  const circle = circleFactsOf(r.value.prepared);
+  if (r.value.prepared.kind !== g.strategy && !(circle && r.value.prepared.kind === 'EVM_USER_OPERATION' && !rewrite)) return refuse('USER_FUNDED_GROUP_NOT_PREPARABLE');
   // The exact validity, for the same reason (the preparation's own clock moved on while it read the chain). Nothing is stored or handed out.
-  if (g.strategy !== 'EVM_USER_OPERATION' && r.value.validUntil >= run.expiresAt) return refuse('WORKFLOW_RUN_EXPIRED');
+  if ((g.strategy !== 'EVM_USER_OPERATION' || circle) && r.value.validUntil >= run.expiresAt) return refuse('WORKFLOW_RUN_EXPIRED');
   // The browser that holds the batch keeps its token across preparations; a first preparation (or one stored before the rule) gets a new one.
-  const token = batch ? rewrite && handout !== undefined && HANDOUT.test(handout) ? handout : randomBytes(32).toString('base64url') : null;
+  const preparedBatch = r.value.prepared.kind === 'EVM_WALLET_BATCH';
+  const token = preparedBatch ? rewrite && handout !== undefined && HANDOUT.test(handout) ? handout : randomBytes(32).toString('base64url') : null;
   const prepared: Prepared = { ...r.value.prepared, ...superseded.length ? { superseded } : {}, ...token ? { handoutHash: handoutHashOf(token) } : {} };
   const moved = (rewrite
     ? await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }, 'GROUP_PREPARED_AGAIN', rewrite.version)
-    : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }))
+    : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null,
+      ...r.value.prepared.kind !== g.strategy ? { strategy: r.value.prepared.kind } : {} }, r.value.prepared.kind !== g.strategy ? 'GROUP_TOKEN_GAS_PREPARED' : 'GROUP_STATE'))
     ?? refuse('WORKFLOW_RUN_CHANGED');
   return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(),
     prepared: publicPrepared(prepared), handout: token };
+}
+/** ADR-0010: the patch that gives a group back the strategy a Circle-paid preparation replaced (nothing for any other preparation). */
+const plannedStrategyPatch = (g: GroupRecord): { readonly strategy?: GroupRecord['strategy'] } => {
+  const planned = plannedStrategyOf(g.prepared);
+  return planned && planned !== g.strategy ? { strategy: planned } : {};
+};
+/** ADR-0010: a Circle-paid preparation that can no longer be used (cap exceeded, mechanism changed) is expired, its planned strategy restored. */
+async function expireTokenGasPreparation(deps: WorkflowRunDeps, runId: string, g: GroupRecord, code: string): Promise<void> {
+  const expired = await deps.store.groupTransition(runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code }, 'GROUP_STATE', g.version);
+  if (expired) await deps.store.groupTransition(runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null, ...plannedStrategyPatch(expired) });
+}
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): the owner's wallet signed the USDC permit of a Circle-paid group (phase 1 of two). The
+ * permit is verified against the frozen artifact (signer = the group's fee payer, spender = the pinned paymaster, value = the reviewed cap, the
+ * owner's current permit nonce), the bundler estimates the FINAL operation with it, and its worst case must stay within the signed cap; the
+ * group stays PREPARED with the operation's typed data, which the owner's wallet signs next (`authorizeUserFundedGroup`). A cap that no longer
+ * covers the operation expires the preparation (CIRCLE_PERMIT_CAP_EXCEEDED: the owner asks for a fresh one; nothing was relayed). A retry with
+ * the same permit after its answer was lost returns the same operation.
+ */
+export async function permitUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  permitSignature: string): Promise<PreparedGroupView> {
+  assertRunWallets(run, wallets);
+  if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
+  const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
+  const paused = executionRefusal();
+  if (paused) refuse(paused);
+  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const c = circleFactsOf(g.prepared);
+  if (g.state !== 'PREPARED' || !c) refuse(g.state !== 'PREPARED' ? `WORKFLOW_RUN_GROUP_${g.state}` : 'CIRCLE_PERMIT_STAGE_INVALID');
+  if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
+    validUntil: validUntil.toISOString(), prepared: publicPrepared(prepared), handout: null });
+  if (c!.stage === 'OPERATION') return c!.permitSignature === String(permitSignature).toLowerCase() ? view(g.prepared as Prepared, g.validUntil!) : refuse('CIRCLE_PERMIT_STAGE_INVALID');
+  const finalized = await finalizeCirclePermit(userFunded, g.prepared as Prepared, permitSignature);
+  if (!finalized.ok) {
+    if (finalized.code === 'CIRCLE_PERMIT_CAP_EXCEEDED' || finalized.code === 'CIRCLE_PERMIT_EXPIRED') await expireTokenGasPreparation(deps, run.runId, g, finalized.code);
+    return refuse(finalized.code);
+  }
+  const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared: finalized.value }, 'GROUP_PERMIT_SIGNED', g.version)
+    ?? refuse('WORKFLOW_RUN_CHANGED');
+  return view(moved.prepared as Prepared, moved.validUntil ?? g.validUntil!);
 }
 /**
  * The owner's wallet answered for one PREPARED group: a wallet batch id, a user-operation signature, or the signed Solana transactions. Verified
@@ -454,6 +505,17 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   if (g.strategy !== 'EVM_WALLET_BATCH' && (!g.validUntil || g.validUntil <= deps.now())) refuse('USER_FUNDED_PREPARED_EXPIRED');
   const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
   if (!verified.ok) return refuse(verified.code);
+  // ADR-0010 §2: a Circle-paid group is authorized only while the policy would still pick Circle — ETH that arrived since the Review means native
+  // gas now covers the fee: nothing switches silently, the preparation expires and the owner reviews again (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED).
+  if (circleFactsOf(g.prepared)) {
+    const covers = await nativeNowCovers(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
+    if (covers === null) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+    try { assertReviewedMechanism('CIRCLE_USDC_PAYMASTER', selectGasMechanism({ chain: g.chain, nativeCovers: covers, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true } })); }
+    catch {
+      await expireTokenGasPreparation(deps, run.runId, g, GAS_ABSTRACTION_CODES.changed);
+      return refuse(GAS_ABSTRACTION_CODES.changed);
+    }
+  }
   // Only onto exactly the artifact the answer was verified against (the row version read above): a concurrent re-preparation is never authorized
   // with an answer checked against another artifact. A concurrent answer that won (a retry racing its first attempt) is compared as a retry.
   // A stop that landed in between (the expiry pass blocked the group, or the owner ended the run, while its batch was unanswered) never drops
@@ -593,10 +655,21 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly state: string; readonly awaitsDelivery: number | null; readonly code: string | null; readonly validUntil: string | null;
   /** Always the run's own wallet on this network (S1). */
   readonly feePayer: string;
-  /** The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. */
-  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED' } | null;
-  /** Network fees actually paid, from the chain (null until reconciled). */
-  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true } | null;
+  /**
+   * The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. ADR-0010:
+   * `unit` 'token' with `token` (address, symbol, decimals) when the owner pays it in a token (Circle: the permit's cap, in USDC).
+   */
+  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED';
+    readonly token?: { readonly address: string; readonly symbol: string; readonly decimals: number } } | null;
+  /** Network fees actually paid, from the chain (null until reconciled). `paidInToken` (ADR-0010): what the owner paid back in a token. */
+  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true;
+    readonly paidInToken?: { readonly mechanism: string; readonly symbol: string; readonly decimals: number; readonly amount: string } } | null;
+  /**
+   * ADR-0010 (owner only): a token-paid fee's mechanism and protocol facts for Technical details — the paymaster, its EntryPoint, the permit's
+   * allowance cap — and the wallet prompts it needs; null for a native fee.
+   */
+  readonly gasPayment?: { readonly mechanism: 'CIRCLE_USDC_PAYMASTER'; readonly stage: 'PERMIT' | 'OPERATION'; readonly signatures: 2; readonly paymaster: string;
+    readonly entryPoint: string; readonly permitCap: string; readonly token: string; readonly symbol: string; readonly decimals: number } | null;
   /** Transactions of the group (public hashes / signatures only, never bytes): what was sent and reconciled. Named like a step's `submissions`. */
   readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
@@ -660,8 +733,16 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
   };
   const groups: RunGroupView[] = groupRecords.map(g => {
-    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null } } | null)?.fee;
-    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean } } | null)?.gasPaid ?? null;
+    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null; token?: string; symbol?: string;
+      decimals?: number } } | null)?.fee;
+    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean;
+      paidInToken?: { mechanism?: unknown; symbol?: unknown; decimals?: unknown; amount?: unknown } } } | null)?.gasPaid ?? null;
+    // ADR-0010: a token-paid fee carries its token (Circle: USDC) — never shown in native units.
+    const tokenFee = fee?.unit === 'token' && typeof fee.token === 'string' && typeof fee.symbol === 'string' && Number.isInteger(fee.decimals)
+      ? { address: fee.token, symbol: fee.symbol, decimals: fee.decimals! } : null;
+    const inToken = paid?.paidInToken && typeof paid.paidInToken.symbol === 'string' && typeof paid.paidInToken.amount === 'string' && Number.isInteger(paid.paidInToken.decimals)
+      ? { mechanism: String(paid.paidInToken.mechanism), symbol: paid.paidInToken.symbol, decimals: paid.paidInToken.decimals as number, amount: paid.paidInToken.amount } : null;
+    const circle = circleFactsOf(g.prepared);
     // Reconciled transactions first; before that, what was sent (a Solana group's signatures are known before sending: listed only once reconciled).
     // An owner-step group's outcome lists its steps' own {chain, hash} records; a relayed group lists hashes on its own chain.
     const recorded = (g.outcome as { transactions?: readonly unknown[] } | null)?.transactions
@@ -674,10 +755,14 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
       // Requesters see that the owner's wallet pays, never which wallet, its batch id or its fees; shared status adds hashes and the gas amount.
       code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: owner ? g.feePayer : 'OWNER_WALLET',
-      maxFee: owner && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false, ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {} } : null,
-      // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet).
+      maxFee: owner && fee?.maxCost && fee.unit && (fee.unit !== 'token' || tokenFee) ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false,
+        ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {}, ...tokenFee ? { token: tokenFee } : {} } : null,
+      // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet). ADR-0010: a fee
+      // Circle fronted and the owner paid back in USDC is the owner's (a requester sees OWNER_WALLET), with the token amount.
       gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : paid.sponsored ? 'FLOFI_PAYMASTER' : 'OWNER_WALLET',
-        ...paid.sponsored ? { sponsored: true as const } : {} } : null,
+        ...paid.sponsored ? { sponsored: true as const } : {}, ...inToken && !paid.sponsored ? { paidInToken: inToken } : {} } : null,
+      gasPayment: owner && circle ? { mechanism: 'CIRCLE_USDC_PAYMASTER', stage: circle.stage, signatures: 2, paymaster: circle.paymaster, entryPoint: circle.entryPoint,
+        permitCap: circle.permitCap, token: circle.usdc, symbol: 'USDC', decimals: 6 } : null,
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,

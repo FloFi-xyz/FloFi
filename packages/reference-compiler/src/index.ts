@@ -82,5 +82,7 @@ export * from './universal-artifacts.js';
 export * as erc7710 from './erc7710.js';
 export * as splDelegation from './spl-delegation.js';
 export * as erc4337 from './erc4337.js';
+// BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): Circle's USDC paymaster (pins, permit, paymasterData, the operation check).
+export * as circlePaymaster from './circle-paymaster.js';
 export * as eip5792 from './eip5792.js';
 export * as solanaNonce from './solana-nonce.js';

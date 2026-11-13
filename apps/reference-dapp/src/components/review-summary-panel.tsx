@@ -14,6 +14,7 @@ import { projectSimulation, simulationStatusPresentation, type SimulationSource 
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../domain/review-presentation';
 import { flightRefusal, FLIGHT_REFUSAL_HREF } from '../domain/flight-refusal';
 import { feeShortfallView } from '../domain/approved-ux';
+import { circleUnavailableReason } from '../domain/token-fee';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 
 export type ReviewSummaryPanelProps = {
@@ -97,6 +98,8 @@ export function BlockerPanel({ title, message, error, owner, feeShortfall, techn
       <div data-emphasis="attention"><dt>{t('Missing, at least')}</dt><dd className="numeric">{fee.missing} {fee.symbol}</dd></div>
     </dl>}
     <p className="review-panel-note">{fee ? t('Send a little {0} on the {1} network to this wallet, from an exchange or another wallet. Nothing was sent.', fee.symbol, t(fee.network)) : t(message)}</p>
+    {/* ADR-0010: paying this fee in USDC through Circle was considered for this request; why it was not available, in plain words. */}
+    {fee?.alternatives?.length ? <p className="review-panel-note">{t('Paying this fee in USDC through Circle is not available: {0}.', t(circleUnavailableReason(fee.alternatives[0]!)))}</p> : null}
     <div className="review-panel-actions">
       {address && (fee || /network fee/i.test(message)) && <button type="button" className="secondary" onClick={() => void copy()}>{t('Copy address')} <span className="numeric">{`${address.slice(0, 6)}…${address.slice(-4)}`}</span></button>}
       {href && <a className="secondary" href={href}>{t(flight!.action === 'LINK_WALLET' ? 'Open Credentials' : flight!.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}

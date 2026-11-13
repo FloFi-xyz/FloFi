@@ -13,10 +13,13 @@
  * every wallet signature and confirmation stays the owner's own, and FloFi re-verifies each of them on the server.
  */
 import { useEffect, useRef, useState } from 'react';
-import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, prepareUserFundedGroup, reportUserFundedBatch,
-  resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
+import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup,
+  reportUserFundedBatch, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
+  workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { batchHandout, batchSponsorshipOf, keepBatchHandout, revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { batchHandout, batchSponsorshipOf, entryPointOfGroup, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup, signSolanaGroup,
+  signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { CIRCLE_NOTHING_SENT, feeAmountText } from '../domain/token-fee';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -60,14 +63,12 @@ const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Not signed yet
   FAILED: 'Failed', UNCERTAIN: 'Outcome pending', BLOCKED: 'Stopped before submission', SKIPPED: 'Not run', EXPIRED: 'Expired' };
 const NETWORK: Readonly<Record<string, string>> = { 'eip155:1': 'Ethereum', 'eip155:8453': 'Base', 'eip155:42161': 'Arbitrum One', 'eip155:4663': 'Robinhood Chain',
   'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'Solana' };
-/** A native amount with at most 6 decimals: a nonzero fee never reads "0" (L2 fees are tiny), and a maximum is rounded UP, never below itself. */
-const units = (amount: string, unit: string, round: 'down' | 'up' = 'down') => {
-  const d = unit === 'lamports' ? 9 : 18, symbol = unit === 'lamports' ? 'SOL' : 'ETH', v = BigInt(amount), step = 10n ** BigInt(d - 6);
-  const shown = round === 'up' ? (v + step - 1n) / step * step : v / step * step;
-  if (v > 0n && shown === 0n) return `< 0.000001 ${symbol}`;
-  const whole = shown / 10n ** BigInt(d), frac = (shown % 10n ** BigInt(d)).toString().padStart(d, '0').slice(0, 6).replace(/0+$/, '');
-  return `${whole}${frac ? '.' + frac : ''} ${symbol}`;
-};
+/**
+ * A fee amount with at most 6 decimals: a nonzero fee never reads "0" (L2 fees are tiny), and a maximum is rounded UP, never below itself.
+ * ADR-0010: wei reads as ETH, lamports as SOL, a token fee in its own symbol and decimals — a USDC amount is never printed as ETH.
+ */
+const units = (amount: string, unit: string, round: 'down' | 'up' = 'down', token?: { readonly symbol: string; readonly decimals: number } | null) =>
+  feeAmountText(amount, unit, token ?? null, round);
 /** "Steps 2–3" or "Step 2": a single-step group is never "Steps 3–3". */
 const stepsOf = (tr: (key: string, ...args: string[]) => string, from: number, to: number) => from === to ? tr('Step {0}', String(from + 1)) : tr('Steps {0}–{1}', String(from + 1), String(to + 1));
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
@@ -118,7 +119,7 @@ function anyAttempt(approvalId: string, group: number): BatchAttempt | null {
  * browser could not keep (write and read back) its attempt, so the wallet was never asked.
  */
 const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
-  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'GAS_SPONSORSHIP_WALLET_UNSUPPORTED']);
+  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'GAS_SPONSORSHIP_WALLET_UNSUPPORTED', ...CIRCLE_NOTHING_SENT]);
 /** Whether the owner's wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not). */
 const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => true, () => false);
 /**
@@ -266,6 +267,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       }
       return recordBatch(index, attemptKey, batchId);
     }
+    if (isCirclePaid(p)) {
+      // ADR-0010: the fee is paid from the owner's USDC through Circle — the permit, then the operation, each checked by this page first.
+      const signature = await signCirclePaidGroup(prepared.value.feePayer, p, permit => permitUserFundedGroup(approvalId, index, permit));
+      return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
+    }
     if (p.kind === 'EVM_USER_OPERATION') {
       const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
       return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
@@ -408,18 +414,27 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     </div>}
     {run.mode === 'USER_FUNDED' && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
       {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
-        <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(GROUP_HOW[g.strategy] ?? g.strategy)}</span>
+        <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation'
+          : GROUP_HOW[g.strategy] ?? g.strategy)}</span>
         <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
           ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
           : tr(stateText(GROUP_STATE, g))}</span>
         {g.gasPaid?.sponsored || g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
         {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}</span>}
-        {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
-          ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
+        {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.token
+          // ADR-0010: a fee paid from the owner's USDC through Circle (the permit's cap): who pays it and in which token, never as ETH.
+          ? tr('Network fee, at most {0} — paid from your USDC through Circle', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token))
+          : g.maxFee.estimated ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
         {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</span>}
-        {g.gasPaid && <span className="muted">{g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
+        {g.gasPaid && <span className="muted">{g.gasPaid.paidInToken ? tr('Network fee paid: {0}', units(g.gasPaid.paidInToken.amount, 'token', 'up', g.gasPaid.paidInToken))
+          : g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
           : tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
+        {/* ADR-0010: Circle's protocol facts stay behind the collapsed technical details. */}
+        {g.gasPayment && <details className="review-panel-technical"><summary>{tr('Technical details')}</summary>
+          <p className="muted">{tr('Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}', g.gasPayment.paymaster, g.gasPayment.entryPoint,
+            units(g.gasPayment.permitCap, 'token', 'up', g.gasPayment))}</p>
+          <p className="muted">{tr('What is left of the permit cap stays approved to Circle\'s paymaster until your next USDC permit replaces it.')}</p></details>}
         {g.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>}
@@ -445,7 +460,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {sent ? <p role="status">{tr('Cancellation sent from your wallet ({0}). Once it is confirmed, the signed operation can never execute.', short(sent))}</p>
           : <div className="approval-actions">
             <button type="button" className="secondary" disabled={busy} aria-describedby={`revoke-note-${g.index}`} onClick={() => void act(async () => {
-              const hash = await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index);
+              const hash = await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index, entryPointOfGroup(g.gasPayment));
               setRevocations(current => ({ ...current, [g.index]: hash }));
               return workflowRunStatusHandoff(approvalId);
             })}>{tr('Cancel the signed operation for {0} in my wallet', label)}</button>

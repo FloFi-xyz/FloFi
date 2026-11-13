@@ -71,7 +71,9 @@ export function nativeBalance(wei: string, decimals = 18): string {
 }
 /** `fee`: the network fee ceiling alone; `sends`: native value the request itself sends (null when none); `required` = fee + sends. */
 export type FeeShortfallView = { readonly network: string; readonly symbol: string; readonly owner: string; readonly balance: string; readonly fee: string;
-  readonly sends: string | null; readonly required: string; readonly missing: string };
+  readonly sends: string | null; readonly required: string; readonly missing: string;
+  /** ADR-0010: why paying the fee in USDC through Circle was not available for this request (closed codes; absent: not considered). */
+  readonly alternatives?: readonly string[] };
 const NATIVE: Readonly<Record<string, { readonly network: string; readonly symbol: string }>> = Object.freeze({
   'eip155:1': { network: 'Ethereum', symbol: 'ETH' }, 'eip155:8453': { network: 'Base', symbol: 'ETH' }, 'eip155:42161': { network: 'Arbitrum One', symbol: 'ETH' },
   'eip155:4663': { network: 'Robinhood Chain', symbol: 'ETH' } });
@@ -80,8 +82,10 @@ export function feeShortfallView(evidence: NativeFeeShortfall | null | undefined
   const native = evidence ? NATIVE[evidence.chainId] : undefined;
   if (!evidence || !native || evidence.unit !== 'wei') return null;
   const sends = /^[1-9][0-9]{0,77}$/.test(evidence.nativeSpend) ? nativeAmount(evidence.nativeSpend) : null;
+  const alternatives = Array.isArray(evidence.unavailable) ? evidence.unavailable.filter(u => u && u.mechanism === 'CIRCLE_USDC_PAYMASTER' && typeof u.code === 'string')
+    .map(u => u.code) : [];
   return { ...native, owner: evidence.owner, balance: nativeBalance(evidence.balance), fee: nativeAmount(evidence.maxFee), sends, required: nativeAmount(evidence.required),
-    missing: nativeAmount(evidence.shortfall) };
+    missing: nativeAmount(evidence.shortfall), ...alternatives.length ? { alternatives } : {} };
 }
 
 /**

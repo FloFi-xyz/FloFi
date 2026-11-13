@@ -21,7 +21,7 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
+import { workflowRunUserFundedAuthorize, workflowRunUserFundedPermit, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -171,6 +171,16 @@ export async function startUserFundedWorkflowRun(approvalId: string, profile: un
 export async function prepareUserFundedGroup(approvalId: string, groupIndex: number, handout?: string): Promise<Result<PreparedGroupView>> {
   return withFlightAccess(async () => {
   return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex, handout));
+
+  });
+}
+/**
+ * ADR-0010: the owner's USDC permit for a group whose network fee Circle fronts and the owner pays in USDC; returns the operation the owner's wallet
+ * signs next. Gated exactly as a preparation (the permit authorizes nothing to be sent by itself).
+ */
+export async function permitUserFundedGroup(approvalId: string, groupIndex: number, permitSignature: string): Promise<Result<PreparedGroupView>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedPermit(s, approvalId, w, groupIndex, permitSignature));
 
   });
 }

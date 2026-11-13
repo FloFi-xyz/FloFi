@@ -19,8 +19,8 @@ import type { WorkflowComposition } from '../engine/strategy-engine';
 import type { WalletWorkflowReviewView } from '../delegation/views.ts';
 import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
-import { assertRunWallets, authorizeUserFundedGroup, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, prepareUserFundedGroup, reportUserFundedBatch,
-  resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
+import { assertRunWallets, authorizeUserFundedGroup, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, permitUserFundedGroup, prepareUserFundedGroup,
+  reportUserFundedBatch, resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
 import type { ApprovalView } from './approvals.ts';
@@ -132,6 +132,11 @@ export async function userFundedStartSequential(deps: WorkflowRunSurface, run: R
 export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
   handout?: string): Promise<PreparedGroupView> {
   return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout);
+}
+/** ADR-0010: the owner's USDC permit for a Circle-paid group; returns the operation's typed data the owner's wallet signs next. */
+export async function userFundedPermitSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  permitSignature: string): Promise<PreparedGroupView> {
+  return permitUserFundedGroup(deps, run, wallets, groupIndex, permitSignature);
 }
 export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer, base: ApprovalView) {
   const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);

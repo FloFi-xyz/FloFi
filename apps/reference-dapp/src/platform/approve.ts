@@ -21,8 +21,8 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
-  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedPrepareSequential, userFundedReportSequential,
-  userFundedStartSequential } from './workflow-run-approvals.ts';
+  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedPermitSequential, userFundedPrepareSequential,
+  userFundedReportSequential, userFundedStartSequential } from './workflow-run-approvals.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
@@ -294,6 +294,16 @@ export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, app
   const c = await runContext(surface, approvalId, wallets);
   // The hand-out token this browser kept for the group's wallet batch (service.ts `handedTo`); anything else is no token.
   return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined);
+}
+/**
+ * ADR-0010: the owner's USDC permit signature for a Circle-paid group (the first of its two typed-data signatures), verified against what FloFi
+ * prepared; returns the group with the operation's typed data the owner's wallet signs next. Owner-gated exactly as prepare/authorize.
+ */
+export async function workflowRunUserFundedPermit(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
+  permitSignature: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  if (typeof permitSignature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(permitSignature)) return refuse('CIRCLE_PERMIT_INVALID');
+  return userFundedPermitSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), permitSignature);
 }
 /** The owner's wallet answer for one prepared group, verified against what FloFi prepared. */
 export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, answer: unknown): Promise<ClaimedProposal> {

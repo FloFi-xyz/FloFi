@@ -34,6 +34,7 @@ import { bridgeOf, bridgeProgressOf, observeBridgeDelivery, type BridgeDelivery 
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
+import { plannedStrategyOf } from '../user-funded/circle-gas.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -109,7 +110,10 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
       // late answer is accepted; a new preparation keeps the same EIP-5792 id) instead of being dropped and offered again as new.
       if (g.validUntil && g.validUntil <= now && g.strategy !== 'EVM_WALLET_BATCH') {
         const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' });
-        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
+        // ADR-0010: an expired Circle-paid preparation gives the group back its planned strategy (native gas is decided afresh when prepared again).
+        const planned = expired ? plannedStrategyOf(expired.prepared) : null;
+        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null,
+          ...planned && planned !== expired.strategy ? { strategy: planned } : {} });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
       }
       // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.

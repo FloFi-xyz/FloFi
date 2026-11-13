@@ -328,3 +328,161 @@ export function decodeAccountCalls(callData: string): Call[] {
   }
   return fail('ERC4337_ACCOUNT_CALLDATA_UNSUPPORTED');
 }
+
+// ── BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): EntryPoint v0.8 and eth-infinitism `Simple7702Account` ────────────────────────
+/**
+ * The canonical ERC-4337 v0.8 EntryPoint (the one `Simple7702Account` v0.8 hard-codes in its pure `entryPoint()`, and Circle's v0.8 paymaster
+ * serves). Its `getUserOpHash` is an EIP-712 digest: domain `ERC4337`/`1` (chainId, verifyingContract = the EntryPoint), primary type
+ * `PackedUserOperation` without the `entryPoint` member — what a `Simple7702Account` recovers its own key from (`ECDSA.recover(userOpHash, sig)`),
+ * so the owner signs it as typed data (`eth_signTypedData_v4`) and the bundler's / receipt's identity of the operation is the same digest.
+ * Sources: eth-infinitism `EntryPoint.sol`/`UserOperationLib.sol` v0.8.0, `Simple7702Account.sol` v0.8.0 (`_checkSignature`), viem 2.57.8
+ * `getUserOperationTypedData` / `getUserOperationHash` (`entryPointVersion: '0.8'`) / `getInitCode` (the EIP-7702 initCode rule).
+ */
+export const ENTRY_POINT_V0_8 = '0x4337084d9e255ff0702461cf8895ce9e3b5ff108';
+/** eth-infinitism `Simple7702Account` v0.8 (the EIP-7702 delegate a v0.8 owner account designates: `0xef0100 ‖ this`). */
+export const SIMPLE_7702_ACCOUNT_V0_8 = '0xe6cae83bde06e4c305530e199d7217f42808555b';
+export const ERC4337_V08_DOMAIN = Object.freeze({ name: 'ERC4337', version: '1' });
+export const PACKED_USER_OP_V08_TYPEHASH = keccakHex('PackedUserOperation(address sender,uint256 nonce,bytes initCode,bytes callData,bytes32 accountGasLimits,'
+  + 'uint256 preVerificationGas,bytes32 gasFees,bytes paymasterAndData)');
+/** The 20-byte EIP-7702 initCode marker of EntryPoint v0.8 (`INITCODE_EIP7702_MARKER`, right-padded with zeros). */
+export const EIP7702_INIT_CODE_MARKER = '0x7702' + '0'.repeat(36);
+/**
+ * The owner account kinds a FloFi-relayed operation may come from (closed list). Each binds the account's EIP-7702 delegate, the EntryPoint
+ * that delegate validates for, and how the owner signs: the DeleGator's own EIP-712 domain (v0.7) or the EntryPoint's typed `userOpHash` (v0.8).
+ */
+export const OWNER_ACCOUNT_KINDS = Object.freeze({
+  METAMASK_DELEGATOR_V1_3: Object.freeze({ delegate: DELEGATOR_IMPLEMENTATION, entryPoint: ENTRY_POINT_V0_7 }),
+  SIMPLE_7702_V0_8: Object.freeze({ delegate: SIMPLE_7702_ACCOUNT_V0_8, entryPoint: ENTRY_POINT_V0_8 }),
+});
+export type OwnerAccountKind = keyof typeof OWNER_ACCOUNT_KINDS;
+/** The kind of an owner account from its code (`eth_getCode`): an EIP-7702 designator of a pinned delegate, else null (plain EOA or anything else). */
+export function ownerAccountKindOfCode(code: unknown): OwnerAccountKind | null {
+  const c = typeof code === 'string' ? code.toLowerCase() : '';
+  for (const [kind, k] of Object.entries(OWNER_ACCOUNT_KINDS) as [OwnerAccountKind, (typeof OWNER_ACCOUNT_KINDS)[OwnerAccountKind]][])
+    if (c === '0xef0100' + k.delegate.slice(2).toLowerCase()) return kind;
+  return null;
+}
+/** The EIP-712 domain separator of EntryPoint v0.8 (`EIP712("ERC4337", "1")`) on `chainId`. */
+export function entryPointV08DomainSeparator(chainId: number, entryPoint = ENTRY_POINT_V0_8): string {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) fail('ERC4337_CHAIN_INVALID');
+  return keccakHex(abiEncode(['bytes32', 'bytes32', 'bytes32', 'uint256', 'address'],
+    [EIP712_DOMAIN_TYPEHASH, keccakHex(ERC4337_V08_DOMAIN.name), keccakHex(ERC4337_V08_DOMAIN.version), BigInt(chainId), evmAddress(entryPoint)]));
+}
+/**
+ * The initCode as v0.8 hashes it: an EIP-7702 marker initCode is replaced by the account's delegate ‖ the rest (`delegate` given), or by the bare
+ * 20-byte marker (no delegate), exactly as viem's `getInitCode({ forHash: true })`; any other initCode as is. FloFi never sends an initCode itself.
+ */
+function initCodeForHashV08(initCode: string, delegate?: string): string {
+  const hex = data(initCode, 'ERC4337_INIT_CODE_INVALID');
+  if (hex.length < EIP7702_INIT_CODE_MARKER.length || hex.slice(0, 42) !== EIP7702_INIT_CODE_MARKER) return hex;
+  return delegate === undefined ? EIP7702_INIT_CODE_MARKER : evmAddress(delegate) + hex.slice(42);
+}
+/** `UserOperationLib.hash` (v0.8): the struct hash of the typed `PackedUserOperation` (no entryPoint member, no signature). */
+export function userOpStructHashV08(op: PackedUserOperation, eip7702Delegate?: string): string {
+  return keccakHex(abiEncode(['bytes32', 'address', 'uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32', 'bytes32'],
+    [PACKED_USER_OP_V08_TYPEHASH, evmAddress(op.sender), op.nonce, keccakHex(bytesOf(initCodeForHashV08(op.initCode, eip7702Delegate))), keccakHex(bytesOf(op.callData)),
+      op.accountGasLimits, op.preVerificationGas, op.gasFees, keccakHex(bytesOf(op.paymasterAndData))]));
+}
+/** `EntryPoint.getUserOpHash` (v0.8): `0x1901 ‖ domainSeparator ‖ structHash` — the bundler's and the receipt's identity, AND what a v0.8 account signs. */
+export function userOpHashV08(op: PackedUserOperation, chainId: number, options: { readonly entryPoint?: string; readonly eip7702Delegate?: string } = {}): string {
+  return keccakHex(concat(Uint8Array.of(0x19, 0x01), bytesOf(entryPointV08DomainSeparator(chainId, options.entryPoint ?? ENTRY_POINT_V0_8)),
+    bytesOf(userOpStructHashV08(op, options.eip7702Delegate))));
+}
+/** The operation's identity for its EntryPoint (`getUserOpHash`): v0.7's keccak form, or v0.8's EIP-712 digest. Any other EntryPoint is refused. */
+export function userOpHashFor(op: PackedUserOperation, chainId: number, entryPoint: string): string {
+  const ep = evmAddress(entryPoint);
+  if (ep === ENTRY_POINT_V0_7) return userOpHash(op, chainId, ep);
+  if (ep === ENTRY_POINT_V0_8) return userOpHashV08(op, chainId, { entryPoint: ep });
+  return fail('ERC4337_ENTRY_POINT_UNSUPPORTED');
+}
+/** The `eth_signTypedData_v4` payload of a v0.8 operation (the wallet shows every field; its digest is `userOpHashV08`). */
+export function entryPointV08TypedData(chainId: number, op: PackedUserOperation, entryPoint = ENTRY_POINT_V0_8) {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) fail('ERC4337_CHAIN_INVALID');
+  if (data(op.initCode, 'ERC4337_INIT_CODE_INVALID') !== '0x') fail('ERC4337_INIT_CODE_REFUSED');
+  return {
+    types: {
+      EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+      PackedUserOperation: [{ name: 'sender', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'initCode', type: 'bytes' }, { name: 'callData', type: 'bytes' },
+        { name: 'accountGasLimits', type: 'bytes32' }, { name: 'preVerificationGas', type: 'uint256' }, { name: 'gasFees', type: 'bytes32' },
+        { name: 'paymasterAndData', type: 'bytes' }],
+    },
+    primaryType: 'PackedUserOperation' as const,
+    domain: { name: ERC4337_V08_DOMAIN.name, version: ERC4337_V08_DOMAIN.version, chainId, verifyingContract: evmAddress(entryPoint) },
+    message: { sender: evmAddress(op.sender), nonce: op.nonce.toString(), initCode: op.initCode, callData: op.callData, accountGasLimits: op.accountGasLimits,
+      preVerificationGas: op.preVerificationGas.toString(), gasFees: op.gasFees, paymasterAndData: op.paymasterAndData },
+  };
+}
+/** Whether `signature` is the owner's raw ECDSA signature over the v0.8 `userOpHash` (the only one `Simple7702Account` accepts). */
+export function verifyOwnerUserOpSignatureV08(chainId: number, op: PackedUserOperation, signature: string, entryPoint = ENTRY_POINT_V0_8): boolean {
+  try { return recoverDigestSigner(userOpHashV08(op, chainId, { entryPoint }), signature) === evmAddress(op.sender); } catch { return false; }
+}
+/** `BaseAccount.execute(address target, uint256 value, bytes data)` / `executeBatch(Call[])` (v0.8; the same selectors as Coinbase's). */
+export const SIMPLE_7702_EXECUTE_SELECTOR = selectorOf('execute(address,uint256,bytes)');
+export const SIMPLE_7702_EXECUTE_BATCH_SELECTOR = selectorOf('executeBatch((address,uint256,bytes)[])');
+/** The `Simple7702Account` call data of exactly these calls: `execute` for one call, `executeBatch` (reverts on the first failure) otherwise. */
+export function simple7702CallData(calls: readonly Call[]): string {
+  if (!Array.isArray(calls) || !calls.length || calls.length > MAX_BATCH_CALLS) fail('ERC4337_BATCH_INVALID');
+  const x = calls.map(call);
+  if (x.length === 1) return SIMPLE_7702_EXECUTE_SELECTOR + hexOf(abiEncode(['address', 'uint256', 'bytes'], [x[0]!.target, x[0]!.value, x[0]!.data])).slice(2);
+  return SIMPLE_7702_EXECUTE_BATCH_SELECTOR + hexOf(abiEncode([{ array: EXECUTION_TUPLE }], [x.map(c => [c.target, c.value, c.data])])).slice(2);
+}
+/** The calls a `Simple7702Account` call data executes (strict: exactly the two encodings above, re-encoded byte for byte), else a closed refusal. */
+export function decodeSimple7702CallData(callData: string): Call[] {
+  const hex = data(callData, 'ERC4337_CALLDATA_INVALID');
+  let calls: Call[];
+  try {
+    if (hex.startsWith(SIMPLE_7702_EXECUTE_SELECTOR)) {
+      const [target, value, calldata] = abiDecode(['address', 'uint256', 'bytes'], bytesOf('0x' + hex.slice(10))) as [string, bigint, string];
+      calls = [{ target: target.toLowerCase(), value, data: calldata.toLowerCase() }];
+    } else if (hex.startsWith(SIMPLE_7702_EXECUTE_BATCH_SELECTOR)) {
+      const [items] = abiDecode([{ array: EXECUTION_TUPLE }], bytesOf('0x' + hex.slice(10))) as [[string, bigint, string][]];
+      calls = items.map(([target, value, calldata]) => ({ target: target.toLowerCase(), value, data: calldata.toLowerCase() }));
+    } else return fail('ERC4337_CALLDATA_INVALID');
+    // Canonical only: one call is always `execute`, several `executeBatch`, and the bytes re-encode exactly (no trailing or padded data).
+    if (simple7702CallData(calls) !== hex) fail('ERC4337_CALLDATA_INVALID');
+  } catch { return fail('ERC4337_CALLDATA_INVALID'); }
+  return calls;
+}
+/** The account call data of `calls` for an owner account kind (the DeleGator's ERC-7579 batch, or `Simple7702Account`'s execute / executeBatch). */
+export function ownerAccountCallData(kind: OwnerAccountKind, calls: readonly Call[]): string {
+  return kind === 'SIMPLE_7702_V0_8' ? simple7702CallData(calls) : batchCallData(calls);
+}
+/** The calls an owner account kind's call data executes (strict). */
+export function decodeOwnerAccountCallData(kind: OwnerAccountKind, callData: string): Call[] {
+  return kind === 'SIMPLE_7702_V0_8' ? decodeSimple7702CallData(callData) : decodeBatchCallData(callData);
+}
+/**
+ * A user operation of the owner's own account WITH a paymaster (ADR-0010: Circle's, checked by the caller against its pins before anything is
+ * built on it): no factory, the exact account call data, the gas words the owner signs and the given `paymasterAndData`.
+ */
+export function packedUserOperationWithPaymaster(input: { readonly sender: string; readonly nonce: bigint; readonly callData: string; readonly gas: UserOperationGas;
+  readonly paymasterAndData: string; readonly signature?: string }): PackedUserOperation {
+  const base = packedUserOperation(input), paymasterAndData = data(input.paymasterAndData, 'ERC4337_PAYMASTER_INVALID');
+  if (unpackPaymasterAndData(paymasterAndData) === null) fail('ERC4337_PAYMASTER_INVALID');
+  return { ...base, paymasterAndData };
+}
+/** The bundler wire format of an operation that names a paymaster: the unpacked v0.7/v0.8 fields with `paymaster*` (still no factory). */
+export type BundlerPaymasterUserOperation = BundlerUserOperation & { readonly paymaster: string; readonly paymasterVerificationGasLimit: string;
+  readonly paymasterPostOpGasLimit: string; readonly paymasterData: string };
+export function toBundlerUserOperationWithPaymaster(op: PackedUserOperation): BundlerPaymasterUserOperation {
+  evmAddress(op.sender);
+  if (data(op.initCode, 'ERC4337_INIT_CODE_REFUSED') !== '0x') fail('ERC4337_INIT_CODE_REFUSED');
+  const pm = unpackPaymasterAndData(op.paymasterAndData) ?? fail('ERC4337_PAYMASTER_INVALID');
+  const gas = userOperationGas(op);
+  if (gas.maxPriorityFeePerGas > gas.maxFeePerGas || gas.maxFeePerGas === 0n || gas.callGasLimit === 0n || gas.verificationGasLimit === 0n) fail('ERC4337_GAS_INVALID');
+  return { sender: op.sender, nonce: quantity(op.nonce), callData: op.callData, callGasLimit: quantity(gas.callGasLimit), verificationGasLimit: quantity(gas.verificationGasLimit),
+    preVerificationGas: quantity(gas.preVerificationGas), maxFeePerGas: quantity(gas.maxFeePerGas), maxPriorityFeePerGas: quantity(gas.maxPriorityFeePerGas), signature: op.signature,
+    paymaster: pm.paymaster, paymasterVerificationGasLimit: quantity(pm.verificationGasLimit), paymasterPostOpGasLimit: quantity(pm.postOpGasLimit), paymasterData: pm.data };
+}
+/** The limits a bundler estimated for an operation with a paymaster: the account's three and the paymaster's two (absent: 0). */
+export function bundlerPaymasterGasEstimate(result: unknown): Pick<UserOperationGas, 'verificationGasLimit' | 'callGasLimit' | 'preVerificationGas'>
+  & { readonly paymasterVerificationGasLimit: bigint; readonly paymasterPostOpGasLimit: bigint } {
+  const r = result && typeof result === 'object' ? result as Record<string, unknown> : fail('ERC4337_RPC_INVALID');
+  const optional = (v: unknown) => v === undefined || v === null ? 0n : parseQuantity(v, 'ERC4337_RPC_INVALID');
+  const verificationGasLimit = parseQuantity(r.verificationGasLimit, 'ERC4337_RPC_INVALID'), callGasLimit = parseQuantity(r.callGasLimit, 'ERC4337_RPC_INVALID'),
+    preVerificationGas = parseQuantity(r.preVerificationGas, 'ERC4337_RPC_INVALID');
+  const paymasterVerificationGasLimit = optional(r.paymasterVerificationGasLimit), paymasterPostOpGasLimit = optional(r.paymasterPostOpGasLimit);
+  if ([verificationGasLimit, callGasLimit, preVerificationGas].some(v => v === 0n || v > UINT128_MAX)
+    || [paymasterVerificationGasLimit, paymasterPostOpGasLimit].some(v => v > UINT128_MAX)) fail('ERC4337_RPC_INVALID');
+  return { verificationGasLimit, callGasLimit, preVerificationGas, paymasterVerificationGasLimit, paymasterPostOpGasLimit };
+}

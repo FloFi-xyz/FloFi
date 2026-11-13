@@ -473,6 +473,31 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         catch (cause) { restoreState(snapshot); throw cause; }
       });
     },
+    /**
+     * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a bundle transaction to `op.entryPoint` (v0.7 or v0.8) carrying ONE operation of the
+     * owner's account whose fee a token paymaster fronts, in the EntryPoint's order: the paymaster's validation effects (`validation`: e.g. the
+     * owner's permit and a USDC prefund pulled from the owner; they stand even if the calls revert), the EntryPoint's `BeforeExecution`, the
+     * operation's calls as the owner's account (all or nothing: a failure reverts them and the operation is unsuccessful), the paymaster's
+     * `postOp(success)` (e.g. a refund), then the `UserOperationEvent` naming the sender, the paymaster and the actual gas cost. The paymaster's own
+     * effects are the caller's (a MODEL of Circle's paymaster, not its bytecode).
+     */
+    entryPointOperation(owner: string, calls: readonly erc7710.Call[], op: { readonly entryPoint: string; readonly userOpHash: string; readonly paymaster: string;
+      readonly bundler: string; readonly nonce: bigint; readonly actualGasCost: bigint; readonly validation: () => Receipt['logs'];
+      readonly postOp: (success: boolean) => Receipt['logs'] }): string {
+      const bundler = lower(op.bundler), n = nonces.get(bundler) ?? 0n;
+      nonces.set(bundler, n + 1n);
+      const hash = D.keccakHex(`entrypoint:${bundler}:${n}:${op.userOpHash}`);
+      return mine(hash, bundler, lower(op.entryPoint), '0x765e827f', n, () => {
+        const validation = op.validation(), before = { address: lower(op.entryPoint), topics: [erc4337.BEFORE_EXECUTION_TOPIC], data: '0x' };
+        const snapshot = snapshotState();
+        let executed: Receipt['logs'] = [], success = true;
+        try { executed = calls.flatMap(c => execute(lower(owner), c)); } catch { restoreState(snapshot); success = false; }
+        const postOp = op.postOp(success);
+        const event = { address: lower(op.entryPoint), topics: [erc4337.USER_OPERATION_EVENT_TOPIC, lower(op.userOpHash), topic(lower(owner)), topic(lower(op.paymaster))],
+          data: '0x' + [op.nonce, success ? 1n : 0n, op.actualGasCost, op.actualGasCost / 1_000_000_000n].map(v => v.toString(16).padStart(64, '0')).join('') };
+        return [...validation, before, ...executed, ...postOp, event];
+      });
+    },
     setPrice(wethPerUsdcUnits: bigint) { wethPerUsdc = wethPerUsdcUnits; },
     /** A node without `eth_simulateV1` (the product must then refuse to offer a batch that depends on Aave state). */
     disableSimulation() { simulateSupported = false; },

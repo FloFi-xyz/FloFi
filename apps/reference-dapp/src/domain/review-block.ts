@@ -23,6 +23,8 @@ export type ReviewBlockView = {
   readonly walletRequests: ReviewBlockText;
   /** A one-time account change inside a wallet confirmation (EIP-7702 smart-account upgrade), or null. */
   readonly setup: ReviewBlockText | null;
+  /** ADR-0010: a request whose fee is paid in USDC through Circle asks the wallet twice (the permit, then the operation); null otherwise. */
+  readonly signatures?: ReviewBlockText | null;
 };
 
 const SIGNIFICANT = 6;
@@ -94,7 +96,15 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   // pays it when it cannot take the sponsorship (never understated).
   const owner = review.groups.filter(g => g.fee?.sponsorship !== 'REQUIRED'), sponsored = owner.length < review.groups.length;
   const priced = owner.filter(g => g.fee), total = priced.reduce((sum, g) => sum + BigInt(g.fee!.maxWei), 0n);
+  // ADR-0010: a request whose fee is paid in the owner's USDC through Circle (its native balance is short): the permit's cap, in USDC, and who
+  // pays it — never added to an ETH amount, never shown as ETH.
+  const circle = owner.filter(g => !g.fee && g.gasPayment?.mechanism === 'CIRCLE_USDC_PAYMASTER');
+  const usdc = circle.reduce((sum, g) => sum + BigInt(g.gasPayment!.maxFee.amount), 0n);
+  const usdcText = circle.length ? `${shortDecimal(usdc.toString(), 6, 'up')} USDC` : null, later = priced.length + circle.length < owner.length;
   const fee = owner.length === 0 ? text('None from your wallet: FloFi offers to pay it')
+    : usdcText && priced.length ? text(later ? '{0} + {1} — paid from your USDC through Circle + later requests, quoted when due' : '{0} + {1} — paid from your USDC through Circle',
+      [ethUp(total), usdcText])
+    : usdcText ? text(later ? '{0} — paid from your USDC through Circle + later requests, quoted when due' : '{0} — paid from your USDC through Circle', [usdcText])
     : priced.length === 0 ? text(sponsored ? 'Later requests, quoted when due' : 'Quoted when each request is due')
     : priced.length < owner.length ? text('{0} + later requests, quoted when due', [ethUp(total)]) : text('{0}', [ethUp(total)]);
   // Token permissions: each step whose prepared calls include an approval lets its protocol spend exactly the step's amount.
@@ -115,6 +125,7 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   return { steps: review.steps.map(stepLine), minimum, fee, permissions: permissionLines,
     // The one-time smart-account upgrade happens inside a confirmation: it is an account change the owner approves, so it is said here.
     setup: counts.oneTimeSetup.includes('EVM_SMART_ACCOUNT_UPGRADE') ? text('includes a one-time smart-account upgrade of this account') : null,
+    signatures: circle.length ? text('Two signatures: a USDC permit for the fee, then the operation') : null,
     walletRequests: counts.networkSwitches > 0
       ? text(counts.atLeast ? 'at least {0} + {1} network switch(es)' : '{0} + {1} network switch(es)', [String(counts.walletPrompts), String(counts.networkSwitches)])
       : counts.atLeast ? text('at least {0}', [String(counts.walletPrompts)]) : text('{0}', [String(counts.walletPrompts)]) };
