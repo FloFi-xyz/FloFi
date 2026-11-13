@@ -54,6 +54,7 @@ import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 import { selectGasMechanism, type MechanismUnavailable } from '../gas-abstraction/mechanism.ts';
 import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleFactsOf, circleOperationOf, type CircleDeps, type CircleFacts } from './circle-gas.ts';
+import { gaslessStepModeRefusal } from './gasless-groups.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
@@ -210,6 +211,10 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const ownerCovers = fees.balance >= maxCost + nativeSpend(group);
   if (!ownerCovers && !(offer && fees.balance >= nativeSpend(group))) {
     const short = nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+    // ADR-0010 §5: a short-native Robinhood Chain batch of swaps 0x Gasless could carry runs step by step instead (the Review says so in
+    // words: the fee-shortfall numbers would only tell the owner to add ETH).
+    const stepMode = gaslessStepModeRefusal(requirement, g);
+    if (stepMode) return no(stepMode.code, stepMode.stepIndex);
     // ADR-0010: native gas is short — the chain's token-paid alternative, when the operator enabled it and this group never handed a batch to the
     // owner's wallet (that batch could still execute: the group keeps it). ADR-0009's FloFi-paid offer, when one exists, keeps its own rule.
     if (offer || g.tokenGas === false) return short;

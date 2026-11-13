@@ -14,6 +14,12 @@ export type PrivyLoginEvent = { readonly wasAlreadyAuthenticated: boolean };
 /** An unsigned EIP-1559 transaction FloFi asks Privy to sign (every field already checked against the reviewed attempt). */
 export type PrivyEvmTransaction = { readonly to: string; readonly value: string; readonly data: string; readonly chainId: number; readonly nonce: string;
   readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: EIP-712 typed data FloFi asks Privy to sign (`types` declare `EIP712Domain`), already matched by
+ * FloFi's server to the reviewed attempt it belongs to (a 0x Gasless trade or its gasless approval).
+ */
+export type PrivyTypedData = { readonly types: Readonly<Record<string, readonly { readonly name: string; readonly type: string }[]>>;
+  readonly domain: Readonly<Record<string, unknown>>; readonly primaryType: string; readonly message: Readonly<Record<string, unknown>> };
 /** What Privy's confirmation screen states about a transaction: FloFi's server-built summary of the reviewed attempt. */
 export type PrivyReview = { readonly title: string; readonly action: string; readonly description: string };
 export type FloFiPrivy = {
@@ -40,6 +46,8 @@ export type FloFiPrivy = {
   readonly exportWallet: (ecosystem: WalletEcosystem, address: string) => Promise<void>;
   readonly signEvmTransaction: (address: string, tx: PrivyEvmTransaction, review?: PrivyReview) => Promise<string>;
   readonly signEvmMessage: (address: string, message: string) => Promise<string>;
+  /** `eth_signTypedData_v4` with the embedded EVM wallet, Privy's confirmation showing FloFi's server summary; returns the 65-byte signature. */
+  readonly signEvmTypedData: (address: string, typedData: PrivyTypedData, review?: PrivyReview) => Promise<string>;
   readonly signSolanaTransaction: (address: string, transaction: Uint8Array, review?: PrivyReview) => Promise<Uint8Array>;
   readonly signSolanaMessage: (address: string, message: Uint8Array) => Promise<Uint8Array>;
   readonly logout: () => Promise<void>;

@@ -18,7 +18,7 @@
 import { classifySigningFailure, type SigningContext } from './flofi-signing';
 import { registerFloFiSigningTarget, takeFloFiSigning, type FloFiWalletRequest } from './flofi-wallet-channel';
 import type { EvmProvider } from './evm-discovery';
-import type { WalletResult } from '../wallet-app/protocol';
+import { parseEvmTypedData, type WalletResult } from '../wallet-app/protocol';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 export type FloFiEvmDeps = {
@@ -111,6 +111,29 @@ export function createFloFiEvmProvider(address: string, deps: FloFiEvmDeps): Flo
     throw unknown();
   }
 
+  /**
+   * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: `eth_signTypedData_v4` of the reviewed run the store bound right before (a 0x Gasless trade or its
+   * gasless approval). The typed data's domain chain must be the provider's chain; FloFi's server re-derives the exact payload from the reviewed
+   * attempt before Privy is asked. A signature, once returned, only travels back to the store (FloFi relays it after verifying it again).
+   */
+  async function signTypedData(args: readonly unknown[], provider: object): Promise<string> {
+    const signing = takeFloFiSigning(provider);
+    if (!signing) throw refused('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
+    if (!own(args[0])) throw refused('FLOFI_WALLET_ACCOUNT_MISMATCH');
+    let payload: unknown = args[1];
+    if (typeof payload === 'string') { if (payload.length > 65_536) throw refused('FLOFI_WALLET_REQUEST_INVALID'); try { payload = JSON.parse(payload); } catch { throw refused('FLOFI_WALLET_REQUEST_INVALID'); } }
+    const typedData = parseEvmTypedData(payload) ?? (() => { throw refused('FLOFI_WALLET_TYPED_DATA_UNSUPPORTED'); })();
+    const domainChain = typedData.domain.chainId;
+    if ((typeof domainChain !== 'number' && typeof domainChain !== 'string') || quantity(typeof domainChain === 'string' && !domainChain.startsWith('0x') ? Number(domainChain) : domainChain) !== chainId)
+      throw refused('FLOFI_WALLET_NETWORK_UNSUPPORTED');
+    try {
+      const result = await deps.request({ op: 'evm_sign_typed_data', address: owner, typedData, signing }) as { signature?: unknown };
+      const signature = typeof result.signature === 'string' ? result.signature.toLowerCase().replace(/^(?:0x)?/, '0x') : '';
+      if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('FLOFI_WALLET_RESPONSE_INVALID');
+      return signature;
+    } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+  }
+
   const provider: FloFiEvmProvider = {
     isFloFiWallet: true, address: owner,
     async request({ method, params = [] }: { method: string; params?: unknown[] }): Promise<unknown> {
@@ -145,6 +168,12 @@ export function createFloFiEvmProvider(address: string, deps: FloFiEvmDeps): Flo
             if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('FLOFI_WALLET_RESPONSE_INVALID');
             return signature;
           } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+        }
+        case 'eth_signTypedData_v4': {
+          if (!connected) throw refused('FLOFI_WALLET_ACCOUNT_MISMATCH');
+          if (sending) throw refused('FLOFI_WALLET_BUSY');
+          sending = true;
+          try { return await signTypedData(args, provider); } finally { sending = false; }
         }
         case 'eth_sendTransaction': {
           if (!connected) throw refused('FLOFI_WALLET_ACCOUNT_MISMATCH');

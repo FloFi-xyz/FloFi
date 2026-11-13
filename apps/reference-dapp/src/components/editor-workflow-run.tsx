@@ -736,6 +736,8 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   SWAP_MINIMUM_NOT_MET: 'A swap in this batch would deliver less than its signed minimum now, so your wallet was not asked. Try again for a fresh quote.',
   USER_FUNDED_SIMULATION_UNAVAILABLE: 'This network’s RPC cannot simulate the whole batch, so FloFi does not offer it in one confirmation. Each step is confirmed on its own instead.',
   USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE: 'Your wallet does not hold enough ETH on this network for the network fee of the batch.',
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a short-ETH Robinhood Chain batch of swaps can pay its fees in tokens one swap at a time.
+  USER_FUNDED_GASLESS_REQUIRES_STEP_MODE: 'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch. Run this workflow with Confirm each step: each swap can then pay its network fee from the tokens it swaps. Nothing was sent.',
   AAVE_BENEFICIARY_NOT_OWNER: 'An Aave step names another account than the connected wallet. Rebuild that step with this wallet.',
   WORKFLOW_SLIPPAGE_UNSUPPORTED: 'A swap allows more than 3% slippage, which cannot be fixed in one batch. Lower the slippage.',
   ACCOUNT_SESSION_REQUIRED: 'Sign in to FloFi to run the whole workflow with one wallet confirmation. You can still confirm each step on its own.',

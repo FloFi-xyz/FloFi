@@ -21,6 +21,7 @@ import { conversationCopy } from './conversation-copy';
 import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import type { WorkflowProgressView } from './workflow-progress';
+import { isIncludedNetworkFee } from './gas-payment';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -257,7 +258,9 @@ export function sumByAsset(values: readonly string[]): { readonly sums: readonly
  */
 export function payableCosts(fees: readonly SimulationLine[]) {
   const unknown: string[] = [];
-  if (!fees.some(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && /network|gas|execution fee/i.test(line.label))) unknown.push('Network cost');
+  // ADR-0010: a network fee 0x takes out of the swap (INCLUDED, shown as such) is a known network cost, never "not provided".
+  if (!fees.some(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && /network|gas|execution fee/i.test(line.label) || isIncludedNetworkFee(line)))
+    unknown.push('Network cost');
   const additional = sumByAsset(fees.filter(line => line.treatment === 'ADDITIONAL').map(line => line.value));
   const ceilings = sumByAsset(fees.filter(line => line.treatment === 'CEILING').map(line => line.value));
   const unclassified = fees.filter(line => !line.treatment).length + additional.unreadable + ceilings.unreadable;
@@ -272,7 +275,8 @@ export function payableCosts(fees: readonly SimulationLine[]) {
  */
 // BUILD-FLOFI-MAINNET-EXEC-002: FEES_CHANGED (ROUTER_/UNIVERSAL_ L1 or execution fee above the authorized maximum) is re-quoted like the rest;
 // before, the chat stopped at a dead Review after ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED.
-export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|FEES_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
+// BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: GAS_MECHANISM_CHANGED (the owner's ETH moved: native gas or 0x Gasless is now the choice) too.
+export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|FEES_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED|GAS_MECHANISM_CHANGED/;
 /**
  * BUILD-FLOFI-E2E-RELIABILITY-001: why the next request of a run with a confirmed earlier request cannot start under its Review, in words that
  * describe that request only (the generic reasons say "nothing was sent", which is false for the run once its approval landed). Null: the

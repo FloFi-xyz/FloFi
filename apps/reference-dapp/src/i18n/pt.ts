@@ -55,6 +55,7 @@ import { portugueseRound2Requote } from './pt-round2-requote';
 import { portugueseRound2Frontend } from './pt-round2-frontend';
 import { portugueseGasCircle } from './pt-gas-circle';
 import { portugueseGasKora } from './pt-gas-kora';
+import { portugueseGasZeroEx } from './pt-gas-zerox';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseCatalogReliability,
@@ -324,4 +325,6 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseGasCircle,
   // ADR-0010 §4: Solana network fee paid in USDC/USDT through Pimlico (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003).
   ...portugueseGasKora,
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: the 0x Gasless swap on Robinhood Chain (new keys, last).
+  ...portugueseGasZeroEx,
 };

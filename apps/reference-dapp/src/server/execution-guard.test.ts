@@ -28,9 +28,9 @@ describe('operator execution pause at actual submission boundaries', () => {
 
   it('blocks new flow wallet handoffs while leaving reports, recovery and reconciliation callable', () => {
     const env = { FLOFI_EXECUTION_PAUSED: 'true' };
-    for (const method of ['begin', 'beginSwap', 'beginLiquidity', 'handoff', 'submit', 'submitSwap', 'submitLiquidity', 'broadcast'])
+    for (const method of ['begin', 'beginSwap', 'beginLiquidity', 'handoff', 'submit', 'submitSwap', 'submitLiquidity', 'broadcast', 'beginGasless', 'submitGasless'])
       expect(() => guardFlowExecution(method, env)).toThrow('EXECUTION_PAUSED');
-    for (const method of ['report', 'walletFailure', 'observe', 'status', 'recover', 'recoverReview', 'reconcile'])
+    for (const method of ['report', 'walletFailure', 'observe', 'status', 'recover', 'recoverReview', 'reconcile', 'reportGasless'])
       expect(() => guardFlowExecution(method, env)).not.toThrow();
   });
 

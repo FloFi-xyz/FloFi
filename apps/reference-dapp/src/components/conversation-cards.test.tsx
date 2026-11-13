@@ -108,7 +108,7 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 compact chat Review', () => {
     expect(technical(html)).not.toContain('The route pays the provider in ETH.');
   });
   it('keeps the material step details visible (health factor, step status, funding, bound amount, token mint); other details stay technical', () => {
-    expect(MATERIAL_STEP_DETAILS).toEqual(['Health factor after', 'Step status', 'Funded by', 'Bound amount', 'Token mint']);
+    expect(MATERIAL_STEP_DETAILS).toEqual(['Health factor after', 'Step status', 'Funded by', 'Bound amount', 'Token mint', 'Signatures']);
     const mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
     const details = [{ label: 'Health factor after', value: '2.41' }, { label: 'Step status', value: 'Already completed' }, { label: 'Funded by', value: '100% of the swap’s reconciled output' },
       { label: 'Bound amount', value: '0.001 WETH' }, { label: 'Token mint', value: mint }, { label: 'Route pools', value: 'USDC/WETH 0.05%' }, { label: 'Tick range', value: '-120–120' }];

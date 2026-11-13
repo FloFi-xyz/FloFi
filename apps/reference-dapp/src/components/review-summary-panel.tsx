@@ -15,6 +15,7 @@ import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../d
 import { flightRefusal, FLIGHT_REFUSAL_HREF } from '../domain/flight-refusal';
 import { feeShortfallView } from '../domain/approved-ux';
 import { circleUnavailableReason } from '../domain/token-fee';
+import { isIncludedNetworkFee, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 
 export type ReviewSummaryPanelProps = {
@@ -64,12 +65,16 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
         {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
         {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line =>
           <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+        {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
+        {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+        {step?.details.filter(line => line.label === SIGNATURES_LABEL).map(line => <div key={line.label}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}
         {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.address}`}><dt>{t('Token permission')}</dt>
           <dd>{approval.unlimited ? t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')
             : t('{0} uses up to {1}', t(approval.spender), t(approval.value))}</dd></div>)}
         {typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
       </dl>
-      <p className="review-panel-note">{t('Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
+      <p className="review-panel-note">{t(sim.fees.some(isIncludedNetworkFee) ? 'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.'
+        : 'Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
     </>}
     {technical}
   </section>;

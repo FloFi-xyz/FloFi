@@ -85,5 +85,7 @@ export * as splDelegation from './spl-delegation.js';
 export * as erc4337 from './erc4337.js';
 // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): Circle's USDC paymaster (pins, permit, paymasterData, the operation check).
 export * as circlePaymaster from './circle-paymaster.js';
+// BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: strict EIP-712 hashing of provider-built typed data (0x Gasless Permit2 / EIP-2612).
+export * as eip712 from './eip712.js';
 export * as eip5792 from './eip5792.js';
 export * as solanaNonce from './solana-nonce.js';
