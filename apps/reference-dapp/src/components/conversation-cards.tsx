@@ -4,7 +4,7 @@ import { useId } from 'react';
 import { translate, useLocale } from '../i18n/locale';
 import { sumByAsset, type ConversationLanguage, type ConversationReview } from '../domain/conversation-lifecycle';
 import { shortDecimal } from '../domain/review-block';
-import { isIncludedNetworkFee } from '../domain/gas-payment';
+import { isIncludedNetworkFee, paidToPimlicoNote } from '../domain/gas-payment';
 import { networkChoiceOptions, networkOfOption } from '../domain/approved-ux';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { walletChainRef } from '../wallet/evm-networks';
@@ -105,7 +105,9 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
   const paidOnTop = fee.unreadable ? t('See Technical details') : fee.estimate && fee.maximum ? t('≈ {0} · at most {1}', fee.estimate, fee.maximum) : fee.estimate ? t('≈ {0}', fee.estimate)
     : fee.maximum ? t('at most {0}', fee.maximum) : unknownNetwork && !fee.included ? t('Not provided by this simulation') : null;
   // ADR-0010: a fee 0x takes out of the swap is shown as such (included, in the swap's token), never hidden and never added on top.
-  const networkFee = [paidOnTop, fee.included ? t('{0}, included in the swap', fee.included) : null].filter(Boolean).join(' · ') || null;
+  // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico (Kora) says who is paid and in which token beside its amount, not only under Technical details.
+  const pimlico = review.fees.map(paidToPimlicoNote).find((note): note is string => note !== null) ?? null;
+  const networkFee = [paidOnTop, fee.included ? t('{0}, included in the swap', fee.included) : null, pimlico ? t(pimlico) : null].filter(Boolean).join(' · ') || null;
   // Review round 2: the fee lines are the whole Review's, so a multi-step Review (not a step-by-step sequence) says its network fee once, after
   // the steps, instead of repeating the same total under every step. A single step (or a sequence's current step) keeps it in its block.
   const sharedFee = !sequence && review.steps.length > 1 ? networkFee : null, stepFee = sharedFee ? null : networkFee;

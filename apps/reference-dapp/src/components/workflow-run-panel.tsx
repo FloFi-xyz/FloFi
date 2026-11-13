@@ -19,7 +19,7 @@ import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRu
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
   signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
-import { CIRCLE_NOTHING_SENT, feeAmountText } from '../domain/token-fee';
+import { CIRCLE_NOTHING_SENT, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -362,6 +362,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>
+    {/* Review B1/LQ1: before anything of the run was signed or reconciled, a later step on a network that needs its native coin for its fee after an
+        earlier token-paid one there is said visibly (the run would stop there with the funds midway); the design stays as it is. */}
+    {open && !(run.groups ?? []).some(g => g.signed || ANSWERED_STATES.includes(g.state)) && !run.steps.some(s => ['RECONCILED', 'FAILED', 'UNCERTAIN'].includes(s.state))
+      && (plan.nativeLater ?? []).map(w => <p key={w.chain} className="workflow-run-native-later" role="note" data-native-later={w.chain}>
+        {nativeLaterMessage(w, tr, action => tr(ACTION[action] ?? action))}</p>)}
     {run.stepCount > 1 && run.mode === 'USER_FUNDED' && <p className="muted workflow-run-progress">{tr('{0} of {1} steps completed', String(progress.completed), String(progress.total))}</p>}
     {awaited && <p role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
       tr(awaited.source), tr(awaited.destination))}</p>}
@@ -463,9 +468,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       const label = stepsOf(tr, g.steps[0], g.steps[1]), sent = revocations[g.index];
       return <div key={`revoke-${g.index}`} className="workflow-run-choice">
         <p role="note" id={`revoke-note-${g.index}`}>{tr('You signed {0} as an operation FloFi did not relay. It stays valid until you cancel it with one transaction from your own wallet.', label)}</p>
+        {/* ADR-0010 review UX8: Circle was chosen because this wallet's ETH could not pay the network fee, and the cancellation is an ordinary
+            transaction the wallet pays in ETH (never in USDC through Circle): said before the wallet is asked. */}
+        {g.gasPayment && !sent && <p role="note" id={`revoke-fee-${g.index}`}>{tr('Cancelling is an ordinary transaction from your wallet, and its network fee is paid in ETH, not in USDC through Circle: you need a small amount of ETH on {0} first.', NETWORK[g.chain] ?? g.chain)}</p>}
         {sent ? <p role="status">{tr('Cancellation sent from your wallet ({0}). Once it is confirmed, the signed operation can never execute.', short(sent))}</p>
           : <div className="approval-actions">
-            <button type="button" className="secondary" disabled={busy} aria-describedby={`revoke-note-${g.index}`} onClick={() => void act(async () => {
+            <button type="button" className="secondary" disabled={busy} aria-describedby={g.gasPayment ? `revoke-note-${g.index} revoke-fee-${g.index}` : `revoke-note-${g.index}`} onClick={() => void act(async () => {
               const hash = await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index, entryPointOfGroup(g.gasPayment));
               setRevocations(current => ({ ...current, [g.index]: hash }));
               return workflowRunStatusHandoff(approvalId);

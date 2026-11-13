@@ -74,7 +74,13 @@ export type UserFundedFacts = { readonly enabled: boolean; readonly code: string
    * pay it (operator-enabled, with a bundler and a read RPC). Decided only when a group is prepared, so a plan made before cannot know it: a
    * group there is "at least" one interaction (two signatures — a USDC permit, then the operation — when Circle pays). Absent or empty: native only.
    */
-  readonly tokenGasChains?: readonly string[] };
+  readonly tokenGasChains?: readonly string[];
+  /**
+   * Review B1/LQ1 (ADR-0010 §4, §5): where a step's own flow may pay its fee in a token when the owner's native coin is short — Pimlico's Kora on
+   * Solana swaps and transfers (`koraTokenGas`), 0x Gasless on Robinhood Chain ERC-20 swaps (`gaslessSwapChains`). Read only to warn, before the
+   * first signature, about later steps on the same chain that still need the native coin (`gas-abstraction/native-later.ts`); never a plan input.
+   */
+  readonly koraTokenGas?: boolean; readonly gaslessSwapChains?: readonly string[] };
 /**
  * What the owner's wallets can do, as reported in the browser at `/approve` (EIP-5792 `wallet_getCapabilities`, Wallet Standard features).
  * Reports only choose the interaction; every artifact is still verified server-side (signer, account code, calls) before it is used.
