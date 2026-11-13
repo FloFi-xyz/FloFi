@@ -193,7 +193,8 @@ describe('review B1/LQ1: a later step that needs the native coin is named before
   });
   it('beside the Robinhood step-mode refusal, which then says which later step needs ETH', () => {
     const shown = visible(render(state({ review: swapBridgeReview({ nativeLater: robinhood, refusal: { code: 'USER_FUNDED_GASLESS_REQUIRES_STEP_MODE', step: 0 } }) })));
-    expect(shown).toContain('Run this workflow with Confirm each step');
+    // The step-mode refusal's own sentence (review Z1 wording: the swaps run one step at a time), then the later-step warning beside it.
+    expect(shown).toContain('Run its swaps one step at a time: each swap can then pay its network fee from the tokens it swaps.');
     expect(shown).toContain('A later step on Robinhood Chain needs ETH for its network fee: step 2 (Bridge). Add ETH before starting, or the run will stop there.');
   });
   it('still shown once the run exists and nothing was signed; gone once a group was signed', () => {
