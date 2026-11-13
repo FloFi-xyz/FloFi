@@ -1129,6 +1129,10 @@
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
       "stage": "unit"
+    },
+    "app.gas-abstraction.gas-abstraction": {
+      "path": "apps/reference-dapp/src/gas-abstraction/gas-abstraction.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1198,7 +1202,8 @@
     "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
-    "reference-reconciler.evidence"
+    "reference-reconciler.evidence",
+    "app.gas-abstraction.gas-abstraction"
   ],
   "modules": [
     {
@@ -7337,6 +7342,30 @@
       "gaps": [
         "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",
         "Local PostgreSQL and provider stand-ins prove request/session/tenant/wallet isolation and emergency pause behavior; live Privy devices, coordinated hosted rollout and external-wallet prompts already released require owner acceptance. No public financial execution is certified."
+      ]
+    },
+    {
+      "id": "gas-abstraction--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-security",
+        "flofi-workflow",
+        "flofi-swap",
+        "flofi-bridge",
+        "flofi-transfer-payments",
+        "flofi-infrastructure-ci"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/gas-abstraction/mechanism.ts",
+        "apps/reference-dapp/src/gas-abstraction/config.ts"
+      ],
+      "suites": [
+        "app.gas-abstraction.gas-abstraction",
+        "app.user-funded.groups"
+      ],
+      "gaps": [
+        "ADR-0010: token-paid network fees (Circle Paymaster, Pimlico Kora, 0x Gasless) are proven with deterministic loopback doubles only; no provider, bundler, wallet or mainnet is reached in CI, and no real-funds token-paid transaction has been recorded."
       ]
     }
   ],
