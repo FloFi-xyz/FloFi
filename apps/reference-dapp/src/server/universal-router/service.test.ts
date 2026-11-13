@@ -383,6 +383,24 @@ describe('N: wrong chain, wrong recipient, modified quote, changed bytes, unexpe
     await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow('ROUTE_CHANGED');
     expect(await c.service.load(run.id)).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true, routeChanges: ['MINIMUM_OUTPUT_DECREASED'] });
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): a declined request superseded by the in-place re-quote leaves the run waiting for the fresh Review, not needing attention', async () => {
+    const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    const approval = await c.service.begin(run.id, EVM_OWNER, w); if (approval.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id);
+    const declined = await c.service.walletFailure(run.id, { invoked: true, attemptId: approval.attempt.attemptId, rejectionCode: 4001, code: 'UNIVERSAL_REJECTED',
+      calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    // Under its own Review a declined request still needs the owner's attention (nothing is retried by itself).
+    expect(financialView(declined).progress.state).toBe('attention');
+    c.tick(121_000); for (const m of Object.values(c.evm)) m.mine();
+    const fresh = await c.service.refresh(run.id);
+    expect(fresh.id).toBe(run.id); expect(fresh.attempts.at(-1)).toMatchObject({ step: 'APPROVAL', state: 'CANCELLED' });
+    // Re-quoted in place: the never-sent attempt stays recorded (and in the evidence), and the run waits for the fresh Review's authorization.
+    const view = financialView(fresh);
+    expect(view.progress).toMatchObject({ started: false, state: 'idle' });
+    expect(view.evidence.operations.APPROVAL?.failure).toBe('declined');
+    await c.service.review(run.id, fresh.review.commitment, w);
+    expect((await c.service.begin(run.id, EVM_OWNER, w)).attempt.step).toBe('APPROVAL');
+  });
   it('a stale (expired) Review is refused and cleared', async () => {
     const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
     c.tick(121_000);

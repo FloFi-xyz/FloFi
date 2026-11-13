@@ -121,6 +121,27 @@ describe('adapter-specific lifecycle boundaries', () => {
     // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the destination settlement is the provider's execution, observed and reconciled — never a wallet request.
     expect(view.steps[0]?.operations.map(operation => [operation.title, operation.wallet])).toEqual([['Approve USDC', true], ['Bridge deposit', true], ['Destination settlement', false]]);
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): a never-sent attempt superseded by the in-place re-quote no longer reads as needing attention', () => {
+    const f = fixture(), workflow = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createRouterNode('bridge', { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: '5', recipient: '', slippage: '100', routing: 'AUTO' })] };
+    const record = (attempts: unknown[], calls = [{ purpose: 'APPROVAL' }, { purpose: 'BRIDGE_DEPOSIT' }]) => ({ id: 'bridge', workflow, provenance: 'PUBLIC_TESTNET', phase: 'PREPARED', verdict: 'PENDING', destination: null,
+      review: { nodeId: 'bridge', commitment: 'review-2', intent: { sourceChain: 'eip155:84532', destinationChain: 'eip155:421614' }, route: { inputToken: { symbol: 'USDC' }, routingProvider: 'across' }, calls }, attempts });
+    const view = (attempts: unknown[], calls?: { purpose: string }[]) => projectExecutionLifecycle(workflow, f.context, source('router', { record: record(attempts, calls), busy: false, signing: false, recovered: false }));
+    // Refused at the hand-off under Review 1 (nothing sent), then re-quoted in place: Review 2 waits for the owner's authorization.
+    const refused = { step: 'APPROVAL', state: 'CANCELLED', reviewCommitment: 'review-1', transactionHash: null, reconciled: false, receipt: null, note: 'ROUTER_REVIEW_EXPIRED' };
+    expect(view([refused])).toMatchObject({ started: false, state: 'idle' });
+    expect(currentExecution(view([refused]))).toBeNull();
+    // Re-quoted without the approval (the allowance now suffices): the superseded approval adds no request that would never complete.
+    expect(view([refused], [{ purpose: 'BRIDGE_DEPOSIT' }]).steps[0]!.operations.filter(operation => operation.wallet).map(operation => operation.title)).toEqual(['Bridge deposit']);
+    // A confirmed approval of Review 1 stays confirmed; only its superseded, never-sent deposit stops holding the step.
+    const approved = { step: 'APPROVAL', state: 'CONFIRMED', reviewCommitment: 'review-1', transactionHash: hash, reconciled: true, receipt: null };
+    const deposit = { step: 'DEPOSIT', state: 'CANCELLED', reviewCommitment: 'review-1', transactionHash: null, reconciled: false, receipt: null };
+    expect(view([approved, deposit], [{ purpose: 'BRIDGE_DEPOSIT' }])).toMatchObject({ started: true, state: 'active' });
+    // Still attention: a refusal under the CURRENT Review (no re-quote yet), and never anything that may have been sent.
+    expect(view([{ ...refused, reviewCommitment: 'review-2' }]).state).toBe('attention');
+    expect(view([{ ...refused, transactionHash: hash }]).state).toBe('attention');
+    expect(view([{ ...refused, state: 'SUBMISSION_RESULT_UNKNOWN' }]).state).toBe('uncertain');
+    expect(view([{ ...refused, state: 'REVERTED', transactionHash: hash }]).state).toBe('attention');
+  });
   it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet requests of a Review are exactly its reviewed calls (no approval when the allowance suffices)', () => {
     const f = fixture(), workflow = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createRouterNode('bridge', { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: '5', recipient: '', slippage: '100', routing: 'AUTO' })] };
     const review = (calls: { purpose: string }[]) => ({ id: 'bridge', workflow, provenance: 'PUBLIC_TESTNET', phase: 'PREPARED', verdict: 'PENDING', destination: null, attempts: [],

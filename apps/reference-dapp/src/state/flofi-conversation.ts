@@ -169,6 +169,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     continuing?: { error: string | null; cleared: boolean; active: boolean; idle: number; fingerprint: string; requoted?: unknown } | undefined;
     /** The continuation (run and record fingerprint) whose fresh Review FloFi already prepared, so it is never re-offered in a loop. */
     requoted?: string | null | undefined;
+    /** Review round 3: the runtime's in-place re-quote this follow-up already accounted for (present when it began, or already presented). */
+    inPlace?: unknown;
     /**
      * Whether FloFi may prepare the next request's fresh Review by itself: only for a continuation the owner started in this conversation
      * (Execute or Continue). A run restored after a reload stays observation-only until the owner asks (“Review workflow”).
@@ -444,7 +446,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // asked about, the fresh Review it prepared, and whether the owner started it here.
     const same = Boolean(previous && previous.scope === scope && previous.runKey !== null && previous.runKey === (live?.runKey ?? null));
     watch.current = { scope, language, phase: null, runKey: live?.runKey ?? null, continued: same ? previous!.continued : null, auto: auto || Boolean(same && previous!.auto),
-      requoted: same ? previous!.requoted : undefined };
+      requoted: same ? previous!.requoted : undefined, inPlace: same ? previous!.inPlace : requotedOf(latest.current.bridge.source.state) };
     setTick(n => n + 1);
   }
   /** The next request's own fresh Review, read-only (the runtime re-quotes the remaining request of the same run), then one question. */
@@ -481,9 +483,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     say(scope, language, (_, c) => c.executing);
     const live = currentExecution(view.progress);
     watch.current = live?.started
-      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted, auto: true,
+      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted, auto: true, inPlace: startRequote,
         continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live.fingerprint, requoted: startRequote } }
-      : { scope, language, phase: null, runKey: null, continued: null, auto: true, start: { error: startError, active: false, idle: 0, requoted: startRequote } };
+      : { scope, language, phase: null, runKey: null, continued: null, auto: true, inPlace: startRequote, start: { error: startError, active: false, idle: 0, requoted: startRequote } };
   }
   function answer(scope: number, open: Question, text: string) {
     const language = open.language, verdict = classifyAnswer(text, open.open.kind), view = latest.current.bridge;
@@ -520,6 +522,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       say(scope, language, (_, c) => c.executing);
       const followed = watch.current?.scope === scope ? watch.current : null, startError = view.source.state.error;
       watch.current = { scope, language, phase: followed?.phase ?? null, runKey: live?.runKey ?? null, continued: followed?.continued ?? null, requoted: followed?.requoted, auto: true,
+        inPlace: requotedOf(view.source.state),
         continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live?.fingerprint ?? '', requoted: requotedOf(view.source.state) } };
       view.controls.request(true);
       return true;
@@ -613,11 +616,24 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       restored.current = live.runKey;
       const language = interfaceLanguage, check = bridge.controls.canCheck;
       say(session.current, language, (_, c) => [c.restored, check ? { options: [c.checkStatus] } : {}]);
-      watch.current = { scope: session.current, language, phase: null, runKey: live.runKey, continued: null };
+      watch.current = { scope: session.current, language, phase: null, runKey: live.runKey, continued: null, inPlace: requotedOf(bridge.source.state) };
     }
     const followed = watch.current;
     if (!followed || followed.scope !== session.current) return;
     const language = followed.language, check = bridge.controls.canCheck;
+    // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a refusal at the wallet hand-off, after begin had recorded the attempt (so neither this start
+    // nor a continuation is still pending), that the runtime re-quoted in place: FloFi says why once and presents that fresh Review of the same
+    // run, as at the start. Never "needs attention" for a request that was never sent, never a second simulation; the owner authorizes again.
+    const inPlace = requotedOf(bridge.source.state);
+    if (inPlace && inPlace !== followed.inPlace && !followed.start && !followed.continuing && followed.auto) {
+      followed.inPlace = inPlace;
+      const earlier = Boolean(live?.steps.some(step => step.operations.some(operation => operation.state === 'confirmed')));
+      if (live) followed.phase = conversationExecution(bridge)?.phase ?? followed.phase;
+      say(followed.scope, language, (language, c) => earlier ? `${c.earlierRequestStays} ${translate(language, requotedMessage(inPlace.code))}` : translate(language, requotedMessage(inPlace.code)));
+      requote.current = { scope: followed.scope };
+      startReview(followed.scope, language, false, earlier);
+      return;
+    }
     if (!live) {
       const start = followed.start, active = bridge.controls.authorizing || bridge.controls.requesting || Boolean(bridge.source.state.busy);
       if (start && active) { start.active = true; start.idle = 0; return; }
@@ -670,6 +686,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           // The next request was re-quoted in place by the runtime (nothing new was sent): its fresh Review is presented, never simulated again.
           const rq = requotedOf(bridge.source.state);
           if (rq && rq !== going.requoted) {
+            followed.inPlace = rq;
             say(followed.scope, language, (language, c) => `${c.earlierRequestStays} ${translate(language, requotedMessage(rq.code))}`);
             requote.current = { scope: followed.scope };
             startReview(followed.scope, language, false, true);
