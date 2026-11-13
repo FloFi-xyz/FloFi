@@ -20,8 +20,17 @@ Email 3 note "We held boarding back one day to fix a few bugs before opening. Th
 weekday; nobody receives English for these emails while `LAUNCH_LANGUAGE` is set. The delay note is only in Email 3 (`GROUP_BOARDING`),
 not in the essential "requested again" access email (`ACCESS_REQUESTED`, unchanged at v2).
 
-Unchanged: subjects, layout, colors, fonts, gota images, buttons, links, variables, footers, quotas and the sending logic. Emails 4a, 4b
-and 5 are byte-identical to before (asserted against the frozen renderer); their Portuguese text already matches board 06.
+Unchanged: subjects, layout, colors, fonts, gota images, buttons, links, variables, footers and quotas. Emails 4a, 4b and 5 are
+byte-identical to before (asserted against the frozen renderer); their Portuguese text already matches board 06.
+
+### One sending-logic fix the plan needs (found in specialist review)
+
+Email 6 outbox rows used to expire when boarding opened (`expires_at = boardingOpensAt` in `inviteCreator` and
+`creator-supersede-templates`). Housekeeping would cancel an Email 6 queued for 09:00 as `EXPIRED` before it was sent. A supersede run
+after 09:00 would have cancelled the held v4 rows and created v5 rows that were already expired, with no CLI way back. Email 6 rows now
+expire with the invite itself (30 days). Delivery still cancels the email once the invite is revoked or expired. `creator-supersede-templates`
+no longer takes the boarding time. A PostgreSQL regression sends Email 6 and the superseded replacements after opening. It fails on the
+old code.
 
 ### Versions and queued rows
 
@@ -56,6 +65,8 @@ No production query, configuration change, deployment, enqueue or email send was
 - **"Waitlist minus invited guests" for Email 3.** The scheduler sends Email 3 to every un-boarded FIRST-flight list entry. An invited
   guest who is also on the list and has not boarded would get both emails. This build does not change sending logic; check the overlap
   before 09:00.
+- A retired Email 6 v4 row left in `SENDING` by a worker crash is not moved to `UNKNOWN` by lease recovery (only the current version
+  is, an existing rule since v1–v3). It can never be resent; check `email-status` for `CREATOR_INVITE`/`SENDING` after deploy.
 - Email 3's access note keeps the repository's documented wording ("confirma o seu embarque…, uma vez") rather than the canvas's older
   "entra com este e-mail", per `TEMPLATE_DEVIATIONS`.
 
@@ -63,5 +74,5 @@ No production query, configuration change, deployment, enqueue or email send was
 
 Local only (Node 22.23.4 here; the pinned toolchain is Node 24.21.0): Flight and backend unit suites 93/93; database-backed suites on a
 disposable loopback PostgreSQL 16 (`launch.pg`, `flight-admin.pg`, `beta-access.pg` and the other Flight `*.pg.test.ts`) 142/142 in the
-combined run. Tests use a fake provider: delivery, inbox placement and the real Resend quota are not proven. CircleCI remains the
+combined run (now 135/135 with the Email 6 opening regression). Tests use a fake provider: delivery, inbox placement and the real Resend quota are not proven. CircleCI remains the
 certification authority.

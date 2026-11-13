@@ -167,7 +167,7 @@ export async function runFlightCommand(command: Command, values: Values, store: 
     }
     case 'creator-supersede-templates': {
       const max = flag(values, 'max') ? integer(values, 'max') : undefined;
-      return ctx().outbox.supersedeCreatorTemplates(now, store.calendar.boardingOpensAt, { ...max ? { max } : {}, apply: values.apply === true });
+      return ctx().outbox.supersedeCreatorTemplates(now, { ...max ? { max } : {}, apply: values.apply === true });
     }
     case 'creator-invites': {
       const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });

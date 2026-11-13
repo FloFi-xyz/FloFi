@@ -388,7 +388,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
    * Preserves the original invite code and recipient. Never touches SENT. Never upgrades UNKNOWN
    * (it may already have reached the provider). Never bulk-releases retired TEST copy.
    */
-  async function supersedeCreatorTemplates(now: number, boardingOpensAt: number, options: { readonly max?: number; readonly apply?: boolean } = {}): Promise<{
+  async function supersedeCreatorTemplates(now: number, options: { readonly max?: number; readonly apply?: boolean } = {}): Promise<{
     readonly eligible: number; readonly superseded: number; readonly skippedUnknown: number; readonly skippedSent: number;
   }> {
     const max = options.max ?? 1_000;
@@ -403,7 +403,9 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         if (row.state === 'SENT') skippedSent = Number(row.n);
       }
       const held = (await tx.query<{ email_id: string; recipient: string; language: EmailLanguage; invite_code: string | null;
-        reserved_at: Date | null; first_attempt_at: Date | null; attempts: number }>(`SELECT email_id, recipient, language, invite_code, reserved_at, first_attempt_at, attempts
+        reserved_at: Date | null; first_attempt_at: Date | null; attempts: number; invite_expires_at: Date | null }>(`SELECT email_id, recipient, language, invite_code,
+          reserved_at, first_attempt_at, attempts, (SELECT i.expires_at FROM flight_invites i WHERE i.tenant_id = flight_emails.tenant_id
+          AND i.code = flight_emails.invite_code) AS invite_expires_at
         FROM flight_emails WHERE tenant_id = $1 AND template = 'CREATOR_INVITE' AND template_version <> $2
           AND state = 'HELD' AND status_reason = 'TEMPLATE_VERSION_REVIEW'
           AND reserved_at IS NULL AND first_attempt_at IS NULL AND attempts = 0 AND invite_code IS NOT NULL
@@ -416,7 +418,7 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
         if (await enqueueEmail(tx, tenantId, {
           template: 'CREATOR_INVITE', recipient: row.recipient, language: row.language, trigger: 'creator_template_superseded',
           dedupeKey: `creator-v${TEMPLATE_VERSIONS.CREATOR_INVITE}:${row.invite_code!.toLowerCase()}`, notBefore: now,
-          expiresAt: boardingOpensAt, inviteCode: row.invite_code, batchKey: null,
+          expiresAt: row.invite_expires_at?.getTime() ?? null, inviteCode: row.invite_code, batchKey: null, // the invite's own validity
         })) superseded++;
       }
       return { eligible: held.length, superseded, skippedUnknown, skippedSent };
