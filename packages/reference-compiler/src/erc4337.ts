@@ -18,6 +18,7 @@
  */
 import { abiDecode, abiEncode, bytesOf, DELEGATION_FRAMEWORK_V1_3, EIP712_DOMAIN_TYPEHASH, evmAddress, hexOf, keccakHex, recoverDigestSigner, selectorOf, word,
   type Call } from './erc7710.js';
+import { rlpEncode, rlpInteger } from './rlp.js';
 
 function fail(code: string): never { throw new Error(code); }
 const concat = (...parts: readonly Uint8Array[]): Uint8Array => {
@@ -297,7 +298,9 @@ export type RpcUserOperation = { readonly sender: string; readonly nonce: string
 /** The packed v0.7 operation of an RPC one (initCode = factory ‖ factoryData), with `paymaster` fields when present. */
 export function packRpcUserOperation(op: RpcUserOperation): PackedUserOperation {
   const q = (v: unknown, code: string) => parseQuantity(v, code);
-  const initCode = op.factory ? evmAddress(op.factory) + data(op.factoryData ?? '0x', 'ERC4337_INIT_CODE_INVALID').slice(2) : '0x';
+  // EntryPoint v0.8's EIP-7702 marker travels as viem's short `factory: '0x7702'` (or its 20-byte padded form): packed as the 20-byte marker.
+  const factory = typeof op.factory === 'string' && /^0x7702(?:0{36})?$/.test(op.factory.toLowerCase()) ? EIP7702_INIT_CODE_MARKER : op.factory ? evmAddress(op.factory) : null;
+  const initCode = factory ? factory + data(op.factoryData ?? '0x', 'ERC4337_INIT_CODE_INVALID').slice(2) : '0x';
   const paymasterAndData = op.paymaster ? packPaymasterAndData({ paymaster: op.paymaster, verificationGasLimit: q(op.paymasterVerificationGasLimit ?? '0x0', 'ERC4337_RPC_INVALID'),
     postOpGasLimit: q(op.paymasterPostOpGasLimit ?? '0x0', 'ERC4337_RPC_INVALID'), data: op.paymasterData ?? '0x' }) : '0x';
   return { sender: evmAddress(op.sender), nonce: q(op.nonce, 'ERC4337_NONCE_INVALID'), initCode, callData: data(op.callData, 'ERC4337_CALLDATA_INVALID'),
@@ -388,17 +391,29 @@ export function userOpHashV08(op: PackedUserOperation, chainId: number, options:
   return keccakHex(concat(Uint8Array.of(0x19, 0x01), bytesOf(entryPointV08DomainSeparator(chainId, options.entryPoint ?? ENTRY_POINT_V0_8)),
     bytesOf(userOpStructHashV08(op, options.eip7702Delegate))));
 }
-/** The operation's identity for its EntryPoint (`getUserOpHash`): v0.7's keccak form, or v0.8's EIP-712 digest. Any other EntryPoint is refused. */
-export function userOpHashFor(op: PackedUserOperation, chainId: number, entryPoint: string): string {
+/**
+ * The operation's identity for its EntryPoint (`getUserOpHash`): v0.7's keccak form, or v0.8's EIP-712 digest. Any other EntryPoint is refused.
+ * `eip7702Delegate`: v0.8 only — the delegate an operation carrying the EIP-7702 initCode marker is hashed with (the one its authorization names).
+ */
+export function userOpHashFor(op: PackedUserOperation, chainId: number, entryPoint: string, eip7702Delegate?: string): string {
   const ep = evmAddress(entryPoint);
-  if (ep === ENTRY_POINT_V0_7) return userOpHash(op, chainId, ep);
-  if (ep === ENTRY_POINT_V0_8) return userOpHashV08(op, chainId, { entryPoint: ep });
+  if (ep === ENTRY_POINT_V0_7 && eip7702Delegate === undefined) return userOpHash(op, chainId, ep);
+  if (ep === ENTRY_POINT_V0_8) return userOpHashV08(op, chainId, { entryPoint: ep, ...eip7702Delegate !== undefined ? { eip7702Delegate } : {} });
   return fail('ERC4337_ENTRY_POINT_UNSUPPORTED');
 }
-/** The `eth_signTypedData_v4` payload of a v0.8 operation (the wallet shows every field; its digest is `userOpHashV08`). */
-export function entryPointV08TypedData(chainId: number, op: PackedUserOperation, entryPoint = ENTRY_POINT_V0_8) {
+/**
+ * The `eth_signTypedData_v4` payload of a v0.8 operation (the wallet shows every field; its digest is `userOpHashV08`). An operation that carries
+ * the EIP-7702 initCode marker (the owner's first upgrade inside it) is signed with the delegate in place of the marker, exactly as viem's
+ * `getUserOperationTypedData` (`toPackedUserOperation({ forHash: true })`): `eip7702Delegate` is then required; any other initCode is refused.
+ */
+export function entryPointV08TypedData(chainId: number, op: PackedUserOperation, entryPoint = ENTRY_POINT_V0_8, eip7702Delegate?: string) {
   if (!Number.isSafeInteger(chainId) || chainId <= 0) fail('ERC4337_CHAIN_INVALID');
-  if (data(op.initCode, 'ERC4337_INIT_CODE_INVALID') !== '0x') fail('ERC4337_INIT_CODE_REFUSED');
+  const initCode = data(op.initCode, 'ERC4337_INIT_CODE_INVALID');
+  if (initCode === EIP7702_INIT_CODE_MARKER && eip7702Delegate !== undefined) return v08TypedData(chainId, { ...op, initCode: evmAddress(eip7702Delegate) }, entryPoint);
+  if (initCode !== '0x' || eip7702Delegate !== undefined) fail('ERC4337_INIT_CODE_REFUSED');
+  return v08TypedData(chainId, op, entryPoint);
+}
+function v08TypedData(chainId: number, op: PackedUserOperation, entryPoint: string) {
   return {
     types: {
       EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
@@ -413,8 +428,63 @@ export function entryPointV08TypedData(chainId: number, op: PackedUserOperation,
   };
 }
 /** Whether `signature` is the owner's raw ECDSA signature over the v0.8 `userOpHash` (the only one `Simple7702Account` accepts). */
-export function verifyOwnerUserOpSignatureV08(chainId: number, op: PackedUserOperation, signature: string, entryPoint = ENTRY_POINT_V0_8): boolean {
-  try { return recoverDigestSigner(userOpHashV08(op, chainId, { entryPoint }), signature) === evmAddress(op.sender); } catch { return false; }
+export function verifyOwnerUserOpSignatureV08(chainId: number, op: PackedUserOperation, signature: string, entryPoint = ENTRY_POINT_V0_8, eip7702Delegate?: string): boolean {
+  try { return recoverDigestSigner(userOpHashV08(op, chainId, { entryPoint, ...eip7702Delegate !== undefined ? { eip7702Delegate } : {} }), signature) === evmAddress(op.sender); }
+  catch { return false; }
+}
+
+// ── The owner's EIP-7702 authorization (owner requirement: a FloFi Wallet upgraded inside its first Circle operation) ──────────────
+/**
+ * An EIP-7702 authorization tuple `[chain_id, address, nonce]`: the owner designates `address` as its account code. FloFi only ever builds one
+ * for a SPECIFIC chain (never 0, which would be valid on every chain), with the account's current transaction nonce, and the caller pins `address`.
+ */
+export type Eip7702Authorization = { readonly chainId: number; readonly address: string; readonly nonce: bigint };
+export type SignedEip7702Authorization = Eip7702Authorization & { readonly r: string; readonly s: string; readonly yParity: 0 | 1 };
+const UINT64 = UINT64_MAX;
+function authorizationOf(a: Eip7702Authorization): Eip7702Authorization {
+  if (!a || !Number.isSafeInteger(a.chainId) || a.chainId <= 0) fail('EIP7702_AUTHORIZATION_CHAIN_INVALID');
+  return { chainId: a.chainId, address: evmAddress(a.address), nonce: uint(a.nonce, UINT64, 'EIP7702_AUTHORIZATION_NONCE_INVALID') };
+}
+/** `keccak256(0x05 ‖ rlp([chain_id, address, nonce]))`, the digest the authority signs (EIP-7702; viem `hashAuthorization`). */
+export function eip7702AuthorizationHash(authorization: Eip7702Authorization): string {
+  const a = authorizationOf(authorization);
+  return keccakHex(concat(Uint8Array.of(0x05), rlpEncode([rlpInteger(BigInt(a.chainId)), bytesOf(a.address), rlpInteger(a.nonce)])));
+}
+/**
+ * The signed tuple from a 65-byte r ‖ s ‖ v signature (v 27/28 or 0/1) of exactly `authorization`, checked to recover (low-s) to `authority`;
+ * anything else is a closed refusal (EIP7702_AUTHORIZATION_SIGNATURE_INVALID).
+ */
+export function signedEip7702Authorization(authorization: Eip7702Authorization, signature: string, authority: string): SignedEip7702Authorization {
+  const a = authorizationOf(authorization);
+  let signer: string;
+  try { signer = recoverDigestSigner(eip7702AuthorizationHash(a), signature); } catch { return fail('EIP7702_AUTHORIZATION_SIGNATURE_INVALID'); }
+  if (signer !== evmAddress(authority)) fail('EIP7702_AUTHORIZATION_SIGNATURE_INVALID');
+  const raw = signature.toLowerCase(), v = parseInt(raw.slice(130, 132), 16);
+  return { ...a, r: '0x' + raw.slice(2, 66), s: '0x' + raw.slice(66, 130), yParity: (v >= 27 ? v - 27 : v) as 0 | 1 };
+}
+/** The address that signed a tuple (low-s enforced), or a closed refusal. */
+export function recoverEip7702AuthorizationSigner(signed: SignedEip7702Authorization): string {
+  const r = typeof signed?.r === 'string' && /^0x[0-9a-fA-F]{64}$/.test(signed.r) ? signed.r.toLowerCase() : fail('EIP7702_AUTHORIZATION_SIGNATURE_INVALID');
+  const s = typeof signed.s === 'string' && /^0x[0-9a-fA-F]{64}$/.test(signed.s) ? signed.s.toLowerCase() : fail('EIP7702_AUTHORIZATION_SIGNATURE_INVALID');
+  if (signed.yParity !== 0 && signed.yParity !== 1) fail('EIP7702_AUTHORIZATION_SIGNATURE_INVALID');
+  try { return recoverDigestSigner(eip7702AuthorizationHash(signed), r + s.slice(2) + (signed.yParity + 27).toString(16)); }
+  catch { return fail('EIP7702_AUTHORIZATION_SIGNATURE_INVALID'); }
+}
+/** The bundler's `eip7702Auth` member of an operation (viem's `formatAuthorization`: quantities, r/s as 32-byte words, yParity as one byte). */
+export type BundlerEip7702Auth = { readonly address: string; readonly chainId: string; readonly nonce: string; readonly r: string; readonly s: string; readonly yParity: string };
+export function toBundlerEip7702Auth(signed: SignedEip7702Authorization): BundlerEip7702Auth {
+  recoverEip7702AuthorizationSigner(signed);
+  return { address: evmAddress(signed.address), chainId: quantity(BigInt(signed.chainId)), nonce: quantity(signed.nonce), r: signed.r.toLowerCase(), s: signed.s.toLowerCase(),
+    yParity: signed.yParity === 1 ? '0x01' : '0x00' };
+}
+/** The signed tuple of a bundler `eip7702Auth` (strict; the bundler double reads what FloFi sent). */
+export function fromBundlerEip7702Auth(value: unknown): SignedEip7702Authorization {
+  const v = value && typeof value === 'object' ? value as Record<string, unknown> : fail('EIP7702_AUTHORIZATION_INVALID');
+  const chainId = parseQuantity(v.chainId, 'EIP7702_AUTHORIZATION_INVALID'), yParity = parseQuantity(v.yParity, 'EIP7702_AUTHORIZATION_INVALID');
+  if (chainId > BigInt(Number.MAX_SAFE_INTEGER) || yParity > 1n) fail('EIP7702_AUTHORIZATION_INVALID');
+  const word32 = (x: unknown) => typeof x === 'string' && /^0x[0-9a-fA-F]{64}$/.test(x) ? x.toLowerCase() : fail('EIP7702_AUTHORIZATION_INVALID');
+  return { chainId: Number(chainId), address: evmAddress(v.address), nonce: parseQuantity(v.nonce, 'EIP7702_AUTHORIZATION_INVALID'), r: word32(v.r), s: word32(v.s),
+    yParity: Number(yParity) as 0 | 1 };
 }
 /** `BaseAccount.execute(address target, uint256 value, bytes data)` / `executeBatch(Call[])` (v0.8; the same selectors as Coinbase's). */
 export const SIMPLE_7702_EXECUTE_SELECTOR = selectorOf('execute(address,uint256,bytes)');
@@ -463,16 +533,32 @@ export function packedUserOperationWithPaymaster(input: { readonly sender: strin
 }
 /** The bundler wire format of an operation that names a paymaster: the unpacked v0.7/v0.8 fields with `paymaster*` (still no factory). */
 export type BundlerPaymasterUserOperation = BundlerUserOperation & { readonly paymaster: string; readonly paymasterVerificationGasLimit: string;
-  readonly paymasterPostOpGasLimit: string; readonly paymasterData: string };
-export function toBundlerUserOperationWithPaymaster(op: PackedUserOperation): BundlerPaymasterUserOperation {
-  evmAddress(op.sender);
-  if (data(op.initCode, 'ERC4337_INIT_CODE_REFUSED') !== '0x') fail('ERC4337_INIT_CODE_REFUSED');
+  readonly paymasterPostOpGasLimit: string; readonly paymasterData: string;
+  /** Only with the EIP-7702 initCode marker: viem's `factory: '0x7702'` / `factoryData: '0x'` and the owner's signed authorization. */
+  readonly factory?: string; readonly factoryData?: string; readonly eip7702Auth?: BundlerEip7702Auth };
+/**
+ * The bundler wire format of an operation that names a paymaster. `eip7702Auth`: the owner's signed EIP-7702 authorization, given exactly when the
+ * operation carries the EIP-7702 initCode marker (the bundler then includes the authorization in its own type-4 transaction, so the delegation is
+ * applied before the EntryPoint validates the operation); refused for any other operation (ERC4337_EIP7702_AUTH_REFUSED), and the marker without it
+ * is refused as any initCode (ERC4337_INIT_CODE_REFUSED).
+ */
+export function toBundlerUserOperationWithPaymaster(op: PackedUserOperation, eip7702Auth?: SignedEip7702Authorization): BundlerPaymasterUserOperation {
+  const sender = evmAddress(op.sender), initCode = data(op.initCode, 'ERC4337_INIT_CODE_REFUSED');
+  if (initCode !== '0x' && initCode !== EIP7702_INIT_CODE_MARKER) fail('ERC4337_INIT_CODE_REFUSED');
+  const upgrade = initCode === EIP7702_INIT_CODE_MARKER;
+  // The marker never travels without the owner's authorization (refused as any other initCode), and an authorization never without the marker.
+  if (upgrade && eip7702Auth === undefined) fail('ERC4337_INIT_CODE_REFUSED');
+  if (!upgrade && eip7702Auth !== undefined) fail('ERC4337_EIP7702_AUTH_REFUSED');
+  // The authorization is the sender's own: an authorization of another key would delegate someone else's account (or fail on chain).
+  if (eip7702Auth && recoverEip7702AuthorizationSigner(eip7702Auth) !== sender) fail('ERC4337_EIP7702_AUTH_REFUSED');
   const pm = unpackPaymasterAndData(op.paymasterAndData) ?? fail('ERC4337_PAYMASTER_INVALID');
   const gas = userOperationGas(op);
   if (gas.maxPriorityFeePerGas > gas.maxFeePerGas || gas.maxFeePerGas === 0n || gas.callGasLimit === 0n || gas.verificationGasLimit === 0n) fail('ERC4337_GAS_INVALID');
-  return { sender: op.sender, nonce: quantity(op.nonce), callData: op.callData, callGasLimit: quantity(gas.callGasLimit), verificationGasLimit: quantity(gas.verificationGasLimit),
+  return { sender: op.sender, nonce: quantity(op.nonce), ...upgrade ? { factory: '0x7702', factoryData: '0x' } : {}, callData: op.callData,
+    callGasLimit: quantity(gas.callGasLimit), verificationGasLimit: quantity(gas.verificationGasLimit),
     preVerificationGas: quantity(gas.preVerificationGas), maxFeePerGas: quantity(gas.maxFeePerGas), maxPriorityFeePerGas: quantity(gas.maxPriorityFeePerGas), signature: op.signature,
-    paymaster: pm.paymaster, paymasterVerificationGasLimit: quantity(pm.verificationGasLimit), paymasterPostOpGasLimit: quantity(pm.postOpGasLimit), paymasterData: pm.data };
+    paymaster: pm.paymaster, paymasterVerificationGasLimit: quantity(pm.verificationGasLimit), paymasterPostOpGasLimit: quantity(pm.postOpGasLimit), paymasterData: pm.data,
+    ...eip7702Auth ? { eip7702Auth: toBundlerEip7702Auth(eip7702Auth) } : {} };
 }
 /** The limits a bundler estimated for an operation with a paymaster: the account's three and the paymaster's two (absent: 0). */
 export function bundlerPaymasterGasEstimate(result: unknown): Pick<UserOperationGas, 'verificationGasLimit' | 'callGasLimit' | 'preVerificationGas'>

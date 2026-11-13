@@ -11,7 +11,7 @@ import { classifySigningFailure } from './flofi-signing';
 const gate = vi.fn(), messageGate = vi.fn();
 vi.mock('../app/flofi-wallet-action', () => ({ floFiSigningGate: (...args: unknown[]) => gate(...args), floFiMessageGate: (...args: unknown[]) => messageGate(...args) }));
 const privy = { ready: true, authenticated: true, embedded: [] as { ecosystem: string; address: string; imported: boolean }[], canSign: vi.fn<(ecosystem: string, address: string) => boolean>(() => true),
-  signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn(), signEvmTypedData: vi.fn() };
+  signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn(), signEvmTypedData: vi.fn(), signEvmAuthorization: vi.fn() };
 let current: typeof privy | null = privy;
 vi.mock('../accounts/privy-context', async importOriginal => ({ ...await importOriginal<object>(), currentFloFiPrivy: () => current }));
 const { requestThroughPrivy } = await import('./flofi-privy-signer');
@@ -156,5 +156,38 @@ describe('typed data (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a reviewed 0x 
     expect(privy.signEvmTypedData).not.toHaveBeenCalled();
     privy.signEvmTypedData.mockRejectedValueOnce(Object.assign(new Error('closed'), { privyErrorCode: 'user_exited_auth_flow' }));
     expect(classifySigningFailure(await code(requestThroughPrivy(request)))).not.toBe('refused');
+  });
+});
+
+describe('EIP-7702 authorization (owner requirement: FloFi Wallet + Circle, the upgrade inside a Circle-paid group)', async () => {
+  const { createTestWallet } = await import('../../../../packages/reference-reconciler/test/test-wallet.ts');
+  const { erc4337 } = await import('@defi-workflow-engine/reference-compiler');
+  const wallet = createTestWallet(), stranger = createTestWallet();
+  const authorization = { chainId: 8453, contractAddress: erc4337.SIMPLE_7702_ACCOUNT_V0_8, nonce: '9' };
+  const tuple = { chainId: 8453, address: erc4337.SIMPLE_7702_ACCOUNT_V0_8, nonce: 9n };
+  const request = { op: 'evm_sign_authorization' as const, address: wallet.address, authorization, signing: { flow: 'base-circle-gas', runId: `wfr_${'a'.repeat(26)}` } };
+  const summary = { ...SUMMARY, flow: 'base-circle-gas', runId: request.signing.runId, action: 'Smart account upgrade (signature)', lines: [{ label: 'Upgrade', value: 'x' }] };
+  it('asks the server first (consent and tuple bound there), then Privy with exactly the tuple, and returns only this wallet\'s signature of it', async () => {
+    gate.mockResolvedValue({ ok: true, value: summary });
+    const signature = wallet.signDigest(erc4337.eip7702AuthorizationHash(tuple));
+    privy.signEvmAuthorization.mockResolvedValue(signature);
+    await expect(requestThroughPrivy(request)).resolves.toEqual({ signature });
+    expect(gate).toHaveBeenCalledWith(request);
+    expect(privy.signEvmAuthorization).toHaveBeenCalledWith(wallet.address, { chainId: 8453, contractAddress: erc4337.SIMPLE_7702_ACCOUNT_V0_8, nonce: 9n });
+    expect(gate.mock.invocationCallOrder[0]!).toBeLessThan(privy.signEvmAuthorization.mock.invocationCallOrder[0]!);
+  });
+  it('never asks Privy without the consent the gate requires; drops a signature of another tuple or key (nothing used)', async () => {
+    gate.mockResolvedValueOnce({ ok: false, code: 'FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED' });
+    expect(await code(requestThroughPrivy(request))).toBe('FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED');
+    expect(classifySigningFailure('FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED')).toBe('refused');
+    expect(privy.signEvmAuthorization).not.toHaveBeenCalled();
+    gate.mockResolvedValue({ ok: true, value: summary });
+    for (const signature of [stranger.signDigest(erc4337.eip7702AuthorizationHash(tuple)), wallet.signDigest(erc4337.eip7702AuthorizationHash({ ...tuple, nonce: 10n })),
+      wallet.signDigest(erc4337.eip7702AuthorizationHash({ ...tuple, address: '0x' + '12'.repeat(20) }))]) {
+      privy.signEvmAuthorization.mockResolvedValueOnce(signature);
+      expect(await code(requestThroughPrivy(request))).toBe('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+    }
+    privy.signEvmAuthorization.mockRejectedValueOnce(Object.assign(new Error('closed'), { privyErrorCode: 'user_exited_auth_flow' }));
+    expect(await code(requestThroughPrivy(request))).toBe('FLOFI_WALLET_REJECTED');
   });
 });

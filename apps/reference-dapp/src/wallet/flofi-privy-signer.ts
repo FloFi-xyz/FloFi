@@ -10,7 +10,7 @@
  * Errors keep the providers' contract (flofi-signing.ts): a cancel in Privy is FLOFI_WALLET_REJECTED (4001: nothing signed); a refusal
  * before Privy was asked is that refusal's code (4100); anything after Privy was asked is unknown and is reconciled, never retried blindly.
  */
-import { eip712 } from '@defi-workflow-engine/reference-compiler';
+import { eip712, erc4337 } from '@defi-workflow-engine/reference-compiler';
 import { floFiMessageGate, floFiSigningGate } from '../app/flofi-wallet-action';
 import { currentFloFiPrivy, floFiPrivyWalletIssue, privyErrorCode, type PrivyReview } from '../accounts/privy-context';
 import type { SigningSummary } from './flofi-signing';
@@ -45,7 +45,8 @@ export async function requestThroughPrivy(request: FloFiWalletRequest): Promise<
   if (!privy?.ready || !privy.authenticated) throw new Error('FLOFI_WALLET_SIGN_IN_REQUIRED');
   // The wallet must be usable in this page before the reviewed attempt's single signature is claimed: otherwise the claim would be spent on
   // a request Privy can never show (an address Privy does not list for this person, or a Solana wallet Privy has not loaded yet).
-  const ecosystem = request.op === 'evm_sign_transaction' || request.op === 'evm_sign_message' || request.op === 'evm_sign_typed_data' ? 'evm' : 'solana';
+  const ecosystem = request.op === 'evm_sign_transaction' || request.op === 'evm_sign_message' || request.op === 'evm_sign_typed_data'
+    || request.op === 'evm_sign_authorization' ? 'evm' : 'solana';
   if ('address' in request && !privy.canSign(ecosystem, request.address)) throw new Error(floFiPrivyWalletIssue(privy, ecosystem, request.address));
   switch (request.op) {
     case 'evm_sign_transaction': case 'solana_sign_transaction': {
@@ -77,6 +78,19 @@ export async function requestThroughPrivy(request: FloFiWalletRequest): Promise<
         const signer = eip712.recoverTypedDataSigner(eip712.hashTypedData(request.typedData), signature);
         if (signer !== request.address.toLowerCase()) throw new Error('FLOFI_WALLET_SIGNER_MISMATCH');
       } catch { throw new Error('FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+      return { signature: signature.toLowerCase() };
+    }
+    case 'evm_sign_authorization': {
+      // Owner requirement (FloFi Wallet + Circle): the server re-derives this exact tuple from the reviewed Circle group's upgrade, requires the
+      // person's consent recorded in FloFi (Privy shows no screen for it) and claims it once, before Privy is asked.
+      const gate = await floFiSigningGate(request).catch(() => ({ ok: false as const, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }));
+      if (!gate.ok) throw new Error(gate.code);
+      const tuple = { chainId: request.authorization.chainId, address: request.authorization.contractAddress, nonce: BigInt(request.authorization.nonce) };
+      let signature: string;
+      try { signature = await privy.signEvmAuthorization(request.address, { chainId: tuple.chainId, contractAddress: tuple.address, nonce: tuple.nonce }); }
+      catch (cause) { throw afterPrivy(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+      // Only this wallet's signature of exactly the approved tuple leaves this function.
+      try { erc4337.signedEip7702Authorization(tuple, signature, request.address); } catch { throw new Error('FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
       return { signature: signature.toLowerCase() };
     }
     case 'evm_sign_message': case 'solana_sign_message': {

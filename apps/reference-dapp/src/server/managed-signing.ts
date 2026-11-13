@@ -17,7 +17,9 @@
  * Nothing here signs, broadcasts or writes; claims (one signature and one broadcast per attempt) are the caller's.
  */
 import { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
-import { eip712, erc7710, parseRlpInteger, rlpBytes, rlpDecode, rlpList } from '@defi-workflow-engine/reference-compiler';
+import { circlePaymaster, eip712, erc4337, erc7710, parseRlpInteger, rlpBytes, rlpDecode, rlpList } from '@defi-workflow-engine/reference-compiler';
+import { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleUpgradeAuthorization, circleUserOpHash,
+  type CircleFacts } from '../user-funded/circle-facts.ts';
 import { isSigningFlow, SIGNING_FLOWS, type SigningContext, type SigningFlow, type SigningSummary } from '../wallet/flofi-signing.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry.ts';
 import type { JupiterRecord } from './jupiter-service.ts';
@@ -31,7 +33,9 @@ export type ManagedEvmTransaction = { readonly from: string; readonly to: string
 export type ManagedSigningRequest = { readonly ecosystem: 'evm'; readonly tx: ManagedEvmTransaction }
   | { readonly ecosystem: 'solana'; readonly message: Uint8Array; readonly chain?: 'solana:mainnet'; readonly address?: string }
   /** BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: `eth_signTypedData_v4` of a reviewed 0x Gasless attempt (its trade or its gasless approval). */
-  | { readonly ecosystem: 'evm-typed-data'; readonly address: string; readonly typedData: eip712.TypedData };
+  | { readonly ecosystem: 'evm-typed-data'; readonly address: string; readonly typedData: eip712.TypedData }
+  /** Owner requirement (FloFi Wallet + Circle): an EIP-7702 authorization tuple of a reviewed Circle-paid group's upgrade. */
+  | { readonly ecosystem: 'evm-authorization'; readonly address: string; readonly authorization: { readonly chainId: number; readonly contractAddress: string; readonly nonce: bigint } };
 export type ManagedSigningDeps = {
   /** The run as its own service's `status` returns it; throws (any error) when it cannot be read. */
   readonly load: (flow: SigningFlow, runId: string) => Promise<unknown>;
@@ -53,7 +57,9 @@ export type ManagedSigningMatch = { readonly summary: SigningSummary; readonly a
   /** EVM only: the attempt's chain and the exact fields FloFi will broadcast (the request's, after every check). */
   readonly evm?: { readonly chainId: number; readonly tx: ManagedEvmTransaction };
   /** Typed data only: the reviewed EIP-712 digest the signature must recover against (FloFi relays it itself, after verifying it again). */
-  readonly typedData?: { readonly digest: string; readonly kind: 'approval' | 'trade' } };
+  readonly typedData?: { readonly digest: string; readonly kind: 'approval' | 'trade' | 'permit' | 'operation' };
+  /** Owner requirement: the EIP-7702 authorization digest of a reviewed Circle upgrade (the signature must recover to the owner against it). */
+  readonly authorization?: { readonly digest: string } };
 export type ManagedSigningResult = { readonly ok: true; readonly value: ManagedSigningMatch } | { readonly ok: false; readonly code: string };
 
 /** The fee cap a provider-filled request may carry, as a multiple of the network's current suggestion. */
@@ -315,6 +321,83 @@ async function gaslessTypedData(flow: SigningFlow, runId: string, run: PublicRun
       action: kind === 'approval' ? 'Token approval (signature)' : 'Swap (signature)', owner, lines: summaryLines, expiresAt: new Date(expires).toISOString() } } };
 }
 
+// ── Owner requirement (FloFi Wallet + Circle): a user-funded workflow run's due Circle-paid group ──────────────────────────────────
+/** What the gate reads of a workflow run (`loadSigningRun` for the `*-circle-gas` flows): the run and its groups as the run store returns them. */
+export type CircleSigningRun = { readonly run: { readonly runId: string; readonly mode: string | null; readonly state: string; readonly currentStep: number };
+  readonly groups: readonly { readonly groupIndex: number; readonly chain: string; readonly feePayer: string; readonly strategy: string; readonly state: string;
+    readonly stepFrom: number; readonly stepTo: number; readonly validUntil: Date | string | null; readonly prepared: unknown }[] };
+const CIRCLE_NETWORKS: Readonly<Record<string, { readonly chainId: number; readonly network: string }>> = Object.freeze({
+  'base-circle-gas': { chainId: 8453, network: 'Base' }, 'arbitrum-circle-gas': { chainId: 42161, network: 'Arbitrum' }, 'ethereum-circle-gas': { chainId: 1, network: 'Ethereum' } });
+const isCircleFlow = (flow: SigningFlow) => Object.hasOwn(CIRCLE_NETWORKS, flow);
+/**
+ * A FloFi Wallet signature for the run's DUE Circle-paid group on this flow's network (PREPARED, still valid, its fee payer = the request's
+ * address = a managed wallet of this account), re-derived from the prepared group alone — never from the page:
+ *   authorization  stage AUTHORIZATION, the owner's consent recorded, exactly the recorded tuple (this chain, the pinned Simple7702Account v0.8,
+ *                  the recorded nonce), and that nonce still the account's pending one (FLOFI_WALLET_NONCE_MISMATCH otherwise: the account moved)
+ *   permit         stage PERMIT: exactly the USDC permit of the facts (spender = Circle's pinned paymaster, value = the reviewed cap)
+ *   operation      stage OPERATION: exactly the operation's typed data rebuilt from the facts
+ * Each is claimed once (its attempt id names the run, the group, the kind and what it binds). The summary is the Review's own words.
+ */
+async function circleGroupSigning(flow: SigningFlow, runId: string, loaded: CircleSigningRun, request: ManagedSigningRequest, deps: ManagedSigningDeps,
+  now: number): Promise<ManagedSigningResult> {
+  const network = CIRCLE_NETWORKS[flow]!, run = loaded.run;
+  if (request.ecosystem !== 'evm-authorization' && request.ecosystem !== 'evm-typed-data') return refuse(NO_MATCH);
+  if (run.runId !== runId || run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) return refuse(NO_MATCH);
+  const address = request.address.toLowerCase(), chain = `eip155:${network.chainId}`;
+  const due = loaded.groups.filter(g => g.chain === chain && g.state === 'PREPARED' && g.strategy === 'EVM_USER_OPERATION' && g.stepFrom <= run.currentStep
+    && run.currentStep <= g.stepTo && g.feePayer.toLowerCase() === address);
+  const g = due.length === 1 ? due[0]! : null;
+  const prepared = g?.prepared && typeof g.prepared === 'object' ? g.prepared as Readonly<Record<string, unknown>> : null;
+  const c: CircleFacts | null = circleFactsOf(prepared);
+  if (!g || !prepared || !c || Number(prepared.chainId) !== network.chainId || String(prepared.owner).toLowerCase() !== address) return refuse(NO_MATCH);
+  const expires = g.validUntil ? new Date(g.validUntil).getTime() : NaN;
+  if (!Number.isFinite(expires) || expires <= now) return refuse('FLOFI_WALLET_REVIEW_EXPIRED');
+  let kind: 'authorization' | 'permit' | 'operation', digest: string, bound: string;
+  if (request.ecosystem === 'evm-authorization') {
+    // The upgrade: only after the owner's consent in FloFi (Privy shows no confirmation screen for an authorization), only the recorded tuple.
+    if (c.stage !== 'AUTHORIZATION' || !c.upgrade) return refuse(NO_MATCH);
+    if (!c.upgrade.consentedAt) return refuse('FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED');
+    const tuple = circleUpgradeAuthorization(c), a = request.authorization;
+    if (a.chainId !== network.chainId || a.chainId !== tuple.chainId || a.contractAddress.toLowerCase() !== erc4337.SIMPLE_7702_ACCOUNT_V0_8
+      || tuple.address !== erc4337.SIMPLE_7702_ACCOUNT_V0_8 || a.nonce !== tuple.nonce) return refuse('FLOFI_WALLET_AUTHORIZATION_UNSUPPORTED');
+    if (!deps.pendingNonce) return refuse('FLOFI_WALLET_NETWORK_READ_FAILED');
+    let pending: bigint;
+    try { pending = await deps.pendingNonce(network.chainId, address); } catch { return refuse('FLOFI_WALLET_NETWORK_READ_FAILED'); }
+    if (pending !== tuple.nonce) return refuse('FLOFI_WALLET_NONCE_MISMATCH');
+    kind = 'authorization'; digest = erc4337.eip7702AuthorizationHash(tuple); bound = tuple.nonce.toString();
+  } else {
+    let requested: string;
+    try { requested = eip712.hashTypedData(request.typedData); } catch { return refuse('FLOFI_WALLET_TYPED_DATA_UNSUPPORTED'); }
+    const content = typedContent(request.typedData);
+    let expected: eip712.TypedData;
+    try {
+      expected = (c.stage === 'PERMIT' ? circlePaymaster.permitTypedData(circlePermitOf(c, network.chainId, address))
+        : c.stage === 'OPERATION' ? circleOperationTypedData(c, network.chainId, circleOperationOf(c, address)) : null) as unknown as eip712.TypedData;
+    } catch { return refuse(NO_MATCH); }
+    if (!expected || requested !== eip712.hashTypedData(expected) || content !== typedContent(expected)) return refuse(NO_MATCH);
+    kind = c.stage === 'PERMIT' ? 'permit' : 'operation'; digest = requested;
+    bound = kind === 'permit' ? c.permitNonce : circleUserOpHash(c, network.chainId, circleOperationOf(c, address));
+  }
+  if (!await deps.managed('evm', address)) return refuse(NO_MATCH);
+  const payment = circleGasPayment(c), fee = units(payment.maxFee.amount, payment.maxFee.decimals, 'USDC');
+  const summaryLines = kind === 'authorization' ? lines(
+    ['Upgrade', `This FloFi Wallet address on ${network.network} to a smart account (EIP-7702)`],
+    ['Why', 'So its network fee can be paid in USDC'],
+    ['What stays the same', 'Your address, balances and control'],
+    ['Smart account', `Open-source Simple7702Account ${short(erc4337.SIMPLE_7702_ACCOUNT_V0_8)}; stays until you replace it`],
+    ['Network fee', fee === null ? null : `At most ${fee}, paid from your USDC through Circle`])
+    : kind === 'permit' ? lines(['Approve', `${fee ?? '—'} for the network fee`], ['Spender', `Circle paymaster ${c.paymaster}`],
+      ['Network fee', fee === null ? null : `At most ${fee}, paid from your USDC through Circle`])
+    : lines(['Operation', `FloFi workflow steps on ${network.network}`], ['Network fee', fee === null ? null : `At most ${fee}, paid from your USDC through Circle`],
+      ['Account', c.upgrade ? 'Upgraded to a smart account in this operation' : 'Your smart account']);
+  if (!summaryLines) return refuse(NO_MATCH);
+  return { ok: true, value: { attempt: `${flow}:${runId}:g${g.groupIndex}:${kind}:${bound}`, owner: address, expiresAtMs: expires,
+    ...kind === 'authorization' ? { authorization: { digest } } : { typedData: { digest, kind } },
+    summary: { flow: flow as SigningSummary['flow'], runId, network: network.network, chain, realFunds: true,
+      action: kind === 'authorization' ? 'Smart account upgrade (signature)' : kind === 'permit' ? 'USDC permit for the network fee (signature)' : 'Workflow operation (signature)',
+      owner: address, lines: summaryLines, expiresAt: new Date(expires).toISOString() } } };
+}
+
 /**
  * The reviewed attempt `request` may be signed for, or the refusal. Unsupported flows are refused by name; every mismatch, foreign owner,
  * stale or already-signed attempt is `FLOFI_WALLET_NO_MATCHING_REVIEW` (the caller learns nothing about other runs).
@@ -322,13 +405,15 @@ async function gaslessTypedData(flow: SigningFlow, runId: string, run: PublicRun
 export async function resolveManagedSigning(context: SigningContext, request: ManagedSigningRequest, deps: ManagedSigningDeps): Promise<ManagedSigningResult> {
   const { flow, runId } = context;
   if (!isSigningFlow(flow)) return refuse('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
-  const ecosystem = request.ecosystem === 'evm-typed-data' ? 'evm' : request.ecosystem;
+  const ecosystem = request.ecosystem === 'evm-typed-data' || request.ecosystem === 'evm-authorization' ? 'evm' : request.ecosystem;
   if (!SIGNING_FLOWS[flow].run.test(runId) || SIGNING_FLOWS[flow].ecosystem !== ecosystem) return refuse(NO_MATCH);
   let loaded: unknown;
   try { loaded = await deps.load(flow, runId); } catch { return refuse('FLOFI_WALLET_REVIEW_UNAVAILABLE'); }
   const run = record(loaded), now = (deps.now ?? Date.now)();
   if (!run) return refuse(NO_MATCH);
   try {
+    if (isCircleFlow(flow)) return await circleGroupSigning(flow, runId, run as unknown as CircleSigningRun, request, deps, now);
+    if (request.ecosystem === 'evm-authorization') return refuse(NO_MATCH);
     if (flow === 'jupiter-swap') return await solanaSwap(flow, runId, run as unknown as JupiterRecord, request, deps, now);
     if (flow === 'solana-transfer') return await solanaTransfer(flow, runId, run as unknown as SolanaTransferRecord, request, deps, now);
     if (flow.endsWith('-mainnet-transfer')) return await evmTransfer(flow, runId, run as unknown as TransferRecord, request, deps, now);
@@ -371,6 +456,13 @@ export function parseSigningRequest(value: unknown): { readonly context: Signing
     if (!typed || !ADDRESS.test(address) || Object.keys(typed).length !== 4 || !record(typed.types) || !record(typed.domain) || !record(typed.message)
       || typeof typed.primaryType !== 'string' || JSON.stringify(typed).length > 65_536) return null;
     return { context, request: { ecosystem: 'evm-typed-data', address, typedData: typed as unknown as eip712.TypedData } };
+  }
+  if (r.op === 'evm_sign_authorization' && Object.keys(r).length === 5) {
+    const a = record(r.authorization), address = typeof r.address === 'string' ? r.address.toLowerCase() : '';
+    if (!a || Object.keys(a).length !== 3 || !ADDRESS.test(address) || typeof a.chainId !== 'number' || !Number.isSafeInteger(a.chainId) || a.chainId <= 0
+      || typeof a.contractAddress !== 'string' || !ADDRESS.test(a.contractAddress.toLowerCase()) || typeof a.nonce !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(a.nonce)
+      || BigInt(a.nonce) >= 1n << 64n) return null;
+    return { context, request: { ecosystem: 'evm-authorization', address, authorization: { chainId: a.chainId, contractAddress: a.contractAddress.toLowerCase(), nonce: BigInt(a.nonce) } } };
   }
   if (r.op === 'solana_sign_transaction' && Object.keys(r).length === 6 && r.chain === 'solana:mainnet'
     && typeof r.address === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.address)) {

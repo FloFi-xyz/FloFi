@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { PrivyProvider, useCreateWallet, useExportWallet, useImportWallet, useLogin, useLoginWithEmail, useLoginWithOAuth, useLogout, usePrivy,
-  useSignMessage, useSignTransaction, useSignTypedData, useWallets as useEvmWallets, type PrivyClientConfig, type User } from '@privy-io/react-auth';
+  useSign7702Authorization, useSignMessage, useSignTransaction, useSignTypedData, useWallets as useEvmWallets, type PrivyClientConfig, type User } from '@privy-io/react-auth';
 import { defaultSolanaRpcsPlugin, toSolanaWalletConnectors, useCreateWallet as useCreateSolanaWallet, useExportWallet as useExportSolanaWallet,
   useImportWallet as useImportSolanaWallet, useSignMessage as useSignSolanaMessage, useSignTransaction as useSignSolanaTransaction,
   useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
@@ -103,6 +103,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   const { signTransaction: signEvm } = useSignTransaction();
   const { signMessage: signEvmText } = useSignMessage();
   const { signTypedData: signEvmTyped } = useSignTypedData();
+  const { signAuthorization: signEvm7702 } = useSign7702Authorization();
   const { signTransaction: signSolana } = useSignSolanaTransaction();
   const { signMessage: signSolanaText } = useSignSolanaMessage();
   // Privy's own wallet readiness (issue #149): the EVM embedded wallet's frame and the Solana wallet objects load after `usePrivy().ready`.
@@ -155,6 +156,18 @@ function PrivyBridge({ children }: { children: ReactNode }) {
         const input = { types: typedData.types, domain: typedData.domain, primaryType: typedData.primaryType, message: typedData.message } as unknown as Parameters<typeof signEvmTyped>[0];
         return (await signEvmTyped(input, { address, uiOptions: uiOptions(review) })).signature;
       }, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
+      signEvmAuthorization: (address, authorization) => wrap(async () => {
+        own('evm', address);
+        // Privy's nonce is a JS number: only a tuple it can carry exactly is asked (FloFi's server bound it to the account's nonce).
+        if (authorization.nonce > BigInt(Number.MAX_SAFE_INTEGER) || authorization.chainId <= 0) fail('FLOFI_WALLET_AUTHORIZATION_UNSUPPORTED');
+        const signed = await signEvm7702({ contractAddress: authorization.contractAddress as `0x${string}`, chainId: authorization.chainId,
+          nonce: Number(authorization.nonce) }, { address });
+        // Exactly the tuple asked for (Privy fills nothing else): another chain, contract or nonce is never returned as this signature.
+        if (signed.chainId !== authorization.chainId || String(signed.address).toLowerCase() !== authorization.contractAddress.toLowerCase()
+          || BigInt(signed.nonce) !== authorization.nonce || (signed.yParity !== 0 && signed.yParity !== 1)) fail('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+        const word = (v: string) => /^0x[0-9a-fA-F]{1,64}$/.test(v) ? v.slice(2).toLowerCase().padStart(64, '0') : fail('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+        return `0x${word(signed.r)}${word(signed.s)}${(signed.yParity + 27).toString(16)}`;
+      }, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       signSolanaTransaction: (address, transaction, review) => wrap(async () => {
         own('solana', address);
         return (await signSolana({ transaction, wallet: solanaWallet(address), chain: 'solana:mainnet', options: { uiOptions: uiOptions(review) } })).signedTransaction;
@@ -163,7 +176,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
         'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       logout: () => logout().catch(() => undefined),
     };
-  }, [privy, oauth, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signEvmTyped, signSolana,
+  }, [privy, oauth, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signEvmTyped, signEvm7702, signSolana,
     signSolanaText, solanaWallet, solanaWallets, solanaReady, evmWalletsReady]);
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
@@ -173,9 +186,11 @@ function PrivyBridge({ children }: { children: ReactNode }) {
  * only when the server itself runs in MOCKED loopback mode (`FLOFI_PRIVY_E2E`, refused on every hosted deployment) and the page is served
  * from a loopback host; otherwise there is no Privy at all (fail closed). The implementation lives in the test harness, not in FloFi.
  */
-export type PrivyDriver = Omit<FloFiPrivy, 'ready' | 'authenticated' | 'userId' | 'embedded' | 'canSign' | 'signEvmTypedData'> & {
+export type PrivyDriver = Omit<FloFiPrivy, 'ready' | 'authenticated' | 'userId' | 'embedded' | 'canSign' | 'signEvmTypedData' | 'signEvmAuthorization'> & {
   /** BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: optional in the stand-in; without it typed data is refused (nothing is signed). */
   readonly signEvmTypedData?: FloFiPrivy['signEvmTypedData'];
+  /** Owner requirement (FloFi Wallet + Circle): optional in the stand-in; without it an authorization is refused (nothing is signed). */
+  readonly signEvmAuthorization?: FloFiPrivy['signEvmAuthorization'];
   readonly snapshot: () => { readonly ready: boolean; readonly authenticated: boolean; readonly userId: string | null; readonly embedded: readonly PrivyEmbedded[] };
   readonly subscribe: (listener: () => void) => () => void;
   /** Test only: receives FloFi's own signing request function (src/wallet/flofi-privy-signer.ts). */
@@ -206,6 +221,7 @@ const PENDING: FloFiPrivy = Object.freeze({
   signEvmTransaction: async () => fail('PRIVY_UNAVAILABLE'),
   signEvmMessage: async () => fail('PRIVY_UNAVAILABLE'),
   signEvmTypedData: async () => fail('PRIVY_UNAVAILABLE'),
+  signEvmAuthorization: async () => fail('PRIVY_UNAVAILABLE'),
   signSolanaTransaction: async () => fail('PRIVY_UNAVAILABLE'),
   signSolanaMessage: async () => fail('PRIVY_UNAVAILABLE'),
   logout: async () => undefined,
@@ -233,6 +249,7 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
       importWallet: wrap(driver.importWallet, 'PRIVY_WALLET_IMPORT_FAILED'), exportWallet: wrap(driver.exportWallet, 'PRIVY_WALLET_EXPORT_FAILED'),
       signEvmTransaction: wrap(driver.signEvmTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signEvmMessage: wrap(driver.signEvmMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       signEvmTypedData: driver.signEvmTypedData ? wrap(driver.signEvmTypedData, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') : async () => fail('PRIVY_UNAVAILABLE'),
+      signEvmAuthorization: driver.signEvmAuthorization ? wrap(driver.signEvmAuthorization, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') : async () => fail('PRIVY_UNAVAILABLE'),
       signSolanaTransaction: wrap(driver.signSolanaTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signSolanaMessage: wrap(driver.signSolanaMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') };
   }, [driver, snapshot]);
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;

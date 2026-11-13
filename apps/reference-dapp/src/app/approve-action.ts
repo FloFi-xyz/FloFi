@@ -21,7 +21,7 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPermit, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
+import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -181,6 +181,23 @@ export async function prepareUserFundedGroup(approvalId: string, groupIndex: num
 export async function permitUserFundedGroup(approvalId: string, groupIndex: number, permitSignature: string): Promise<Result<PreparedGroupView>> {
   return withFlightAccess(async () => {
   return runAction((s, w) => workflowRunUserFundedPermit(s, approvalId, w, groupIndex, permitSignature));
+
+  });
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner agreed, in FloFi's own Review, to upgrade this FloFi Wallet address to a smart account inside
+ * the group's Circle-paid operation. Recorded before FloFi Wallet is asked anything (its signing gate refuses the authorization without it).
+ */
+export async function consentUserFundedGroupUpgrade(approvalId: string, groupIndex: number): Promise<Result<PreparedGroupView>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedConsent(s, approvalId, w, groupIndex));
+
+  });
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner's EIP-7702 upgrade authorization; returns the group at its USDC permit stage. */
+export async function upgradeUserFundedGroup(approvalId: string, groupIndex: number, signature: string): Promise<Result<PreparedGroupView>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedUpgrade(s, approvalId, w, groupIndex, signature));
 
   });
 }

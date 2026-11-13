@@ -18,7 +18,7 @@
  *                 `maxFeePerGas`) priced in USDC from FloFi's verified price source, plus Circle's surcharge and FloFi's disclosed margin.
  */
 import { abiDecode, abiEncode, bytesOf, EIP712_DOMAIN_TYPEHASH, evmAddress, hexOf, keccakHex, recoverDigestSigner, selectorOf } from './erc7710.js';
-import { decodeOwnerAccountCallData, ENTRY_POINT_V0_7, ENTRY_POINT_V0_8, maxSponsoredCost, OWNER_ACCOUNT_KINDS, unpackPaymasterAndData, userOperationGas,
+import { decodeOwnerAccountCallData, EIP7702_INIT_CODE_MARKER, ENTRY_POINT_V0_7, ENTRY_POINT_V0_8, maxSponsoredCost, OWNER_ACCOUNT_KINDS, unpackPaymasterAndData, userOperationGas,
   type OwnerAccountKind, type PackedUserOperation, type UserOperationGas } from './erc4337.js';
 
 function fail(code: string): never { throw new Error(code); }
@@ -171,12 +171,18 @@ export function circlePaymasterAndData(input: { readonly paymaster: string; read
 // ── The operation check (before the owner signs it, and again before it is relayed) ──────────────────────────────────────────
 export type CircleOperationExpectation = { readonly chainId: number; readonly entryPoint: string; readonly owner: string; readonly accountKind: OwnerAccountKind;
   /** The cap the owner reviewed (the permit's value). */ readonly permitCap: bigint;
-  /** The owner's USDC permit nonce the permit was signed for. */ readonly permitNonce: bigint };
+  /** The owner's USDC permit nonce the permit was signed for. */ readonly permitNonce: bigint;
+  /**
+   * Owner requirement (FloFi Wallet): the operation upgrades the owner's plain account to `Simple7702Account` v0.8 inside itself (the EIP-7702
+   * initCode marker; the owner's own signed authorization travels beside it to the bundler). Absent: no initCode at all.
+   */
+  readonly eip7702Upgrade?: boolean };
 /**
- * Refuses any operation that is not exactly a Circle-paid operation of the owner's own account: sender = owner; no initCode (FloFi never sends an
- * EIP-7702 authorization); the account kind's EntryPoint; `paymasterAndData` naming the paymaster pinned for this chain and EntryPoint, with
- * bounded paymaster gas; mode 0; token = the pinned USDC; permitAmount = the reviewed cap; a 65-byte permit signature recovering to the owner
- * over the pinned domain, spender = the paymaster, the signed nonce and the never-expiring deadline; sane fees; account call data FloFi can read.
+ * Refuses any operation that is not exactly a Circle-paid operation of the owner's own account: sender = owner; no initCode (or, for an upgrade the
+ * owner authorized, exactly the EIP-7702 marker of a `Simple7702Account` v0.8 account); the account kind's EntryPoint; `paymasterAndData`
+ * naming the paymaster pinned for this chain and EntryPoint, with bounded paymaster gas; mode 0; token = the pinned USDC; permitAmount = the
+ * reviewed cap; a 65-byte permit signature recovering to the owner over the pinned domain, spender = the paymaster, the signed nonce and the
+ * never-expiring deadline; sane fees; account call data FloFi can read.
  * Returns the decoded parts.
  */
 export function assertCirclePaymasterOperation(op: PackedUserOperation, x: CircleOperationExpectation): {
@@ -184,7 +190,9 @@ export function assertCirclePaymasterOperation(op: PackedUserOperation, x: Circl
   const pins = circlePinsOf(x.chainId) ?? fail('CIRCLE_CHAIN_UNSUPPORTED');
   const owner = evmAddress(x.owner), entryPoint = evmAddress(x.entryPoint);
   if (evmAddress(op.sender) !== owner) fail('CIRCLE_OPERATION_SENDER_INVALID');
-  if (typeof op.initCode !== 'string' || op.initCode.toLowerCase() !== '0x') fail('ERC4337_INIT_CODE_REFUSED');
+  // FloFi never sends an initCode of its own: only the EIP-7702 marker of an upgrade the owner explicitly authorized, to the pinned v0.8 delegate.
+  const initCode = typeof op.initCode === 'string' ? op.initCode.toLowerCase() : null;
+  if (x.eip7702Upgrade === true ? initCode !== EIP7702_INIT_CODE_MARKER || x.accountKind !== 'SIMPLE_7702_V0_8' : initCode !== '0x') fail('ERC4337_INIT_CODE_REFUSED');
   if (OWNER_ACCOUNT_KINDS[x.accountKind]?.entryPoint !== entryPoint) fail('CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED');
   const pinned = circlePaymasterOf(x.chainId, entryPoint) ?? fail('CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED');
   let pm: ReturnType<typeof unpackPaymasterAndData>;

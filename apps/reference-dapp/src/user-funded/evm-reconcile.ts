@@ -236,8 +236,12 @@ function reconcileSponsoredBatch(group: EvmGroupCalls, r: EvmReceipt, fromBlock:
       logs: own.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) }] };
 }
 
-/** ADR-0010: a Circle-paid operation's reconciliation facts (from its prepared artifact): its EntryPoint, the pinned paymaster, USDC and the cap. */
-export type CircleReconciliation = { readonly entryPoint: string; readonly paymaster: string; readonly usdc: string; readonly cap: bigint };
+/**
+ * ADR-0010: a Circle-paid operation's reconciliation facts (from its prepared artifact): its EntryPoint, the pinned paymaster, USDC and the cap.
+ * `delegate` (owner requirement: FloFi Wallet's first use): the operation carried the owner's EIP-7702 upgrade, so the account's code at the
+ * operation's block must be exactly `0xef0100 ‖ delegate` (the pinned Simple7702Account v0.8).
+ */
+export type CircleReconciliation = { readonly entryPoint: string; readonly paymaster: string; readonly usdc: string; readonly cap: bigint; readonly delegate?: string };
 /**
  * The USDC the owner paid Circle for one operation, from the receipt alone: owner↔paymaster USDC transfers in the bundle's validation phase (before
  * the EntryPoint's `BeforeExecution`) and in the operation's own segment. Returns the fee and the segment's other logs (the step legs).
@@ -277,6 +281,15 @@ export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupC
   const own = operationLogs(logs, eventIndex(logs, userOpHash, entryPoint), entryPoint);
   const fee = circle ? circleFeeOf(logs, own, group.owner.toLowerCase(), circle) : null;
   if (fee && !fee.ok) return { status: 'MISMATCH', code: fee.code, gasPaid: null, transactions: [transactionHash] };
+  // Owner requirement: an upgrade landed exactly to the pinned delegate (its EntryPoint validated the operation through it, so anything else is a
+  // contradiction FloFi never reconciles). Read at the operation's own block; an unreadable answer decides nothing yet.
+  if (circle?.delegate) {
+    let code: unknown;
+    try { code = await t.rpc('eth_getCode', [group.owner, typeof r.blockNumber === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(r.blockNumber) ? r.blockNumber : 'latest']); }
+    catch { return { status: 'PENDING' }; }
+    if (String(code).toLowerCase() !== '0xef0100' + circle.delegate.toLowerCase().slice(2))
+      return { status: 'MISMATCH', code: 'CIRCLE_DELEGATION_NOT_LANDED', gasPaid: null, transactions: [transactionHash] };
+  }
   const gasPaid: GasPaidFact = circle && fee?.ok ? { payer: circle.paymaster.toLowerCase(), amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT',
     paidInToken: { mechanism: 'CIRCLE_USDC_PAYMASTER', token: circle.usdc.toLowerCase(), symbol: 'USDC', decimals: 6, amount: fee.paid.toString(), payee: circle.paymaster.toLowerCase() } }
     : { payer: group.owner, amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT' };

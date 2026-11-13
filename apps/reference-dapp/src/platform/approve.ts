@@ -21,7 +21,8 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
-  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedPermitSequential, userFundedPrepareSequential,
+  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedConsentSequential, userFundedPermitSequential,
+  userFundedPrepareSequential, userFundedUpgradeSequential,
   userFundedReportSequential, userFundedStartSequential } from './workflow-run-approvals.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
@@ -308,6 +309,20 @@ export async function workflowRunUserFundedPermit(surface: ApprovalSurface, appr
   const c = await runContext(surface, approvalId, wallets);
   if (typeof permitSignature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(permitSignature)) return refuse('CIRCLE_PERMIT_INVALID');
   return userFundedPermitSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), permitSignature);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner's explicit consent, in FloFi, to upgrade this FloFi Wallet address to the pinned
+ * Simple7702Account v0.8 inside the group's Circle-paid operation (recorded before the wallet is asked; nothing is signed or sent).
+ */
+export async function workflowRunUserFundedConsent(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedConsentSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex));
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner's EIP-7702 upgrade authorization, verified against what FloFi prepared. */
+export async function workflowRunUserFundedUpgrade(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, signature: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return refuse('CIRCLE_AUTHORIZATION_INVALID');
+  return userFundedUpgradeSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), signature);
 }
 /** The owner's wallet answer for one prepared group, verified against what FloFi prepared. */
 export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, answer: unknown): Promise<ClaimedProposal> {

@@ -13,13 +13,14 @@
  * every wallet signature and confirmation stays the owner's own, and FloFi re-verifies each of them on the server.
  */
 import { useEffect, useRef, useState } from 'react';
-import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup,
+import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, consentUserFundedGroupUpgrade, continueWorkflowRunHandoff, permitUserFundedGroup,
+  prepareUserFundedGroup, upgradeUserFundedGroup,
   reportUserFundedBatch, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
   signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
-import { CIRCLE_NOTHING_SENT, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
+import { CIRCLE_NOTHING_SENT, CIRCLE_UPGRADE_CONSENT, CIRCLE_UPGRADE_SIGNATURES, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -269,7 +270,13 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     if (isCirclePaid(p)) {
       // ADR-0010: the fee is paid from the owner's USDC through Circle — the permit, then the operation, each checked by this page first.
-      const signature = await signCirclePaidGroup(prepared.value.feePayer, p, permit => permitUserFundedGroup(approvalId, index, permit));
+      // Owner requirement (FloFi Wallet + Circle): FloFi Wallet signs bound to this run; on its first use, FloFi's own consent comes first (a
+      // separate, explicit confirmation: Privy shows none for the EIP-7702 upgrade) — declined, nothing is signed or sent.
+      const network = (chainId: number) => chainId === 1 ? 'Ethereum' : chainId === 8453 ? 'Base' : chainId === 42161 ? 'Arbitrum One' : `eip155:${chainId}`;
+      const signature = await signCirclePaidGroup(prepared.value.feePayer, p, permit => permitUserFundedGroup(approvalId, index, permit),
+        { runId: run.workflowRunId, consent: async upgrade => window.confirm(`${tr(CIRCLE_UPGRADE_CONSENT, tr(network(upgrade.chainId)))}\n\n${tr(CIRCLE_UPGRADE_SIGNATURES)}`),
+          recordConsent: () => consentUserFundedGroupUpgrade(approvalId, index), upgrade: signed => upgradeUserFundedGroup(approvalId, index, signed) },
+        { runId: run.workflowRunId });
       return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
     }
     if (p.kind === 'EVM_USER_OPERATION') {

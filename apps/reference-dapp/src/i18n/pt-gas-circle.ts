@@ -99,4 +99,24 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
     'A FloFi não enviou este pedido depois que o prazo dele terminou (ele apenas falharia e ainda custaria a taxa de rede em USDC). Ele não foi executado e nenhuma taxa de rede foi cobrada.',
   'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.':
     'O serviço que encaminha este pedido não aceita esta versão de conta inteligente nesta rede, então nada foi enviado. Carregue o pedido de novo para ver como a taxa de rede pode ser paga.',
+  // Owner requirement (FloFi Wallet + Circle): the EIP-7702 upgrade inside the first Circle-paid operation.
+  'Upgrade this FloFi Wallet address on {0} to a smart account so its network fee can be paid in USDC. Your address, balances and control do not change. The upgrade uses EIP-7702 with the open-source Simple7702Account contract and stays until you replace it.':
+    'Atualizar este endereço da FloFi Wallet na {0} para uma conta inteligente, para que a taxa de rede possa ser paga em USDC. Seu endereço, seus saldos e o seu controle não mudam. A atualização usa EIP-7702 com o contrato de código aberto Simple7702Account e permanece até que você a substitua.',
+  'Agree and upgrade': 'Concordar e atualizar',
+  'Not now': 'Agora não',
+  'Three signatures this time: the smart-account upgrade, a USDC permit for the fee, then the operation. Two from then on.':
+    'Três assinaturas desta vez: a atualização da conta inteligente, uma permissão de USDC para a taxa e, depois, a operação. Duas a partir daí.',
+  'this wallet has a transaction still pending on this network': 'esta carteira tem uma transação ainda pendente nesta rede',
+  'You did not agree to the smart-account upgrade, so nothing was signed or sent. Add ETH on this network to pay the network fee instead.':
+    'Você não concordou com a atualização da conta inteligente, então nada foi assinado nem enviado. Adicione ETH nesta rede para pagar a taxa de rede.',
+  'Agree to the smart-account upgrade first. Nothing was signed or sent.': 'Concorde primeiro com a atualização da conta inteligente. Nada foi assinado nem enviado.',
+  'The smart-account upgrade signature could not be verified, so nothing was sent. Try again.':
+    'Não foi possível verificar a assinatura da atualização da conta inteligente, então nada foi enviado. Tente de novo.',
+  'This wallet changed since your review (another transaction or upgrade), so the upgrade was not used and nothing was sent. Load the request again.':
+    'Esta carteira mudou desde a sua revisão (outra transação ou atualização), então a atualização não foi usada e nada foi enviado. Carregue o pedido de novo.',
+  'This request has no smart-account upgrade to agree to. Nothing was signed or sent.': 'Este pedido não tem atualização de conta inteligente para concordar. Nada foi assinado nem enviado.',
+  'FloFi Wallet signs an account upgrade only after you agree to it in FloFi. Nothing was signed.':
+    'A FloFi Wallet assina uma atualização de conta apenas depois que você concorda com ela na FloFi. Nada foi assinado.',
+  'FloFi Wallet signs an account upgrade only for the smart account and network you reviewed in FloFi. Nothing was signed.':
+    'A FloFi Wallet assina uma atualização de conta apenas para a conta inteligente e a rede que você revisou na FloFi. Nada foi assinado.',
 };
