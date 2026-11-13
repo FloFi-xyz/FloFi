@@ -18,7 +18,10 @@ export type ReviewBlockView = {
    * A request whose fee FloFi must sponsor (REQUIRED) is not counted; an OFFERED one is.
    */
   readonly fee: ReviewBlockText | null;
-  /** One sentence per token approval in the prepared request ("Uniswap uses up to 2 USDC"); a fallback sentence when none is known. */
+  /**
+   * One sentence per token approval in the prepared request ("Uniswap uses up to 2 USDC") and per USDC permit a Circle-paid request asks (ADR-0010:
+   * Circle's paymaster may take up to its cap); a fallback sentence when none is known.
+   */
   readonly permissions: readonly ReviewBlockText[];
   readonly walletRequests: ReviewBlockText;
   /** A one-time account change inside a wallet confirmation (EIP-7702 smart-account upgrade), or null. */
@@ -119,7 +122,12 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   const laterGroups = prepared.length < review.groups.length;
   // An approval this view cannot word (no planned spend) is never hidden behind "no new permission" (fails closed).
   const unworded = approving.length > permissions.length ? [text('A token approval is in this request (see Technical details)')] : [];
-  const permissionLines = permissions.length || unworded.length ? [...permissions, ...unworded, ...laterGroups ? [text('Later steps ask when they are due')] : []]
+  // Review UX3 (ADR-0010 §3): a Circle-paid request's USDC permit is a token permission the owner signs (a signature, not a call of the batch):
+  // Circle's paymaster may take up to the cap, and what is left stays approved until the owner's next USDC permit — said visibly, never "none".
+  const circlePermits = circle.map(g => text('Circle\'s paymaster may take up to {0} for the network fee; what is left stays approved until your next USDC permit',
+    [`${shortDecimal(g.gasPayment!.permitCap, 6, 'up')} USDC`]));
+  const permissionLines = permissions.length || unworded.length || circlePermits.length
+    ? [...permissions, ...unworded, ...circlePermits, ...laterGroups ? [text('Later steps ask when they are due')] : []]
     : [text(laterGroups ? 'Asked when each step is due' : 'No new token permission')];
   const counts = review.counts;
   return { steps: review.steps.map(stepLine), minimum, fee, permissions: permissionLines,

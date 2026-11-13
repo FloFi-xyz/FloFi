@@ -19,6 +19,9 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
     '{0} + {1} — paga com seu USDC pela Circle + os pedidos seguintes, cotados quando chegar a vez deles',
   'The network fee is paid from your USDC through Circle. FloFi never signs or sends for you.':
     'A taxa de rede é paga com seu USDC pela Circle. A FloFi nunca assina nem envia por você.',
+  // Review UX3: the visible "Token permission" line of a Circle-paid request (its USDC permit).
+  'Circle\'s paymaster may take up to {0} for the network fee; what is left stays approved until your next USDC permit':
+    'O paymaster da Circle pode cobrar até {0} pela taxa de rede; o que sobrar continua aprovado até a sua próxima permissão de USDC',
   // Technical details (collapsed).
   'Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}': 'Paymaster da Circle {0} · EntryPoint {1} · limite da permissão de USDC {2}',
   'What is left of the permit cap stays approved to Circle\'s paymaster until your next USDC permit replaces it.':
@@ -59,8 +62,30 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'The network fee of this request could not be bounded, so nothing was sent. Try again.':
     'Não foi possível limitar a taxa de rede deste pedido, então nada foi enviado. Tente de novo.',
   'The prepared request did not match what you approved, so nothing was sent.': 'O pedido preparado não correspondia ao que você aprovou, então nada foi enviado.',
-  'Who pays the network fee changed since your review (ETH arrived in or left this wallet). Nothing was sent; review again.':
-    'Quem paga a taxa de rede mudou desde a sua revisão (chegou ou saiu ETH desta carteira). Nada foi enviado; revise de novo.',
+  'How the network fee is paid changed since it was shown to you: your ETH on this network now covers it, or no longer does. Nothing was sent. Authorize again to see the request with the fee as it is paid now.':
+    'A forma de pagar a taxa de rede mudou desde que ela foi mostrada a você: o seu ETH nesta rede agora a cobre, ou deixou de cobrir. Nada foi enviado. Autorize de novo para ver o pedido com a taxa como ela é paga agora.',
+  // Review UX1: the Editor's Review bound the mechanism; the way forward is to end the run and review again (and the button that does it).
+  'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was sent. End this workflow and review it again to see how the fee is paid now.':
+    'A forma de pagar a taxa de rede mudou desde a sua revisão: o seu ETH nesta rede agora a cobre, ou deixou de cobrir. Nada foi enviado. Encerre este fluxo e revise-o de novo para ver como a taxa é paga agora.',
+  'End and review again': 'Encerrar e revisar de novo',
+  // Review UX1: the USDC cap rose since the Review (CIRCLE_FEE_CAP_ROSE_CONFIRM): shown and confirmed before the wallet is asked.
+  'Network fee, at most {0} — paid from your USDC through Circle (reviewed {1}: the network fee or the ETH price moved since your review)':
+    'Taxa de rede, no máximo {0} — paga com seu USDC pela Circle (revisado: {1}; a taxa de rede ou o preço do ETH mudou desde a sua revisão)',
+  'Prices moved since your review. Confirm what your wallet will be asked:': 'Os preços mudaram desde a sua revisão. Confirme o que será pedido à sua carteira:',
+  // Review UX4: the two Circle signatures, one at a time (never the batch calls).
+  'EXECUTION · SIGNATURE {0} OF {1}': 'EXECUÇÃO · ASSINATURA {0} DE {1}',
+  'Signature 1 of 2: USDC permit, at most {0}. It lets Circle\'s paymaster take the network fee from your USDC.':
+    'Assinatura 1 de 2: permissão de USDC, no máximo {0}. Ela permite que o paymaster da Circle cobre a taxa de rede do seu USDC.',
+  'Signature 2 of 2: the operation. Your wallet shows it as typed data; FloFi relays it, and Circle\'s paymaster takes the network fee from your USDC.':
+    'Assinatura 2 de 2: a operação. A sua carteira a mostra como dados tipados; a FloFi a encaminha, e o paymaster da Circle cobra a taxa de rede do seu USDC.',
+  'Sign the USDC permit in your wallet. It sends no transaction.': 'Assine a permissão de USDC na sua carteira. Ela não envia nenhuma transação.',
+  'Sign the operation in your wallet. It sends no transaction: FloFi relays it.': 'Assine a operação na sua carteira. Ela não envia nenhuma transação: a FloFi a encaminha.',
+  // Review UX7: a Circle-paid group is one operation and two signatures, never "one wallet confirmation" or "one per group".
+  '{0} calls in the operation ({1} token approvals)': '{0} chamadas na operação ({1} aprovações de token)',
+  'All {0} steps run as ONE operation on {1} from your own account: two signatures in your wallet (a USDC permit for the network fee, then the operation), then FloFi relays it and Circle\'s paymaster takes the network fee from your USDC.':
+    'As {0} etapas rodam como UMA operação em {1} da sua própria conta: duas assinaturas na sua carteira (uma permissão de USDC para a taxa de rede e, depois, a operação); então a FloFi a encaminha e o paymaster da Circle cobra a taxa de rede do seu USDC.',
+  'All {0} steps run in {2} wallet requests: a group whose network fee is paid from your USDC through Circle asks for two signatures (a USDC permit, then the operation); a later group is asked when it becomes due.':
+    'As {0} etapas rodam com {2} pedidos à carteira: um grupo cuja taxa de rede é paga com seu USDC pela Circle pede duas assinaturas (uma permissão de USDC e, depois, a operação); um grupo posterior é pedido quando chegar a vez dele.',
   'FloFi did not send this request after its time window ended (it would only have failed and still cost you the network fee in USDC). It did not execute, and no network fee was taken.':
     'A FloFi não enviou este pedido depois que o prazo dele terminou (ele apenas falharia e ainda custaria a taxa de rede em USDC). Ele não foi executado e nenhuma taxa de rede foi cobrada.',
   'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.':

@@ -53,10 +53,30 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   CIRCLE_INSUFFICIENT_USDC: 'This wallet does not hold enough USDC for the steps and the network fee. Nothing was sent.',
   CIRCLE_PAYMASTER_GAS_INVALID: 'The network fee of this request could not be bounded, so nothing was sent. Try again.',
   CIRCLE_OPERATION_INVALID: 'The prepared request did not match what you approved, so nothing was sent.',
-  GAS_MECHANISM_CHANGED_REVIEW_REQUIRED: 'Who pays the network fee changed since your review (ETH arrived in or left this wallet). Nothing was sent; review again.',
+  // The server refused the authorization: the preparation expired and the group is planned again, so authorizing again prepares it with the fee
+  // as it is paid now (shown before the wallet is asked). The Editor, whose whole-workflow Review bound the mechanism, words its own path.
+  GAS_MECHANISM_CHANGED_REVIEW_REQUIRED: 'How the network fee is paid changed since it was shown to you: your ETH on this network now covers it, or no longer does. Nothing was sent. Authorize again to see the request with the fee as it is paid now.',
   // Review C2: never (re)sent at or after its calls' deadline minus a margin; review C3: a bundler that cannot carry the account's operation.
   CIRCLE_OPERATION_DEADLINE_PASSED: 'FloFi did not send this request after its time window ended (it would only have failed and still cost you the network fee in USDC). It did not execute, and no network fee was taken.',
   USER_OPERATION_ENTRY_POINT_UNSUPPORTED: 'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.',
+};
+/**
+ * Review UX1: the Editor's whole-workflow Review bound who pays group 1's network fee (ETH, or USDC through Circle). The run prepared it with the
+ * other mechanism (the owner's ETH now covers the fee, or no longer does): nothing switches silently, and this run cannot be reviewed again in
+ * place, so the way forward is to end it (nothing of it was signed) and review the workflow again.
+ */
+export const EDITOR_MECHANISM_CHANGED = 'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was sent. End this workflow and review it again to see how the fee is paid now.';
+/**
+ * Review UX1: the USDC cap of a Circle-paid request rose above the one the owner accepted (both are computed from the live gas price and the
+ * verified ETH/USD price, so any upward move between Review and Authorize raises it). Never a refusal and never applied silently: the new cap is
+ * shown beside the reviewed one and the owner confirms it before the wallet is asked (the Editor's confirm-update step, like a lower minimum).
+ * A cap at or below the accepted one needs no confirmation (the owner pays at most what they accepted).
+ */
+export const CIRCLE_FEE_CAP_ROSE_CONFIRM = 'CIRCLE_FEE_CAP_ROSE_CONFIRM';
+/** The confirm-update line of a Circle fee: {0} the new cap, {1} the reviewed one (rose), or the cap alone when this tab never showed one. */
+export const CIRCLE_FEE_CONFIRM: Readonly<Record<'ROSE' | 'NEW', string>> = {
+  ROSE: 'Network fee, at most {0} — paid from your USDC through Circle (reviewed {1}: the network fee or the ETH price moved since your review)',
+  NEW: 'Network fee, at most {0} — paid from your USDC through Circle',
 };
 /** The Circle refusals the browser itself raises before any wallet request: nothing was sent. */
 export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH']);

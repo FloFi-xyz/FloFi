@@ -137,7 +137,8 @@ type ReviewShape = { readonly counts: { readonly walletPrompts: number; readonly
 type RunShape = { readonly currentStep: number;
   readonly groups: readonly { readonly index: number; readonly steps: readonly [number, number]; readonly planned: { readonly calls: number; readonly approvals: number } | null }[] };
 /**
- * Board 08 (Confirm in wallet): which wallet request this is ("REQUEST n OF m") and what the wallet shows, in plain words. The group is the run's
+ * Board 08 (Confirm in wallet): which wallet request this is ("REQUEST n OF m") and what the wallet shows, in plain words — for a wallet batch
+ * (a Circle-paid request is described by `circleSignatureView` instead: its wallet shows a permit, then an operation, never batch calls). The group is the run's
  * own group holding its current step (none: no header — never a guessed group); before a run exists, the Review's first group. The call count is
  * the PREPARED group's own (`planned.calls`): the Review's itemized calls are shown only when they agree with it (a group prepared again after an
  * expiry or an allowance change may differ), else the request is described by its steps. `of` is null when the Review counts only a lower
@@ -159,6 +160,21 @@ export function walletRequestView(review: ReviewShape, run: RunShape | null): Wa
       : { text: CALL_WORDS[call.kind] ?? 'Call for step {0}', parameters: [String(call.step + 1)] })
     : review.steps.filter(step => steps[0] <= step.index && step.index <= steps[1]).map(step => ({ text: 'Step {0}: {1}', parameters: [String(step.index + 1), step.action] }));
   return { request, of: review.counts.atLeast ? null : Math.max(review.counts.walletPrompts, request), calls: agrees ? reviewedCalls.length : prepared?.calls ?? null, items, itemized: agrees };
+}
+
+/**
+ * Review UX4 (ADR-0010 §3): what the wallet shows while a Circle-paid request is signed — never the batch calls of `walletRequestView` (the wallet
+ * shows no batch): first the USDC permit (spender Circle's paymaster, value the cap), then the operation as typed data. `stage` follows the
+ * request itself: 1 while its permit is unsigned, 2 once FloFi's permit step answered with the OPERATION stage. Neither signature sends a
+ * transaction from the wallet. `cap`: the permit's cap as the owner reads it (e.g. "0.21 USDC").
+ */
+export type CircleSignatureView = { readonly eyebrow: { readonly text: string; readonly parameters: readonly string[] };
+  readonly detail: { readonly text: string; readonly parameters: readonly string[] }; readonly status: string };
+export function circleSignatureView(stage: 1 | 2, cap: string): CircleSignatureView {
+  return { eyebrow: { text: 'EXECUTION · SIGNATURE {0} OF {1}', parameters: [String(stage), '2'] },
+    detail: stage === 1 ? { text: 'Signature 1 of 2: USDC permit, at most {0}. It lets Circle\'s paymaster take the network fee from your USDC.', parameters: [cap] }
+      : { text: 'Signature 2 of 2: the operation. Your wallet shows it as typed data; FloFi relays it, and Circle\'s paymaster takes the network fee from your USDC.', parameters: [] },
+    status: stage === 1 ? 'Sign the USDC permit in your wallet. It sends no transaction.' : 'Sign the operation in your wallet. It sends no transaction: FloFi relays it.' };
 }
 
 /**

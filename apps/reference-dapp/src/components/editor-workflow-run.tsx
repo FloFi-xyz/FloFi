@@ -22,12 +22,12 @@ import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
-import { CIRCLE_NOTHING_SENT, CIRCLE_REFUSAL, feeAmountText } from '../domain/token-fee';
+import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED, feeAmountText } from '../domain/token-fee';
 import { circleFactsOf } from '../user-funded/circle-facts';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
-import { walletRequestView } from '../domain/approved-ux';
+import { circleSignatureView, walletRequestView } from '../domain/approved-ux';
 import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
 import { BlockerPanel } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -145,6 +145,8 @@ const CODE = /^[A-Z][A-Z0-9_:]{2,100}$/;
 const codeOf = (cause: unknown) => cause instanceof Error && CODE.test(cause.message) ? cause.message
   : (cause as { code?: unknown } | null)?.code === 4001 ? 'WALLET_REQUEST_REJECTED' : 'EDITOR_EXECUTION_FAILED';
 const OPEN_RUN = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'];
+/** A USDC amount (6 decimals) as the owner reads it, rounded up (a cap is never understated). */
+const usdcText = (units: bigint | string) => feeAmountText(String(units), 'token', { symbol: 'USDC', decimals: 6 });
 const EVM_MAINNETS: readonly string[] = ['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:4663'];
 
 export type EditorRunPhase = 'idle' | 'reviewing' | 'reviewed' | 'authorizing' | 'proving' | 'confirm-update' | 'wallet' | 'confirming' | 'running' | 'done';
@@ -152,8 +154,11 @@ export type EditorWorkflowRunState = {
   readonly available: boolean; readonly phase: EditorRunPhase; readonly review: EditorExecutionReview | null; readonly error: string | null;
   readonly run: RunView | null;
   /** What the wallet would be asked that the owner has not accepted in this tab: a minimum below the accepted one, or (no Review in memory,
-   *  e.g. after a reload, or a step quoted only when due) a minimum or recipient never shown. Confirmed before the wallet is asked. */
-  readonly updated: readonly { readonly index: number; readonly kind: 'minimum' | 'recipient'; readonly reviewed: string | null; readonly now: string }[];
+   *  e.g. after a reload, or a step quoted only when due) a minimum or recipient never shown. Confirmed before the wallet is asked.
+   *  Review UX1 (ADR-0010): `fee` — a Circle-paid group's USDC cap above the one the owner accepted (`code` CIRCLE_FEE_CAP_ROSE_CONFIRM, `index`
+   *  the group's), or one this tab never showed (`reviewed` null). */
+  readonly updated: readonly { readonly index: number; readonly kind: 'minimum' | 'recipient' | 'fee'; readonly reviewed: string | null; readonly now: string;
+    readonly code?: string }[];
   /** A run of this workflow exists (started here or found after a reload): the per-step path must not start this workflow again. */
   readonly started: boolean;
   /** The whole workflow runs here as wallet-grouped authorization (the review says so); otherwise the Editor keeps its step-by-step path. */
@@ -182,6 +187,16 @@ export type EditorWorkflowRunState = {
   readonly canReview: boolean;
   /** The run shown is one from an earlier visit (not this Canvas workflow's): it never takes over this workflow's primary action. */
   readonly following: boolean;
+  /**
+   * Review UX4 (ADR-0010 §3): a Circle-paid request is being signed — `stage` 1 while its USDC permit is asked (at most `cap`, in USDC units), 2
+   * once FloFi's permit step answered with the operation to sign. Null otherwise (absent: a state without it).
+   */
+  readonly signing?: { readonly stage: 1 | 2; readonly cap: string } | null;
+  /**
+   * Review UX1: the run prepared its first group with another fee mechanism than the Review (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED): this run is
+   * ended (nothing of it was signed) and the workflow reviewed again, in one action. Absent: a state without it.
+   */
+  endAndReview?(): Promise<void>;
   /** Stops showing a followed earlier run (it stays stored and is offered again). */
   hide(): void;
   /** A HALTED run stopped at a group nothing was signed for: it continues (as a batch again, or through each step's own flow). */
@@ -217,6 +232,11 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   /** The recipient the owner accepted for each transfer step (the reviewed one, or one confirmed after a reload). */
   const acceptedRecipients = useRef<Map<number, string>>(new Map());
   const offeredRecipients = useRef<Map<number, string>>(new Map());
+  /** Review UX1: the USDC cap the owner accepted for each Circle-paid group (the reviewed one, or a higher one they confirmed), by group index. */
+  const acceptedCaps = useRef<Map<number, bigint>>(new Map());
+  const offeredCaps = useRef<Map<number, bigint>>(new Map());
+  /** Review UX4: which of a Circle-paid request's two signatures the wallet is asked for now. */
+  const [signing, setSigning] = useState<{ readonly stage: 1 | 2; readonly cap: string } | null>(null);
   const runRef = useRef<RunView | null>(null);
   const reviewRef = useRef<EditorExecutionReview | null>(null);
   /** The exact Canvas workflow the Review describes: Authorize starts THIS one (the server refuses any other hash). */
@@ -276,7 +296,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const resetView = () => {
     setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; reviewedWorkflow.current = null; setPhase('idle');
     setError(null); setUpdated([]); recovered.current = null; setUnrecorded(false); authorizedRevision.current = null; setFollowing(false); setEarlier(null);
-    accepted.current = new Map(); acceptedRecipients.current = new Map(); failedFor.current = null; record.current = null; refusedFor(null);
+    accepted.current = new Map(); acceptedRecipients.current = new Map(); acceptedCaps.current = new Map(); failedFor.current = null; record.current = null; refusedFor(null);
   };
   // ONE effect resolves what this tab shows for the Canvas workflow, so a workflow switch and the lookup of its run can never race:
   //   another workflow opened in place (e.g. from the library): the previous one's Review and run stop being shown (both stay stored) — once
@@ -329,6 +349,10 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const runReview = () => guard(async () => {
     // Never while a run is shown (this workflow's or a followed earlier one): the Review would be read against another run's facts.
     if (approvalId) return;
+    await reviewNow();
+  });
+  /** The whole-workflow Review of the Canvas workflow (never while a run is shown: `runReview`, and `endAndReview` once its run was closed). */
+  async function reviewNow() {
     if (!evmAccount) { failedFor.current = currentKey.current; throw new Error('EVM_WALLET_REQUIRED'); }
     setPhase('reviewing'); setUpdated([]);
     // The wallet is asked what it can do on FloFi's EVM mainnets (`wallet_getCapabilities` shows no prompt); the server keeps only this workflow's.
@@ -339,7 +363,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     if (currentKey.current !== key) { setPhase('idle'); return; }
     if (!result.ok) { failedFor.current = key; throw new Error(result.code); }
     reviewedFor.current = key; reviewRef.current = result.value; reviewedWorkflow.current = reviewing; setReview(result.value); setPhase('reviewed');
-  });
+  }
   /** Hands a prepared group to the owner's wallet and relays the answer; a batch is then followed until the wallet reports its transactions. */
   async function sendPrepared(id: string, index: number, p: Record<string, unknown>, feePayer: string) {
     setPhase('wallet');
@@ -396,11 +420,20 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     if (isCirclePaid(p)) {
       // ADR-0010: the fee is paid from the owner's USDC through Circle — the permit, then the operation (each re-derived and checked by the page
-      // before the wallet is asked); FloFi relays the operation once it is authorized.
-      const signature = await signCirclePaidGroup(feePayer, p, permit => permitUserFundedGroup(id, index, permit));
-      const authorized = await authorizeUserFundedGroup(id, index, { kind: 'EVM_USER_OPERATION', signature });
-      if (!authorized.ok) throw new Error(authorized.code);
-      adopt(authorized.value); setPhase('running'); return;
+      // before the wallet is asked); FloFi relays the operation once it is authorized. Review UX4: the page says which of the two signatures the
+      // wallet shows (the permit and its cap, then the operation), advancing when FloFi's permit step answers with the operation to sign.
+      const facts = circleFactsOf(p)!;
+      setSigning({ stage: facts.stage === 'PERMIT' ? 1 : 2, cap: facts.permitCap });
+      try {
+        const signature = await signCirclePaidGroup(feePayer, p, async permit => {
+          const answered = await permitUserFundedGroup(id, index, permit);
+          if (answered.ok && circleFactsOf(answered.value.prepared as Readonly<Record<string, unknown>> | null)?.stage === 'OPERATION') setSigning({ stage: 2, cap: facts.permitCap });
+          return answered;
+        });
+        const authorized = await authorizeUserFundedGroup(id, index, { kind: 'EVM_USER_OPERATION', signature });
+        if (!authorized.ok) throw new Error(authorized.code);
+        adopt(authorized.value); setPhase('running'); return;
+      } finally { setSigning(null); }
     }
     if (p.kind === 'EVM_USER_OPERATION') {
       const authorized = await authorizeUserFundedGroup(id, index, { kind: 'EVM_USER_OPERATION', signature: await signUserOperation(feePayer, Number(p.chainId), p.typedData) });
@@ -482,11 +515,11 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // except ADR-0010's Circle-paid operation, which carries the same batch's planned calls (compared below exactly as a batch's).
     const circle = circleFactsOf(prepared.prepared as Readonly<Record<string, unknown>> | null);
     if (kind !== 'EVM_WALLET_BATCH' && !(kind === 'EVM_USER_OPERATION' && circle)) throw new Error('EDITOR_EXECUTION_PLAN_UNVERIFIED');
-    // ADR-0010 §2: the reviewed group is asked only with the fee mechanism the owner reviewed — a fee that changed hands (ETH arrived or left, or
-    // Circle became (un)available) or a higher USDC cap than reviewed is never applied silently: the owner reviews again.
+    // ADR-0010 §2: the reviewed group is asked only with the fee mechanism the owner reviewed — a fee that changed hands (the owner's ETH now
+    // covers it, or no longer does) is never applied silently: GAS_MECHANISM_CHANGED_REVIEW_REQUIRED (the panel offers to end this run and review
+    // again). Review UX1: a higher USDC cap than the accepted one is NOT a mechanism change — it is shown and confirmed below.
     const reviewed = index === 0 && reviewRef.current?.workflowHash === runRef.current?.workflowHash ? reviewRef.current?.groups[0] : undefined;
-    if (reviewed && (Boolean(reviewed.gasPayment) !== Boolean(circle)
-      || circle && reviewed.gasPayment && BigInt(circle.permitCap) > BigInt(reviewed.gasPayment.permitCap))) throw new Error('GAS_MECHANISM_CHANGED_REVIEW_REQUIRED');
+    if (reviewed && Boolean(reviewed.gasPayment) !== Boolean(circle)) throw new Error('GAS_MECHANISM_CHANGED_REVIEW_REQUIRED');
     {
       const fresh = await workflowRunStatusHandoff(id);
       if (!fresh.ok) throw new Error(fresh.code);
@@ -497,7 +530,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
       // Every minimum the owner accepted is still there, for the same asset. Anything the owner has not accepted in this tab — a lower minimum,
       // or (no Review in memory, e.g. after a reload; a step quoted only when due) a minimum or recipient never shown — is shown and confirmed
       // first: the wallet is never asked for something the owner did not see.
-      const changes: { index: number; kind: 'minimum' | 'recipient'; reviewed: string | null; now: string; amount?: ReviewAmount; recipient?: string }[] = [];
+      const changes: { index: number; kind: 'minimum' | 'recipient' | 'fee'; reviewed: string | null; now: string; amount?: ReviewAmount; recipient?: string; cap?: bigint;
+        code?: string }[] = [];
       for (const step of planned.steps) {
         if (step.recipient) {
           const known = acceptedRecipients.current.get(step.index) ?? null;
@@ -509,11 +543,20 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
         if (step.minimum && (!before || BigInt(step.minimum.units) < BigInt(before.units)))
           changes.push({ index: step.index, kind: 'minimum', reviewed: before?.text ?? null, now: step.minimum.text, amount: step.minimum });
       }
+      // Review UX1 (ADR-0010): a Circle-paid group's USDC cap is recomputed from the live gas and ETH/USD prices on every preparation, so it may
+      // be above the one the owner accepted by any amount. It is shown beside the accepted one and confirmed (CIRCLE_FEE_CAP_ROSE_CONFIRM) — or,
+      // when this tab never showed one (a reload, a group prepared when due), shown and confirmed — before the wallet is asked for the permit.
+      if (circle) {
+        const known = acceptedCaps.current.get(index), cap = BigInt(circle.permitCap);
+        if (known === undefined || cap > known) changes.push({ index, kind: 'fee', reviewed: known === undefined ? null : usdcText(known), now: usdcText(cap), cap,
+          ...known === undefined ? {} : { code: CIRCLE_FEE_CAP_ROSE_CONFIRM } });
+      }
       if (changes.length) {
         pendingSend.current = { approvalId: id, index };
-        offered.current = new Map(changes.flatMap(c => c.amount ? [[c.index, c.amount] as const] : []));
+        offered.current = new Map(changes.flatMap(c => c.kind === 'minimum' && c.amount ? [[c.index, c.amount] as const] : []));
         offeredRecipients.current = new Map(changes.flatMap(c => c.recipient ? [[c.index, c.recipient] as const] : []));
-        setUpdated(changes.map(c => ({ index: c.index, kind: c.kind, reviewed: c.reviewed, now: c.now }))); setPhase('confirm-update');
+        offeredCaps.current = new Map(changes.flatMap(c => c.kind === 'fee' && c.cap !== undefined ? [[c.index, c.cap] as const] : []));
+        setUpdated(changes.map(c => ({ index: c.index, kind: c.kind, reviewed: c.reviewed, now: c.now, ...c.code ? { code: c.code } : {} }))); setPhase('confirm-update');
         return;
       }
     }
@@ -547,6 +590,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // The wallet is asked for exactly what the owner reviewed, or the owner sees what changed first (a signed minimum below the reviewed one).
     accepted.current = new Map(review.steps.flatMap(step => step.minimum ? [[step.index, step.minimum] as const] : []));
     acceptedRecipients.current = new Map(review.steps.flatMap(step => step.recipient ? [[step.index, step.recipient] as const] : []));
+    acceptedCaps.current = new Map(review.groups.flatMap(g => g.gasPayment ? [[g.index, BigInt(g.gasPayment.permitCap)] as const] : []));
     await continueGroup(id, 0, prepared as { prepared: unknown; feePayer: string });
   });
   const confirmUpdate = () => guard(async () => {
@@ -555,6 +599,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     // The owner accepted exactly the minimums shown; anything lower after a new quote is shown again before the wallet is asked.
     for (const [index, amount] of offered.current) accepted.current.set(index, amount);
     for (const [index, recipient] of offeredRecipients.current) acceptedRecipients.current.set(index, recipient);
+    for (const [index, cap] of offeredCaps.current) acceptedCaps.current.set(index, cap);
     setUpdated([]); setPhase('authorizing');
     await continueGroup(pending.approvalId, pending.index);
   });
@@ -616,6 +661,21 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     if (!r.ok) throw new Error(r.code);
     adopt(r.value); dropStored(approvalId);
   });
+  /**
+   * Review UX1: the run's first group came back with another fee mechanism than the Review (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED). The run is ended
+   * (the server refuses while anything of it may still execute), closed in this tab, and the workflow reviewed again, so the owner sees how the
+   * fee is paid now. Nothing is prepared or asked of the wallet by this.
+   */
+  const endAndReview = () => guard(async () => {
+    if (!approvalId) return;
+    const r = await cancelWorkflowRunHandoff(approvalId);
+    if (!r.ok) throw new Error(r.code);
+    dropStored(approvalId);
+    setFollowing(false); setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; setUpdated([]); recovered.current = null;
+    setUnrecorded(false); authorizedRevision.current = null; accepted.current = new Map(); acceptedRecipients.current = new Map(); acceptedCaps.current = new Map();
+    record.current = null; refusedFor(null); reviewedWorkflow.current = null;
+    await reviewNow();
+  });
   const resume = () => guard(async () => {
     if (!approvalId) return;
     const r = await resumeWorkflowRunHandoff(approvalId);
@@ -624,10 +684,10 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   });
   /** Stops showing the run in this tab without forgetting it (an earlier visit's run is offered again). */
   const hide = () => { if (acting.current) return; setApprovalId(null); setRun(null); runRef.current = null; setFollowing(false); setPhase('idle'); setError(null); setUpdated([]);
-    recovered.current = null; setUnrecorded(false); accepted.current = new Map(); acceptedRecipients.current = new Map(); refusedFor(null); };
+    recovered.current = null; setUnrecorded(false); accepted.current = new Map(); acceptedRecipients.current = new Map(); acceptedCaps.current = new Map(); refusedFor(null); };
   const dismiss = () => { dropStored(approvalId); setFollowing(false); setApprovalId(null); setRun(null); runRef.current = null; setReview(null); reviewRef.current = null; setPhase('idle');
     setError(null); setUpdated([]); recovered.current = null; setUnrecorded(false); authorizedRevision.current = null; accepted.current = new Map();
-    acceptedRecipients.current = new Map(); record.current = null; refusedFor(null); };
+    acceptedRecipients.current = new Map(); acceptedCaps.current = new Map(); record.current = null; refusedFor(null); };
   /** Follows a run this browser started in an earlier visit: its progress, a batch to read back from the wallet, its result. */
   const followEarlier = () => guard(async () => {
     const e = earlier;
@@ -642,7 +702,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const grouped = Boolean(review && review.mode !== 'STEP_BY_STEP' && !review.refusal);
   // A followed earlier run is this tab's view only: it never counts as THIS workflow's run (its primary action and Review stay its own).
   const ownRun = Boolean(approvalId) && !following;
-  return { available: available && enabled, phase, review, error, run, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume,
+  return { available: available && enabled, phase, review, error, run, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
     canReview: available && enabled && evmWorkflow && !approvalId,
     visible: available && (enabled || Boolean(approvalId) || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
     stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)
@@ -661,6 +721,13 @@ const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Not signed yet
 const HOW: Readonly<Record<string, string>> = { EVM_WALLET_BATCH: 'One wallet confirmation: one atomic transaction', EVM_USER_OPERATION: 'One signature now; FloFi relays it when due',
   EVM_OWNER_STEP: 'Each step confirmed in your wallet', SOLANA_SIGN_ALL: 'One Solana signing request for every transaction', SOLANA_OWNER_STEP: 'One Solana prompt per step',
   SOLANA_DURABLE_NONCE: 'One Solana signing request now' };
+/** ADR-0010 review UX7: how a group whose fee is paid from the owner's USDC through Circle is authorized (never "one wallet confirmation"). */
+const CIRCLE_HOW = 'Two signatures: a USDC permit for the fee, then the operation';
+/**
+ * Review UX2: who receives a network fee the owner pays in a token, by the group's network — the /approve rule: Pimlico's Kora fee payer on
+ * Solana (in the group's own fee token), Circle's paymaster on an EVM network (always USDC).
+ */
+const tokenFeeKey = (chain: string) => chain.startsWith('solana:') ? 'Network fee, at most {0} · paid from your {1} to Pimlico' : 'Network fee, at most {0} — paid from your USDC through Circle';
 /** Why fewer wallet interactions are not possible, in plain words (closed codes; anything else is shown with its code). */
 export const EXECUTION_REASON: Readonly<Record<string, string>> = {
   WALLET_ATOMIC_BATCH_UNSUPPORTED: 'Your wallet does not offer atomic batching on this network, so each step is confirmed in your wallet.',
@@ -794,6 +861,9 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   ACROSS_CALLDATA_MISMATCH: 'The bridge quote did not match what FloFi asked for (amount, recipient or tokens), so your wallet was not asked. Nothing was sent.',
   // ADR-0010: a network fee paid from the owner's USDC through Circle — every refusal before anything is relayed (nothing was sent).
   ...CIRCLE_REFUSAL,
+  // Review UX1: the Editor's Review bound the mechanism, and a run cannot be reviewed again in place: end it and review again (never "review
+  // again" with no way to do it).
+  GAS_MECHANISM_CHANGED_REVIEW_REQUIRED: EDITOR_MECHANISM_CHANGED,
 };
 /** A Review refusal that names the step it is about (`refusal.step`, shown as {0}): only then is a step number written. */
 export const STEP_REFUSAL: Readonly<Record<string, string>> = {
@@ -904,6 +974,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   const preparable = (g: RunView['groups'][number]) => g.strategy !== 'EVM_WALLET_BATCH' || Boolean(run && Date.parse(run.expiresAt) > now + BATCH_PREPARATION_VALIDITY_MS)
     || (g.state === 'PREPARED' && g.validUntil !== null && Date.parse(g.validUntil) > now);
   const due = dueGroup !== null && preparable(dueGroup);
+  // Review UX1: the run's first group came back with another fee mechanism than this Review bound. Preparing it again could only be refused
+  // again (or leave a fresh batch that blocks ending the run until it expires), so "Authorize" is not offered: the owner ends and reviews again.
+  const mechanismChanged = error === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' && Boolean(review) && currentGroup?.index === 0;
   // The due group's request can no longer be prepared: no "Authorize" (it would only be refused); the panel says why instead.
   const windowClosed = dueGroup !== null && !due;
   // The prepared wallet request(s) of the run view, dated by the LATEST validity: while any of them is still valid it is never called expired.
@@ -977,8 +1050,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   // ADR-0010: a fee in its own unit (a token amount never reads as ETH), who paid it, and Circle's protocol facts (Technical details only).
   const usdcFee = (amount: string) => feeAmountText(amount, 'token', { symbol: 'USDC', decimals: 6 });
   const groupFee = (fee: NonNullable<RunView['groups'][number]['maxFee']>) => feeAmountText(fee.amount, fee.unit, fee.token ?? null);
-  const paidWords = (paid: NonNullable<RunView['groups'][number]['gasPaid']>) => paid.paidInToken
-    ? tr('Network fee paid: {0}', feeAmountText(paid.paidInToken.amount, 'token', paid.paidInToken))
+  const paidWords = (paid: NonNullable<RunView['groups'][number]['gasPaid']>, chain: string) => paid.paidInToken
+    ? tr(chain.startsWith('solana:') ? 'Network fees paid: {0} from your wallet to Pimlico' : 'Network fee paid: {0}', feeAmountText(paid.paidInToken.amount, 'token', paid.paidInToken))
     : paid.sponsored ? tr('Gas paid by FloFi: {0}', feeAmountText(paid.amount, paid.unit)) : tr('network fees paid: {0}', feeAmountText(paid.amount, paid.unit));
   const circleDetails = (payment: { readonly paymaster: string; readonly entryPoint: string; readonly permitCap: string } | null | undefined) => payment
     ? ` · ${tr('Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}', payment.paymaster, payment.entryPoint, usdcFee(payment.permitCap))}`
@@ -986,7 +1059,11 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   const technical = review && <>
       {/* Review round 2 (ADR-0009): who pays the one confirmation's network fee follows its sponsorship — FloFi offers to pay a REQUIRED one (the
           wallet must take it, or nothing is sent); an OFFERED one is paid by the wallet only when it cannot take the sponsorship. */}
-      <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode === 'ONE_WALLET_CONFIRMATION'
+      <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode !== 'STEP_BY_STEP' && review.groups.some(g => g.gasPayment)
+        ? review.groups.length === 1
+          ? 'All {0} steps run as ONE operation on {1} from your own account: two signatures in your wallet (a USDC permit for the network fee, then the operation), then FloFi relays it and Circle\'s paymaster takes the network fee from your USDC.'
+          : 'All {0} steps run in {2} wallet requests: a group whose network fee is paid from your USDC through Circle asks for two signatures (a USDC permit, then the operation); a later group is asked when it becomes due.'
+        : review.mode === 'ONE_WALLET_CONFIRMATION'
         ? review.groups[0]?.fee?.sponsorship === 'REQUIRED'
           ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee (your wallet must support sponsored fees on this network).'
           : review.groups[0]?.fee?.sponsorship === 'OFFERED'
@@ -1024,16 +1101,16 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       </ol>
       <dl className="editor-run-facts">
         {review.groups.map(g => <div key={g.index}><dt>{review.groups.length > 1 ? tr('Group {0} · {1}', String(g.index + 1), g.network) : g.network}</dt>
-          <dd>{tr(HOW[g.strategy] ?? g.strategy)}{g.calls ? ` · ${tr('{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}` : ''}
-            {g.gasPayment ? ` · ${tr('Network fee, at most {0} — paid from your USDC through Circle', usdcFee(g.gasPayment.maxFee.amount))} · ${tr('Two signatures: a USDC permit for the fee, then the operation')}`
+          <dd>{tr(g.gasPayment ? CIRCLE_HOW : HOW[g.strategy] ?? g.strategy)}{g.calls ? ` · ${tr(g.gasPayment ? '{0} calls in the operation ({1} token approvals)' : '{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}` : ''}
+            {g.gasPayment ? ` · ${tr('Network fee, at most {0} — paid from your USDC through Circle', usdcFee(g.gasPayment.maxFee.amount))}`
               : g.fee?.sponsorship === 'REQUIRED' ? ` · ${tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}`
               : g.fee ? ` · ${tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))}`
               : run?.groups[g.index]?.maxFee?.unit === 'wei' ? ` · ${tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))}`
-              : run?.groups[g.index]?.maxFee?.token ? ` · ${tr('Network fee, at most {0} — paid from your USDC through Circle', groupFee(run.groups[g.index]!.maxFee!))}` : ''}
+              : run?.groups[g.index]?.maxFee?.token ? ` · ${tr(tokenFeeKey(run.groups[g.index]!.chain), groupFee(run.groups[g.index]!.maxFee!), run.groups[g.index]!.maxFee!.token!.symbol)}` : ''}
             {g.fee?.sponsorship === 'OFFERED' ? ` · ${tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}` : ''}
             {circleDetails(g.gasPayment ?? run?.groups[g.index]?.gasPayment ?? null)}
             {run?.groups[g.index] ? ` · ${groupWords(run.groups[g.index]!)}` : ''}
-            {run?.groups[g.index]?.gasPaid ? ` · ${paidWords(run.groups[g.index]!.gasPaid!)}` : ''}
+            {run?.groups[g.index]?.gasPaid ? ` · ${paidWords(run.groups[g.index]!.gasPaid!, run.groups[g.index]!.chain)}` : ''}
             {/* While the wallet prompt is open, an expired request is always rejected there (its on-chain deadline would refuse it and the wallet
                 would still pay the fee); a fresh one is promised only when this page would send one. */}
             {run?.groups[g.index]?.state === 'PREPARED' && run.groups[g.index]!.validUntil && Date.parse(run.groups[g.index]!.validUntil!) <= now
@@ -1118,7 +1195,17 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     </>}
     {!fresh && <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>}
     {/* P0 approved UX (board 08): while the wallet holds the request, say which request it is and what the wallet shows, in plain words. */}
-    {review && (phase === 'wallet' || phase === 'confirming') && (() => {
+    {/* Review UX4 (ADR-0010 §3): a Circle-paid request is two typed-data signatures, never a batch: which one the wallet shows now, and its cap. */}
+    {phase === 'wallet' && state.signing && (() => {
+      const view = circleSignatureView(state.signing.stage, usdcFee(state.signing.cap));
+      return <div className="execution-wallet-request" data-phase={phase} data-circle-signature={state.signing.stage}>
+        <p className="eyebrow">{tr(view.eyebrow.text, ...view.eyebrow.parameters)}</p>
+        <h4>{tr('Confirm in your wallet')}</h4>
+        <p className="muted">{tr(view.detail.text, ...view.detail.parameters)}</p>
+        <p className="muted">{tr('Editing paused during execution')}</p>
+      </div>;
+    })()}
+    {review && !state.signing && (phase === 'wallet' || phase === 'confirming') && (() => {
       // Only for the run this Review describes (a run of another revision or wallet profile shows its own progress below, never this plan).
       const view = run && run.workflowHash !== review.workflowHash ? null : walletRequestView(review, run);
       return view && <div className="execution-wallet-request" data-phase={phase}>
@@ -1156,17 +1243,20 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       </ol>
       <dl className="editor-run-facts">{run.groups.map(g => <div key={g.index}><dt>{run.groups.length > 1 ? tr('Group {0}', String(g.index + 1)) : tr('Wallet request')}</dt>
         {/* Review round 2: a reconciled sponsored batch says FloFi paid its gas (as with a Review in this tab), never that the wallet did. */}
-        <dd>{tr(g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation' : HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}
-          {!g.gasPaid && g.maxFee?.token ? ` · ${tr('Network fee, at most {0} — paid from your USDC through Circle', groupFee(g.maxFee))}` : ''}
-          {g.gasPaid ? ` · ${paidWords(g.gasPaid)}` : ''}</dd></div>)}</dl>
+        <dd>{tr(g.gasPayment ? CIRCLE_HOW : HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}
+          {!g.gasPaid && g.maxFee?.token ? ` · ${tr(tokenFeeKey(g.chain), groupFee(g.maxFee), g.maxFee.token.symbol)}` : ''}
+          {g.gasPaid ? ` · ${paidWords(g.gasPaid, g.chain)}` : ''}</dd></div>)}</dl>
     </>}
     {refusal && !fresh && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
     {feeBlocked && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review!.refusal!.code} owner={review!.owner}
       feeShortfall={review!.refusal!.evidence!} technical={fresh ? <details className="review-panel-technical"><summary>{tr('Technical details, for support')}</summary>{technical}</details> : null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
-      <p>{tr(state.updated.every(u => u.reviewed) ? 'Prices moved since your review. Your wallet would be asked with these minimums:' : 'Confirm what your wallet will be asked:')}</p>
-      <ul>{state.updated.map(u => <li key={`${u.kind}:${u.index}`}>{u.reviewed ? tr('Step {0}: {1} (reviewed {2})', String(u.index + 1), u.now, u.reviewed)
+      <p>{tr(!state.updated.every(u => u.reviewed) ? 'Confirm what your wallet will be asked:' : state.updated.some(u => u.kind === 'fee')
+        ? 'Prices moved since your review. Confirm what your wallet will be asked:' : 'Prices moved since your review. Your wallet would be asked with these minimums:')}</p>
+      <ul>{state.updated.map(u => <li key={`${u.kind}:${u.index}`} data-update-code={u.code ?? undefined}>{u.kind === 'fee'
+        ? u.reviewed ? tr(CIRCLE_FEE_CONFIRM.ROSE, u.now, u.reviewed) : tr(CIRCLE_FEE_CONFIRM.NEW, u.now)
+        : u.reviewed ? tr('Step {0}: {1} (reviewed {2})', String(u.index + 1), u.now, u.reviewed)
         : u.kind === 'recipient' ? <>{tr('Step {0} pays', String(u.index + 1))} <code className="editor-run-recipient">{u.now}</code></>
         : tr('Step {0}: minimum {1}', String(u.index + 1), u.now)}</li>)}</ul></div>}
     {errorText && !(fresh && !feeBlocked) && <p className="error-banner" role="alert">{errorText}</p>}
@@ -1186,7 +1276,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     {unanswered && <p role="status">{tr('A batch was handed to your wallet and FloFi never recorded an answer for it: it may have executed before it expired. Check your wallet\'s activity.')}</p>}
     {windowClosed && error !== 'WORKFLOW_RUN_EXPIRED' && <p className="muted" role="note">{tr(RUN_WINDOW_CLOSED)}</p>}
     {run?.state === 'COMPLETED' && <p role="status"><strong>{tr('Every step reconciled.')}</strong></p>}
-    {phase === 'wallet' && <p role="status">{tr('Confirm the request in your wallet. It shows every call of the batch and the network fee.')}</p>}
+    {phase === 'wallet' && <p role="status">{state.signing ? tr(circleSignatureView(state.signing.stage, '').status)
+      : tr('Confirm the request in your wallet. It shows every call of the batch and the network fee.')}</p>}
     {phase === 'confirming' && <p role="status">{tr('Waiting for your wallet to report the batch…')}</p>}
     {phase === 'proving' && <p role="status">{tr('Sign the FloFi sign-in message in your wallet (once per session). It authorizes no transaction.')}</p>}
     <div className="approval-actions">
@@ -1196,13 +1287,14 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       {state.following && !busy && <button type="button" className="quiet" onClick={state.hide}>{tr('Hide this workflow')}</button>}
       {review && state.canReview && state.grouped && !footerActions && <button type="button" className="primary editor-run-authorize" disabled={busy || expired} aria-busy={busy || undefined} onClick={() => void state.authorize()}>
         {tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>}
-      {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed) ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}
+      {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed && u.kind !== 'fee') ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}
       {resumable && !busy && <button type="button" className="primary" onClick={() => void state.resume()}>{tr('Resume the workflow')}</button>}
       {run && approvalSlotHref(run) && <p><a className="secondary" href={approvalSlotHref(run)!}>{tr('Continue step {0} on the signing page', String(run.currentStep + 1))}</a></p>}
-      {due && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
+      {due && !mechanismChanged && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
       {(run?.nextAction === 'OWNER_CONFIRMS_BATCH' || state.unrecorded) && !['wallet', 'confirming'].includes(phase) && <button type="button" className="secondary" onClick={() => void state.checkWallet()}>{tr('Check my wallet for the batch')}</button>}
       {endable && !['wallet', 'confirming'].includes(phase) && <>
           {state.unrecorded && <p className="muted" role="note">{tr('Your wallet may already have sent this batch. Check your wallet\'s activity before ending the workflow: ending it does not stop a batch already on chain.')}</p>}
+          {mechanismChanged && state.started && state.endAndReview && <button type="button" className="primary" disabled={busy} onClick={() => void state.endAndReview?.()}>{tr('End and review again')}</button>}
           <button type="button" className="quiet" onClick={() => void state.end()}>{tr('End workflow')}</button></>}
       {state.unloaded && !busy && <>
         <p className="muted" role="note">{tr('Forgetting removes this workflow only from this browser: the run, and anything your wallet already sent, stay. Check your wallet\'s activity first.')}</p>
