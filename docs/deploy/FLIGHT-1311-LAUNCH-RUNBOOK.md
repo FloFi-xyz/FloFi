@@ -8,8 +8,10 @@ Todos os comandos rodam da raiz do repositório **no commit que foi deployado**,
 
 ## Pré-condições (todas obrigatórias)
 
-1. O PR foi revisado e mergeado pelo owner; Vercel **e** o worker do Railway rodam o commit do merge (Railway → serviço worker →
-   Deployments: o SHA ativo é o do merge). Um worker antigo não envia linha v3: ele a segura como `RENDER_FAILED`, sem chamar o Resend.
+1. O PR foi revisado e mergeado pelo owner, e tanto a Vercel quanto o worker do Railway rodam o commit do merge (confira em Railway →
+   serviço worker → Deployments: o SHA ativo é o do merge). O banco não enxerga o commit do worker, por isso o apply pede a confirmação.
+   Se um worker antigo pegar uma linha v3, ele a segura como `RENDER_FAILED` sem chamar o Resend. Mas o token de acesso daquela linha
+   passa a contar as 72 h a partir dessa tentativa. Recuperação, depois do deploy certo: `$A email-release $T --reason RENDER_FAILED`.
 2. Envio de campanha pausado durante as operações (passo 1). Os e-mails de acesso pedidos pelas pessoas continuam saindo.
 
 ## Passos
@@ -24,10 +26,15 @@ umask 077; A="node apps/reference-dapp/backend/flight-admin.ts"; T="--tenant def
 $A email-status $T > /secure/1311-00-status-antes.json
 ```
 
-1. Pausar a campanha:
+1. Pausar a campanha. Em seguida, espere 1 minuto e confira que nenhum e-mail de campanha está em `SENDING`
+   (o ciclo do worker roda a cada 15 s, e o lease relê a pausa sob o lock):
 
 ```bash
 $A email-pause $T --reason "1311 launch upgrade"
+```
+
+```bash
+$A email-status $T > /secure/1311-01-status-pausado.json
 ```
 
 2. Dry-run da migração dos pendentes (Email 3 v2 → v3 + PT; 4a/4b/5/6 em inglês → PT). Nada muda:
@@ -36,9 +43,19 @@ $A email-pause $T --reason "1311 launch upgrade"
 $A email-launch-upgrade $T > /secure/1311-02-upgrade-dryrun.json
 ```
 
-   Confira: `campaignPaused: true`; `codeVersions.GROUP_BOARDING = 3`; `eligible` = 48 Email 3 + 1 CARD_FOUNDING (+ qualquer 5 em inglês
-   pendente); `planned` lista cada `emailId` com versão/idioma de/para; `skipped` traz o que já passou do ponto (tentado, reservado,
-   SENDING/UNKNOWN/SENT/HELD) e não será tocado; `guestOnWaitlist` mostra a sobreposição (passo 5). Se algo não bater, pare.
+   Confira:
+   - `campaignPaused: true` e `codeVersions.GROUP_BOARDING = 3`.
+   - `eligible` = 48 Email 3 + 1 CARD_FOUNDING, mais qualquer Email 5 pendente em inglês.
+   - `planned` lista cada `emailId` com versão e idioma de/para.
+   - `skipped` traz o que já passou do ponto e não será tocado: tentado, reservado, SENDING/UNKNOWN/SENT/HELD.
+   - `guestOnWaitlist` mostra a sobreposição (passo 5).
+
+   Se algo não bater, pare. Dois casos conhecidos:
+   - **`releasedPendingIds` não vazio** (motivo `RELEASED_OR_RETRIED`): são linhas que já foram liberadas ou retentadas. Uma liberação de
+     `UNRESOLVED_OUTCOME` apaga as tentativas, então essas linhas podem ter chegado ao Resend. Procure cada id no log do Resend (chave de
+     idempotência). Só se nenhum foi enviado, rode o apply com `--include-released`.
+   - **Email 3 `HELD` nunca tentado** (por exemplo `QUOTA_DAILY`, motivo `NOT_PENDING`): fica em v2. Esta operação só altera PENDING.
+     Decida com o owner: cancelar por id ou aceitar o texto antigo.
 
 3. Aplicar (só com a campanha pausada e o worker no commit novo; recusa sem os dois):
 
@@ -59,9 +76,18 @@ $A email-launch-upgrade $T > /secure/1311-03b-upgrade-verifica.json
 $A creator-requeue-missing $T > /secure/1311-04-email6-dryrun.json
 ```
 
-   Confira `eligible: 9` e `invites` por situação (`MISSING`, `EMAIL6_SENT`, `EMAIL6_QUEUED`, `REVOKED`, `SUPPRESSED`...). Se houver
-   `EMAIL6_QUEUED` de uma versão antiga (v1–v4 em `TEMPLATE_VERSION_REVIEW`), esse código é tratado por `creator-supersede-templates`
-   (dry-run primeiro; o apply cria a v5 PENDING, que sai na retomada). Depois:
+   Confira:
+   - `eligible: 9`.
+   - `invites` por situação: `MISSING`, `EMAIL6_SENT`, `EMAIL6_QUEUED`, `REVOKED`, `EXPIRED`, `SUPPRESSED`, `EMAIL6_STOPPED` e
+     `EMAIL6_OPERATOR_CANCELLED`.
+   - `EMAIL6_STOPPED` (falha no provedor, descadastro, sem consentimento) nunca é reenfileirado.
+   - Se os 9 aparecerem como `EMAIL6_OPERATOR_CANCELLED` (por exemplo, cancelados com `email-cancel` no adiamento), acrescente
+     `--include-operator-cancelled` ao dry-run e ao apply.
+   - Se houver `EMAIL6_QUEUED` de versão antiga (v1–v4 em `TEMPLATE_VERSION_REVIEW`), use `creator-supersede-templates` (dry-run
+     primeiro). Atenção: o apply dele cria a v5 PENDING, que sai na retomada.
+   - Um convidado que resgatar o código antes da liberação tem o Email 6 cancelado (`INVITE_REDEEMED`).
+
+   Depois:
 
 ```bash
 $A creator-requeue-missing $T --apply > /secure/1311-04b-email6-apply.json
@@ -77,7 +103,9 @@ $A creator-requeue-missing $T --apply > /secure/1311-04b-email6-apply.json
 $A email-cancel $T --email-id <groupBoardingEmailId do passo 2>
 ```
 
-   Se `groupBoardingEmailId` vier `null`, o Email 3 dela ainda não existe: nada a fazer agora. Confira de novo depois do passo 7.
+   Se `groupBoardingEmailId` vier `null`, o Email 3 dela ainda não existe. A partir das 09:00, mesmo com a campanha pausada, o worker
+   agenda o Email 3 dos grupos abertos. Por isso, **logo antes do passo 7** (já depois das 09:00), rode de novo o dry-run do passo 2 e
+   cancele o `groupBoardingEmailId` que aparecer.
 
 6. Testes da Dayane (procedimento do time, antes das 09:00). Conferir quota real no painel do Resend: a campanha de hoje gasta cerca de
    48 + 9 + 1 = 58 envios do limite diário (100, dos quais 5 ficam para e-mails de acesso).

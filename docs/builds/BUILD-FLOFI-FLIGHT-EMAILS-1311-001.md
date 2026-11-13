@@ -70,6 +70,17 @@ The runbook with the exact commands is [FLIGHT-1311-LAUNCH-RUNBOOK.md](../deploy
 - **Guest also on the waitlist.** They receive Email 6 and Email 3, with two valid access paths. Neither blocks the other. Boarding
   cancels any Email 3 not yet sent (`BOARDED`). The recommended fix keeps access: cancel only that person's Email 3 by id before
   resuming. Their list entry and invite stay valid. The dry-run lists the overlap with a masked address and the Email 3 id.
+- **Review fixes (flofi-data-privacy, second pass).**
+  - A row released by id after `UNRESOLVED_OUTCOME` looks never-attempted, so eligibility also requires `next_attempt_at = not_before`.
+    Every enqueue writes the two equal; every retry or release moves `next_attempt_at`. Such rows are listed (`releasedPendingIds`) and
+    change only with `--include-released`.
+  - `lease` re-reads the pause under the quota lock, and the upgrade reads it `FOR SHARE`.
+  - Delivery cancels an Email 6 whose invite was already redeemed (`INVITE_REDEEMED`).
+  - The requeue never revives an Email 6 that failed or was stopped; an operator-cancelled one is requeued only with
+    `--include-operator-cancelled`.
+  - The overlap report ignores expired invites.
+  - Runbook: wait after the pause, recovery from `RENDER_FAILED`, never-attempted HELD Email 3 rows stay on v2, and the overlap is
+    re-checked right before release.
 - Tests: `launch-1311.pg.test.ts` (new suite `app.flight.launch-1311.pg`). It covers the dry-run changing nothing, both apply gates,
   two concurrent applies plus a concurrent lease (no double update, no new row, a reserved or leased row left as enqueued), preservation
   of every key and link, untouched SENT/SENDING/HELD/CANCELLED rows, idempotence, and an English waitlist entry receiving the PT v3 Email 3

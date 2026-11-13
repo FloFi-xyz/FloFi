@@ -36,14 +36,17 @@
  *   creator-supersede-templates [--max <n>] [--apply]
  *                                                  dry-run by default; replace unsent TEMPLATE_VERSION_REVIEW creator rows with the current version,
  *                                                  preserving invite codes. Never touches SENT/UNKNOWN. Inspect Resend before apply.
- *   email-launch-upgrade [--max <n>] [--apply --confirm-worker-deployed]
+ *   email-launch-upgrade [--max <n>] [--include-released] [--apply --confirm-worker-deployed]
  *                                                  13/11 launch, dry-run by default: unsent Email 3 v2 rows → v3 and unsent 3/4a/4b/5/6 rows → PT,
  *                                                  in place (same email id, dedupe key, recipient, not_before, links). Only PENDING rows never
  *                                                  attempted, reserved or leased. Apply needs `email-pause` first and the worker already on this
  *                                                  release. Prints counts before/after, the ids changed, what was skipped and guest/waitlist overlaps.
- *   creator-requeue-missing [--max <n>] [--apply]  13/11 launch, dry-run by default: Email 6 (current version, PT) for active creator invites
+ *                                                  A pending row a release/retry moved is listed (releasedPendingIds) and changed only with
+ *                                                  --include-released, after its id was checked in the Resend log.
+ *   creator-requeue-missing [--max <n>] [--include-operator-cancelled] [--apply]  13/11 launch, dry-run by default: Email 6 (current version, PT) for active creator invites
  *                                                  with no Email 6 queued, in flight or sent, reusing their codes; enqueued HELD in batch
- *                                                  creators-v<version>, sent only after `email-release --batch creators-v<version>`.
+ *                                                  creators-v<version>, sent only after `email-release --batch creators-v<version>`. Never for an
+ *                                                  invite whose Email 6 failed or was stopped; operator-cancelled ones only with the flag.
  *   import-google-forms --file <csv> [--apply]      dry-run by default; columns email,submitted_at,language,consent; ISO timestamp with explicit offset,
  *                                                  consent true/false is required; language EN/PT may be blank. Preserves original signup order.
  *   email-early-list [--send-at <ISO>] [--apply]    separately reserve Email 0 once for eligible consented imports; never sends directly
@@ -179,11 +182,13 @@ export async function runFlightCommand(command: Command, values: Values, store: 
     }
     case 'email-launch-upgrade': {
       const max = flag(values, 'max') ? integer(values, 'max') : undefined;
-      return ctx().outbox.upgradeLaunchPending(now, { ...max ? { max } : {}, apply: values.apply === true, workerDeployed: values['confirm-worker-deployed'] === true });
+      return ctx().outbox.upgradeLaunchPending(now, { ...max ? { max } : {}, apply: values.apply === true, workerDeployed: values['confirm-worker-deployed'] === true,
+        includeReleased: values['include-released'] === true });
     }
     case 'creator-requeue-missing': {
       const max = flag(values, 'max') ? integer(values, 'max') : undefined;
-      return ctx().outbox.enqueueMissingCreatorInvites(now, { ...max ? { max } : {}, apply: values.apply === true });
+      return ctx().outbox.enqueueMissingCreatorInvites(now, { ...max ? { max } : {}, apply: values.apply === true,
+        includeOperatorCancelled: values['include-operator-cancelled'] === true });
     }
     case 'creator-invites': {
       const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });
@@ -274,7 +279,8 @@ async function main(): Promise<void> {
     batch: { type: 'string' }, 'opens-at': { type: 'string' }, count: { type: 'string' }, flight: { type: 'string' }, out: { type: 'string' },
     email: { type: 'string' }, pass: { type: 'string' }, 'email-id': { type: 'string' }, max: { type: 'string' }, reason: { type: 'string' },
     template: { type: 'string' }, 'provider-id': { type: 'string' }, language: { type: 'string' }, 'send-at': { type: 'string' }, file: { type: 'string' },
-    card: { type: 'string' }, apply: { type: 'boolean', default: false }, 'confirm-worker-deployed': { type: 'boolean', default: false } } });
+    card: { type: 'string' }, apply: { type: 'boolean', default: false }, 'confirm-worker-deployed': { type: 'boolean', default: false },
+    'include-released': { type: 'boolean', default: false }, 'include-operator-cancelled': { type: 'boolean', default: false } } });
   const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-flight-admin' });
