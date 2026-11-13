@@ -17,11 +17,16 @@
  *   Solana         one `solana:signTransaction` request for every transaction of the group
  *   Circle fee     ADR-0010: two `eth_signTypedData_v4` prompts — the USDC permit (spender = Circle's pinned paymaster, value = the reviewed cap),
  *                  then the operation that carries it — each re-derived here from the artifact's facts and FloFi's pins and compared with the
- *                  server's typed data before the wallet is asked; FloFi Wallet is never asked (CIRCLE_WALLET_UNSUPPORTED)
+ *                  server's typed data before the wallet is asked. FloFi Wallet (owner requirement) signs them only bound to the workflow run
+ *                  (`circleSigningContext`: its server gate re-derives each); on its first use, FloFi's own consent step comes first (the owner
+ *                  must agree; declining signs nothing: CIRCLE_UPGRADE_DECLINED), then the EIP-7702 upgrade authorization (`flofi_signAuthorization`
+ *                  of exactly the recorded tuple: this chain, the pinned Simple7702Account v0.8, the account's nonce) — three signatures, two after
  */
 import { circlePaymaster, eip5792, erc4337 } from '@defi-workflow-engine/reference-compiler';
 import { circleFactsOf, circleOperationOf, circleOperationTypedData, circlePermitOf } from '../user-funded/circle-facts';
 import { chosenEvmProvider, evmWalletIdentity, injected, isFloFiWalletKey, type EvmProvider } from '../wallet/evm-discovery';
+import { bindFloFiSigning } from '../wallet/flofi-wallet-channel';
+import { circleSigningContext } from '../wallet/flofi-signing';
 import { connectSolanaWallet, signAllWithSolanaWallet } from '../wallet/solana-wallet';
 import { walletPreference } from '../wallet/wallet-registry';
 import type { WalletProfile } from '../workflow-runs/execution-groups';
@@ -217,55 +222,108 @@ export async function signUserOperation(address: string, chainId: number, typedD
 // ── BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a group whose network fee the owner pays in USDC through Circle ───────────────────
 /** Whether a prepared group's fee is paid in the owner's USDC through Circle (two typed-data signatures: the permit, then the operation). */
 export const isCirclePaid = (prepared: Readonly<Record<string, unknown>>) => prepared.kind === 'EVM_USER_OPERATION' && circleFactsOf(prepared) !== null;
-/** FloFi Wallet has no EIP-7702 account and signs no typed data: a Circle-paid group is never asked of it (nothing is sent). */
-function refuseFloFiWallet() {
+/**
+ * Owner requirement (FloFi Wallet + Circle): FloFi Wallet signs a Circle-paid group's signatures only bound to its workflow run (its server gate
+ * re-derives each one from the prepared group); without the run it is never asked (CIRCLE_WALLET_UNSUPPORTED, nothing sent). Any other wallet: as
+ * before. Returns whether the wallet is FloFi Wallet (and binds the next request to the run when it is).
+ */
+function bindFloFiWallet(binding: CircleBinding | undefined, chainId: number): boolean {
   const provider = chosenEvmProvider() ?? injected();
-  if (provider && isFloFiWalletKey(evmWalletIdentity(provider)?.key)) fail('CIRCLE_WALLET_UNSUPPORTED');
+  if (!provider || !isFloFiWalletKey(evmWalletIdentity(provider)?.key)) return false;
+  const context = binding ? circleSigningContext(binding.runId, chainId) : null;
+  if (!context) fail('CIRCLE_WALLET_UNSUPPORTED');
+  bindFloFiSigning(provider, context);
+  return true;
 }
+/** The workflow run a Circle-paid group belongs to (`RunView.workflowRunId`): FloFi Wallet's signing binding. */
+export type CircleBinding = { readonly runId: string };
 /**
  * The owner's USDC permit for a Circle-paid group. Before the wallet is asked, the page re-derives the permit from the artifact's facts and FloFi's
  * own pins alone — USDC's domain on this chain (`USD Coin`/`2`), spender = Circle's paymaster pinned for this chain and the account's EntryPoint,
  * value = the reviewed cap (the fee shown), the owner, the never-expiring deadline — and requires the server's typed data to be exactly it
  * (CIRCLE_PERMIT_MISMATCH otherwise: nothing is signed). The wallet then shows exactly these fields.
  */
-export async function signCirclePermit(address: string, prepared: Readonly<Record<string, unknown>>): Promise<string> {
+export async function signCirclePermit(address: string, prepared: Readonly<Record<string, unknown>>, binding?: CircleBinding): Promise<string> {
   const facts = circleFactsOf(prepared), chainId = Number(prepared.chainId), pins = circlePaymaster.circlePinsOf(chainId);
   if (!facts || facts.stage !== 'PERMIT' || !pins || facts.usdc !== pins.usdc || circlePaymaster.circlePaymasterOf(chainId, facts.entryPoint) !== facts.paymaster
     || String(prepared.owner).toLowerCase() !== address.toLowerCase()) fail('CIRCLE_PERMIT_MISMATCH');
-  refuseFloFiWallet();
   const expected = circlePaymaster.permitTypedData(circlePermitOf(facts!, chainId, address.toLowerCase()));
   const shown = prepared.gasPayment as { permitCap?: unknown; paymaster?: unknown; maxFee?: { amount?: unknown } } | undefined;
   if (JSON.stringify((prepared.permit as { typedData?: unknown } | undefined)?.typedData) !== JSON.stringify(expected) || shown?.permitCap !== facts!.permitCap
     || shown?.maxFee?.amount !== facts!.permitCap || shown?.paymaster !== facts!.paymaster) fail('CIRCLE_PERMIT_MISMATCH');
+  bindFloFiWallet(binding, chainId);
   return signWorkflowGrant(address, chainId, expected);
 }
 /**
  * The owner's signature of a Circle-paid operation, once its permit was verified (stage OPERATION): the operation is rebuilt here from the facts
  * (the exact calls, gas words, the pinned paymaster with the signed permit and the reviewed cap) and its typed data must be exactly the server's.
  */
-export async function signCircleOperation(address: string, prepared: Readonly<Record<string, unknown>>): Promise<string> {
+export async function signCircleOperation(address: string, prepared: Readonly<Record<string, unknown>>, binding?: CircleBinding): Promise<string> {
   const facts = circleFactsOf(prepared), chainId = Number(prepared.chainId);
   if (!facts || facts.stage !== 'OPERATION' || circlePaymaster.circlePaymasterOf(chainId, facts.entryPoint) !== facts.paymaster
     || String(prepared.owner).toLowerCase() !== address.toLowerCase()) fail('CIRCLE_PERMIT_MISMATCH');
-  refuseFloFiWallet();
   let expected: unknown;
   try { expected = circleOperationTypedData(facts!, chainId, circleOperationOf(facts!, address.toLowerCase())); } catch { return fail('CIRCLE_PERMIT_MISMATCH'); }
   if (JSON.stringify(prepared.typedData) !== JSON.stringify(expected)) fail('CIRCLE_PERMIT_MISMATCH');
+  bindFloFiWallet(binding, chainId);
   return signWorkflowGrant(address, chainId, expected);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): what the first use of a FloFi Wallet address asks before its permit. `consent` shows FloFi's own
+ * consent (CIRCLE_UPGRADE_CONSENT, with the network) and resolves true only when the owner agreed; `recordConsent` records it on the server
+ * (the signing gate refuses the authorization without it); `upgrade` hands the signed authorization to the server, which verifies it.
+ */
+export type CircleUpgradeSteps = {
+  readonly consent: (upgrade: { readonly chainId: number; readonly delegate: string }) => Promise<boolean>;
+  readonly recordConsent: () => Promise<{ ok: true; value: { prepared: unknown } } | { ok: false; code: string }>;
+  readonly upgrade: (signature: string) => Promise<{ ok: true; value: { prepared: unknown } } | { ok: false; code: string }>;
+};
+/**
+ * The owner's EIP-7702 authorization of a Circle-paid group's upgrade, through FloFi Wallet only (`flofi_signAuthorization`, bound to the run): the
+ * tuple is re-derived here from the artifact's facts and FloFi's pins alone — this chain (never 0), the pinned Simple7702Account v0.8, the recorded
+ * nonce — and must match what the server shows; the signature must recover to the owner for exactly it.
+ */
+export async function signCircleAuthorization(address: string, prepared: Readonly<Record<string, unknown>>, binding: CircleBinding): Promise<string> {
+  const facts = circleFactsOf(prepared), chainId = Number(prepared.chainId), upgrade = facts?.upgrade;
+  const shown = (prepared.gasPayment as { upgrade?: { delegate?: unknown; chainId?: unknown } } | undefined)?.upgrade;
+  if (!facts || facts.stage !== 'AUTHORIZATION' || !upgrade?.consentedAt || upgrade.chainId !== chainId || upgrade.delegate !== erc4337.SIMPLE_7702_ACCOUNT_V0_8
+    || shown?.delegate !== upgrade.delegate || shown?.chainId !== chainId || String(prepared.owner).toLowerCase() !== address.toLowerCase()) fail('CIRCLE_PERMIT_MISMATCH');
+  if (!bindFloFiWallet(binding, chainId)) fail('CIRCLE_PERMIT_MISMATCH');
+  const provider = evmProvider();
+  await onChainOrFail(provider, BigInt(chainId), '0x' + chainId.toString(16));
+  bindFloFiWallet(binding, chainId);
+  const tuple = { chainId, address: upgrade!.delegate, nonce: BigInt(upgrade!.nonce) };
+  const signature = await provider.request({ method: 'flofi_signAuthorization', params: [address, { chainId: '0x' + chainId.toString(16), contractAddress: tuple.address,
+    nonce: '0x' + tuple.nonce.toString(16) }] }).catch(rejected);
+  if (typeof signature !== 'string') return fail('WALLET_SIGNATURE_INVALID');
+  try { erc4337.signedEip7702Authorization(tuple, signature, address); } catch { return fail('WALLET_SIGNATURE_INVALID'); }
+  return signature.toLowerCase();
 }
 /**
  * The whole Circle sequence for one prepared group: the permit (when not signed yet) handed to the server's permit step, then the operation's
  * signature — two wallet prompts, both typed data, nothing sent by the wallet. Returns the operation signature to authorize the group with.
  */
 export async function signCirclePaidGroup(address: string, prepared: Readonly<Record<string, unknown>>,
-  permit: (signature: string) => Promise<{ ok: true; value: { prepared: unknown } } | { ok: false; code: string }>): Promise<string> {
+  permit: (signature: string) => Promise<{ ok: true; value: { prepared: unknown } } | { ok: false; code: string }>,
+  firstUse?: CircleUpgradeSteps & CircleBinding, binding?: CircleBinding): Promise<string> {
   let current = prepared;
-  if (circleFactsOf(current)?.stage === 'PERMIT') {
-    const answered = await permit(await signCirclePermit(address, current));
+  const next = (answered: { ok: true; value: { prepared: unknown } } | { ok: false; code: string }) => {
     if (!answered.ok) fail(answered.code);
     current = (answered as { value: { prepared: Readonly<Record<string, unknown>> } }).value.prepared;
+  };
+  const run = binding ?? (firstUse ? { runId: firstUse.runId } : undefined);
+  // Owner requirement: a FloFi Wallet's first use — FloFi's own consent first (declined: nothing is signed or sent), then the authorization.
+  const upgrade = circleFactsOf(current)?.upgrade;
+  if (circleFactsOf(current)?.stage === 'AUTHORIZATION' && upgrade) {
+    if (!firstUse) fail('CIRCLE_PERMIT_MISMATCH');
+    if (!upgrade.consentedAt) {
+      if (!await firstUse!.consent({ chainId: upgrade.chainId, delegate: upgrade.delegate })) fail('CIRCLE_UPGRADE_DECLINED');
+      next(await firstUse!.recordConsent());
+    }
+    next(await firstUse!.upgrade(await signCircleAuthorization(address, current, { runId: firstUse!.runId })));
   }
-  return signCircleOperation(address, current);
+  if (circleFactsOf(current)?.stage === 'PERMIT') next(await permit(await signCirclePermit(address, current, run)));
+  return signCircleOperation(address, current, run);
 }
 /**
  * The owner revokes a signed operation of a Circle-paid group exactly as an owner-paid one, on the EntryPoint its account uses (v0.7 or v0.8).
