@@ -38,7 +38,9 @@ export function bundlerRefusal(message: string): BundlerError {
  * paymaster's gas limits do not fit, or Circle's paymaster refused it (deposit, price, pause). Every other refusal keeps `bundlerRefusal`'s code.
  */
 export function circleBundlerRefusal(error: unknown): BundlerError {
-  const e = error instanceof BundlerError ? error : bundlerRefusal(error instanceof Error ? error.message : 'USER_OPERATION_REJECTED');
+  // A closed code (the transport's own, a malformed answer's) is kept as it is; a provider's text is mapped as any refusal.
+  const e = error instanceof BundlerError ? error : error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? new BundlerError(error.message)
+    : bundlerRefusal(error instanceof Error ? error.message : 'USER_OPERATION_REJECTED');
   const m = e.detail ?? '';
   if (!/AA3[0-9]/.test(m)) return e;
   if (/AA3[3-4]/.test(m) && /signature|permit|EIP2612|expired/i.test(m)) return new BundlerError('CIRCLE_PERMIT_INVALID', m);
