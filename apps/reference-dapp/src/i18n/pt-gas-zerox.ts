@@ -34,6 +34,9 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'This wallet does not have enough ETH for the network fee of this swap. Add ETH on this network before you authorize.':
     'Esta carteira não tem ETH suficiente para a taxa de rede deste swap. Adicione ETH nesta rede antes de autorizar.',
   '{0}, included in the swap': '{0}, incluída no swap',
+  // The wallet prompts the chat lists for a reviewed 0x Gasless swap (domain/gas-payment.ts gaslessWalletRequests, review CH3).
+  'Token approval (signature)': 'Aprovação do token (assinatura)',
+  'Swap (signature)': 'Swap (assinatura)',
   'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.':
     'Você assina; a 0x envia o swap e desconta dele a taxa de rede. A FloFi nunca assina nem paga por você.',
   // Why paying the network fee in tokens is not available (domain/gas-payment.ts).

@@ -44,6 +44,18 @@ export function gaslessUnavailableReason(code: string): string {
   return 'FloFi could not verify the provider quote for this swap.';
 }
 
+/** The wallet prompts of a reviewed 0x Gasless swap (typed-data signatures, never transactions). */
+export const GASLESS_APPROVAL_REQUEST = 'Token approval (signature)', GASLESS_TRADE_REQUEST = 'Swap (signature)';
+/**
+ * Review CH3: what the owner's wallet asks for a reviewed 0x Gasless swap, in order, from the reviewed fee payment itself (the gasless EIP-2612
+ * approval of Permit2 when the binding carries one, then the trade) — or null when the quote does not bind 0x Gasless (its requests are the
+ * lifecycle's planned operations).
+ */
+export function gaslessWalletRequests(quote: { readonly gas?: { readonly mechanism: string; readonly zeroEx: { readonly approval: unknown } | null } | null } | null | undefined):
+  readonly string[] | null {
+  const zeroEx = quote?.gas?.mechanism === 'ZEROX_GASLESS_SWAP' ? quote.gas.zeroEx : null;
+  return zeroEx ? [...zeroEx.approval ? [GASLESS_APPROVAL_REQUEST] : [], GASLESS_TRADE_REQUEST] : null;
+}
 /**
  * A gasless attempt as the shared transaction lifecycle reads it (signatures in the wallet, relayed to 0x, settled on chain, failed, declined).
  * Review CH2: a FAILED attempt is a final failure only once the server marked it `final` (the signed trade's deadline passed with its Permit2
