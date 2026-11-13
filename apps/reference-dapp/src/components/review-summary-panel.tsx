@@ -15,7 +15,7 @@ import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../d
 import { flightRefusal, FLIGHT_REFUSAL_HREF } from '../domain/flight-refusal';
 import { feeShortfallView } from '../domain/approved-ux';
 import { circleUnavailableReason } from '../domain/token-fee';
-import { isIncludedNetworkFee, SIGNATURES_LABEL } from '../domain/gas-payment';
+import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 
 export type ReviewSummaryPanelProps = {
@@ -63,8 +63,13 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       <dl className="review-panel-rows">
         {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
         {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
-        {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line =>
-          <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+        {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
+          // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
+          const paidTo = paidToPimlicoNote(line);
+          return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
+            ? <dd><span className="numeric">{t(line.value)}</span><small className="review-block-qualifier">{t(paidTo)}</small></dd>
+            : <dd className="numeric">{t(line.value)}</dd>}</div>;
+        })}
         {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
         {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
         {step?.details.filter(line => line.label === SIGNATURES_LABEL).map(line => <div key={line.label}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}

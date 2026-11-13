@@ -14,6 +14,15 @@ export const SIGNATURES_LABEL = 'Signatures';
 export const isIncludedNetworkFee = (line: { readonly label: string; readonly treatment?: string }) =>
   line.treatment === 'INCLUDED' && line.label === INCLUDED_NETWORK_FEE_LABEL;
 
+/**
+ * ADR-0010 §4 review UX6: who receives a network fee the owner pays in a token through Pimlico's Kora fee payer, as the fee line itself says it
+ * ("Paid from your USDC to Pimlico.", `simulation-presentation.ts` `koraFee`): the visible Review row and the compact chat card show it beside
+ * the amount, never only under Technical details. Null for every other fee line (a native fee keeps its own words).
+ */
+const PAID_TO_PIMLICO = /^Paid from your [A-Z0-9]{2,10} to Pimlico\.$/;
+export const paidToPimlicoNote = (line: { readonly note?: string | undefined; readonly treatment?: string | undefined }): string | null =>
+  line.treatment === 'CEILING' && typeof line.note === 'string' && PAID_TO_PIMLICO.test(line.note) ? line.note : null;
+
 /** Why paying the network fee in tokens through 0x is not available for this swap: one sentence per closed reason, in plain words. */
 const GASLESS_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
   ZEROX_GASLESS_NOT_ENABLED: 'Paying the network fee in tokens is not enabled on this FloFi server.',

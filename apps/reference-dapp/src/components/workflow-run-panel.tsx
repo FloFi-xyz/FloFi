@@ -463,9 +463,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       const label = stepsOf(tr, g.steps[0], g.steps[1]), sent = revocations[g.index];
       return <div key={`revoke-${g.index}`} className="workflow-run-choice">
         <p role="note" id={`revoke-note-${g.index}`}>{tr('You signed {0} as an operation FloFi did not relay. It stays valid until you cancel it with one transaction from your own wallet.', label)}</p>
+        {/* ADR-0010 review UX8: Circle was chosen because this wallet's ETH could not pay the network fee, and the cancellation is an ordinary
+            transaction the wallet pays in ETH (never in USDC through Circle): said before the wallet is asked. */}
+        {g.gasPayment && !sent && <p role="note" id={`revoke-fee-${g.index}`}>{tr('Cancelling is an ordinary transaction from your wallet, and its network fee is paid in ETH, not in USDC through Circle: you need a small amount of ETH on {0} first.', NETWORK[g.chain] ?? g.chain)}</p>}
         {sent ? <p role="status">{tr('Cancellation sent from your wallet ({0}). Once it is confirmed, the signed operation can never execute.', short(sent))}</p>
           : <div className="approval-actions">
-            <button type="button" className="secondary" disabled={busy} aria-describedby={`revoke-note-${g.index}`} onClick={() => void act(async () => {
+            <button type="button" className="secondary" disabled={busy} aria-describedby={g.gasPayment ? `revoke-note-${g.index} revoke-fee-${g.index}` : `revoke-note-${g.index}`} onClick={() => void act(async () => {
               const hash = await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index, entryPointOfGroup(g.gasPayment));
               setRevocations(current => ({ ...current, [g.index]: hash }));
               return workflowRunStatusHandoff(approvalId);
