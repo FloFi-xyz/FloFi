@@ -37,9 +37,14 @@ sponsorship ([GAS-SPONSORSHIP.md](GAS-SPONSORSHIP.md)) is a separate feature and
 | `FLOFI_BUNDLER_RPC_<chainId>` | **[OWNER]** an ERC-4337 bundler URL that serves EntryPoint v0.7 `0x0000000071727De22E5E9d8BAf0edAc6f37da032` (Base, Arbitrum One) and/or v0.8 `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108` (Ethereum, Base, Arbitrum One), e.g. `https://api.pimlico.io/v2/<chainId>/rpc?apikey=…` — **secret** |
 | `FLOFI_AUTOMATION_PRICE_SOURCE`, `FLOFI_AUTOMATION_CHAINLINK_RPC_URL`, `FLOFI_AUTOMATION_CHAINLINK_FEEDS` | existing deployment price source with an `ETH=` feed: the ETH/USD price that sizes the USDC permit cap |
 
-Circle's paymaster and USDC addresses are pinned in code and verified on chain at first use. Accounts that can use it: an EOA delegated with
-EIP-7702 to MetaMask's `EIP7702StatelessDeleGator` v1.3.0 (EntryPoint v0.7: Base, Arbitrum One) or to `Simple7702Account` v0.8 (EntryPoint v0.8:
-Ethereum, Base, Arbitrum One). FloFi never creates or changes a delegation.
+Circle's paymaster and USDC addresses are pinned in code and verified on chain at first use (paymaster code present, `entryPoint()` equals the
+pinned EntryPoint, USDC `name()`/`version()` = `USD Coin`/`2`). Accounts that can use it: an EOA delegated with EIP-7702 to MetaMask's
+`EIP7702StatelessDeleGator` v1.3.0 (EntryPoint v0.7: Base, Arbitrum One) or to `Simple7702Account` v0.8 (EntryPoint v0.8: Ethereum, Base, Arbitrum
+One), and a **FloFi Wallet** address with no code, which the owner may upgrade to `Simple7702Account` v0.8 inside its first Circle operation after
+FloFi's explicit consent screen (never silently; never replacing another delegation). MetaMask on Ethereum keeps ETH (its smart account is bound
+to EntryPoint v0.7; see ADR-0010 §3). The bundler must serve **both** EntryPoints where both are used (a v0.7-only bundler disables Circle for
+v0.8 accounts with `CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED` before any permit is asked) and must accept `eip7702Auth` in v0.8 operations for the
+FloFi Wallet upgrade (Pimlico does).
 
 ### 2.2 Pimlico hosted Kora — Railway `flofi-api` (Jupiter, transfers) **and** Vercel + `flofi-worker` (Solana workflow groups)
 
@@ -86,8 +91,10 @@ Each check is an explicit owner action through the reviewed wallet flow; none is
 2. **Base or Arbitrum, Circle**: an account upgraded to the MetaMask smart account, holding about 2 USDC and no ETH; in the Editor run a 1 USDC
    transfer to yourself with *Review whole workflow*; the Review shows the USDC fee ceiling and two signatures; after it lands, the run shows
    *Network fee paid: X USDC* and the explorer's `UserOperationEvent` names Circle's paymaster.
-3. **Ethereum, Circle v0.8**: only with an account delegated to `Simple7702Account` v0.8; a MetaMask smart account is shown the closed reason
-   instead.
+3. **Ethereum, Circle v0.8**: a FloFi Wallet address holding about 2 USDC and no ETH, through `/approve`: FloFi shows the upgrade consent
+   (read it in full), then three signatures (upgrade, USDC permit, operation); after it lands, the explorer shows the address delegated to
+   `Simple7702Account` (`0xef0100…e6cae83b…`) and the `UserOperationEvent` names Circle's v0.8 paymaster. A MetaMask smart account on Ethereum is
+   shown the closed reason instead and keeps ETH.
 4. **Solana, Kora**: a wallet with 0 SOL and about 2 USDC; swap 1 USDC → SOL on Jupiter; the Review shows *Network fee: X USDC (paid to
    Pimlico)*; the explorer shows Pimlico's fee payer and the USDC transfer to the payment address.
 5. **Robinhood Chain, 0x**: a wallet with 0 ETH and about 5 USDG; swap 2 USDG → WETH; the Review shows *Network fee (included in the swap)*;
@@ -97,6 +104,8 @@ Each check is an explicit owner action through the reviewed wallet flow; none is
 
 - `TOKEN_GAS_RELAYER_NOT_PINNED`, `KORA_SIGNER_MISMATCH`, `CIRCLE_PAYMASTER_UNVERIFIED`, `ZEROX_SETTLER_MISMATCH`, `ZEROX_SPONSORED_QUOTE_REFUSED`:
   a provider answered with something other than what is pinned — investigate before re-enabling.
+- `CIRCLE_DELEGATION_NOT_LANDED`, `CIRCLE_AUTHORIZATION_STALE`, `KORA_TRANSACTION_MISMATCH`, `ZEROX_QUOTE_WORSE_THAN_REFERENCE`: refusals
+  that protect the owner; frequent occurrences mean a provider or wallet behaves differently from what was certified offline.
 - Pimlico: `pimlico solana txs --type sponsored` must stay empty (a sponsored transaction means a payment-less transaction reached Pimlico,
   which FloFi refuses to send).
 - 0x: the dashboard's sponsorship setting must stay off.
