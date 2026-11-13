@@ -47,7 +47,8 @@ export type ReviewGroup = {
   /** Prepared now (the first group): the exact calls the wallet will show, the simulation and the fee estimate. */
   readonly calls: readonly { readonly kind: UserCall['kind']; readonly step: number }[] | null;
   readonly approvals: number | null;
-  readonly fee: { readonly estimatedWei: string; readonly maxWei: string; readonly payer: string } | null;
+  /** `sponsorship` (ADR-0009): FloFi's paymaster offers to pay this batch's network fee when the wallet supports it (OFFERED), or must (REQUIRED). */
+  readonly fee: { readonly estimatedWei: string; readonly maxWei: string; readonly payer: string; readonly sponsorship?: 'OFFERED' | 'REQUIRED' | null } | null;
   readonly healthFactorAfter: string | null;
 };
 export type ReviewCounts = {
@@ -142,17 +143,18 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     // Only the first group is due now: it is prepared exactly as the run will prepare it. A later group is quoted when it becomes due.
     if (g.index === 0 && g.strategy === 'EVM_WALLET_BATCH') {
       const r = await prepareGroup(input.deps, composed, req.value, { runId: 'editor-review', groupIndex: 0, strategy: g.strategy, chain: g.chain, feePayer: owner,
-        stepFrom: g.stepFrom, stepTo: g.stepTo });
+        stepFrom: g.stepFrom, stepTo: g.stepTo, preview: true });
       if (!r.ok) refusal = { code: r.code, step: r.stepIndex ?? null, ...r.evidence ? { evidence: r.evidence } : {} };
       else {
         const p = r.value.prepared as unknown as { group: EvmGroupCalls; simulation: BatchSimulation | null;
-          fee: { estimatedGas: string; maxFeePerGas: string; maxCost: string; payer: string; l1FeeUpperBound?: string } };
+          fee: { estimatedGas: string; maxFeePerGas: string; maxCost: string; payer: string; l1FeeUpperBound?: string; sponsorship?: 'OFFERED' | 'REQUIRED' | null } };
         validUntil = r.value.validUntil.toISOString();
         calls = p.group.calls.map((c, i) => ({ kind: c.kind, step: p.group.steps.find(s => s.calls.includes(i))?.stepIndex ?? g.stepFrom }));
         approvals = p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length;
         preparedCalls.set(g.index, p.group.calls.length);
         // The estimate is the execution gas at about the current price plus the L1 data fee bound (OP Stack only; 0 elsewhere).
-        fee = { estimatedWei: (BigInt(p.fee.estimatedGas) * BigInt(p.fee.maxFeePerGas) / 2n + BigInt(p.fee.l1FeeUpperBound ?? '0')).toString(), maxWei: p.fee.maxCost, payer: p.fee.payer };
+        fee = { estimatedWei: (BigInt(p.fee.estimatedGas) * BigInt(p.fee.maxFeePerGas) / 2n + BigInt(p.fee.l1FeeUpperBound ?? '0')).toString(), maxWei: p.fee.maxCost, payer: p.fee.payer,
+          sponsorship: p.fee.sponsorship ?? null };
         healthFactorAfter = p.simulation ? Object.values(p.simulation.healthFactorAfter)[0] ?? null : null;
         for (const [index, values] of plannedSteps(req.value, p.group)) planned.set(index, values);
       }

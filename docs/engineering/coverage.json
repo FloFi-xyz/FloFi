@@ -266,6 +266,10 @@
       "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
       "stage": "unit"
     },
+    "app.components.user-funded-browser": {
+      "path": "apps/reference-dapp/src/components/user-funded-browser.test.ts",
+      "stage": "unit"
+    },
     "app.config.product": {
       "path": "apps/reference-dapp/src/config/product.test.ts",
       "stage": "unit"
@@ -485,6 +489,10 @@
     "app.flight.store.pg": {
       "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.gas-sponsorship.gas-sponsorship": {
+      "path": "apps/reference-dapp/src/gas-sponsorship/gas-sponsorship.test.ts",
+      "stage": "unit"
     },
     "app.i18n.catalog": {
       "path": "apps/reference-dapp/src/i18n/catalog.test.ts",
@@ -760,6 +768,10 @@
     },
     "app.user-funded.solana-nonce-codec": {
       "path": "apps/reference-dapp/src/user-funded/solana-nonce-codec.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.sponsored-batch": {
+      "path": "apps/reference-dapp/src/user-funded/sponsored-batch.test.ts",
       "stage": "unit"
     },
     "app.user-funded.universal-batch": {
@@ -6819,10 +6831,38 @@
         "app.user-funded.universal-batch",
         "app.user-funded.arbitrum-batch",
         "app.workflow-runs.user-funded-due-refusal.pg",
-        "app.e2e.editor-wallet-batch"
+        "app.e2e.editor-wallet-batch",
+        "app.user-funded.sponsored-batch"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
+      ]
+    },
+    {
+      "id": "gas-sponsorship--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/app/api/gas/paymaster/[chainId]/route.ts",
+        "apps/reference-dapp/src/gas-sponsorship/config.ts",
+        "apps/reference-dapp/src/gas-sponsorship/http.ts",
+        "apps/reference-dapp/src/gas-sponsorship/ledger.ts",
+        "apps/reference-dapp/src/gas-sponsorship/paymaster-service.ts",
+        "apps/reference-dapp/src/gas-sponsorship/runtime.ts",
+        "apps/reference-dapp/src/gas-sponsorship/solana-fee-payer.ts"
+      ],
+      "suites": [
+        "app.gas-sponsorship.gas-sponsorship",
+        "app.user-funded.sponsored-batch",
+        "app.components.user-funded-browser"
+      ],
+      "gaps": [
+        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md §3.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
       ]
     },
     {

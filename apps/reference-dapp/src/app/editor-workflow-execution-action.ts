@@ -74,7 +74,8 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
       return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };
     // The workflow's listed tokens resolve exactly as on the Canvas (the run's own start does the same).
     await prepareCatalogs(workflow);
-    const runtime = userFundedRuntime(env), engine = deploymentEngineRuntime(env);
+    // ADR-0009: the Review's preparation is a preview (no sponsorship grant), but it says whether FloFi would sponsor the fee (shared state).
+    const runtime = userFundedRuntime(env, fetch, host), engine = deploymentEngineRuntime(env);
     // P0 hotfix: a bridge joins the batch only while its own flow executes on this deployment (code support and the deployment's live mode /
     // owner-execution switch — the policy part is the run's own, checked when it starts); otherwise the Review says why, step by step.
     const stepRefusal = async (step: Parameters<typeof evaluateGates>[0]) => {

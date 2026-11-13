@@ -23,6 +23,7 @@ import { batchBridgeProfile, batchBridgeRoutes, type AcrossRoute } from './bridg
 import { bundlerRpc, createBundlerClient, type BundlerClient } from './bundler.ts';
 import { readUserFundedConfig } from './config.ts';
 import type { UserFundedDeps } from './groups.ts';
+import { sponsorshipPort, sponsorshipStorage } from '../gas-sponsorship/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type UserFundedRuntime = { readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null };
@@ -65,7 +66,10 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
     acrossRoutes.set(key, route);
     return route;
   };
-  const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null, across,
+  // ADR-0009: network-fee sponsorship of wallet batches — offered only where the operator configured a paymaster; grants are read from the
+  // shared PostgreSQL state wherever there is a host (a worker without the configuration still reconciles a batch sponsored by the web tier).
+  const sponsorship = host ? sponsorshipPort(env, () => sponsorshipStorage(host)) : null;
+  const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null, across, sponsorship,
     submissionRefusal: async (wallet, owner = wallet) => {
       const mode = betaAccessMode(env);
       if (mode === 'open') return null;

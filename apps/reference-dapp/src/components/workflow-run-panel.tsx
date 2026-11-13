@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, prepareUserFundedGroup, reportUserFundedBatch,
   resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { batchHandout, keepBatchHandout, revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { batchHandout, batchSponsorshipOf, keepBatchHandout, revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -118,7 +118,7 @@ function anyAttempt(approvalId: string, group: number): BatchAttempt | null {
  * browser could not keep (write and read back) its attempt, so the wallet was never asked.
  */
 const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
-  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE']);
+  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'GAS_SPONSORSHIP_WALLET_UNSUPPORTED']);
 /** Whether the owner's wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not). */
 const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => true, () => false);
 /**
@@ -256,7 +256,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
             // tab's attempt landing in between stops this request too.
             const back = batchAttempts()[attemptKey] as BatchAttempt | null | undefined;
             if (back?.nonce !== nonce) throw new Error(back ? 'WALLET_BATCH_SEND_UNCONFIRMED' : 'WALLET_ATTEMPT_UNRECORDABLE');
-          });
+          }, batchSponsorshipOf(p));
         } catch (cause) {
           // Nothing was sent by THIS call: only its own attempt is forgotten (another tab's stays, whatever this call's failure).
           if (cause instanceof Error && NOTHING_SENT.has(cause.message) && batchAttempts()[attemptKey]?.nonce === nonce) putBatchAttempt(attemptKey, null);
@@ -412,11 +412,14 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
           ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
           : tr(stateText(GROUP_STATE, g))}</span>
-        <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>
-        {g.maxFee && !g.gasPaid && <span className="muted">{g.maxFee.estimated
+        {g.gasPaid?.sponsored ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
+        {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Network fee sponsored: gas paid by FloFi (your wallet must support sponsored fees on this network)')}</span>}
+        {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
-        {g.gasPaid && <span className="muted">{tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
+        {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Network fee sponsored when your wallet supports it: gas paid by FloFi; otherwise your wallet pays the estimate above')}</span>}
+        {g.gasPaid && <span className="muted">{g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
+          : tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
         {g.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>}

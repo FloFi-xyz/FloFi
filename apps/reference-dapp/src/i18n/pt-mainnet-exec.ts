@@ -45,4 +45,12 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   'Unwrap WETH to ETH': 'Desembrulhar WETH em ETH',
   'The provider is paid in ETH: your WETH is first unwrapped 1:1 into ETH in your wallet (its own wallet request), then deposited. A refund, if any, arrives as ETH.':
     'O provedor recebe em ETH: o seu WETH é primeiro desembrulhado 1:1 em ETH na sua carteira (um pedido próprio na carteira) e depois depositado. Um eventual reembolso chega em ETH.',
+  // BUILD-FLOFI-MAINNET-EXEC-002 — network-fee sponsorship (ADR-0009)
+  'Your wallet does not support sponsored network fees on this network, and your balance there cannot pay them, so FloFi did not ask your wallet. Add native gas to this wallet, or use a wallet that supports sponsored fees, then try again.':
+    'Sua carteira não oferece suporte a taxas de rede patrocinadas nesta rede, e seu saldo nela não cobre essas taxas, então a FloFi não fez o pedido à sua carteira. Adicione gás nativo a esta carteira ou use uma carteira com suporte a taxas patrocinadas e tente de novo.',
+  'Network fee sponsored: gas paid by FloFi (your wallet must support sponsored fees on this network)':
+    'Taxa de rede patrocinada: gas pago pela FloFi (sua carteira precisa oferecer suporte a taxas patrocinadas nesta rede)',
+  'Network fee sponsored when your wallet supports it: gas paid by FloFi; otherwise your wallet pays the estimate above':
+    'Taxa de rede patrocinada quando sua carteira oferecer suporte: gas pago pela FloFi; caso contrário, sua carteira paga a estimativa acima',
+  'Gas paid by FloFi: {0}': 'Gas pago pela FloFi: {0}',
 };

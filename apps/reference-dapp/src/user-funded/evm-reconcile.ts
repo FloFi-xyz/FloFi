@@ -13,6 +13,13 @@
  * what it receives) are filled in step order. An owner outflow nobody expected, a wrong amount, or a swap below its signed minimum is a
  * RECONCILIATION_MISMATCH (S2): the group never counts as reconciled. Extra inflows (aTokens, variable-debt tokens) are recorded only.
  *
+ *   sponsored batch  ADR-0009: when FloFi offered to sponsor the batch's network fee, the wallet may send it as an ERC-4337 operation of the
+ *                    owner's account paid by the pinned paymaster: the reported transaction is then a bundle, sent by a bundler. It reconciles
+ *                    only through the EntryPoint's own `UserOperationEvent` of an operation FloFi's paymaster proxy sponsored for THIS group
+ *                    (its hash is on the grant; the proxy verified, before sponsoring, that the operation's calls are exactly the prepared ones,
+ *                    and the hash commits to them), with sender = the owner and paymaster = the pinned one; gas paid = its `actualGasCost`,
+ *                    paid by the paymaster (`sponsored`). Legs are read from that operation's own logs only.
+ *
  * P0 hotfix (E1): an Across deposit's source leg is exactly its input from the owner to its pinned SpokePool. The wallet batch's receipts (block,
  * hash, logs) are returned with the reconciliation, so the bridge's destination delivery is matched to THIS deposit (`bridge-delivery.ts`).
  */
@@ -35,8 +42,9 @@ export type GroupReconciliation =
   | { readonly status: 'PENDING' }
   | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly blockNumber: string | null;
       /** Wallet batches: each receipt's block and logs, re-read from the chain (a bridge's deposit is identified from them). */
-      readonly receipts?: readonly ReconciledReceipt[] }
-  | { readonly status: 'REVERTED' | 'MISMATCH'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[] };
+      readonly receipts?: readonly ReconciledReceipt[];
+      /** ADR-0009: the sponsored operation's hash, when the paymaster paid. */ readonly sponsoredOperation?: string }
+  | { readonly status: 'REVERTED' | 'MISMATCH'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly sponsoredOperation?: string };
 
 const topicAddress = (topic: string | undefined) => topic ? ('0x' + topic.slice(-40)).toLowerCase() : '';
 const quantity = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value) ? BigInt(value) : 0n;
@@ -138,7 +146,8 @@ export function batchCarriesCalls(owner: string, txs: readonly EvmTransaction[],
  * Reconciles a wallet batch from the receipts of the transaction hashes the wallet reported (re-read from the chain). `fromBlock`: the block
  * at preparation — an older transaction of the owner is not this batch.
  */
-export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCalls, hashes: readonly string[], fromBlock: string | null = null): Promise<GroupReconciliation> {
+export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCalls, hashes: readonly string[], fromBlock: string | null = null,
+  sponsored: SponsoredOperations | null = null): Promise<GroupReconciliation> {
   if (!hashes.length) return { status: 'PENDING' };
   const receipts: EvmReceipt[] = [];
   for (const hash of hashes) {
@@ -146,6 +155,8 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
     if (!r) return { status: 'PENDING' };
     receipts.push({ ...r, transactionHash: hash });
   }
+  // ADR-0009: one bundle transaction that the owner did not send is reconciled only as an operation FloFi's paymaster sponsored for this group.
+  if (sponsored && receipts.length === 1 && String(receipts[0]!.from ?? '').toLowerCase() !== group.owner) return reconcileSponsoredBatch(group, receipts[0]!, fromBlock, sponsored);
   let gas = 0n;
   for (const r of receipts) {
     // S1 on the chain itself: the account that sent (and paid for) every transaction of the batch is the owner.
@@ -171,6 +182,35 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
       logs: (r.logs ?? []).map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) })) };
 }
 
+/** ADR-0009: the operations FloFi's paymaster proxy sponsored for a group (hashes recorded on its grant) and the paymaster pinned for the chain. */
+export type SponsoredOperations = { readonly paymaster: string; readonly userOpHashes: readonly string[] };
+/** The logs of one operation's execution inside a bundle: after the previous `UserOperationEvent`, before its own (at index `at`). */
+function operationLogs(logs: readonly Log[], at: number): readonly Log[] {
+  const previous = logs.slice(0, at).map((l, i) => l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
+  return logs.slice(previous + 1, at);
+}
+/** The index of the EntryPoint's own `UserOperationEvent` of `hash` (another operation of the bundle could emit a look-alike log). */
+const eventIndex = (logs: readonly Log[], hash: string) => logs.findIndex(l => l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7
+  && l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC && l.topics[1]?.toLowerCase() === hash.toLowerCase());
+/** A wallet batch sent as a sponsored ERC-4337 operation of the owner's account (see the module comment). */
+function reconcileSponsoredBatch(group: EvmGroupCalls, r: EvmReceipt, fromBlock: string | null, sponsored: SponsoredOperations): GroupReconciliation {
+  const transactions = [r.transactionHash], logs = r.logs ?? [];
+  if (fromBlock !== null && quantity(r.blockNumber) < BigInt(fromBlock)) return { status: 'MISMATCH', code: 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION', gasPaid: null, transactions };
+  const hash = sponsored.userOpHashes.find(h => eventIndex(logs, h) >= 0);
+  // No operation this group's grant sponsored is in the bundle: not this preparation's calls (an earlier preparation's grant may hold it).
+  if (!hash) return { status: 'MISMATCH', code: 'RECONCILIATION_CALLS_MISMATCH', gasPaid: null, transactions };
+  const event = erc4337.userOperationEvent(logs, hash)!;
+  if (event.sender.toLowerCase() !== group.owner) return { status: 'MISMATCH', code: 'GAS_PAYER_NOT_OWNER', gasPaid: null, transactions };
+  if (event.paymaster.toLowerCase() !== sponsored.paymaster.toLowerCase()) return { status: 'MISMATCH', code: 'GAS_SPONSORSHIP_REFUSED', gasPaid: null, transactions };
+  const gasPaid: GasPaidFact = { payer: event.paymaster.toLowerCase(), amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT', sponsored: true };
+  if (r.status !== '0x1' || !event.success) return { status: 'REVERTED', code: 'USER_OPERATION_REVERTED', gasPaid, transactions, sponsoredOperation: hash.toLowerCase() };
+  const attributed = attributeLegs(group, operationLogs(logs, eventIndex(logs, hash)));
+  if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions, sponsoredOperation: hash.toLowerCase() };
+  return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions, blockNumber: r.blockNumber ?? null, sponsoredOperation: hash.toLowerCase(),
+    receipts: [{ transactionHash: r.transactionHash.toLowerCase(), blockNumber: String(r.blockNumber ?? ''), blockHash: String(r.blockHash ?? '').toLowerCase(),
+      logs: logs.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) }] };
+}
+
 /** Reconciles an owner user operation from its bundle transaction's receipt on the chain. */
 export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupCalls, userOpHash: string, transactionHash: string | null): Promise<GroupReconciliation> {
   if (!transactionHash) return { status: 'PENDING' };
@@ -185,10 +225,7 @@ export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupC
   // Only the logs of this operation's execution: those before its own UserOperationEvent and after the previous one in the bundle.
   const logs = r.logs ?? [];
   // The EntryPoint's own event only: another operation of the same bundle could emit a look-alike log carrying this public hash.
-  const at = logs.findIndex(l => l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7 && l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC
-    && l.topics[1]?.toLowerCase() === userOpHash.toLowerCase());
-  const previous = logs.slice(0, at).map((l, i) => l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
-  const attributed = attributeLegs(group, logs.slice(previous + 1, at));
+  const attributed = attributeLegs(group, operationLogs(logs, eventIndex(logs, userOpHash)));
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions: [transactionHash] };
   return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions: [transactionHash], blockNumber: r.blockNumber ?? null };
 }

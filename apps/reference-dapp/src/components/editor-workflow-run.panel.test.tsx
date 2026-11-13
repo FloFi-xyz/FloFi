@@ -15,7 +15,7 @@ vi.mock('../app/approve-action', () => {
   return { authorizeUserFundedGroup: never, cancelWorkflowRunHandoff: never, prepareUserFundedGroup: never, reportUserFundedBatch: never, resumeWorkflowRunHandoff: never,
     workflowRunStatusHandoff: never };
 });
-vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, keepBatchHandout: () => undefined, sendWalletBatch: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn(), walletBatchHashes: vi.fn(), walletProfile: vi.fn() }));
+vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn(), walletBatchHashes: vi.fn(), walletProfile: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
 const { EditorWorkflowRunPanel } = await import('./editor-workflow-run');
 const { LocaleProvider } = await import('../i18n/locale');

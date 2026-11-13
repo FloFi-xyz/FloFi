@@ -448,6 +448,25 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         catch (cause) { restoreState(snapshot); throw cause; }
       });
     },
+    /**
+     * BUILD-FLOFI-MAINNET-EXEC-002 (ADR-0009): what a wallet does with a SPONSORED `wallet_sendCalls`: an ERC-4337 operation of the owner's account
+     * executing every call, all or nothing, relayed by a bundler in a bundle transaction to the EntryPoint; the EntryPoint's `UserOperationEvent`
+     * names the sender, the paymaster that paid and the actual gas cost. `op` lets a test forge the event (another hash, sender or paymaster).
+     */
+    sponsoredOperation(owner: string, calls: readonly erc7710.Call[], op: { readonly userOpHash: string; readonly paymaster: string; readonly bundler: string;
+      readonly actualGasCost: bigint; readonly sender?: string; readonly success?: boolean }): string {
+      const bundler = lower(op.bundler), n = nonces.get(bundler) ?? 0n;
+      nonces.set(bundler, n + 1n);
+      const hash = D.keccakHex(`bundle:${bundler}:${n}:${calls.map(c => c.data).join('')}`);
+      const snapshot = snapshotState(), success = op.success !== false;
+      const event = (opNonce: bigint) => ({ address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, lower(op.userOpHash), topic(lower(op.sender ?? owner)),
+        topic(lower(op.paymaster))], data: '0x' + [opNonce, success ? 1n : 0n, op.actualGasCost, op.actualGasCost / 1_000_000_000n].map(v => v.toString(16).padStart(64, '0')).join('') });
+      return mine(hash, bundler, erc4337.ENTRY_POINT_V0_7, '0x765e827f', n, () => {
+        if (!success) return [event(n)];
+        try { return [...calls.flatMap(c => execute(lower(owner), c)), event(n)]; }
+        catch (cause) { restoreState(snapshot); throw cause; }
+      });
+    },
     setPrice(wethPerUsdcUnits: bigint) { wethPerUsdc = wethPerUsdcUnits; },
     /** A node without `eth_simulateV1` (the product must then refuse to offer a batch that depends on Aave state). */
     disableSimulation() { simulateSupported = false; },

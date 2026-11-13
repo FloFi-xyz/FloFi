@@ -283,7 +283,7 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   }
   if (r.status === 'RECONCILED') {
     await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'RECONCILED', { outcome: groupOutcome, code: null });
-    deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount });
+    deps.log('workflow_run.group_reconciled', { run: run.runId, group: g.groupIndex, gasPaid: r.gasPaid.amount, ...r.gasPaid.sponsored ? { gasSponsored: true } : {} });
     return afterGroup(deps, (await deps.store.byId(run.runId))!, g);
   }
   await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED', 'UNCERTAIN'], 'FAILED', { outcome: groupOutcome, code: stored(r.code) });
