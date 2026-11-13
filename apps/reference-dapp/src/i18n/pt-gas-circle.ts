@@ -121,6 +121,9 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
     'Nada foi assinado. A etapa {0} segue pela própria revisão, que paga a taxa de rede em ETH.',
   'Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation':
     'Três assinaturas: a atualização da conta inteligente, uma permissão de USDC para a taxa e, depois, a operação',
+  // The Editor's step-by-step Review with FloFi Wallet: where the USDC fee is available, and that each step run here pays ETH.
+  'Paying the network fee in USDC through Circle with FloFi Wallet is available when a workflow is approved through a FloFi approval link (/approve) and authorized in groups. Here each step runs on its own and pays its network fee in ETH.':
+    'Pagar a taxa de rede em USDC pela Circle com a FloFi Wallet está disponível quando um fluxo é aprovado por um link de aprovação da FloFi (/approve) e autorizado em grupos. Aqui, cada etapa roda sozinha e paga a taxa de rede em ETH.',
   'You already signed part of this request, so FloFi keeps it as it is. Nothing more was signed or sent.':
     'Você já assinou parte deste pedido, então a FloFi o mantém como está. Nada mais foi assinado nem enviado.',
   'This request has no network fee in USDC to decline. Nothing was signed or sent.':

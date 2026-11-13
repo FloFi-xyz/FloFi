@@ -93,6 +93,12 @@ export type EditorExecutionReview = {
    * signature; nothing in the plan changes. Absent: a Review made before this field existed.
    */
   readonly nativeLater?: readonly NativeLaterWarning[];
+  /**
+   * Owner requirement (FloFi Wallet + Circle): the owner signs with FloFi Wallet and a group of this workflow is on a network where Circle may pay its
+   * fee in USDC — possible only in a user-funded run approved on /approve (FloFi Wallet's groups are owner steps, so this Review is STEP_BY_STEP
+   * and the Editor runs each step through its own flow, which pays ETH). Said in the Review; nothing here is ever Circle-paid. Absent otherwise.
+   */
+  readonly circleOnApproval?: true;
 };
 export type ReviewResult = { readonly ok: true; readonly value: EditorExecutionReview } | { readonly ok: false; readonly code: string; readonly step?: number };
 
@@ -152,6 +158,13 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   const buildable = userFundedBuildable(input.facts, owner);
   const plan = planExecutionGroups(req.value, input.facts, input.profile, st => closed.has(st.index) ? 'USER_FUNDED_BRIDGE_FLOW_CLOSED' : buildable(st));
   if (!plan.ok) return { ok: false, code: plan.code };
+  // Grouping is offered under the run's own rule (`userFundedPreferred`, which its claim applies too: otherwise the claim starts confirming each
+  // step, and the grouped Authorize could not start): never more wallet interactions than confirming each step, whose step count is only a lower
+  // bound (a step's own flow may add a token approval; a batch folds approvals in and carries an on-chain expiry). Every group here is a
+  // grouped interaction, so a tie never forces step-by-step. Nothing claims FEWER: the counts are shown as they are.
+  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy));
+  // A Circle-paid group is still one grouped interaction for the run's rule (its permit is part of that group's authorization).
+  const allGrouped = everyGroupBatched && userFundedPreferred(plan.groups, plan.interactions, req.value.steps.length);
   const preparedCalls = new Map<number, number>(), tokenGas = new Set<number>(), decided = new Set<number>();
   /** Review B1/LQ1: who pays each prepared group's fee, as this Review found it (USDC through Circle, or the owner's own native coin). */
   const feePayers = new Map<number, 'TOKEN' | 'NATIVE'>();
@@ -164,8 +177,11 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     // Only the first group is due now: it is prepared exactly as the run will prepare it. A later group is quoted when it becomes due.
     if (g.index === 0 && g.strategy === 'EVM_WALLET_BATCH') {
       const wallet = input.profile.eip155?.wallet;
+      // A workflow the Editor runs step by step never starts a run: each step goes through its own single-step flow, which pays its network fee in
+      // the native coin (ADR-0010 §3). Its first group is then never shown as paid in USDC through Circle (`tokenGas: false`): it is the native
+      // fee, or the native shortfall.
       const r = await prepareGroup(input.deps, composed, req.value, { runId: 'editor-review', groupIndex: 0, strategy: g.strategy, chain: g.chain, feePayer: owner,
-        stepFrom: g.stepFrom, stepTo: g.stepTo, preview: true, ...wallet ? { wallet } : {} });
+        stepFrom: g.stepFrom, stepTo: g.stepTo, preview: true, ...wallet ? { wallet } : {}, ...allGrouped ? {} : { tokenGas: false } });
       if (!r.ok) refusal = { code: r.code, step: r.stepIndex ?? null, ...r.evidence ? { evidence: r.evidence } : {} };
       else {
         const p = r.value.prepared as unknown as { group: EvmGroupCalls; simulation: BatchSimulation | null;
@@ -208,19 +224,17 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
       recipient: step.action === 'transfer' ? recipientOf(step.strategy as { readonly recipient?: unknown }, step.namespace === 'eip155' ? owner : null) : null,
       ...step.action === 'bridge' ? { destination: NETWORKS[(step.strategy as { readonly destinationNetwork: NetworkId }).destinationNetwork]?.label ?? null } : {} };
   });
-  // Grouping is offered under the run's own rule (`userFundedPreferred`, which its claim applies too: otherwise the claim starts confirming each
-  // step, and the grouped Authorize could not start): never more wallet interactions than confirming each step, whose step count is only a lower
-  // bound (a step's own flow may add a token approval; a batch folds approvals in and carries an on-chain expiry). Every group here is a
-  // grouped interaction, so a tie never forces step-by-step. Nothing claims FEWER: the counts are shown as they are.
-  const everyGroupBatched = plan.groups.every(g => GROUPED.includes(g.strategy));
-  // A Circle-paid group is still one grouped interaction for the run's rule (its permit is part of that group's authorization).
-  const allGrouped = everyGroupBatched && userFundedPreferred(plan.groups, plan.interactions, req.value.steps.length);
   const mode = !allGrouped ? 'STEP_BY_STEP' : interactions.single ? 'ONE_WALLET_CONFIRMATION' : 'GROUPED';
+  // Owner requirement (FloFi Wallet + Circle): FloFi Wallet pays a group's fee in USDC through Circle only in a user-funded run approved on
+  // /approve (the planner's flag on its owner-step group); this Review, step by step, says so — and that each step here pays its fee in ETH.
+  const circleOnApproval = mode === 'STEP_BY_STEP' && input.profile.eip155?.wallet === 'FLOFI_WALLET'
+    && plan.groups.some(g => g.strategy === 'EVM_OWNER_STEP' && g.tokenGas === 'CIRCLE_USDC_PAYMASTER');
   return { ok: true, value: { workflowHash: converted.workflowHash, stepCount: req.value.steps.length, owner, reviewedAt: input.now.toISOString(), validUntil, mode, groups, steps,
     counts: counts(planGroups, preparedCalls, interactions.networkSwitches, interactions.oneTimeSetup, tokenGas),
     // USER_FUNDED_NOT_FEWER_INTERACTIONS is no longer emitted: groups that are all grouped interactions never need more prompts than their steps.
     reasons: [...new Set(plan.groups.flatMap(g => g.downgrades))].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
     refusal,
     // Review B1/LQ1: the run's own groups when it runs grouped (a Circle group may pay in USDC), else each step through its own flow.
-    nativeLater: nativeLaterWarnings(req.value.steps, mode === 'STEP_BY_STEP' ? null : plan.groups, input.facts, feePayers) } };
+    nativeLater: nativeLaterWarnings(req.value.steps, mode === 'STEP_BY_STEP' ? null : plan.groups, input.facts, feePayers),
+    ...circleOnApproval ? { circleOnApproval: true as const } : {} } };
 }

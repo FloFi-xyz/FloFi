@@ -128,6 +128,11 @@ export const CIRCLE_FEE_CONSENT: Readonly<Record<'TITLE' | 'WHAT' | 'SIGNATURES'
   SIGNATURES: 'Two signatures follow: a USDC permit, then the operation.',
   AGREE: 'Pay in USDC and continue',
 };
+/**
+ * Owner requirement (FloFi Wallet + Circle), the Editor's step-by-step Review (`EditorExecutionReview.circleOnApproval`): where paying the fee in USDC
+ * with FloFi Wallet is really available (a user-funded run approved on /approve), and that every step run here pays its network fee in ETH.
+ */
+export const CIRCLE_ON_APPROVAL = 'Paying the network fee in USDC through Circle with FloFi Wallet is available when a workflow is approved through a FloFi approval link (/approve) and authorized in groups. Here each step runs on its own and pays its network fee in ETH.';
 /** Both cards' way out, what it does, and what /approve says once it was chosen (`{0}`: the step number). */
 export const CIRCLE_CONSENT_DECLINE: Readonly<Record<'ACTION' | 'NOTE' | 'DONE', string>> = {
   ACTION: 'Not now',

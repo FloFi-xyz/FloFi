@@ -22,7 +22,8 @@ import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
-import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
+import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_ON_APPROVAL, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED, feeAmountText,
+  nativeLaterMessage } from '../domain/token-fee';
 import { circleFactsOf } from '../user-funded/circle-facts';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 import type { ClaimedProposal } from '../platform/approvals';
@@ -1152,6 +1153,10 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   const beforeFirstSignature = !run || !run.groups.some(g => g.signed || ANSWERED_STATES.includes(g.state)) && !run.steps.some(s => s.state === 'RECONCILED');
   const nativeLater = beforeFirstSignature ? (review?.nativeLater ?? []).map(w => <p key={w.chain} className="review-panel-note review-block-native-later" role="note"
     data-native-later={w.chain}>{nativeLaterMessage(w, tr, action => tr(ACTION[action] ?? action))}</p>) : [];
+  // Owner requirement (FloFi Wallet + Circle): the Editor runs a FloFi Wallet workflow step by step, each step paying ETH; the USDC fee through Circle
+  // is available on /approve only. Said precisely, never as a fee of these steps.
+  const circleOnApproval = review?.circleOnApproval && review.mode === 'STEP_BY_STEP'
+    ? <p className="review-panel-note" role="note" data-circle-on-approval="">{tr(CIRCLE_ON_APPROVAL)}</p> : null;
   // One amber line at the top of the block: what stops or invalidates this Review now (never an extra paragraph).
   // The Review's own refusal and an action's error both stay said (one line); expired prices in a sentence of their own.
   const alert = [refusal, errorText !== refusal ? errorText : null].filter(Boolean).join(' ')
@@ -1186,6 +1191,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       <p className="eyebrow">{tr('REVIEW')}</p>
       <h3>{tr(block ? 'You are authorizing' : 'Review the whole workflow')}</h3>
       {review?.mode === 'STEP_BY_STEP' && <p className="review-panel-note">{tr('This workflow needs a confirmation in your wallet for each step on its own.')}</p>}
+      {circleOnApproval}
       {!block ? <p className="review-panel-status" role="status">{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…'
         : 'FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p> : <>
         <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
@@ -1230,7 +1236,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       <button type="button" className="secondary" disabled={busy} onClick={() => void state.followEarlier()}>{tr('Show its progress')}</button></div>}
     {!fresh && !review && !run && state.canReview && <p>{tr('FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p>}
     {state.following && <p className="muted">{tr('This is a workflow you authorized earlier, not the one on the Canvas.')}</p>}
-    {review && !fresh && <>{nativeLater}{technical}</>}
+    {review && !fresh && <>{nativeLater}{circleOnApproval}{technical}</>}
     {!review && run && <>
       {/* After a reload the Review is not in this tab any more: the run's own progress is shown from the server (amounts as reconciled). */}
       <ol className="editor-run-steps" aria-label={tr('Steps')}>
