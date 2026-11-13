@@ -73,6 +73,8 @@ engineering review); browser evidence is listed there only for profiles that act
 | Arbitrum swap → Solana bridge on the Canvas: applies; destination auto-filled (Solana wallet), editable, validated | unit (domain/state) |
 | Compact review EN/PT, Technical details closed | unit |
 | Sponsored wallet batch: offered / required / fallback / reconciled as paid by paymaster / refusals | unit (sponsorship + sponsored-batch + browser wallet double) |
+| Refusal at the wallet hand-off (L1 fee, fees, gas or expiry) re-quoted in place: no interim "needs attention", the chat presents the fresh Review once the controls settle, Authorize starts the fresh request (superseded never-sent attempt ignored by the lifecycle and the execution gate, kept in the evidence) | unit (chat timing, lifecycle, execution gate, universal service) |
+| A request first reported as unknown, then proven on chain: no uncertainty note left on the confirmed attempt (router and universal) | unit |
 
 ## 7. Not proven (honest limits)
 
@@ -80,3 +82,19 @@ engineering review); browser evidence is listed there only for profiles that act
   against the recorded figures, not by a new mainnet transfer.
 - Sponsored gas depends on each wallet's EIP-5792 `paymasterService` support and the operator's provider policy; untested live.
 - Solana fee sponsorship is not connected to a flow.
+
+### Review round 3 (pre-merge regression check of the round-2 fixes)
+
+Three independent finders then flofi-workflow, flofi-chat and flofi-bridge reviewed the fixes; every P1 they raised was fixed and verified
+again (no P0/P1 left). Known, accepted limits:
+
+- The router and universal stores have no unit test of their own for the in-place re-quote ordering (interim record, thrown status or
+  refresh calls). It is covered through the chat, lifecycle and execution-gate tests and by the CI browser profiles, not by a store harness.
+- A run whose only requests were superseded by an in-place re-quote reads "awaiting authorization" on the web, while the server summary
+  (MCP, channels, Dashboard list) still classifies it by its last attempt (for example "Transaction not submitted").
+- A Solana deposit proven not executed (NOT_FOUND after expiry) still reads "uncertain" after its re-quote until a new attempt starts.
+- The router accepts a client diagnostic that the wallet was never invoked after the hand-off (the universal service refuses it). The
+  shipped store sends it only when it never called `eth_sendTransaction`; it is the owner's own browser report, not verified on the server.
+- A tolerated re-pricing note recorded at begin is replaced when a later report (unknown/rejected) or a network-fee overrun writes its own
+  note; the drift stays in the run's earlier log lines.
+
