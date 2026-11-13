@@ -38,6 +38,7 @@ import type { SponsorshipPort } from '../gas-sponsorship/runtime.ts';
 import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
+import { gaslessStepModeRefusal } from './gasless-groups.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
@@ -168,7 +169,12 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does. With a
   // sponsorship offer it must still cover the native value: the offer is then REQUIRED (sent only sponsored, never owner-paid without the gas).
   const ownerCovers = fees.balance >= maxCost + nativeSpend(group);
-  if (!ownerCovers && !(offer && fees.balance >= nativeSpend(group))) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+  if (!ownerCovers && !(offer && fees.balance >= nativeSpend(group))) {
+    // ADR-0010 §5: a short-native Robinhood Chain batch of swaps 0x Gasless could carry runs step by step instead (the Review says so in
+    // words: the fee-shortfall numbers would only tell the owner to add ETH).
+    const stepMode = gaslessStepModeRefusal(requirement, g);
+    return stepMode ? no(stepMode.code, stepMode.stepIndex) : nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+  }
   const sponsorship = offer ? { ...offer, required: !ownerCovers } : null;
   // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
   // after a lost answer, a reload, a re-preparation after expiry) and lets the owner's browser read the first batch back instead.

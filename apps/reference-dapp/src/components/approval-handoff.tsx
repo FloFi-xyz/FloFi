@@ -59,6 +59,7 @@ const CLAIM_TEXT: Record<string, string> = {
   EDITOR_WALLET_NOT_IN_ACCOUNT: 'This wallet does not belong to the FloFi account that started this workflow. Connect one of that account\'s wallets.',
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded groups, in plain words (never a raw code).
   USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE: 'Your wallet does not hold enough of this network\'s native token to pay the fees of this group. Add funds to your own wallet, then try again.',
+  USER_FUNDED_GASLESS_REQUIRES_STEP_MODE: 'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch. Run this workflow with Confirm each step: each swap can then pay its network fee from the tokens it swaps. Nothing was sent.',
   WORKFLOW_RUN_GROUP_IN_FLIGHT: 'A group of this workflow may still be executing from your wallet. Wait until it is reconciled, then try again.',
   WORKFLOW_RUN_GROUP_SIGNED: 'Something you already signed for this step is never replaced: end this workflow and start a new one.',
   WORKFLOW_RUN_GROUP_NOT_DUE: 'This group can be authorized only when it becomes due, after the previous group reconciled.',

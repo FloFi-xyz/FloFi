@@ -64,6 +64,9 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'The 0x service did not answer, so nothing was signed or submitted. Try again shortly.': 'O serviço da 0x não respondeu, por isso nada foi assinado nem enviado. Tente novamente em instantes.',
   'Your wallet did not return the signatures, so nothing was submitted. Authorize again when ready.':
     'A sua carteira não devolveu as assinaturas, por isso nada foi enviado. Autorize de novo quando quiser.',
+  // User-funded batches on Robinhood Chain (components/editor-workflow-run.tsx, components/approval-handoff.tsx).
+  'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch. Run this workflow with Confirm each step: each swap can then pay its network fee from the tokens it swaps. Nothing was sent.':
+    'A sua carteira não tem ETH suficiente na Robinhood Chain para a taxa de rede deste lote. Execute este fluxo com Confirmar cada etapa: cada swap poderá então pagar a taxa de rede com os tokens que troca. Nada foi enviado.',
   // Evidence (domain/execution-evidence.ts).
   '0x trade hash': 'Hash da negociação na 0x',
   'Network fee paid from the swap': 'Taxa de rede paga com o swap',
