@@ -17,7 +17,8 @@ const PRICE: Record<string, bigint> = { SOL: 117_600_000n, USDC: 1_000_000n, USD
 const key = (label: string) => base58Encode(sha256(new TextEncoder().encode('gryloo-mock:' + label)));
 export type MockedTokenAccount = { mint: string; owner: string; amount: bigint };
 export type MockedTransaction = { signature: string; slot: number; bytes: string; err: unknown; fee: bigint; keys: string[]; loaded: { writable: string[]; readonly: string[] };
-  pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[]; inner: unknown[]; finalizedAt: number };
+  pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[]; inner: unknown[]; finalizedAt: number;
+  /** The block height it landed at (`getBlock`). */ height?: number };
 export type MockedJupiterOptions = { actualOutput?: (quoted: bigint) => bigint; failSwap?: boolean; extraInputDebit?: bigint;
   send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number; cluster?: string; tamperBuild?: (build: Record<string, unknown>) => void };
 export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
@@ -153,7 +154,7 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
     const pre = balances(before, keys), post = balances(final, keys);
     state.lamports = final.lamports; state.tokens = final.tokens; state.lamportsOf = final.lamportsOf;
     state.slot += 1;
-    state.transactions.set(signature, { signature, slot: state.slot, bytes: txBase64, err: result.err, fee: result.fee, keys,
+    state.transactions.set(signature, { signature, slot: state.slot, height: state.blockHeight, bytes: txBase64, err: result.err, fee: result.fee, keys,
       loaded: { writable: keys.slice(d.parsed.staticKeys.length, d.parsed.staticKeys.length + d.parsed.lookups.reduce((n, l) => n + l.writable.length, 0)),
         readonly: keys.slice(d.parsed.staticKeys.length + d.parsed.lookups.reduce((n, l) => n + l.writable.length, 0)) },
       pre: pre.lamports, post: post.lamports, preTokens: pre.tokens, postTokens: post.tokens,
@@ -167,11 +168,22 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
       case 'getMultipleAccounts': return value((params[0] as string[]).map(k => accountValue(snapshot(), k)));
       case 'getLatestBlockhash': { const hash = blockhash(state.blockHeight); issued.set(hash, state.blockHeight + 150); return value({ blockhash: hash, lastValidBlockHeight: state.blockHeight + 150 }); }
       case 'getBlockHeight': return state.blockHeight;
+      case 'getBlock': {
+        // Only a slot that holds a landed transaction is a block here (a skipped slot is an RPC error, as on a real node).
+        const t = [...state.transactions.values()].find(x => x.slot === Number(params[0]));
+        if (!t) throw Object.assign(new Error('Slot was skipped, or missing in long-term storage'), { rpc: -32007 });
+        return { blockHeight: t.height, blockTime: 1_790_870_000 + t.slot % 1000, parentSlot: t.slot - 1, blockhash: t.signature.slice(0, 44), previousBlockhash: t.signature.slice(0, 44) };
+      }
       case 'getMinimumBalanceForRentExemption': return Number(params[0]) === 165 ? Number(RENT) : (128 + Number(params[0])) * 6_960;
       case 'getSignaturesForAddress': {
-        // Newest first, like the RPC: every landed transaction that names the address (ADR-0010 recovery of a lost Kora answer).
-        const limit = Math.min(1_000, Number((params[1] as { limit?: number } | undefined)?.limit ?? 1_000));
-        return [...state.transactions.values()].filter(t => t.keys.includes(params[0] as string)).reverse().slice(0, limit)
+        // Newest first, like the RPC: every landed transaction that names the address (ADR-0010 recovery of a lost Kora answer), paged like the
+        // RPC: `before` starts after that signature, `until` stops before it.
+        const config = (params[1] ?? {}) as { limit?: number; before?: string; until?: string };
+        const limit = Math.min(1_000, Number(config.limit ?? 1_000));
+        let listed = [...state.transactions.values()].filter(t => t.keys.includes(params[0] as string)).reverse();
+        if (config.before) { const at = listed.findIndex(t => t.signature === config.before); listed = at < 0 ? [] : listed.slice(at + 1); }
+        if (config.until) { const at = listed.findIndex(t => t.signature === config.until); if (at >= 0) listed = listed.slice(0, at); }
+        return listed.slice(0, limit)
           .map(t => ({ signature: t.signature, slot: t.slot, err: t.err, memo: null, blockTime: 1_790_870_000 + t.slot % 1000,
             confirmationStatus: state.blockHeight >= t.finalizedAt ? 'finalized' : 'confirmed' }));
       }

@@ -229,7 +229,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
       if (record.review.gas && attempt.kora && !attempt.signature) {
         // ADR-0010: Kora's answer was lost. The transaction is found by the owner's recorded signature (read-only), never re-created.
         const recovered = await recoverKoraTransaction(input.rpc, { owner: record.review.owner, ownerSignature: attempt.kora.ownerSignature, ownerSigned: attempt.transaction!,
-          feePayer: record.review.gas.feePayer, sinceSlot: record.review.simulationResult.slot });
+          feePayer: record.review.gas.feePayer, sinceSlot: record.review.simulationResult.slot, lastValidBlockHeight: record.review.lastValidBlockHeight });
         if (recovered.state !== 'FOUND') {
           if (recovered.state === 'ABSENT' && finalizedHeight > record.review.lastValidBlockHeight) {
             let next: SolanaSwapRun = record;

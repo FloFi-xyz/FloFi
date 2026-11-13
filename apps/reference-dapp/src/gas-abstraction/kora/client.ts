@@ -20,9 +20,20 @@ export const KORA_CODES = Object.freeze({
   feeAccountMissing: 'KORA_FEE_TOKEN_ACCOUNT_MISSING', rateLimited: 'KORA_RATE_LIMITED', unknown: 'KORA_ERROR_UNKNOWN', unreachable: 'KORA_UNREACHABLE',
   invalid: 'KORA_RESPONSE_INVALID',
 });
-/** Kora refused the transaction itself: it did not sign, so no transaction with these bytes can exist (`KORA_UNREACHABLE` / unknown never are). */
-export const KORA_REFUSAL_CODES: ReadonlySet<string> = new Set([KORA_CODES.refused, KORA_CODES.paymentInsufficient, KORA_CODES.unavailable, KORA_CODES.feeAccountMissing,
-  KORA_CODES.rateLimited]);
+/**
+ * JSON-RPC error codes Kora answers from its validation BEFORE it signs (Pimlico error reference): -32000 the transaction was refused (invalid,
+ * its simulation failed, the token payment is insufficient), -32602 invalid params, -32050 an account was not found. Never -32603 (internal: it
+ * may have signed), never an HTTP-level failure (a gateway may answer after Kora signed), never a rate limit.
+ */
+const PRE_SIGNING_RPC_CODES: ReadonlySet<number> = new Set([-32000, -32602, -32050]);
+/** Errors this client raised for exactly such an answer (only this module can mark one). */
+const refusedBeforeSigning = new WeakSet<Error>();
+/**
+ * Kora's own answer proves it refused BEFORE signing: a 2xx response whose body is a well-formed JSON-RPC 2.0 error object (integer code, string
+ * message) with a pre-signing validation code. It proves nothing about these bytes unless it answered the FIRST call for them (a later call may be
+ * refused because an earlier one was signed and landed): the caller decides that (`runtime.ts`).
+ */
+export const isKoraRefusalBeforeSigning = (cause: unknown): boolean => cause instanceof Error && refusedBeforeSigning.has(cause);
 export type KoraEstimate = { readonly feeInLamports: string; readonly feeInToken: string; readonly signerPubkey: string; readonly paymentAddress: string };
 export type KoraSigned = { readonly signature: string; readonly signedTransaction: string; readonly signerPubkey: string };
 export type KoraClient = {
@@ -93,7 +104,10 @@ export function createKoraClient(url: string, options: { readonly transport?: Ko
     const envelope = record(body, method);
     if (envelope.error !== undefined && envelope.error !== null) {
       const error = record(envelope.error, method);
-      throw failure(koraErrorCode(error), { method, rpcCode: typeof error.code === 'number' ? error.code : null, message: redactKoraText(String(error.message ?? '')) });
+      const raised = failure(koraErrorCode(error), { method, rpcCode: typeof error.code === 'number' ? error.code : null, message: redactKoraText(String(error.message ?? '')) });
+      if (response.ok && envelope.jsonrpc === '2.0' && Number.isSafeInteger(error.code) && typeof error.message === 'string' && PRE_SIGNING_RPC_CODES.has(error.code as number))
+        refusedBeforeSigning.add(raised);
+      throw raised;
     }
     if (!response.ok) throw failure(response.status >= 500 ? KORA_CODES.unavailable : KORA_CODES.invalid, { method, status: response.status });
     if (envelope.jsonrpc !== '2.0' || !('result' in envelope)) throw failure(KORA_CODES.invalid, { method });

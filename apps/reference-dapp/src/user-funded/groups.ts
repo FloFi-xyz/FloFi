@@ -360,6 +360,20 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
   return ok({ ...kora.value, fee: { payer: g.feePayer, unit: 'token', maxCost: terms.reduce((sum, t) => sum + BigInt(t.amount), 0n).toString(), estimated: false,
     mechanism: KORA_MECHANISM, token: { mint: token.mint, symbol: token.symbol, decimals: token.decimals }, relayer: terms[0]!.feePayer, payee: terms[0]!.paymentAddress } });
 }
+/** ADR-0010 §4: whether a prepared group is a Kora group (its transactions' fees fronted by Pimlico's Kora fee payer). */
+export const isKoraGroup = (prepared: Readonly<Record<string, unknown>> | null): boolean => prepared?.kind === 'SOLANA_SIGN_ALL' && Array.isArray(prepared.transactions)
+  && (prepared.transactions as readonly Partial<SolanaGroupTx>[]).some(x => Boolean(x?.gas));
+/**
+ * ADR-0010 §2 at authorization, for a Kora group: does the owner's SOL now cover the members' native worst case together (the same test that chose
+ * Kora at preparation)? True: the policy would now pick native gas — the owner reviews again. Null: unreadable (nothing is decided).
+ */
+export async function koraGroupNativeCovers(deps: Pick<UserFundedDeps, 'solana'>, prepared: Readonly<Record<string, unknown>>): Promise<boolean | null> {
+  const txs = prepared.transactions as readonly SolanaGroupTx[], owner = String(prepared.owner ?? '');
+  if (!deps.solana || !txs.every(x => x.gas && /^(0|[1-9][0-9]{0,19})$/.test(x.gas.nativeWorstCaseLamports))) return null;
+  let read: Awaited<ReturnType<typeof readSolanaAccounts>>;
+  try { read = await readSolanaAccounts(deps.solana, [owner]); } catch { return null; }
+  return (read.accounts[0]?.lamports ?? 0n) >= txs.reduce((sum, x) => sum + BigInt(x.gas!.nativeWorstCaseLamports), 0n);
+}
 async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput, kora: KoraGas | null): Promise<Result<Prepared>> {
   if (!deps.solana) return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
   const txs: SolanaGroupTx[] = [];
@@ -543,6 +557,48 @@ export function solanaSubmission(authorization: Readonly<Record<string, unknown>
 }
 /** At most this many Kora calls per transaction: the first, and one retry with the identical bytes when its answer was lost. */
 export const KORA_GROUP_RELAY_ATTEMPTS = 2;
+/**
+ * ADR-0010 §4: a Kora group's progress while it is in flight — each Kora call counted BEFORE it is made (`relayAttempts`), each verified answer or
+ * recovered transaction (`hashes`, `relayed`). The submission itself is written once (migration 0023 never lets it change); the progress is kept on
+ * the group's outcome (mutable until the group is terminal) under `kora`, written by compare-and-set on the group's version. Absent: nothing
+ * happened yet beyond the submission.
+ */
+export type KoraGroupProgress = { readonly hashes: readonly (string | null)[]; readonly relayed: readonly (string | null)[]; readonly relayAttempts: readonly number[] };
+const KORA_ID = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+function koraProgressValid(p: unknown, n: number): p is KoraGroupProgress {
+  const x = p as Partial<KoraGroupProgress> | null;
+  return Boolean(x) && Array.isArray(x!.hashes) && Array.isArray(x!.relayed) && Array.isArray(x!.relayAttempts) && x!.hashes.length === n && x!.relayed.length === n
+    && x!.relayAttempts.length === n && x!.hashes.every(h => h === null || typeof h === 'string' && KORA_ID.test(h))
+    // Kora's bytes only beside its id (a member without them is sent with the owner's own signed bytes).
+    && x!.relayed.every((b, i) => b === null || x!.hashes![i] !== null && typeof b === 'string' && b.length <= 2048)
+    && x!.relayAttempts.every(a => Number.isSafeInteger(a) && a >= 0 && a <= KORA_GROUP_RELAY_ATTEMPTS);
+}
+/** The live view of a Kora group: its written-once submission with the recorded progress over it. A malformed record decides nothing (fails closed). */
+export function koraGroupSubmission(submission: Readonly<Record<string, unknown>>, outcome: Readonly<Record<string, unknown>> | null): Readonly<Record<string, unknown>> {
+  if (!Array.isArray(submission.ownerSignatures)) return submission;
+  const n = submission.ownerSignatures.length, kora = (outcome as { kora?: unknown } | null)?.kora;
+  if (kora === undefined) return submission;
+  if (!koraProgressValid(kora, n)) throw new Error('SOLANA_GROUP_SUBMISSION_INVALID');
+  // A transaction id the submission already names (a native member) is never replaced by the progress.
+  const fixed = submission.hashes as readonly (string | null)[];
+  if (kora.hashes.some((h, i) => fixed[i] !== null && h !== fixed[i])) throw new Error('SOLANA_GROUP_SUBMISSION_INVALID');
+  return { ...submission, hashes: kora.hashes, relayed: kora.relayed, relayAttempts: kora.relayAttempts };
+}
+/**
+ * The outcome patch that records a Kora group's progress, only when it is a monotonic step from `prior`: attempts never fall (and never exceed
+ * two), an id or Kora's bytes, once recorded, never change. Null otherwise (nothing is written).
+ */
+export function koraGroupProgress(prior: Readonly<Record<string, unknown>>, next: Readonly<Record<string, unknown>>): { readonly kora: KoraGroupProgress } | null {
+  const n = Array.isArray(prior.ownerSignatures) ? prior.ownerSignatures.length : -1;
+  const before = { hashes: prior.hashes, relayed: prior.relayed, relayAttempts: prior.relayAttempts }, after = { hashes: next.hashes, relayed: next.relayed,
+    relayAttempts: next.relayAttempts };
+  if (!koraProgressValid(before, n) || !koraProgressValid(after, n)) return null;
+  for (let i = 0; i < n; i++) {
+    if (after.relayAttempts[i]! < before.relayAttempts[i]!) return null;
+    if (before.hashes[i] !== null && (after.hashes[i] !== before.hashes[i] || after.relayed[i] !== before.relayed[i])) return null;
+  }
+  return { kora: after };
+}
 type SignatureStatus = { readonly confirmationStatus?: string; readonly err?: unknown } | null;
 /**
  * Block heights one transaction of a sign-all group needs, from its send to its confirmation and the next pass (about 400 ms per block: a
@@ -603,8 +659,12 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
   const rpc = deps.solana;
   if (!rpc) return { state: 'WAITING', index: null, code: 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE' };
   const txs = prepared.transactions as readonly SolanaGroupTx[], signed = authorization.transactions as readonly { signature: string; transaction: string }[];
-  // ADR-0010 §4: a Kora group's transaction ids become known one by one (null until Kora answered for that transaction).
-  if (submission && Array.isArray(submission.ownerSignatures)) return advanceKoraGroup(deps, rpc, txs, signed, submission, owner, runOwner, persist);
+  // ADR-0010 §4: a Kora group's transaction ids become known one by one (null until Kora answered for that transaction). A Solana RPC that fails
+  // in the middle of a pass (a rate limit, an unavailable node) decides nothing: the pass waits and the next one starts over from the chain.
+  if (submission && Array.isArray(submission.ownerSignatures)) {
+    try { return await advanceKoraGroup(deps, rpc, txs, signed, submission, owner, runOwner, persist); }
+    catch (cause) { if (cause instanceof SolanaRpcWait) return { state: 'WAITING', index: cause.index, code: 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE' }; throw cause; }
+  }
   const known = await statuses(rpc, signed.map(s => s.signature));
   for (const [i, status] of known.entries()) {
     if (status?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
@@ -639,13 +699,21 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
   return { state: 'DONE', index: null, code: null };
 }
 
+/** A Solana read or send of a Kora group's pass that failed (unavailable, rate limited, malformed): the pass decides nothing and waits. */
+// (No TypeScript parameter property: plain Node strips types and runs this module as is.)
+class SolanaRpcWait extends Error {
+  readonly index: number | null;
+  constructor(index: number | null) { super('USER_FUNDED_SOLANA_RPC_UNAVAILABLE'); this.index = index; }
+}
 /**
  * ADR-0010 §4, one pass of a Kora group, in order, each transaction after its predecessor confirmed:
  *   id known      its status decides (confirmed: next; seen: wait; unseen: Kora's fully signed bytes are (re)sent by FloFi while valid)
  *   id unknown    a Kora call already made: the owner's history is searched for the owner's signature (read-only); found: recorded.
- *                 Otherwise, while the blockhash is valid and fewer than two calls were made: the call is RECORDED first, then Kora is asked
- *                 with the identical owner-signed bytes (K1 and the S1 claim inside the relay); its verified answer is recorded, then broadcast.
- *                 Kora refused (it never signed): EXPIRED for this transaction (it can never exist). Two lost answers: only the chain decides.
+ *                 Otherwise, while the blockhash is valid: the call is RECORDED first (each actual Kora call is counted, at most two), then Kora
+ *                 is asked once with the identical owner-signed bytes (K1 and the S1 claim inside the relay); its verified answer is recorded,
+ *                 then broadcast. A second call only once the owner's history proved the first one's transaction absent — never while its
+ *                 outcome is unknown. Kora's own pre-signing refusal of the FIRST call (it never signed): EXPIRED for this transaction (it can
+ *                 never exist). Any other failure is unknown: only the chain decides, once the blockhash provably expired.
  */
 async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: readonly SolanaGroupTx[], signed: readonly { signature: string; transaction: string }[],
   submission: Readonly<Record<string, unknown>>, owner: string, runOwner: BetaPrincipal | undefined, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
@@ -654,35 +722,52 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
   const attempts = [...submission.relayAttempts as readonly number[]], ownerSignatures = submission.ownerSignatures as readonly string[];
   const record = async (patch: { hashes?: (string | null)[]; relayed?: (string | null)[]; relayAttempts?: number[] }) => persist ? persist({ ...submission, hashes, relayed,
     relayAttempts: attempts, ...patch }) : false;
-  const known = hashes.some(Boolean) ? await statuses(rpc, hashes.filter((h): h is string => Boolean(h))) : [];
+  // K3: every Solana read and FloFi's own broadcast go through this: a failure (or a malformed height) makes the pass wait, never UNCERTAIN.
+  const io = async <T,>(index: number | null, work: () => Promise<T>): Promise<T> => { try { return await work(); } catch { throw new SolanaRpcWait(index); } };
+  const blockHeight = (index: number, commitment: 'confirmed' | 'finalized') => io(index, async () => {
+    const h = await rpc('getBlockHeight', [{ commitment }]);
+    if (!Number.isSafeInteger(h) || (h as number) < 0) throw new Error('SOLANA_RPC_INVALID');
+    return h as number;
+  });
+  const recover = (i: number, tx: SolanaGroupTx) => recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction,
+    feePayer: tx.gas!.feePayer, sinceSlot: tx.sinceSlot ?? 0, lastValidBlockHeight: tx.lastValidBlockHeight });
+  const known = hashes.some(Boolean) ? await io(null, () => statuses(rpc, hashes.filter((h): h is string => Boolean(h)))) : [];
   const statusOf = (i: number) => { const at = hashes.slice(0, i).filter(Boolean).length; return hashes[i] ? known[at] ?? null : null; };
   for (const [i, tx] of txs.entries()) {
-    const id = hashes[i] ?? null, status = statusOf(i), bytes = relayed[i] ?? signed[i]!.transaction;
+    const id = hashes[i] ?? null, status = statusOf(i), bytes = relayed[i] ?? signed[i]!.transaction, made = attempts[i] ?? 0;
     if (status?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
     if (status && ['confirmed', 'finalized'].includes(String(status.confirmationStatus))) continue;
     if (status) return { state: 'WAITING', index: i, code: null };
     const paused = executionRefusal();
     if (paused) return { state: 'WAITING', index: i, code: paused };
-    const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }]));
-    if (!id && tx.gas && (attempts[i] ?? 0) > 0) {
-      const found = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas.feePayer, sinceSlot: tx.sinceSlot ?? 0 });
+    const height = await blockHeight(i, 'confirmed');
+    // An earlier Kora call whose answer was lost (or proved nothing): the owner's history is searched first (read-only, never re-created).
+    let absent = false;
+    if (!id && tx.gas && made > 0) {
+      const found = await recover(i, tx);
       if (found.state === 'FOUND') {
         hashes[i] = found.signature; relayed[i] = found.transaction;
         return { state: 'WAITING', index: i, code: await record({}) ? null : 'KORA_RELAY_NOT_RECORDED' };
       }
+      absent = found.state === 'ABSENT';
     }
     if (height > tx.lastValidBlockHeight) {
       // Never relayed: these bytes can never land. Relayed (or sent): expired only when provable, as for the native group.
-      if (!id && (attempts[i] ?? 0) === 0) return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
-      const finalized = Number(await rpc('getBlockHeight', [{ commitment: 'finalized' }]));
+      if (!id && made === 0) return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+      const finalized = await blockHeight(i, 'finalized');
       if (!(finalized > tx.lastValidBlockHeight)) return { state: 'WAITING', index: i, code: null };
       if (id) {
-        const again = (await statuses(rpc, [id]))[0] ?? null;
+        const again = (await io(i, () => statuses(rpc, [id])))[0] ?? null;
         if (again?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
         if (again) return { state: 'WAITING', index: i, code: null };
         return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
       }
-      const last = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas!.feePayer, sinceSlot: tx.sinceSlot ?? 0 });
+      // Kora's answer never arrived: only the owner's history, scanned up to the blockhash's expiry, decides that it never landed.
+      const last = await recover(i, tx);
+      if (last.state === 'FOUND') {
+        hashes[i] = last.signature; relayed[i] = last.transaction;
+        return { state: 'WAITING', index: i, code: await record({}) ? null : 'KORA_RELAY_NOT_RECORDED' };
+      }
       return last.state === 'ABSENT' ? { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' } : { state: 'WAITING', index: i, code: null };
     }
     const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);
@@ -690,17 +775,19 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
     if (!id) {
       const gas = tx.gas;
       if (!gas) return { state: 'FAILED', index: i, code: 'SOLANA_GROUP_SUBMISSION_INVALID' };
-      if ((attempts[i] ?? 0) >= KORA_GROUP_RELAY_ATTEMPTS) return { state: 'WAITING', index: i, code: 'KORA_ANSWER_LOST_OBSERVING' };
+      // K1: at most two actual Kora calls; a second one only once the first one's transaction is provably absent (never while it may land).
+      if (made >= KORA_GROUP_RELAY_ATTEMPTS || made > 0 && !absent) return { state: 'WAITING', index: i, code: 'KORA_ANSWER_LOST_OBSERVING' };
       if (!deps.kora) return { state: 'WAITING', index: i, code: 'KORA_NOT_ENABLED' };
-      // The call is durable BEFORE it is made: at most two calls per transaction, whatever happens to this process.
-      attempts[i] = (attempts[i] ?? 0) + 1;
+      // The call is durable BEFORE it is made: each actual call is counted, whatever happens to this process.
+      attempts[i] = made + 1;
       if (!await record({})) return { state: 'WAITING', index: i, code: 'KORA_RELAY_NOT_RECORDED' };
       assertExecutionEnabled();
       let outcome: Awaited<ReturnType<KoraGas['relay']>>;
       try { outcome = await deps.kora.relay({ review: { message: tx.message, owner, gas, lookupTables: tx.lookupTables }, ownerSigned: signed[i]!.transaction,
-        prefix: tx.kind === 'TRANSFER' ? 'SOLANA_TRANSFER' : 'JUPITER' }); }
-      catch (cause) { outcome = { kind: 'REFUSED', code: codeOf(cause, 'KORA_TRANSACTION_REFUSED') }; }
-      // Kora refused before signing (or FloFi never called it): this transaction can never exist; nothing later is sent.
+        prefix: tx.kind === 'TRANSFER' ? 'SOLANA_TRANSFER' : 'JUPITER', priorCalls: made, maxCalls: 1 }); }
+      // A local check refused before anything was sent (K1 on the exact bytes, S1): definitive only while no earlier call's outcome is unknown.
+      catch (cause) { outcome = { kind: made === 0 ? 'REFUSED' : 'UNKNOWN', code: codeOf(cause, 'KORA_TRANSACTION_REFUSED') }; }
+      // Kora's own pre-signing refusal of the first call (or nothing was sent): this transaction can never exist; nothing later is sent.
       if (outcome.kind === 'REFUSED') return { state: 'EXPIRED', index: i, code: outcome.code };
       if (outcome.kind === 'UNKNOWN') return { state: 'WAITING', index: i, code: outcome.code };
       hashes[i] = outcome.signature; relayed[i] = outcome.transaction;
@@ -711,7 +798,8 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: message.staticKeys[0] ?? '', ownerWallet: owner, ...tx.gas && deps.kora ? { tokenFee: {
       mechanism: KORA_MECHANISM, relayer: tx.gas.feePayer, pinnedRelayers: [deps.kora.feePayer], token: tx.gas.token.mint, amount: tx.gas.amount } } : {} });
     assertExecutionEnabled();
-    await rpc('sendTransaction', [relayed[i] ?? bytes, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
+    // Kora also broadcasts the bytes it signed: FloFi's own send failing proves nothing (the next pass reads the status, or resends while valid).
+    await io(i, () => rpc('sendTransaction', [relayed[i] ?? bytes, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]));
     return { state: 'SENT', index: i, code: null };
   }
   return { state: 'DONE', index: null, code: null };

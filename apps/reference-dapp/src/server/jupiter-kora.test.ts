@@ -122,13 +122,36 @@ describe('Jupiter swap with Pimlico Kora (MOCKED loopback, ADR-0010 §4)', () =>
     await expect(s.service.submit(second.id, second.ownerSigned)).resolves.toMatchObject({ attempt: { state: 'PENDING' } });
     expect(s.double.state.unpaid).toBe(0);
   });
-  it('never retries without payment: Kora -32603 (provider unavailable) leaves the run not executed and nothing sent', async () => {
+  it('never retries without payment: Kora -32603 (provider unavailable) proves nothing, so the run is observed and not executed only once expired', async () => {
+    const s = await setup({ lamports: 0n, USDC: 100_000_000n });
+    const { id, review, ownerSigned } = await signed(s, workflow('10', 'USDC', 'SOL'));
+    s.double.state.signMode = 'UNAVAILABLE';
+    // K1: -32603 does not prove Kora skipped signing: the outcome is unknown until the blockhash provably expired without the transaction.
+    await expect(s.service.submit(id, ownerSigned)).resolves.toMatchObject({ verdict: 'PENDING', submissionError: 'KORA_PROVIDER_UNAVAILABLE',
+      attempt: { state: 'SUBMISSION_RESULT_UNKNOWN', signature: null } });
+    expect(s.double.state.signed).toHaveLength(1);
+    s.env.advance(review.lastValidBlockHeight - s.env.state.blockHeight + 1);
+    await expect(s.service.observe(id)).resolves.toMatchObject({ verdict: 'NOT_EXECUTED', error: 'JUPITER_TRANSACTION_EXPIRED_NOT_EXECUTED' });
+    expect(s.env.state.sent).toEqual([]);
+  });
+  // K1: an answer that does not prove Kora skipped signing is never taken as a refusal; the transaction is recovered from the chain.
+  it('a gateway 504 after Kora signed and broadcast: the run is observed and reconciles (never "not executed")', async () => {
     const s = await setup({ lamports: 0n, USDC: 100_000_000n });
     const { id, ownerSigned } = await signed(s, workflow('10', 'USDC', 'SOL'));
-    s.double.state.signMode = 'UNAVAILABLE';
-    await expect(s.service.submit(id, ownerSigned)).resolves.toMatchObject({ verdict: 'NOT_EXECUTED', error: 'KORA_PROVIDER_UNAVAILABLE' });
+    s.double.state.gatewayErrorsAfterSign = 1;
+    await expect(s.service.submit(id, ownerSigned)).resolves.toMatchObject({ verdict: 'PENDING', submissionError: 'KORA_PROVIDER_UNAVAILABLE',
+      attempt: { state: 'SUBMISSION_RESULT_UNKNOWN', signature: null } });
+    await expect(s.service.observe(id)).resolves.toMatchObject({ verdict: 'RECONCILED', attempt: { state: 'CONFIRMED' } });
     expect(s.double.state.signed).toHaveLength(1);
-    expect(s.env.state.sent).toEqual([]);
+  });
+  it('a lost answer whose identical retry Kora refuses (already processed): the refusal of a second call is not taken as "never signed"', async () => {
+    const s = await setup({ lamports: 0n, USDC: 100_000_000n });
+    const { id, ownerSigned } = await signed(s, workflow('10', 'USDC', 'SOL'));
+    s.double.state.loseAnswers = 1; s.double.state.refuseRepeat = true;
+    await expect(s.service.submit(id, ownerSigned)).resolves.toMatchObject({ verdict: 'PENDING', submissionError: 'KORA_TRANSACTION_REFUSED',
+      attempt: { state: 'SUBMISSION_RESULT_UNKNOWN', signature: null } });
+    expect(s.double.state.signed).toEqual([ownerSigned, ownerSigned]);
+    await expect(s.service.observe(id)).resolves.toMatchObject({ verdict: 'RECONCILED', attempt: { state: 'CONFIRMED' } });
   });
   it('retries a lost Kora answer once with the identical bytes, and recovers a twice-lost answer from the chain by the owner\'s signature', async () => {
     const once = await setup({ lamports: 0n, USDC: 100_000_000n });

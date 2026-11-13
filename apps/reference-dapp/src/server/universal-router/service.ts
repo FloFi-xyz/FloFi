@@ -329,9 +329,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const { route, considered } = await selectRoute(f, quoteRequest(f, inputFacts, outputFacts, owner, recipient));
     if (route.source.ecosystem !== 'SOLANA' || route.source.instruction.programId !== S.relayProgram) fail('UNIVERSAL_UNEXPECTED_CONTRACT');
     const deposit = await sol.simulateSolanaDeposit(input.solanaRpc, S, route, programIdOf(inputFacts)).catch((cause: unknown) => {
-      // ADR-0010 §4: the owner's SOL cannot pay the deposit's fee; where Kora is offered, say plainly that this step cannot pay it in a token.
+      // ADR-0010 §4: the owner's SOL cannot pay the deposit's fee (too little SOL, or no account at all: a wallet that never held SOL); where Kora
+      // is offered, say plainly that this step cannot pay it in a token. An account that is not a wallet keeps its own refusal (SOL would not help).
       const code = cause instanceof Error ? cause.message : '';
-      if (input.koraEnabled && (code === 'UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES' || code === 'UNIVERSAL_OWNER_NOT_WALLET')) fail('KORA_OPERATION_UNSUPPORTED');
+      const noSol = code === 'UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES'
+        || code === 'UNIVERSAL_OWNER_NOT_WALLET' && ((cause as Error).cause as { ownerAccount?: unknown } | undefined)?.ownerAccount === 'ABSENT';
+      if (input.koraEnabled && noSol) fail('KORA_OPERATION_UNSUPPORTED');
       throw cause;
     });
     const expiresMs = Math.min(observed.getTime() + D.reviewTtlSeconds * 1000, Date.parse(route.quote.expiresAt));
