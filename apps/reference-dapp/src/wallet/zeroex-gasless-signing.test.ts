@@ -28,7 +28,7 @@ async function begun() {
   zx.script.permitTokens = new Set([usdg.address!]);
   const dir = mkdtempSync(join(tmpdir(), 'flofi-gasless-page-')); dirs.push(dir);
   const s = createPublicTestnetService({ rpc: async () => { throw new Error('UNUSED'); }, rpcs: { 'eip155:4663': zx.rpc }, journalDir: dir, idPrefix: 'rhs', now: () => new Date(clock),
-    catalog: { ...mockCatalogRuntime(catalog), gasless: { config: { enabled: true, apiUrl: 'http://127.0.0.1:8561', apiKey: 'mock-zeroex-loopback-key', chains: ['eip155:4663'], loopback: true },
+    catalog: { ...mockCatalogRuntime(catalog), gasless: { config: { enabled: true, apiUrl: 'http://127.0.0.1:8561', apiKey: 'loopback-key', chains: ['eip155:4663'], loopback: true },
       client: createZeroExGaslessClient(zx.http, () => clock) } } });
   const ref = (a: typeof usdg) => ({ chain: a.chain, address: a.address!, decimals: a.decimals, officialId: a.stock?.officialId ?? null });
   const run = await s.prepare({ schemaVersion: '1.0.0', workflowId: 'w', revision: 1, resourceEdges: [],

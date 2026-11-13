@@ -27,7 +27,7 @@ function catalogSwapWorkflow(input: CanonicalAsset, output: CanonicalAsset, amou
   return { schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 1, resourceEdges: [],
     nodes: [createCatalogSwapNode('node-002', { chain: 'eip155:4663', amount, slippageBps, input: ref(input), output: ref(output) })] };
 }
-const ENABLED: ZeroExGaslessConfig = { enabled: true, apiUrl: 'http://127.0.0.1:8561', apiKey: 'mock-zeroex-loopback-key', chains: ['eip155:4663'], loopback: true };
+const ENABLED: ZeroExGaslessConfig = { enabled: true, apiUrl: 'http://127.0.0.1:8561', apiKey: 'loopback-key', chains: ['eip155:4663'], loopback: true };
 const dirs: string[] = [];
 let clock = T0, catalog: AssetCatalog, chain: RobinhoodMockChain, zx: ZeroExDouble, usdg: CanonicalAsset, tsla: CanonicalAsset, owner: TestWallet;
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); vi.unstubAllEnvs(); });

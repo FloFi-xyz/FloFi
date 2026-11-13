@@ -899,6 +899,8 @@ function createGaslessExecution({ rpcFor, now, catalog, persistence, quote, quot
       if (raw === null) continue;
       if (!isObject(raw)) fail('RECEIPT_INVALID');
       const tx = await rpc('eth_getTransactionByHash', [txHash]);
+      // A node that serves the receipt before the transaction is not consistent yet: observed again later, never judged on half an answer.
+      if (tx === null) continue;
       const { relayer } = gaslessSettlementShape(tx, P.chainId, txHash, binding);
       const status = Number(quantity(raw.status)), blockNumber = Number(quantity(raw.blockNumber));
       if (![0, 1].includes(status) || !Number.isSafeInteger(blockNumber) || hex(raw.transactionHash) !== txHash || address(raw.from) !== relayer ||
