@@ -17,8 +17,14 @@ import { FloFiAvatar, UserAvatar } from './flofi-avatar';
  * this panel can render beside any stage without losing it. Suggested answers appear only on FloFi's latest message: an older button can never
  * answer a newer question.
  */
-export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
   proof?: ReturnType<typeof useWalletProof>;
+  /**
+   * Board 06: the Editor shows the whole-workflow Review beside the cards with its one primary action (Authorize) in the footer. The chat then
+   * shows no second Review card; FloFi's own text, its notes (e.g. what a requote changed) and its answers are unchanged. Presentation only: the
+   * conversation keeps every message and answer.
+   */
+  reviewInPanel?: boolean;
   /** BUILD-FLOFI-BUILDER-UX-002: the Editor's live workflow summary (Canvas only), above the unchanged conversation and composer. */
   overview?: ReactNode }) {
   const { t: tr, language } = useLocale();
@@ -50,7 +56,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
         {(message.role === 'you' || showLabels) && <small className="sr-only">{tr(message.role === 'you' ? 'YOU' : message.role === 'flofi' || message.role === 'system' && !copilot.enabled ? 'FLOFI' : copilotLabel(message.role, copilot.mode))}</small>}
         {message.role === 'ai' || message.role === 'flofi' ? <>
           <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} disabled={busy} onPick={send}/>
-          {message.review && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
+          {message.review && !reviewInPanel && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
           {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>

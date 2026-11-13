@@ -36,14 +36,17 @@ export type FooterStatus = { readonly tone: 'ready' | 'attention' | 'blocked' | 
  * execution of this workflow has started, says nothing was sent; a running simulation says so. Null where the footer shows the Create notices.
  */
 export function simulateFooterStatus(input: { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string;
-  readonly expiresAt: number | null; readonly now: number; readonly executionStarted: boolean; readonly networkQuestion?: boolean }): FooterStatus | null {
+  readonly expiresAt: number | null; readonly now: number; readonly executionStarted: boolean; readonly networkQuestion?: boolean;
+  /** Board 06: the footer of the whole-workflow Review (Execute, before authorization) words its own Review, never a simulation. */
+  readonly subject?: 'simulation' | 'review' }): FooterStatus | null {
+  const review = input.subject === 'review';
   if (input.networkQuestion) return { tone: 'attention', text: 'Choose the network in the chat to simulate' };
-  if (input.busy) return { tone: 'neutral', text: 'Simulating workflow…' };
+  if (input.busy) return { tone: 'neutral', text: review ? 'Reviewing the whole workflow…' : 'Simulating workflow…' };
   if (input.status === 'blocked') return { tone: 'blocked', text: input.label, detail: input.executionStarted ? null : 'Nothing was sent' };
   if (input.expiresAt !== null) {
     const left = input.expiresAt - input.now;
-    return left > 0 ? { tone: left < COUNTDOWN_ATTENTION_MS ? 'attention' : 'ready', text: 'Simulation valid for {0}', parameters: [countdown(left)] }
-      : { tone: 'attention', text: 'Expired, simulate again' };
+    return left > 0 ? { tone: left < COUNTDOWN_ATTENTION_MS ? 'attention' : 'ready', text: review ? 'Review valid for {0}' : 'Simulation valid for {0}', parameters: [countdown(left)] }
+      : { tone: 'attention', text: review ? 'Review expired, review again' : 'Expired, simulate again' };
   }
   return null;
 }

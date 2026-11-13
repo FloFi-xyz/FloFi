@@ -51,6 +51,22 @@ describe('Copilot product presentation', () => {
   });
 });
 
+describe('board 06: while the whole-workflow Review is open beside the cards', () => {
+  it('shows no second Review card; FloFi\'s text, its requote note and its answers stay', () => {
+    const review = { steps: [], fees: [], totals: { additional: [], ceilings: [], excludes: [] }, unknown: [], flofiFee: { recorded: false, value: 'None', note: '' },
+      expiresAt: null, account: null, network: null, warnings: [], limits: [], approvals: [], sequence: null } as unknown as NonNullable<ChatMessage['review']>;
+    const messages: ChatMessage[] = [{ id: 1, role: 'flofi', language: 'EN', text: 'Here is the review of your workflow.', review,
+      notes: ['The quote changed since your last Review.'], question: 'Do you confirm this workflow?', options: ['Yes, I confirm', 'No'] } as ChatMessage];
+    const shown = renderToStaticMarkup(createElement(CopilotPanel, { conversation: conversation(true, messages) }));
+    expect(shown).toContain('class="conversation-review"');
+    const open = renderToStaticMarkup(createElement(CopilotPanel, { conversation: conversation(true, messages), reviewInPanel: true }));
+    expect(open).not.toContain('class="conversation-review"');
+    expect(open).toContain('Here is the review of your workflow.');
+    expect(open).toContain('The quote changed since your last Review.');
+    expect(open).toContain('>Yes, I confirm</button>');
+  });
+});
+
 describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 FloFi Assistant avatars and welcome', () => {
   const chat = (language: 'EN' | 'PT', mode: 'live' | 'replay' | 'unavailable') => ({ messages: [{ id: 0, role: 'system', text: FLOFI_WELCOME_COMMANDS },
     { id: 1, role: 'you', text: 'Swap 0.001 ETH to USDC on Base' }, { id: 2, role: 'flofi', text: 'Swap added to your workflow.', language }],

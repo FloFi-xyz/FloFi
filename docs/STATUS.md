@@ -7,6 +7,14 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## P0 — Review block before authorization (board 06)
+
+**Status: PR FOR OWNER REVIEW on `claude/peaceful-galileo-7r9j2j` (from main `d3f30a2`) — presentation only; unit and MOCKED loopback-browser
+evidence; no transaction signed or sent, nothing deployed.** The whole-workflow Review the Editor shows before authorization (Execute, before a
+run) now reads as board 06: what you are authorizing in plain lines, the final minimum, the network-fee ceiling, token permissions and wallet
+requests, with everything else under a collapsed "Technical details"; its ONE primary action is the Editor footer's, and the chat shows no second
+Review card meanwhile. Authorization, batching and wallet requests are unchanged. See the [build note](builds/P0-REVIEW-BLOCK-BOARD-06.md).
+
 ## P0 — Real workflow execution and the approved FloFi App UX
 
 **Status: IMPLEMENTED ON `claude/peaceful-galileo-7r9j2j` (from main `009975a`) — unit, PostgreSQL and loopback-browser evidence; no

@@ -55,6 +55,12 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    * (its fresh per-step confirmation inline, with `primaryAction`), never by sending the owner back to Simulate, and never as "Review required".
    */
   continuation?: SequenceContinuation | null;
+  /**
+   * Board 06: the chat-first Editor shows the whole-workflow Review before anything is authorized (`workflowRun`): the Review alone is docked
+   * beside the cards — at most one amber line above it, no per-step status list, no back buttons, and no action or caption on the Canvas (the
+   * Editor footer holds the ONE primary action; going back is the stepper).
+   */
+  reviewBlock?: boolean;
 };
 export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const { t: tr } = useLocale();
@@ -75,7 +81,8 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const detailsOnly = Boolean(props.detailsOnly);
   const progress = props.workflowProgress ?? null, continuation = !live && props.continuation ? props.continuation : null;
   // N is the WHOLE workflow's number of steps (a sequence step's own run has one); without a workflow view the run's own count stays.
-  const progressList = progress && progress.total > 1 && !continuation ? <WorkflowProgressList progress={progress} heading={false}/> : null;
+  const reviewBlock = Boolean(props.reviewBlock && !live && !continuation);
+  const progressList = progress && progress.total > 1 && !continuation && !reviewBlock ? <WorkflowProgressList progress={progress} heading={false}/> : null;
   // The actions only this summary offers: connect the execution wallet, start a new workflow (and navigation back to Build/Simulate).
   const connectWallet = execution.connect && authorization.accepted && !wallet.changed && !execution.started;
   const startNew = Boolean(result && props.startNewWorkflow && isFinalExecutionResult(live));
@@ -83,9 +90,11 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
     {connectWallet && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
     {startNew && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
   </>;
+  const tone = verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked'
+    : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked';
   const status = continuation ? <div className="simulation-validity simulation-tone-neutral" role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr('Workflow in progress')}</strong>
     <p>{tr('Step {0} of {1} continues here. Completed steps stay completed; nothing is sent again.', continuation.current, continuation.total)}</p></div>
-    : <div className={`simulation-validity simulation-tone-${verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked' : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>;
+    : <div className={`simulation-validity simulation-tone-${tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>;
   // What needs the owner's attention or action: the same lines in the side summary and in the chat-first status panel.
   const notices = <>
         {(requestFailed || live && props.source.state.error) && <p className="simulation-warning-blocking execution-request-error" role="status">{tr("The last request could not complete. Check the recorded status before taking another action.")}</p>}
@@ -137,7 +146,14 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   </>;
   // BUILD0-UX-001: the chat-first status panel — the run's state and progress, what needs the owner's action, and where to go next. The wallet,
   // network, provider and cost lines of the side summary and the run's technical evidence are in the Dashboard, never duplicated here.
-  const statusPanel = <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
+  // Board 06: the Review before authorization — one amber line when the step-by-step path's own state needs attention, then the Review.
+  const reviewPanel = <div className="execution-summary execution-status-panel panel review-block-host">
+    {!grouped && ['attention', 'blocked'].includes(tone) && <p className="review-block-alert" role="status">{tr(statusMessage)}</p>}
+    {!grouped && notices}
+    {props.workflowRun}
+    {(connectWallet || startNew) && <div className="execute-actions simulation-workspace-actions execution-status-actions">{stageActions}</div>}
+  </div>;
+  const statusPanel = reviewBlock ? reviewPanel : <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
     {!grouped && status}
     {!live && !grouped && !continuation && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
     {live && <p className="execution-status-progress">{progress ? tr(STEPS_COMPLETED, progress.completed, progress.total)
@@ -157,7 +173,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
       {!live && continuation ? <SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>
-        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" dock={detailsOnly ? statusPanel : undefined} dockLabel={null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" dock={detailsOnly ? statusPanel : undefined} dockLabel={null} foot={!reviewBlock} primaryAction={reviewBlock ? undefined : props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
     </div>
     {/* P0 hotfix (layout): before execution starts, the status, the whole-workflow Review and Authorize are docked inside the Canvas frame (as on
