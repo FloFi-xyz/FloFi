@@ -66,3 +66,27 @@ describe('review B1/LQ1: /approve names a later step that needs the native coin,
     expect(render(claim(signedOperation({ gasPayment: circle })))).not.toContain('A later step on');
   });
 });
+
+describe('owner requirement: a FloFi Wallet group whose fee Circle pays on /approve', () => {
+  const running = (group: Group, patch: Partial<WorkflowRunClaim['run']> = {}): WorkflowRunClaim => {
+    const c = claim(group);
+    return { ...c, run: { ...c.run, state: 'RUNNING', nextAction: 'OWNER_SIGNS_GROUP', steps: [{ index: 0, action: 'transfer', state: 'DELEGATED' }, { index: 1, action: 'transfer',
+      state: 'DELEGATED' }] as unknown as WorkflowRunClaim['run']['steps'], ...patch } };
+  };
+  const upgrade = { ...circle, stage: 'AUTHORIZATION' as const, signatures: 3 as const, upgrade: { delegate: '0x' + '7'.repeat(40), chainId: 8453, consented: false } };
+  it('its first use names the three signatures (the upgrade, the permit, the operation); an upgraded address keeps two (EN/PT)', () => {
+    const first = running(signedOperation({ state: 'PREPARED', signed: false, gasPayment: upgrade }));
+    expect(render(first)).toContain('Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation');
+    expect(render(first, 'PT')).toContain('Três assinaturas: a atualização da conta inteligente, uma permissão de USDC para a taxa e, depois, a operação');
+    expect(render(first)).toContain('Authorize Steps 1–2 now');
+    expect(render(running(signedOperation({ state: 'PREPARED', signed: false, gasPayment: { ...circle, stage: 'PERMIT' } }))))
+      .toContain('Two signatures: a USDC permit for the fee, then the operation');
+  });
+  it('an owner-step group not loaded yet offers "Continue to step 1" (FloFi asks the server before it loads); no card is shown by rendering', () => {
+    const html = render(running(signedOperation({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', signed: false }), { nextAction: 'OWNER_SIGNS_STEP',
+      steps: [{ index: 0, action: 'transfer', state: 'READY' }, { index: 1, action: 'transfer', state: 'PENDING' }] as unknown as WorkflowRunClaim['run']['steps'] }));
+    expect(html).toContain('Continue to step 1');
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('Upgrade and continue');
+  });
+});

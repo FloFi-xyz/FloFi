@@ -100,12 +100,31 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.':
     'O serviço que encaminha este pedido não aceita esta versão de conta inteligente nesta rede, então nada foi enviado. Carregue o pedido de novo para ver como a taxa de rede pode ser paga.',
   // Owner requirement (FloFi Wallet + Circle): the EIP-7702 upgrade inside the first Circle-paid operation.
-  'Upgrade this FloFi Wallet address on {0} to a smart account so its network fee can be paid in USDC. Your address, balances and control do not change. The upgrade uses EIP-7702 with the open-source Simple7702Account contract and stays until you replace it.':
-    'Atualizar este endereço da FloFi Wallet na {0} para uma conta inteligente, para que a taxa de rede possa ser paga em USDC. Seu endereço, seus saldos e o seu controle não mudam. A atualização usa EIP-7702 com o contrato de código aberto Simple7702Account e permanece até que você a substitua.',
-  'Agree and upgrade': 'Concordar e atualizar',
+  // Owner requirement (FloFi Wallet + Circle): FloFi's consent card before the first Circle-paid operation (the upgrade) or a later one (the fee).
+  'Upgrade this FloFi Wallet address to pay the network fee in USDC': 'Atualizar este endereço da FloFi Wallet para pagar a taxa de rede em USDC',
+  'The upgrade is an EIP-7702 delegation of this FloFi Wallet address on {0} to the open-source Simple7702Account contract, so the network fee can be paid in USDC.':
+    'A atualização é uma delegação EIP-7702 deste endereço da FloFi Wallet em {0} para o contrato de código aberto Simple7702Account, para que a taxa de rede possa ser paga em USDC.',
+  'Your address, balances and control do not change.': 'Seu endereço, seus saldos e o seu controle não mudam.',
+  'The upgrade stays until you replace it.': 'A atualização permanece até que você a substitua.',
+  'Three signatures follow this first time: the upgrade, a USDC permit, then the operation.':
+    'Seguem três assinaturas desta primeira vez: a atualização, uma permissão de USDC e, depois, a operação.',
+  'Upgrade and continue': 'Atualizar e continuar',
+  'Pay this network fee in USDC through Circle': 'Pagar esta taxa de rede em USDC pela Circle',
+  'Your ETH on {0} does not cover this network fee. FloFi Wallet can pay it from your USDC through Circle instead.':
+    'Seu ETH em {0} não cobre esta taxa de rede. A FloFi Wallet pode pagá-la com seu USDC pela Circle.',
+  'Two signatures follow: a USDC permit, then the operation.': 'Seguem duas assinaturas: uma permissão de USDC e, depois, a operação.',
+  'Pay in USDC and continue': 'Pagar em USDC e continuar',
   'Not now': 'Agora não',
-  'Three signatures this time: the smart-account upgrade, a USDC permit for the fee, then the operation. Two from then on.':
-    'Três assinaturas desta vez: a atualização da conta inteligente, uma permissão de USDC para a taxa e, depois, a operação. Duas a partir daí.',
+  'Choosing Not now signs nothing: the step continues through its own review, which pays its network fee in ETH.':
+    'Se escolher Agora não, nada é assinado: a etapa segue pela própria revisão, que paga a taxa de rede em ETH.',
+  'Nothing was signed. Step {0} continues through its own review, which pays its network fee in ETH.':
+    'Nada foi assinado. A etapa {0} segue pela própria revisão, que paga a taxa de rede em ETH.',
+  'Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation':
+    'Três assinaturas: a atualização da conta inteligente, uma permissão de USDC para a taxa e, depois, a operação',
+  'You already signed part of this request, so FloFi keeps it as it is. Nothing more was signed or sent.':
+    'Você já assinou parte deste pedido, então a FloFi o mantém como está. Nada mais foi assinado nem enviado.',
+  'This request has no network fee in USDC to decline. Nothing was signed or sent.':
+    'Este pedido não tem taxa de rede em USDC para recusar. Nada foi assinado nem enviado.',
   'this wallet has a transaction still pending on this network': 'esta carteira tem uma transação ainda pendente nesta rede',
   'You did not agree to the smart-account upgrade, so nothing was signed or sent. Add ETH on this network to pay the network fee instead.':
     'Você não concordou com a atualização da conta inteligente, então nada foi assinado nem enviado. Adicione ETH nesta rede para pagar a taxa de rede.',

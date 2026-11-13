@@ -67,6 +67,9 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   CIRCLE_AUTHORIZATION_STALE: 'This wallet changed since your review (another transaction or upgrade), so the upgrade was not used and nothing was sent. Load the request again.',
   CIRCLE_AUTHORIZATION_STAGE_INVALID: 'This request already moved on. Nothing was sent; load it again.',
   CIRCLE_UPGRADE_NOT_PREPARED: 'This request has no smart-account upgrade to agree to. Nothing was signed or sent.',
+  // "Not now" on the consent card: refused for a request already signed in part, or one that is not a FloFi Wallet group's Circle fee.
+  CIRCLE_DECLINE_ALREADY_SIGNED: 'You already signed part of this request, so FloFi keeps it as it is. Nothing more was signed or sent.',
+  CIRCLE_DECLINE_NOT_APPLICABLE: 'This request has no network fee in USDC to decline. Nothing was signed or sent.',
 };
 /**
  * Review UX1: the Editor's whole-workflow Review bound who pays group 1's network fee (ETH, or USDC through Circle). The run prepared it with the
@@ -106,11 +109,28 @@ export function nativeLaterMessage(warning: { readonly network: string; readonly
 export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH', 'CIRCLE_UPGRADE_DECLINED']);
 
 /**
- * Owner requirement (FloFi Wallet + Circle): FloFi's own consent step, shown before the wallet is asked to sign the EIP-7702 authorization (Privy
- * shows no confirmation screen for it). `{0}`: the network. The signing gate refuses the authorization until this consent was recorded.
+ * Owner requirement (FloFi Wallet + Circle): FloFi's own consent card (`components/circle-consent-card.tsx`), shown on /approve before FloFi Wallet
+ * is asked anything for a group whose network fee would be paid in USDC through Circle. Privy shows no confirmation screen for an EIP-7702
+ * authorization, so this card is the owner's explicit confirmation of the upgrade (the signing gate refuses the authorization until it was
+ * recorded). `{0}`: the network. The first use upgrades the address (three signatures); once upgraded, the card asks about the fee alone (two).
  */
-export const CIRCLE_UPGRADE_CONSENT = 'Upgrade this FloFi Wallet address on {0} to a smart account so its network fee can be paid in USDC. Your address, balances and control do not change. The upgrade uses EIP-7702 with the open-source Simple7702Account contract and stays until you replace it.';
-/** The consent's two actions and its signature count (three on first use: the upgrade, the USDC permit, the operation). */
-export const CIRCLE_UPGRADE_AGREE = 'Agree and upgrade';
-export const CIRCLE_UPGRADE_DECLINE = 'Not now';
-export const CIRCLE_UPGRADE_SIGNATURES = 'Three signatures this time: the smart-account upgrade, a USDC permit for the fee, then the operation. Two from then on.';
+export const CIRCLE_UPGRADE_CONSENT: Readonly<Record<'TITLE' | 'WHAT' | 'UNCHANGED' | 'STAYS' | 'SIGNATURES' | 'AGREE', string>> = {
+  TITLE: 'Upgrade this FloFi Wallet address to pay the network fee in USDC',
+  WHAT: 'The upgrade is an EIP-7702 delegation of this FloFi Wallet address on {0} to the open-source Simple7702Account contract, so the network fee can be paid in USDC.',
+  UNCHANGED: 'Your address, balances and control do not change.',
+  STAYS: 'The upgrade stays until you replace it.',
+  SIGNATURES: 'Three signatures follow this first time: the upgrade, a USDC permit, then the operation.',
+  AGREE: 'Upgrade and continue',
+};
+export const CIRCLE_FEE_CONSENT: Readonly<Record<'TITLE' | 'WHAT' | 'SIGNATURES' | 'AGREE', string>> = {
+  TITLE: 'Pay this network fee in USDC through Circle',
+  WHAT: 'Your ETH on {0} does not cover this network fee. FloFi Wallet can pay it from your USDC through Circle instead.',
+  SIGNATURES: 'Two signatures follow: a USDC permit, then the operation.',
+  AGREE: 'Pay in USDC and continue',
+};
+/** Both cards' way out, what it does, and what /approve says once it was chosen (`{0}`: the step number). */
+export const CIRCLE_CONSENT_DECLINE: Readonly<Record<'ACTION' | 'NOTE' | 'DONE', string>> = {
+  ACTION: 'Not now',
+  NOTE: 'Choosing Not now signs nothing: the step continues through its own review, which pays its network fee in ETH.',
+  DONE: 'Nothing was signed. Step {0} continues through its own review, which pays its network fee in ETH.',
+};

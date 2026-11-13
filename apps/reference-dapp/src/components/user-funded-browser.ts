@@ -269,8 +269,9 @@ export async function signCircleOperation(address: string, prepared: Readonly<Re
   return signWorkflowGrant(address, chainId, expected);
 }
 /**
- * Owner requirement (FloFi Wallet + Circle): what the first use of a FloFi Wallet address asks before its permit. `consent` shows FloFi's own
- * consent (CIRCLE_UPGRADE_CONSENT, with the network) and resolves true only when the owner agreed; `recordConsent` records it on the server
+ * Owner requirement (FloFi Wallet + Circle): what the first use of a FloFi Wallet address asks before its permit. `consent` is FloFi's own consent
+ * (on /approve, the answer the owner gave on FloFi's consent card, `circle-consent-card.tsx`, just before) and resolves true only when the owner
+ * agreed; `recordConsent` records it on the server
  * (the signing gate refuses the authorization without it); `upgrade` hands the signed authorization to the server, which verifies it.
  */
 export type CircleUpgradeSteps = {
