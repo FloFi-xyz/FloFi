@@ -6414,6 +6414,7 @@
         "apps/reference-dapp/src/server/testdata/universal/mayan-quote-sol-base.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-arb-rh-eth.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-arb-sol.json",
+        "apps/reference-dapp/src/server/testdata/universal/relay-base-arb-weth.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-base-sol.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-eth-sol-native.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-rh-sol.json",

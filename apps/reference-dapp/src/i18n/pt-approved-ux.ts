@@ -92,6 +92,9 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
     "O provedor da ponte não tem liquidez suficiente para este valor agora, por isso este passo não foi simulado nem enviado. Tente um valor menor ou tente novamente mais tarde.",
   "The amount is below the bridge provider’s minimum for this route, so this step was not simulated or sent. Choose a larger amount, then simulate again.":
     "O valor está abaixo do mínimo do provedor da ponte para esta rota, por isso este passo não foi simulado nem enviado. Escolha um valor maior e simule novamente.",
+  "Not started: its simulation was refused": "Não iniciado: a simulação foi recusada",
+  "FloFi cannot bridge WETH on this route: the bridge provider converts it to native ETH through contracts FloFi does not verify, so this step was not simulated or sent. Bridge ETH (unwrap the WETH first) or USDC instead.":
+    "A FloFi não consegue enviar WETH pela ponte nesta rota: o provedor da ponte o converte em ETH nativo por meio de contratos que a FloFi não verifica, por isso este passo não foi simulado nem enviado. Envie ETH pela ponte (faça antes o unwrap do WETH) ou USDC.",
   "No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.":
     "Nenhuma rota de ponte que a FloFi consiga verificar e executar está disponível para este valor agora, por isso este passo não foi simulado nem enviado. Tente novamente mais tarde ou altere o valor.",
   "Below the provider minimum":

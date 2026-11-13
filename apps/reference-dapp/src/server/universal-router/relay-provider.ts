@@ -19,6 +19,7 @@ import { canonicalizeUniversalRoute, EVM_ZERO_ADDRESS, SOLANA_SYSTEM_PROGRAM, ty
   type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { encodeErc20ApproveExact, encodeRelayDepositErc20, encodeRelayDepositNative, relaySolanaDepositInstruction, verifyRelayOrder, RELAY_EVM_DEPOSITORY,
   RELAY_SOLANA_DEPOSITORY_PROGRAM, type RelayOrderData } from '@defi-workflow-engine/reference-compiler';
+import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ETHEREUM_BASE_ASSETS, ROBINHOOD_BASE_ASSETS } from '@defi-workflow-engine/action-registry';
 import { providerHttpError, providerRefusalCode, type UniversalHttp } from './http.ts';
 
 export const RELAY_API = 'https://api.relay.link';
@@ -49,6 +50,9 @@ export const relayCurrency = (network: UniversalNetwork, token: UniversalToken) 
   ? network.ecosystem === 'EVM' ? EVM_ZERO_ADDRESS : SOLANA_SYSTEM_PROGRAM : token.address!;
 const sameCurrency = (network: UniversalNetwork, a: unknown, b: string) => typeof a === 'string' && (network.ecosystem === 'EVM' ? a.toLowerCase() === b.toLowerCase() : a === b);
 const vmOf = (slug: string) => slug === 'solana' ? 'solana-vm' as const : 'ethereum-vm' as const;
+/** Each EVM mainnet's pinned wrapped-native token (WETH9), as `chain:address`. */
+const WRAPPED_NATIVE: ReadonlySet<string> = new Set([BASE_BASE_ASSETS, ARBITRUM_BASE_ASSETS, ETHEREUM_BASE_ASSETS, ROBINHOOD_BASE_ASSETS]
+  .flatMap(catalog => catalog.assets.filter(asset => asset.assetClass === 'WRAPPED_NATIVE' && asset.address).map(asset => `${asset.chain}:${asset.address!.toLowerCase()}`)));
 /** The quote body FloFi sends: exact input, FloFi's slippage, refunds to the owner, no app fee, no deposit-address flow. */
 export function relayQuoteBody(r: UniversalQuoteRequest): Record<string, unknown> {
   return { user: r.owner, recipient: r.recipient, originChainId: r.source.providers.relay.chainId, destinationChainId: r.destination.providers.relay.chainId,
@@ -75,8 +79,17 @@ export function normalizeRelayQuote(raw: unknown, r: UniversalQuoteRequest): Uni
   const S = r.source, D = r.destination, inputCurrency = relayCurrency(S, r.inputToken), outputCurrency = relayCurrency(D, r.outputToken);
   const depository = S.ecosystem === 'EVM' ? RELAY_EVM_DEPOSITORY : RELAY_SOLANA_DEPOSITORY_PROGRAM;
   const payment = rec(protocol.paymentDetails, 'RELAY_PROTOCOL_UNSUPPORTED');
-  if (payment.chainId !== S.providers.relay.slug || !sameCurrency(S, payment.depository, depository) || !sameCurrency(S, payment.currency, inputCurrency) ||
-      payment.amount !== r.amount) fail('RELAY_PAYMENT_MISMATCH');
+  // The payment Relay asks for: on the source chain, to the Depository, exactly the requested amount, in `currency` (the check is unchanged).
+  const pays = (currency: string) => payment.chainId === S.providers.relay.slug && sameCurrency(S, payment.depository, depository) &&
+    sameCurrency(S, payment.currency, currency) && payment.amount === r.amount;
+  // P0 hotfix (production 2026-11-13, every Base WETH → Arbitrum One quote refused as RELAY_PAYMENT_MISMATCH): for a wrapped-native token input
+  // (WETH) Relay answers with a NATIVE-asset order — `paymentDetails.currency` and the order's input are the native asset — funded through its own
+  // approval proxy and router, which pull the token, unwrap it and deposit native ETH (the proxy's leftover refund goes to the solver). FloFi neither
+  // pins nor rebuilds those contracts, so it is refused — and named for what it is only for the network's pinned WETH with everything else about the
+  // payment matching exactly (any other token answered in the native asset stays a mismatch).
+  if (!pays(inputCurrency))
+    fail(r.inputToken.kind === 'TOKEN' && S.ecosystem === 'EVM' && WRAPPED_NATIVE.has(`${S.chain}:${inputCurrency.toLowerCase()}`) && pays(EVM_ZERO_ADDRESS)
+      ? 'RELAY_WRAPPED_NATIVE_INPUT_UNSUPPORTED' : 'RELAY_PAYMENT_MISMATCH');
   const order = verifyRelayOrder(orderData, { orderId, sourceSlug: S.providers.relay.slug, destinationSlug: D.providers.relay.slug, inputCurrency, outputCurrency,
     amount: r.amount, owner: r.owner, recipient: r.recipient, slippageBps: r.slippageBps, nowSeconds: Math.floor(r.nowMs / 1000), vmOf });
 

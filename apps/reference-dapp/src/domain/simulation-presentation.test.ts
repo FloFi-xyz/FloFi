@@ -122,6 +122,9 @@ describe('simulation financial presentation', () => {
     expect(simulationError('WALLET_AUTHORIZATION_REJECTED')).toContain('Earlier confirmed requests stay recorded');
     // Issue #149 (quoter): an unanswered read is not a missing pool, and a missing pool is not an outage.
     expect(simulationError('PUBLIC_RPC_UNAVAILABLE')).toContain('not a liquidity problem');
+    // P0 FIX 3: Relay's WETH answer (a native-ETH order through its router) says what happened and what works, never "simulation failed".
+    expect(simulationError('RELAY_WRAPPED_NATIVE_INPUT_UNSUPPORTED')).toBe('FloFi cannot bridge WETH on this route: the bridge provider converts it to native ETH through contracts FloFi does not verify, so this step was not simulated or sent. Bridge ETH (unwrap the WETH first) or USDC instead.');
+    expect(simulationError('RELAY_PAYMENT_MISMATCH')).toBe(generic);
     expect(simulationError('POOL_UNUSABLE')).toContain('No pool for this pair has usable liquidity');
     // BUILD-SOLANA-TRANSFER-UX-001: specific, readable meanings instead of one generic failure.
     expect(simulationError('SOLANA_TRANSFER_RECIPIENT_IS_TOKEN_ACCOUNT')).toContain('destination address');
