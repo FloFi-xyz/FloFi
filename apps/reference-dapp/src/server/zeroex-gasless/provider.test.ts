@@ -113,12 +113,12 @@ describe('the pre-sign checklist on 0x\'s official example (Ethereum, chainId 1)
   const request = { chainId: 1, taker, sellToken: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', buyToken: '0xdac17f958d2ee523a2206206994597c13d831ec7', sellAmount: '300000000', slippageBps: 30 };
   // The published example's permit expires ~50 minutes before its trade: the clock is set where both are still signable.
   const context: GaslessCheckContext = { settlers: { current: settler, previous: null }, nowMs: 1_718_667_000_000, minimumLifetimeMs: 45_000, maximumLifetimeSeconds: 3_600 };
-  const funded = { ...examples.quote, issues: { ...examples.quote.issues as object, balance: null } };
+  const funded: Record<string, unknown> = { ...examples.quote, issues: { ...examples.quote.issues as object, balance: null } };
   const verify = (quote: unknown, ctx: Partial<GaslessCheckContext> = {}, req: Partial<typeof request> = {}) =>
     verifyGaslessQuote(parseGaslessQuote(quote), '0x' + '0'.repeat(64), { ...request, ...req }, { ...context, ...ctx });
   type Trade = { trade: { eip712: { message: Record<string, unknown> } } };
   const withMessage = (change: (message: Record<string, unknown>) => void, rehash = false) => {
-    const copy = structuredClone(funded) as typeof funded & Trade & { trade: { hash: string } }; change(copy.trade.eip712.message);
+    const copy = structuredClone(funded) as Record<string, unknown> & Trade & { trade: { hash: string } }; change(copy.trade.eip712.message);
     // A provider that re-signs its own tampered payload: the digest matches, so only the field checks can refuse it.
     if (rehash) copy.trade.hash = eip712.hashTypedData(copy.trade.eip712 as unknown as eip712.TypedData);
     return copy;
@@ -154,7 +154,7 @@ describe('the pre-sign checklist on 0x\'s official example (Ethereum, chainId 1)
     ['a re-hashed trade for another spender', () => verify(withMessage(m => { m.spender = '0x' + '4'.repeat(40); }, true)), 'ZEROX_SETTLER_MISMATCH'],
     ['the chain differs', () => verify(funded, {}, { chainId: 4663 }), 'ZEROX_TRADE_UNVERIFIABLE'],
     ['the permit approves the Settler instead of Permit2', () => {
-      const copy = structuredClone(funded) as typeof funded & { approval: { eip712: { message: Record<string, unknown> } } };
+      const copy = structuredClone(funded) as Record<string, unknown> & { approval: { eip712: { message: Record<string, unknown> } } };
       copy.approval.eip712.message.spender = settler; return verify(copy); }, 'ZEROX_APPROVAL_MISMATCH'],
     ['an unknown approval type is offered', () => verify({ ...funded, approval: { ...funded.approval as object, type: 'executeMetaTransaction::approve' } }), 'ZEROX_GASLESS_APPROVAL_UNAVAILABLE'],
     ['an allowance is missing and no gasless approval exists', () => verify({ ...funded, approval: null }), 'ZEROX_GASLESS_APPROVAL_UNAVAILABLE'],
@@ -162,5 +162,20 @@ describe('the pre-sign checklist on 0x\'s official example (Ethereum, chainId 1)
     ['liquidity is unavailable', () => verify({ liquidityAvailable: false, zid: '0x1' }), 'ZEROX_NO_LIQUIDITY'],
   ])('refuses when %s', (_name, run, code) => {
     expect(run).toThrow(code);
+  });
+});
+
+describe('the Robinhood Chain gasless runtime', () => {
+  it('is off by default, and never lets a live deployment reach a loopback double or the harness reach api.0x.org', async () => {
+    const { robinhoodGaslessRuntime } = await import('../robinhood-mainnet.ts');
+    expect(robinhoodGaslessRuntime('live', {})).toEqual({ config: { enabled: false, code: 'ZEROX_GASLESS_NOT_ENABLED' }, client: null });
+    expect(robinhoodGaslessRuntime('live', { FLOFI_ZEROX_GASLESS: 'enabled' }).config).toEqual({ enabled: false, code: 'ZEROX_API_KEY_NOT_CONFIGURED' });
+    const live = { FLOFI_ZEROX_GASLESS: 'enabled', FLOFI_ZEROX_API_KEY: KEY };
+    expect(robinhoodGaslessRuntime('live', live).config).toMatchObject({ enabled: true, apiUrl: 'https://api.0x.org', loopback: false });
+    expect(robinhoodGaslessRuntime('live', live).client).not.toBeNull();
+    expect(robinhoodGaslessRuntime('harness', live).config).toEqual({ enabled: false, code: 'ZEROX_CONFIGURATION_INVALID' });
+    const loopback = { ...live, FLOFI_ZEROX_API_URL: 'http://127.0.0.1:8561' };
+    expect(robinhoodGaslessRuntime('live', loopback).config).toEqual({ enabled: false, code: 'ZEROX_CONFIGURATION_INVALID' });
+    expect(robinhoodGaslessRuntime('harness', loopback).config).toMatchObject({ enabled: true, loopback: true });
   });
 });

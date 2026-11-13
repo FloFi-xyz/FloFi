@@ -44,7 +44,7 @@ beforeEach(() => {
   chain.fundNative(owner.address, 0n);
   zx.script.permitTokens = new Set([usdg.address!]);
 });
-function service(options: { config?: ZeroExGaslessConfig; executionEnabled?: boolean; dir?: string; gasless?: boolean } = {}): PublicTestnetService {
+function service(options: { config?: ZeroExGaslessConfig; executionEnabled?: boolean; dir?: string | undefined; gasless?: boolean } = {}): PublicTestnetService {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'flofi-rh-gasless-'));
   if (!options.dir) dirs.push(dir);
   const runtime = { ...mockCatalogRuntime(catalog, options.executionEnabled ?? true),
@@ -333,5 +333,33 @@ describe('authorization gates', () => {
     const { writeFileSync } = await import('node:fs');
     writeFileSync(join(dir, id + '.json'), JSON.stringify(tampered));
     await expect(s.beginGasless(id, owner.address)).rejects.toThrow('QUOTE_BINDING_INVALID');
+  });
+});
+
+describe('the robinhood-swap cloud flow carries the gasless methods', () => {
+  it('validates gasless arguments strictly, projects gasless attempts and observes only submitted trades', async () => {
+    const { FLOWS } = await import('../../../backend/flows.ts');
+    const flow = FLOWS['robinhood-swap'], id = 'rhs-' + 'a'.repeat(24), attempt = id + '.gasless.1', sig = '0x' + '1'.repeat(130);
+    expect(flow.methods.beginGasless!.validate([id, owner.address])).toBe(true);
+    expect(flow.methods.submitGasless!.validate([id, attempt, { trade: sig, approval: null }])).toBe(true);
+    expect(flow.methods.submitGasless!.validate([id, attempt, { trade: sig, approval: null, extra: 1 }])).toBe(false);
+    expect(flow.methods.submitGasless!.validate([id, id + '.swap.1', { trade: sig, approval: sig }])).toBe(false);
+    expect(flow.methods.reportGasless!.validate([id, attempt, { kind: 'REJECTED' }])).toBe(true);
+    expect(flow.methods.reportGasless!.validate([id, attempt, { kind: 'HASH' }])).toBe(false);
+    // Other catalog networks offer no gasless execution.
+    expect(FLOWS['base-swap'].methods.submitGasless).toBeUndefined();
+    const s = service(), run = await reviewed(s), runId = run.quote.executionId;
+    const project = (value: PublicRun) => flow.projector(runId + '.jsonl', new TextEncoder().encode(JSON.stringify(value) + '\n'))!;
+    const begun = await s.beginGasless(runId, owner.address);
+    expect(project(s.load(runId)).run).toMatchObject({ status: 'SIGNING', ownerAccount: owner.address, needsObservation: false });
+    zx.script.settle = false;
+    const submitted = await s.submitGasless(runId, begun.attempt.attemptId, { approval: sign(begun.approval), trade: sign(begun.trade)! });
+    expect(project(submitted).run).toMatchObject({ status: 'SUBMITTED', needsObservation: true });
+    zx.settle(run.quote.gas!.zeroEx!.trade.hash);
+    const done = await s.observe(runId), projected = project(done);
+    expect(projected.run).toMatchObject({ status: 'RECONCILED', needsObservation: false, hasEvidence: true, errorCode: null });
+    expect(projected.run.attempts).toEqual([expect.objectContaining({ attemptId: begun.attempt.attemptId, step: 'SWAP', state: 'CONFIRMED',
+      transactionHash: done.gasless![0]!.txHash, reconciled: true })]);
+    expect(flow.evidence(done)).toMatchObject({ environment: 'MOCKED', outcome: 'RECONCILED' });
   });
 });
