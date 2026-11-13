@@ -33,6 +33,7 @@ export const CIRCLE_UNAVAILABLE_REASON: Readonly<Record<string, string>> = {
   CIRCLE_PRICE_UNAVAILABLE: 'no verified ETH price is available right now',
   CIRCLE_PAYMASTER_UNVERIFIED: 'Circle\'s contract could not be verified on this network',
   CIRCLE_NATIVE_VALUE_UNCOVERED: 'this request also sends ETH that this wallet does not hold',
+  CIRCLE_ACCOUNT_NONCE_PENDING: 'this wallet has a transaction still pending on this network',
   USER_OPERATION_BUNDLER_UNAVAILABLE: 'the service that relays it is not available on this network',
   USER_FUNDED_SIMULATION_UNAVAILABLE: 'this network cannot simulate the whole request',
   USER_FUNDED_RPC_UNAVAILABLE: 'the network could not be read just now',
@@ -57,6 +58,23 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   // Review C2: never (re)sent at or after its calls' deadline minus a margin; review C3: a bundler that cannot carry the account's operation.
   CIRCLE_OPERATION_DEADLINE_PASSED: 'FloFi did not send this request after its time window ended (it would only have failed and still cost you the network fee in USDC). It did not execute, and no network fee was taken.',
   USER_OPERATION_ENTRY_POINT_UNSUPPORTED: 'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.',
+  // Owner requirement (FloFi Wallet + Circle): the EIP-7702 upgrade of a FloFi Wallet address inside its first Circle-paid operation.
+  CIRCLE_UPGRADE_DECLINED: 'You did not agree to the smart-account upgrade, so nothing was signed or sent. Add ETH on this network to pay the network fee instead.',
+  CIRCLE_UPGRADE_CONSENT_REQUIRED: 'Agree to the smart-account upgrade first. Nothing was signed or sent.',
+  CIRCLE_AUTHORIZATION_INVALID: 'The smart-account upgrade signature could not be verified, so nothing was sent. Try again.',
+  CIRCLE_AUTHORIZATION_STALE: 'This wallet changed since your review (another transaction or upgrade), so the upgrade was not used and nothing was sent. Load the request again.',
+  CIRCLE_AUTHORIZATION_STAGE_INVALID: 'This request already moved on. Nothing was sent; load it again.',
+  CIRCLE_UPGRADE_NOT_PREPARED: 'This request has no smart-account upgrade to agree to. Nothing was signed or sent.',
 };
 /** The Circle refusals the browser itself raises before any wallet request: nothing was sent. */
-export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH']);
+export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH', 'CIRCLE_UPGRADE_DECLINED']);
+
+/**
+ * Owner requirement (FloFi Wallet + Circle): FloFi's own consent step, shown before the wallet is asked to sign the EIP-7702 authorization (Privy
+ * shows no confirmation screen for it). `{0}`: the network. The signing gate refuses the authorization until this consent was recorded.
+ */
+export const CIRCLE_UPGRADE_CONSENT = 'Upgrade this FloFi Wallet address on {0} to a smart account so its network fee can be paid in USDC. Your address, balances and control do not change. The upgrade uses EIP-7702 with the open-source Simple7702Account contract and stays until you replace it.';
+/** The consent's two actions and its signature count (three on first use: the upgrade, the USDC permit, the operation). */
+export const CIRCLE_UPGRADE_AGREE = 'Agree and upgrade';
+export const CIRCLE_UPGRADE_DECLINE = 'Not now';
+export const CIRCLE_UPGRADE_SIGNATURES = 'Three signatures this time: the smart-account upgrade, a USDC permit for the fee, then the operation. Two from then on.';

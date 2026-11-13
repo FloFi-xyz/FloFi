@@ -18,7 +18,7 @@
 import { classifySigningFailure, type SigningContext } from './flofi-signing';
 import { registerFloFiSigningTarget, takeFloFiSigning, type FloFiWalletRequest } from './flofi-wallet-channel';
 import type { EvmProvider } from './evm-discovery';
-import { parseEvmTypedData, type WalletResult } from '../wallet-app/protocol';
+import { parseEvmAuthorization, parseEvmTypedData, type WalletResult } from '../wallet-app/protocol';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 export type FloFiEvmDeps = {
@@ -134,6 +134,29 @@ export function createFloFiEvmProvider(address: string, deps: FloFiEvmDeps): Flo
     } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
   }
 
+  /**
+   * Owner requirement (FloFi Wallet + Circle): FloFi's own `flofi_signAuthorization` — an EIP-7702 authorization of the reviewed run the store bound
+   * right before (a Circle-paid group's upgrade, after the person's consent in FloFi). The tuple's chain must be the provider's chain (never 0);
+   * FloFi's server re-derives it and refuses anything but the pinned Simple7702Account v0.8 with the account's current nonce. No other dapp
+   * method signs an authorization (FloFi Wallet answers `wallet_*` authorization requests with 4200).
+   */
+  async function signAuthorization(args: readonly unknown[], provider: object): Promise<string> {
+    const signing = takeFloFiSigning(provider);
+    if (!signing) throw refused('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
+    if (!own(args[0])) throw refused('FLOFI_WALLET_ACCOUNT_MISMATCH');
+    const raw = args[1] && typeof args[1] === 'object' && !Array.isArray(args[1]) ? args[1] as Record<string, unknown> : null;
+    if (!raw || Object.keys(raw).length !== 3 || quantity(raw.chainId) !== chainId) throw refused(raw ? 'FLOFI_WALLET_NETWORK_UNSUPPORTED' : 'FLOFI_WALLET_REQUEST_INVALID');
+    const authorization = parseEvmAuthorization({ chainId: Number(BigInt(chainId)), contractAddress: raw.contractAddress,
+      nonce: typeof raw.nonce === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(raw.nonce) ? BigInt(raw.nonce).toString() : null });
+    if (!authorization) throw refused('FLOFI_WALLET_REQUEST_INVALID');
+    try {
+      const result = await deps.request({ op: 'evm_sign_authorization', address: owner, authorization, signing }) as { signature?: unknown };
+      const signature = typeof result.signature === 'string' ? result.signature.toLowerCase().replace(/^(?:0x)?/, '0x') : '';
+      if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('FLOFI_WALLET_RESPONSE_INVALID');
+      return signature;
+    } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+  }
+
   const provider: FloFiEvmProvider = {
     isFloFiWallet: true, address: owner,
     async request({ method, params = [] }: { method: string; params?: unknown[] }): Promise<unknown> {
@@ -174,6 +197,12 @@ export function createFloFiEvmProvider(address: string, deps: FloFiEvmDeps): Flo
           if (sending) throw refused('FLOFI_WALLET_BUSY');
           sending = true;
           try { return await signTypedData(args, provider); } finally { sending = false; }
+        }
+        case 'flofi_signAuthorization': {
+          if (!connected) throw refused('FLOFI_WALLET_ACCOUNT_MISMATCH');
+          if (sending) throw refused('FLOFI_WALLET_BUSY');
+          sending = true;
+          try { return await signAuthorization(args, provider); } finally { sending = false; }
         }
         case 'eth_sendTransaction': {
           if (!connected) throw refused('FLOFI_WALLET_ACCOUNT_MISMATCH');

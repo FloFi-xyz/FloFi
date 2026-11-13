@@ -24,6 +24,7 @@ vi.mock('@privy-io/react-auth', () => ({
   useExportWallet: () => ({ exportWallet: unused }), useSignTransaction: () => ({ signTransaction: unused }), useSignMessage: () => ({ signMessage: unused }),
   // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: the bridge also wires Privy's typed-data signer (0x Gasless).
   useSignTypedData: () => ({ signTypedData: unused }),
+  useSign7702Authorization: () => ({ signAuthorization: unused }),
 }));
 vi.mock('@privy-io/react-auth/solana', () => ({
   defaultSolanaRpcsPlugin: () => ({}), toSolanaWalletConnectors: () => ({}),

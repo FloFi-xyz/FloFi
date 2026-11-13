@@ -90,7 +90,7 @@ export function createCircleDouble(evm: EvmDouble, options: CircleDoubleOptions)
     // EIP-7702 in the bundler's own type-4 transaction, BEFORE the EntryPoint runs: a valid tuple of the sender sets its code; an invalid one is
     // skipped by the chain (the account then stays as it was and the operation fails validation below).
     if (rpcOp.eip7702Auth !== undefined) {
-      let signed: erc4337.SignedEip7702Authorization | null = null, signer = '';
+      let signed: erc4337.SignedEip7702Authorization | null, signer = '';
       try { signed = erc4337.fromBundlerEip7702Auth(rpcOp.eip7702Auth); signer = erc4337.recoverEip7702AuthorizationSigner(signed); } catch { signed = null; }
       const accountNonce = BigInt(String(await evm.rpc('eth_getTransactionCount', [sender, 'latest'])));
       const delegatable = code === '0x' || code.startsWith('0xef0100');

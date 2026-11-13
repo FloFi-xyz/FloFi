@@ -31,6 +31,12 @@ export type SigningBinding = SigningContext;
  */
 export type EvmTypedData = { readonly types: Readonly<Record<string, readonly { readonly name: string; readonly type: string }[]>>;
   readonly domain: Readonly<Record<string, unknown>>; readonly primaryType: string; readonly message: Readonly<Record<string, unknown>> };
+/**
+ * Owner requirement (FloFi Wallet + Circle): an EIP-7702 authorization tuple FloFi asks the person's Privy wallet to sign — a SPECIFIC chain (never
+ * 0) of FloFi Wallet's four, the contract the address designates, and the account's transaction nonce (decimal, uint64). The server gate allows it
+ * only for the pinned Simple7702Account v0.8 of a reviewed Circle-paid group, after the person's consent in FloFi.
+ */
+export type EvmAuthorization = { readonly chainId: number; readonly contractAddress: string; readonly nonce: string };
 export type WalletOperation =
   | { readonly op: 'connect' }
   | { readonly op: 'manage' }
@@ -40,6 +46,7 @@ export type WalletOperation =
   | { readonly op: 'evm_sign_transaction'; readonly address: string; readonly tx: EvmTransaction; readonly signing?: SigningBinding }
   | { readonly op: 'evm_sign_message'; readonly address: string; readonly message: string }
   | { readonly op: 'evm_sign_typed_data'; readonly address: string; readonly typedData: EvmTypedData; readonly signing?: SigningBinding }
+  | { readonly op: 'evm_sign_authorization'; readonly address: string; readonly authorization: EvmAuthorization; readonly signing?: SigningBinding }
   | { readonly op: 'solana_sign_transaction'; readonly address: string; readonly chain: SolanaWalletChain; readonly transaction: string;
     readonly signing?: SigningBinding }
   | { readonly op: 'solana_sign_message'; readonly address: string; readonly message: string };
@@ -106,6 +113,15 @@ export function parseEvmTypedData(value: unknown): EvmTypedData | null {
   try { size = JSON.stringify(r).length; } catch { return null; }
   return size <= 65_536 ? { types: types as EvmTypedData['types'], domain, primaryType: r.primaryType, message } : null;
 }
+const AUTHORIZATION_CHAINS: ReadonlySet<number> = new Set([1, 8453, 42161, 4663]);
+/** A strictly shaped authorization tuple (exact keys; one of FloFi Wallet's mainnets, never chain 0; an address; a uint64 decimal nonce). */
+export function parseEvmAuthorization(value: unknown): EvmAuthorization | null {
+  const r = record(value);
+  if (!r || !exactKeys(r, ['chainId', 'contractAddress', 'nonce']) || typeof r.chainId !== 'number' || !AUTHORIZATION_CHAINS.has(r.chainId)) return null;
+  const contract = typeof r.contractAddress === 'string' ? r.contractAddress.toLowerCase() : '';
+  if (!EVM_ADDRESS.test(contract) || typeof r.nonce !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(r.nonce) || BigInt(r.nonce) >= 1n << 64n) return null;
+  return { chainId: r.chainId, contractAddress: contract, nonce: r.nonce };
+}
 function parseOperation(value: unknown): WalletOperation | null {
   const r = record(value);
   if (!r) return null;
@@ -127,6 +143,11 @@ function parseOperation(value: unknown): WalletOperation | null {
     case 'evm_sign_typed_data': {
       const typedData = parseEvmTypedData(r.typedData), address = typeof r.address === 'string' ? r.address.toLowerCase() : '', keys = withBinding(r, ['op', 'address', 'typedData']);
       return keys.ok && typedData && EVM_ADDRESS.test(address) ? { op: r.op, address, typedData, ...keys.signing ? { signing: keys.signing } : {} } : null;
+    }
+    case 'evm_sign_authorization': {
+      const authorization = parseEvmAuthorization(r.authorization), address = typeof r.address === 'string' ? r.address.toLowerCase() : '';
+      const keys = withBinding(r, ['op', 'address', 'authorization']);
+      return keys.ok && authorization && EVM_ADDRESS.test(address) ? { op: r.op, address, authorization, ...keys.signing ? { signing: keys.signing } : {} } : null;
     }
     case 'solana_sign_transaction': {
       const keys = withBinding(r, ['op', 'address', 'chain', 'transaction']);

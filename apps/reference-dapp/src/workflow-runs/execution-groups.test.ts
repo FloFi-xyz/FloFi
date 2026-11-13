@@ -56,6 +56,16 @@ describe('ADR-0010 review C5: a group whose network fee Circle may pay is never 
     expect(flofi.groups[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH' });
     expect(flofi.groups[0]).not.toHaveProperty('tokenGas');
   });
+  it('owner requirement (FloFi Wallet + Circle): a FloFi Wallet group stays owner steps; on a Circle chain it is flagged as possibly Circle-paid when due', () => {
+    const facts: UserFundedFacts = { ...ALL, tokenGasChains: ['eip155:8453'] };
+    const p = plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, FLOFI, facts);
+    expect(p.groups[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', interactions: 2, signing: 'WHEN_DUE', tokenGas: 'CIRCLE_USDC_PAYMASTER' });
+    expect(p.interactions).toMatchObject({ single: false, atLeast: true });
+    expect(describeGroup(p.groups[0]!)).toMatch(/one wallet confirmation per step.*three signatures the first time \(a smart-account upgrade you agree to first, a USDC permit, then the operation\), two afterwards/);
+    // Without the operator's Circle switch, or on a chain without it: exactly as before.
+    expect(plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, FLOFI).groups[0]).not.toHaveProperty('tokenGas');
+    expect(plan({ version: 2, steps: [{ ...SWAP_BASE, network: 'arbitrum-one' }, { ...SEND_BASE, network: 'arbitrum-one' }] }, FLOFI, facts).groups[0]).not.toHaveProperty('tokenGas');
+  });
 });
 
 describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {

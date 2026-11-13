@@ -268,8 +268,11 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
     const interactions = ownerStep ? members.length : 1;
     // ADR-0010 review (C5): a batch or user operation on a chain where Circle may pay the fee, for a wallet that could sign its permit (never FloFi
     // Wallet): one confirmation if the owner's ETH pays when it is prepared, two signatures if Circle does — not knowable now.
-    const tokenGas = (strategy === 'EVM_WALLET_BATCH' || strategy === 'EVM_USER_OPERATION') && (facts.tokenGasChains ?? []).includes(chain)
-      && profile.eip155?.wallet === 'INJECTED';
+    // Owner requirement (FloFi Wallet + Circle): a FloFi Wallet group of buildable steps on such a chain stays owner steps (its own flows, the owner's
+    // ETH paying, exactly as before) — and, when due, ONLY if the owner's ETH cannot pay it, may run as one Circle-paid operation of the owner's own
+    // address instead (three signatures the first time, after the owner agrees to the EIP-7702 upgrade; two afterwards): decided when prepared.
+    const tokenGas = (facts.tokenGasChains ?? []).includes(chain) && ((strategy === 'EVM_WALLET_BATCH' || strategy === 'EVM_USER_OPERATION')
+      && profile.eip155?.wallet === 'INJECTED' || strategy === 'EVM_OWNER_STEP' && profile.eip155?.wallet === 'FLOFI_WALLET' && chainEnabled && allBuildable);
     groups.push({ index: groups.length, namespace, chain, steps, stepFrom: first.index, stepTo: members.at(-1)!.index, strategy, signing, awaitsDelivery,
       interactions, setup: [...new Set(setup)], downgrades: assumed ? [...downgrades, 'WALLET_CAPABILITIES_ASSUMED'] : downgrades, feePayer: 'OWNER_WALLET',
       ...tokenGas ? { tokenGas: 'CIRCLE_USDC_PAYMASTER' as const } : {} });
@@ -303,6 +306,8 @@ export function describeGroup(g: ExecutionGroup): string {
     SOLANA_DURABLE_NONCE: 'one Solana wallet prompt now (durable nonces); FloFi submits when the delivery lands', SOLANA_OWNER_STEP: 'one Solana wallet prompt per step',
   };
   // ADR-0010 review (C5): the fee of such a group may be paid from the owner's USDC through Circle — then two signatures, said in words.
-  const tokenGas = g.tokenGas ? ' (in USDC through Circle when your ETH cannot pay them: then two signatures (a USDC permit, then the operation) instead of one)' : '';
+  const tokenGas = !g.tokenGas ? '' : g.strategy === 'EVM_OWNER_STEP'
+    ? ' (when your ETH cannot pay them, FloFi Wallet can pay them in USDC through Circle as one operation instead: three signatures the first time (a smart-account upgrade you agree to first, a USDC permit, then the operation), two afterwards)'
+    : ' (in USDC through Circle when your ETH cannot pay them: then two signatures (a USDC permit, then the operation) instead of one)';
   return `${steps} on ${g.chain}: ${how[g.strategy]}${g.signing === 'WHEN_DUE' && g.strategy !== 'EVM_USER_OPERATION' && g.strategy !== 'SOLANA_DURABLE_NONCE' && g.awaitsDelivery !== null ? ', when the delivery lands' : ''}; fees paid by your own wallet${tokenGas}.`;
 }

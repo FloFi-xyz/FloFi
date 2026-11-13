@@ -694,8 +694,10 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
    * ADR-0010 (owner only): a token-paid fee's mechanism and protocol facts for Technical details — the paymaster, its EntryPoint, the permit's
    * allowance cap — and the wallet prompts it needs; null for a native fee.
    */
-  readonly gasPayment?: { readonly mechanism: 'CIRCLE_USDC_PAYMASTER'; readonly stage: 'PERMIT' | 'OPERATION'; readonly signatures: 2; readonly paymaster: string;
-    readonly entryPoint: string; readonly permitCap: string; readonly token: string; readonly symbol: string; readonly decimals: number } | null;
+  readonly gasPayment?: { readonly mechanism: 'CIRCLE_USDC_PAYMASTER'; readonly stage: 'AUTHORIZATION' | 'PERMIT' | 'OPERATION'; readonly signatures: 2 | 3; readonly paymaster: string;
+    readonly entryPoint: string; readonly permitCap: string; readonly token: string; readonly symbol: string; readonly decimals: number;
+    /** Owner requirement (FloFi Wallet's first use): the address is upgraded to this pinned smart account inside the operation, after consent. */
+    readonly upgrade?: { readonly delegate: string; readonly chainId: number; readonly consented: boolean } } | null;
   /** Transactions of the group (public hashes / signatures only, never bytes): what was sent and reconciled. Named like a step's `submissions`. */
   readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
@@ -790,8 +792,9 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       // Circle or Kora fronted and the owner paid back in a token is the owner's (a requester sees OWNER_WALLET), with the token amount.
       gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : paid.sponsored ? 'FLOFI_PAYMASTER' : 'OWNER_WALLET',
         ...paid.sponsored ? { sponsored: true as const } : {}, ...inToken && !paid.sponsored ? { paidInToken: inToken } : {} } : null,
-      gasPayment: owner && circle ? { mechanism: 'CIRCLE_USDC_PAYMASTER', stage: circle.stage, signatures: 2, paymaster: circle.paymaster, entryPoint: circle.entryPoint,
-        permitCap: circle.permitCap, token: circle.usdc, symbol: 'USDC', decimals: 6 } : null,
+      gasPayment: owner && circle ? { mechanism: 'CIRCLE_USDC_PAYMASTER', stage: circle.stage, signatures: circle.upgrade ? 3 : 2, paymaster: circle.paymaster,
+        entryPoint: circle.entryPoint, permitCap: circle.permitCap, token: circle.usdc, symbol: 'USDC', decimals: 6,
+        ...circle.upgrade ? { upgrade: { delegate: circle.upgrade.delegate, chainId: circle.upgrade.chainId, consented: Boolean(circle.upgrade.consentedAt) } } : {} } : null,
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,

@@ -20,6 +20,11 @@ export type PrivyEvmTransaction = { readonly to: string; readonly value: string;
  */
 export type PrivyTypedData = { readonly types: Readonly<Record<string, readonly { readonly name: string; readonly type: string }[]>>;
   readonly domain: Readonly<Record<string, unknown>>; readonly primaryType: string; readonly message: Readonly<Record<string, unknown>> };
+/**
+ * Owner requirement (FloFi Wallet + Circle): the EIP-7702 authorization tuple FloFi asks Privy to sign (a specific chain, the contract the address
+ * designates, the account's nonce), already matched by FloFi's server to a reviewed Circle-paid group's upgrade after the person's consent.
+ */
+export type PrivyAuthorization = { readonly chainId: number; readonly contractAddress: string; readonly nonce: bigint };
 /** What Privy's confirmation screen states about a transaction: FloFi's server-built summary of the reviewed attempt. */
 export type PrivyReview = { readonly title: string; readonly action: string; readonly description: string };
 export type FloFiPrivy = {
@@ -48,6 +53,12 @@ export type FloFiPrivy = {
   readonly signEvmMessage: (address: string, message: string) => Promise<string>;
   /** `eth_signTypedData_v4` with the embedded EVM wallet, Privy's confirmation showing FloFi's server summary; returns the 65-byte signature. */
   readonly signEvmTypedData: (address: string, typedData: PrivyTypedData, review?: PrivyReview) => Promise<string>;
+  /**
+   * Owner requirement: an EIP-7702 authorization with the embedded EVM wallet (Privy's `useSign7702Authorization`; embedded wallets only). Privy
+   * 3.51.0 shows NO confirmation screen for it (it signs the authorization digest with `secp256k1_sign`, and takes no UI options): FloFi's own
+   * consent step, recorded by its server, is the person's confirmation. Returns the 65-byte r ‖ s ‖ v signature of exactly the tuple asked for.
+   */
+  readonly signEvmAuthorization: (address: string, authorization: PrivyAuthorization) => Promise<string>;
   readonly signSolanaTransaction: (address: string, transaction: Uint8Array, review?: PrivyReview) => Promise<Uint8Array>;
   readonly signSolanaMessage: (address: string, message: Uint8Array) => Promise<Uint8Array>;
   readonly logout: () => Promise<void>;
