@@ -167,6 +167,20 @@ describe('sendWalletBatch', () => {
       expect(batchSponsorshipOf({ sponsorship: { url: 'http://flofi.example/x', context: null } })).toBeNull();
       expect(batchSponsorshipOf({})).toBeNull();
     });
+    it('review round 2: a batch that REQUIRES sponsorship but carries no usable offer fails closed before the wallet is asked anything', async () => {
+      const unusable = { url: null, context: null, required: true };
+      for (const prepared of [{ fee: { sponsorship: 'REQUIRED' } }, { sponsorship: { url: 'http://flofi.example/x', context: offer.context, required: true } },
+        { sponsorship: { url: 'https://user:pass@flofi.example/x', context: offer.context }, fee: { sponsorship: 'REQUIRED' } }, { sponsorship: { url: 'not a url', required: true } },
+        { sponsorship: { context: offer.context, required: true } }])
+        expect(batchSponsorshipOf(prepared)).toEqual(unusable);
+      wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { paymasterService: { supported: true } } });
+      await expect(sendWalletBatch(request, onSending, batchSponsorshipOf({ fee: { sponsorship: 'REQUIRED' } }))).rejects.toThrow('GAS_SPONSORSHIP_WALLET_UNSUPPORTED');
+      // Nothing was asked of the wallet (no network read, no capability or account read, no send) and no "may have been sent" marker was kept.
+      expect(wallet.log).toEqual([]);
+      expect(onSending).not.toHaveBeenCalled();
+      // An offer the artifact marks optional, but unusable here, is no offer: the plain owner-paid batch, exactly as before.
+      expect(batchSponsorshipOf({ sponsorship: { url: 'http://flofi.example/x', context: offer.context }, fee: { sponsorship: 'OFFERED' } })).toBeNull();
+    });
   });
 });
 

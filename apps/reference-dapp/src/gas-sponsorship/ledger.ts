@@ -5,11 +5,13 @@
  *
  *  - Ledger, per network and UTC day of the grant (`gas-sponsor-<network>-<yyyymmdd>.jsonl`): ONE reservation per grant (its owner nonce is
  *    pinned, so at most one of its operations can land), raised to the largest worst-case cost the paymaster signed for it, then a SETTLE with
- *    the actual fee observed on chain, or a RELEASE when the sponsorship was refused after reserving. The day's spend is Σ (settled ? actual :
- *    reserved), where a reservation neither settled nor released stops counting `RESERVATION_HOLD_MS` after it was made (the provider's
- *    paymaster validity window must be shorter: see docs/deploy/GAS-SPONSORSHIP.md). A reservation that would exceed the operator's daily
- *    budget is refused (the operation stays user-funded). Abuse protection is on the sponsor's funds — per-operation cap, daily budget, exact
- *    reviewed calls, pinned nonce, bounded fees — never a quota on what a person may build or execute.
+ *    the actual fee observed on chain. The day's spend is Σ (settled ? actual : reserved): an unsettled reservation counts for its WHOLE day
+ *    (BUILD-FLOFI-MAINNET-EXEC-002 review, round 2: a time-limited hold gave an owner who never reports back the budget again after an hour,
+ *    and a paymaster signature can stay valid longer). The trade-off is availability, never funds: a signature the wallet refused or abandoned
+ *    keeps its worst case reserved until the day ends, so operators size the daily budget for it (docs/deploy/GAS-SPONSORSHIP.md). A
+ *    reservation that would exceed the operator's daily budget is refused (the operation stays user-funded). Abuse protection is on the
+ *    sponsor's funds — per-operation cap, daily budget, exact reviewed calls, pinned nonce, bounded fees — never a quota on what a person may
+ *    build or execute.
  *  - Grant (`gas-grant-<id>.jsonl`): created by FloFi when it prepares a sponsorable request for the owner's exact reviewed calls; it names the
  *    owner, the network, the calls' hash and an expiry. The paymaster proxy sponsors only an operation of that owner whose calls are exactly
  *    those, and records each sponsored operation hash on the grant (reconciliation finds the one that landed by it).
@@ -21,6 +23,11 @@ import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-exe
 const fail = (code: string): never => { throw new Error(code); };
 const networkKey = (network: string) => network.replace(/[^A-Za-z0-9]+/g, '-');
 const day = (at: Date) => at.toISOString().slice(0, 10).replaceAll('-', '');
+/**
+ * `RELEASE`: written by an earlier build when a sponsorship was refused after reserving. Still readable (a ledger holding one is not corrupt),
+ * but it frees nothing any more (review round 2: a concurrent request's refusal could release the reservation of an answer already handed to a
+ * wallet), so its reservation keeps counting for the day like any other unsettled one.
+ */
 type LedgerLine = { readonly kind: 'RESERVE'; readonly id: string; readonly amount: string; readonly at: string } |
   { readonly kind: 'SETTLE'; readonly id: string; readonly amount: string; readonly reference: string; readonly at: string } |
   { readonly kind: 'RELEASE'; readonly id: string; readonly amount: '0'; readonly at: string };
@@ -28,28 +35,21 @@ const lines = <T,>(bytes: Uint8Array | null): T[] => utf8(bytes).split('\n').fil
 const validLedger = (bytes: Uint8Array) => {
   for (const line of lines<LedgerLine>(bytes)) if (!['RESERVE', 'SETTLE', 'RELEASE'].includes(line.kind) || typeof line.id !== 'string' || !/^(0|[1-9][0-9]*)$/.test(line.amount)) fail('GAS_SPONSOR_LEDGER_CORRUPT');
 };
-/** How long a reservation that was neither settled nor released keeps counting against the day's budget. */
-export const RESERVATION_HOLD_MS = 60 * 60_000;
 
 export type SponsorLedger = ReturnType<typeof createSponsorLedger>;
 export function createSponsorLedger(storage: ExecutionStorage, now: () => Date = () => new Date()) {
   const { log, leases } = storage;
   const name = (network: string, at: Date) => `gas-sponsor-${networkKey(network)}-${day(at)}.jsonl`;
-  /** Σ (settled ? actual : reserved, released: 0) of the day, a held reservation counting only within `RESERVATION_HOLD_MS`; and each id's reservation. */
+  /** Σ (settled ? actual : reserved) of the day — an unsettled reservation counts for the whole day (a legacy RELEASE frees nothing); and each id's reservation. */
   const spent = (entries: readonly LedgerLine[]) => {
-    const reserved = new Map<string, { amount: bigint; at: number }>(), settled = new Map<string, bigint>(), released = new Set<string>();
+    const reserved = new Map<string, bigint>(), settled = new Map<string, bigint>();
     for (const e of entries) {
-      if (e.kind === 'RESERVE') reserved.set(e.id, { amount: BigInt(e.amount), at: reserved.get(e.id)?.at ?? Date.parse(e.at) });
+      if (e.kind === 'RESERVE') reserved.set(e.id, BigInt(e.amount));
       else if (e.kind === 'SETTLE') settled.set(e.id, BigInt(e.amount));
-      else released.add(e.id);
     }
-    const at = now().getTime();
     let total = 0n;
-    for (const [id, r] of reserved) {
-      const actual = settled.get(id);
-      total += actual !== undefined ? actual : released.has(id) || at - r.at > RESERVATION_HOLD_MS ? 0n : r.amount;
-    }
-    return { total, reserved, settled, released };
+    for (const [id, amount] of reserved) total += settled.get(id) ?? amount;
+    return { total, reserved, settled };
   };
   const append = async (file: string, prior: Uint8Array | null, line: LedgerLine) => {
     const next = utf8(prior) + JSON.stringify(line) + '\n';
@@ -65,12 +65,11 @@ export function createSponsorLedger(storage: ExecutionStorage, now: () => Date =
       if (amount <= 0n) fail('GAS_SPONSOR_COST_INVALID');
       const file = name(network, on);
       await leases.hold(`gas-sponsor-${networkKey(network)}`, async () => {
-        const prior = await log.read(file), state = spent(lines<LedgerLine>(prior)), held = state.reserved.get(id);
-        if (state.settled.has(id) || state.released.has(id)) fail('GAS_SPONSOR_GRANT_USED');
-        if (held && held.amount >= amount) return;
-        // The grant's earlier reservation, where it still counts, is replaced (raised), never added twice.
-        const counted = held && now().getTime() - held.at <= RESERVATION_HOLD_MS ? held.amount : 0n;
-        if (state.total - counted + amount > budget) fail('GAS_SPONSOR_BUDGET_EXHAUSTED');
+        const prior = await log.read(file), state = spent(lines<LedgerLine>(prior)), held = state.reserved.get(id) ?? null;
+        if (state.settled.has(id)) fail('GAS_SPONSOR_GRANT_USED');
+        if (held !== null && held >= amount) return;
+        // The grant's earlier reservation (it counts all day) is replaced (raised), never added twice.
+        if (state.total - (held ?? 0n) + amount > budget) fail('GAS_SPONSOR_BUDGET_EXHAUSTED');
         await append(file, prior, { kind: 'RESERVE', id, amount: amount.toString(), at: now().toISOString() });
       });
     },
@@ -82,15 +81,6 @@ export function createSponsorLedger(storage: ExecutionStorage, now: () => Date =
         if (!entries.some(e => e.kind === 'RESERVE' && e.id === id)) fail('GAS_SPONSOR_RESERVATION_MISSING');
         if (entries.some(e => e.kind === 'SETTLE' && e.id === id)) return;
         await append(file, prior, { kind: 'SETTLE', id, amount: amount.toString(), reference, at: now().toISOString() });
-      });
-    },
-    /** Releases a reservation whose sponsorship was refused after it was made (nothing was handed to the wallet). No-op once settled. */
-    async release(network: string, id: string, on: Date = now()): Promise<void> {
-      const file = name(network, on);
-      await leases.hold(`gas-sponsor-${networkKey(network)}`, async () => {
-        const prior = await log.read(file), entries = lines<LedgerLine>(prior);
-        if (!entries.some(e => e.kind === 'RESERVE' && e.id === id) || entries.some(e => e.kind !== 'RESERVE' && e.id === id)) return;
-        await append(file, prior, { kind: 'RELEASE', id, amount: '0', at: now().toISOString() });
       });
     },
     /** Today's spend on a network (reserved worst cases, replaced by actual fees once settled). */

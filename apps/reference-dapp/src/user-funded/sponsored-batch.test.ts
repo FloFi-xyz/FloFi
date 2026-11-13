@@ -119,8 +119,31 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002: a sponsored owner wallet batch (ADR-0009
     expect(await reconcileEvmGroup(down, p, { hashes: [tx] })).toEqual({ status: 'PENDING' });
     const { sponsorship: _port, ...without } = s.deps; void _port;
     expect(await reconcileEvmGroup(without, p, { hashes: [tx] })).toEqual({ status: 'PENDING' });
+    // Review round 2: a grant the artifact names that the port does not find (null) is unreadable too, never "no grant" (that would judge the
+    // sponsored bundle as a transaction the owner did not send: UNMATCHED GAS_PAYER_NOT_OWNER).
+    const unknown = { ...s.deps, sponsorship: { ...s.deps.sponsorship!, operations: async () => null } };
+    expect(await reconcileEvmGroup(unknown, p, { hashes: [tx] })).toEqual({ status: 'PENDING' });
+    expect(s.settled).toEqual([]);
     // Once it can be read, the same batch reconciles.
     expect(await reconcileEvmGroup(s.deps, p, { hashes: [tx] })).toMatchObject({ status: 'RECONCILED', gasPaid: { sponsored: true } });
+  });
+  it('review round 2: the reconciled receipt carries the operation\'s own logs only, never another sender\'s operation in the same bundle', async () => {
+    const s = setup(), p = await prepared(s), OTHER = '0x' + '22'.repeat(20), SPOKE = '0x' + '5c'.repeat(20), OTHER_OP = '0x' + 'ef'.repeat(32);
+    // Another sender's operation executed earlier in the same bundle, with a deposit-like log of its own (e.g. its Across FundsDeposited).
+    const foreign = { address: SPOKE, topics: ['0x' + 'fd'.repeat(32), '0x' + '1'.padStart(64, '0'), '0x' + OTHER.slice(2).padStart(64, '0')], data: '0x' + '00'.repeat(32) };
+    const tx = s.chain.control.sponsoredOperation(OWNER, evmCallsOf(p.group), { userOpHash: OP_HASH, paymaster: PAYMASTER, bundler: BUNDLER, actualGasCost: 7n,
+      before: [{ userOpHash: OTHER_OP, sender: OTHER, logs: [foreign] }] });
+    const onChain = await s.deps.evm(CHAIN)!.rpc('eth_getTransactionReceipt', [tx]) as { logs: { address: string; topics: string[]; data: string }[] };
+    expect(onChain.logs.some(l => l.address === SPOKE)).toBe(true); // the bundle itself does hold it
+    const r = await reconcileEvmGroup(s.deps, p, { hashes: [tx] });
+    if (r.status !== 'RECONCILED') throw new Error(JSON.stringify(r));
+    const logs = r.receipts![0]!.logs;
+    // Exactly this operation's execution logs: after the previous operation's UserOperationEvent, before its own (the EntryPoint's events excluded).
+    const own = onChain.logs.slice(onChain.logs.findIndex(l => l.topics[1] === OTHER_OP) + 1, -1);
+    expect(own.length).toBeGreaterThan(0);
+    expect(logs).toEqual(own.map(l => ({ address: l.address, topics: l.topics, data: l.data })));
+    expect(logs.some(l => l.address === SPOKE || l.topics.includes(OTHER_OP))).toBe(false);
+    expect(r.steps[0]).toMatchObject({ stepIndex: 0, spent: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: '3000000' }] });
   });
   it('a self-bundling wallet (the owner sends the bundle to the EntryPoint) reconciles through the sponsored operation too', async () => {
     const s = setup(), p = await prepared(s);

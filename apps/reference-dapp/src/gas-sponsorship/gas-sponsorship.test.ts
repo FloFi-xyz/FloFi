@@ -7,11 +7,11 @@ import { generateKeyPairSync, sign as signBytes } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { base58Encode, erc4337, parseTransaction, serializeSignedTransaction, setComputeUnitLimit, setComputeUnitPrice, type SolanaInstruction } from '@defi-workflow-engine/reference-compiler';
 import { readGasSponsorshipConfig, paymasterProxyUrl, solanaSecretKey } from './config';
-import { callsHash, createGrantStore, createSponsorLedger, RESERVATION_HOLD_MS } from './ledger';
+import { callsHash, createGrantStore, createSponsorLedger } from './ledger';
 import { handlePaymasterRpc, reconcileSponsoredOperation, type PaymasterTransport } from './paymaster-service';
 import { assertSponsorableMessage, cosignSponsoredTransaction, solanaSponsorSigner, sponsoredMessage, sponsoredTransactionId } from './solana-fee-payer';
 import { gasSponsorshipRuntime, sponsorshipPort } from './runtime';
@@ -51,6 +51,14 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 sponsorship configuration', () => {
     expect(paymasterProxyUrl(config, 'eip155:8453')).toBe('https://flofi.example/api/gas/paymaster/8453');
     expect(readGasSponsorshipConfig({ ...ENV, FLOFI_SPONSOR_DAILY_BUDGET_WEI_8453: '1' }).refusals['eip155:8453']).toBe('GAS_SPONSOR_EVM_CONFIG_INVALID');
     expect(readGasSponsorshipConfig({ ...ENV, FLOFI_GAS_SPONSOR_PUBLIC_ORIGIN: 'http://flofi.example' }).refusals['eip155:8453']).toBe('GAS_SPONSOR_EVM_CONFIG_INVALID');
+    // Review round 2: the public origin is https, or plain http on the loopback address only (local acceptance) — never another scheme there.
+    expect(readGasSponsorshipConfig({ ...ENV, FLOFI_GAS_SPONSOR_PUBLIC_ORIGIN: 'http://127.0.0.1:3000' }).publicOrigin).toBe('http://127.0.0.1:3000');
+    for (const origin of ['ws://127.0.0.1:3000', 'ftp://127.0.0.1', 'file://127.0.0.1/']) {
+      const refused = readGasSponsorshipConfig({ ...ENV, FLOFI_GAS_SPONSOR_PUBLIC_ORIGIN: origin });
+      expect(refused).toMatchObject({ enabled: false, publicOrigin: null });
+      expect(refused.evm).toEqual({});
+      expect(refused.refusals['eip155:8453']).toBe('GAS_SPONSOR_EVM_CONFIG_INVALID');
+    }
   });
   it('reads a Solana sponsor key only as a valid 64-byte keypair (base58 or the CLI JSON format)', () => {
     const key = solanaKeypair();
@@ -137,12 +145,19 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 ERC-7677 paymaster proxy (EVM)', () => {
     const per = (fee: bigint) => (0x20000n + 0x30000n + 0xc350n + 0x10000n + 0x5000n) * fee;
     expect(await s.ledger.spentToday('eip155:8453')).toBe(2n * per(FEE));
   });
-  it('review P1: a stub never carries isFinal; final data asking for more fee or gas than the reviewed batch is refused before the provider is asked', async () => {
+  it('review P1: a stub the provider marks final is refused (round 2); final data asking for more fee or gas than the reviewed batch is refused before the provider is asked', async () => {
+    let finalStub = true;
     const s = await setup(body => ({ jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER, paymasterData: '0x01', paymasterVerificationGasLimit: '0x10000', paymasterPostOpGasLimit: '0x5000',
-      isFinal: body.method === 'pm_getPaymasterStubData' } }));
+      isFinal: finalStub && body.method === 'pm_getPaymasterStubData' } }));
     const ctx = { flofiGrant: s.grant.id };
+    // A wallet would take a final stub as the paymaster data and never ask for final data (no cap, budget, nonce pin or hash record): refused.
     const stub = await s.rpc('pm_getPaymasterStubData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]);
-    expect(stub.result).not.toHaveProperty('isFinal');
+    expect(stub.error).toEqual({ code: -32000, message: 'GAS_SPONSOR_PROVIDER_ANSWER_INVALID' });
+    expect(stub.result).toBeUndefined();
+    finalStub = false;
+    const plain = await s.rpc('pm_getPaymasterStubData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]);
+    expect(plain.result).toMatchObject({ paymaster: PAYMASTER, paymasterData: '0x01' });
+    expect(plain.result).not.toHaveProperty('isFinal');
     const asked = s.seen.length;
     expect((await s.rpc('pm_getPaymasterData', [{ ...op(), maxFeePerGas: '0x5f5e101' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_FEE_ABOVE_REVIEW');
     expect((await s.rpc('pm_getPaymasterData', [{ ...op(), maxPriorityFeePerGas: '0x5f5e101' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_FEE_ABOVE_REVIEW');
@@ -152,7 +167,52 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 ERC-7677 paymaster proxy (EVM)', () => {
     expect(s.seen.length).toBe(asked);
     expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
   });
-  it('review P2: storage failures reach the caller only as closed codes; a reservation is released when the use cannot be recorded; an unsettled one stops counting after the hold', async () => {
+  it('review round 2: a stub is held to the same fee, gas and nonce bounds wherever it carries a value (0x0 placeholders pass); it records and reserves nothing', async () => {
+    const s = await setup(undefined, { FLOFI_SPONSOR_DAILY_BUDGET_WEI_8453: '1000000000000000' }), ctx = { flofiGrant: s.grant.id };
+    const stub = (o: Record<string, string>) => s.rpc('pm_getPaymasterStubData', [o, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]);
+    const placeholders = { ...op(), nonce: '0x0', callGasLimit: '0x0', verificationGasLimit: '0x0', preVerificationGas: '0x0', maxFeePerGas: '0x0', maxPriorityFeePerGas: '0x0' };
+    expect((await stub(placeholders)).error).toBeUndefined();
+    expect((await stub({ ...op(), maxFeePerGas: '0x0' })).error).toBeUndefined(); // the priority fee within the grant's own ceiling
+    const asked = s.seen.length;
+    const refusals = [{ maxFeePerGas: '0x5f5e101' }, { maxPriorityFeePerGas: '0x5f5e101' }, { maxFeePerGas: '0x0', maxPriorityFeePerGas: '0x5f5e101' }, { callGasLimit: '0x60001' },
+      { verificationGasLimit: '0xf4241' }, { preVerificationGas: '0x2dc6c1' }];
+    const codes = [];
+    for (const change of refusals) codes.push((await stub({ ...op(), ...change })).error?.message);
+    expect(codes).toEqual(['GAS_SPONSOR_FEE_ABOVE_REVIEW', 'GAS_SPONSOR_FEE_ABOVE_REVIEW', 'GAS_SPONSOR_FEE_ABOVE_REVIEW', 'GAS_SPONSOR_GAS_ABOVE_REVIEW',
+      'GAS_SPONSOR_GAS_ABOVE_REVIEW', 'GAS_SPONSOR_GAS_ABOVE_REVIEW']);
+    expect(s.seen.length).toBe(asked); // refused before the provider is asked
+    expect((await s.grants.read(s.grant.id))!.uses).toHaveLength(0);
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
+    // The first final sponsorship pins nonce 5: a stub for another nonce is refused; a 0x0 nonce placeholder is not compared.
+    expect((await s.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error).toBeUndefined();
+    const spent = await s.ledger.spentToday('eip155:8453');
+    expect((await stub({ ...op(), nonce: '0x6' })).error?.message).toBe('GAS_SPONSOR_NONCE_CHANGED');
+    expect((await stub({ ...op(), nonce: '0x0' })).error).toBeUndefined();
+    expect((await stub(op())).error).toBeUndefined();
+    // Stub answers are never recorded or reserved: only the final one is.
+    expect((await s.grants.read(s.grant.id))!.uses).toHaveLength(1);
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(spent);
+  });
+  it('review round 2 (P1 race): a concurrent final request for another nonce of the same grant is refused and never frees the reservation of the answer handed out', async () => {
+    // Both requests read the grant (no use yet) before either records one; then A completes, then B — the interleaving that let B's refusal
+    // release A's reservation.
+    const gates = new Map<string, () => void>();
+    const s = await setup(async body => {
+      await new Promise<void>(go => gates.set((body.params[0] as { nonce: string }).nonce, go));
+      return { jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER, paymasterData: '0xabcdef', paymasterVerificationGasLimit: '0x10000', paymasterPostOpGasLimit: '0x5000' } };
+    }), ctx = { flofiGrant: s.grant.id };
+    const a = s.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]);
+    const b = s.rpc('pm_getPaymasterData', [{ ...op(), nonce: '0x6' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]);
+    await vi.waitFor(() => expect([...gates.keys()].sort()).toEqual(['0x5', '0x6']));
+    gates.get('0x5')!();
+    expect((await a).error).toBeUndefined();
+    gates.get('0x6')!();
+    expect((await b).error).toEqual({ code: -32000, message: 'GAS_SPONSOR_NONCE_CHANGED' });
+    // A's answer was handed out: its worst case still counts, and only its use (nonce 5) is on the grant.
+    expect(await s.ledger.spentToday('eip155:8453')).toBe((0x20000n + 0x30000n + 0xc350n + 0x10000n + 0x5000n) * FEE);
+    expect((await s.grants.read(s.grant.id))!.uses.map(u => u.nonce)).toEqual(['5']);
+  });
+  it('review P2: storage failures reach the caller only as closed codes; the use is recorded before anything is reserved; an unsettled reservation counts for its whole day', async () => {
     const s = await setup(), ctx = { flofiGrant: s.grant.id };
     const broken = { ...s.ledger, reserve: async () => { throw new Error('connect ECONNREFUSED 10.0.0.7:5432 user=flofi_prod'); } };
     const failed = await handlePaymasterRpc({ sponsor: s.sponsor, grants: s.grants, ledger: broken, transport: async () => ({ jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER,
@@ -160,19 +220,35 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 ERC-7677 paymaster proxy (EVM)', () => {
       { jsonrpc: '2.0', id: 1, method: 'pm_getPaymasterData', params: [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx] });
     expect(failed.error?.message).toBe('GAS_SPONSOR_UNAVAILABLE');
     expect(JSON.stringify(failed)).not.toContain('ECONNREFUSED');
-    // The use cannot be recorded (here: the grant's storage refuses it): the reservation just made is released.
+    // The use cannot be recorded (here: the grant's storage refuses it): refused before anything is reserved (nothing is ever released).
     const lost = { ...s.grants, use: async () => { throw new Error('GAS_SPONSOR_BUSY'); } };
     const refused = await handlePaymasterRpc({ sponsor: s.sponsor, grants: lost, ledger: s.ledger, transport: async () => ({ jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER,
       paymasterData: '0x', paymasterVerificationGasLimit: '0x1', paymasterPostOpGasLimit: '0x1' } }), now: () => new Date('2026-11-13T12:00:00Z') },
       { jsonrpc: '2.0', id: 1, method: 'pm_getPaymasterData', params: [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx] });
     expect(refused.error?.message).toBe('GAS_SPONSOR_BUSY');
     expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
-    // A reservation whose operation never landed (nothing settles it) counts for RESERVATION_HOLD_MS only.
+    // Review round 2: a reservation whose operation never landed (nothing settles it) keeps counting for the rest of its day — an owner who never
+    // reports back never gets the budget back early — and the next UTC day starts a new ledger.
     const other = await s.grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), maxFeePerGas: FEE, callGasLimit: 0x30000n, ttlSeconds: 600 });
     expect((await s.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: other.id }])).error).toBeUndefined();
-    expect(await s.ledger.spentToday('eip155:8453')).toBeGreaterThan(0n);
-    s.tick(RESERVATION_HOLD_MS + 1);
+    const reserved = await s.ledger.spentToday('eip155:8453');
+    expect(reserved).toBe((0x20000n + 0x30000n + 0xc350n + 0x10000n + 0x5000n) * FEE);
+    s.tick(60 * 60_000 + 1);
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(reserved);
+    s.tick(10 * 60 * 60_000); // 23:00 UTC, still the grant's day
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(reserved);
+    s.tick(2 * 60 * 60_000); // the next UTC day
     expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
+  });
+  it('review round 2: a legacy RELEASE line stays readable but frees nothing (its reservation counts for the day)', async () => {
+    const s = await setup();
+    await s.ledger.reserve('eip155:8453', s.grant.id, 1_000n, 10_000n, new Date('2026-11-13T12:00:00Z'));
+    const file = 'gas-sponsor-eip155-8453-20261113.jsonl', prior = new TextDecoder().decode((await s.storage.log.read(file))!);
+    const legacy = JSON.stringify({ kind: 'RELEASE', id: s.grant.id, amount: '0', at: '2026-11-13T12:00:01Z' });
+    await s.storage.log.extend(file, new TextEncoder().encode(prior + legacy + '\n'), () => undefined);
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(1_000n);
+    await s.ledger.settle('eip155:8453', s.grant.id, 400n, '0x' + '1'.repeat(64));
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(400n);
   });
 });
 

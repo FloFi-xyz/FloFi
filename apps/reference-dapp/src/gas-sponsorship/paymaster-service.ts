@@ -6,21 +6,23 @@
  *  1. the request is for this chain and the pinned EntryPoint (v0.7), with a FloFi grant in its context, unexpired;
  *  2. the operation's sender is the grant's owner, it deploys nothing (no factory), and its calls — decoded from the account's own encoding — are
  *     exactly the grant's reviewed calls (same targets, values and data, same order);
- *  3. (final data) the operation asks for no more per gas than the preparation's own fee ceiling, no more execution gas than its allowance, and
- *     bounded verification/pre-verification gas; its owner nonce is the grant's pinned nonce (the first final sponsorship fixes it), so at most
- *     ONE operation of a grant can ever land;
- *  4. the provider's answer names the pinned paymaster contract, and (final data) the operation's worst-case cost with the paymaster's gas is
- *     within the per-operation cap and today's budget (one reservation per grant in the ledger) — else the request is refused and the wallet's
- *     operation stays unsponsored. A stub answer never carries `isFinal` (ERC-7677: the wallet must then ask for final data, so every control
- *     above runs);
- *  5. the final operation's hash and nonce are recorded on the grant, so reconciliation proves exactly that operation landed and who paid.
+ *  3. the operation asks for no more per gas than the preparation's own fee ceiling, no more execution gas than its allowance, and bounded
+ *     verification/pre-verification gas; its owner nonce is the grant's pinned nonce (the first final sponsorship fixes it), so at most ONE
+ *     operation of a grant can ever land. A stub request is held to the same bounds wherever it carries a value (a wallet's `0x0` placeholder
+ *     never exceeds one);
+ *  4. the provider's answer names the pinned paymaster contract; a stub answer the provider marks `isFinal` is refused (ERC-7677: the wallet
+ *     would skip the final request, and with it the cap, the budget, the nonce pin and the hash record), and `isFinal` is never forwarded;
+ *  5. (final data) the operation's hash and nonce are recorded on the grant FIRST — under the grant's lease, which pins the nonce, so a
+ *     concurrent request for another nonce is refused there — and only then is its worst-case cost with the paymaster's gas reserved within
+ *     the per-operation cap and today's budget (one reservation per grant in the ledger), so reconciliation proves exactly which operation
+ *     landed and who paid. Any refusal leaves the wallet's operation unsponsored; nothing reserved is ever released.
  * Every refusal is a closed `GAS_SPONSOR_*` code; no internal or storage error text reaches the (unauthenticated) caller.
  * The owner still signs the operation (the paymaster pays gas only). FloFi's grant context is never forwarded; the provider's key never leaves
  * the server. Nothing here holds a key of the owner or signs anything.
  */
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
 import type { EvmSponsor } from './config.ts';
-import { callsHash, GRANT_ID, GRANT_MAX_USES, type GrantUse, type GrantStore, type SponsorLedger } from './ledger.ts';
+import { callsHash, GRANT_ID, type GrantUse, type GrantStore, type SponsorLedger } from './ledger.ts';
 
 export type JsonRpcRequest = { readonly jsonrpc?: unknown; readonly id?: unknown; readonly method?: unknown; readonly params?: unknown };
 export type JsonRpcResponse = { readonly jsonrpc: '2.0'; readonly id: unknown; readonly result?: unknown; readonly error?: { readonly code: number; readonly message: string } };
@@ -58,14 +60,19 @@ function answerOf(raw: unknown, sponsor: EvmSponsor, final: boolean): ProviderAn
   const r = raw.result as Record<string, unknown>;
   if (typeof r.paymaster !== 'string' || r.paymaster.toLowerCase() !== sponsor.paymaster) refuse('GAS_SPONSOR_PAYMASTER_UNEXPECTED', -32000);
   if (typeof r.paymasterData !== 'string' || !DATA.test(r.paymasterData)) refuse('GAS_SPONSOR_PROVIDER_ANSWER_INVALID', -32000);
+  // Review round 2: a stub answer the provider marks final is refused (a wallet would take it as the paymaster data and never ask for the final
+  // answer, skipping the cap, the budget, the nonce pin and the hash record); `isFinal` itself is never forwarded (review P1).
+  if (!final && r.isFinal === true) refuse('GAS_SPONSOR_PROVIDER_ANSWER_INVALID', -32000);
   const gas = (k: string) => typeof r[k] === 'string' && QUANTITY.test(r[k] as string) && BigInt(r[k] as string) < 1n << 128n ? r[k] as string
     : final ? refuse('GAS_SPONSOR_PROVIDER_ANSWER_INVALID', -32000) : '0x0';
-  // `isFinal` is never forwarded (review P1): a stub the wallet took as final would skip the cap, the budget, the nonce pin and the hash record.
   return { paymaster: sponsor.paymaster, paymasterData: (r.paymasterData as string).toLowerCase(), paymasterVerificationGasLimit: gas('paymasterVerificationGasLimit'),
     paymasterPostOpGasLimit: gas('paymasterPostOpGasLimit') };
 }
 
-/** One ERC-7677 JSON-RPC request. Every refusal is a JSON-RPC error (the wallet then does not use sponsorship); nothing is partially recorded. */
+/**
+ * One ERC-7677 JSON-RPC request. Every refusal is a JSON-RPC error (the wallet then does not use sponsorship) and hands out no paymaster data; a
+ * use recorded on the grant before the budget refused its reservation therefore sponsors nothing.
+ */
 export async function handlePaymasterRpc(deps: PaymasterServiceDeps, request: JsonRpcRequest): Promise<JsonRpcResponse> {
   const id = request.id ?? null, now = deps.now ?? (() => new Date()), sponsor = deps.sponsor;
   try {
@@ -88,14 +95,14 @@ export async function handlePaymasterRpc(deps: PaymasterServiceDeps, request: Js
     const final = method === 'pm_getPaymasterData';
     const gas = { verificationGasLimit: BigInt(op.verificationGasLimit), callGasLimit: BigInt(op.callGasLimit), preVerificationGas: BigInt(op.preVerificationGas),
       maxFeePerGas: BigInt(op.maxFeePerGas), maxPriorityFeePerGas: BigInt(op.maxPriorityFeePerGas) };
-    const nonce = BigInt(op.nonce), uses = found.uses as readonly GrantUse[];
-    if (final) {
-      // Review P1: fees and gas no larger than the owner's own reviewed batch would have used, and the grant's pinned nonce (one landing at most).
-      if (gas.maxFeePerGas > BigInt(found.grant.maxFeePerGas) || gas.maxPriorityFeePerGas > gas.maxFeePerGas) refuse('GAS_SPONSOR_FEE_ABOVE_REVIEW');
-      if (gas.callGasLimit > BigInt(found.grant.callGasLimit) * CALL_GAS_HEADROOM || gas.verificationGasLimit > MAX_VERIFICATION_GAS ||
-          gas.preVerificationGas > MAX_PRE_VERIFICATION_GAS) refuse('GAS_SPONSOR_GAS_ABOVE_REVIEW');
-      if (uses.length && uses[0]!.nonce !== nonce.toString()) refuse('GAS_SPONSOR_NONCE_CHANGED');
-    }
+    const nonce = BigInt(op.nonce), uses = found.uses as readonly GrantUse[], ceiling = BigInt(found.grant.maxFeePerGas);
+    // Review P1: fees and gas no larger than the owner's own reviewed batch would have used, and the grant's pinned nonce (one landing at most).
+    // Review round 2: a stub request too, wherever it carries a value — a zero placeholder never exceeds a bound; a stub's priority fee is bounded
+    // by the grant's ceiling while its maxFeePerGas is still a placeholder, and a zero nonce placeholder is not compared.
+    if (gas.maxFeePerGas > ceiling || gas.maxPriorityFeePerGas > (final || gas.maxFeePerGas !== 0n ? gas.maxFeePerGas : ceiling)) refuse('GAS_SPONSOR_FEE_ABOVE_REVIEW');
+    if (gas.callGasLimit > BigInt(found.grant.callGasLimit) * CALL_GAS_HEADROOM || gas.verificationGasLimit > MAX_VERIFICATION_GAS ||
+        gas.preVerificationGas > MAX_PRE_VERIFICATION_GAS) refuse('GAS_SPONSOR_GAS_ABOVE_REVIEW');
+    if ((final || nonce !== 0n) && uses.length && uses[0]!.nonce !== nonce.toString()) refuse('GAS_SPONSOR_NONCE_CHANGED');
     // The provider sees the operation and its own sponsorship context only — never FloFi's grant.
     const answer = answerOf(await deps.transport(sponsor.paymasterRpc, { jsonrpc: '2.0', id: 1, method, params: [op, sponsor.entryPoint, chainId, sponsor.context ?? {}] }),
       sponsor, final);
@@ -106,17 +113,15 @@ export async function handlePaymasterRpc(deps: PaymasterServiceDeps, request: Js
       if (maxCost > sponsor.maxWeiPerOp) refuse('GAS_SPONSOR_COST_ABOVE_CAP', -32000);
       const hash = erc4337.userOpHash(erc4337.packRpcUserOperation({ ...op, paymaster: answer.paymaster, paymasterData: answer.paymasterData,
         paymasterVerificationGasLimit: answer.paymasterVerificationGasLimit, paymasterPostOpGasLimit: answer.paymasterPostOpGasLimit }), sponsor.chainId, sponsor.entryPoint);
-      // A grant past its uses is refused before anything is reserved (the budget is never held by an operation that cannot be sponsored).
-      if (!uses.some(u => u.userOpHash === hash) && uses.length >= GRANT_MAX_USES) refuse('GAS_SPONSOR_GRANT_USED', -32000);
-      // One reservation per grant (only one of its operations can land), on the grant's own day; released if the use cannot be recorded.
-      const on = new Date(found.grant.createdAt);
-      try { await deps.ledger.reserve(sponsor.chain, grantId, maxCost, sponsor.dailyBudgetWei, on); }
-      catch (cause) { return refuse(closed(cause), -32000); }
+      // Review round 2 (P1 race): the use is recorded FIRST, under the grant's lease — it re-reads the grant there, so a concurrent request for
+      // another nonce (or past GRANT_MAX_USES, or after expiry) is refused here, before anything is reserved. Then ONE reservation per grant (only
+      // one of its operations can land), on the grant's own day. A reservation is never released: releasing on a refusal let a concurrent
+      // request free the reservation of an answer already handed to a wallet. A use recorded without a reservation (the budget refused it) is
+      // harmless: no paymaster data is returned for it, so that operation cannot be sponsored.
       try { await deps.grants.use(grantId, hash, nonce, maxCost); }
-      catch (cause) {
-        if (!uses.length) await deps.ledger.release(sponsor.chain, grantId, on).catch(() => undefined);
-        return refuse(closed(cause), -32000);
-      }
+      catch (cause) { return refuse(closed(cause), -32000); }
+      try { await deps.ledger.reserve(sponsor.chain, grantId, maxCost, sponsor.dailyBudgetWei, new Date(found.grant.createdAt)); }
+      catch (cause) { return refuse(closed(cause), -32000); }
     }
     return { jsonrpc: '2.0', id, result: { ...answer, sponsor: { name: 'FloFi' } } };
   } catch (cause) {

@@ -63,7 +63,9 @@ export function readGasSponsorshipConfig(env: Env, options: { readonly solana?: 
   if (env.FLOFI_GAS_SPONSORSHIP !== 'enabled') return off('GAS_SPONSORSHIP_DISABLED');
   const urlOf = (text: string | undefined): URL | null => { try { return text ? new URL(text) : null; } catch { return null; } };
   const origin = urlOf(env.FLOFI_GAS_SPONSOR_PUBLIC_ORIGIN);
-  const publicOrigin = origin && (origin.protocol === 'https:' || origin.hostname === '127.0.0.1') && origin.pathname === '/' ? origin.origin : null;
+  // BUILD-FLOFI-MAINNET-EXEC-002 review (round 2): https, or plain http on the loopback address only (local acceptance); never another scheme.
+  const publicOrigin = origin && (origin.protocol === 'https:' || origin.protocol === 'http:' && origin.hostname === '127.0.0.1') && origin.pathname === '/'
+    ? origin.origin : null;
   const evm: Record<string, EvmSponsor> = {}, refusals: Record<string, string> = {};
   for (const chainId of SPONSORABLE_EVM_CHAINS) {
     const chain = `eip155:${chainId}`, rpc = env[`FLOFI_PAYMASTER_RPC_${chainId}`];

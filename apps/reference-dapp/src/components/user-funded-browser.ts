@@ -67,8 +67,12 @@ export async function walletProfile(evmAddress: string | null, chains: readonly 
   return { ...eip155 ? { eip155 } : {}, ...solana ? { solana } : {} };
 }
 
-/** ADR-0009: FloFi's offer to sponsor a prepared batch's network fee (`required`: the owner's balance cannot pay it, so it is never sent unsponsored). */
-export type BatchSponsorship = { readonly url: string; readonly context: Readonly<Record<string, unknown>> | null; readonly required: boolean };
+/**
+ * ADR-0009: FloFi's offer to sponsor a prepared batch's network fee (`required`: the owner's balance cannot pay it, so it is never sent
+ * unsponsored). `url` null: the artifact REQUIRES sponsorship but carries no offer this browser can use (BUILD-FLOFI-MAINNET-EXEC-002 review,
+ * round 2) — `sendWalletBatch` then asks the wallet nothing (GAS_SPONSORSHIP_WALLET_UNSUPPORTED).
+ */
+export type BatchSponsorship = { readonly url: string | null; readonly context: Readonly<Record<string, unknown>> | null; readonly required: boolean };
 /** Whether the wallet REPORTS EIP-5792 `paymasterService` for this chain (its own entry, else a chain-agnostic `0x0` one); never assumed. */
 export function reportedPaymasterService(capabilities: unknown, chainId: bigint): boolean {
   const all = capabilities && typeof capabilities === 'object' ? capabilities as Record<string, unknown> : null;
@@ -105,6 +109,9 @@ async function onChainOrFail(provider: EvmProvider, chainId: bigint, hex: string
  * request is not made and its error is returned unchanged (never mapped to a "nothing was sent" or "may have been sent" code here).
  */
 export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSending?: () => void, sponsorship: BatchSponsorship | null = null): Promise<string> {
+  // Review round 2: a REQUIRED sponsorship without a usable offer (`batchSponsorshipOf`): the owner's balance cannot pay the fee and there is no
+  // paymaster to hand the wallet, so nothing at all is asked of it (a closed "nothing was sent" code).
+  if (sponsorship?.required && !sponsorship.url) fail('GAS_SPONSORSHIP_WALLET_UNSUPPORTED');
   const provider = evmProvider();
   await onChainOrFail(provider, BigInt(request.chainId), request.chainId);
   // A wallet that ignores `from` sends the batch from its SELECTED account (`eth_accounts[0]`), so that account must be the run's own
@@ -112,7 +119,7 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSendi
   // Read last, right before sending (after any network switch).
   // ADR-0009: the sponsorship capability only for a wallet that reports it on this chain. A REQUIRED offer the wallet cannot take: nothing is sent
   // (the owner's balance cannot pay the fee, and FloFi never sends the batch hoping it can). Asked before the account check, which stays last.
-  const sponsored = sponsorship?.context ? await provider.request({ method: 'wallet_getCapabilities', params: [request.from, [request.chainId]] })
+  const sponsored = sponsorship?.url && sponsorship.context ? await provider.request({ method: 'wallet_getCapabilities', params: [request.from, [request.chainId]] })
     .then(caps => reportedPaymasterService(caps, BigInt(request.chainId)), () => false) : false;
   if (sponsorship?.required && !sponsored) fail('GAS_SPONSORSHIP_WALLET_UNSUPPORTED');
   const accounts = await provider.request({ method: 'eth_accounts', params: [] }).catch(notSent('WALLET_ACCOUNT_MISMATCH'));
@@ -122,7 +129,7 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSendi
   onSending?.();
   // Exactly the prepared request: atomic required; the only capability ever added is FloFi's own paymaster service (an optional one unless required).
   const send = (withSponsor: boolean) => provider.request({ method: 'wallet_sendCalls', params: [{ ...request, calls: request.calls.map(c => ({ ...c })),
-    ...withSponsor && sponsorship ? { capabilities: { paymasterService: { url: sponsorship.url, context: sponsorship.context, ...sponsorship.required ? {} : { optional: true } } } } : {} }] });
+    ...withSponsor && sponsorship?.url ? { capabilities: { paymasterService: { url: sponsorship.url, context: sponsorship.context, ...sponsorship.required ? {} : { optional: true } } } } : {} }] });
   const codeOf = (cause: unknown) => (cause as { code?: unknown } | null)?.code;
   const answer = await send(sponsored).catch(cause => {
     // A wallet that refuses the sponsorship capability itself (5700) sent nothing: an optional offer falls back to the owner-paid batch once.
@@ -139,16 +146,23 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSendi
     });
   return eip5792.sendCallsId(answer);
 }
-/** The sponsorship offer a prepared wallet batch carries (ADR-0009), or null. */
+/**
+ * The sponsorship offer a prepared wallet batch carries (ADR-0009), or null. Review round 2: a batch whose artifact REQUIRES sponsorship
+ * (`sponsorship.required`, or `fee.sponsorship` = REQUIRED) but carries no usable offer is never treated as "no offer" (it would be sent
+ * owner-paid by a wallet whose balance cannot pay the fee): it reads as `{ url: null, required: true }`, which `sendWalletBatch` refuses before
+ * asking the wallet anything.
+ */
 export function batchSponsorshipOf(prepared: Readonly<Record<string, unknown>>): BatchSponsorship | null {
   const s = prepared.sponsorship as { url?: unknown; context?: unknown; required?: unknown } | undefined;
-  if (!s || typeof s.url !== 'string') return null;
+  const fee = prepared.fee as { sponsorship?: unknown } | undefined;
+  const required = s?.required === true || fee?.sponsorship === 'REQUIRED', unusable = required ? { url: null, context: null, required: true } : null;
+  if (!s || typeof s.url !== 'string') return unusable;
   // FloFi's own paymaster proxy only: HTTPS (a loopback origin in local acceptance), never a URL with credentials.
   let url: URL;
-  try { url = new URL(s.url); } catch { return null; }
-  if (!(url.protocol === 'https:' || url.protocol === 'http:' && url.hostname === '127.0.0.1') || url.username || url.password) return null;
+  try { url = new URL(s.url); } catch { return unusable; }
+  if (!(url.protocol === 'https:' || url.protocol === 'http:' && url.hostname === '127.0.0.1') || url.username || url.password) return unusable;
   const context = s.context && typeof s.context === 'object' && !Array.isArray(s.context) ? s.context as Record<string, unknown> : null;
-  return { url: s.url, context, required: s.required === true };
+  return { url: s.url, context, required };
 }
 /**
  * The transaction hashes of a batch once the wallet reports it final (null while pending). Only the hashes are used; the chain decides.

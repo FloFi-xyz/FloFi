@@ -452,18 +452,24 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
      * BUILD-FLOFI-MAINNET-EXEC-002 (ADR-0009): what a wallet does with a SPONSORED `wallet_sendCalls`: an ERC-4337 operation of the owner's account
      * executing every call, all or nothing, relayed by a bundler in a bundle transaction to the EntryPoint; the EntryPoint's `UserOperationEvent`
      * names the sender, the paymaster that paid and the actual gas cost. `op` lets a test forge the event (another hash, sender or paymaster).
+     * `op.before`: other senders' operations of the same bundle, executed first — each one's logs (as given, nothing is executed for them) then
+     * its own `UserOperationEvent` (review round 2: a bundle's other operations are never this batch's evidence).
      */
     sponsoredOperation(owner: string, calls: readonly erc7710.Call[], op: { readonly userOpHash: string; readonly paymaster: string; readonly bundler: string;
-      readonly actualGasCost: bigint; readonly sender?: string; readonly success?: boolean }): string {
+      readonly actualGasCost: bigint; readonly sender?: string; readonly success?: boolean;
+      readonly before?: readonly { readonly userOpHash: string; readonly sender: string; readonly logs: readonly { readonly address: string; readonly topics: readonly string[]; readonly data: string }[] }[] }): string {
       const bundler = lower(op.bundler), n = nonces.get(bundler) ?? 0n;
       nonces.set(bundler, n + 1n);
       const hash = D.keccakHex(`bundle:${bundler}:${n}:${calls.map(c => c.data).join('')}`);
       const snapshot = snapshotState(), success = op.success !== false;
-      const event = (opNonce: bigint) => ({ address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, lower(op.userOpHash), topic(lower(op.sender ?? owner)),
-        topic(lower(op.paymaster))], data: '0x' + [opNonce, success ? 1n : 0n, op.actualGasCost, op.actualGasCost / 1_000_000_000n].map(v => v.toString(16).padStart(64, '0')).join('') });
+      const eventOf = (userOpHash: string, sender: string, opNonce: bigint, ok: boolean) => ({ address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC,
+        lower(userOpHash), topic(lower(sender)), topic(lower(op.paymaster))], data: '0x' + [opNonce, ok ? 1n : 0n, op.actualGasCost, op.actualGasCost / 1_000_000_000n]
+        .map(v => v.toString(16).padStart(64, '0')).join('') });
+      const event = (opNonce: bigint) => eventOf(op.userOpHash, op.sender ?? owner, opNonce, success);
+      const others = (op.before ?? []).flatMap(o => [...o.logs.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })), eventOf(o.userOpHash, o.sender, 0n, true)]);
       return mine(hash, bundler, erc4337.ENTRY_POINT_V0_7, '0x765e827f', n, () => {
-        if (!success) return [event(n)];
-        try { return [...calls.flatMap(c => execute(lower(owner), c)), event(n)]; }
+        if (!success) return [...others, event(n)];
+        try { return [...others, ...calls.flatMap(c => execute(lower(owner), c)), event(n)]; }
         catch (cause) { restoreState(snapshot); throw cause; }
       });
     },

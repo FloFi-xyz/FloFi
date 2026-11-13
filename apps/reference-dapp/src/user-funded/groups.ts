@@ -569,14 +569,16 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
     const hashes = (submission.hashes ?? []) as string[];
     // ADR-0009: the operations FloFi's paymaster sponsored under a preparation's grant (none: the batch can only reconcile as owner-paid).
     // A preparation with a grant whose operations cannot be read now (storage unavailable, or this process has no sponsorship port) decides
-    // nothing: the group stays PENDING (review P2), never UNMATCHED for want of a read.
+    // nothing: the group stays PENDING (review P2), never UNMATCHED for want of a read. BUILD-FLOFI-MAINNET-EXEC-002 review (round 2): a grant
+    // the artifact names that the port does not find (null) is unreadable too, never "no grant" (which would judge a sponsored bundle as a
+    // transaction the owner did not send).
     const UNREADABLE = Symbol('UNREADABLE');
     const sponsoredBy = async (sponsor: Sponsor | null | undefined): Promise<SponsoredOperations | null | typeof UNREADABLE> => {
       if (!sponsor) return null;
       if (!deps.sponsorship) return UNREADABLE;
       let hashes: readonly string[] | null;
       try { hashes = await deps.sponsorship.operations(sponsor.grantId); } catch { return UNREADABLE; }
-      return hashes ? { paymaster: sponsor.paymaster, userOpHashes: hashes } : null;
+      return hashes ? { paymaster: sponsor.paymaster, userOpHashes: hashes } : UNREADABLE;
     };
     // "Not this preparation's batch": its calls or block differ, or (a preparation without sponsorship) a bundle the owner did not send — which an
     // earlier, sponsored preparation of the same group may still own.

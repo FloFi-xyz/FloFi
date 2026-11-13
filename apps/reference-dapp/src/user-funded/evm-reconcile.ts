@@ -18,7 +18,8 @@
  *                    only through the EntryPoint's own `UserOperationEvent` of an operation FloFi's paymaster proxy sponsored for THIS group
  *                    (its hash is on the grant; the proxy verified, before sponsoring, that the operation's calls are exactly the prepared ones,
  *                    and the hash commits to them), with sender = the owner and paymaster = the pinned one; gas paid = its `actualGasCost`,
- *                    paid by the paymaster (`sponsored`). Legs are read from that operation's own logs only.
+ *                    paid by the paymaster (`sponsored`). Legs are read from that operation's own logs only, and only those logs are
+ *                    returned with the reconciled receipt (another sender's operation in the same bundle is never this batch's evidence).
  *
  * P0 hotfix (E1): an Across deposit's source leg is exactly its input from the owner to its pinned SpokePool. The wallet batch's receipts (block,
  * hash, logs) are returned with the reconciliation, so the bridge's destination delivery is matched to THIS deposit (`bridge-delivery.ts`).
@@ -213,11 +214,13 @@ function reconcileSponsoredBatch(group: EvmGroupCalls, r: EvmReceipt, fromBlock:
   if (event.paymaster.toLowerCase() !== sponsored.paymaster.toLowerCase()) return { status: 'MISMATCH', code: 'GAS_SPONSORSHIP_REFUSED', gasPaid: null, transactions };
   const gasPaid: GasPaidFact = { payer: event.paymaster.toLowerCase(), amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT', sponsored: true };
   if (r.status !== '0x1' || !event.success) return { status: 'REVERTED', code: 'USER_OPERATION_REVERTED', gasPaid, transactions, sponsoredOperation: hash.toLowerCase() };
-  const attributed = attributeLegs(group, operationLogs(logs, eventIndex(logs, hash)));
+  const own = operationLogs(logs, eventIndex(logs, hash)), attributed = attributeLegs(group, own);
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions, sponsoredOperation: hash.toLowerCase() };
+  // BUILD-FLOFI-MAINNET-EXEC-002 review (round 2): the reconciled receipt carries this operation's own logs only — a bundle also holds other
+  // senders' operations, and a bridge's delivery must never match another sender's FundsDeposited (`bridge-delivery.ts`).
   return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions, blockNumber: r.blockNumber ?? null, sponsoredOperation: hash.toLowerCase(),
     receipts: [{ transactionHash: r.transactionHash.toLowerCase(), blockNumber: String(r.blockNumber ?? ''), blockHash: String(r.blockHash ?? '').toLowerCase(),
-      logs: logs.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) }] };
+      logs: own.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) }] };
 }
 
 /** Reconciles an owner user operation from its bundle transaction's receipt on the chain. */

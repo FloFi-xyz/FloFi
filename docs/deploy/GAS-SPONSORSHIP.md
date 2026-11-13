@@ -31,7 +31,7 @@ Supported chain ids: `8453` (Base), `42161` (Arbitrum One), `1` (Ethereum), `466
 | `FLOFI_PAYMASTER_ADDRESS_<chainId>` | the pinned paymaster contract |
 | `FLOFI_PAYMASTER_CONTEXT_<chainId>` | optional JSON object forwarded as the provider's context, e.g. `{"sponsorshipPolicyId":"sp_…"}` |
 | `FLOFI_SPONSOR_MAX_WEI_PER_OP_<chainId>` | worst-case cost cap of one operation (wei), e.g. `200000000000000` (0.0002 ETH) |
-| `FLOFI_SPONSOR_DAILY_BUDGET_WEI_<chainId>` | sum of worst-case costs per UTC day (wei, ≥ the cap) |
+| `FLOFI_SPONSOR_DAILY_BUDGET_WEI_<chainId>` | sum of worst-case costs per UTC day (wei, ≥ the cap); size it as described in *Budget accounting* below |
 | `FLOFI_SOLANA_SPONSOR_SECRET_KEY` | (future Solana wiring) sponsor keypair, base58 or Solana CLI JSON — **secret**; not used by any flow yet |
 | `FLOFI_SOLANA_SPONSOR_MAX_LAMPORTS_PER_TX`, `FLOFI_SOLANA_SPONSOR_DAILY_BUDGET_LAMPORTS`, `FLOFI_SOLANA_SPONSOR_MIN_BALANCE_LAMPORTS` | Solana caps (future wiring) |
 
@@ -40,6 +40,18 @@ PostgreSQL platform state (`DATABASE_URL`): the ledger and grants live in `execu
 `gas-sponsorship` — **no migration** is needed.
 
 A chain with an incomplete or malformed configuration is disabled on its own (`GAS_SPONSOR_EVM_CONFIG_INVALID`); others keep working.
+`FLOFI_GAS_SPONSOR_PUBLIC_ORIGIN` must be `https:` (plain `http:` only for `127.0.0.1` in local acceptance); any other scheme disables every
+chain.
+
+**Budget accounting (conservative).** When the proxy hands a wallet final paymaster data, the grant first records the operation's hash and
+owner nonce (which pins the nonce), and then the operation's worst-case cost (all gas limits, paymaster gas included, × `maxFeePerGas`) is
+reserved on the ledger of the UTC day the **grant was created**. Reconciliation replaces it with the fee actually paid (the EntryPoint's
+`actualGasCost`). Until then the reservation counts **in full for that whole day**: nothing releases it and it does not expire after a
+time. This is deliberate. A paymaster signature can stay valid after the owner stops answering, so returning the budget early would let
+unreported operations spend beyond it. The trade-off is availability, not funds: a signature the owner refused, or a wallet that abandoned
+the operation, keeps its worst case reserved until the day ends. A spent budget makes later batches fall back to owner-paid, or to "nothing
+sent" when sponsorship is required. Size `FLOFI_SPONSOR_DAILY_BUDGET_WEI_<chainId>` as roughly (sponsored batches expected per day +
+abandoned or refused signatures) × the per-operation cap. A new UTC day starts a new ledger.
 
 Solana sponsor key, when wired later: **[OWNER]** generate it offline (`solana-keygen new --no-bip39-passphrase -o sponsor.json` on a trusted
 machine), fund it with a small SOL float only, store it only as a Vercel Sensitive variable, never in Git or chat.
@@ -58,7 +70,8 @@ machine), fund it with a small SOL float only, store it only as a Vercel Sensiti
 ## 4. Monitoring
 
 - `workflow_run.group_reconciled` with `gasSponsored: true`; sponsored spend per day in `execution_logs` names
-  `gas-sponsor-eip155-<chainId>-<yyyymmdd>.jsonl` (RESERVE then SETTLE lines).
+  `gas-sponsor-eip155-<chainId>-<yyyymmdd>.jsonl` (RESERVE then SETTLE lines; a RESERVE without a SETTLE counts in full for its day. A
+  RELEASE line written by an earlier build is still read but no longer frees anything).
 - `GAS_SPONSOR_PAYMASTER_UNEXPECTED`, `GAS_SPONSOR_RECEIPT_MISMATCH`, `GAS_SPONSORSHIP_REFUSED` (a bundle paid by another paymaster) are
   security signals: investigate. `GAS_SPONSOR_BUDGET_EXHAUSTED` means the day's budget is spent (batches fall back to owner-paid).
 
