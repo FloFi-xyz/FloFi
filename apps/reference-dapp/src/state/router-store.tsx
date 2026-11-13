@@ -307,10 +307,11 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       // the seconds the fresh quote takes): only the refreshed run, or, when no re-quote happens, the latest record it read.
       const requoteInPlace = async (code: string, interim: RouterRecord | null = null) => {
         if (!REQUOTE_IN_PLACE.test(code)) { if (interim) acceptCurrent(interim); return; }
-        const latestRun = await routerStatus(net, id);
+        // A status or refresh call that throws (transport) still shows the latest record read, never the attempt as still being prepared.
+        const latestRun = await routerStatus(net, id).catch(cause => { if (interim) acceptCurrent(interim); throw cause; });
         const fallback = () => { const value = latestRun.ok ? latestRun.value : interim; if (value) acceptCurrent(value); };
         if (!latestRun.ok || !requotableInPlace(latestRun.value)) { fallback(); return; }
-        const refreshed = await routerRefresh(net, id);
+        const refreshed = await routerRefresh(net, id).catch(cause => { fallback(); throw cause; });
         if (!refreshed.ok) { fallback(); return; }
         acceptCurrent(refreshed.value);
         setRequoted({ code, runId: id, changes: bridgeReviewChanges(record.review, refreshed.value.review) });

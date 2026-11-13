@@ -341,12 +341,14 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       // BUILD-FLOFI-MAINNET-EXEC-002: a refusal before any wallet request (route or fee moved, Review expired) leaves the run re-quotable in place:
       // fresh quote, simulation and Review on the same run and workflow; only the material values that moved are shown, then a new authorization.
       if (cause instanceof Error && REQUOTE_IN_PLACE.test(cause.message)) {
-        const current = await universalStatus(eco, reviewed.id), interim = (cause as { interim?: UniversalRecord }).interim ?? null;
+        const interim = (cause as { interim?: UniversalRecord }).interim ?? null;
+        // A status or refresh call that throws (transport) still shows the latest record read, never the attempt as still being prepared.
+        const current = await universalStatus(eco, reviewed.id).catch(failure => { if (interim) accept(interim); throw failure; });
         const fallback = () => { const value = current.ok ? current.value : interim; if (value) accept(value); };
         if (!current.ok || !requotableInPlace(current.value)) fallback();
         else {
           // Review P2: an automatic re-quote keeps the REVIEWED recipient (the server reuses it); only the owner's own Refresh may pick another.
-          const refreshed = await universalRefresh(eco, reviewed.id, undefined);
+          const refreshed = await universalRefresh(eco, reviewed.id, undefined).catch(failure => { fallback(); throw failure; });
           if (refreshed.ok) {
             accept(refreshed.value);
             setRequoted({ code: cause.message, runId: reviewed.id, changes: bridgeReviewChanges(reviewed.review, refreshed.value.review) });
