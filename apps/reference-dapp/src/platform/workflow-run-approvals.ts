@@ -19,7 +19,7 @@ import type { WorkflowComposition } from '../engine/strategy-engine';
 import type { WalletWorkflowReviewView } from '../delegation/views.ts';
 import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
-import { assertRunWallets, authorizeUserFundedGroup, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, permitUserFundedGroup, prepareUserFundedGroup,
+import { assertRunWallets, authorizeUserFundedGroup, authorizeUserFundedGroupUpgrade, consentUserFundedGroupUpgrade, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, permitUserFundedGroup, prepareUserFundedGroup,
   reportUserFundedBatch, resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
@@ -140,6 +140,15 @@ export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run:
 export async function userFundedPermitSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
   permitSignature: string): Promise<PreparedGroupView> {
   return permitUserFundedGroup(deps, run, wallets, groupIndex, permitSignature);
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner agreed in FloFi to the group's EIP-7702 upgrade (recorded before the wallet is asked). */
+export async function userFundedConsentSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
+  return consentUserFundedGroupUpgrade(deps, run, wallets, groupIndex);
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner's EIP-7702 upgrade authorization; returns the group at its permit stage. */
+export async function userFundedUpgradeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  signature: string): Promise<PreparedGroupView> {
+  return authorizeUserFundedGroupUpgrade(deps, run, wallets, groupIndex, signature);
 }
 export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer, base: ApprovalView) {
   const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);
