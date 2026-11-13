@@ -18,7 +18,8 @@ import { createCircleDouble } from '../delegation/harness/circle-double.ts';
 import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { authorizeGroup, checkUserOperation, prepareGroup, reconcileEvmGroup, relayUserOperation, type NativeFeeShortfall, type Prepared, type UserFundedDeps } from './groups.ts';
-import { circleFactsOf, circleOperationOf, circlePermitOf, finalizeCirclePermit, forgetCircleVerifications, tokenNeedOf, type CircleFacts } from './circle-gas.ts';
+import { circleDepsOf, circleFactsOf, circleOperationOf, circlePermitOf, finalizeCirclePermit, forgetCircleVerifications, tokenNeedOf, type CircleFacts } from './circle-gas.ts';
+import type { PriceSource } from '../automations/price-source.ts';
 import { reconcileUserOperation, TRANSFER_TOPIC } from './evm-reconcile.ts';
 import type { EvmGroupCalls } from './evm-calls.ts';
 
@@ -328,6 +329,26 @@ describe('ADR-0010 Circle USDC paymaster: the USDC reserve and reconciliation', 
       .toMatchObject({ status: 'MISMATCH', code: 'CIRCLE_FEE_ABOVE_CAP' });
     expect(await reconcileUserOperation(receipt([before, fine[2], transfer(pm, owner, 1n), fine[4]]), group, hash, '0x' + 'cd'.repeat(32), circle))
       .toMatchObject({ status: 'MISMATCH', code: 'CIRCLE_FEE_UNRECONCILED' });
+  });
+});
+
+describe('ADR-0010 Circle runtime facts from the configuration and the verified price source', () => {
+  const source = (prices: Partial<Record<'ETH' | 'USDC', string>>, observedAt = NOW.toISOString()): PriceSource => ({ id: 'fixture', maxAgeMs: 3_600_000,
+    assets: Object.keys(prices) as PriceSource['assets'], observe: async asset => prices[asset as 'ETH' | 'USDC'] ? { ok: true, observation: { asset, priceUsd: prices[asset as 'ETH' | 'USDC']!,
+      observedAt, receivedAt: observedAt, source: 'FIXTURE', evidence: 'MOCKED', provenance: {} } } : { ok: false, code: 'PRICE_UNAVAILABLE' } });
+  it('is off unless enabled, and only on enabled chains that have a bundler', async () => {
+    expect(circleDepsOf({}, ['eip155:8453'], () => source({ ETH: '3000' }))).toBeNull();
+    expect(circleDepsOf({ FLOFI_CIRCLE_USDC_GAS: 'enabled', FLOFI_CIRCLE_USDC_GAS_CHAINS: 'eip155:1' }, ['eip155:8453'], () => source({ ETH: '3000' }))).toBeNull();
+    const deps = circleDepsOf({ FLOFI_CIRCLE_USDC_GAS: 'enabled' }, ['eip155:8453', 'eip155:4663'], () => source({ ETH: '3012.5', USDC: '0.9998' }))!;
+    expect(deps.chains).toEqual(['eip155:8453']);
+    expect(await deps.price(NOW)).toEqual({ ethUsd: 301_250_000_000n, usdcUsd: 99_980_000n, observedAt: NOW.toISOString() });
+  });
+  it('fails closed without a fresh ETH price (no source, no feed, a stale observation)', async () => {
+    const enabled = { FLOFI_CIRCLE_USDC_GAS: 'enabled' };
+    expect(await circleDepsOf(enabled, ['eip155:8453'], () => null)!.price(NOW)).toBeNull();
+    expect(await circleDepsOf(enabled, ['eip155:8453'], () => source({ USDC: '1' }))!.price(NOW)).toBeNull();
+    expect(await circleDepsOf(enabled, ['eip155:8453'], () => source({ ETH: '3000' }, '2026-11-13T09:00:00.000Z'))!.price(NOW)).toBeNull();
+    expect(await circleDepsOf(enabled, ['eip155:8453'], () => source({ ETH: '3000' }))!.price(NOW)).toMatchObject({ ethUsd: 300_000_000_000n, usdcUsd: null });
   });
 });
 
