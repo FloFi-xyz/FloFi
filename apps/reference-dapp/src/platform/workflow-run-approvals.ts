@@ -128,10 +128,13 @@ export async function userFundedStartSequential(deps: WorkflowRunSurface, run: R
   const started = await startUserFunded(deps, run, wallets, profile);
   return proposalOf(deps, started, await currentStep(deps, started, wallets), base);
 }
-/** What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). */
+/**
+ * What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). `wallet`: the
+ * owner's EVM wallet as the preparing browser reported it (absent: unknown, never offered a token-paid fee that needs a typed-data permit).
+ */
 export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout?: string): Promise<PreparedGroupView> {
-  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout);
+  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET'): Promise<PreparedGroupView> {
+  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout, wallet);
 }
 /** ADR-0010: the owner's USDC permit for a Circle-paid group; returns the operation's typed data the owner's wallet signs next. */
 export async function userFundedPermitSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,

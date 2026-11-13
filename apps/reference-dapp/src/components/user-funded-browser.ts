@@ -46,6 +46,14 @@ function reportedAtomic(capabilities: unknown, chainId: number): 'supported' | '
   return eip5792.atomicCapability({ ['0x' + chainId.toString(16)]: all[key] }, chainId);
 }
 /** What the owner's wallets can do on these chains, asked once from the wallets themselves (only what they report; never assumed). */
+/**
+ * ADR-0010 review (C4): the EVM wallet this browser would sign with, as a group's preparation needs it (FloFi Wallet signs no USDC permit, so it is
+ * never handed a Circle-paid group). Null without any EVM wallet: the server then treats the wallet as unknown and offers no Circle permit.
+ */
+export function evmWalletKind(): 'INJECTED' | 'FLOFI_WALLET' | null {
+  const provider = chosenEvmProvider() ?? injected();
+  return provider ? isFloFiWalletKey(evmWalletIdentity(provider)?.key) ? 'FLOFI_WALLET' : 'INJECTED' : null;
+}
 export async function walletProfile(evmAddress: string | null, chains: readonly string[], withSolana: boolean): Promise<WalletProfile> {
   let eip155: WalletProfile['eip155'] | null = null, solana: WalletProfile['solana'] | null = null;
   if (evmAddress) {

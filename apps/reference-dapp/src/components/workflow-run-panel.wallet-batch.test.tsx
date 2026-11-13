@@ -31,7 +31,7 @@ vi.mock('../app/approve-action', () => {
     prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorize, reportUserFundedBatch: server.report, startUserFundedWorkflowRun: server.start };
 });
 const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn(), profile: vi.fn(), accounts: vi.fn() }));
-vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: browser.profile,
+vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: browser.profile,
   revokeUserOperation: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
 vi.mock('../wallet/evm-discovery', () => {
   const provider = { request: async ({ method }: { method: string }) => method === 'eth_accounts' ? browser.accounts() : null };

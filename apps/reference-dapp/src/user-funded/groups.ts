@@ -53,7 +53,8 @@ import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 import { selectGasMechanism, type MechanismUnavailable } from '../gas-abstraction/mechanism.ts';
-import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleFactsOf, circleOperationOf, type CircleDeps, type CircleFacts } from './circle-gas.ts';
+import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleDeadlinePassed, circleFactsOf, circleOperationOf, circleRelayOpen, type CircleDeps,
+  type CircleFacts } from './circle-gas.ts';
 import { gaslessStepModeRefusal } from './gasless-groups.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
@@ -220,7 +221,7 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     if (offer || g.tokenGas === false) return short;
     const circle = await circleAttempt(deps, { runId: g.runId, groupIndex: g.groupIndex, chain: g.chain, strategy: options.plannedStrategy ?? g.strategy,
       ...g.wallet ? { wallet: g.wallet } : {}, group, calls, simulation, simulatedGas: gas, fees, l1FeeUpperBound, nativeRequired: maxCost + nativeSpend(group),
-      nativeSpend: nativeSpend(group), now: deps.now() });
+      nativeSpend: nativeSpend(group), now: deps.now(), deadline });
     if (!circle.considered) return short;
     const selection = selectGasMechanism({ chain: g.chain, nativeCovers: false, candidate: circle.candidate });
     if (selection.mechanism === 'CIRCLE_USDC_PAYMASTER' && circle.prepared) return ok(circle.prepared as Prepared);
@@ -497,6 +498,8 @@ export async function checkUserOperation(deps: UserFundedDeps, prepared: Prepare
  * signed operation within every signed limit (the paymaster's included). The submission record names its EntryPoint.
  */
 async function checkCircleOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string): Promise<Result<Readonly<Record<string, unknown>>>> {
+  // Review C2: never handed to a bundler at or after its calls' deadline minus the margin (it would revert, and the owner would still pay in USDC).
+  if (!circleRelayOpen(prepared, deps.now())) return no('CIRCLE_OPERATION_DEADLINE_PASSED');
   const bundler = deps.bundler(`eip155:${String(prepared.chainId)}`);
   if (!bundler?.estimateCircle) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   let op: erc4337.PackedUserOperation;
@@ -525,7 +528,9 @@ export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepare
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   try {
     const { op, circle } = preparedOperation(prepared, String(authorization.signature));
-    // ADR-0010: a Circle-paid operation goes to its own EntryPoint, through the bundler's Circle-only path (any other paymaster is refused there).
+    // ADR-0010: a Circle-paid operation goes to its own EntryPoint, through the bundler's Circle-only path (any other paymaster is refused there),
+    // and never at or after its calls' deadline minus the margin (review C2: first relay and resend alike).
+    if (circle && !circleRelayOpen(prepared, deps.now())) return no('CIRCLE_OPERATION_DEADLINE_PASSED');
     if (circle) return bundler.sendCircle ? ok(await bundler.sendCircle(op, circle.entryPoint)) : no('USER_OPERATION_BUNDLER_UNAVAILABLE');
     return ok(await bundler.send(op));
   } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
@@ -917,9 +922,12 @@ const entryPointOf = (prepared: Prepared): string => circleFactsOf(prepared)?.en
 const userOperationOutcome = (r: Awaited<ReturnType<typeof reconcileUserOperation>>): Reconciled => r.status === 'PENDING' ? r
   : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...r.receipts ? { receipts: r.receipts } : {} }
   : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
-/** Resend refusals that decide nothing about the operation (the bundler, the fee market, a pause, beta access): retried on a later pass. */
+/**
+ * Resend refusals that decide nothing about the operation (the bundler, the fee market, a pause, beta access): retried on a later pass. A Circle
+ * operation's closed relay window (review C2) is decided by the next pass too, from its deadline.
+ */
 const RESEND_RETRYABLE: ReadonlySet<string> = new Set(['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
-  'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
+  'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID', 'CIRCLE_OPERATION_DEADLINE_PASSED']);
 /**
  * Bounds of the chain search for a forgotten operation's own `UserOperationEvent`: blocks per `eth_getLogs` request (the range the router's log
  * scans use) and requests per pass, newest first, never below the preparation's block when the artifact records one (`fromBlock`). A search
@@ -977,7 +985,9 @@ async function findUserOperationEvent(t: ChainTransport, userOpHash: string, fro
  * receipt lookback, another instance). The bundler's word alone decides nothing; the chain does, read with FloFi's own transport:
  *   nonce unconsumed   the operation provably never executed: the SAME signed bytes are relayed again (its nonce admits it once). A refusal is
  *                      FAILED only when the nonce is STILL unconsumed after it: an operation mined meanwhile fails the bundler's validation on its
- *                      spent prefund (AA21) before its nonce (AA25). Retryable refusals (AA25 included) stay PENDING.
+ *                      spent prefund (AA21) before its nonce (AA25). Retryable refusals (AA25 included) stay PENDING. A Circle-paid operation
+ *                      (review C2) is resent only before its calls' deadline minus the margin; then PENDING until the deadline plus the margin,
+ *                      then FAILED (CIRCLE_OPERATION_DEADLINE_PASSED: it never executed, the owner paid nothing).
  *   nonce consumed     never resent, never FAILED: the operation's own UserOperationEvent is searched on the chain and reconciled from its
  *                      transaction exactly as from a bundler receipt; not found (the owner's revocation consumed the key, or the range cannot be
  *                      searched): UNMATCHED (USER_OPERATION_NONCE_CONSUMED_UNRECONCILED) — funds may have moved, the run needs attention
@@ -989,6 +999,10 @@ async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTranspor
   try { op = opOf(prepared.op as SerialOp); } catch { return { status: 'PENDING' }; }
   const entryPoint = entryPointOf(prepared);
   let consumed = await userOperationNonceConsumed(t, op, entryPoint);
+  // Review C2: a Circle-paid operation is resent only inside its relay window. After it, never again: once its calls' deadline (plus the margin)
+  // passed with the nonce still unconsumed and the bundler not knowing it, it can no longer execute, and nothing was charged — FAILED.
+  if (consumed === false && circleFactsOf(prepared) && !circleRelayOpen(prepared, deps.now()))
+    return circleDeadlinePassed(prepared, deps.now()) ? { status: 'FAILED', code: 'CIRCLE_OPERATION_DEADLINE_PASSED', gasPaid: null, transactions: [] } : { status: 'PENDING' };
   if (consumed === false) {
     const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
     if (resent.ok || resent.code.startsWith('BETA_') || RESEND_RETRYABLE.has(resent.code)) return { status: 'PENDING' };

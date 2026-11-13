@@ -27,6 +27,8 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'Circle does not support this smart-account version on this network': 'a Circle não aceita esta versão de conta inteligente nesta rede',
   'this smart-account type is not supported': 'este tipo de conta inteligente não é aceito',
   'FloFi Wallet cannot sign it': 'a FloFi Wallet não consegue assiná-la',
+  'the wallet that would sign it was not identified': 'a carteira que a assinaria não foi identificada',
+  'the service that relays it does not support this smart-account version on this network': 'o serviço que a encaminha não aceita esta versão de conta inteligente nesta rede',
   'this wallet does not hold enough USDC for the steps and the fee': 'esta carteira não tem USDC suficiente para as etapas e a taxa',
   'no verified ETH price is available right now': 'não há um preço verificado de ETH disponível agora',
   'Circle\'s contract could not be verified on this network': 'o contrato da Circle não pôde ser verificado nesta rede',
@@ -57,4 +59,8 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'The prepared request did not match what you approved, so nothing was sent.': 'O pedido preparado não correspondia ao que você aprovou, então nada foi enviado.',
   'Who pays the network fee changed since your review (ETH arrived in or left this wallet). Nothing was sent; review again.':
     'Quem paga a taxa de rede mudou desde a sua revisão (chegou ou saiu ETH desta carteira). Nada foi enviado; revise de novo.',
+  'FloFi did not send this request after its time window ended (it would only have failed and still cost you the network fee in USDC). It did not execute, and no network fee was taken.':
+    'A FloFi não enviou este pedido depois que o prazo dele terminou (ele apenas falharia e ainda custaria a taxa de rede em USDC). Ele não foi executado e nenhuma taxa de rede foi cobrada.',
+  'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.':
+    'O serviço que encaminha este pedido não aceita esta versão de conta inteligente nesta rede, então nada foi enviado. Carregue o pedido de novo para ver como a taxa de rede pode ser paga.',
 };

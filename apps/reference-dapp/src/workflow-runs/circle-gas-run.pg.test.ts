@@ -18,6 +18,7 @@ import { BASE_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
 import { createCircleDouble } from '../delegation/harness/circle-double.ts';
 import { circleFactsOf, circleOperationOf, circlePermitOf } from '../user-funded/circle-gas.ts';
+import { createBundlerClient, type BundlerClient } from '../user-funded/bundler.ts';
 import type { Prepared } from '../user-funded/groups.ts';
 import { runView } from './service.ts';
 import { workflowRunHarness } from './workflow-run.test-harness.ts';
@@ -31,8 +32,10 @@ async function setup() {
   let clock: () => Date = () => new Date();
   const chain = createEvmDouble(8453, () => Math.floor(clock().getTime() / 1000), { profile: BASE_MAINNET_SWAP });
   const circle = createCircleDouble(chain, { chainId: 8453 });
+  // The operator's bundler for Base (replaceable: a process restarted with another bundler configuration).
+  let bundler: BundlerClient = circle.bundler;
   const h = await workflowRunHarness(t.db, { flows: ['base-mainnet-transfer'], policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base' }, userFundedChains: [CHAIN],
-    userFundedRpc: c => c === CHAIN ? circle.rpc : null, bundler: c => c === CHAIN ? circle.bundler : null,
+    userFundedRpc: c => c === CHAIN ? circle.rpc : null, bundler: c => c === CHAIN ? bundler : null,
     circle: { chains: [CHAIN], price: async () => ({ ethUsd: 3_000n * 10n ** 8n, usdcUsd: null, observedAt: clock().toISOString() }) } });
   clock = h.d.now;
   const owner = h.d.evmOwner.address.toLowerCase(), wallets = [h.evm, h.sol];
@@ -45,15 +48,18 @@ async function setup() {
   const run = await ownedRun(h.runs, approval.approvalId, wallets);
   const permitSignature = (p: Prepared) => h.d.evmOwner.signDigest(C.permitDigest(circlePermitOf(circleFactsOf(p)!, 8453, owner)));
   const operationSignature = (p: Prepared) => h.d.evmOwner.signDigest(erc4337.delegatorUserOpDigest(8453, circleOperationOf(circleFactsOf(p)!, owner)));
-  return { t, chain, circle, h, owner, wallets, approval, run, permitSignature, operationSignature };
+  /** The group prepared by the owner's browser, which reports its EVM wallet kind (review C4: an injected wallet unless said otherwise; null: none). */
+  const prepare = (wallet: unknown = 'INJECTED') => workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, undefined, wallet);
+  const setBundler = (next: BundlerClient) => { bundler = next; };
+  return { t, chain, circle, h, owner, wallets, approval, run, permitSignature, operationSignature, prepare, setBundler };
 }
 
 describe('ADR-0010: a user-funded run whose fee is paid in the owner\'s USDC through Circle', () => {
   it('prepares the due group as a Circle-paid operation, verifies both owner signatures, relays once and reconciles the USDC fee', async () => {
-    const { t, chain, circle, h, owner, wallets, approval, run, permitSignature, operationSignature } = await setup();
+    const { t, chain, circle, h, owner, wallets, approval, run, permitSignature, operationSignature, prepare } = await setup();
     try {
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', state: 'PLANNED' });
-      const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const p1 = await prepare();
       // The planned batch became a Circle-paid user operation (stored with it); no hand-out token: FloFi relays it itself.
       expect(p1).toMatchObject({ strategy: 'EVM_USER_OPERATION', handout: null, prepared: { kind: 'EVM_USER_OPERATION', circle: { stage: 'PERMIT', plannedStrategy: 'EVM_WALLET_BATCH' },
         gasPayment: { mechanism: 'CIRCLE_USDC_PAYMASTER', signatures: 2, paymaster: C.CIRCLE_PAYMASTER_V07 } } });
@@ -75,7 +81,7 @@ describe('ADR-0010: a user-funded run whose fee is paid in the owner\'s USDC thr
       // A retried permit (its answer lost) returns the same operation; another permit for the same group is refused.
       expect((await workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, signedPermit)).prepared).toEqual(p2.prepared);
       // A reload hands out the same artifact at its stage.
-      expect((await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0)).prepared).toEqual(p2.prepared);
+      expect((await prepare()).prepared).toEqual(p2.prepared);
       // Authorized: the run relays exactly the signed operation once, and reconciles it from the chain.
       await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_USER_OPERATION', signature: await operationSignature(p2.prepared) });
       expect(circle.control.sends()).toBe(1);
@@ -94,9 +100,9 @@ describe('ADR-0010: a user-funded run whose fee is paid in the owner\'s USDC thr
   });
 
   it('ETH that arrived since the Review: authorization never switches silently (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED); the group is planned again', async () => {
-    const { t, chain, circle, h, owner, wallets, approval, run, permitSignature, operationSignature } = await setup();
+    const { t, chain, circle, h, owner, wallets, approval, run, permitSignature, operationSignature, prepare } = await setup();
     try {
-      const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const p1 = await prepare();
       const p2 = await workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await permitSignature(p1.prepared));
       chain.control.fundNative(owner, 10n ** 17n);
       await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'EVM_USER_OPERATION', signature: await operationSignature(p2.prepared) }))
@@ -104,24 +110,53 @@ describe('ADR-0010: a user-funded run whose fee is paid in the owner\'s USDC thr
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_WALLET_BATCH', prepared: null });
       expect(circle.control.sends()).toBe(0);
       // Prepared again: the owner now pays natively, as an ordinary wallet batch (handed out with its token).
-      const again = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const again = await prepare();
       expect(again).toMatchObject({ strategy: 'EVM_WALLET_BATCH', prepared: { kind: 'EVM_WALLET_BATCH', fee: { unit: 'wei' } } });
       expect(again.handout).toMatch(/^[A-Za-z0-9_-]{43}$/);
     } finally { await t.drop(); }
   });
 
   it('an expired Circle preparation gives the group back its planned strategy; a fresh one is prepared (new quote, new permit)', async () => {
-    const { t, h, wallets, approval, run, permitSignature } = await setup();
+    const { t, h, wallets, approval, run, permitSignature, prepare } = await setup();
     try {
-      const p1 = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const p1 = await prepare();
       h.d.advance(9 * 60_000);
       // Past its validity: the permit step is refused, and the worker's pass expires the preparation.
       await expect(workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await permitSignature(p1.prepared))).rejects.toThrow('USER_FUNDED_PREPARED_EXPIRED');
       await h.drain(run.runId);
       expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_WALLET_BATCH', prepared: null });
-      const fresh = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const fresh = await prepare();
       expect(fresh).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { stage: 'PERMIT' } } });
       expect(Date.parse(fresh.validUntil!) > Date.parse(p1.validUntil!)).toBe(true);
+    } finally { await t.drop(); }
+  });
+
+  it('review C4: the run prepares with the wallet kind the browser reports — FloFi Wallet, or none reported, is never handed a Circle permit', async () => {
+    const { t, circle, h, run, prepare } = await setup();
+    try {
+      // Without the wallet kind (an older browser), with FloFi Wallet, or with anything else: the native shortfall, never a Circle permit.
+      for (const wallet of [null, 'FLOFI_WALLET', 'METAMASK'])
+        await expect(prepare(wallet)).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_WALLET_BATCH', prepared: null });
+      // The injected wallet the browser reports: Circle, exactly as the Editor's Review offers it.
+      expect(await prepare('INJECTED')).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { stage: 'PERMIT' } } });
+      expect(circle.control.sends()).toBe(0);
+    } finally { await t.drop(); }
+  });
+
+  it('review C3: a permit the bundler cannot carry expires the preparation (planned strategy restored); the next one shows the native shortfall', async () => {
+    const { t, circle, h, wallets, approval, run, permitSignature, prepare, setBundler } = await setup();
+    try {
+      const p1 = await prepare();
+      // Another process, configured with a bundler that serves only EntryPoint v0.8: MetaMask's DeleGator validates for v0.7 only.
+      setBundler(createBundlerClient(8453, async (method, params) => method === 'eth_supportedEntryPoints' ? [erc4337.ENTRY_POINT_V0_8] : circle.bundlerRpc(method, params)));
+      await expect(workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await permitSignature(p1.prepared))).rejects.toThrow('USER_OPERATION_ENTRY_POINT_UNSUPPORTED');
+      // Never left waiting for a permit that can never be used: the preparation expired and the group is planned again with its own strategy.
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_WALLET_BATCH', prepared: null });
+      // Prepared again: Circle is not offered with this bundler (CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED), so the owner sees the native shortfall.
+      await expect(prepare()).rejects.toThrow('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'PLANNED', strategy: 'EVM_WALLET_BATCH', prepared: null });
+      expect(circle.control.sends()).toBe(0);
     } finally { await t.drop(); }
   });
 });

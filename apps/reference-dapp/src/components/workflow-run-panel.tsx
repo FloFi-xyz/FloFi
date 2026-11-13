@@ -17,8 +17,8 @@ import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRu
   reportUserFundedBatch, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { batchHandout, batchSponsorshipOf, entryPointOfGroup, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup, signSolanaGroup,
-  signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
+  signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { CIRCLE_NOTHING_SENT, feeAmountText } from '../domain/token-fee';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -230,7 +230,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     // Otherwise the group is prepared (again). A lost answer still reaches this point only when the run showed no batch id for the group: its
     // prepared id is then asked of the wallet below before anything is sent.
-    const prepared = await prepareUserFundedGroup(approvalId, index, batchHandout(approvalId, index));
+    const prepared = await prepareUserFundedGroup(approvalId, index, batchHandout(approvalId, index), evmWalletKind());
     if (!prepared.ok) return prepared;
     keepBatchHandout(approvalId, index, prepared.value.handout);
     const p = prepared.value.prepared as unknown as Record<string, unknown>;

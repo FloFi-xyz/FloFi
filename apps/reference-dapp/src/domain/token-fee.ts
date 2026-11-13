@@ -27,6 +27,8 @@ export const CIRCLE_UNAVAILABLE_REASON: Readonly<Record<string, string>> = {
   CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED: 'Circle does not support this smart-account version on this network',
   CIRCLE_ACCOUNT_UNSUPPORTED: 'this smart-account type is not supported',
   CIRCLE_WALLET_UNSUPPORTED: 'FloFi Wallet cannot sign it',
+  CIRCLE_WALLET_UNKNOWN: 'the wallet that would sign it was not identified',
+  CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED: 'the service that relays it does not support this smart-account version on this network',
   CIRCLE_INSUFFICIENT_USDC: 'this wallet does not hold enough USDC for the steps and the fee',
   CIRCLE_PRICE_UNAVAILABLE: 'no verified ETH price is available right now',
   CIRCLE_PAYMASTER_UNVERIFIED: 'Circle\'s contract could not be verified on this network',
@@ -52,6 +54,9 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   CIRCLE_PAYMASTER_GAS_INVALID: 'The network fee of this request could not be bounded, so nothing was sent. Try again.',
   CIRCLE_OPERATION_INVALID: 'The prepared request did not match what you approved, so nothing was sent.',
   GAS_MECHANISM_CHANGED_REVIEW_REQUIRED: 'Who pays the network fee changed since your review (ETH arrived in or left this wallet). Nothing was sent; review again.',
+  // Review C2: never (re)sent at or after its calls' deadline minus a margin; review C3: a bundler that cannot carry the account's operation.
+  CIRCLE_OPERATION_DEADLINE_PASSED: 'FloFi did not send this request after its time window ended (it would only have failed and still cost you the network fee in USDC). It did not execute, and no network fee was taken.',
+  USER_OPERATION_ENTRY_POINT_UNSUPPORTED: 'The service that relays this request does not support this smart-account version on this network, so nothing was sent. Load the request again to see how the network fee can be paid.',
 };
 /** The Circle refusals the browser itself raises before any wallet request: nothing was sent. */
 export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH']);

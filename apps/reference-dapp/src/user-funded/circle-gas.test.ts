@@ -18,7 +18,8 @@ import { createCircleDouble } from '../delegation/harness/circle-double.ts';
 import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { authorizeGroup, checkUserOperation, prepareGroup, reconcileEvmGroup, relayUserOperation, type NativeFeeShortfall, type Prepared, type UserFundedDeps } from './groups.ts';
-import { circleDepsOf, circleFactsOf, circleOperationOf, circlePermitOf, finalizeCirclePermit, forgetCircleVerifications, tokenNeedOf, type CircleFacts } from './circle-gas.ts';
+import { CIRCLE_RELAY_MARGIN_SECONDS, circleDepsOf, circleFactsOf, circleOperationOf, circlePermitOf, finalizeCirclePermit, forgetCircleVerifications, tokenNeedOf,
+  type CircleFacts } from './circle-gas.ts';
 import type { PriceSource } from '../automations/price-source.ts';
 import { reconcileUserOperation, TRANSFER_TOPIC } from './evm-reconcile.ts';
 import type { EvmGroupCalls } from './evm-calls.ts';
@@ -42,11 +43,14 @@ const transfers = (network: string) => ({ version: 2, steps: [
   { action: 'transfer', network, asset: 'USDC', amount: '1', recipient: R1 }, { action: 'transfer', network, asset: 'USDC', amount: '2', recipient: R2 }] });
 
 type Account = 'DELEGATOR' | 'SIMPLE_7702' | 'EOA' | 'OTHER';
-async function setup(input: { chainId: ChainId; account: Account; eth?: bigint; usdc?: bigint; circle?: boolean; price?: boolean; wallet?: 'INJECTED' | 'FLOFI_WALLET';
-  strategy?: unknown; estimate?: Parameters<typeof createCircleDouble>[1]['estimate'] }) {
+/** `wallet`: the owner's EVM wallet as the browser reported it (default an injected wallet; null: not reported). */
+async function setup(input: { chainId: ChainId; account: Account; eth?: bigint; usdc?: bigint; circle?: boolean; price?: boolean; wallet?: 'INJECTED' | 'FLOFI_WALLET' | null;
+  strategy?: unknown; estimate?: Parameters<typeof createCircleDouble>[1]['estimate']; supportedEntryPoints?: readonly string[] }) {
   const { profile, network } = PROFILES[input.chainId], chain = `eip155:${input.chainId}`;
-  const evm = createEvmDouble(input.chainId, () => Math.floor(NOW.getTime() / 1000), { profile });
-  const circle = createCircleDouble(evm, { chainId: input.chainId, ...input.estimate ? { estimate: input.estimate } : {} });
+  let at = NOW.getTime();
+  const evm = createEvmDouble(input.chainId, () => Math.floor(at / 1000), { profile });
+  const circle = createCircleDouble(evm, { chainId: input.chainId, ...input.estimate ? { estimate: input.estimate } : {},
+    ...input.supportedEntryPoints ? { supportedEntryPoints: input.supportedEntryPoints } : {} });
   const owner = await evmWallet(), stranger = await evmWallet(), address = owner.address.toLowerCase();
   evm.control.fundNative(address, input.eth ?? 0n);
   evm.control.fundToken(address, profile.usdc, input.usdc ?? 50_000_000n);
@@ -55,13 +59,15 @@ async function setup(input: { chainId: ChainId; account: Account; eth?: bigint; 
   if (input.account === 'OTHER') evm.control.setCode(address, '0xef0100' + '12'.repeat(20));
   const transport: ChainTransport = guarded(chain, 'read', 'MOCKED', circle.rpc);
   const deps: UserFundedDeps = { chains: [chain], evm: c => c === chain ? transport : null, bundler: c => c === chain ? circle.bundler : null, solana: null, jupiter: null,
-    now: () => NOW, ...input.circle === false ? {} : { circle: { chains: [chain],
+    now: () => new Date(at), ...input.circle === false ? {} : { circle: { chains: [chain],
       price: async () => input.price === false ? null : { ethUsd: 3_000n * 10n ** 8n, usdcUsd: null, observedAt: NOW.toISOString() } } } };
   const { composition, requirement } = compose(input.strategy ?? transfers(network));
   const group = { runId: 'wfr_' + 'c'.repeat(26), groupIndex: 0, strategy: 'EVM_WALLET_BATCH' as const, chain, feePayer: address, stepFrom: 0,
-    stepTo: requirement.steps.length - 1, ...input.wallet ? { wallet: input.wallet } : {} };
+    stepTo: requirement.steps.length - 1, ...input.wallet !== null ? { wallet: input.wallet ?? 'INJECTED' } : {} };
   const prepare = () => prepareGroup(deps, composition, requirement, group);
-  return { evm, circle, owner, stranger, address, deps, chain, chainId: input.chainId, usdc: profile.usdc, prepare };
+  /** Moves FloFi's clock and the chain's together (unix milliseconds). */
+  const setNow = (ms: number) => { at = ms; };
+  return { evm, circle, owner, stranger, address, deps, chain, chainId: input.chainId, usdc: profile.usdc, prepare, setNow };
 }
 type Ctx = Awaited<ReturnType<typeof setup>>;
 const factsOf = (p: Prepared) => circleFactsOf(p) ?? (() => { throw new Error('CIRCLE_EXPECTED'); })();
@@ -185,6 +191,51 @@ describe('ADR-0010 Circle USDC paymaster: two signatures, relayed when due, reco
   });
 });
 
+describe('ADR-0010 review C2: a Circle-paid operation is never (re)sent at or after its calls\' deadline minus the margin', () => {
+  async function authorized(ctx: Ctx) {
+    const p = await prepared(ctx), f = await finalized(ctx, p);
+    const authorization = authorizeGroup(f, { kind: 'EVM_USER_OPERATION', signature: await signOperation(ctx, f) }, ctx.address, NOW);
+    if (!authorization.ok) throw new Error(authorization.code);
+    const guard = (f.group as EvmGroupCalls).calls.find(c => c.kind === 'DEADLINE_GUARD') as { deadline: string } | undefined;
+    if (!guard) throw new Error('GUARD_EXPECTED');
+    return { f, authorization: authorization.value, deadline: Number(guard.deadline) };
+  }
+  it('records the calls\' deadline; a lost operation is resent only before it; past it, unconsumed and unknown to the bundler: FAILED, nothing charged', async () => {
+    const ctx = await setup({ chainId: 8453, account: 'DELEGATOR' });
+    const { f, authorization, deadline } = await authorized(ctx);
+    // The facts carry the deadline of the very calls the operation executes (the batch's deadline guard here).
+    expect(factsOf(f).deadline).toBe(String(deadline));
+    const submitted = await checkUserOperation(ctx.deps, f, authorization, ctx.address);
+    if (!submitted.ok) throw new Error(submitted.code);
+    ctx.circle.control.dropNextSend();
+    expect(await relayUserOperation(ctx.deps, f, authorization)).toEqual({ ok: true, value: f.userOpHash });
+    // The bundler lost it (fee market, outage). Inside the margin before the deadline it is NOT resent: a bundler could include it only once its
+    // calls are refused on chain, and Circle would still take the owner's USDC for that sure revert.
+    ctx.setNow((deadline - CIRCLE_RELAY_MARGIN_SECONDS) * 1000);
+    expect(await reconcileEvmGroup(ctx.deps, f, submitted.value, authorization)).toEqual({ status: 'PENDING' });
+    expect(await relayUserOperation(ctx.deps, f, authorization)).toEqual({ ok: false, code: 'CIRCLE_OPERATION_DEADLINE_PASSED', stepIndex: null });
+    expect(ctx.circle.control.sends()).toBe(1);
+    // Past the deadline and the margin, its nonce still unconsumed and the bundler not knowing it: the group FAILED — nothing executed, nothing paid.
+    const usdc = ctx.evm.control.tokenBalance(ctx.usdc, ctx.address);
+    ctx.setNow((deadline + CIRCLE_RELAY_MARGIN_SECONDS) * 1000);
+    expect(await reconcileEvmGroup(ctx.deps, f, submitted.value, authorization)).toEqual({ status: 'FAILED', code: 'CIRCLE_OPERATION_DEADLINE_PASSED', gasPaid: null,
+      transactions: [] });
+    expect(ctx.circle.control.sends()).toBe(1);
+    expect(ctx.evm.control.tokenBalance(ctx.usdc, ctx.address)).toBe(usdc);
+    expect(ctx.circle.control.permitNonce(ctx.address)).toBe(0n);
+  });
+  it('the first relay too: a due-time check inside the margin refuses before anything is sent; one second earlier it passes', async () => {
+    const ctx = await setup({ chainId: 8453, account: 'DELEGATOR' });
+    const { f, authorization, deadline } = await authorized(ctx);
+    ctx.setNow((deadline - CIRCLE_RELAY_MARGIN_SECONDS - 1) * 1000);
+    expect(await checkUserOperation(ctx.deps, f, authorization, ctx.address)).toMatchObject({ ok: true });
+    ctx.setNow((deadline - CIRCLE_RELAY_MARGIN_SECONDS) * 1000);
+    expect(await checkUserOperation(ctx.deps, f, authorization, ctx.address)).toEqual({ ok: false, code: 'CIRCLE_OPERATION_DEADLINE_PASSED', stepIndex: null });
+    expect(await relayUserOperation(ctx.deps, f, authorization)).toEqual({ ok: false, code: 'CIRCLE_OPERATION_DEADLINE_PASSED', stepIndex: null });
+    expect(ctx.circle.control.sends()).toBe(0);
+  });
+});
+
 describe('ADR-0010 Circle USDC paymaster: every reason it is not offered, attached to the native shortfall', () => {
   const unavailableOf = async (input: Parameters<typeof setup>[0], arrange?: (ctx: Ctx) => void) => {
     const ctx = await setup(input);
@@ -201,6 +252,24 @@ describe('ADR-0010 Circle USDC paymaster: every reason it is not offered, attach
     expect(await unavailableOf({ chainId: 8453, account: 'EOA' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_SMART_ACCOUNT_REQUIRED' }]);
     expect(await unavailableOf({ chainId: 8453, account: 'OTHER' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_ACCOUNT_UNSUPPORTED' }]);
     expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', wallet: 'FLOFI_WALLET' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_WALLET_UNSUPPORTED' }]);
+  });
+  it('review C4: a wallet type nobody reported is never offered Circle (fail closed: it may be FloFi Wallet, which cannot sign the permit)', async () => {
+    expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', wallet: null })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_WALLET_UNKNOWN' }]);
+  });
+  it('review C3: a bundler that does not serve the account\'s EntryPoint is never offered (no permit the owner signs in vain); asked once per process', async () => {
+    // Simple7702Account validates for EntryPoint v0.8 only; MetaMask's DeleGator for v0.7 only; a bundler serving neither is refused whole.
+    expect(await unavailableOf({ chainId: 1, account: 'SIMPLE_7702', supportedEntryPoints: [erc4337.ENTRY_POINT_V0_7] }))
+      .toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED' }]);
+    expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', supportedEntryPoints: [erc4337.ENTRY_POINT_V0_8] }))
+      .toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED' }]);
+    expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', supportedEntryPoints: ['0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789'] }))
+      .toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED' }]);
+    // A bundler that serves it: Circle, and the bundler's EntryPoints are read once for every later preparation of this process.
+    const ctx = await setup({ chainId: 1, account: 'SIMPLE_7702', supportedEntryPoints: [erc4337.ENTRY_POINT_V0_7, erc4337.ENTRY_POINT_V0_8] });
+    expect(factsOf(await prepared(ctx)).entryPoint).toBe(erc4337.ENTRY_POINT_V0_8);
+    expect(factsOf(await prepared(ctx)).entryPoint).toBe(erc4337.ENTRY_POINT_V0_8);
+    expect(ctx.circle.control.entryPointQueries()).toBe(1);
+    expect(ctx.circle.control.sends()).toBe(0);
   });
   it('USDC that does not cover the group\'s own spend plus the cap; no verified price', async () => {
     // 3 USDC spent by the transfers + a cap of a few cents: 3.000001 USDC is not enough.
@@ -359,8 +428,12 @@ describe('ADR-0010 Circle facts are read back strictly', () => {
     expect(circleFactsOf({ circle: { stage: 'OTHER' } })).toBeNull();
     const facts = { stage: 'PERMIT', accountKind: 'METAMASK_DELEGATOR_V1_3', entryPoint: erc4337.ENTRY_POINT_V0_7, paymaster: C.CIRCLE_PAYMASTER_V07, usdc: BASE_MAINNET_SWAP.usdc,
       permitCap: '1', permitNonce: '0', surchargeBps: '1000', marginBps: '2000', nonce: '0', callData: '0x', nativeRequired: '1', usdcSpend: '0',
-      plannedStrategy: 'EVM_WALLET_BATCH', gas: {}, price: {} } satisfies Record<keyof Omit<CircleFacts, 'permitSignature'>, unknown>;
+      plannedStrategy: 'EVM_WALLET_BATCH', gas: {}, price: {} } satisfies Record<keyof Omit<CircleFacts, 'permitSignature' | 'deadline'>, unknown>;
     expect(circleFactsOf({ circle: facts })?.stage).toBe('PERMIT');
+    // Review C2: the calls' deadline, when recorded, is a unix second (a preparation stored before it carries none and reads its calls').
+    expect(circleFactsOf({ circle: { ...facts, deadline: '1791789000' } })?.deadline).toBe('1791789000');
+    expect(circleFactsOf({ circle: { ...facts, deadline: '0' } })).toBeNull();
+    expect(circleFactsOf({ circle: { ...facts, deadline: 1791789000 } })).toBeNull();
     expect(circleFactsOf({ circle: { ...facts, permitCap: '-1' } })).toBeNull();
     expect(circleFactsOf({ circle: { ...facts, accountKind: 'COINBASE' } })).toBeNull();
     expect(erc7710.evmAddress(C.CIRCLE_PAYMASTER_V08)).toBe(C.CIRCLE_PAYMASTER_V08);

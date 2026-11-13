@@ -32,8 +32,8 @@ import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
 import { BlockerPanel } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
-import { batchHandout, batchSponsorshipOf, isCirclePaid, keepBatchHandout, sendWalletBatch, signCirclePaidGroup, signSolanaGroup, signUserOperation, walletBatchHashes,
-  walletProfile } from './user-funded-browser';
+import { batchHandout, batchSponsorshipOf, evmWalletKind, isCirclePaid, keepBatchHandout, sendWalletBatch, signCirclePaidGroup, signSolanaGroup, signUserOperation,
+  walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
 import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
 import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
@@ -472,7 +472,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     let prepared = given;
     if (!prepared) {
-      const r = await prepareUserFundedGroup(id, index, batchHandout(id, index));
+      const r = await prepareUserFundedGroup(id, index, batchHandout(id, index), evmWalletKind());
       if (!r.ok) { if (r.code === PREPARED_STILL_VALID_CODE) refusedFor(index); throw new Error(r.code); }
       keepBatchHandout(id, index, r.value.handout);
       prepared = r.value;
