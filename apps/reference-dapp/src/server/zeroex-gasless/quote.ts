@@ -76,7 +76,15 @@ export type ZeroExGaslessBinding = { readonly provider: '0x-gasless-v2'; readonl
     readonly unlimited: boolean; readonly nonce: string; readonly deadline: number } | null;
   readonly gasFee: ZeroExFee; readonly zeroExFee: ZeroExFee | null;
   /** 0x's route sources (shown under Technical details), and 0x's informational submission target. */
-  readonly sources: readonly string[]; readonly target: string };
+  readonly sources: readonly string[]; readonly target: string;
+  /**
+   * ADR-0010 §5: FloFi's own on-chain quote of exactly this swap (the Uniswap v3 route the native path would take, read at the same block), kept
+   * beside 0x's, and the floor 0x's minimum had to reach: FloFi's slippage minimum net of 0x's disclosed fees (`gaslessReferenceFloor`). Both
+   * are shown under Technical details; the native-coverage re-check estimates the Uniswap call from this reference, never from 0x's figures.
+   */
+  readonly reference: GaslessReference & { readonly floor: string } };
+/** FloFi's own quote of the swap: the Uniswap v3 pool and fee tier, its expected output and FloFi's slippage minimum (buy-token units). */
+export type GaslessReference = { readonly source: 'uniswap-v3'; readonly pool: string; readonly fee: number; readonly expectedOut: string; readonly minimumOut: string };
 
 const fail = (code: string): never => { throw new Error(code); };
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/, HASH = /^0x[0-9a-fA-F]{64}$/, UNITS = /^(0|[1-9][0-9]{0,77})$/;
@@ -213,10 +221,33 @@ const lower = (value: unknown, code: string): string => typeof value === 'string
 export type GaslessCheckContext = {
   /** The genuine Settlers read from the registry at this quote (current and, during the dwell period, the previous one). */
   readonly settlers: { readonly current: string; readonly previous: string | null };
+  /** FloFi's own on-chain quote of exactly this swap, which 0x's minimum must not fall below net of 0x's disclosed fees. */
+  readonly reference: GaslessReference;
   readonly nowMs: number;
   /** The trade deadline must leave at least this long for Review and signatures (ms), and be at most this far away (s). */
   readonly minimumLifetimeMs: number; readonly maximumLifetimeSeconds: number;
 };
+/**
+ * ADR-0010 §5: the least 0x's signed minimum may be — FloFi's own slippage minimum for this swap, less what 0x's disclosed fees cost the owner
+ * (0x takes them out of the trade, so its net output is legitimately lower by exactly that much and no more). A fee in the buy token is
+ * subtracted as is; a fee in the sell token removes its share of the input, valued at FloFi's own reference (the reference minimum scaled to
+ * the input left after it). Never below zero. Integer arithmetic, rounded down.
+ */
+export function gaslessReferenceFloor(reference: GaslessReference, sell: { readonly token: string; readonly amount: string }, buyToken: string,
+  fees: readonly (ZeroExFee | null)[]): bigint {
+  const sellAmount = BigInt(sell.amount), minimum = BigInt(reference.minimumOut);
+  if (sellAmount <= 0n || minimum <= 0n) return fail('ZEROX_TRADE_UNVERIFIABLE');
+  let sellFees = 0n, buyFees = 0n;
+  for (const fee of fees) {
+    if (!fee) continue;
+    if (fee.token === sell.token) sellFees += BigInt(fee.amount);
+    else if (fee.token === buyToken) buyFees += BigInt(fee.amount);
+    else fail('ZEROX_TRADE_UNVERIFIABLE');
+  }
+  if (sellFees >= sellAmount) return 0n;
+  const floor = minimum * (sellAmount - sellFees) / sellAmount - buyFees;
+  return floor > 0n ? floor : 0n;
+}
 /**
  * The pre-sign checklist (research-0x.md §6.3). Returns the binding the Review shows and the owner signs, or throws the closed reason this
  * quote cannot be used gaslessly. Pure: the Settler answer and the clock are inputs.
@@ -264,6 +295,12 @@ export function verifyGaslessQuote(parsed: ParsedQuote, rawHash: string, request
     fail('ZEROX_TRADE_UNVERIFIABLE');
   if (minimum.toString() !== q.minBuyAmount || minimum > BigInt(q.buyAmount)) fail('ZEROX_QUOTE_MISMATCH');
   if (minimum < slippageFloor) fail('ZEROX_MINIMUM_BELOW_SLIPPAGE');
+  // ADR-0010 §5: never worse than FloFi's own on-chain quote beyond 0x's disclosed fees (0x's own buyAmount is not a reference for itself).
+  const reference = context.reference;
+  if (reference.source !== 'uniswap-v3' || !ADDRESS.test(reference.pool) || !Number.isSafeInteger(reference.fee) || reference.fee <= 0 ||
+      !UNITS.test(reference.expectedOut) || !UNITS.test(reference.minimumOut) || BigInt(reference.minimumOut) > BigInt(reference.expectedOut)) fail('ZEROX_TRADE_UNVERIFIABLE');
+  const floor = gaslessReferenceFloor(reference, { token: sellToken, amount: request.sellAmount }, buyToken, [gasFee, zeroExFee]);
+  if (minimum < floor) fail('ZEROX_QUOTE_WORSE_THAN_REFERENCE');
   // actions[0] must be one of the Settler's witness-aware METATXN_* actions (the one that authenticates the rest) whose permit words are exactly
   // the signed permit: METATXN_TRANSFER_FROM, exactly the permit paid to the Settler; a METATXN_*_VIP, the permit right after its recipient (the
   // first hop's output target: the Settler, or the next pool under 0x's custody optimisation). Whatever the route, the owner's protection is the
@@ -300,5 +337,7 @@ export function verifyGaslessQuote(parsed: ParsedQuote, rawHash: string, request
   return { provider: '0x-gasless-v2', zid: q.zid, rawHash, quotedAt: new Date(context.nowMs).toISOString(), chainId: request.chainId, taker,
     sellToken, buyToken, sellAmount: request.sellAmount, buyAmount: q.buyAmount, minBuyAmount: q.minBuyAmount, slippageBps: request.slippageBps,
     settler: spender, settlerSource, permit2: PERMIT2, trade: { hash: tradeHash, eip712: trade, nonce: nonce.toString(), deadline: Number(deadline) },
-    approval, gasFee, zeroExFee, sources, target: q.target };
+    approval, gasFee, zeroExFee, sources, target: q.target,
+    reference: { source: 'uniswap-v3', pool: reference.pool, fee: reference.fee, expectedOut: reference.expectedOut, minimumOut: reference.minimumOut,
+      floor: floor.toString() } };
 }

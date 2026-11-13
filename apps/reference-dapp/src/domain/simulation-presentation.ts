@@ -416,6 +416,11 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
             { label: 'Trade hash', value: zx.trade.hash }, { label: 'Signed trade valid until', value: new Date(zx.trade.deadline * 1000).toISOString() });
           if (zx.approval) s.details.push({ label: 'Token approval by signature', value: zx.approval.unlimited ? `Permit2 ${zx.permit2} may spend any amount of ${q.inputSymbol}`
             : `Permit2 ${zx.permit2} may spend at most ${simulationAmount(zx.approval.value, din, q.inputSymbol)}` });
+          // ADR-0010 §5 (review Z3): 0x's quote beside FloFi's own on-chain Uniswap v3 quote of the same swap, and the least 0x's minimum could be.
+          const out = (units: string) => simulationAmount(units, dout, q.outputSymbol) ?? '—', reference = zx.reference as typeof zx.reference | undefined;
+          s.details.push({ label: '0x quote', value: `Expected ${out(zx.buyAmount)}, at least ${out(zx.minBuyAmount)}` });
+          if (reference) s.details.push({ label: 'FloFi reference (Uniswap v3)', value: `Expected ${out(reference.expectedOut)}, at least ${out(reference.minimumOut)}` },
+            { label: 'Lowest 0x minimum FloFi accepts', value: `${out(reference.floor)} (FloFi's minimum less 0x's fees)` });
         }
         for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
         if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');

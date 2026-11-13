@@ -9,7 +9,8 @@ import { eip712, erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { createZeroExHttp } from './transport.ts';
 import { createZeroExGaslessClient } from './client.ts';
 import { EXECUTE_METATXN_SELECTOR, METATXN_FIRST_ACTIONS, METATXN_TRANSFER_FROM_SELECTOR, OWNER_OF_SELECTOR, parseGaslessChains, parseGaslessQuote,
-  parseGaslessStatus, PERMIT2, PREV_SELECTOR, readGenuineSettlers, SETTLER_REGISTRY, verifyGaslessQuote, zeroExErrorCode, type GaslessCheckContext } from './quote.ts';
+  gaslessReferenceFloor, parseGaslessStatus, PERMIT2, PREV_SELECTOR, readGenuineSettlers, SETTLER_REGISTRY, verifyGaslessQuote, zeroExErrorCode,
+  type GaslessCheckContext } from './quote.ts';
 import { createBaseSepoliaReadRpc } from '../public-testnet-rpc.ts';
 
 const examples = JSON.parse(readFileSync(new URL('../testdata/zeroex/gasless-official-examples.json', import.meta.url), 'utf8')) as { quote: Record<string, unknown>;
@@ -127,7 +128,10 @@ describe('the pre-sign checklist on 0x\'s official example (Ethereum, chainId 1)
   const taker = '0x70a9f34f9b34c64957b9c401a97bfed35b95049e', settler = '0x7c39a136ea20b3483e402ea031c1f3c019bab24b';
   const request = { chainId: 1, taker, sellToken: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', buyToken: '0xdac17f958d2ee523a2206206994597c13d831ec7', sellAmount: '300000000', slippageBps: 30 };
   // The published example's permit expires ~50 minutes before its trade: the clock is set where both are still signable.
-  const context: GaslessCheckContext = { settlers: { current: settler, previous: null }, nowMs: 1_718_667_000_000, minimumLifetimeMs: 45_000, maximumLifetimeSeconds: 3_600 };
+  // FloFi's own Uniswap v3 quote of the same swap (USDC → USDT about 1:1): minimum 299.1 USDT at 30 bps, so 0x's floor is 299.1 − 7.112169 fees.
+  const reference = { source: 'uniswap-v3' as const, pool: '0x3416cf6c708da44db2624d63ea0aaef7113527c6', fee: 100, expectedOut: '300000000', minimumOut: '299100000' };
+  const context: GaslessCheckContext = { settlers: { current: settler, previous: null }, reference, nowMs: 1_718_667_000_000, minimumLifetimeMs: 45_000,
+    maximumLifetimeSeconds: 3_600 };
   const funded: Record<string, unknown> = { ...examples.quote, issues: { ...examples.quote.issues as object, balance: null } };
   const verify = (quote: unknown, ctx: Partial<GaslessCheckContext> = {}, req: Partial<typeof request> = {}) =>
     verifyGaslessQuote(parseGaslessQuote(quote), '0x' + '0'.repeat(64), { ...request, ...req }, { ...context, ...ctx });
@@ -149,6 +153,27 @@ describe('the pre-sign checklist on 0x\'s official example (Ethereum, chainId 1)
       gasFee: { token: request.buyToken, amount: '6962116' }, zeroExFee: { amount: '150053' }, approval: { type: 'permit', value: '300000000', unlimited: false },
       trade: { hash: '0x3ff032fa3a970a3f2b763afce093fd133ced63c0b097ab12ae1441b42de4a167', deadline: 1_718_670_104 } });
     expect(binding.sources).toEqual(['SolidlyV3']);
+    // Review Z3: FloFi's own reference is kept beside 0x's figures, with the floor 0x's minimum had to reach (both fees are in USDT, the buy token).
+    expect(binding.reference).toEqual({ ...reference, floor: (299_100_000 - 6_962_116 - 150_053).toString() });
+  });
+  it('Z3: refuses a quote whose minimum is below FloFi\'s own slippage minimum net of 0x\'s disclosed fees (ZEROX_QUOTE_WORSE_THAN_REFERENCE)', () => {
+    // Uniswap would pay 301 USDT (minimum 300.097): net of 7.112169 USDT of fees the floor is 292.984831 > 0x's 292.116101.
+    expect(() => verify(funded, { reference: { ...reference, expectedOut: '301000000', minimumOut: '300097000' } })).toThrow('ZEROX_QUOTE_WORSE_THAN_REFERENCE');
+    // Exactly at the floor is accepted; one unit above it is not.
+    const atFloor = (292_116_101 + 6_962_116 + 150_053).toString();
+    expect(verify(funded, { reference: { ...reference, minimumOut: atFloor } }).reference.floor).toBe('292116101');
+    expect(() => verify(funded, { reference: { ...reference, minimumOut: (BigInt(atFloor) + 1n).toString() } })).toThrow('ZEROX_QUOTE_WORSE_THAN_REFERENCE');
+    // A reference that is not one (no pool, a minimum above its expected output) is unverifiable, never skipped.
+    expect(() => verify(funded, { reference: { ...reference, pool: 'none' } })).toThrow('ZEROX_TRADE_UNVERIFIABLE');
+    expect(() => verify(funded, { reference: { ...reference, minimumOut: '300000001' } })).toThrow('ZEROX_TRADE_UNVERIFIABLE');
+  });
+  it('Z3: a fee in the sell token removes its share of the input at FloFi\'s reference; never below zero', () => {
+    const ref = { ...reference, expectedOut: '1000', minimumOut: '995' }, sell = { token: request.sellToken, amount: '1000' };
+    expect(gaslessReferenceFloor(ref, sell, request.buyToken, [{ token: request.sellToken, amount: '100' }, null])).toBe(995n * 900n / 1000n);
+    expect(gaslessReferenceFloor(ref, sell, request.buyToken, [{ token: request.sellToken, amount: '100' }, { token: request.buyToken, amount: '5' }])).toBe(895n - 5n);
+    expect(gaslessReferenceFloor(ref, sell, request.buyToken, [{ token: request.buyToken, amount: '2000' }])).toBe(0n);
+    expect(gaslessReferenceFloor(ref, sell, request.buyToken, [{ token: request.sellToken, amount: '1000' }])).toBe(0n);
+    expect(() => gaslessReferenceFloor(ref, sell, request.buyToken, [{ token: PERMIT2, amount: '1' }])).toThrow('ZEROX_TRADE_UNVERIFIABLE');
   });
   it.each([
     ['0x reports a balance issue (the example as published)', () => verify(examples.quote), 'ZEROX_INSUFFICIENT_BALANCE'],

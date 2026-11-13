@@ -36,6 +36,7 @@ const GASLESS_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
   ZEROX_INSUFFICIENT_BALANCE: 'The wallet balance is lower than this amount.',
   ZEROX_SPONSORED_QUOTE_REFUSED: 'The provider quote did not charge the network fee to this swap, so FloFi refused it.',
   ZEROX_QUOTE_EXPIRED: 'The provider quote expired too quickly to review and sign.',
+  ZEROX_QUOTE_WORSE_THAN_REFERENCE: 'The provider quote pays less than FloFi\'s own Uniswap quote for this swap, beyond the provider\'s fees, so FloFi refused it.',
 });
 export function gaslessUnavailableReason(code: string): string {
   if (Object.hasOwn(GASLESS_UNAVAILABLE, code)) return GASLESS_UNAVAILABLE[code]!;

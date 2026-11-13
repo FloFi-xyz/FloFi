@@ -14,6 +14,12 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'Route sources': 'Fontes da rota',
   'Trade hash': 'Hash da negociação',
   'Signed trade valid until': 'Negociação assinada válida até',
+  // FloFi's own Uniswap v3 reference beside 0x's quote (review Z3, Technical details).
+  '0x quote': 'Cotação da 0x',
+  'FloFi reference (Uniswap v3)': 'Referência da FloFi (Uniswap v3)',
+  'Lowest 0x minimum FloFi accepts': 'Menor mínimo da 0x que a FloFi aceita',
+  'Expected {0}, at least {1}': 'Esperado {0}, no mínimo {1}',
+  '{0} (FloFi\'s minimum less 0x\'s fees)': '{0} (o mínimo da FloFi menos as taxas da 0x)',
   'Token approval by signature': 'Aprovação do token por assinatura',
   'Permit2 {0} may spend any amount of {1}': 'O Permit2 {0} pode gastar qualquer quantia de {1}',
   'Permit2 {0} may spend at most {1}': 'O Permit2 {0} pode gastar no máximo {1}',
@@ -48,6 +54,8 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'The wallet balance is lower than this amount.': 'O saldo da carteira é menor que este valor.',
   'The provider quote did not charge the network fee to this swap, so FloFi refused it.': 'A cotação do provedor não cobrou a taxa de rede deste swap, por isso a FloFi a recusou.',
   'The provider quote expired too quickly to review and sign.': 'A cotação do provedor expirou rápido demais para revisar e assinar.',
+  'The provider quote pays less than FloFi\'s own Uniswap quote for this swap, beyond the provider\'s fees, so FloFi refused it.':
+    'A cotação do provedor paga menos que a própria cotação da FloFi na Uniswap para este swap, além das taxas do provedor, por isso a FloFi a recusou.',
   'The provider did not answer. Try again shortly.': 'O provedor não respondeu. Tente novamente em instantes.',
   'FloFi could not verify the provider quote for this swap.': 'A FloFi não conseguiu verificar a cotação do provedor para este swap.',
   // Execution refusals and outcomes (domain/simulation-presentation.ts simulationError).

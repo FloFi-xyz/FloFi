@@ -73,6 +73,25 @@ describe('the 0x Gasless Review on Robinhood Chain', () => {
     for (const line of [...view.fees.map(f => f.label), ...view.warnings.map(w => w.message), ...view.steps[0]!.details.map(d => d.label)])
       expect(translate('PT', line), line).not.toMatch(/grátis|sem taxas|patrocinad/i);
   });
+  it('review Z3: shows 0x\'s quote beside FloFi\'s own Uniswap v3 reference under Technical details, and says why a worse quote was refused', () => {
+    const reference = { source: 'uniswap-v3', pool: '0x' + '9'.repeat(40), fee: 3000, expectedOut: '260000000000000000', minimumOut: '258700000000000000', floor: '257613460000000000' };
+    const view = projectSimulation(swap, context, source(gasless({ buyAmount: quote.expectedOut, minBuyAmount: quote.minimumOut, reference })), now);
+    const details = view.steps[0]!.details;
+    expect(details).toEqual(expect.arrayContaining([{ label: '0x quote', value: 'Expected 0.258908 TSLA, at least 0.25761346 TSLA' },
+      { label: 'FloFi reference (Uniswap v3)', value: 'Expected 0.26 TSLA, at least 0.2587 TSLA' },
+      { label: 'Lowest 0x minimum FloFi accepts', value: '0.25761346 TSLA (FloFi\'s minimum less 0x\'s fees)' }]));
+    // Technical details only: the visible Review keeps 0x's amounts (net of the fee) as the swap's result.
+    expect(view.steps[0]).toMatchObject({ result: '0.258908 TSLA', minimum: '0.25761346 TSLA' });
+    expect(translate('PT', 'FloFi reference (Uniswap v3)')).toBe('Referência da FloFi (Uniswap v3)');
+    expect(translate('PT', 'Expected 0.26 TSLA, at least 0.2587 TSLA')).toBe('Esperado 0.26 TSLA, no mínimo 0.2587 TSLA');
+    expect(translate('PT', '0.25761346 TSLA (FloFi\'s minimum less 0x\'s fees)')).toBe('0.25761346 TSLA (o mínimo da FloFi menos as taxas da 0x)');
+    const refused = projectSimulation(swap, context, source({ owner: '0x' + '1'.repeat(40), mechanism: 'NATIVE_WALLET_GAS', nativeShort: true, zeroEx: null,
+      unavailable: [{ mechanism: 'ZEROX_GASLESS_SWAP', code: 'ZEROX_QUOTE_WORSE_THAN_REFERENCE' }], native: { balanceWei: '0', worstCaseWei: '4800000000000' },
+      payment: { mechanism: 'NATIVE_WALLET_GAS' } }), now);
+    const reason = 'The provider quote pays less than FloFi\'s own Uniswap quote for this swap, beyond the provider\'s fees, so FloFi refused it.';
+    expect(refused.warnings.map(w => w.message)).toContain(reason);
+    expect(translate('PT', reason)).toMatch(/^A cotação do provedor paga menos/);
+  });
   it('words every refusal and outcome of the gasless path', () => {
     expect(simulationError('GAS_MECHANISM_CHANGED_REVIEW_REQUIRED')).toMatch(/How the network fee is paid changed/);
     expect(simulationError('ZEROX_SIGNER_MISMATCH')).toMatch(/signature did not match/);

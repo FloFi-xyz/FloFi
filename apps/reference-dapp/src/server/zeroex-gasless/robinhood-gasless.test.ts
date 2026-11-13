@@ -6,13 +6,15 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCatalogSwapNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { eip712 } from '@defi-workflow-engine/reference-compiler';
 import type { AssetCatalog, CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createTestWallet, type TestWallet } from '../../../../../packages/reference-reconciler/test/test-wallet.ts';
-import { createPublicTestnetService, type PublicRun, type PublicTestnetService } from '../public-testnet-service.ts';
+import { createPublicTestnetService, type PublicRun, type PublicTestnetService, type Rpc } from '../public-testnet-service.ts';
+import { UNISWAP_V3_ROBINHOOD } from '@defi-workflow-engine/action-registry';
 import { asset, createRobinhoodMockChain, mockCatalogRuntime, officialCatalog, type RobinhoodMockChain } from '../robinhood-mainnet.test-harness.ts';
 import { createZeroExDouble, MOCK_PREVIOUS_SETTLER, MOCK_RELAYER, MOCK_SETTLER, type ZeroExDouble } from './zeroex.test-harness.ts';
 import { createZeroExGaslessClient } from './client.ts';
@@ -27,6 +29,10 @@ function catalogSwapWorkflow(input: CanonicalAsset, output: CanonicalAsset, amou
   return { schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 1, resourceEdges: [],
     nodes: [createCatalogSwapNode('node-002', { chain: 'eip155:4663', amount, slippageBps, input: ref(input), output: ref(output) })] };
 }
+/** The service's own manifest digest (sha-256 of the canonical JSON), for a tampered record that is otherwise self-consistent. */
+const canonicalJson = (value: unknown): string => value === null || typeof value !== 'object' ? JSON.stringify(value) : Array.isArray(value)
+  ? '[' + value.map(canonicalJson).join(',') + ']' : '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonicalJson((value as Record<string, unknown>)[key])).join(',') + '}';
+const canonicalDigest = (value: unknown) => '0x' + createHash('sha256').update(canonicalJson(value)).digest('hex');
 const ENABLED: ZeroExGaslessConfig = { enabled: true, apiUrl: 'http://127.0.0.1:8561', apiKey: 'loopback-key', chains: ['eip155:4663'], loopback: true };
 const dirs: string[] = [];
 let clock = T0, catalog: AssetCatalog, chain: RobinhoodMockChain, zx: ZeroExDouble, usdg: CanonicalAsset, tsla: CanonicalAsset, owner: TestWallet;
@@ -44,12 +50,12 @@ beforeEach(() => {
   chain.fundNative(owner.address, 0n);
   zx.script.permitTokens = new Set([usdg.address!]);
 });
-function service(options: { config?: ZeroExGaslessConfig; executionEnabled?: boolean; dir?: string | undefined; gasless?: boolean } = {}): PublicTestnetService {
+function service(options: { config?: ZeroExGaslessConfig; executionEnabled?: boolean; dir?: string | undefined; gasless?: boolean; rpc?: Rpc } = {}): PublicTestnetService {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'flofi-rh-gasless-'));
   if (!options.dir) dirs.push(dir);
   const runtime = { ...mockCatalogRuntime(catalog, options.executionEnabled ?? true),
     ...options.gasless === false ? {} : { gasless: { config: options.config ?? ENABLED, client: createZeroExGaslessClient(zx.http, () => clock) } } };
-  return createPublicTestnetService({ rpc: async () => { throw new Error('PUBLIC_NETWORK_UNAVAILABLE'); }, rpcs: { 'eip155:4663': zx.rpc }, journalDir: dir,
+  return createPublicTestnetService({ rpc: async () => { throw new Error('PUBLIC_NETWORK_UNAVAILABLE'); }, rpcs: { 'eip155:4663': options.rpc ?? zx.rpc }, journalDir: dir,
     idPrefix: 'rhs', now: () => new Date(clock), catalog: runtime });
 }
 /** The owner's wallet: signs exactly the typed data it is handed (`eth_signTypedData_v4`). */
@@ -284,6 +290,75 @@ describe('execution: typed data signed by the owner, relayed once, reconciled fr
     zx.script.received = BigInt(run.quote.minimumOut) - 1n;
     await execute(s, run);
     expect((await s.observe(run.quote.executionId)).divergence).toBe('RECONCILIATION_MISMATCH');
+  });
+});
+
+describe('review Z2/Z3: 0x is compared with FloFi\'s own Uniswap quote, and the native re-check never estimates 0x\'s minimum', () => {
+  /** The pool's output for 100 USDG (the mock pool's rate): what the Uniswap router can pay at most. */
+  const POOL_OUT = 260_000_000_000_000_000n;
+  /**
+   * The chain as a real node answers `eth_estimateGas` for the router's `exactInputSingle`: it reverts ("Too little received") when the call's
+   * amountOutMinimum is above what the pool pays (the mock chain itself never simulates an estimate). `estimate: 'down'` plays a node that does
+   * not answer estimates at all. The production read client's revert shape (public-testnet-rpc.ts).
+   */
+  function nodeRpc(control: { estimate: 'up' | 'down' }): Rpc {
+    return async (method, params, context) => {
+      if (method === 'eth_estimateGas') {
+        if (control.estimate === 'down') throw new Error('PUBLIC_RPC_UNAVAILABLE');
+        const call = params[0] as { to: string; data: string };
+        if (call.to.toLowerCase() === UNISWAP_V3_ROBINHOOD.router.toLowerCase() && call.data.startsWith('0x04e45aaf') &&
+            BigInt('0x' + call.data.slice(10 + 5 * 64, 10 + 6 * 64)) > POOL_OUT)
+          throw Object.assign(new Error('PUBLIC_RPC_RESPONSE_INVALID'), { rpcErrorCode: 3, rpcReverted: true });
+      }
+      return zx.rpc(method, params, context);
+    };
+  }
+  it('Z2: 0x quoting above the pool (owner already allowed the router) keeps the reviewed gasless swap at begin and submit; it settles', async () => {
+    zx = createZeroExDouble(chain, { now: () => clock, price: { numerator: 2_700_000_000n, denominator: 1n } });
+    zx.script.permitTokens = new Set([usdg.address!]);
+    chain.state.allowances.set(`${usdg.address}:${owner.address.toLowerCase()}:${UNISWAP_V3_ROBINHOOD.router.toLowerCase()}`, 10n ** 12n);
+    const control = { estimate: 'up' as 'up' | 'down' }, s = service({ rpc: nodeRpc(control) }), run = await reviewed(s), id = run.quote.executionId;
+    const zeroEx = run.quote.gas!.zeroEx!;
+    expect(run.quote.gas!.mechanism).toBe('ZEROX_GASLESS_SWAP');
+    // 0x's minimum is above what the pool pays: an estimate built on it would revert. FloFi's own reference stays beside it.
+    expect(BigInt(zeroEx.minBuyAmount)).toBeGreaterThan(POOL_OUT);
+    expect(zeroEx.reference).toMatchObject({ source: 'uniswap-v3', pool: run.quote.pool, fee: 3000, expectedOut: POOL_OUT.toString(), minimumOut: '258700000000000000' });
+    const begun = await s.beginGasless(id, owner.address);
+    expect(begun.attempt.state).toBe('SIGNING');
+    const submitted = await s.submitGasless(id, begun.attempt.attemptId, { approval: sign(begun.approval), trade: sign(begun.trade)! });
+    expect(submitted.gasless!.at(-1)!.state).toBe('SUBMITTED');
+    expect((await s.observe(id)).outcome?.outputReceived).toBe(run.quote.expectedOut);
+  });
+  it('Z2: an estimate the node cannot give now never flips a reviewed gasless swap (only ETH that proves to cover it does)', async () => {
+    const control = { estimate: 'up' as 'up' | 'down' }, s = service({ rpc: nodeRpc(control) }), run = await reviewed(s), id = run.quote.executionId;
+    expect(run.quote.gas!.mechanism).toBe('ZEROX_GASLESS_SWAP');
+    control.estimate = 'down';
+    const begun = await s.beginGasless(id, owner.address);
+    expect(begun.attempt.state).toBe('SIGNING');
+    expect(s.load(id).reviewedManifestHash).toBe(run.quote.manifestHash);
+    expect((await s.submitGasless(id, begun.attempt.attemptId, { approval: sign(begun.approval), trade: sign(begun.trade)! })).gasless!.at(-1)!.state).toBe('SUBMITTED');
+  });
+  it('Z3: a 0x quote worse than FloFi\'s own Uniswap quote beyond its disclosed fees is refused before anything is signed (native, short, with the reason)', async () => {
+    zx = createZeroExDouble(chain, { now: () => clock, price: { numerator: 2_500_000_000n, denominator: 1n } });
+    zx.script.permitTokens = new Set([usdg.address!]);
+    const run = await service().prepare(catalogSwapWorkflow(usdg, tsla, '100000000'), owner.address);
+    expect(run.quote.gas).toMatchObject({ mechanism: 'NATIVE_WALLET_GAS', nativeShort: true, zeroEx: null,
+      unavailable: [{ mechanism: 'ZEROX_GASLESS_SWAP', code: 'ZEROX_QUOTE_WORSE_THAN_REFERENCE' }] });
+    // The Review keeps FloFi's own figures (nothing of 0x's worse quote is bound).
+    expect(run.quote).toMatchObject({ expectedOut: POOL_OUT.toString(), minimumOut: '258700000000000000' });
+  });
+  it('Z3: a stored gasless binding without FloFi\'s reference, or one whose minimum is below its floor, is never authority', async () => {
+    const s = service(), run = await reviewed(s), id = run.quote.executionId, dir = dirs.at(-1)!;
+    const { writeFileSync } = await import('node:fs');
+    const withoutReference: Record<string, unknown> = { ...run.quote.gas!.zeroEx! };
+    delete withoutReference.reference;
+    for (const zeroEx of [withoutReference, { ...run.quote.gas!.zeroEx!, reference: { ...run.quote.gas!.zeroEx!.reference, floor: (BigInt(run.quote.minimumOut) + 1n).toString() } }]) {
+      const tampered = { ...run, quote: { ...run.quote, gas: { ...run.quote.gas!, zeroEx } } };
+      const fields: Record<string, unknown> = { ...tampered.quote };
+      delete fields.manifestHash;
+      writeFileSync(join(dir, id + '.json'), JSON.stringify({ ...tampered, quote: { ...fields, manifestHash: canonicalDigest(fields) } }));
+      await expect(s.beginGasless(id, owner.address)).rejects.toThrow('QUOTE_BINDING_INVALID');
+    }
   });
 });
 

@@ -620,7 +620,14 @@ function assertCanonicalQuote(run: PublicRun): void {
   const gas = run.quote.gas;
   if (gas && (gas.mechanism === 'ZEROX_GASLESS_SWAP' ? !gas.zeroEx || gas.payment.mechanism !== 'ZEROX_GASLESS_SWAP' || gas.zeroEx.taker !== gas.owner ||
       gas.zeroEx.sellAmount !== run.quote.amountIn || gas.zeroEx.sellToken !== run.quote.inputToken || gas.zeroEx.buyToken !== run.quote.outputToken ||
-      gas.zeroEx.minBuyAmount !== run.quote.minimumOut : gas.zeroEx !== null || gas.payment.mechanism !== 'NATIVE_WALLET_GAS')) fail('QUOTE_BINDING_INVALID');
+      gas.zeroEx.minBuyAmount !== run.quote.minimumOut || !referenceBound(gas.zeroEx, run.quote)
+    : gas.zeroEx !== null || gas.payment.mechanism !== 'NATIVE_WALLET_GAS')) fail('QUOTE_BINDING_INVALID');
+}
+/** ADR-0010 §5: a gasless binding carries FloFi's own reference for the same route, and 0x's minimum is at least its floor. */
+function referenceBound(zeroEx: NonNullable<QuoteGas['zeroEx']>, q: PublicQuote): boolean {
+  const reference = zeroEx.reference as Partial<NonNullable<QuoteGas['zeroEx']>['reference']> | undefined;
+  return !!reference && reference.source === 'uniswap-v3' && reference.pool === q.pool && reference.fee === q.fee &&
+    typeof reference.floor === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(reference.floor) && BigInt(zeroEx.minBuyAmount) >= BigInt(reference.floor);
 }
 export function reviewPublicRun(run: PublicRun, manifestHash: string, now: Date): PublicRun {
   assertCanonicalQuote(run);
@@ -770,10 +777,16 @@ function createGaslessExecution({ rpcFor, now, catalog, persistence, quote, quot
     await save({ ...next, reviewedManifestHash: null });
     return fail(code);
   }
-  /** The reviewed gasless swap is still what the policy picks now, for the same genuine Settler and a plain EOA owner. */
+  /**
+   * The reviewed gasless swap is still what the policy picks now, for the same genuine Settler and a plain EOA owner. The native path's coverage
+   * is estimated on FloFi's own Uniswap v3 call (the reference route and minimum bound beside 0x's quote), never on 0x's minimum: 0x may quote
+   * above what the pool pays, and that call would revert. Only ETH that now proves to cover the native path changes the reviewed mechanism; a
+   * coverage that cannot be estimated now (the pool moved past the reference minimum, a node that did not answer) leaves the Review as it was.
+   */
   async function stillReviewed(run: PublicRun, owner: string, rpc: Rpc, at: string, attempt?: GaslessAttempt): Promise<{ current: string; previous: string | null }> {
     const { binding } = gaslessOf(run);
-    if ((await swapNativeCoverage(run.quote, owner, rpc, at)).covers !== false) await renew(run, owner, GAS_ABSTRACTION_CODES.changed, attempt);
+    const native = { ...run.quote, expectedOut: binding.reference.expectedOut, minimumOut: binding.reference.minimumOut };
+    if ((await swapNativeCoverage(native, owner, rpc, at)).covers === true) await renew(run, owner, GAS_ABSTRACTION_CODES.changed, attempt);
     const settlers = await readGenuineSettlers(rpc, at);
     if (binding.settler !== settlers.current && binding.settler !== settlers.previous) await renew(run, owner, 'QUOTE_CHANGED_REVIEW_REQUIRED', attempt);
     if (ownerAccountCode(await rpc('eth_getCode', [owner, at])).kind !== 'EOA') fail('ZEROX_OWNER_NOT_EOA');
@@ -1422,8 +1435,10 @@ async function bindSwapGas(q: PublicQuote, ownerValue: string, rpc: Rpc, runtime
   if (owner === '0x' + '0'.repeat(40)) fail('ADDRESS_INVALID');
   if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
   const native = await swapNativeCoverage(q, owner, rpc, at);
+  // `q` is FloFi's own catalog quote (never a bound one): its Uniswap v3 route and minimum are the reference 0x's quote must not fall below.
   const evaluated = native.covers === false ? await gaslessCandidate(runtime.gasless, rpc, { chainId: P.chainId, owner, block: at,
-    sellToken: q.inputToken, buyToken: q.outputToken, sellAmount: q.amountIn, slippageBps: q.slippageBps, conversion: Boolean(q.conversion), nowMs: now().getTime() }) : null;
+    sellToken: q.inputToken, buyToken: q.outputToken, sellAmount: q.amountIn, slippageBps: q.slippageBps, conversion: Boolean(q.conversion), nowMs: now().getTime(),
+    reference: { source: 'uniswap-v3', pool: q.pool, fee: q.fee, expectedOut: q.expectedOut, minimumOut: q.minimumOut } }) : null;
   const selection = selectGasMechanism({ chain: P.chainRef, nativeCovers: native.covers, candidate: evaluated?.candidate ?? null });
   const zeroEx = selection.mechanism === 'ZEROX_GASLESS_SWAP' ? evaluated?.binding ?? fail('ZEROX_TRADE_UNVERIFIABLE') : null;
   const sides = { input: { token: q.inputToken, symbol: q.inputSymbol, decimals: quoteDecimals(q, 'input') },

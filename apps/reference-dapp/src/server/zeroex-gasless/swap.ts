@@ -19,7 +19,8 @@ import type { GasMechanism, GasPayment, MechanismCandidate, MechanismUnavailable
 import type { ZeroExGaslessConfig } from '../../gas-abstraction/config.ts';
 import type { PublicReceipt, Rpc } from '../public-testnet-service.ts';
 import type { ZeroExGaslessClient, GaslessSignature } from './client.ts';
-import { EXECUTE_METATXN_SELECTOR, NATIVE_TOKEN, PERMIT2, readGenuineSettlers, verifyGaslessQuote, type TypedData, type ZeroExGaslessBinding } from './quote.ts';
+import { EXECUTE_METATXN_SELECTOR, NATIVE_TOKEN, PERMIT2, readGenuineSettlers, verifyGaslessQuote, type GaslessReference, type TypedData,
+  type ZeroExGaslessBinding } from './quote.ts';
 
 export type { ZeroExGaslessBinding } from './quote.ts';
 /** The gasless runtime of a catalog network: its configuration (off unless `FLOFI_ZEROX_GASLESS=enabled`) and its 0x client. */
@@ -98,7 +99,9 @@ export async function nativeCoverage(rpc: Rpc, input: { readonly owner: string; 
  */
 export async function gaslessCandidate(runtime: GaslessRuntime | undefined, rpc: Rpc, input: { readonly chainId: number; readonly owner: string;
   readonly block: string; readonly sellToken: string; readonly buyToken: string; readonly sellAmount: string; readonly slippageBps: number;
-  readonly conversion: boolean; readonly nowMs: number }): Promise<{ readonly candidate: MechanismCandidate; readonly binding: ZeroExGaslessBinding | null }> {
+  readonly conversion: boolean; readonly nowMs: number;
+  /** FloFi's own Uniswap v3 quote of exactly this swap at `block`: 0x's minimum is never accepted below it net of 0x's disclosed fees. */
+  readonly reference: GaslessReference }): Promise<{ readonly candidate: MechanismCandidate; readonly binding: ZeroExGaslessBinding | null }> {
   const refuse = (code: string) => ({ candidate: { mechanism: 'ZEROX_GASLESS_SWAP' as const, eligible: false as const, code }, binding: null });
   if (!runtime) return refuse('TOKEN_GAS_NOT_CONFIGURED');
   if (!runtime.config.enabled) return refuse(runtime.config.code);
@@ -112,8 +115,8 @@ export async function gaslessCandidate(runtime: GaslessRuntime | undefined, rpc:
     const request = { chainId: input.chainId, taker: input.owner, sellToken: input.sellToken, buyToken: input.buyToken, sellAmount: input.sellAmount,
       slippageBps: input.slippageBps };
     const { parsed, rawHash } = await runtime.client.quote(request);
-    const binding = verifyGaslessQuote(parsed, rawHash, request, { settlers, nowMs: input.nowMs, minimumLifetimeMs: GASLESS_MINIMUM_LIFETIME_MS,
-      maximumLifetimeSeconds: GASLESS_MAXIMUM_LIFETIME_SECONDS });
+    const binding = verifyGaslessQuote(parsed, rawHash, request, { settlers, reference: input.reference, nowMs: input.nowMs,
+      minimumLifetimeMs: GASLESS_MINIMUM_LIFETIME_MS, maximumLifetimeSeconds: GASLESS_MAXIMUM_LIFETIME_SECONDS });
     return { candidate: { mechanism: 'ZEROX_GASLESS_SWAP', eligible: true }, binding };
   } catch (cause) {
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'ZEROX_PROVIDER_UNAVAILABLE';
