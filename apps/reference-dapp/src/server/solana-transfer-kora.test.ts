@@ -7,8 +7,8 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createMockedSolanaTransferChain, createMockedSolanaWallet, fromBase64, parseTransaction, SOLANA_MAINNET_TRANSFER, SOLANA_DEVNET_TRANSFER,
-  SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/reference-compiler';
+import { compileMessageV0, createMockedSolanaTransferChain, createMockedSolanaWallet, fromBase64, parseTransaction, serializeMessageV0, serializeTransaction, toBase64,
+  SOLANA_MAINNET_TRANSFER, SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/reference-compiler';
 import { createSolanaTransferNode, type SemanticWorkflow, type SolanaTransferToken } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaTransferService } from './solana-transfer-service';
 import { koraGasFromEnv } from '../gas-abstraction/kora/runtime';
@@ -84,5 +84,52 @@ describe('Solana transfer with Pimlico Kora (MOCKED loopback, ADR-0010 §4)', ()
       journalDir: await mkdtemp(join(tmpdir(), 'flofi-transfer-kora-devnet-')), provenance: 'MOCKED', executionEnabled: true, kora: s.kora });
     await expect(devnet.simulate(workflow(s.recipient, '1000', null, SOLANA_DEVNET_TRANSFER.chain), s.owner.owner)).rejects.toThrow('SOLANA_TRANSFER_OWNER_NOT_WALLET');
     expect(s.double.state.signed).toEqual([]);
+  });
+  // K1: an HTTP-level failure after Kora signed proves nothing; the transfer is observed and recovered, never recorded as not executed.
+  it('a gateway 504 after Kora signed and broadcast: the transfer is observed and reconciles', async () => {
+    const s = await setup({ recipientAccount: true });
+    const wf = workflow(s.recipient, '12000000');
+    const simulated = await s.service.simulate(wf, s.owner.owner);
+    await s.service.review(simulated.id, simulated.review.commitment, wf);
+    const begin = await s.service.begin(simulated.id, s.owner.owner, wf);
+    s.double.state.gatewayErrorsAfterSign = 1;
+    await expect(s.service.submit(simulated.id, s.owner.sign(begin.unsignedTransaction))).resolves.toMatchObject({ verdict: 'PENDING',
+      submissionError: 'KORA_PROVIDER_UNAVAILABLE', attempt: { state: 'SUBMISSION_RESULT_UNKNOWN', signature: null } });
+    await expect(s.service.observe(simulated.id)).resolves.toMatchObject({ verdict: 'RECONCILED' });
+    expect(s.chain.tokenAccount(s.chain.ata(s.recipient, T.USDC.mint))?.amount).toBe(7n + 12_000_000n);
+  });
+  // K4: a lost answer is always decided — whatever the owner's later activity — between the Review's slot and the blockhash's expiry.
+  it('recovers a lost answer, and proves an unsigned one absent, even after many later transactions name the owner', async () => {
+    const spam = async (s: Awaited<ReturnType<typeof setup>>, n: number) => {
+      const sender = createMockedSolanaWallet();
+      s.chain.fundWallet(sender.owner, 10_000_000_000n);
+      for (let i = 0; i < n; i++) {
+        const latest = await s.chain.rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]) as { value: { blockhash: string } };
+        const data = new Uint8Array(12); new DataView(data.buffer).setUint32(0, 2, true); new DataView(data.buffer).setBigUint64(4, 1_000_000n + BigInt(i), true);
+        const message = serializeMessageV0(compileMessageV0(sender.owner, [{ programId: '11111111111111111111111111111111', accounts: [
+          { pubkey: sender.owner, isSigner: true, isWritable: true }, { pubkey: s.owner.owner, isSigner: false, isWritable: true }], data }], latest.value.blockhash, {}));
+        await s.chain.rpc('sendTransaction', [sender.sign(toBase64(serializeTransaction(null, message))), { encoding: 'base64' }]);
+      }
+    };
+    // Kora signed and sent it, both answers lost; then 60 transactions naming the owner landed before the blockhash expired.
+    const found = await setup({ recipientAccount: true });
+    const wf = workflow(found.recipient, '12000000');
+    const a = await found.service.simulate(wf, found.owner.owner);
+    await found.service.review(a.id, a.review.commitment, wf);
+    const beginA = await found.service.begin(a.id, found.owner.owner, wf);
+    found.double.state.loseAnswers = 2;
+    await expect(found.service.submit(a.id, found.owner.sign(beginA.unsignedTransaction))).resolves.toMatchObject({ attempt: { state: 'SUBMISSION_RESULT_UNKNOWN' } });
+    await spam(found, 60);
+    await expect(found.service.observe(a.id)).resolves.toMatchObject({ verdict: 'RECONCILED' });
+    // Kora never signed (its call timed out); 60 transactions naming the owner landed after the blockhash expired: absence is still proven.
+    const absent = await setup({ recipientAccount: true });
+    const b = await absent.service.simulate(wf, absent.owner.owner);
+    await absent.service.review(b.id, b.review.commitment, wf);
+    const beginB = await absent.service.begin(b.id, absent.owner.owner, wf);
+    absent.double.state.signMode = 'UNAVAILABLE';
+    await absent.service.submit(b.id, absent.owner.sign(beginB.unsignedTransaction));
+    absent.chain.advance(b.review.lastValidBlockHeight - absent.chain.state.blockHeight + 1);
+    await spam(absent, 60);
+    await expect(absent.service.observe(b.id)).resolves.toMatchObject({ verdict: 'NOT_EXECUTED', error: 'SOLANA_TRANSFER_TRANSACTION_EXPIRED_NOT_EXECUTED' });
   });
 });

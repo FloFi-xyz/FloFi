@@ -29,7 +29,13 @@ export async function startKoraDouble(options: KoraDoubleOptions) {
   const signer = createMockedSolanaWallet(), payment = createMockedSolanaWallet().owner;
   const solPrice = options.solPriceMicroUsd ?? 117_600_000n, rent = options.rentLamports ?? 2_039_280n;
   const state = { calls: [] as KoraDoubleCall[], signed: [] as string[], unpaid: 0, signMode: 'OK' as SignMode, loseAnswers: 0, priceDriftBps: 0n, broadcast: true,
-    estimateError: null as { code: number; message: string } | null, answerSigner: null as string | null };
+    estimateError: null as { code: number; message: string } | null, answerSigner: null as string | null,
+    /** Bytes the double actually signed (and broadcast, unless `broadcast` is off). */
+    completed: [] as string[],
+    /** Like Kora re-simulating bytes it already signed and sent: the identical bytes again are refused -32000 (already processed). */
+    refuseRepeat: false,
+    /** Answers this many signAndSendTransaction calls, AFTER signing and broadcasting, with a gateway's HTTP 504 HTML page instead of the result. */
+    gatewayErrorsAfterSign: 0 };
   const rpcError = (code: number, message: string) => Object.assign(new Error(message), { rpcCode: code });
   /** Like Kora, v0 address lookup tables are resolved from the chain itself. */
   async function tablesOf(parsed: ReturnType<typeof parseMessageV0>): Promise<LookupTables> {
@@ -95,6 +101,8 @@ export async function startKoraDouble(options: KoraDoubleOptions) {
       case 'signAndSendTransaction': {
         const tx = decode(params.transaction);
         state.signed.push(params.transaction as string);
+        if (state.refuseRepeat && state.completed.includes(params.transaction as string))
+          throw rpcError(-32000, 'Transaction simulation failed: This transaction has already been processed');
         if (!await paid(tx.message)) state.unpaid++;
         if (state.signMode === 'UNAVAILABLE') throw rpcError(-32603, 'Solana paymaster unavailable');
         if (state.signMode === 'HANG_UNSIGNED') { await new Promise(resolve => setTimeout(resolve, 2_000)); throw rpcError(-32603, 'Solana paymaster unavailable'); }
@@ -106,6 +114,7 @@ export async function startKoraDouble(options: KoraDoubleOptions) {
         if (!payment || !token || payment.amount < tokenAmount(required, token.decimals)) throw rpcError(-32000, `Insufficient token payment. Required ${required} lamports`);
         await simulate(params.transaction as string);
         const signed = signer.sign(params.transaction as string), signature = base58Encode(parseTransaction(fromBase64(signed, 2048)).signatures[0]!);
+        state.completed.push(params.transaction as string);
         if (state.broadcast) await options.rpc('sendTransaction', [signed, { encoding: 'base64' }]).catch(() => undefined);
         return { signature, signed_transaction: state.signMode === 'WRONG_SIGNER' ? createMockedSolanaWallet().sign(params.transaction as string) : signed,
           signer_pubkey: state.answerSigner ?? signer.owner };
@@ -127,6 +136,11 @@ export async function startKoraDouble(options: KoraDoubleOptions) {
           state.calls.push({ method, params });
           const result = await handle(method, params);
           if (method === 'signAndSendTransaction' && state.loseAnswers > 0) { state.loseAnswers--; request.socket.destroy(); return; }
+          if (method === 'signAndSendTransaction' && state.gatewayErrorsAfterSign > 0) {
+            state.gatewayErrorsAfterSign--;
+            response.writeHead(504, { 'content-type': 'text/html' }).end('<html><body>504 Gateway Time-out</body></html>');
+            return;
+          }
           response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id, result }));
         } catch (cause) {
           const error = cause as { rpcCode?: number; message?: string };

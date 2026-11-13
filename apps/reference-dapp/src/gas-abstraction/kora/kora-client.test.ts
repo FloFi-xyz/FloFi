@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** ADR-0010 §4: FloFi's Kora JSON-RPC client and runtime against in-process fake transports (no network, no provider). */
 import { afterEach, describe, expect, it } from 'vitest';
-import { createKoraClient, koraErrorCode, redactKoraText, KORA_CODES, type KoraClient, type KoraTransport } from './client';
+import { createKoraClient, isKoraRefusalBeforeSigning, koraErrorCode, redactKoraText, KORA_CODES, type KoraClient, type KoraTransport } from './client';
 import { createKoraGas, withKoraFallback } from './runtime';
 import { readKoraGasConfig } from '../config';
 
@@ -55,6 +55,30 @@ describe('Kora JSON-RPC client', () => {
     expect(JSON.stringify(unreachable?.cause)).not.toContain('sk-secret');
     expect((await message(createKoraClient(URL_WITH_KEY, { transport: reply('', 429) }).getSupportedTokens()))?.message).toBe('KORA_RATE_LIMITED');
     expect((await message(createKoraClient(URL_WITH_KEY, { transport: reply('<html>', 502) }).getSupportedTokens()))?.message).toBe('KORA_PROVIDER_UNAVAILABLE');
+  });
+  // K1: only Kora's own well-formed JSON-RPC answer with a pre-signing validation code proves it did not sign; nothing at the HTTP level does.
+  it('marks as a refusal before signing only a 2xx JSON-RPC 2.0 error with a pre-signing code (-32000, -32602, -32050)', async () => {
+    const refusal = async (body: unknown, status = 200) => {
+      const error = await message(createKoraClient(URL_WITH_KEY, { transport: reply(body, status) }).signAndSendTransaction('AQ=='));
+      return { code: error?.message, definitive: isKoraRefusalBeforeSigning(error) };
+    };
+    const rpc = (code: unknown, text: unknown = 'refused') => ({ jsonrpc: '2.0', id: 1, error: { code, message: text } });
+    expect(await refusal(rpc(-32000, 'Insufficient token payment. Required 5000 lamports'))).toEqual({ code: 'KORA_PAYMENT_INSUFFICIENT', definitive: true });
+    expect(await refusal(rpc(-32000, 'Transaction simulation failed'))).toEqual({ code: 'KORA_TRANSACTION_REFUSED', definitive: true });
+    expect(await refusal(rpc(-32602, 'Invalid params'))).toMatchObject({ definitive: true });
+    expect(await refusal(rpc(-32050, 'Account not found'))).toEqual({ code: 'KORA_FEE_TOKEN_ACCOUNT_MISSING', definitive: true });
+    // Kora may have signed: internal errors, gateways, rate limits, malformed or non-2xx error envelopes and unknown codes prove nothing.
+    expect(await refusal(rpc(-32603, 'Solana paymaster unavailable'))).toEqual({ code: 'KORA_PROVIDER_UNAVAILABLE', definitive: false });
+    expect(await refusal('<html>504 Gateway Time-out</html>', 504)).toEqual({ code: 'KORA_PROVIDER_UNAVAILABLE', definitive: false });
+    expect(await refusal('', 429)).toEqual({ code: 'KORA_RATE_LIMITED', definitive: false });
+    expect(await refusal(rpc(-32005, 'rate limited'))).toEqual({ code: 'KORA_RATE_LIMITED', definitive: false });
+    expect(await refusal(rpc(-32000), 500)).toMatchObject({ definitive: false });
+    expect(await refusal(rpc(-32000), 400)).toMatchObject({ definitive: false });
+    expect(await refusal(rpc('-32000'))).toMatchObject({ definitive: false });
+    expect(await refusal(rpc(-32000, { text: 'x' }))).toMatchObject({ definitive: false });
+    expect(await refusal({ jsonrpc: '1.0', id: 1, error: { code: -32000, message: 'refused' } })).toMatchObject({ definitive: false });
+    expect(await refusal(rpc(-32001))).toEqual({ code: 'KORA_TRANSACTION_REFUSED', definitive: false });
+    expect(isKoraRefusalBeforeSigning(new Error('KORA_TRANSACTION_REFUSED'))).toBe(false);
   });
   it('passes the operator\'s execution pause before signAndSendTransaction leaves the process', async () => {
     process.env.FLOFI_EXECUTION_PAUSED = 'true';

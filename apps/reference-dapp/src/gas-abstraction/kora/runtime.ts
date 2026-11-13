@@ -7,23 +7,32 @@
  *   selection   native first: the Kora build is tried only after the native build failed for lack of SOL, and only `selectGasMechanism` decides
  *   relay       K1 then one Kora call: the exact owner-signed bytes are re-verified (pinned fee payer, Kora's slot empty, the reviewed payment),
  *               the S1 token-fee claim is asserted, `signAndSendTransaction` is called (one retry with the identical bytes when the answer is
- *               lost), and Kora's answer must be those bytes completed by the pinned signer
+ *               lost, unless the caller counts its calls itself), and Kora's answer must be those bytes completed by the pinned signer. REFUSED
+ *               only when nothing was sent (a local check failed) or Kora's own pre-signing refusal answered the FIRST call for these bytes;
+ *               any other failure is UNKNOWN (Kora may have signed: it also broadcasts in the background) and the caller observes the chain
  *   still due   before the wallet is asked: the policy would still pick Kora (no SOL arrived), the payment account exists, the fee token covers
  *
- * FloFi never pays: a Review without a positive token payment never reaches Kora, and Kora's own refusal is final for those bytes.
+ * FloFi never pays: a Review without a positive token payment never reaches Kora, and Kora's own refusal of the first call is final for those bytes.
  */
 import { isSolanaNativeFeeShortfall, readSolanaAccounts, verifyKoraAnswer, verifyKoraOwnerSigned, parseMessageV0, parseTransaction, fromBase64, decodeTokenAccount,
   KORA_MECHANISM, KORA_TOKEN_PROGRAM, type KoraFeeToken, type KoraGasTerms, type KoraPort, type LookupTables, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { assertReviewedMechanism, selectGasMechanism, SOLANA_MAINNET } from '../mechanism.ts';
 import { readKoraGasConfig, type KoraGasConfig } from '../config.ts';
 import { assertUserFundedSubmission } from '../../user-funded/gas-payer.ts';
-import { createKoraClient, KORA_CODES, KORA_REFUSAL_CODES, type KoraClient, type KoraTransport } from './client.ts';
+import { createKoraClient, isKoraRefusalBeforeSigning, KORA_CODES, type KoraClient, type KoraTransport } from './client.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type KoraRelayOutcome = { readonly kind: 'SIGNED'; readonly signature: string; readonly transaction: string }
   | { readonly kind: 'REFUSED'; readonly code: string } | { readonly kind: 'UNKNOWN'; readonly code: string };
 export type KoraRelayInput = { readonly review: { readonly message: string; readonly owner: string; readonly gas: KoraGasTerms; readonly lookupTables?: LookupTables };
-  readonly ownerSigned: string; readonly prefix: string };
+  readonly ownerSigned: string; readonly prefix: string;
+  /**
+   * Kora calls already made for these exact bytes (a caller that counts its calls durably, e.g. a sign-all group); 0 (default): this relay's first
+   * call is the first one. A refusal is definitive only for the first call.
+   */
+  readonly priorCalls?: number;
+  /** Calls this relay may make (default 2: one retry with the identical bytes when the answer was lost; a caller that counts its calls passes 1). */
+  readonly maxCalls?: 1 | 2 };
 export type KoraGas = { readonly feePayer: string; readonly paymentAddress: string; readonly port: KoraPort; relay(input: KoraRelayInput): Promise<KoraRelayOutcome> };
 type EnabledKora = Extract<KoraGasConfig, { enabled: true }>;
 const codeOf = (cause: unknown) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : '';
@@ -57,14 +66,19 @@ export function createKoraGas(config: EnabledKora, client: KoraClient, options: 
     const feePayer = parseMessageV0(parseTransaction(fromBase64(ownerSigned, 2048)).message).staticKeys[0] ?? '';
     assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer, ownerWallet: review.owner,
       tokenFee: { mechanism: KORA_MECHANISM, relayer: gas.feePayer, pinnedRelayers: [config.signer], token: gas.token.mint, amount: gas.amount } });
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const prior = input.priorCalls ?? 0, calls = input.maxCalls ?? 2;
+    if (!Number.isSafeInteger(prior) || prior < 0 || ![1, 2].includes(calls)) throw new Error('KORA_RELAY_INPUT_INVALID');
+    for (let attempt = 0; attempt < calls; attempt++) {
       let answer: Awaited<ReturnType<KoraClient['signAndSendTransaction']>>;
       try { answer = await client.signAndSendTransaction(ownerSigned); }
       catch (cause) {
         const code = codeOf(cause) || KORA_CODES.unknown;
-        if (KORA_REFUSAL_CODES.has(code)) return { kind: 'REFUSED', code };
-        // The execution pause, or a lost answer: retried once with the identical bytes (the same transaction at most once), then unknown.
-        if (!RETRYABLE.has(code) || attempt === 1) return { kind: 'UNKNOWN', code };
+        // Kora's own pre-signing refusal of the FIRST call for these bytes: it never signed them, so they can never land. Any other answer —
+        // an HTTP-level failure, -32603, a rate limit, or a refusal after an earlier call whose answer was lost (it may have been signed and
+        // landed) — proves nothing: UNKNOWN, and the caller observes the chain until the blockhash provably expired.
+        if (prior + attempt === 0 && isKoraRefusalBeforeSigning(cause)) return { kind: 'REFUSED', code };
+        // A lost answer: retried once with the identical bytes (the same transaction at most once), then unknown.
+        if (!RETRYABLE.has(code) || attempt === calls - 1) return { kind: 'UNKNOWN', code };
         continue;
       }
       try { return { kind: 'SIGNED', ...verifyKoraAnswer(ownerSigned, answer, config.signer) }; }

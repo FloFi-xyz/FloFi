@@ -18,7 +18,7 @@ export type MockedTransferMint = { program: 'spl-token' | 'token-2022'; decimals
 export type MockedTransferTokenAccount = { program: 'spl-token' | 'token-2022'; mint: string; owner: string; amount: bigint; state: 1 | 2; extensions: { type: number; value: Uint8Array }[] };
 type Snapshot = { lamports: Map<string, bigint>; systemData: Map<string, number>; mints: Map<string, MockedTransferMint>; tokens: Map<string, MockedTransferTokenAccount>; executables: Set<string> };
 type Landed = { signature: string; slot: number; bytes: string; err: unknown; fee: bigint; keys: string[]; pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[];
-  finalizedAt: number };
+  finalizedAt: number; /** The block height it landed at (`getBlock`). */ height: number };
 export type MockedTransferOptions = { profile?: SolanaTransferProfile; send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number;
   /** A wrong RPC cluster (genesis hash) for wrong-network tests. */ genesisHash?: string; simulateWithoutFee?: boolean };
 const cloneToken = (t: MockedTransferTokenAccount): MockedTransferTokenAccount => ({ ...t, extensions: t.extensions.map(e => ({ ...e })) });
@@ -151,7 +151,7 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
     const final = result.err ? (() => { const s = snapshot(); s.lamports.set(keys[0]!, (s.lamports.get(keys[0]!) ?? 0n) - result.fee); return s; })() : working;
     const lamportsAt = (s: Snapshot, k: string) => s.lamports.get(k) ?? 0n;
     state.current = final; state.slot += 1;
-    state.transactions.set(signature, { signature, slot: state.slot, bytes: txBase64, err: result.err, fee: result.fee, keys, pre: keys.map(k => lamportsAt(before, k)),
+    state.transactions.set(signature, { signature, slot: state.slot, height: state.blockHeight, bytes: txBase64, err: result.err, fee: result.fee, keys, pre: keys.map(k => lamportsAt(before, k)),
       post: keys.map(k => lamportsAt(final, k)), preTokens: tokenBalances(before, keys), postTokens: tokenBalances(final, keys),
       finalizedAt: state.blockHeight + (options.confirmationDelay ?? 0) });
     return signature;
@@ -166,6 +166,12 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
         .map(([pubkey]) => ({ pubkey, account: accountValue(state.current, pubkey) })));
       case 'getLatestBlockhash': { const hash = blockhash(state.blockHeight); issued.set(hash, state.blockHeight + 150); return value({ blockhash: hash, lastValidBlockHeight: state.blockHeight + 150 }); }
       case 'getBlockHeight': return state.blockHeight;
+      case 'getBlock': {
+        // Only a slot that holds a landed transaction is a block here (a skipped slot is an RPC error, as on a real node).
+        const t = [...state.transactions.values()].find(x => x.slot === Number(params[0]));
+        if (!t) throw Object.assign(new Error('Slot was skipped, or missing in long-term storage'), { rpc: -32007 });
+        return { blockHeight: t.height, blockTime: 1_790_870_000 + t.slot % 1000, parentSlot: t.slot - 1, blockhash: t.signature.slice(0, 44), previousBlockhash: t.signature.slice(0, 44) };
+      }
       case 'getSlot': return state.slot;
       case 'getFeeForMessage': {
         const message = parseMessageV0(fromBase64(params[0]));
@@ -173,9 +179,14 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
         return value(Number(execute(snapshot(), instructions, message.staticKeys[0]!, false, message.header[0]).fee));
       }
       case 'getSignaturesForAddress': {
-        // Newest first, like the RPC: every landed transaction that names the address (ADR-0010 recovery of a lost Kora answer).
-        const limit = Math.min(1_000, Number((params[1] as { limit?: number } | undefined)?.limit ?? 1_000));
-        return [...state.transactions.values()].filter(t => t.keys.includes(params[0] as string)).reverse().slice(0, limit)
+        // Newest first, like the RPC: every landed transaction that names the address (ADR-0010 recovery of a lost Kora answer), paged like the
+        // RPC: `before` starts after that signature, `until` stops before it.
+        const config = (params[1] ?? {}) as { limit?: number; before?: string; until?: string };
+        const limit = Math.min(1_000, Number(config.limit ?? 1_000));
+        let listed = [...state.transactions.values()].filter(t => t.keys.includes(params[0] as string)).reverse();
+        if (config.before) { const at = listed.findIndex(t => t.signature === config.before); listed = at < 0 ? [] : listed.slice(at + 1); }
+        if (config.until) { const at = listed.findIndex(t => t.signature === config.until); if (at >= 0) listed = listed.slice(0, at); }
+        return listed.slice(0, limit)
           .map(t => ({ signature: t.signature, slot: t.slot, err: t.err, memo: null, blockTime: 1_790_900_000 + t.slot % 1000,
             confirmationStatus: state.blockHeight >= t.finalizedAt ? 'finalized' : 'confirmed' }));
       }

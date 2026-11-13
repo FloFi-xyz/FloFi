@@ -32,8 +32,11 @@ async function setup() {
   doubles.push(double);
   chain.fundWallet(double.signer, 5_000_000_000n); chain.fundToken(double.payment, T.USDC.mint, 0n); chain.fundToken(double.payment, T.USDT.mint, 0n);
   const kora = koraGasFromEnv({ FLOFI_KORA_TOKEN_GAS: 'enabled', FLOFI_PIMLICO_KORA_RPC_URL: double.url, FLOFI_KORA_SIGNER: double.signer, FLOFI_KORA_PAYMENT_ADDRESS: double.payment });
+  // FloFi's own Solana RPC (the Kora double reads the cluster directly); a test may make a method fail, as an unavailable node would.
+  const blocked = new Set<string>();
+  const solana = async (method: string, params: readonly unknown[]) => { if (blocked.has(method)) throw new Error('SOLANA_RPC_UNAVAILABLE'); return chain.rpc(method, params); };
   const h = await workflowRunHarness(t.db, { flows: ['solana-transfer'], policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana' }, userFundedChains: [SOLANA],
-    solana: chain.rpc, kora });
+    solana, kora });
   const owner = h.d.solOwner.address, wallets = [h.evm, h.sol];
   // The owner holds USDC and no SOL at all (its System account does not exist).
   chain.fundToken(owner, T.USDC.mint, 50_000_000n);
@@ -48,7 +51,7 @@ async function setup() {
     const own = parseTransaction(fromBase64(await h.d.solOwner.signTransaction(message), 2048)).signatures[0]!;
     return toBase64(serializeSignedTransaction([new Uint8Array(64), own], fromBase64(message, 2048)));
   };
-  return { t, chain, double, h, owner, wallets, approval, run, signSlot1, recipients: [a, b] };
+  return { t, chain, double, h, owner, wallets, approval, run, signSlot1, recipients: [a, b], blocked };
 }
 type KoraTx = { message: string; gas?: { amount: string; feePayer: string } };
 
@@ -57,7 +60,7 @@ describe('ADR-0010 §4: a user-funded Solana run whose fees the owner pays in US
     const { t, chain, double, h, owner, wallets, approval, run, signSlot1, recipients } = await setup();
     try {
       const p = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
-      const txs = (p.prepared as { transactions: KoraTx[] }).transactions;
+      const txs = (p.prepared as unknown as { transactions: KoraTx[] }).transactions;
       expect(p).toMatchObject({ strategy: 'SOLANA_SIGN_ALL', prepared: { kind: 'SOLANA_SIGN_ALL', fee: { unit: 'token', token: { symbol: 'USDC' } } } });
       expect(txs.every(x => x.gas?.feePayer === double.signer)).toBe(true);
       const total = txs.reduce((sum, x) => sum + BigInt(x.gas!.amount), 0n);
@@ -80,11 +83,35 @@ describe('ADR-0010 §4: a user-funded Solana run whose fees the owner pays in US
     } finally { await t.drop(); }
   });
 
+  // K3: a group a failed pass left UNCERTAIN keeps recording Kora's progress (from its current state, by version): a transaction that landed is
+  // reconciled and the next one is still sent.
+  it('a Kora group left UNCERTAIN still records the transaction it recovers, sends the rest and completes', async () => {
+    const { t, double, h, wallets, approval, run, signSlot1, blocked } = await setup();
+    try {
+      const p = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
+      const txs = (p.prepared as unknown as { transactions: KoraTx[] }).transactions;
+      // Kora signs and broadcasts tx0, its answer is lost; the owner's history cannot be read yet (nothing more is decided or sent).
+      double.state.loseAnswers = 1; blocked.add('getSignaturesForAddress');
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'SOLANA_SIGN_ALL', transactions: await Promise.all(txs.map(x => signSlot1(x.message))) });
+      const submitted = (await h.store.groups(run.runId))[0]!;
+      expect(submitted).toMatchObject({ state: 'SUBMITTED', outcome: { kora: { hashes: [null, null], relayAttempts: [1, 0] } } });
+      // A failed pass (any cause) moved the group to UNCERTAIN and the run to ATTENTION.
+      expect(await h.store.groupTransition(run.runId, 0, ['SUBMITTED'], 'UNCERTAIN', { code: 'RECONCILIATION_FAILED' })).not.toBeNull();
+      const current = (await h.store.byId(run.runId))!;
+      await h.store.transition(run.runId, { version: current.version, from: ['RUNNING'] }, 'ATTENTION', { code: 'RECONCILIATION_FAILED' });
+      blocked.clear();
+      for (let pass = 0; pass < 12 && ['RUNNING', 'ATTENTION'].includes((await h.store.byId(run.runId))!.state); pass++) await h.drain(run.runId);
+      expect((await h.store.byId(run.runId))!.state).toBe('COMPLETED');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ state: 'RECONCILED', code: null });
+      expect(double.state.signed).toHaveLength(2);
+    } finally { await t.drop(); }
+  });
+
   it('SOL that arrived since the Review: authorization never switches silently (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED); the group is planned again', async () => {
     const { t, chain, double, h, owner, wallets, approval, run, signSlot1 } = await setup();
     try {
       const p = await workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0);
-      const txs = (p.prepared as { transactions: KoraTx[] }).transactions;
+      const txs = (p.prepared as unknown as { transactions: KoraTx[] }).transactions;
       chain.fundWallet(owner, 2_000_000_000n);
       await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0, { kind: 'SOLANA_SIGN_ALL',
         transactions: await Promise.all(txs.map(x => signSlot1(x.message))) })).rejects.toThrow('GAS_MECHANISM_CHANGED_REVIEW_REQUIRED');
