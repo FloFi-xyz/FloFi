@@ -64,7 +64,7 @@ export const TEMPLATE_DEVIATIONS: readonly string[] = Object.freeze([
   'Email 3: a "Group" line is added when the person has a numbered boarding group.',
   'Email 6 v4 follows Dayane’s approved invited-guest copy (BUILD-FLOFI-FLIGHT-EMAIL6-CONSOLE-FIX-001); v1–v3 remain historical renderers.',
   'Emails 4a and 4b show the real card image (the 1200 × 630 card picture) in place of the drawn card block.',
-  'Email 6 v5 and Email 3 v3 follow the 13/11 boarding canvas: no weekday in Email 6 (preheader, step 1), its Boarding panel reads OPEN (PT: ABERTO, like the Email 3 Gate panel), and Email 3 opens with the one-day delay note. The English copy mirrors the Portuguese change.',
+  'Email 6 v5 and Email 3 v3 follow the 13/11 boarding canvas: no weekday in Email 6 (preheader, step 1), its Boarding panel reads OPEN (PT: ABERTO, like the Email 3 Gate panel), and Email 3 v3 carries the team-approved launch copy (preheader, two opening paragraphs, "what you can try today" checked against the mainnet capability matrix, small-amounts reminder, feedback request). ACCESS_REQUESTED keeps its v2 copy. The English copy mirrors the Portuguese change.',
   'Version 2 follows BUILD-FLOFI-FLIGHT-LAUNCH-ADMIN-001: linked-wallet return access in Email 3, @ in Email 4a, official card after the first route in Email 6, Portuguese interface labels and boarding-card footers. Portuguese copy follows section 04 of the supplied Flight FloFi.html; unsupported route-limit and automatic-sign-in promises remain omitted.',
 ]);
 
@@ -89,7 +89,7 @@ export type RenderedEmail = { readonly subject: string; readonly html: string; r
 
 // Approved palette (artifact design system "flofi"): navy, blue, periwinkle, ground.
 const C = { navy: '#041B3D', blue: '#2343D9', peri: '#93A6FF', soft: '#C9D2F8', ground: '#E9EEF5', panel: '#F5F8FB', line: '#DCE3F0', body: '#3A4658',
-  muted: '#7A8699', label: '#4B5B73', footSoft: '#8EA0C4', white: '#FFFFFF' } as const;
+  muted: '#7A8699', label: '#4B5B73', footSoft: '#8EA0C4', white: '#FFFFFF', blueSoft: '#E9EDFD' } as const;
 const SANS = "'Outfit',Helvetica,Arial,sans-serif", MONO = "'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace";
 
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
@@ -257,11 +257,30 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
       if (!/^\d{6}$/.test(input.code) || !/^\/board\/access(\?l=(en|pt))?#t=[A-Za-z0-9_-]{43}$/.test(input.accessUrl.slice(o.length)) || !input.accessUrl.startsWith(o))
         throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
       const subject = PT ? 'Seu grupo está embarcando ✈️' : 'Your group is boarding ✈️';
-      const preheader = PT ? 'Diga para onde vai. Você aprova cada passo.' : 'Say where you’re going. You approve every step.';
-      const delay = input.template === 'GROUP_BOARDING' ? (PT ? 'Atrasamos um dia para corrigir alguns erros antes de abrir. Obrigado pela paciência.'
-        : 'We held boarding back one day to fix a few bugs before opening. Thanks for your patience.') : null;
-      const intro = PT ? 'O seu portão abriu. Diga à FloFi para onde quer levar as suas criptos, veja cada passo simulado e assine só o que aprovar.'
-        : 'Your gate is open. Tell FloFi where you want your crypto to go, see every step simulated, and sign only what you approve.';
+      // Email 3 v3 (13/11 launch, approved by the team): "we are starting" opening, what can be tried today, and a request for feedback.
+      // The requested access email (ACCESS_REQUESTED, v2) keeps the earlier copy.
+      const launch = input.template === 'GROUP_BOARDING';
+      const preheader = launch ? (PT ? 'Estamos começando, e queremos testar com você.' : 'We’re just getting started, and we want to test it with you.')
+        : (PT ? 'Diga para onde vai. Você aprova cada passo.' : 'Say where you’re going. You approve every step.');
+      const opening = launch ? (PT ? ['A FloFi está começando, e este é o primeiro voo. Atrasamos um dia para corrigir alguns erros antes de abrir.',
+        'Queremos entender, com quem usa DeFi de verdade, onde a FloFi já ajuda e onde ainda deixa a desejar. A sua opinião agora vale muito.']
+        : ['FloFi is just getting started, and this is the first flight. We held boarding back one day to fix a few bugs before opening.',
+          'We want to learn, from people who really use DeFi, where FloFi already helps and where it still falls short. Your opinion matters a lot right now.'])
+        : [PT ? 'O seu portão abriu. Diga à FloFi para onde quer levar as suas criptos, veja cada passo simulado e assine só o que aprovar.'
+          : 'Your gate is open. Tell FloFi where you want your crypto to go, see every step simulated, and sign only what you approve.'];
+      // What the public mainnet product offers today (docs/builds/BUILD-FLOFI-MAINNET-PRODUCT-001-CAPABILITY-MATRIX.json): never a promise beyond it.
+      const tryLabel = PT ? 'O que dá para testar hoje' : 'What you can try today';
+      const tryLines: [string, string][] = PT ? [['Trocar tokens', ' na Ethereum, Base, Arbitrum One, Robinhood Chain (inclusive tokens de ações) e Solana.'],
+        ['Levar tokens de uma rede para outra', ', inclusive entre as redes EVM e a Solana.'], ['Enviar tokens', ' para outra carteira.'],
+        ['Emprestar USDC na Aave', ' e <b>prover liquidez</b>, nas redes que suportam.']]
+        : [['Swap tokens', ' on Ethereum, Base, Arbitrum One, Robinhood Chain (including stock tokens) and Solana.'],
+          ['Move tokens between networks', ', including between EVM networks and Solana.'], ['Send tokens', ' to another wallet.'],
+          ['Lend USDC on Aave', ' and <b>provide liquidity</b>, on the networks that support them.']];
+      const smallAmounts = PT ? 'Comece com valores pequenos: é mainnet, com dinheiro de verdade. Você revisa e assina cada passo na sua carteira.'
+        : 'Start with small amounts: this is mainnet, with real money. You review and sign every step in your wallet.';
+      const feedbackLabel = PT ? 'Depois de testar' : 'After you try it';
+      const feedback = PT ? 'Responda este e-mail contando como foi: onde você travou e o que esperava encontrar. Lemos todas as respostas.'
+        : 'Reply to this email and tell us how it went: where you got stuck and what you expected to find. We read every reply.';
       const hours = input.linkHours, minutes = input.codeMinutes;
       const codeLife = minutes >= 120 ? (PT ? `${Math.round(minutes / 60)} horas` : `${Math.round(minutes / 60)} hours`) : (PT ? `${minutes} minutos` : `${minutes} minutes`);
       const note = PT ? `Este botão confirma o seu embarque com este e-mail, sem senha, uma vez, e vale por ${hours} horas.`
@@ -273,14 +292,19 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
       const founding = PT ? 'As 100 primeiras pessoas a embarcar viram <b>Founding Members</b>: assento numerado, acesso antecipado à FloFi no Claude e no ChatGPT (em breve) e 3 convites.'
         : 'The first 100 to board become <b>Founding Members</b>: a numbered seat, first access to FloFi in Claude and ChatGPT (coming soon), and 3 invites.';
       const rows = [label(PT ? 'Portão' : 'Gate') + flaps(PT ? 'ABERTO' : 'OPEN'), ...input.group ? [label(PT ? 'Grupo' : 'Group') + flaps(PT ? `GRUPO ${input.group}` : `GROUP ${input.group}`)] : []];
-      const body = h1(PT ? 'Seu grupo ' : 'Your group ', PT ? 'está embarcando.' : 'is boarding.') + (delay ? p(e(delay)) : '') + p(intro) + panel(rows)
-        + button(input.accessUrl, PT ? 'Embarcar agora →' : 'Board now →') + small(e(note))
+      const tryBlock = launch ? panel([label(tryLabel) + tryLines.map(([lead, rest]) => `<div style="padding:6px 0 0;font-family:${SANS};font-size:16px;line-height:1.5;color:${C.body}"><span style="color:${C.blue};font-family:${MONO};font-weight:500">→</span> <b>${e(lead)}</b>${rest}</div>`).join('')])
+        + p(e(smallAmounts), 16) : '';
+      const feedbackBlock = launch ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:${C.blueSoft};border-radius:16px"><tr><td style="padding:16px 18px">${label(feedbackLabel)}<div style="font-family:${SANS};font-size:16px;line-height:1.5;color:${C.navy}">${e(feedback)}</div></td></tr></table>` : '';
+      const body = h1(PT ? 'Seu grupo ' : 'Your group ', PT ? 'está embarcando.' : 'is boarding.') + opening.map(text => p(e(text))).join('') + tryBlock + panel(rows)
+        + button(input.accessUrl, PT ? 'Embarcar agora →' : 'Board now →') + small(e(note)) + feedbackBlock
         + panel([label(PT ? 'Código de 6 dígitos' : '6-digit code') + flaps(input.code)]) + small(e(other)) + small(e(returning))
         + (input.foundingOpen ? `<div style="border-top:1.5px solid #E2E7EE;padding-top:16px">${p(founding, 16)}</div>` : '');
       const why = input.template === 'ACCESS_REQUESTED' ? reason.access : reason.list;
       return { subject, preheader, html: layout(ctx, { subject, preheader, band: PT ? 'Flight FloFi · Embarcando' : 'Flight FloFi · Now boarding', pose: 'welcome', body, reason: why }),
-        text: plain([subject, delay, strip(intro), ...input.group ? [`${PT ? 'Grupo' : 'Group'}: ${input.group}`] : [], `${PT ? 'Embarcar agora' : 'Board now'}: ${input.accessUrl}`, note,
-          `${PT ? 'Código de 6 dígitos' : '6-digit code'}: ${input.code}`, other, returning, input.foundingOpen && strip(founding)], ctx, why) };
+        text: plain([subject, ...opening, ...launch ? [`${tryLabel}:\n${tryLines.map(([lead, rest]) => `→ ${lead}${strip(rest)}`).join('\n')}`, smallAmounts] : [],
+          ...input.group ? [`${PT ? 'Grupo' : 'Group'}: ${input.group}`] : [], `${PT ? 'Embarcar agora' : 'Board now'}: ${input.accessUrl}`, note,
+          ...launch ? [`${feedbackLabel}: ${feedback}`] : [], `${PT ? 'Código de 6 dígitos' : '6-digit code'}: ${input.code}`, other, returning,
+          input.foundingOpen && strip(founding)], ctx, why) };
     }
     case 'CARD_FOUNDING': {
       if (input.invites.length !== 0 && input.invites.length !== 3) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');

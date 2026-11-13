@@ -347,7 +347,8 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
    * (oldest first): an explicit, operator-chosen partial send. An UNRESOLVED_OUTCOME email is never released by a filter, only by its id
    * after the operator checked the provider's log (it may already have been delivered); the same for an idempotency conflict.
    */
-  async function release(filter: { readonly emailId?: string; readonly batchKey?: string; readonly reason?: string; readonly max?: number }, now: number): Promise<number> {
+  async function release(filter: { readonly emailId?: string; readonly batchKey?: string; readonly reason?: string; readonly template?: EmailTemplate; readonly max?: number },
+    now: number): Promise<number> {
     const max = filter.max ?? 1_000_000;
     if (!Number.isSafeInteger(max) || max < 1) throw new Error('FLIGHT_RELEASE_MAX_INVALID');
     if (!filter.emailId && !filter.batchKey && !filter.reason) throw new Error('FLIGHT_RELEASE_FILTER_REQUIRED');
@@ -356,8 +357,10 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       first_attempt_at = CASE WHEN status_reason = 'UNRESOLVED_OUTCOME' THEN NULL ELSE first_attempt_at END, updated_at = clock_timestamp()
       WHERE tenant_id = $1 AND email_id IN (SELECT email_id FROM flight_emails WHERE tenant_id = $1 AND state = 'HELD'
         AND ($3::text IS NULL OR email_id = $3) AND ($4::text IS NULL OR batch_key = $4) AND ($5::text IS NULL OR status_reason = $5)
+        AND ($8::text IS NULL OR template = $8)
         AND ($3::text IS NOT NULL OR status_reason IS NULL OR NOT (status_reason = ANY($7::text[])))
-        ORDER BY created_at, email_id LIMIT $6)`, [tenantId, at(now), filter.emailId ?? null, filter.batchKey ?? null, filter.reason ?? null, max, POSSIBLY_SENT])).rowCount;
+        ORDER BY created_at, email_id LIMIT $6)`, [tenantId, at(now), filter.emailId ?? null, filter.batchKey ?? null, filter.reason ?? null, max, POSSIBLY_SENT,
+      filter.template ?? null])).rowCount;
   }
   /** Cancel pending or held emails (a postponed campaign, a mistaken batch). Sent, in-flight and unknown emails are never touched. */
   async function cancel(filter: { readonly emailId?: string; readonly batchKey?: string; readonly template?: EmailTemplate }): Promise<number> {
@@ -566,9 +569,37 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
     });
   }
 
+  /**
+   * 13/11 launch, operator-only: before `email-resume`, hold every PENDING campaign email whose template is not in `keep` (the launch sends
+   * only Email 3), so resuming releases nothing else. Held as `OPERATOR_HOLD`: nothing is cancelled or lost, nothing about the row changes
+   * but its state and reason, and `email-release --reason OPERATOR_HOLD [--template T]` sends them later, by the team's decision.
+   * ESSENTIAL emails (a link a person asked for) are never held. Emails enqueued after this (a card issued after 09:00, a new sign-up) follow
+   * the normal automatic flow. Runs under the quota lock, so no lease interleaves. Dry-run by default; idempotent.
+   */
+  async function holdCampaignExcept(now: number, options: { readonly keep: readonly EmailTemplate[]; readonly apply?: boolean }) {
+    if (!options.keep.length) throw new Error('FLIGHT_HOLD_KEEP_REQUIRED');
+    return db.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [QUOTA_LOCK_CLASS, tenantId]);
+      const pending = (await tx.query<{ email_id: string; template: EmailTemplate }>(`SELECT email_id, template FROM flight_emails WHERE tenant_id = $1
+        AND state = 'PENDING' AND category = 'CAMPAIGN' AND NOT (template = ANY($2::text[])) ORDER BY template, created_at, email_id FOR UPDATE`,
+      [tenantId, options.keep])).rows;
+      const byTemplate = pending.reduce<Record<string, number>>((all, r) => ({ ...all, [r.template]: (all[r.template] ?? 0) + 1 }), {});
+      const kept = (await tx.query<{ template: string; n: string }>(`SELECT template, count(*)::text AS n FROM flight_emails WHERE tenant_id = $1 AND state = 'PENDING'
+        AND (template = ANY($2::text[]) OR category = 'ESSENTIAL') GROUP BY 1 ORDER BY 1`, [tenantId, options.keep])).rows
+        .reduce<Record<string, number>>((all, r) => ({ ...all, [r.template]: Number(r.n) }), {});
+      const report = { dryRun: !options.apply, keep: options.keep, toHold: pending.length, toHoldByTemplate: byTemplate, toHoldIds: pending.map(r => r.email_id),
+        stillPending: kept, held: 0 };
+      if (!options.apply) return report;
+      const held = (await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'OPERATOR_HOLD', updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND email_id = ANY($2::text[]) AND state = 'PENDING' AND category = 'CAMPAIGN' AND NOT (template = ANY($3::text[]))`,
+      [tenantId, pending.map(r => r.email_id), options.keep])).rowCount;
+      return { ...report, dryRun: false, held };
+    });
+  }
+
   return { usage, control, setPaused, block, clearBlock, housekeeping, lease, settle, scheduleEve, scheduleBoarding, backfillConfirmations, scheduleEarlyList, suppress, isSuppressed,
     unsubscribe, status, listAttention, release, cancel, markDelivered, prune, supersedeCreatorTemplates, upgradeLaunchPending, guestWaitlistOverlap,
-    enqueueMissingCreatorInvites, limits: { daily: dailyLimit, monthly: monthlyLimit } };
+    enqueueMissingCreatorInvites, holdCampaignExcept, limits: { daily: dailyLimit, monthly: monthlyLimit } };
 }
 export type EmailOutbox = ReturnType<typeof createEmailOutbox>;
 

@@ -20,7 +20,7 @@
  * BUILD-FLOFI-FLIGHT-LAUNCH-001 (email through Resend, access links, public cards). No command prints an email address in full:
  *   email-status                                   reservations today/this month against the limits, emails by template and state, held batches
  *   email-attention [--count <n>]                  held, unknown and failed emails (masked recipient, reason, batch)
- *   email-release  (--email-id <fem_…> | --batch <key> | --reason <CODE>) [--max <n>]
+ *   email-release  (--email-id <fem_…> | --batch <key> | --reason <CODE>) [--template <T>] [--max <n>]
  *                                                  the team's decision to send held emails (quota raised, next day); --max sends only
  *                                                  the oldest n of a batch (an explicit partial send). UNRESOLVED_OUTCOME only by --email-id
  *   email-cancel   (--email-id <fem_…> | --batch <key> | --template <T>)  withdraw pending or held emails (sent ones are never touched)
@@ -43,6 +43,9 @@
  *                                                  release. Prints counts before/after, the ids changed, what was skipped and guest/waitlist overlaps.
  *                                                  A pending row a release/retry moved is listed (releasedPendingIds) and changed only with
  *                                                  --include-released, after its id was checked in the Resend log.
+ *   email-hold-campaign --keep <T[,T…]> [--apply]  13/11 launch, dry-run by default: hold (OPERATOR_HOLD) every PENDING campaign email whose
+ *                                                  template is not kept, so `email-resume` releases only the kept ones. Essential emails are never
+ *                                                  held; release later with `email-release --reason OPERATOR_HOLD [--template T]`.
  *   creator-requeue-missing [--max <n>] [--include-operator-cancelled] [--apply]  13/11 launch, dry-run by default: Email 6 (current version, PT) for active creator invites
  *                                                  with no Email 6 queued, in flight or sent, reusing their codes; enqueued HELD in batch
  *                                                  creators-v<version>, sent only after `email-release --batch creators-v<version>`. Never for an
@@ -73,6 +76,7 @@ import { createFlightStore, type FlightStore } from '../src/flight/store.ts';
 export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export-batch', 'issue-invites', 'erase-email', 'hide-pass', 'prune', 'purge-lists',
   'email-status', 'email-attention', 'email-release', 'email-cancel', 'email-pause', 'email-resume', 'email-unblock', 'email-mark-delivered',
   'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'creator-supersede-templates', 'email-launch-upgrade', 'creator-requeue-missing',
+  'email-hold-campaign',
   'import-google-forms', 'email-early-list', 'remove-card', 'revoke-access'] as const;
 const TEMPLATES: readonly EmailTemplate[] = ['EARLY_LIST', 'LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
 /** What the email and access commands need besides the store; `sendDue` runs one delivery cycle (absent: not configured). */
@@ -149,8 +153,10 @@ export async function runFlightCommand(command: Command, values: Values, store: 
     case 'email-release': {
       const max = flag(values, 'max') ? integer(values, 'max') : undefined, reason = flag(values, 'reason');
       if (reason && !/^[A-Z0-9_]{1,60}$/.test(reason)) throw new Error('ARGUMENT_INVALID: --reason');
-      const id = emailId(values), batchKey = flag(values, 'batch');
-      return { released: await ctx().outbox.release({ ...id ? { emailId: id } : {}, ...batchKey ? { batchKey } : {}, ...reason ? { reason } : {}, ...max ? { max } : {} }, now) };
+      const id = emailId(values), batchKey = flag(values, 'batch'), template = flag(values, 'template') as EmailTemplate | undefined;
+      if (template && !TEMPLATES.includes(template)) throw new Error('ARGUMENT_INVALID: --template');
+      return { released: await ctx().outbox.release({ ...id ? { emailId: id } : {}, ...batchKey ? { batchKey } : {}, ...reason ? { reason } : {},
+        ...template ? { template } : {}, ...max ? { max } : {} }, now) };
     }
     case 'email-cancel': {
       const template = flag(values, 'template') as EmailTemplate | undefined;
@@ -184,6 +190,11 @@ export async function runFlightCommand(command: Command, values: Values, store: 
       const max = flag(values, 'max') ? integer(values, 'max') : undefined;
       return ctx().outbox.upgradeLaunchPending(now, { ...max ? { max } : {}, apply: values.apply === true, workerDeployed: values['confirm-worker-deployed'] === true,
         includeReleased: values['include-released'] === true });
+    }
+    case 'email-hold-campaign': {
+      const keep = required(values, 'keep').split(',').map(value => value.trim()).filter(Boolean) as EmailTemplate[];
+      if (!keep.length || keep.some(template => !TEMPLATES.includes(template))) throw new Error('ARGUMENT_INVALID: --keep');
+      return ctx().outbox.holdCampaignExcept(now, { keep, apply: values.apply === true });
     }
     case 'creator-requeue-missing': {
       const max = flag(values, 'max') ? integer(values, 'max') : undefined;
@@ -280,7 +291,7 @@ async function main(): Promise<void> {
     email: { type: 'string' }, pass: { type: 'string' }, 'email-id': { type: 'string' }, max: { type: 'string' }, reason: { type: 'string' },
     template: { type: 'string' }, 'provider-id': { type: 'string' }, language: { type: 'string' }, 'send-at': { type: 'string' }, file: { type: 'string' },
     card: { type: 'string' }, apply: { type: 'boolean', default: false }, 'confirm-worker-deployed': { type: 'boolean', default: false },
-    'include-released': { type: 'boolean', default: false }, 'include-operator-cancelled': { type: 'boolean', default: false } } });
+    'include-released': { type: 'boolean', default: false }, keep: { type: 'string' }, 'include-operator-cancelled': { type: 'boolean', default: false } } });
   const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-flight-admin' });

@@ -5,6 +5,9 @@ Source: the Claude Design canvas "Flight FloFi · E-mails de embarque (13/11)" (
 
 Boarding moved from Thursday 12 Nov to **Friday 13 Nov, 09:00 BRT** (America/Sao_Paulo). This build changes only what the canvas lists.
 
+**Final decision (team, Dayane): the launch sends only Email 3.** Email 6 (invited guests) is postponed; its code, the invites and their
+codes are preserved, and nothing in the launch runbook queues or releases it. Email 3 v3 carries the final approved copy (below).
+
 ## Implemented
 
 | Email | Where | Before | After |
@@ -13,12 +16,24 @@ Boarding moved from Thursday 12 Nov to **Friday 13 Nov, 09:00 BRT** (America/Sao
 | 6 (`CREATOR_INVITE` v4 → **v5**) | Preheader | Seu código e como embarcar na quinta. | Seu código e como embarcar. |
 | 6 | Boarding panel | NOV 12 09:00 (from the calendar) | ABERTO (EN: OPEN) |
 | 6 | Step 1 | Quinta, a partir das 9h, entra em flofi.xyz/board, … | Entra em flofi.xyz/board, … (rest unchanged) |
-| 3 (`GROUP_BOARDING` v2 → **v3**) | New paragraph right below the title, same `p()` style as the paragraph below it | (none) | Atrasamos um dia para corrigir alguns erros antes de abrir. Obrigado pela paciência. |
+| 3 (`GROUP_BOARDING` v2 → **v3**, final) | Preheader | Diga para onde vai. Você aprova cada passo. | Estamos começando, e queremos testar com você. |
+| 3 | Below the title (replaces "O seu portão abriu…") | O seu portão abriu. Diga à FloFi para onde quer levar as suas criptos, veja cada passo simulado e assine só o que aprovar. | Two paragraphs: "A FloFi está começando, e este é o primeiro voo. Atrasamos um dia para corrigir alguns erros antes de abrir." and "Queremos entender, com quem usa DeFi de verdade, onde a FloFi já ajuda e onde ainda deixa a desejar. A sua opinião agora vale muito." |
+| 3 | New block before the Gate panel (light info box) | (none) | "O que dá para testar hoje": Trocar tokens na Ethereum, Base, Arbitrum One, Robinhood Chain (inclusive tokens de ações) e Solana · Levar tokens de uma rede para outra, inclusive entre as redes EVM e a Solana · Enviar tokens para outra carteira · Emprestar USDC na Aave e prover liquidez, nas redes que suportam. Then: "Comece com valores pequenos: é mainnet, com dinheiro de verdade. Você revisa e assina cada passo na sua carteira." |
+| 3 | New block right after the 72-hour note (light blue box) | (none) | "Depois de testar": Responda este e-mail contando como foi: onde você travou e o que esperava encontrar. Lemos todas as respostas. |
 
-The English copy mirrors each change (preheader "Your code, and how to board.", step 1 "Go to flofi.xyz/board, …", panel `OPEN`,
-Email 3 note "We held boarding back one day to fix a few bugs before opening. Thanks for your patience."), so English never names the wrong
-weekday; nobody receives English for these emails while `LAUNCH_LANGUAGE` is set. The delay note is only in Email 3 (`GROUP_BOARDING`),
-not in the essential "requested again" access email (`ACCESS_REQUESTED`, unchanged at v2).
+Every line of "O que dá para testar hoje" was checked against the public mainnet capability matrix
+(`docs/builds/BUILD-FLOFI-MAINNET-PRODUCT-001-CAPABILITY-MATRIX.json`):
+- **Swap:** Ethereum, Base, Arbitrum One, Robinhood and Solana. Robinhood's catalog includes Stock Tokens (BUILD-RH-002).
+- **Bridge:** between every pair of networks, including EVM ↔ Solana.
+- **Transfer:** on every network.
+- **Aave V3 USDC supply:** Ethereum, Base and Arbitrum One.
+- **`add_liquidity`:** Uniswap v3 on the EVM networks and Orca on Solana.
+
+The Gate panel (PT), button and access link, code and lifetimes, Founding Members block, footer and styles are unchanged.
+`ACCESS_REQUESTED` keeps its v2 copy. v3 was never deployed, so it carries the final text; v1/v2 renderers stay frozen.
+
+The English copy mirrors each change, so English never names the wrong weekday. Nobody receives English for these emails while
+`LAUNCH_LANGUAGE` is set.
 
 Unchanged: subjects, layout, colors, fonts, gota images, buttons, links, variables, footers and quotas. Emails 4a, 4b and 5 are
 byte-identical to before (asserted against the frozen renderer); their Portuguese text already matches board 06.
@@ -81,6 +96,15 @@ The runbook with the exact commands is [FLIGHT-1311-LAUNCH-RUNBOOK.md](../deploy
   - The overlap report ignores expired invites.
   - Runbook: wait after the pause, recovery from `RENDER_FAILED`, never-attempted HELD Email 3 rows stay on v2, and the overlap is
     re-checked right before release.
+- **`email-hold-campaign --keep GROUP_BOARDING`** (`holdCampaignExcept`). Run before `email-resume`, it holds every PENDING campaign
+  email of any other template as `OPERATOR_HOLD`: the two pending CARD_FOUNDING, any Email 6, any Email 5. Resuming therefore sends only
+  Email 3.
+  - ESSENTIAL access emails are never held.
+  - Nothing is cancelled. `email-release` takes a new `--template` filter, so a template can be released later on its own (e.g. the
+    cards), without releasing Email 6.
+  - It runs under the quota lock. Dry-run by default; idempotent.
+  - Emails created after release (cards issued, new sign-ups) follow the normal automatic flow.
+- **Invited guest on the waiting list.** With Email 6 postponed, they receive Email 3 normally. They stay on the list and keep their invite.
 - Tests: `launch-1311.pg.test.ts` (new suite `app.flight.launch-1311.pg`). It covers the dry-run changing nothing, both apply gates,
   two concurrent applies plus a concurrent lease (no double update, no new row, a reserved or leased row left as enqueued), preservation
   of every key and link, untouched SENT/SENDING/HELD/CANCELLED rows, idempotence, and an English waitlist entry receiving the PT v3 Email 3

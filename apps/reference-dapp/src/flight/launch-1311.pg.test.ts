@@ -164,7 +164,11 @@ describe('email-launch-upgrade: unsent Email 3 v2 and English launch emails move
     expect(sent.subject).toBe('Seu grupo está embarcando ✈️');
     expect(sent.html).toContain(`https://flofi.xyz/board/access?l=pt#t=${linkTokenFor(SECRET, id)}`);
     expect(sent.text).toContain(codeFor(SECRET, id));
-    expect(sent.text).toContain('Atrasamos um dia para corrigir alguns erros antes de abrir. Obrigado pela paciência.');
+    expect(sent.html).toContain('>Estamos começando, e queremos testar com você.</div>');
+    for (const part of ['A FloFi está começando, e este é o primeiro voo. Atrasamos um dia para corrigir alguns erros antes de abrir.',
+      'Queremos entender, com quem usa DeFi de verdade, onde a FloFi já ajuda e onde ainda deixa a desejar. A sua opinião agora vale muito.',
+      'O que dá para testar hoje', 'Comece com valores pequenos: é mainnet, com dinheiro de verdade.', 'Depois de testar: Responda este e-mail contando como foi'])
+      expect(sent.text).toContain(part);
     expect(await rows('SELECT entry_id FROM flight_access_tokens WHERE entry_id = $1', [enEntry])).toHaveLength(1);
     // Rows that had already gone further were never re-versioned: a retry (same key) carries the payload it was enqueued with.
     expect(await rows('SELECT DISTINCT template_version, language FROM flight_emails WHERE email_id = ANY($1::text[]) AND email_id <> $2',
@@ -269,5 +273,63 @@ describe('creator-requeue-missing: a HELD Email 6 v5 for active creator invites 
       expect(email.text).toContain('EMBARQUE = ABERTO');
       expect(email.text).toContain(codes[email.to.slice(6, email.to.indexOf('@'))]!);
     }
+  });
+});
+
+describe('13/11 release: only Email 3 goes out; Email 6 and every other campaign email stay held; access emails keep working', () => {
+  it('holds the pending 4a cards, Email 6 and Email 5, then resume sends only Email 3 (the invited guest on the list included) and essential email', async () => {
+    await t.db.query(`UPDATE flight_emails SET state = 'CANCELLED', reserved_at = NULL, lease_token = NULL, lease_until = NULL WHERE state IN ('PENDING', 'HELD', 'UNKNOWN', 'SENDING')`);
+    await outbox.setPaused(true, 'launch 1311');
+    // The waiting list's Email 3 (one of them an invited guest), two pending 4a cards, an Email 6 v5 still queued, an Email 5, and an
+    // access email a person asked for (ESSENTIAL).
+    const listed: string[] = [];
+    for (const label of ['a', 'b', 'guest']) {
+      const email = `release-${label}@flofi-test.dev`, entry = await joined(email, 'EN');
+      listed.push(await legacy('GROUP_BOARDING', 2, label === 'b' ? 'PT' : 'EN', email, { entryId: entry, batchKey: 'group-1' }));
+    }
+    const invite = await store.inviteCreator({ email: 'release-guest@flofi-test.dev', language: 'PT', sendAt: BEFORE, now: BEFORE });
+    const inviteBefore = await rows('SELECT * FROM flight_invites WHERE code = $1', [invite.code]);
+    const others = [await legacy('CARD_FOUNDING', 2, 'EN', 'release-card1@flofi-test.dev'), await legacy('CARD_FOUNDING', 2, 'PT', 'release-card2@flofi-test.dev'),
+      await legacy('NEXT_FLIGHT', 2, 'EN', 'release-next@flofi-test.dev'),
+      (await rows(`SELECT email_id FROM flight_emails WHERE template = 'CREATOR_INVITE' AND invite_code = $1`, [invite.code]))[0]!.email_id as string];
+    const essential = `fem_${hex(16)}`, essentialEntry = await joined('release-access@flofi-test.dev', 'PT');
+    await t.db.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger, entry_id,
+      not_before, next_attempt_at) VALUES ('default', $1, $2, 'ACCESS_REQUESTED', 2, 'ESSENTIAL', 'release-access@flofi-test.dev', 'PT', 'access_requested', $3, $4, $4)`,
+    [essential, `access:${essential.slice(4)}`, essentialEntry, new Date(OPEN)]);
+    // Upgrade Email 3 to the final v3 in Portuguese first.
+    expect((await outbox.upgradeLaunchPending(OPEN, { apply: true, workerDeployed: true })).updatedIds).toEqual(expect.arrayContaining(listed));
+    // Dry-run, then hold everything but Email 3.
+    const ctx = { outbox, entryOf: async () => null, revoke: null, sendDue: { disabled: 'TEST' } as const };
+    const dry = await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING' }, store, OPEN, ctx);
+    expect(dry).toMatchObject({ dryRun: true, toHold: 4, toHoldByTemplate: { CARD_FOUNDING: 2, NEXT_FLIGHT: 1, CREATOR_INVITE: 1 },
+      stillPending: { GROUP_BOARDING: 3, ACCESS_REQUESTED: 1 } });
+    expect((dry.toHoldIds as string[]).sort()).toEqual([...others].sort());
+    expect(await rows(`SELECT DISTINCT state FROM flight_emails WHERE email_id = ANY($1::text[])`, [others])).toEqual([{ state: 'PENDING' }]);
+    await expect(runFlightCommand('email-hold-campaign', { apply: true }, store, OPEN, ctx)).rejects.toThrow('ARGUMENT_REQUIRED: --keep');
+    expect(await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING', apply: true }, store, OPEN, ctx)).toMatchObject({ held: 4 });
+    expect(await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING', apply: true }, store, OPEN, ctx)).toMatchObject({ toHold: 0, held: 0 });
+    // 09:00: resume. One cycle sends Email 3 (all in Portuguese, the guest included) and the access email, nothing else.
+    await outbox.setPaused(false, null);
+    const fake = fakeProvider();
+    await delivery(fake.provider, () => OPEN + 5000).cycle();
+    const sentIds = fake.sent.map(e => e.idempotencyKey);
+    expect(sentIds).toEqual(expect.arrayContaining([...listed, essential]));
+    // Anything else sent is an Email 3 the worker scheduled at opening for another list entry: never a held template.
+    expect(await rows(`SELECT DISTINCT template FROM flight_emails WHERE email_id = ANY($1::text[]) ORDER BY 1`, [sentIds]))
+      .toEqual([{ template: 'ACCESS_REQUESTED' }, { template: 'GROUP_BOARDING' }]);
+    expect(sentIds.some(id => others.includes(id))).toBe(false);
+    for (const email of fake.sent.filter(e => listed.includes(e.idempotencyKey))) {
+      expect(email.subject).toBe('Seu grupo está embarcando ✈️');
+      expect(email.text).toContain('O que dá para testar hoje');
+    }
+    expect(fake.sent.some(e => e.subject.startsWith('Seu convite'))).toBe(false); // no Email 6
+    expect(await rows(`SELECT DISTINCT state, status_reason FROM flight_emails WHERE email_id = ANY($1::text[])`, [others]))
+      .toEqual([{ state: 'HELD', status_reason: 'OPERATOR_HOLD' }]);
+    // The guest keeps the invite and the list entry; access by the Email 3 link stays theirs.
+    expect(await rows('SELECT * FROM flight_invites WHERE code = $1', [invite.code])).toEqual(inviteBefore);
+    expect(await rows(`SELECT boarded_at FROM flight_list_entries WHERE email = 'release-guest@flofi-test.dev'`)).toEqual([{ boarded_at: null }]);
+    // Later, by the team's decision: release only the 4a cards; Email 6 stays held.
+    expect(await runFlightCommand('email-release', { reason: 'OPERATOR_HOLD', template: 'CARD_FOUNDING' }, store, OPEN + 6000, ctx)).toEqual({ released: 2 });
+    expect(await rows(`SELECT state FROM flight_emails WHERE email_id = $1`, [others[3]])).toEqual([{ state: 'HELD' }]);
   });
 });

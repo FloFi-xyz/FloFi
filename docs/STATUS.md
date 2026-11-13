@@ -9,11 +9,14 @@ This separate branding build does not resume its execution work. BUILD-CLOUD-001
 
 ## BUILD-FLOFI-FLIGHT-EMAILS-1311-001 — Boarding emails for Friday 13 Nov
 
-**Status: PR FOR OWNER REVIEW on `claude/design-implementation-qwurbw` (from main `bef4419`) — unit and disposable-PostgreSQL evidence;
-nothing sent, configured or deployed.** Boarding moved to Friday 13 Nov, 09:00 BRT. Emails 3, 4a, 4b, 5 and 6 are enqueued in Portuguese
-for everyone. Email 6 (v5) drops the weekday from its preheader and step 1, and its Boarding panel reads ABERTO. Email 3 (v3) opens with
-the one-day delay note. Queued Email 6 v4 rows are held for review, as for earlier versions; Email 6 rows now live as long as the invite, so the 09:00 send is not cancelled as expired. Operator commands `email-launch-upgrade` and `creator-requeue-missing` (dry-run by default) prepare the queued rows; see the [runbook](deploy/FLIGHT-1311-LAUNCH-RUNBOOK.md). `FLOFI_FLIGHT_BOARDING_OPENS_AT`, batch 1
-`opens_at`, test sends and the 09:00 sends remain owner actions. See the [build note](builds/BUILD-FLOFI-FLIGHT-EMAILS-1311-001.md).
+**Status: PR #189 — unit, disposable-PostgreSQL and CI evidence; nothing was sent from this work, and production operations are the
+operator's.**
+- Launch Fri 13 Nov 09:00 BRT sends **only Email 3** (v3, the team-approved "estamos começando" copy) to the waiting list, in Portuguese.
+- Email 6 (guests) is postponed: invites and codes are preserved.
+- `email-launch-upgrade` moves the 48 queued Email 3 v2 rows to v3 + PT in place.
+- `email-hold-campaign --keep GROUP_BOARDING` holds every other pending campaign email before `email-resume`.
+
+See the [build note](builds/BUILD-FLOFI-FLIGHT-EMAILS-1311-001.md) and the [runbook](deploy/FLIGHT-1311-LAUNCH-RUNBOOK.md).
 
 ## P0 — Review block before authorization (board 06)
 

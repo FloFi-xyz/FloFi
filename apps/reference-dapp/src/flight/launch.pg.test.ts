@@ -277,11 +277,13 @@ describe('access by link and code', () => {
       fake.provider, () => BOARDING).cycle();
     const sent = fake.sent.find(e => e.to === 'board@flofi-test.dev')!;
     emailId = sent.idempotencyKey;
-    // An English entry still gets the Portuguese Email 3 (13/11 launch), with the one-day delay note and a Portuguese landing link.
+    // An English entry still gets the Portuguese Email 3 v3 (13/11 launch copy) and a Portuguese landing link.
     expect(sent.subject).toBe('Seu grupo está embarcando ✈️');
     expect(sent.html).toContain(`https://flofi.xyz/board/access?l=pt#t=${linkTokenFor(SECRET, emailId)}`);
     expect(sent.text).toContain(codeFor(SECRET, emailId));
-    expect(sent.text).toContain('Atrasamos um dia para corrigir alguns erros antes de abrir. Obrigado pela paciência.');
+    expect(sent.html).toContain('>Estamos começando, e queremos testar com você.</div>');
+    expect(sent.text).toContain('A FloFi está começando, e este é o primeiro voo. Atrasamos um dia para corrigir alguns erros antes de abrir.');
+    expect(sent.text).toContain('O que dá para testar hoje');
     expect(sent.text).toContain('O código vale por 72 horas, uma vez.');
     expect(await rows(`SELECT template_version, language FROM flight_emails WHERE email_id = $1`, [emailId])).toEqual([{ template_version: 3, language: 'PT' }]);
     expect(await rows(`SELECT extract(epoch FROM (code_expires_at - created_at))::int AS code_seconds,

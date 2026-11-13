@@ -79,21 +79,64 @@ describe('Flight launch email copy and immutable queued versions', () => {
     expect(renderEmailForVersion(inputs[2]!, context('PT'), 2)).toEqual(renderEmailV2(inputs[2] as Parameters<typeof renderEmailV2>[0], { ...context('PT'),
       calendar: { ...context('PT').calendar, creatorsOpenAt: Date.parse('2026-11-11T14:00:00-03:00') } }));
   });
-  it('opens Email 3 with the one-day delay note right below the title, in the style of the paragraph below it; never in the requested access email', () => {
-    const note = { PT: 'Atrasamos um dia para corrigir alguns erros antes de abrir. Obrigado pela paciência.',
-      EN: 'We held boarding back one day to fix a few bugs before opening. Thanks for your patience.' } as const;
-    const intro = { PT: 'O seu portão abriu.', EN: 'Your gate is open.' } as const;
-    for (const language of ['EN', 'PT'] as const) {
-      const rendered = renderEmail(inputs[2]!, context(language)), html = decode(rendered.html);
-      expect(html.indexOf('</h1>')).toBeLessThan(html.indexOf(note[language]));
-      expect(html.indexOf(note[language])).toBeLessThan(html.indexOf(intro[language]));
-      const style = (text: string) => html.slice(html.lastIndexOf('<p ', html.indexOf(text)), html.indexOf(text));
-      expect(style(note[language])).toBe(style(intro[language]));
-      expect(rendered.text.indexOf(note[language])).toBeGreaterThan(0);
-      expect(rendered.text.indexOf(note[language])).toBeLessThan(rendered.text.indexOf(intro[language]));
-      expect(renderEmail(inputs[3]!, context(language)).text).not.toContain(note[language]);
-      expect(renderEmailForVersion(inputs[3]!, context(language), TEMPLATE_VERSIONS.ACCESS_REQUESTED).text).not.toContain(note[language]);
-      expect(renderEmailForVersion(inputs[2]!, context(language), 2).text).not.toContain(note[language]);
+  it('renders the approved 13/11 Email 3 v3 copy in HTML and plain text, block by block; never in the requested access email', () => {
+    const copy = {
+      PT: { preheader: 'Estamos começando, e queremos testar com você.', title: 'Seu grupo está embarcando.',
+        opening: ['A FloFi está começando, e este é o primeiro voo. Atrasamos um dia para corrigir alguns erros antes de abrir.',
+          'Queremos entender, com quem usa DeFi de verdade, onde a FloFi já ajuda e onde ainda deixa a desejar. A sua opinião agora vale muito.'],
+        tryLabel: 'O que dá para testar hoje',
+        lines: ['Trocar tokens na Ethereum, Base, Arbitrum One, Robinhood Chain (inclusive tokens de ações) e Solana.',
+          'Levar tokens de uma rede para outra, inclusive entre as redes EVM e a Solana.', 'Enviar tokens para outra carteira.',
+          'Emprestar USDC na Aave e prover liquidez, nas redes que suportam.'],
+        small: 'Comece com valores pequenos: é mainnet, com dinheiro de verdade. Você revisa e assina cada passo na sua carteira.',
+        gate: 'PORTÃO', gateValue: 'ABERTO', button: 'Embarcar agora →', feedbackLabel: 'Depois de testar',
+        feedback: 'Responda este e-mail contando como foi: onde você travou e o que esperava encontrar. Lemos todas as respostas.',
+        code: 'Código de 6 dígitos', founding: 'Founding Members', old: 'O seu portão abriu.' },
+      EN: { preheader: 'We’re just getting started, and we want to test it with you.', title: 'Your group is boarding.',
+        opening: ['FloFi is just getting started, and this is the first flight. We held boarding back one day to fix a few bugs before opening.',
+          'We want to learn, from people who really use DeFi, where FloFi already helps and where it still falls short. Your opinion matters a lot right now.'],
+        tryLabel: 'What you can try today',
+        lines: ['Swap tokens on Ethereum, Base, Arbitrum One, Robinhood Chain (including stock tokens) and Solana.',
+          'Move tokens between networks, including between EVM networks and Solana.', 'Send tokens to another wallet.',
+          'Lend USDC on Aave and provide liquidity, on the networks that support them.'],
+        small: 'Start with small amounts: this is mainnet, with real money. You review and sign every step in your wallet.',
+        gate: 'GATE', gateValue: 'OPEN', button: 'Board now →', feedbackLabel: 'After you try it',
+        feedback: 'Reply to this email and tell us how it went: where you got stuck and what you expected to find. We read every reply.',
+        code: '6-digit code', founding: 'Founding Members', old: 'Your gate is open.' },
+    } as const;
+    for (const language of ['PT', 'EN'] as const) {
+      const c = copy[language], rendered = renderEmail(inputs[2]!, context(language));
+      const html = decode(rendered.html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').replace(/ ([,.:])/g, '$1'), text = rendered.text.replace(/\s+/g, ' ');
+      expect(rendered.preheader).toBe(c.preheader);
+      expect(rendered.subject).toBe(language === 'PT' ? 'Seu grupo está embarcando ✈️' : 'Your group is boarding ✈️');
+      expect(rendered.html).toContain(`>${c.preheader}</div>`); // the hidden preheader
+      // Every block, in this order, in both MIME parts: title, two opening paragraphs, what to try, small amounts, gate, button, 72 h note,
+      // feedback, code, Founding Members.
+      const order = (whole: string, title: boolean) => [...title ? [c.title] : [], ...c.opening, c.tryLabel, ...c.lines, c.small, ...title ? [c.gateValue.split('').join(' ')] : [],
+        c.feedbackLabel, c.feedback, c.founding].map(part => whole.indexOf(part));
+      for (const [whole, title] of [[html, true], [text, false]] as const) {
+        const positions = order(whole, title);
+        expect(positions.every(position => position >= 0)).toBe(true);
+        expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+        expect(whole).not.toContain(c.old);
+      }
+      expect(html.indexOf(c.small)).toBeLessThan(html.indexOf(c.button));
+      expect(html.indexOf(c.button)).toBeLessThan(html.indexOf(c.feedback));
+      expect(html.indexOf(c.feedback)).toBeLessThan(html.indexOf(c.code));
+      // The two opening paragraphs have the style of a body paragraph; nothing else changed: access link, code and its lifetimes, footer.
+      for (const paragraph of c.opening) expect(rendered.html).toContain(`line-height:1.55;color:#3A4658">${paragraph}</p>`);
+      expect(rendered.html).toContain(`href="${access.accessUrl}"`);
+      expect(rendered.text).toContain('482913');
+      expect(rendered.text).toContain(language === 'PT' ? 'vale por 72 horas' : 'works for 72 hours');
+      expect(rendered.text).toContain(language === 'PT' ? 'DeFi envolve risco.' : 'DeFi involves risk.');
+      expect(rendered.html).toContain(context(language).unsubscribeUrl);
+      // The requested access email keeps its earlier copy, in every renderer.
+      for (const access of [renderEmail(inputs[3]!, context(language)), renderEmailForVersion(inputs[3]!, context(language), TEMPLATE_VERSIONS.ACCESS_REQUESTED)]) {
+        expect(access.text).toContain(c.old);
+        for (const part of [c.preheader, ...c.opening, c.tryLabel, c.feedback]) expect(access.text).not.toContain(part);
+      }
+      // Queued v2 rows keep the v2 copy (byte-identical, frozen renderer).
+      expect(renderEmailForVersion(inputs[2]!, context(language), 2).text).toContain(c.old);
     }
   });
   it('enqueues emails 3, 4a, 4b, 5 and 6 in Portuguese for the 13/11 launch; every other email keeps the stored locale', () => {
