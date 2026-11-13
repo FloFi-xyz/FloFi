@@ -97,4 +97,3 @@ again (no P0/P1 left). Known, accepted limits:
   shipped store sends it only when it never called `eth_sendTransaction`; it is the owner's own browser report, not verified on the server.
 - A tolerated re-pricing note recorded at begin is replaced when a later report (unknown/rejected) or a network-fee overrun writes its own
   note; the drift stays in the run's earlier log lines.
-
