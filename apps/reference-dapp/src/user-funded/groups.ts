@@ -700,7 +700,11 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
 }
 
 /** A Solana read or send of a Kora group's pass that failed (unavailable, rate limited, malformed): the pass decides nothing and waits. */
-class SolanaRpcWait extends Error { constructor(readonly index: number | null) { super('USER_FUNDED_SOLANA_RPC_UNAVAILABLE'); } }
+// (No TypeScript parameter property: plain Node strips types and runs this module as is.)
+class SolanaRpcWait extends Error {
+  readonly index: number | null;
+  constructor(index: number | null) { super('USER_FUNDED_SOLANA_RPC_UNAVAILABLE'); this.index = index; }
+}
 /**
  * ADR-0010 §4, one pass of a Kora group, in order, each transaction after its predecessor confirmed:
  *   id known      its status decides (confirmed: next; seen: wait; unseen: Kora's fully signed bytes are (re)sent by FloFi while valid)
