@@ -23,6 +23,14 @@
  *
  * P0 hotfix (E1): an Across deposit's source leg is exactly its input from the owner to its pinned SpokePool. The wallet batch's receipts (block,
  * hash, logs) are returned with the reconciliation, so the bridge's destination delivery is matched to THIS deposit (`bridge-delivery.ts`).
+ *
+ *   Circle-paid op   BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a user operation prepared with Circle's USDC paymaster reconciles from its
+ *                    own EntryPoint (v0.7 or v0.8) with paymaster = the pinned Circle paymaster (never another, never for any other group). The USDC
+ *                    the owner paid is read from the same receipt: USDC `Transfer`s between the owner and the paymaster in the bundle's validation
+ *                    phase (before the EntryPoint's `BeforeExecution`: the permit's prefund) and in the operation's own segment (its postOp
+ *                    refund or charge) — charged minus refunded, never negative, never above the signed cap. Those transfers are the fee, not
+ *                    step legs; any other owner outflow is still RECONCILIATION_UNEXPECTED_OWNER_OUTFLOW. Gas: the paymaster fronted
+ *                    `actualGasCost` in native units and the owner paid it back in USDC (`GasPaidFact.paidInToken`, never `sponsored`).
  */
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
 import type { ChainTransport } from '../delegation/chains.ts';
@@ -193,14 +201,14 @@ export type SponsoredOperations = { readonly paymaster: string; readonly userOpH
  * validation of every operation of the bundle) or the previous operation's `UserOperationEvent` — and before its own (at index `at`). Only
  * logs the EntryPoint itself emitted count as boundaries (an account or token could emit a look-alike topic).
  */
-function operationLogs(logs: readonly Log[], at: number): readonly Log[] {
-  const boundary = (l: Log) => l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7
+function operationLogs(logs: readonly Log[], at: number, entryPoint: string = erc4337.ENTRY_POINT_V0_7): readonly Log[] {
+  const boundary = (l: Log) => l.address.toLowerCase() === entryPoint
     && (l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC || l.topics[0]?.toLowerCase() === erc4337.BEFORE_EXECUTION_TOPIC);
   const previous = logs.slice(0, at).map((l, i) => boundary(l) ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
   return logs.slice(previous + 1, at);
 }
 /** The index of the EntryPoint's own `UserOperationEvent` of `hash` (another operation of the bundle could emit a look-alike log). */
-const eventIndex = (logs: readonly Log[], hash: string) => logs.findIndex(l => l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7
+const eventIndex = (logs: readonly Log[], hash: string, entryPoint: string = erc4337.ENTRY_POINT_V0_7) => logs.findIndex(l => l.address.toLowerCase() === entryPoint
   && l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC && l.topics[1]?.toLowerCase() === hash.toLowerCase());
 /** A wallet batch sent as a sponsored ERC-4337 operation of the owner's account (see the module comment). */
 function reconcileSponsoredBatch(group: EvmGroupCalls, r: EvmReceipt, fromBlock: string | null, sponsored: SponsoredOperations): GroupReconciliation {
@@ -223,21 +231,53 @@ function reconcileSponsoredBatch(group: EvmGroupCalls, r: EvmReceipt, fromBlock:
       logs: own.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) }] };
 }
 
-/** Reconciles an owner user operation from its bundle transaction's receipt on the chain. */
-export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupCalls, userOpHash: string, transactionHash: string | null): Promise<GroupReconciliation> {
+/** ADR-0010: a Circle-paid operation's reconciliation facts (from its prepared artifact): its EntryPoint, the pinned paymaster, USDC and the cap. */
+export type CircleReconciliation = { readonly entryPoint: string; readonly paymaster: string; readonly usdc: string; readonly cap: bigint };
+/**
+ * The USDC the owner paid Circle for one operation, from the receipt alone: owner↔paymaster USDC transfers in the bundle's validation phase (before
+ * the EntryPoint's `BeforeExecution`) and in the operation's own segment. Returns the fee and the segment's other logs (the step legs).
+ */
+function circleFeeOf(logs: readonly Log[], own: readonly Log[], owner: string, circle: CircleReconciliation):
+  { readonly ok: true; readonly paid: bigint; readonly legs: readonly Log[] } | { readonly ok: false; readonly code: string } {
+  const usdc = circle.usdc.toLowerCase(), paymaster = circle.paymaster.toLowerCase();
+  const before = logs.findIndex(l => l.address.toLowerCase() === circle.entryPoint && l.topics[0]?.toLowerCase() === erc4337.BEFORE_EXECUTION_TOPIC);
+  const direction = (l: Log): 'CHARGE' | 'REFUND' | null => {
+    if (l.address.toLowerCase() !== usdc || l.topics[0]?.toLowerCase() !== TRANSFER_TOPIC || l.topics.length !== 3) return null;
+    const from = topicAddress(l.topics[1]), to = topicAddress(l.topics[2]);
+    return from === owner && to === paymaster ? 'CHARGE' : from === paymaster && to === owner ? 'REFUND' : null;
+  };
+  let charged = 0n, refunded = 0n;
+  for (const l of before >= 0 ? logs.slice(0, before) : []) if (direction(l) === 'CHARGE') charged += quantity(l.data);
+  for (const l of own) { const d = direction(l); if (d === 'CHARGE') charged += quantity(l.data); if (d === 'REFUND') refunded += quantity(l.data); }
+  if (refunded > charged) return { ok: false, code: 'CIRCLE_FEE_UNRECONCILED' };
+  if (charged - refunded > circle.cap) return { ok: false, code: 'CIRCLE_FEE_ABOVE_CAP' };
+  return { ok: true, paid: charged - refunded, legs: own.filter(l => direction(l) === null) };
+}
+/** Reconciles an owner user operation from its bundle transaction's receipt on the chain (`circle`: ADR-0010, a Circle-paid operation's facts). */
+export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupCalls, userOpHash: string, transactionHash: string | null,
+  circle: CircleReconciliation | null = null): Promise<GroupReconciliation> {
   if (!transactionHash) return { status: 'PENDING' };
   const r = await t.rpc('eth_getTransactionReceipt', [transactionHash]) as EvmReceipt | null;
   if (!r) return { status: 'PENDING' };
-  const event = erc4337.userOperationEvent(r.logs ?? [], userOpHash);
+  const entryPoint = circle?.entryPoint.toLowerCase() ?? erc4337.ENTRY_POINT_V0_7;
+  const event = erc4337.userOperationEvent(r.logs ?? [], userOpHash, entryPoint);
   if (!event) return { status: 'MISMATCH', code: 'USER_OPERATION_EVENT_MISSING', gasPaid: null, transactions: [transactionHash] };
   if (event.sender.toLowerCase() !== group.owner) return { status: 'MISMATCH', code: 'GAS_PAYER_NOT_OWNER', gasPaid: null, transactions: [transactionHash] };
-  if (event.paymaster !== '0x' + '0'.repeat(40)) return { status: 'MISMATCH', code: 'GAS_SPONSORSHIP_REFUSED', gasPaid: null, transactions: [transactionHash] };
-  const gasPaid: GasPaidFact = { payer: group.owner, amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT' };
-  if (!event.success) return { status: 'REVERTED', code: 'USER_OPERATION_REVERTED', gasPaid, transactions: [transactionHash] };
+  // The paymaster the operation was prepared with, and only it: none for an owner-paid operation, Circle's pinned one for a Circle-paid one.
+  if (event.paymaster !== (circle ? circle.paymaster.toLowerCase() : '0x' + '0'.repeat(40)))
+    return { status: 'MISMATCH', code: 'GAS_SPONSORSHIP_REFUSED', gasPaid: null, transactions: [transactionHash] };
   // Only the logs of this operation's execution: those before its own UserOperationEvent and after the previous one in the bundle.
   const logs = r.logs ?? [];
   // The EntryPoint's own event only: another operation of the same bundle could emit a look-alike log carrying this public hash.
-  const attributed = attributeLegs(group, operationLogs(logs, eventIndex(logs, userOpHash)));
+  const own = operationLogs(logs, eventIndex(logs, userOpHash, entryPoint), entryPoint);
+  const fee = circle ? circleFeeOf(logs, own, group.owner.toLowerCase(), circle) : null;
+  if (fee && !fee.ok) return { status: 'MISMATCH', code: fee.code, gasPaid: null, transactions: [transactionHash] };
+  const gasPaid: GasPaidFact = circle && fee?.ok ? { payer: circle.paymaster.toLowerCase(), amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT',
+    paidInToken: { mechanism: 'CIRCLE_USDC_PAYMASTER', token: circle.usdc.toLowerCase(), symbol: 'USDC', decimals: 6, amount: fee.paid.toString(), payee: circle.paymaster.toLowerCase() } }
+    : { payer: group.owner, amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT' };
+  // A reverted operation still paid its fee (the owner's USDC, for a Circle-paid one): recorded, never dropped.
+  if (!event.success) return { status: 'REVERTED', code: 'USER_OPERATION_REVERTED', gasPaid, transactions: [transactionHash] };
+  const attributed = attributeLegs(group, fee?.ok ? fee.legs : own);
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions: [transactionHash] };
   return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions: [transactionHash], blockNumber: r.blockNumber ?? null };
 }

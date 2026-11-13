@@ -20,6 +20,12 @@
  *                         transaction's owner balance deltas and fee
  *
  * Nothing here chooses a wallet, holds a key or signs. A failed check is a closed code; a submitted artifact is never replaced by another.
+ *
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): when the owner's native balance does not cover an EVM group's worst-case fee, and only
+ * then, the policy (`selectGasMechanism`) may pick Circle's USDC paymaster (`circle-gas.ts`): the group is then prepared as an EVM_USER_OPERATION
+ * of the owner's own smart account whose fee Circle fronts and charges back in the owner's USDC — two owner signatures (a capped permit, then the
+ * operation), relayed when due, reconciled from the EntryPoint's event and the USDC the owner paid. Otherwise native gas, with the reason the
+ * alternative was not available attached to the shortfall evidence. Native gas is unchanged for anyone who holds enough of it.
  */
 import { erc4337, eip5792, fromBase64, parseMessageV0, parseTransaction, simulateJupiterSwap, simulateSolanaTransfer, verifySignedJupiterTransaction,
   verifySignedSolanaTransfer, type JupiterHttp, type JupiterReview, type LookupTables, type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
@@ -33,15 +39,22 @@ import { AAVE_ACTIONS, type GroupStrategy, type OwnerAnswer } from '../workflow-
 import type { BundlerClient } from './bundler.ts';
 import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, L1_FEE_UPPER_BOUND_SELECTOR, OP_GAS_PRICE_ORACLE, OP_STACK_CHAIN_IDS, type AssetAmountFact,
   type EvmGroupCalls } from './evm-calls.ts';
-import { reconcileUserOperation, reconcileWalletBatch, type ReconciledReceipt, type SponsoredOperations, type StepFacts } from './evm-reconcile.ts';
+import { reconcileUserOperation, reconcileWalletBatch, type CircleReconciliation, type ReconciledReceipt, type SponsoredOperations, type StepFacts } from './evm-reconcile.ts';
 import type { SponsorshipPort } from '../gas-sponsorship/runtime.ts';
 import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
+import { selectGasMechanism, type MechanismUnavailable } from '../gas-abstraction/mechanism.ts';
+import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleFactsOf, circleOperationOf, type CircleDeps, type CircleFacts } from './circle-gas.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
 /** How long a prepared EVM group's quotes are honoured before it must be prepared again. */
 export const EVM_PREPARED_TTL_MS = 10 * 60_000;
+/**
+ * ADR-0010: a Circle-paid group's validity — two minutes inside its calls' on-chain deadline (`EVM_PREPARED_TTL_MS`), so an operation authorized at
+ * the end of its window is still relayed and mined before its swaps' deadline refuses them (the owner would still pay the fee in USDC).
+ */
+export const CIRCLE_PREPARED_TTL_MS = EVM_PREPARED_TTL_MS - 2 * 60_000;
 /** Conservative user-operation limits when the account cannot be simulated yet (not upgraded, or waiting for a delivery). */
 const USER_OP_FALLBACK: { readonly verificationGasLimit: bigint; readonly preVerificationGas: bigint; readonly perCallGas: bigint } =
   Object.freeze({ verificationGasLimit: 150_000n, preVerificationGas: 80_000n, perCallGas: 250_000n });
@@ -66,10 +79,16 @@ export type UserFundedDeps = {
   readonly across?: AcrossRoutes;
   /** ADR-0009: network-fee sponsorship of wallet batches (`src/gas-sponsorship`), where the operator configured it; absent: owner-paid only. */
   readonly sponsorship?: SponsorshipPort | null;
+  /** ADR-0010: Circle's USDC paymaster where the operator enabled it (`FLOFI_CIRCLE_USDC_GAS`) on a bundler chain; absent: native gas only. */
+  readonly circle?: CircleDeps | null;
 };
-/** `preview`: a review's preparation (nothing is handed to a wallet): no sponsorship grant is created. */
+/**
+ * `preview`: a review's preparation (nothing is handed to a wallet): no sponsorship grant is created. `tokenGas` false: a token-paid fee is not
+ * considered for this preparation (a group whose earlier wallet batch may still be in the owner's wallet keeps its batch). `wallet`: the owner's
+ * EVM wallet as the browser reported it (FloFi Wallet signs no typed data: no Circle).
+ */
 export type GroupInput = { readonly runId: string; readonly groupIndex: number; readonly strategy: GroupStrategy; readonly chain: string; readonly feePayer: string;
-  readonly stepFrom: number; readonly stepTo: number; readonly preview?: boolean };
+  readonly stepFrom: number; readonly stepTo: number; readonly preview?: boolean; readonly tokenGas?: boolean; readonly wallet?: 'INJECTED' | 'FLOFI_WALLET' };
 export type Prepared = Readonly<Record<string, unknown>> & { readonly kind: GroupStrategy };
 /**
  * P0 approved UX (board 07): the numbers behind USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE, exactly as this module already read and computed them
@@ -77,7 +96,9 @@ export type Prepared = Readonly<Record<string, unknown>> & { readonly kind: Grou
  * blocker screen and the assistant's explanation; it authorizes nothing and is never an input to a later preparation.
  */
 export type NativeFeeShortfall = { readonly kind: 'NATIVE_FEE_SHORTFALL'; readonly chainId: string; readonly owner: string; readonly unit: 'wei';
-  readonly balance: string; readonly maxFee: string; readonly nativeSpend: string; readonly required: string; readonly shortfall: string };
+  readonly balance: string; readonly maxFee: string; readonly nativeSpend: string; readonly required: string; readonly shortfall: string;
+  /** ADR-0010: the token-paid alternative that was considered for this group and why it could not be used (closed codes); absent: none considered. */
+  readonly unavailable?: readonly MechanismUnavailable[] };
 export type Result<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly stepIndex?: number | null; readonly evidence?: NativeFeeShortfall };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const no = (code: string, stepIndex: number | null = null): Result<never> => ({ ok: false, code, stepIndex });
@@ -103,7 +124,16 @@ export const walletBatchId = (runId: string, groupIndex: number) => '0x' + creat
 const ESTIMATION_SIGNATURE = '0x' + 'ff'.repeat(32) + '7f' + 'ff'.repeat(31) + '1c';
 const nativeSpend = (group: EvmGroupCalls) => group.calls.reduce((sum, c) => c.kind === 'NATIVE_TRANSFER' ? sum + BigInt(c.amount) : sum, 0n);
 
-async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>): Promise<Result<Prepared>> {
+/**
+ * ADR-0010: the shortfall of a group whose owner cannot pay the native fee, or — when the policy picks it — the Circle-paid operation that replaces
+ * it (`circle-gas.ts` decides eligibility for exactly these calls; `selectGasMechanism` decides). `circleOnly` (a due user operation asking
+ * whether Circle applies): the same, but a batch the owner COULD pay natively answers CIRCLE_NOT_NEEDED and the caller keeps its own shortfall.
+ */
+type BatchOptions = { readonly circleOnly?: boolean; readonly plannedStrategy?: GroupStrategy };
+const withUnavailable = (short: Result<never>, unavailable: readonly MechanismUnavailable[]): Result<never> =>
+  short.ok || !short.evidence || !unavailable.length ? short : { ...short, evidence: { ...short.evidence, unavailable } };
+async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>,
+  options: BatchOptions = {}): Promise<Result<Prepared>> {
   const t = deps.evm(g.chain);
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
   // Every swap of the batch is refused on chain after the preparation's validity: a wallet prompt left open never executes a stale quote.
@@ -163,12 +193,25 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas + l1FeeUpperBound;
   // ADR-0009: FloFi's sponsorship offer for exactly these calls (null where no paymaster is configured, the day's budget is spent, or the offer
   // cannot be made now: the batch is then owner-paid, as always).
-  const offer = deps.sponsorship ? await deps.sponsorship.offer({ chain: g.chain, owner: group.owner, calls, maxFeePerGas, gas, ttlSeconds: EVM_PREPARED_TTL_MS / 1000,
-    preview: g.preview === true }).catch(() => null) : null;
+  const offer = deps.sponsorship && !options.circleOnly ? await deps.sponsorship.offer({ chain: g.chain, owner: group.owner, calls, maxFeePerGas, gas,
+    ttlSeconds: EVM_PREPARED_TTL_MS / 1000, preview: g.preview === true }).catch(() => null) : null;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does. With a
   // sponsorship offer it must still cover the native value: the offer is then REQUIRED (sent only sponsored, never owner-paid without the gas).
   const ownerCovers = fees.balance >= maxCost + nativeSpend(group);
-  if (!ownerCovers && !(offer && fees.balance >= nativeSpend(group))) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+  if (!ownerCovers && !(offer && fees.balance >= nativeSpend(group))) {
+    const short = nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+    // ADR-0010: native gas is short — the chain's token-paid alternative, when the operator enabled it and this group never handed a batch to the
+    // owner's wallet (that batch could still execute: the group keeps it). ADR-0009's FloFi-paid offer, when one exists, keeps its own rule.
+    if (offer || g.tokenGas === false) return short;
+    const circle = await circleAttempt(deps, { runId: g.runId, groupIndex: g.groupIndex, chain: g.chain, strategy: options.plannedStrategy ?? g.strategy,
+      ...g.wallet ? { wallet: g.wallet } : {}, group, calls, simulation, simulatedGas: gas, fees, l1FeeUpperBound, nativeRequired: maxCost + nativeSpend(group),
+      nativeSpend: nativeSpend(group), now: deps.now() });
+    if (!circle.considered) return short;
+    const selection = selectGasMechanism({ chain: g.chain, nativeCovers: false, candidate: circle.candidate });
+    if (selection.mechanism === 'CIRCLE_USDC_PAYMASTER' && circle.prepared) return ok(circle.prepared as Prepared);
+    return withUnavailable(short, selection.unavailable);
+  }
+  if (options.circleOnly) return no('CIRCLE_NOT_NEEDED');
   const sponsorship = offer ? { ...offer, required: !ownerCovers } : null;
   // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
   // after a lost answer, a reload, a re-preparation after expiry) and lets the owner's browser read the first batch back instead.
@@ -228,17 +271,43 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
   const op = erc4337.packedUserOperation({ sender: group.owner, nonce, callData, gas });
   erc4337.assertUserFundedOperation(op);
   const maxCost = erc4337.maxPrefund(gas);
-  if (!delayed && fees.balance < maxCost + nativeSpend(group)) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+  if (!delayed && fees.balance < maxCost + nativeSpend(group)) {
+    const short = nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+    // ADR-0010: a due operation the owner cannot pay natively may still run with its fee paid in USDC through Circle — built exactly as a due
+    // wallet batch (deadline-bounded calls, simulated whole), never as an operation signed upfront.
+    if (g.tokenGas === false || !deps.circle?.chains.includes(g.chain)) return short;
+    const viaCircle = await prepareWalletBatch(deps, requirement, { ...g, strategy: 'EVM_WALLET_BATCH', preview: true }, guaranteed,
+      { circleOnly: true, plannedStrategy: g.strategy });
+    if (viaCircle.ok) return viaCircle;
+    const unavailable = viaCircle.evidence?.unavailable ?? (viaCircle.code === 'CIRCLE_NOT_NEEDED' ? []
+      : [{ mechanism: 'CIRCLE_USDC_PAYMASTER' as const, code: viaCircle.code.split(':')[0]! }]);
+    return withUnavailable(short, unavailable);
+  }
   return ok({ kind: 'EVM_USER_OPERATION', chainId: group.chainId, owner: group.owner, group, upgraded,
     op: serialOp(op), userOpHash: erc4337.userOpHash(op, group.chainId), typedData: erc4337.delegatorUserOpTypedData(group.chainId, op),
     fee: { payer: group.owner, unit: 'wei', maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: !delayed } });
 }
+/** `paymasterAndData`: ADR-0010 only — a Circle-paid operation's (verified against its facts by `circle-gas.ts` before any use); absent: none. */
 export type SerialOp = { readonly sender: string; readonly nonce: string; readonly callData: string; readonly accountGasLimits: string; readonly preVerificationGas: string;
-  readonly gasFees: string };
+  readonly gasFees: string; readonly paymasterAndData?: string };
 const serialOp = (op: erc4337.PackedUserOperation): SerialOp => ({ sender: op.sender, nonce: op.nonce.toString(), callData: op.callData, accountGasLimits: op.accountGasLimits,
   preVerificationGas: op.preVerificationGas.toString(), gasFees: op.gasFees });
 export const opOf = (s: SerialOp, signature = '0x'): erc4337.PackedUserOperation => ({ sender: s.sender, nonce: BigInt(s.nonce), initCode: '0x', callData: s.callData,
-  accountGasLimits: s.accountGasLimits, preVerificationGas: BigInt(s.preVerificationGas), gasFees: s.gasFees, paymasterAndData: '0x', signature });
+  accountGasLimits: s.accountGasLimits, preVerificationGas: BigInt(s.preVerificationGas), gasFees: s.gasFees, paymasterAndData: s.paymasterAndData ?? '0x', signature });
+/**
+ * ADR-0010: the operation a prepared artifact signs and relays: a Circle-paid one is rebuilt from its verified facts (never from the stored op
+ * alone), an owner-paid one from its serialized op (no paymaster).
+ */
+function preparedOperation(prepared: Prepared, signature = '0x'): { readonly op: erc4337.PackedUserOperation; readonly circle: CircleFacts | null } {
+  const circle = circleFactsOf(prepared);
+  if (!circle) return { op: opOf(prepared.op as SerialOp, signature), circle: null };
+  const op = circleOperationOf(circle, String(prepared.owner), signature);
+  // The stored op must be exactly the one rebuilt from the facts the owner reviewed (a tampered artifact is never relayed).
+  const stored = prepared.op as SerialOp | undefined;
+  if (!stored || stored.paymasterAndData !== op.paymasterAndData || stored.callData !== op.callData || stored.accountGasLimits !== op.accountGasLimits
+    || stored.gasFees !== op.gasFees || stored.nonce !== op.nonce.toString() || stored.preVerificationGas !== op.preVerificationGas.toString()) throw new Error('CIRCLE_OPERATION_INVALID');
+  return { op, circle };
+}
 
 /** One reviewed Solana transaction of a group (what the owner signs and what FloFi verifies; never the whole Review artifact chain). */
 export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITER' | 'TRANSFER'; readonly owner: string; readonly message: string; readonly messageHash: string;
@@ -304,7 +373,8 @@ export async function prepareGroup(deps: UserFundedDeps, composition: WorkflowCo
     // A Solana group's window is its blockhash lifetime MINUS the send budget it needs before its first transaction (`solanaSendBudget`):
     // signatures arriving later are refused at authorization (USER_FUNDED_PREPARED_EXPIRED; the owner prepares again from a fresh blockhash)
     // instead of being accepted and then blocked, unsent, for lack of budget.
-    const validUntil = new Date(g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000
+    // ADR-0010: a Circle-paid operation is a due group's, bound to fresh quotes, a price and its swaps' on-chain deadline: a short window, inside it.
+    const validUntil = new Date(circleFactsOf(r.value) ? now + CIRCLE_PREPARED_TTL_MS : g.strategy === 'EVM_USER_OPERATION' ? now + 24 * 3_600_000
       : g.strategy === 'SOLANA_SIGN_ALL' ? now + solanaPreparedTtlMs((r.value.transactions as readonly unknown[]).length) : now + EVM_PREPARED_TTL_MS);
     return ok({ prepared: { ...r.value, preparedAt: new Date(now).toISOString() }, validUntil });
   } catch (cause) { return no(codeOf(cause, 'USER_FUNDED_PREPARE_FAILED')); }
@@ -321,6 +391,13 @@ export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: s
   const at = now.toISOString();
   if (answer.kind === 'EVM_WALLET_BATCH') {
     try { return ok({ kind: answer.kind, batchId: eip5792.sendCallsId(answer.batchId), at }); } catch { return no('EIP5792_RESPONSE_INVALID'); }
+  }
+  if (answer.kind === 'EVM_USER_OPERATION' && circleFactsOf(prepared)) {
+    // ADR-0010: a Circle-paid operation — only once its permit was signed and verified (stage OPERATION), and only the owner's signature of exactly
+    // the operation rebuilt from those facts, in the account's own scheme (the DeleGator's domain on v0.7, the EntryPoint's typed hash on v0.8).
+    const checked = authorizeCircleOperation(prepared, answer.signature, owner);
+    if (!checked.ok) return no(checked.code);
+    return ok({ kind: answer.kind, signature: answer.signature.toLowerCase(), signer: owner.toLowerCase(), at });
   }
   if (answer.kind === 'EVM_USER_OPERATION') {
     const op = opOf(prepared.op as SerialOp), chainId = Number(prepared.chainId);
@@ -352,6 +429,7 @@ export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: s
 export async function checkUserOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string): Promise<Result<Readonly<Record<string, unknown>>>> {
   const chain = `eip155:${String(prepared.chainId)}`, bundler = deps.bundler(chain);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+  if (circleFactsOf(prepared)) return checkCircleOperation(deps, prepared, authorization, owner);
   const op = opOf(prepared.op as SerialOp, String(authorization.signature));
   assertUserFundedSubmission({ kind: 'EVM_USER_OPERATION', feePayer: op.sender, ownerWallet: owner, sponsorship: op.paymasterAndData });
   try {
@@ -363,6 +441,28 @@ export async function checkUserOperation(deps: UserFundedDeps, prepared: Prepare
   return ok({ kind: 'EVM_USER_OPERATION', userOpHash: erc4337.userOpHash(op, Number(prepared.chainId)), hashes: [], submittedAt: deps.now().toISOString() });
 }
 /**
+ * ADR-0010: the due-time check of a Circle-paid operation, before anything is relayed: the operation rebuilt from its verified facts, S1 with the
+ * token-fee claim, the permit nonce still the owner's current one (CIRCLE_PERMIT_EXPIRED otherwise), then the bundler's simulation of the exact
+ * signed operation within every signed limit (the paymaster's included). The submission record names its EntryPoint.
+ */
+async function checkCircleOperation(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string): Promise<Result<Readonly<Record<string, unknown>>>> {
+  const bundler = deps.bundler(`eip155:${String(prepared.chainId)}`);
+  if (!bundler?.estimateCircle) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+  let op: erc4337.PackedUserOperation;
+  try { op = preparedOperation(prepared, String(authorization.signature)).op; } catch (cause) { return no(codeOf(cause, 'CIRCLE_OPERATION_INVALID')); }
+  const checked = await checkCircleSubmission(deps, prepared, op, owner);
+  if (!checked.ok) return no(checked.code);
+  const c = checked.value;
+  try {
+    const need = await bundler.estimateCircle(op, c.entryPoint);
+    const [verificationGasLimit, callGasLimit] = erc4337.unpackUints(op.accountGasLimits), pm = erc4337.unpackPaymasterAndData(op.paymasterAndData)!;
+    if (need.verificationGasLimit > verificationGasLimit || need.callGasLimit > callGasLimit || need.preVerificationGas > op.preVerificationGas
+      || need.paymasterVerificationGasLimit > pm.verificationGasLimit || need.paymasterPostOpGasLimit > pm.postOpGasLimit) return no('USER_OPERATION_GAS_LIMIT_TOO_LOW');
+  } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
+  return ok({ kind: 'EVM_USER_OPERATION', userOpHash: erc4337.userOpHashFor(op, Number(prepared.chainId), c.entryPoint), entryPoint: c.entryPoint, hashes: [],
+    submittedAt: deps.now().toISOString() });
+}
+/**
  * Relays the owner-signed operation to the bundler. Called only after its submission was recorded (exactly one process won that write), and
  * again by reconciliation while neither the chain nor the bundler knows it: the same signed bytes, so a resend can never be a second operation.
  */
@@ -372,8 +472,12 @@ export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepare
   if (paused) return no(paused);
   const bundler = deps.bundler(`eip155:${String(prepared.chainId)}`);
   if (!bundler) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
-  try { return ok(await bundler.send(opOf(prepared.op as SerialOp, String(authorization.signature)))); }
-  catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
+  try {
+    const { op, circle } = preparedOperation(prepared, String(authorization.signature));
+    // ADR-0010: a Circle-paid operation goes to its own EntryPoint, through the bundler's Circle-only path (any other paymaster is refused there).
+    if (circle) return bundler.sendCircle ? ok(await bundler.sendCircle(op, circle.entryPoint)) : no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+    return ok(await bundler.send(op));
+  } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
 }
 /** The Solana submission record: every signature is known before anything is sent (the first signature of each owner-signed transaction). */
 export function solanaSubmission(authorization: Readonly<Record<string, unknown>>, now: Date): Readonly<Record<string, unknown>> {
@@ -612,8 +716,15 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
   // word (`reconcileLostUserOperation`): it is relayed again (the SAME signed bytes) only while its nonce is provably unconsumed.
   if (!receipt && bundler && authorization && await bundler.known(userOpHash).then(k => !k, () => false))
     return reconcileLostUserOperation(deps, t, group, prepared, authorization, userOpHash, runOwner);
-  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null));
+  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, receipt?.transactionHash ?? null, circleReconciliationOf(prepared)));
 }
+/** ADR-0010: what a Circle-paid group's reconciliation checks (its EntryPoint, the pinned paymaster, USDC and the cap); null for any other group. */
+function circleReconciliationOf(prepared: Prepared): CircleReconciliation | null {
+  const c = circleFactsOf(prepared);
+  return c ? { entryPoint: c.entryPoint, paymaster: c.paymaster, usdc: c.usdc, cap: BigInt(c.permitCap) } : null;
+}
+/** The EntryPoint a prepared operation was signed for: a Circle-paid one names its own; FloFi's owner-paid operations are v0.7. */
+const entryPointOf = (prepared: Prepared): string => circleFactsOf(prepared)?.entryPoint ?? erc4337.ENTRY_POINT_V0_7;
 /** What the chain shows of a user operation, as the group's outcome: only a reverted operation FAILED; a mismatch it did not revert is UNMATCHED. */
 const userOperationOutcome = (r: Awaited<ReturnType<typeof reconcileUserOperation>>): Reconciled => r.status === 'PENDING' ? r
   : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
@@ -638,10 +749,10 @@ export function entryPointNonceSequence(answer: unknown, key: bigint): bigint | 
   return n >> 64n === key ? n & UINT64_MAX : n >> 64n === 0n ? n : null;
 }
 /** Whether the EntryPoint consumed the signed nonce of `op` (its key's sequence moved past it), read with FloFi's own transport; null: unreadable. */
-async function userOperationNonceConsumed(t: ChainTransport, op: erc4337.PackedUserOperation): Promise<boolean | null> {
+async function userOperationNonceConsumed(t: ChainTransport, op: erc4337.PackedUserOperation, entryPoint: string = erc4337.ENTRY_POINT_V0_7): Promise<boolean | null> {
   try {
     const { key, sequence } = erc4337.userOpNonceParts(op.nonce);
-    const current = entryPointNonceSequence(await t.rpc('eth_call', [{ to: erc4337.ENTRY_POINT_V0_7, data: erc4337.getNonceCall(op.sender, key) }, 'latest']), key);
+    const current = entryPointNonceSequence(await t.rpc('eth_call', [{ to: entryPoint, data: erc4337.getNonceCall(op.sender, key) }, 'latest']), key);
     return current === null ? null : current > sequence;
   } catch { return null; }
 }
@@ -651,21 +762,21 @@ type EventSearch = { readonly state: 'FOUND'; readonly transactionHash: string }
  * transport failed or answered malformed (nothing is decided). NOT_FOUND: not in the searched range, or the transport/provider refuses the search
  * (a method outside its allowlist, a range above its cap).
  */
-async function findUserOperationEvent(t: ChainTransport, userOpHash: string, fromBlock: bigint | null): Promise<EventSearch> {
+async function findUserOperationEvent(t: ChainTransport, userOpHash: string, fromBlock: bigint | null, entryPoint: string = erc4337.ENTRY_POINT_V0_7): Promise<EventSearch> {
   let raw: unknown;
   try { raw = await t.rpc('eth_blockNumber', []); } catch { return { state: 'UNREADABLE' }; }
   if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(raw)) return { state: 'UNREADABLE' };
   const hash = userOpHash.toLowerCase(), floor = fromBlock ?? 0n;
   const isEvent = (log: unknown): log is { readonly transactionHash: string } => {
     const l = log && typeof log === 'object' ? log as { address?: unknown; topics?: unknown; transactionHash?: unknown; removed?: unknown } : null;
-    return !!l && l.removed !== true && typeof l.address === 'string' && l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7 && Array.isArray(l.topics)
+    return !!l && l.removed !== true && typeof l.address === 'string' && l.address.toLowerCase() === entryPoint && Array.isArray(l.topics)
       && String(l.topics[0]).toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC && String(l.topics[1]).toLowerCase() === hash
       && typeof l.transactionHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(l.transactionHash);
   };
   for (let to = BigInt(raw), request = 0; to >= floor && request < USER_OPERATION_LOG_SCAN_REQUESTS; to -= USER_OPERATION_LOG_SCAN_BLOCKS, request++) {
     const from = to - USER_OPERATION_LOG_SCAN_BLOCKS + 1n > floor ? to - USER_OPERATION_LOG_SCAN_BLOCKS + 1n : floor;
     let logs: unknown;
-    try { logs = await t.rpc('eth_getLogs', [{ address: erc4337.ENTRY_POINT_V0_7, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, hash], fromBlock: hex(from), toBlock: hex(to) }]); }
+    try { logs = await t.rpc('eth_getLogs', [{ address: entryPoint, topics: [erc4337.USER_OPERATION_EVENT_TOPIC, hash], fromBlock: hex(from), toBlock: hex(to) }]); }
     catch (cause) { return { state: codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'UNREADABLE' : 'NOT_FOUND' }; }
     if (!Array.isArray(logs)) return { state: 'UNREADABLE' };
     const event = logs.find(isEvent);
@@ -688,17 +799,18 @@ async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTranspor
   authorization: Readonly<Record<string, unknown>>, userOpHash: string, runOwner?: BetaPrincipal): Promise<Reconciled> {
   let op: erc4337.PackedUserOperation;
   try { op = opOf(prepared.op as SerialOp); } catch { return { status: 'PENDING' }; }
-  let consumed = await userOperationNonceConsumed(t, op);
+  const entryPoint = entryPointOf(prepared);
+  let consumed = await userOperationNonceConsumed(t, op, entryPoint);
   if (consumed === false) {
     const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
     if (resent.ok || resent.code.startsWith('BETA_') || RESEND_RETRYABLE.has(resent.code)) return { status: 'PENDING' };
-    consumed = await userOperationNonceConsumed(t, op);
+    consumed = await userOperationNonceConsumed(t, op, entryPoint);
     if (consumed === false) return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
   }
   if (consumed === null) return { status: 'PENDING' };
   const fromBlock = typeof prepared.fromBlock === 'string' && /^[0-9]{1,20}$/.test(prepared.fromBlock) ? BigInt(prepared.fromBlock) : null;
-  const found = await findUserOperationEvent(t, userOpHash, fromBlock);
+  const found = await findUserOperationEvent(t, userOpHash, fromBlock, entryPoint);
   if (found.state === 'UNREADABLE') return { status: 'PENDING' };
   if (found.state === 'NOT_FOUND') return { status: 'UNMATCHED', code: 'USER_OPERATION_NONCE_CONSUMED_UNRECONCILED', gasPaid: null, transactions: [] };
-  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, found.transactionHash));
+  return userOperationOutcome(await reconcileUserOperation(t, group, userOpHash, found.transactionHash, circleReconciliationOf(prepared)));
 }

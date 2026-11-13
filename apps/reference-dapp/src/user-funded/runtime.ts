@@ -24,6 +24,8 @@ import { bundlerRpc, createBundlerClient, type BundlerClient } from './bundler.t
 import { readUserFundedConfig } from './config.ts';
 import type { UserFundedDeps } from './groups.ts';
 import { sponsorshipPort, sponsorshipStorage } from '../gas-sponsorship/runtime.ts';
+import { deploymentPriceSource } from '../automations/config.ts';
+import { circleDepsOf } from './circle-gas.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type UserFundedRuntime = { readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null };
@@ -69,7 +71,10 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
   // ADR-0009: network-fee sponsorship of wallet batches — offered only where the operator configured a paymaster; grants are read from the
   // shared PostgreSQL state wherever there is a host (a worker without the configuration still reconciles a batch sponsored by the web tier).
   const sponsorship = host ? sponsorshipPort(env, () => sponsorshipStorage(host)) : null;
-  const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null, across, sponsorship,
+  // ADR-0010: Circle's USDC paymaster on the chains the operator enabled (`FLOFI_CIRCLE_USDC_GAS`) that also have a bundler and a read RPC here,
+  // priced from the deployment's verified price source; offered only when the owner's native gas falls short (`groups.ts`).
+  const circle = circleDepsOf(env, facts.bundlerChains, () => deploymentPriceSource(env, fetchImpl));
+  const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null, across, sponsorship, circle,
     submissionRefusal: async (wallet, owner = wallet) => {
       const mode = betaAccessMode(env);
       if (mode === 'open') return null;

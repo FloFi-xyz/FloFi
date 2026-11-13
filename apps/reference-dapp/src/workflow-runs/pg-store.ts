@@ -17,6 +17,7 @@ import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platfo
 import { WALLET_BATCH_OUTCOME_UNKNOWN, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode, type RunState,
   type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
+import type { TokenFeePaid } from '../user-funded/gas-payer.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
 /** How a bound step's amount was resolved (native units of `asset`). */
@@ -32,7 +33,9 @@ export type StepOutcome = {
   readonly spent: readonly { readonly asset: string; readonly amount: string }[]; readonly received: readonly { readonly asset: string; readonly amount: string }[];
   readonly observedAt: string;
   /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: network fees actually paid for the group this step ran in, and by whom (always the owner's wallet). */
-  readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number } };
+  readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number;
+    /** ADR-0010: the payer fronted the native fee and the OWNER paid it back in a token (proven from the same receipt). */
+    readonly paidInToken?: TokenFeePaid } };
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: one execution group of a USER_FUNDED run (migration 0023). */
 export const GROUP_STATES = ['PLANNED', 'PREPARED', 'AUTHORIZED', 'SUBMITTED', 'RECONCILED', 'FAILED', 'UNCERTAIN', 'BLOCKED', 'SKIPPED', 'EXPIRED'] as const;
 export type GroupState = (typeof GROUP_STATES)[number];
