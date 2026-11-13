@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeApprove, toHex } from '@defi-workflow-engine/reference-compiler';
 import { reviewFixture, reviewOwner, reviewSpender } from '../test-utils/review-fixture';
 import { reviewBindingAdopts, useReviewAuthorization } from './review-authorization';
+import { reviewApprovalValue } from '../domain/review-presentation';
 
 const f = vi.hoisted(() => ({ stores: {} as Record<string, Record<string, unknown>>, state: undefined as unknown }));
 // A minimal hook runner keeps the shell's binding state across wallet events.
@@ -58,6 +59,27 @@ describe('shared wallet and existing Review capability', () => {
     expect(useReviewAuthorization('public').authorization.ready).toBe(false);
     Object.assign(run, { divergence: undefined, quote: { ...run.quote, ownerReview: undefined } });
     expect(useReviewAuthorization('public').authorization.ready).toBe(false);
+  });
+  it('review UX5: a 0x Gasless Review lists its Permit2 approval as a token permission (exact, or unlimited), and a native one adds none', () => {
+    const fixture = reviewFixture();
+    if (fixture.source.kind !== 'public' || !fixture.source.state.run) throw Error('fixture');
+    const saved = fixture.source.state.run, USDG = '0x5fc5360d0b2f7ede3b27e8a1d5e3fa6a1be1d168', PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3';
+    const withGas = (gas: object) => ({ ...saved, quote: { ...saved.quote, chainId: 4663, inputToken: USDG, inputSymbol: 'USDG', inputDecimals: 6, gas } });
+    const gasless = (approval: object | null) => withGas({ mechanism: 'ZEROX_GASLESS_SWAP', zeroEx: { permit2: PERMIT2, approval } });
+    f.stores.public = { run: gasless({ type: 'permit', value: '100000000', unlimited: false }), available: true, busy: false, retired: false, recoveryOnly: false, review: vi.fn() };
+    const { authorization } = useReviewAuthorization('public');
+    expect(authorization.approvals).toEqual([{ token: USDG, chain: 'eip155:4663', spender: PERMIT2, spenderName: 'Permit2', amount: '100000000', kind: 'exact' }]);
+    expect(authorization.tokens).toEqual(expect.arrayContaining([{ address: USDG, chain: 'eip155:4663', symbol: 'USDG', decimals: 6 }]));
+    expect(reviewApprovalValue(authorization.approvals[0]!, authorization.tokens, fixture.context)).toMatchObject({ symbol: 'USDG', unlimited: false, value: 'Exactly 100 USDG', spender: 'Permit2' });
+    f.state = undefined;
+    f.stores.public = { ...f.stores.public, run: gasless({ type: 'permit', value: ((1n << 256n) - 1n).toString(), unlimited: true }) };
+    const unlimited = useReviewAuthorization('public').authorization;
+    expect(reviewApprovalValue(unlimited.approvals[0]!, unlimited.tokens, fixture.context)).toMatchObject({ unlimited: true, value: 'Unlimited approval', spender: 'Permit2' });
+    // Permit2 already allowed (one signature), or a native Review: no gasless permission row.
+    for (const run of [gasless(null), withGas({ mechanism: 'NATIVE_WALLET_GAS', zeroEx: null })]) {
+      f.state = undefined; f.stores.public = { ...f.stores.public, run };
+      expect(useReviewAuthorization('public').authorization.approvals).toEqual([]);
+    }
   });
   it('allows Review of a refreshed public quote after a confirmed approval, without reviving the old quote binding', () => {
     const fixture = reviewFixture();

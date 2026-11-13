@@ -21,8 +21,26 @@ export const METATXN_FEATURE = 3n;
 export const NATIVE_TOKEN = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 export const OWNER_OF_SELECTOR = erc7710.selectorOf('ownerOf(uint256)');
 export const PREV_SELECTOR = erc7710.selectorOf('prev(uint128)');
-/** Settler `METATXN_TRANSFER_FROM(address recipient, ((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline) permit)`. */
-export const METATXN_TRANSFER_FROM_SELECTOR = erc7710.selectorOf('METATXN_TRANSFER_FROM(address,((address,uint256),uint256,uint256))');
+/** Permit2 `PermitTransferFrom` as the ABI encodes it: `((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline)`, four static words. */
+const PERMIT_TRANSFER_FROM = '((address,uint256),uint256,uint256)';
+/** Settler `METATXN_TRANSFER_FROM(address recipient, PermitTransferFrom permit)`. */
+export const METATXN_TRANSFER_FROM_SELECTOR = erc7710.selectorOf(`METATXN_TRANSFER_FROM(address,${PERMIT_TRANSFER_FROM})`);
+/**
+ * The witness-aware actions SettlerMetaTxn accepts as the FIRST action (0x-settler `ISettlerActions.sol`, every `METATXN_*` declaration, canonical
+ * signatures): selector → signature. Each one is a VIP action that "should always start with `recipient` address and the `permit` from the taker"
+ * — its first five words are the recipient and the four static words of the taker's Permit2 permit, which FloFi binds to the signed permit.
+ * Which of them a given Settler dispatches is the Settler's business (an action it does not dispatch reverts the trade before anything moves).
+ */
+export const METATXN_FIRST_ACTIONS: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries([
+  `METATXN_TRANSFER_FROM(address,${PERMIT_TRANSFER_FROM})`,
+  `METATXN_RFQ_VIP(address,${PERMIT_TRANSFER_FROM},${PERMIT_TRANSFER_FROM},address,bytes)`,
+  `METATXN_UNISWAPV4_VIP(address,${PERMIT_TRANSFER_FROM},uint8,bool,uint256,uint256,bytes,uint256)`,
+  `METATXN_BALANCERV3_VIP(address,${PERMIT_TRANSFER_FROM},bool,uint256,uint256,bytes,uint256)`,
+  `METATXN_PANCAKE_INFINITY_VIP(address,${PERMIT_TRANSFER_FROM},uint8,bool,uint256,uint256,bytes,uint256)`,
+  `METATXN_UNISWAPV3_VIP(address,${PERMIT_TRANSFER_FROM},bytes,uint256)`,
+  `METATXN_CURVE_TRICRYPTO_VIP(address,${PERMIT_TRANSFER_FROM},uint80,uint256)`,
+  `METATXN_EKUBOV3_VIP(address,${PERMIT_TRANSFER_FROM},bool,uint256,uint256,bytes,uint256)`,
+].map(signature => [erc7710.selectorOf(signature), signature])));
 /** SettlerMetaTxn `executeMetaTxn((address,address,uint256) slippage, bytes[] actions, bytes32 zid, address msgSender, bytes sig)`. */
 export const EXECUTE_METATXN_SELECTOR = erc7710.selectorOf('executeMetaTxn((address,address,uint256),bytes[],bytes32,address,bytes)');
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -58,7 +76,15 @@ export type ZeroExGaslessBinding = { readonly provider: '0x-gasless-v2'; readonl
     readonly unlimited: boolean; readonly nonce: string; readonly deadline: number } | null;
   readonly gasFee: ZeroExFee; readonly zeroExFee: ZeroExFee | null;
   /** 0x's route sources (shown under Technical details), and 0x's informational submission target. */
-  readonly sources: readonly string[]; readonly target: string };
+  readonly sources: readonly string[]; readonly target: string;
+  /**
+   * ADR-0010 §5: FloFi's own on-chain quote of exactly this swap (the Uniswap v3 route the native path would take, read at the same block), kept
+   * beside 0x's, and the floor 0x's minimum had to reach: FloFi's slippage minimum net of 0x's disclosed fees (`gaslessReferenceFloor`). Both
+   * are shown under Technical details; the native-coverage re-check estimates the Uniswap call from this reference, never from 0x's figures.
+   */
+  readonly reference: GaslessReference & { readonly floor: string } };
+/** FloFi's own quote of the swap: the Uniswap v3 pool and fee tier, its expected output and FloFi's slippage minimum (buy-token units). */
+export type GaslessReference = { readonly source: 'uniswap-v3'; readonly pool: string; readonly fee: number; readonly expectedOut: string; readonly minimumOut: string };
 
 const fail = (code: string): never => { throw new Error(code); };
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/, HASH = /^0x[0-9a-fA-F]{64}$/, UNITS = /^(0|[1-9][0-9]{0,77})$/;
@@ -144,6 +170,14 @@ export function zeroExErrorCode(status: number, body: unknown): string {
   return name && Object.hasOwn(ERROR_CODES, name) ? ERROR_CODES[name]! : `ZEROX_PROVIDER_HTTP_${status}`;
 }
 
+/**
+ * Whether a read failed because the CALL reverted (an answer about the call), never because the node did not answer. FloFi's production read
+ * client (`public-testnet-rpc.ts`) never passes the node's text on: it throws `PUBLIC_RPC_RESPONSE_INVALID` marked `rpcReverted: true` (JSON-RPC
+ * code 3, or revert text under any code). A raw client's "execution reverted" message is the same answer. Anything else (an outage, a missing
+ * history, a malformed answer) is not a revert and is thrown on.
+ */
+export const callReverted = (cause: unknown): boolean => cause instanceof Error &&
+  ((cause as Error & { readonly rpcReverted?: unknown }).rpcReverted === true || /revert/i.test(cause.message));
 /** The genuine MetaTxn Settler(s), read from 0x's registry on FloFi's own read client at `block`. A revert of `ownerOf(3)` means paused. */
 export async function readGenuineSettlers(rpc: Rpc, block: string): Promise<{ readonly current: string; readonly previous: string | null }> {
   const code = await rpc('eth_getCode', [SETTLER_REGISTRY, block]);
@@ -152,7 +186,8 @@ export async function readGenuineSettlers(rpc: Rpc, block: string): Promise<{ re
   const read = async (selector: string): Promise<string | null> => {
     let answer: unknown;
     try { answer = await rpc('eth_call', [{ to: SETTLER_REGISTRY, data: selector + feature }, block]); }
-    catch (cause) { if (cause instanceof Error && /revert/i.test(cause.message)) return null; throw cause; }
+    // `ownerOf(3)` reverts while the MetaTxn feature is paused; `prev(3)` reverts when there is no previous Settler (outside a dwell period).
+    catch (cause) { if (callReverted(cause)) return null; throw cause; }
     if (typeof answer !== 'string' || !/^0x0{24}[0-9a-fA-F]{40}$/.test(answer)) return fail('ZEROX_SETTLER_UNVERIFIED');
     const settler = '0x' + answer.slice(-40).toLowerCase();
     return /^0x0{40}$/.test(settler) ? null : settler;
@@ -186,10 +221,33 @@ const lower = (value: unknown, code: string): string => typeof value === 'string
 export type GaslessCheckContext = {
   /** The genuine Settlers read from the registry at this quote (current and, during the dwell period, the previous one). */
   readonly settlers: { readonly current: string; readonly previous: string | null };
+  /** FloFi's own on-chain quote of exactly this swap, which 0x's minimum must not fall below net of 0x's disclosed fees. */
+  readonly reference: GaslessReference;
   readonly nowMs: number;
   /** The trade deadline must leave at least this long for Review and signatures (ms), and be at most this far away (s). */
   readonly minimumLifetimeMs: number; readonly maximumLifetimeSeconds: number;
 };
+/**
+ * ADR-0010 §5: the least 0x's signed minimum may be — FloFi's own slippage minimum for this swap, less what 0x's disclosed fees cost the owner
+ * (0x takes them out of the trade, so its net output is legitimately lower by exactly that much and no more). A fee in the buy token is
+ * subtracted as is; a fee in the sell token removes its share of the input, valued at FloFi's own reference (the reference minimum scaled to
+ * the input left after it). Never below zero. Integer arithmetic, rounded down.
+ */
+export function gaslessReferenceFloor(reference: GaslessReference, sell: { readonly token: string; readonly amount: string }, buyToken: string,
+  fees: readonly (ZeroExFee | null)[]): bigint {
+  const sellAmount = BigInt(sell.amount), minimum = BigInt(reference.minimumOut);
+  if (sellAmount <= 0n || minimum <= 0n) return fail('ZEROX_TRADE_UNVERIFIABLE');
+  let sellFees = 0n, buyFees = 0n;
+  for (const fee of fees) {
+    if (!fee) continue;
+    if (fee.token === sell.token) sellFees += BigInt(fee.amount);
+    else if (fee.token === buyToken) buyFees += BigInt(fee.amount);
+    else fail('ZEROX_TRADE_UNVERIFIABLE');
+  }
+  if (sellFees >= sellAmount) return 0n;
+  const floor = minimum * (sellAmount - sellFees) / sellAmount - buyFees;
+  return floor > 0n ? floor : 0n;
+}
 /**
  * The pre-sign checklist (research-0x.md §6.3). Returns the binding the Review shows and the owner signs, or throws the closed reason this
  * quote cannot be used gaslessly. Pure: the Settler answer and the clock are inputs.
@@ -237,12 +295,28 @@ export function verifyGaslessQuote(parsed: ParsedQuote, rawHash: string, request
     fail('ZEROX_TRADE_UNVERIFIABLE');
   if (minimum.toString() !== q.minBuyAmount || minimum > BigInt(q.buyAmount)) fail('ZEROX_QUOTE_MISMATCH');
   if (minimum < slippageFloor) fail('ZEROX_MINIMUM_BELOW_SLIPPAGE');
-  // actions[0] must be METATXN_TRANSFER_FROM of exactly the permit, paid to the Settler (the witness-aware VIP action that authenticates the rest).
+  // ADR-0010 §5: never worse than FloFi's own on-chain quote beyond 0x's disclosed fees (0x's own buyAmount is not a reference for itself).
+  const reference = context.reference;
+  if (reference.source !== 'uniswap-v3' || !ADDRESS.test(reference.pool) || !Number.isSafeInteger(reference.fee) || reference.fee <= 0 ||
+      !UNITS.test(reference.expectedOut) || !UNITS.test(reference.minimumOut) || BigInt(reference.minimumOut) > BigInt(reference.expectedOut)) fail('ZEROX_TRADE_UNVERIFIABLE');
+  const floor = gaslessReferenceFloor(reference, { token: sellToken, amount: request.sellAmount }, buyToken, [gasFee, zeroExFee]);
+  if (minimum < floor) fail('ZEROX_QUOTE_WORSE_THAN_REFERENCE');
+  // actions[0] must be one of the Settler's witness-aware METATXN_* actions (the one that authenticates the rest) whose permit words are exactly
+  // the signed permit: METATXN_TRANSFER_FROM, exactly the permit paid to the Settler; a METATXN_*_VIP, the permit right after its recipient (the
+  // first hop's output target: the Settler, or the next pool under 0x's custody optimisation). Whatever the route, the owner's protection is the
+  // populated slippage struct checked above, which the Settler enforces last (its own balance of the buy token ≥ the minimum, paid to the owner),
+  // and the receipt reconciliation. Anything else is refused.
   const actions = witness.actions;
   if (!Array.isArray(actions) || actions.length < 1 || actions.length > 32) return fail('ZEROX_TRADE_UNVERIFIABLE');
   const first = typeof actions[0] === 'string' ? actions[0].toLowerCase() : '';
   const w = (n: bigint) => n.toString(16).padStart(64, '0'), a = (address: string) => address.slice(2).padStart(64, '0');
-  if (first !== METATXN_TRANSFER_FROM_SELECTOR + a(spender) + a(sellToken) + w(BigInt(request.sellAmount)) + w(nonce) + w(deadline)) fail('ZEROX_TRADE_UNVERIFIABLE');
+  const selector = first.slice(0, 10), recipientWord = first.slice(10, 74), permitWords = first.slice(74, 330);
+  // Whole ABI words after the selector; the recipient an address word, never zero.
+  if (!/^0x[0-9a-f]{8}(?:[0-9a-f]{64}){5,}$/.test(first) || !Object.hasOwn(METATXN_FIRST_ACTIONS, selector) ||
+      permitWords !== a(sellToken) + w(BigInt(request.sellAmount)) + w(nonce) + w(deadline) || !/^0{24}[0-9a-f]{40}$/.test(recipientWord) || /^0{64}$/.test(recipientWord))
+    fail('ZEROX_TRADE_UNVERIFIABLE');
+  if (selector === METATXN_TRANSFER_FROM_SELECTOR ? first.length !== 10 + 5 * 64 || recipientWord !== a(spender) : first.length <= 10 + 5 * 64)
+    fail('ZEROX_TRADE_UNVERIFIABLE');
   // --- the optional gasless approval (EIP-2612 permit of Permit2) ---
   let approval: ZeroExGaslessBinding['approval'] = null;
   if (q.approval) {
@@ -263,5 +337,7 @@ export function verifyGaslessQuote(parsed: ParsedQuote, rawHash: string, request
   return { provider: '0x-gasless-v2', zid: q.zid, rawHash, quotedAt: new Date(context.nowMs).toISOString(), chainId: request.chainId, taker,
     sellToken, buyToken, sellAmount: request.sellAmount, buyAmount: q.buyAmount, minBuyAmount: q.minBuyAmount, slippageBps: request.slippageBps,
     settler: spender, settlerSource, permit2: PERMIT2, trade: { hash: tradeHash, eip712: trade, nonce: nonce.toString(), deadline: Number(deadline) },
-    approval, gasFee, zeroExFee, sources, target: q.target };
+    approval, gasFee, zeroExFee, sources, target: q.target,
+    reference: { source: 'uniswap-v3', pool: reference.pool, fee: reference.fee, expectedOut: reference.expectedOut, minimumOut: reference.minimumOut,
+      floor: floor.toString() } };
 }

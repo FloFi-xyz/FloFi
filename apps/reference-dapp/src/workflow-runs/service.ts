@@ -230,7 +230,11 @@ export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BI
   // offer is USER_FUNDED_ACTION_NOT_BUILDABLE above), or a deployment whose pinned contracts no longer match: the Router's own flow reviews it.
   'USER_FUNDED_BRIDGE_PROVIDER_UNSUPPORTED', 'USER_FUNDED_BRIDGE_PAIR_UNSUPPORTED', 'USER_FUNDED_BRIDGE_ASSET_UNSUPPORTED', 'USER_FUNDED_BRIDGE_DESTINATION_UNREADABLE',
   'USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER', 'USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE', 'ROUTER_UNEXPECTED_CONTRACT',
-  'ROUTER_CONTRACT_CODE_MISSING']);
+  'ROUTER_CONTRACT_CODE_MISSING',
+  // ADR-0010 §5 (review Z1): a short-ETH Robinhood Chain batch of swaps 0x Gasless could carry one at a time (user-funded/gasless-groups.ts). A
+  // wallet batch can never pay its fee in tokens, so every retry refuses again; Resume runs each swap through its own owner-signed flow
+  // (`robinhood-swap`), which decides there how its fee is paid (the owner's ETH first; 0x Gasless when it is short).
+  'USER_FUNDED_GASLESS_REQUIRES_STEP_MODE']);
 /**
  * Blocks a due group after a permanent refusal and halts the run (steps already executed keep their facts), then refuses with the code. Only
  * from exactly the PLANNED group this preparation read (its row version): a concurrent preparation that succeeded — its batch possibly already

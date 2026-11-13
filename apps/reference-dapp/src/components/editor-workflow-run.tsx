@@ -96,7 +96,9 @@ const TRANSIENT_REVIEW_FAILURE: ReadonlySet<string> = new Set(['EDITOR_REVIEW_RA
  * workflow is offered step by step instead of a batch that can never be prepared (the same codes a due group resumes step by step for).
  */
 const STEP_BY_STEP_REFUSALS: ReadonlySet<string> = new Set(['USER_FUNDED_SIMULATION_UNAVAILABLE', 'SIMULATION_SWAP_OUTPUT_SHORT', 'USER_FUNDED_DEADLINE_UNAVAILABLE',
-  'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING']);
+  'TOKEN_METADATA_MISMATCH', 'CONTRACT_CODE_MISSING',
+  // ADR-0010 §5 (review Z1): a short-ETH Robinhood Chain batch of swaps: each swap can pay its own fee in tokens through 0x Gasless, step by step.
+  'USER_FUNDED_GASLESS_REQUIRES_STEP_MODE']);
 /** Whether a whole-workflow Review sends the owner to the step-by-step path: it planned one, or refused the batch for good. */
 export const reviewOffersStepByStep = (review: Pick<EditorExecutionReview, 'mode' | 'refusal'>) =>
   review.mode === 'STEP_BY_STEP' || (review.refusal !== null && STEP_BY_STEP_REFUSALS.has(review.refusal.code));
@@ -737,7 +739,7 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   USER_FUNDED_SIMULATION_UNAVAILABLE: 'This network’s RPC cannot simulate the whole batch, so FloFi does not offer it in one confirmation. Each step is confirmed on its own instead.',
   USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE: 'Your wallet does not hold enough ETH on this network for the network fee of the batch.',
   // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a short-ETH Robinhood Chain batch of swaps can pay its fees in tokens one swap at a time.
-  USER_FUNDED_GASLESS_REQUIRES_STEP_MODE: 'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch. Run this workflow with Confirm each step: each swap can then pay its network fee from the tokens it swaps. Nothing was sent.',
+  USER_FUNDED_GASLESS_REQUIRES_STEP_MODE: 'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch, so nothing was sent. Run its swaps one step at a time: each swap can then pay its network fee from the tokens it swaps.',
   AAVE_BENEFICIARY_NOT_OWNER: 'An Aave step names another account than the connected wallet. Rebuild that step with this wallet.',
   WORKFLOW_SLIPPAGE_UNSUPPORTED: 'A swap allows more than 3% slippage, which cannot be fixed in one batch. Lower the slippage.',
   ACCOUNT_SESSION_REQUIRED: 'Sign in to FloFi to run the whole workflow with one wallet confirmation. You can still confirm each step on its own.',

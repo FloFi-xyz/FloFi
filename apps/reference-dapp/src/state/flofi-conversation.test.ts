@@ -544,6 +544,72 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its 
     expect(chat.messages).toHaveLength(count);
     expect(controls.authorize).toHaveBeenCalledTimes(1);
   });
+  /** A 0x Gasless swap's run while the owner signs: its attempt is recorded first, so the run is live (one request waiting in the wallet). */
+  const signing = { started: true, restored: false, local: false, matchesWorkflow: true, completed: 0, label: 'Execution in progress', state: 'active', message: '', runKey: 'rhs-1',
+    fingerprint: 'signing', busy: false, steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [op('swap', 'Swap', 'wallet', false)] }] };
+  (signing as unknown as { active: unknown }).active = signing.steps[0];
+  async function gaslessSigning() {
+    await confirmedAndExecuting();
+    simulate.mockClear();
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: signing as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
+  }
+  /** At submit the attempt is abandoned: the lifecycle filters it out (no live run), and the runtime keeps the refusal as its error. */
+  const abandoned = (error: string) => {
+    reviewedPatch = { ...reviewedPatch, progress: null, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error } } as SimulationSource };
+    lifecycle(reviewedPatch);
+  };
+  it('review CH3: a 0x Gasless Review lists its two signatures (approval, then trade) from the reviewed fee payment, never one "Swap"', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    const base = reviewed(), run = (base.source.state as { run: { quote: Record<string, unknown> } }).run;
+    const zeroEx = (approval: object | null) => ({ taker: reviewOwner, settler: '0x' + '5c'.repeat(20), permit2: '0x000000000022d473030f116ddee9f6b43ac78ba3', sources: ['0x_RFQ'],
+      gasFee: { token: '0x' + '1'.repeat(40), amount: '420000' }, zeroExFee: null, trade: { hash: '0x' + 'ab'.repeat(32), deadline: Math.floor(reviewNow / 1000) + 300 },
+      buyAmount: '25000000000000000', minBuyAmount: '24875000000000000', approval });
+    const notStarted = { started: false, restored: false, local: false, matchesWorkflow: true, completed: 0, label: 'Not started', state: 'idle', message: '', runKey: 'rhs-1',
+      fingerprint: '', busy: false, steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [op('swap', 'Swap', 'waiting', false)] }] };
+    const gasless = (approval: object | null): Partial<ConversationBridge> => ({ ...base, progress: notStarted as unknown as ConversationBridge['progress'],
+      source: { ...base.source, state: { ...base.source.state, run: { ...run, quote: { ...run.quote, gas: { owner: reviewOwner, mechanism: 'ZEROX_GASLESS_SWAP', nativeShort: true,
+        unavailable: [], native: { balanceWei: '0', worstCaseWei: null }, payment: { mechanism: 'ZEROX_GASLESS_SWAP' }, zeroEx: zeroEx(approval) } } } } } as unknown as SimulationSource });
+    reviewedPatch = gasless({ type: 'permit', value: '100000000', unlimited: false }); lifecycle(reviewedPatch); render();
+    let chat = await say('Yes, I confirm');
+    expect(last(chat).notes).toContain('Your wallet will ask you to confirm each request separately: Token approval (signature), Swap (signature).');
+    // The gasless approval is one of the reviewed signatures, never "requested only if your allowance is still too low".
+    expect(last(chat).notes!.some(note => /only if your current allowance/.test(note))).toBe(false);
+    expect(translate('PT', 'Token approval (signature)')).toBe('Aprovação do token (assinatura)');
+    expect(translate('PT', 'Swap (signature)')).toBe('Swap (assinatura)');
+    // Permit2 already allowed: one signature, the trade.
+    await say('No');
+    reviewedPatch = gasless(null); lifecycle(reviewedPatch); render();
+    await say('Review workflow');
+    reviewedPatch = gasless(null); lifecycle(reviewedPatch); render();
+    chat = await say('Yes, I confirm');
+    expect(last(chat).notes).toContain('Your wallet will ask you to confirm each request separately: Swap (signature).');
+  });
+  it('review CH1: a 0x Gasless start abandoned at submit for a moved quote is re-quoted at once (the chat never goes silent)', async () => {
+    await gaslessSigning();
+    let chat = render();
+    expect(last(chat).text).toMatch(/Confirm or decline the reviewed request in your wallet|confirm or reject it in your wallet/);
+    // The run vanishes first (the abandoned attempt), then the error lands: nothing is said until the refusal is known, then once.
+    reviewedPatch = { ...reviewedPatch, progress: null }; lifecycle(reviewedPatch); render(); await flush();
+    const before = render().messages.length;
+    abandoned('QUOTE_EXPIRED_REVIEW_REQUIRED'); render(); await flush(); render(); await flush(); chat = render();
+    const said = chat.messages.slice(before).map(message => message.text);
+    expect(said[0]).toMatch(/^Nothing was sent\. .*I am getting a fresh quote now; you review and confirm it again before anything is signed\.$/);
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+    const count = chat.messages.length;
+    render(); await flush(); render(); await flush();
+    expect(render().messages.slice(count).some(message => /Nothing was sent/.test(message.text ?? ''))).toBe(false);
+  });
+  it('review CH1: a 0x Gasless start abandoned without the signatures says it could not start and why, and offers the Review', async () => {
+    await gaslessSigning();
+    abandoned('GASLESS_SIGNATURE_NOT_RECEIVED'); render(); await flush(); render(); await flush();
+    const chat = render();
+    expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. Your wallet did not return the signatures, so nothing was submitted. Authorize again when ready.');
+    expect(last(chat).options).toEqual(['Review workflow']);
+    expect(simulate).not.toHaveBeenCalled();
+  });
   it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): after an earlier confirmed request, the hand-off re-quote keeps that request and presents the next one only', async () => {
     await confirmedAndExecuting();
     simulate.mockClear();

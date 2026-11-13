@@ -15,6 +15,7 @@ import { watchWalletResponse } from './wallet-request-lifecycle';
 import { bindFloFiSigning, usesFloFiWallet } from '../wallet/flofi-wallet-channel';
 import { floFiWalletMessage, PRE_SIGNATURE_CODES, signingContextOf } from '../wallet/flofi-signing';
 import { observeUntilSettled } from '../domain/observation-schedule';
+import { gaslessUnsettled } from '../domain/gas-payment';
 import { createJourney, reportJourney, type Journey } from '../domain/journey-metrics';
 import { editorStorage, readPersistedEditor } from '../domain/editor-persistence';
 
@@ -30,10 +31,12 @@ const tabRun = () => { try { return sessionStorage.getItem(TAB_KEY); } catch { r
 export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'> & Partial<Pick<PublicRun, 'gasless'>>) =>
   !run.outcome && (run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN', 'CONFIRMED'].includes(attempt.state)) ||
     // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a 0x Gasless trade relayed (or possibly relayed) to 0x, or a failure not yet final.
-    (run.gasless ?? []).some(attempt => GASLESS_FOLLOWED.includes(attempt.state) || attempt.state === 'FAILED' && !attempt.final));
-/** The gasless states a page keeps following (read-only observe; nothing is signed or submitted again). */
-const GASLESS_FOLLOWED: readonly string[] = ['SUBMITTING', 'SUBMITTED', 'UNKNOWN', 'PENDING'];
-const gaslessSettled = (run: PublicRun) => Boolean(run.divergence || run.outcome) || !GASLESS_FOLLOWED.includes(run.gasless?.at(-1)?.state ?? '');
+    (run.gasless ?? []).some(gaslessUnsettled));
+/**
+ * A gasless run the page stops following: settled (an outcome or a divergence), or whose latest attempt can no longer settle. Review CH2: a
+ * FAILED attempt that is not final (0x said "failed" before the signed deadline) is still followed until the server makes it final.
+ */
+const gaslessSettled = (run: PublicRun) => Boolean(run.divergence || run.outcome) || !gaslessUnsettled(run.gasless?.at(-1));
 const sameWorkflow = (a: unknown, b: unknown) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; } };
 type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
@@ -198,7 +201,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         setRun(recovered); setRecoveryOnly(true);
         // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a submitted transaction keeps being followed (read-only observe; nothing
         // is signed, submitted or retried), instead of waiting for "Check result" or the worker's backoff.
-        const gaslessFollowed = GASLESS_FOLLOWED.includes(recovered.gasless?.at(-1)?.state ?? '');
+        const gaslessFollowed = gaslessUnsettled(recovered.gasless?.at(-1));
         if (gaslessFollowed || ['HASH', 'PENDING'].includes(recovered.attempts.at(-1)?.state ?? '')) {
           // Applied only while that run is still the page's run: a newer simulation is never replaced by an older run's observation.
           const sameRun = (current: PublicRun | null) => current?.quote.executionId === id;
@@ -217,7 +220,10 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const simulate = useCallback(() => guarded(`Reading ${swapProfile(authoredChain)?.network ?? 'Base Sepolia'}`, async () => {
     const profile = swapProfile(authoredChain);
     if (!available) throw new Error(profile?.kind === 'CATALOG' ? 'PUBLIC_NETWORK_UNAVAILABLE' : 'PUBLIC_RECORDING_OFF');
-    if (run?.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state))) throw new Error('ATTEMPT_ALREADY_ACTIVE');
+    // Review CH2: a 0x Gasless trade that may still settle (relayed, or "failed" before its signed deadline) blocks a new swap exactly like a
+    // native transaction in flight: the owner could otherwise swap twice while the first trade still lands.
+    if (run?.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state)) || (run?.gasless ?? []).some(gaslessUnsettled))
+      throw new Error('ATTEMPT_ALREADY_ACTIVE');
     const workflow = workflowRef.current;
     const journey = createJourney({ operation: 'swap', network: profile ? `eip155:${profile.chainId}` : 'eip155:8453', provider: 'Uniswap V3' });
     journey.mark('review_requested');
@@ -311,7 +317,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       const status = await publicStatus(id).catch(() => null);
       if (status?.ok) acceptCurrent(status.value);
       // The server records the submission before relaying it: a submission it may have relayed is only observed, never repeated.
-      if (!submitted || status?.ok && GASLESS_FOLLOWED.includes(status.value.gasless?.at(-1)?.state ?? '')) { finish('inconclusive'); throw new Error('SUBMISSION_RESULT_UNKNOWN'); }
+      if (!submitted || status?.ok && gaslessUnsettled(status.value.gasless?.at(-1))) { finish('inconclusive'); throw new Error('SUBMISSION_RESULT_UNKNOWN'); }
       finish('failed'); throw new Error(submitted.code);
     }
     acceptCurrent(submitted.value);

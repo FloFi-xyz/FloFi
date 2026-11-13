@@ -36,6 +36,7 @@ const GASLESS_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
   ZEROX_INSUFFICIENT_BALANCE: 'The wallet balance is lower than this amount.',
   ZEROX_SPONSORED_QUOTE_REFUSED: 'The provider quote did not charge the network fee to this swap, so FloFi refused it.',
   ZEROX_QUOTE_EXPIRED: 'The provider quote expired too quickly to review and sign.',
+  ZEROX_QUOTE_WORSE_THAN_REFERENCE: 'The provider quote pays less than FloFi\'s own Uniswap quote for this swap, beyond the provider\'s fees, so FloFi refused it.',
 });
 export function gaslessUnavailableReason(code: string): string {
   if (Object.hasOwn(GASLESS_UNAVAILABLE, code)) return GASLESS_UNAVAILABLE[code]!;
@@ -43,16 +44,43 @@ export function gaslessUnavailableReason(code: string): string {
   return 'FloFi could not verify the provider quote for this swap.';
 }
 
-/** A gasless attempt as the shared transaction lifecycle reads it (signatures in the wallet, relayed to 0x, settled on chain, failed, declined). */
-export function gaslessLifecycleState(state: string, reconciled: boolean): string | null {
+/** The wallet prompts of a reviewed 0x Gasless swap (typed-data signatures, never transactions). */
+export const GASLESS_APPROVAL_REQUEST = 'Token approval (signature)', GASLESS_TRADE_REQUEST = 'Swap (signature)';
+/**
+ * Review CH3: what the owner's wallet asks for a reviewed 0x Gasless swap, in order, from the reviewed fee payment itself (the gasless EIP-2612
+ * approval of Permit2 when the binding carries one, then the trade) — or null when the quote does not bind 0x Gasless (its requests are the
+ * lifecycle's planned operations).
+ */
+export function gaslessWalletRequests(quote: { readonly gas?: { readonly mechanism: string; readonly zeroEx: { readonly approval: unknown } | null } | null } | null | undefined):
+  readonly string[] | null {
+  const zeroEx = quote?.gas?.mechanism === 'ZEROX_GASLESS_SWAP' ? quote.gas.zeroEx : null;
+  return zeroEx ? [...zeroEx.approval ? [GASLESS_APPROVAL_REQUEST] : [], GASLESS_TRADE_REQUEST] : null;
+}
+/**
+ * A gasless attempt as the shared transaction lifecycle reads it (signatures in the wallet, relayed to 0x, settled on chain, failed, declined).
+ * Review CH2: a FAILED attempt is a final failure only once the server marked it `final` (the signed trade's deadline passed with its Permit2
+ * nonce unused: it can never execute). Before that, 0x's "failed" (or a reverted candidate) is a hint the chain may still contradict, so it
+ * reads as uncertain — kept under observation, never offered as a reason to swap again. REFUSED is 0x's definitive refusal of the submission:
+ * nothing reached the chain, so it is "not submitted", never a failed action.
+ */
+export function gaslessLifecycleState(state: string, reconciled: boolean, final: boolean): string | null {
   switch (state) {
     case 'SIGNING': return 'PREPARED';
     case 'SUBMITTING': case 'SUBMITTED': return 'HASH';
     case 'UNKNOWN': return 'UNKNOWN';
     case 'PENDING': return 'PENDING';
     case 'CONFIRMED': return reconciled ? 'CONFIRMED' : 'PENDING';
-    case 'FAILED': case 'REFUSED': return 'FAILED';
+    case 'FAILED': return final ? 'FAILED' : 'UNKNOWN';
+    case 'REFUSED': return 'NOT_SUBMITTED';
     case 'REJECTED': return 'REJECTED';
     default: return null;
   }
 }
+/** The gasless states a page keeps following (read-only observe; nothing is signed or submitted again). */
+const GASLESS_FOLLOWED: readonly string[] = Object.freeze(['SUBMITTING', 'SUBMITTED', 'UNKNOWN', 'PENDING']);
+/**
+ * Whether a gasless attempt may still settle on chain: relayed (or possibly relayed) to 0x and not settled, or a failure that is not final yet.
+ * Such an attempt is observed until it settles, and no other swap is simulated for the page's run meanwhile (review CH2).
+ */
+export const gaslessUnsettled = (attempt: { readonly state: string; readonly final?: boolean } | undefined): boolean =>
+  !!attempt && (GASLESS_FOLLOWED.includes(attempt.state) || attempt.state === 'FAILED' && attempt.final !== true);

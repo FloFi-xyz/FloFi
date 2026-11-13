@@ -21,7 +21,7 @@ import { conversationCopy } from './conversation-copy';
 import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import type { WorkflowProgressView } from './workflow-progress';
-import { isIncludedNetworkFee } from './gas-payment';
+import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -212,6 +212,11 @@ export type ConversationReview = {
   readonly approvals: readonly { readonly symbol: string; readonly value: string; readonly spender: string; readonly network: string }[];
   /** The wallet requests the reviewed record plans, in order (each is a separate confirmation in the wallet). Empty: not known before execution starts. */
   readonly walletRequests: readonly string[];
+  /**
+   * ADR-0010 (review CH3): the requests are a reviewed 0x Gasless swap's typed-data signatures, read from its reviewed fee payment (the approval
+   * signature is part of the Review, never "only if needed"). Optional: absent means false.
+   */
+  readonly gaslessSignatures?: boolean;
   /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: what the provider executes after the wallet requests (a bridge's destination settlement): no signature. */
   readonly providerSteps: readonly string[];
   readonly account: string | null; readonly network: string | null; readonly expiresAt: number | null;
@@ -322,11 +327,14 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
   const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...unclassified ? [{ text: 'Cost lines FloFi cannot classify', parameters: [] }] : [],
     ...later.length ? [{ text: later.length === 1 ? 'Step {0} (simulated after the steps before it)' : 'Steps {0} (simulated after the steps before them)', parameters: [later.join(', ')] }] : []];
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: only requests the owner's wallet signs; provider settlement is observed and reconciled, never signed.
-  const planned = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.filter(operation => operation.wallet).map(operation => operation.title)) : [];
+  // ADR-0010 (review CH3): a Review bound to 0x Gasless asks the wallet for its reviewed signatures (the approval, then the trade), not one "Swap".
+  const gasless = view.source.kind === 'public' ? gaslessWalletRequests(view.source.state.run?.quote) : null;
+  const planned = view.progress && !view.progress.started ? gasless
+    ?? view.progress.steps.flatMap(step => step.operations.filter(operation => operation.wallet).map(operation => operation.title)) : [];
   const settlement = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.filter(operation => !operation.wallet).map(operation => operation.title)) : [];
   return { status: current.status, label: current.label, message: current.status === 'ready' || current.status === 'approved' ? simulation.message : current.message,
     canConfirm: current.status === 'ready' || current.bindingValid, steps, fees, limits: current.limits, warnings: [...current.warnings],
-    approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned, providerSteps: settlement,
+    approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned, gaslessSignatures: gasless !== null, providerSteps: settlement,
     account: view.wallet.account, network: view.wallet.chain ? shellChainLabel(view.wallet.chain) : null, expiresAt: current.expiresAt, unknown,
     simulationProblem: simulation.status === 'blocked' ? simulation.message : null, sequence, totals: { additional, ceilings, excludes }, flofiFee };
 }

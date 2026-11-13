@@ -6,9 +6,10 @@
  * pays its fee in ETH). The run's plan fixes each group's strategy when the owner authorizes the whole workflow, and the planner has no native
  * balance fact to choose `EVM_OWNER_STEP` with (adding one would change what an authorized plan means, which this build does not migrate).
  * So, when the batch preparation finds native gas short and EVERY step of the group is a swap 0x Gasless could carry (ERC-20 → ERC-20 on
- * Robinhood Chain, with 0x Gasless enabled on this deployment), the preparation is refused with a precise code telling the owner to run the
- * workflow in confirm-each-step mode, where each swap goes through `robinhood-swap` and decides there how its fee is paid (native first; 0x
- * Gasless when ETH is short). Any other group keeps native gas and the existing shortfall: transfers, liquidity, bridges, lending and native-ETH
+ * Robinhood Chain, with 0x Gasless enabled on this deployment), the preparation is refused with a precise code. At the Editor's Review it
+ * offers the step-by-step path; for a run already started it is a permanent due-time refusal (`PERMANENT_DUE_REFUSALS`, review Z1): the group
+ * is blocked, the run halts before anything is sent, and Resume runs each swap through its own owner-signed flow (`robinhood-swap`), which
+ * decides there how its fee is paid (native first; 0x Gasless when ETH is short). Any other group keeps native gas and the existing shortfall: transfers, liquidity, bridges, lending and native-ETH
  * swaps on Robinhood Chain always need ETH. The design is never cancelled: nothing is signed or sent by either refusal.
  */
 import type { WorkflowRequirement } from '../delegation/steps.ts';

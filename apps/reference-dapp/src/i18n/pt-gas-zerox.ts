@@ -14,6 +14,12 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'Route sources': 'Fontes da rota',
   'Trade hash': 'Hash da negociação',
   'Signed trade valid until': 'Negociação assinada válida até',
+  // FloFi's own Uniswap v3 reference beside 0x's quote (review Z3, Technical details).
+  '0x quote': 'Cotação da 0x',
+  'FloFi reference (Uniswap v3)': 'Referência da FloFi (Uniswap v3)',
+  'Lowest 0x minimum FloFi accepts': 'Menor mínimo da 0x que a FloFi aceita',
+  'Expected {0}, at least {1}': 'Esperado {0}, no mínimo {1}',
+  '{0} (FloFi\'s minimum less 0x\'s fees)': '{0} (o mínimo da FloFi menos as taxas da 0x)',
   'Token approval by signature': 'Aprovação do token por assinatura',
   'Permit2 {0} may spend any amount of {1}': 'O Permit2 {0} pode gastar qualquer quantia de {1}',
   'Permit2 {0} may spend at most {1}': 'O Permit2 {0} pode gastar no máximo {1}',
@@ -28,6 +34,9 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'This wallet does not have enough ETH for the network fee of this swap. Add ETH on this network before you authorize.':
     'Esta carteira não tem ETH suficiente para a taxa de rede deste swap. Adicione ETH nesta rede antes de autorizar.',
   '{0}, included in the swap': '{0}, incluída no swap',
+  // The wallet prompts the chat lists for a reviewed 0x Gasless swap (domain/gas-payment.ts gaslessWalletRequests, review CH3).
+  'Token approval (signature)': 'Aprovação do token (assinatura)',
+  'Swap (signature)': 'Swap (assinatura)',
   'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.':
     'Você assina; a 0x envia o swap e desconta dele a taxa de rede. A FloFi nunca assina nem paga por você.',
   // Why paying the network fee in tokens is not available (domain/gas-payment.ts).
@@ -48,6 +57,8 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'The wallet balance is lower than this amount.': 'O saldo da carteira é menor que este valor.',
   'The provider quote did not charge the network fee to this swap, so FloFi refused it.': 'A cotação do provedor não cobrou a taxa de rede deste swap, por isso a FloFi a recusou.',
   'The provider quote expired too quickly to review and sign.': 'A cotação do provedor expirou rápido demais para revisar e assinar.',
+  'The provider quote pays less than FloFi\'s own Uniswap quote for this swap, beyond the provider\'s fees, so FloFi refused it.':
+    'A cotação do provedor paga menos que a própria cotação da FloFi na Uniswap para este swap, além das taxas do provedor, por isso a FloFi a recusou.',
   'The provider did not answer. Try again shortly.': 'O provedor não respondeu. Tente novamente em instantes.',
   'FloFi could not verify the provider quote for this swap.': 'A FloFi não conseguiu verificar a cotação do provedor para este swap.',
   // Execution refusals and outcomes (domain/simulation-presentation.ts simulationError).
@@ -65,8 +76,8 @@ export const portugueseGasZeroEx: Readonly<Record<string, string>> = {
   'Your wallet did not return the signatures, so nothing was submitted. Authorize again when ready.':
     'A sua carteira não devolveu as assinaturas, por isso nada foi enviado. Autorize de novo quando quiser.',
   // User-funded batches on Robinhood Chain (components/editor-workflow-run.tsx, components/approval-handoff.tsx).
-  'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch. Run this workflow with Confirm each step: each swap can then pay its network fee from the tokens it swaps. Nothing was sent.':
-    'A sua carteira não tem ETH suficiente na Robinhood Chain para a taxa de rede deste lote. Execute este fluxo com Confirmar cada etapa: cada swap poderá então pagar a taxa de rede com os tokens que troca. Nada foi enviado.',
+  'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch, so nothing was sent. Run its swaps one step at a time: each swap can then pay its network fee from the tokens it swaps.':
+    'A sua carteira não tem ETH suficiente na Robinhood Chain para a taxa de rede deste lote, por isso nada foi enviado. Execute os swaps uma etapa de cada vez: cada swap poderá então pagar a taxa de rede com os tokens que troca.',
   // Evidence (domain/execution-evidence.ts).
   '0x trade hash': 'Hash da negociação na 0x',
   'Network fee paid from the swap': 'Taxa de rede paga com o swap',
