@@ -6,7 +6,7 @@
  * preferences and language stay. Nothing is simulated, signed or sent.
  */
 import type { Page } from '@playwright/test';
-import { test, expect, sendChatCommand } from './fixtures';
+import { test, expect } from './fixtures';
 import { openBuilder } from './build-entry-navigation';
 
 const nameText = (page: Page) => page.locator('.build-canvas-head .workflow-name-text');
@@ -49,8 +49,12 @@ test('New workflow (keyboard and mouse) empties the Canvas, the proposal and the
   await page.getByRole('textbox', { name: 'Workflow name' }).fill('Weekly rebalance');
   await page.keyboard.press('Enter');
   await expect(nameText(page)).toHaveText('Weekly rebalance');
-  await sendChatCommand(page, 'swap 1 USDC to WETH on Base');
-  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message')).not.toHaveCount(1);
+  // The conversation gains history (the owner's message and FloFi's answer, whatever it is) beyond the greeting.
+  const messages = page.getByRole('log', { name: 'Conversation' }).locator('.message');
+  await expect(messages).toHaveCount(1);
+  await page.getByLabel('Describe your flow').fill('swap 1 USDC to WETH on Base');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(messages).toHaveCount(3, { timeout: 30_000 });
   const theme = await page.evaluate(() => document.documentElement.dataset.theme ?? 'light');
 
   // Keyboard: Tab from the rename control reaches New workflow; Enter activates it.
