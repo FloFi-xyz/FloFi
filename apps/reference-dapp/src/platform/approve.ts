@@ -288,12 +288,16 @@ export async function workflowRunUserFundedStart(surface: ApprovalSurface, appro
   const c = await runContext(surface, approvalId, wallets);
   return userFundedStartSequential(c.runs, c.run, wallets, walletProfileOf(profile), c.base);
 }
-/** What the owner's wallet signs for one group now (exact calls / typed data / Solana transactions, the fee ceiling and its payer). */
+/**
+ * What the owner's wallet signs for one group now (exact calls / typed data / Solana transactions, the fee ceiling and its payer). `wallet`: the
+ * owner's EVM wallet kind as this browser reports it ('INJECTED' or 'FLOFI_WALLET'); anything else is unknown (review C4: no Circle permit then).
+ */
 export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
-  handout: unknown = undefined) {
+  handout: unknown = undefined, wallet: unknown = undefined) {
   const c = await runContext(surface, approvalId, wallets);
   // The hand-out token this browser kept for the group's wallet batch (service.ts `handedTo`); anything else is no token.
-  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined);
+  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined,
+    wallet === 'INJECTED' || wallet === 'FLOFI_WALLET' ? wallet : undefined);
 }
 /**
  * ADR-0010: the owner's USDC permit signature for a Circle-paid group (the first of its two typed-data signatures), verified against what FloFi

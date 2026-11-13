@@ -26,6 +26,12 @@ export type CircleFacts = {
   readonly usdcSpend: string;
   /** The strategy the group was planned with (restored when this preparation expires). */
   readonly plannedStrategy: GroupStrategy;
+  /**
+   * Review C2: the unix second after which the operation's calls are refused on chain (its swaps' deadline, else the batch's deadline guard). The
+   * operation is never (re)sent at or after it minus `CIRCLE_RELAY_MARGIN_SECONDS`: Circle would still take the owner's USDC for the sure revert.
+   * Absent only on a preparation stored before it (then read from the calls themselves).
+   */
+  readonly deadline?: string;
 };
 const DECIMAL = /^(0|[1-9][0-9]{0,77})$/;
 /** The Circle facts of a prepared artifact (strictly read back), or null for any artifact that is not Circle-paid. */
@@ -35,6 +41,7 @@ export function circleFactsOf(prepared: Readonly<Record<string, unknown>> | null
   const strings = ['entryPoint', 'paymaster', 'usdc', 'permitCap', 'permitNonce', 'surchargeBps', 'marginBps', 'nonce', 'callData', 'nativeRequired', 'usdcSpend', 'plannedStrategy'];
   if (strings.some(k => typeof c[k] !== 'string') || !c.gas || typeof c.gas !== 'object' || !c.price || typeof c.price !== 'object') return null;
   if (![c.permitCap, c.permitNonce, c.nonce, c.nativeRequired, c.usdcSpend].every(v => DECIMAL.test(String(v)))) return null;
+  if (c.deadline !== undefined && (typeof c.deadline !== 'string' || !/^[1-9][0-9]{0,15}$/.test(c.deadline))) return null;
   return c as unknown as CircleFacts;
 }
 /** The strategy a Circle preparation replaced (restored when it expires or must be prepared again), else null. */

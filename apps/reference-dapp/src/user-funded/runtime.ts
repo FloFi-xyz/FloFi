@@ -26,6 +26,7 @@ import type { UserFundedDeps } from './groups.ts';
 import { sponsorshipPort, sponsorshipStorage } from '../gas-sponsorship/runtime.ts';
 import { deploymentPriceSource } from '../automations/config.ts';
 import { circleDepsOf } from './circle-gas.ts';
+import { readCircleGasConfig } from '../gas-abstraction/config.ts';
 import { koraGasForFlow } from '../gas-abstraction/kora/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -39,8 +40,11 @@ export function userFundedFactsOf(env: Env): UserFundedFacts {
   const config = readUserFundedConfig(env);
   if (!config.enabled) return { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false };
   const chains = config.chains.filter(c => c.startsWith('solana:') || Boolean(config.rpc[c]));
-  return { enabled: true, code: null, chains, bundlerChains: Object.keys(config.bundlers).filter(c => chains.includes(c) && c.startsWith('eip155:')),
-    solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES) };
+  const bundlerChains = Object.keys(config.bundlers).filter(c => chains.includes(c) && c.startsWith('eip155:'));
+  // ADR-0010 review (C5): where a group's fee may be paid in USDC through Circle (the same chains `circleDepsOf` serves): its plan says "at least".
+  const circle = readCircleGasConfig(env), tokenGasChains = circle.enabled ? circle.chains.filter(c => bundlerChains.includes(c)) : [];
+  return { enabled: true, code: null, chains, bundlerChains, solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES),
+    ...tokenGasChains.length ? { tokenGasChains } : {} };
 }
 /** The deployment's user-funded facts and transports. Disabled or misconfigured: facts say why, and there are no transports at all. */
 export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, host?: { db: Database; tenantId: string }): UserFundedRuntime {
@@ -53,8 +57,13 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
   const solanaEnabled = config.chains.includes(JUPITER_SOLANA_MAINNET.chain);
   const solanaUrl = solanaEnabled ? solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'USER_FUNDED_SOLANA_RPC_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc : null;
   const chains = config.chains.filter(c => c.startsWith('solana:') || evm.has(c));
+  // ADR-0010: Circle's USDC paymaster on the chains the operator enabled (`FLOFI_CIRCLE_USDC_GAS`) that also have a bundler and a read RPC here,
+  // priced from the deployment's verified price source; offered only when the owner's native gas falls short (`groups.ts`).
+  const circle = circleDepsOf(env, [...bundlers.keys()], () => deploymentPriceSource(env, fetchImpl));
   const facts: UserFundedFacts = { enabled: true, code: null, chains, bundlerChains: [...bundlers.keys()],
-    solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES) };
+    solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES),
+    // Review C5: a plan counts a group on these chains as "at least" one interaction (two signatures when Circle pays).
+    ...circle ? { tokenGasChains: circle.chains } : {} };
   // The Router's own Across adapter per batchable route (read-only quotes and deposit status; pins: the profile's own, never overridden here).
   const http = createRouterHttp(fetchImpl), acrossRoutes = new Map<string, AcrossRoute>();
   const across = (source: string, destination: string): AcrossRoute | null => {
@@ -72,9 +81,6 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
   // ADR-0009: network-fee sponsorship of wallet batches — offered only where the operator configured a paymaster; grants are read from the
   // shared PostgreSQL state wherever there is a host (a worker without the configuration still reconciles a batch sponsored by the web tier).
   const sponsorship = host ? sponsorshipPort(env, () => sponsorshipStorage(host)) : null;
-  // ADR-0010: Circle's USDC paymaster on the chains the operator enabled (`FLOFI_CIRCLE_USDC_GAS`) that also have a bundler and a read RPC here,
-  // priced from the deployment's verified price source; offered only when the owner's native gas falls short (`groups.ts`).
-  const circle = circleDepsOf(env, facts.bundlerChains, () => deploymentPriceSource(env, fetchImpl));
   const deps: UserFundedDeps = { chains: facts.chains, evm: chain => evm.get(chain) ?? null, bundler: chain => bundlers.get(chain) ?? null, across, sponsorship, circle,
     submissionRefusal: async (wallet, owner = wallet) => {
       const mode = betaAccessMode(env);

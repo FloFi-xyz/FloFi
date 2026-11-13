@@ -331,9 +331,11 @@ const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Obje
 /**
  * Builds what the owner's wallet signs for one group, from fresh chain facts: an UPFRONT group at any time while the run is open; a WHEN_DUE
  * group only once it is the current group (its delivery reconciled). Bound steps spend the reconciled facts (never an estimate).
+ * `wallet`: the owner's EVM wallet as the preparing browser reported it (review C4: FloFi Wallet signs no USDC permit; a wallet nobody reported
+ * is never offered Circle).
  */
 export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout?: string): Promise<PreparedGroupView> {
+  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET'): Promise<PreparedGroupView> {
   assertRunWallets(run, wallets);
   if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
   const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
@@ -424,7 +426,8 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   // ADR-0010: the group's fee may be paid in the owner's USDC through Circle when native gas falls short — only for a group no wallet batch was
   // ever handed out for (that batch could still execute: the group keeps it), and only when due (never an operation signed upfront).
   const r = await prepareGroup(userFunded, composition, req.value, { runId: run.runId, groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
-    stepFrom: g.stepFrom, stepTo: g.stepTo, tokenGas: due && !rewrite && superseded.length === 0 }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
+    stepFrom: g.stepFrom, stepTo: g.stepTo, tokenGas: due && !rewrite && superseded.length === 0, ...wallet ? { wallet } : {} },
+    { guaranteed, delayed: g.awaitsDelivery !== null && !due });
   if (!r.ok) return blockable && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
   // ADR-0010: the only strategy a preparation may change is a due group's to a Circle-paid user operation (stored with it; restored on expiry).
   const circle = circleFactsOf(r.value.prepared);
@@ -448,6 +451,13 @@ const plannedStrategyPatch = (g: GroupRecord): { readonly strategy?: GroupRecord
   const planned = plannedStrategyOf(g.prepared);
   return planned && planned !== g.strategy ? { strategy: planned } : {};
 };
+/**
+ * ADR-0010 review (C3): the phase-2 refusals that leave a Circle preparation usable — the owner's wallet may sign the permit again (a signature that
+ * did not verify, an answer that raced the operation stage), or the bundler, the chain read or the operator's pause may answer on a retry. Any
+ * other refusal is permanent for this preparation (`permitUserFundedGroup` expires it).
+ */
+const CIRCLE_PERMIT_RETRYABLE: ReadonlySet<string> = new Set(['CIRCLE_PERMIT_INVALID', 'CIRCLE_PERMIT_STAGE_INVALID', 'USER_FUNDED_RPC_UNAVAILABLE',
+  'USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'DELEGATION_RPC_UNAVAILABLE', 'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
 /** ADR-0010: a Circle-paid preparation that can no longer be used (cap exceeded, mechanism changed) is expired, its planned strategy restored. */
 async function expireTokenGasPreparation(deps: WorkflowRunDeps, runId: string, g: GroupRecord, code: string): Promise<void> {
   const expired = await deps.store.groupTransition(runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code }, 'GROUP_STATE', g.version);
@@ -458,8 +468,9 @@ async function expireTokenGasPreparation(deps: WorkflowRunDeps, runId: string, g
  * permit is verified against the frozen artifact (signer = the group's fee payer, spender = the pinned paymaster, value = the reviewed cap, the
  * owner's current permit nonce), the bundler estimates the FINAL operation with it, and its worst case must stay within the signed cap; the
  * group stays PREPARED with the operation's typed data, which the owner's wallet signs next (`authorizeUserFundedGroup`). A cap that no longer
- * covers the operation expires the preparation (CIRCLE_PERMIT_CAP_EXCEEDED: the owner asks for a fresh one; nothing was relayed). A retry with
- * the same permit after its answer was lost returns the same operation.
+ * covers the operation expires the preparation (CIRCLE_PERMIT_CAP_EXCEEDED: the owner asks for a fresh one; nothing was relayed), as does every
+ * other refusal signing again cannot change (`CIRCLE_PERMIT_RETRYABLE`). A retry with the same permit after its answer was lost returns the same
+ * operation.
  */
 export async function permitUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
   permitSignature: string): Promise<PreparedGroupView> {
@@ -477,7 +488,10 @@ export async function permitUserFundedGroup(deps: WorkflowRunDeps, run: RunRecor
   if (c!.stage === 'OPERATION') return c!.permitSignature === String(permitSignature).toLowerCase() ? view(g.prepared as Prepared, g.validUntil!) : refuse('CIRCLE_PERMIT_STAGE_INVALID');
   const finalized = await finalizeCirclePermit(userFunded, g.prepared as Prepared, permitSignature);
   if (!finalized.ok) {
-    if (finalized.code === 'CIRCLE_PERMIT_CAP_EXCEEDED' || finalized.code === 'CIRCLE_PERMIT_EXPIRED') await expireTokenGasPreparation(deps, run.runId, g, finalized.code);
+    // Review C3: every refusal that signing again cannot change (a cap exceeded, a permit overtaken, a bundler that does not serve the account's
+    // EntryPoint, Circle's or the account's own refusal) expires the preparation and restores the planned strategy: the next preparation decides
+    // the mechanism afresh instead of handing the owner the same dead permit again. Only a transient failure or a signature to retry keeps it.
+    if (!CIRCLE_PERMIT_RETRYABLE.has(finalized.code.split(':')[0]!)) await expireTokenGasPreparation(deps, run.runId, g, finalized.code.split(':')[0]!);
     return refuse(finalized.code);
   }
   const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared: finalized.value }, 'GROUP_PERMIT_SIGNED', g.version)

@@ -19,17 +19,19 @@ const transfers = (network: string) => ({ version: 2, steps: [
   { action: 'transfer', network, asset: 'USDC', amount: '1', recipient: '0x' + '2'.repeat(40) },
   { action: 'transfer', network, asset: 'USDC', amount: '2', recipient: '0x' + '3'.repeat(40) }] });
 
-async function reviewOn(chainId: 1 | 8453, eth: bigint) {
+async function reviewOn(chainId: 1 | 8453, eth: bigint, options: { readonly tokenGasChains?: readonly string[]; readonly strategy?: unknown; readonly chains?: readonly string[] } = {}) {
   const chain = `eip155:${chainId}`, profile = chainId === 1 ? ETHEREUM_MAINNET_SWAP : BASE_MAINNET_SWAP;
   const evm = createEvmDouble(chainId, () => Math.floor(NOW.getTime() / 1000), { profile }), circle = createCircleDouble(evm, { chainId });
   evm.control.upgrade(OWNER); evm.control.fundToken(OWNER, profile.usdc, 50_000_000n); evm.control.fundNative(OWNER, eth);
   const transport = guarded(chain, 'read', 'MOCKED', circle.rpc);
   const deps: UserFundedDeps = { chains: [chain], evm: c => c === chain ? transport : null, bundler: c => c === chain ? circle.bundler : null, solana: null, jupiter: null,
     now: () => NOW, circle: { chains: [chain], price: async () => ({ ethUsd: 3_000n * 10n ** 8n, usdcUsd: null, observedAt: NOW.toISOString() }) } };
-  const canvas = canvasWorkflowOfStrategy(transfers(chainId === 1 ? 'ethereum' : 'base'));
+  const canvas = canvasWorkflowOfStrategy(options.strategy ?? transfers(chainId === 1 ? 'ethereum' : 'base'));
   if (!canvas.ok) throw new Error(canvas.code);
-  const r = await reviewEditorExecution({ workflow: canvas.workflow, owner: OWNER, profile: { eip155: { wallet: 'INJECTED', atomic: { [chain]: 'supported' }, typedData: true } },
-    facts: { enabled: true, code: null, chains: [chain], bundlerChains: [chain], solanaNonceAccounts: false }, deps, now: NOW });
+  const chains = options.chains ?? [chain];
+  const r = await reviewEditorExecution({ workflow: canvas.workflow, owner: OWNER, profile: { eip155: { wallet: 'INJECTED', atomic: Object.fromEntries(chains.map(c => [c, 'supported'])),
+    typedData: true } }, facts: { enabled: true, code: null, chains, bundlerChains: chains, solanaNonceAccounts: false,
+    ...options.tokenGasChains ? { tokenGasChains: options.tokenGasChains } : {} }, deps, now: NOW });
   if (!r.ok) throw new Error(r.code);
   return { review: r.value, circle };
 }
@@ -52,6 +54,19 @@ describe('ADR-0010: the Editor\'s Review with a Circle-paid first group', () => 
     expect(review.groups[0]).toMatchObject({ interactions: 1, fee: { payer: OWNER } });
     expect(review.groups[0]).not.toHaveProperty('gasPayment');
     expect(review).toMatchObject({ mode: 'ONE_WALLET_CONFIRMATION', counts: { walletPrompts: 1, signatures: 1 } });
+  });
+  it('review C5: on a deployment where Circle may pay the fee, the prepared first group is counted as it will be asked; a later group is "at least"', async () => {
+    const base = ['eip155:8453'], both = ['eip155:8453', 'eip155:1'];
+    // The first group is prepared by the Review: ETH pays (one confirmation, exactly as before) or Circle does (two signatures).
+    expect((await reviewOn(8453, 10n ** 17n, { tokenGasChains: base })).review).toMatchObject({ mode: 'ONE_WALLET_CONFIRMATION',
+      counts: { walletPrompts: 1, signatures: 1, atLeast: false } });
+    expect((await reviewOn(8453, 0n, { tokenGasChains: base })).review).toMatchObject({ mode: 'GROUPED', counts: { walletPrompts: 2, signatures: 2, atLeast: false } });
+    // A later group on another Circle chain is quoted only when due: whether ETH or USDC pays it is not known yet, so the count is a minimum.
+    const later = await reviewOn(8453, 10n ** 17n, { tokenGasChains: both, chains: both, strategy: { version: 2, steps: [
+      { action: 'transfer', network: 'base', asset: 'USDC', amount: '1', recipient: '0x' + '2'.repeat(40) },
+      { action: 'transfer', network: 'ethereum', asset: 'USDC', amount: '2', recipient: '0x' + '3'.repeat(40) }] } });
+    expect(later.review).toMatchObject({ mode: 'GROUPED', counts: { walletPrompts: 2, atLeast: true } });
+    expect(later.review.groups.map(g => g.chain)).toEqual(['eip155:8453', 'eip155:1']);
   });
   it('Ethereum with MetaMask\'s DeleGator: the native shortfall, with Circle\'s closed reason', async () => {
     const { review } = await reviewOn(1, 0n);

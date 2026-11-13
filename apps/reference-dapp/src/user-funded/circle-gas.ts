@@ -4,12 +4,14 @@
  * permissionless paymaster, on Ethereum, Base and Arbitrum One — offered only when the owner's native balance does NOT cover the group's
  * worst-case fee (native gas stays the default) and this module proves the alternative eligible for exactly this group:
  *
- *   (a) the operator enabled it for the chain (`FLOFI_CIRCLE_USDC_GAS`), and (b) the user-funded runtime has a bundler and a read RPC there
+ *   (a) the operator enabled it for the chain (`FLOFI_CIRCLE_USDC_GAS`), and (b) the user-funded runtime has a bundler and a read RPC there,
+ *       and that bundler serves the owner account's EntryPoint (`eth_supportedEntryPoints`, cached: CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED)
  *   (c) the owner's native balance is short (`selectGasMechanism`), yet covers any native value the group itself sends
  *   (d) the owner's account is a pinned EIP-7702 smart account whose EntryPoint has a Circle paymaster on this chain: MetaMask's
  *       EIP7702StatelessDeleGator (v0.7: Base, Arbitrum One) or eth-infinitism's Simple7702Account (v0.8: Ethereum, Base, Arbitrum One)
  *       (CIRCLE_SMART_ACCOUNT_REQUIRED, CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED, CIRCLE_ACCOUNT_UNSUPPORTED)
- *   (e) an injected wallet that signs typed data (FloFi Wallet has no EIP-7702 delegation and no typed data: CIRCLE_WALLET_UNSUPPORTED)
+ *   (e) an injected wallet that signs typed data, as the owner's browser reported it (FloFi Wallet has no EIP-7702 delegation and no typed data:
+ *       CIRCLE_WALLET_UNSUPPORTED; a wallet nobody reported is never assumed: CIRCLE_WALLET_UNKNOWN)
  *   (f) the paymaster and USDC are verified on chain — code present, `entryPoint()` = the pinned EntryPoint, USDC `name()`/`version()` = the pinned
  *       permit domain (CIRCLE_PAYMASTER_UNVERIFIED; a success is cached per process for an hour, a failure never)
  *   (g) a fresh ETH/USD price from the deployment's verified price source (CIRCLE_PRICE_UNAVAILABLE)
@@ -29,7 +31,8 @@
  *   authorization (`groups.ts`)        the owner's operation signature, recovered to the owner (the account's own scheme)
  *   submission                         S1 with the token-fee claim (relayer = the pinned paymaster, the owner pays a positive USDC amount),
  *                                      the operation check again, the permit nonce unmoved (CIRCLE_PERMIT_EXPIRED), the bundler's re-estimate
- *                                      within the signed limits — then recorded, then relayed once
+ *                                      within the signed limits — then recorded, then relayed once; never at or after the calls' deadline minus
+ *                                      `CIRCLE_RELAY_MARGIN_SECONDS` (first relay or resend: CIRCLE_OPERATION_DEADLINE_PASSED, review C2)
  *
  * Nothing here holds a key, signs, or pays: Circle fronts the native fee from its own deposit and is paid back by the owner in USDC inside the
  * same operation. FloFi's only cost is the operator's bundler plan.
@@ -158,7 +161,8 @@ export type CircleAttemptInput = {
   readonly group: EvmGroupCalls; readonly calls: readonly erc7710.Call[]; readonly simulation: BatchSimulation | null; readonly simulatedGas: bigint;
   readonly fees: { readonly priority: bigint; readonly gasPrice: bigint; readonly balance: bigint }; readonly l1FeeUpperBound: bigint;
   /** The native path's fee ceiling + native value: what the owner's balance did not cover. */ readonly nativeRequired: bigint;
-  readonly nativeSpend: bigint; readonly now: Date };
+  readonly nativeSpend: bigint; readonly now: Date;
+  /** Review C2: the unix second the calls are refused on chain after (the deadline the batch was built with). */ readonly deadline: number };
 export type CircleAttempt = { readonly considered: false } | { readonly considered: true; readonly candidate: MechanismCandidate; readonly prepared: Readonly<Record<string, unknown>> | null };
 type CircleRuntimeDeps = { readonly evm: (chain: string) => ChainTransport | null; readonly bundler: (chain: string) => BundlerClient | null;
   readonly circle?: CircleDeps | null };
@@ -171,8 +175,10 @@ const unavailable = (code: string): CircleAttempt => ({ considered: true, candid
 export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemptInput): Promise<CircleAttempt> {
   if (!deps.circle?.chains.includes(input.chain)) return { considered: false };
   const t = deps.evm(input.chain), bundler = deps.bundler(input.chain), group = input.group, owner = group.owner.toLowerCase(), chainId = group.chainId;
-  if (!t || !bundler?.estimateCircle || !bundler.sendCircle) return unavailable('USER_OPERATION_BUNDLER_UNAVAILABLE');
-  if (input.wallet === 'FLOFI_WALLET') return unavailable('CIRCLE_WALLET_UNSUPPORTED');
+  if (!t || !bundler?.estimateCircle || !bundler.sendCircle || !bundler.servesEntryPoint) return unavailable('USER_OPERATION_BUNDLER_UNAVAILABLE');
+  // (e) Fail closed (review C4): only a wallet the owner's browser REPORTED as an injected wallet. FloFi Wallet signs no permit, and a wallet nobody
+  // reported may be FloFi Wallet: the owner would be handed a permit that wallet cannot sign.
+  if (input.wallet !== 'INJECTED') return unavailable(input.wallet === 'FLOFI_WALLET' ? 'CIRCLE_WALLET_UNSUPPORTED' : 'CIRCLE_WALLET_UNKNOWN');
   // The fee only: any native value the group sends is still the owner's own ETH.
   if (input.fees.balance < input.nativeSpend) return unavailable('CIRCLE_NATIVE_VALUE_UNCOVERED');
   if (!input.simulation) return unavailable('USER_FUNDED_SIMULATION_UNAVAILABLE');
@@ -185,6 +191,12 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
   if (!accountKind) return unavailable('CIRCLE_ACCOUNT_UNSUPPORTED');
   const entryPoint = erc4337.OWNER_ACCOUNT_KINDS[accountKind].entryPoint, paymaster = C.circlePaymasterOf(chainId, entryPoint);
   if (!paymaster) return unavailable('CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED');
+  // (b) Review C3: the operator's bundler must serve exactly this account's EntryPoint (Simple7702Account: v0.8 only) — asked here, before the
+  // owner signs anything, never first at phase 2 after the permit. The answer is cached per process by the bundler client.
+  let served: boolean;
+  try { served = await bundler.servesEntryPoint(entryPoint); }
+  catch (cause) { return unavailable(codeOf(cause, '') === 'USER_OPERATION_ENTRY_POINT_UNSUPPORTED' ? 'CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED' : 'USER_OPERATION_BUNDLER_UNAVAILABLE'); }
+  if (!served) return unavailable('CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED');
   const verified = await verifyCircleContracts(t, chainId, entryPoint, paymaster, pins.usdc, input.now);
   if (verified !== 'OK') return unavailable(verified === 'UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'CIRCLE_PAYMASTER_UNVERIFIED');
   let postOpGasLimit: bigint;
@@ -222,7 +234,7 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
     gas: { verificationGasLimit: gas.verificationGasLimit.toString(), callGasLimit: gas.callGasLimit.toString(), preVerificationGas: gas.preVerificationGas.toString(),
       maxFeePerGas: gas.maxFeePerGas.toString(), maxPriorityFeePerGas: gas.maxPriorityFeePerGas.toString(), paymasterVerificationGasLimit: pmGas.verificationGasLimit.toString(),
       paymasterPostOpGasLimit: pmGas.postOpGasLimit.toString() },
-    nativeRequired: input.nativeRequired.toString(), usdcSpend: usdcSpend.toString(), plannedStrategy: input.strategy };
+    nativeRequired: input.nativeRequired.toString(), usdcSpend: usdcSpend.toString(), plannedStrategy: input.strategy, deadline: String(input.deadline) };
   const permit = circlePermitOf(facts, chainId, owner);
   return { considered: true, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true }, prepared: {
     kind: 'EVM_USER_OPERATION', chainId, owner, group, upgraded: true, simulation: input.simulation, circle: facts, gasPayment: circleGasPayment(facts),
@@ -315,6 +327,35 @@ export async function checkCircleSubmission(deps: CircleRuntimeDeps, prepared: R
   const nonce = await permitNonceUnmoved(t.rpc, c, owner.toLowerCase());
   if (nonce !== 'OK') return no(nonce === 'MOVED' ? 'CIRCLE_PERMIT_EXPIRED' : 'USER_FUNDED_RPC_UNAVAILABLE');
   return { ok: true, value: c };
+}
+/**
+ * Review C2: how long before its calls' on-chain deadline a Circle-paid operation is last handed to a bundler (first relay or resend of a lost one).
+ * A bundler needs time to include it; one included after the deadline reverts its calls, and Circle's paymaster still takes the owner's USDC for
+ * the gas (the permit never expires). Smaller than the gap between the preparation's validity and the deadline (`CIRCLE_PREPARED_TTL_MS`), so an
+ * operation authorized at the end of its window is still relayed.
+ */
+export const CIRCLE_RELAY_MARGIN_SECONDS = 60;
+/**
+ * The unix second after which a Circle preparation's calls are refused on chain: the earliest of the recorded deadline and every deadline its calls
+ * carry (a deadline guard, a swap's own). Null when none is known (never sent then).
+ */
+export function circleCallsDeadline(prepared: Readonly<Record<string, unknown>>): number | null {
+  const c = circleFactsOf(prepared);
+  const group = prepared.group && typeof prepared.group === 'object' ? prepared.group as { readonly calls?: unknown } : null;
+  const calls = Array.isArray(group?.calls) ? group.calls as readonly { readonly kind?: unknown; readonly deadline?: unknown }[] : [];
+  const known = [c?.deadline, ...calls.filter(x => x && (x.kind === 'DEADLINE_GUARD' || x.kind === 'UNISWAP_V3_EXACT_INPUT_SINGLE')).map(x => x.deadline)]
+    .filter((v): v is string => typeof v === 'string' && /^[1-9][0-9]{0,15}$/.test(v)).map(Number);
+  return known.length ? Math.min(...known) : null;
+}
+/** Whether a Circle-paid operation may still be handed to a bundler at `now`: strictly before its calls' deadline minus the margin (unknown: never). */
+export function circleRelayOpen(prepared: Readonly<Record<string, unknown>>, now: Date): boolean {
+  const deadline = circleCallsDeadline(prepared);
+  return deadline !== null && Math.floor(now.getTime() / 1000) < deadline - CIRCLE_RELAY_MARGIN_SECONDS;
+}
+/** Whether a Circle-paid operation's calls can no longer execute at `now`: its deadline plus the margin (the chain's clock may lag FloFi's) passed. */
+export function circleDeadlinePassed(prepared: Readonly<Record<string, unknown>>, now: Date): boolean {
+  const deadline = circleCallsDeadline(prepared);
+  return deadline === null || Math.floor(now.getTime() / 1000) >= deadline + CIRCLE_RELAY_MARGIN_SECONDS;
 }
 /** Whether the owner's native balance now covers what native gas needed when the group was prepared (ADR-0010 §2: never switched silently). */
 export async function nativeNowCovers(deps: CircleRuntimeDeps, prepared: Readonly<Record<string, unknown>>): Promise<boolean | null> {

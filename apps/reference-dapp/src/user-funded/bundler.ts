@@ -84,6 +84,12 @@ export type BundlerClient = {
    */
   readonly estimateCircle?: (op: erc4337.PackedUserOperation, entryPoint: string) => Promise<ReturnType<typeof erc4337.bundlerPaymasterGasEstimate>>;
   readonly sendCircle?: (op: erc4337.PackedUserOperation, entryPoint: string) => Promise<string>;
+  /**
+   * ADR-0010 review (C3): whether the bundler serves `entryPoint` (its `eth_supportedEntryPoints`, read once per client and cached on success).
+   * Throws the transport's closed code (or USER_OPERATION_ENTRY_POINT_UNSUPPORTED when it serves neither v0.7 nor v0.8). Asked before Circle is
+   * offered, so the owner never signs a permit for an operation this bundler cannot carry.
+   */
+  readonly servesEntryPoint?: (entryPoint: string) => Promise<boolean>;
 };
 export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
   let verified: ReadonlySet<string> | null = null;
@@ -112,6 +118,7 @@ export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
   };
   return {
     chainId, verify,
+    async servesEntryPoint(entryPoint) { await verify(); return verified!.has(entryPoint.toLowerCase()); },
     async estimate(op) { await served(erc4337.ENTRY_POINT_V0_7); return erc4337.bundlerGasEstimate(await rpc('eth_estimateUserOperationGas', [erc4337.toBundlerUserOperation(op), erc4337.ENTRY_POINT_V0_7])); },
     async estimateCircle(op, entryPoint) {
       await served(entryPoint);

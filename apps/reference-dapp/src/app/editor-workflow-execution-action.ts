@@ -127,7 +127,8 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
       throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
     // Exactly the reviewed workflow and plan: the same canonical workflow hash, the same groups (mechanism and steps) in the same order.
     if (!runMatchesBinding(run, binding)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
-    const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0);
+    // Review C4: the wallet kind this browser reported for the Review (FloFi Wallet, or none reported, is never handed a Circle permit).
+    const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0, undefined, parsed.eip155?.wallet);
     return { ok: true, value: { approvalId, proposal, prepared } };
   } catch (cause) {
     // Nothing was signed or sent: a started run that could not reach its wallet request is ended (it stays readable as ended).

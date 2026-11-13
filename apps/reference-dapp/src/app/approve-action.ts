@@ -167,10 +167,10 @@ export async function startUserFundedWorkflowRun(approvalId: string, profile: un
 
   });
 }
-/** What the owner's wallet signs for one execution group now. */
-export async function prepareUserFundedGroup(approvalId: string, groupIndex: number, handout?: string): Promise<Result<PreparedGroupView>> {
+/** What the owner's wallet signs for one execution group now (`wallet`: this browser's EVM wallet kind, as `evmWalletKind` reports it). */
+export async function prepareUserFundedGroup(approvalId: string, groupIndex: number, handout?: string, wallet?: string | null): Promise<Result<PreparedGroupView>> {
   return withFlightAccess(async () => {
-  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex, handout));
+  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex, handout, wallet ?? undefined));
 
   });
 }

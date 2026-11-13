@@ -47,7 +47,7 @@ export function createCircleDouble(evm: EvmDouble, options: CircleDoubleOptions)
   const usdc = pins.usdc, usdcPerEth = options.usdcPerEth ?? 3_000_000_000n, surcharge = options.surchargeBps ?? 1_000n;
   const permitNonces = new Map<string, bigint>(), entryPointNonces = new Map<string, bigint>();
   const operations = new Map<string, { readonly txHash: string | null; readonly sender: string; readonly nonce: bigint }>();
-  let unverified: 'NO_CODE' | 'WRONG_ENTRY_POINT' | 'WRONG_DOMAIN' | null = null, dropNext = false, sends = 0, estimates = 0;
+  let unverified: 'NO_CODE' | 'WRONG_ENTRY_POINT' | 'WRONG_DOMAIN' | null = null, dropNext = false, sends = 0, estimates = 0, entryPointQueries = 0;
   let additional = options.additionalGasCharge === undefined ? 40_000n : options.additionalGasCharge;
   const paymasterEntryPoint = (paymaster: string) => Object.entries(pins.paymasters).find(([, pm]) => pm === paymaster.toLowerCase())?.[0] ?? null;
   const prefundOf = (nativeWei: bigint) => (nativeWei * usdcPerEth * (10_000n + surcharge) + 10n ** 18n * 10_000n - 1n) / (10n ** 18n * 10_000n);
@@ -137,7 +137,7 @@ export function createCircleDouble(evm: EvmDouble, options: CircleDoubleOptions)
     const p = params as unknown[];
     switch (method) {
       case 'eth_chainId': return hex(BigInt(chainId));
-      case 'eth_supportedEntryPoints': return [...options.supportedEntryPoints ?? [erc4337.ENTRY_POINT_V0_7, erc4337.ENTRY_POINT_V0_8]];
+      case 'eth_supportedEntryPoints': entryPointQueries += 1; return [...options.supportedEntryPoints ?? [erc4337.ENTRY_POINT_V0_7, erc4337.ENTRY_POINT_V0_8]];
       case 'eth_estimateUserOperationGas': {
         estimates += 1;
         await validate(p[0] as erc4337.RpcUserOperation, String(p[1]), false);
@@ -170,6 +170,8 @@ export function createCircleDouble(evm: EvmDouble, options: CircleDoubleOptions)
       /** The next accepted operation is lost (never mined, then unknown to the bundler): FloFi must resend the same bytes, never others. */
       dropNextSend() { dropNext = true; },
       sends: () => sends, estimates: () => estimates,
+      /** How many times the bundler was asked which EntryPoints it serves (FloFi's client caches the answer per process). */
+      entryPointQueries: () => entryPointQueries,
       receiptOf: (userOpHash: string) => { const o = operations.get(userOpHash.toLowerCase()); return o?.txHash ? evm.control.receipt(o.txHash) : null; },
       prefundOf,
     } };

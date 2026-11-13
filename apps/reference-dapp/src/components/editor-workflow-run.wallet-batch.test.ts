@@ -27,7 +27,7 @@ vi.mock('../app/editor-workflow-execution-action', () => ({ editorWorkflowExecut
 vi.mock('../app/approve-action', () => ({ workflowRunStatusHandoff: server.status, prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorizeGroup,
   reportUserFundedBatch: server.report, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: vi.fn() }));
 const browser = vi.hoisted(() => ({ send: vi.fn(), hashes: vi.fn() }));
-vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
+vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: browser.send, walletBatchHashes: browser.hashes, walletProfile: async () => ({}),
   signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
 const { useEditorWorkflowRun, EXECUTION_REFUSAL, EXECUTION_REASON, STEP_REFUSAL, reviewOffersStepByStep, BATCH_PREPARATION_VALIDITY_MS } = await import('./editor-workflow-run');

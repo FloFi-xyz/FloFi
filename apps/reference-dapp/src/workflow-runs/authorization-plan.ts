@@ -135,6 +135,10 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
     ...userFundedAvailable ? ['One wallet interaction is not one transaction: a batch executes several steps in one transaction on one network; each network needs its own wallet authorization.',
       'Each group starts only after the previous one reconciled on chain.'] : ['Each step starts only after the previous step reconciled on chain.']];
   if (namespaces.length > 1) notes.push('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.');
+  // ADR-0010 review (C5): whether ETH or USDC (Circle) pays a group's fee is decided when it is prepared: never "one interaction" for such a group
+  // (`summarize` counts it as a minimum), and the plan says how many signatures Circle needs.
+  if (userFundedAvailable && groupsPlan?.groups.some(g => g.tokenGas)) notes.push('When your ETH cannot pay a group\'s network fee, FloFi may offer to pay it from your '
+    + 'USDC through Circle: that group then needs two signatures (a USDC permit, then the operation) instead of one.');
   if (bindingCodes.length) notes.push(userFundedAvailable
     ? 'A dependent step in the same group spends the earlier step\'s signed guaranteed minimum, fixed when you sign (anything above it stays in your wallet); '
       + 'a dependent step in a later group spends what was actually delivered after reconciliation, capped by its own amount, and is signed when it becomes due.'

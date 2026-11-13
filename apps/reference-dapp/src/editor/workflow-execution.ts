@@ -103,8 +103,10 @@ function counts(groups: readonly ExecutionGroup[], prepared: ReadonlyMap<number,
     const steps = g.stepTo - g.stepFrom + 1;
     walletPrompts += g.interactions;
     if (g.strategy === 'EVM_WALLET_BATCH' || g.strategy === 'EVM_USER_OPERATION') {
-      // ADR-0010: a Circle-paid group is two typed-data signatures (the USDC permit, then the operation) for one on-chain transaction.
+      // ADR-0010: a Circle-paid group is two typed-data signatures (the USDC permit, then the operation) for one on-chain transaction. Review C5: a
+      // group whose fee Circle may still pay (not prepared by this Review) may ask that second signature: the counts are a minimum.
       signatures += tokenGas.has(g.index) ? 2 : 1; transactions += 1;
+      if (g.tokenGas) atLeast = true;
       // Before preparation a batch is counted as its steps' exact calls without approvals (a minimum: approvals are added only where needed).
       batchedCalls += prepared.get(g.index) ?? steps;
     } else if (g.strategy === 'SOLANA_SIGN_ALL' || g.strategy === 'SOLANA_DURABLE_NONCE') { signatures += steps; transactions += steps; }
@@ -143,7 +145,7 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   const buildable = userFundedBuildable(input.facts, owner);
   const plan = planExecutionGroups(req.value, input.facts, input.profile, st => closed.has(st.index) ? 'USER_FUNDED_BRIDGE_FLOW_CLOSED' : buildable(st));
   if (!plan.ok) return { ok: false, code: plan.code };
-  const preparedCalls = new Map<number, number>(), tokenGas = new Set<number>();
+  const preparedCalls = new Map<number, number>(), tokenGas = new Set<number>(), decided = new Set<number>();
   let validUntil: string | null = null, refusal: EditorExecutionReview['refusal'] = null;
   const groups: ReviewGroup[] = [];
   const planned = new Map<number, Pick<ReviewStep, 'spend' | 'expected' | 'minimum'>>();
@@ -160,6 +162,8 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
         const p = r.value.prepared as unknown as { group: EvmGroupCalls; simulation: BatchSimulation | null;
           fee: { estimatedGas: string; maxFeePerGas: string; maxCost: string; payer: string; l1FeeUpperBound?: string; sponsorship?: 'OFFERED' | 'REQUIRED' | null } };
         validUntil = r.value.validUntil.toISOString();
+        // Review C5: prepared now, so who pays its fee (ETH, or USDC through Circle) is known for this group.
+        decided.add(g.index);
         calls = p.group.calls.map((c, i) => ({ kind: c.kind, step: p.group.steps.find(s => s.calls.includes(i))?.stepIndex ?? g.stepFrom }));
         approvals = p.group.calls.filter(c => c.kind === 'ERC20_APPROVE').length;
         preparedCalls.set(g.index, p.group.calls.length);
@@ -178,9 +182,12 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
       signing: g.signing, interactions: tokenGas.has(g.index) ? Math.max(2, g.interactions) : g.interactions, setup: g.setup, downgrades: g.downgrades, calls, approvals, fee,
       healthFactorAfter, ...gasPayment ? { gasPayment } : {} });
   }
-  // ADR-0010: the interaction summary of the plan as it will actually be asked (a Circle-paid group counts its two signatures).
-  const planGroups = plan.groups.map(g => tokenGas.has(g.index) ? { ...g, interactions: Math.max(2, g.interactions) } : g);
-  const interactions = tokenGas.size ? summarize(planGroups) : plan.interactions;
+  // ADR-0010: the interaction summary of the plan as it will actually be asked (a Circle-paid group counts its two signatures). Review C5: a group
+  // the Review prepared is counted exactly (native: one; Circle: two); a later one whose fee Circle may pay keeps the plan's "at least".
+  const decidedGroup = (g: ExecutionGroup): ExecutionGroup => { const { tokenGas: _possible, ...known } = g; void _possible;
+    return tokenGas.has(g.index) ? { ...known, interactions: Math.max(2, g.interactions) } : known; };
+  const planGroups = plan.groups.map(g => decided.has(g.index) ? decidedGroup(g) : g);
+  const interactions = summarize(planGroups);
   const steps: ReviewStep[] = req.value.steps.map(step => {
     const g = plan.groups.find(x => x.stepFrom <= step.index && step.index <= x.stepTo)!;
     const basis = g.steps.find(s => s.index === step.index)?.amount ?? 'EXACT', boundTo = g.steps.find(s => s.index === step.index)?.boundTo ?? null;
