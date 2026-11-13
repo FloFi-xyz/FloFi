@@ -197,7 +197,8 @@ describe('BUILD-ROUTER-001 authorization invalidation (ROUTE_CHANGED and friends
   it('fee increase after Review: ROUTE_CHANGED clears the authorization; the old Review cannot be re-accepted; a new quote and Review are required', async () => {
     const { service, h } = await setup(), w = workflow();
     const run = await reviewed(service, w);
-    h.controls.feeBump = 5_000n;
+    // BUILD-FLOFI-MAINNET-EXEC-002: beyond the tolerated re-pricing (a quarter of the 33 773 route fee, at most the owner's 0.5% slippage share).
+    h.controls.feeBump = 20_000n;
     await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTE_CHANGED');
     const after = await service.load(run.id);
     expect(after).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true, error: 'ROUTE_CHANGED' });
@@ -211,19 +212,58 @@ describe('BUILD-ROUTER-001 authorization invalidation (ROUTE_CHANGED and friends
     expect((await service.begin(run.id, ROUTER_OWNER, w)).attempt.step).toBe('APPROVAL');
     expect(h.counters.sends).toBe(0);
   });
-  it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a relayer re-pricing of a few base units keeps the Review (reviewed bytes execute; drift recorded); a larger one does not', async () => {
-    // The production failure: the live Across quote moved by 1–3 base units between Review and Execute, and `begin` refused every such run.
+  it('BUILD-FLOFI-MAINNET-EXEC-002: a relayer re-pricing within the tolerance keeps the Review (reviewed bytes execute; drift recorded); a larger one does not', async () => {
+    // Production 2026-11-13: the live Across quote moved by more than 1% of its fee between Review and Execute and `begin` refused the run
+    // (ROUTE_CHANGED: FEES_OUT_OF_BOUNDS, MINIMUM_OUTPUT_DECREASED) although the very next quote was 0.18% away.
     const { service, h } = await setup(), w = workflow();
-    const run = await reviewed(service, w);
-    h.controls.feeBump = 3n;
+    const run = await reviewed(service, w), tolerance = BigInt(run.review.route.feeTotal) / 4n;
+    h.controls.feeBump = BigInt(run.review.route.feeTotal) / 100n + 1n; // the old 1% rule refused this
     const begun = await service.begin(run.id, ROUTER_OWNER, w);
     expect(begun.attempt.tx.data).toBe(run.review.calls.find(c => c.purpose === 'APPROVAL')!.data);
-    expect(begun.attempt.note).toMatch(/^ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:3:3:[0-9]+$/);
+    expect(begun.attempt.note).toBe(`ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:${h.controls.feeBump}:${h.controls.feeBump}:${tolerance}`);
     expect((await service.load(run.id))).toMatchObject({ phase: 'AUTHORIZED', requote: false, error: null });
     const other = await setup(), again = await reviewed(other.service, w);
-    other.h.controls.feeBump = BigInt(again.review.route.feeTotal) / 100n + 1n;
+    other.h.controls.feeBump = BigInt(again.review.route.feeTotal) / 4n + 1n;
     await expect(other.service.begin(again.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTE_CHANGED');
+    expect((await other.service.load(again.id)).routeChanges).toEqual(['FEES_OUT_OF_BOUNDS', 'MINIMUM_OUTPUT_DECREASED']);
     expect(h.counters.sends + other.h.counters.sends).toBe(0);
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: Across itemizing a zero LP line in the fresh quote (same total) is not ROUTE_CHANGED', async () => {
+    const { service, h } = await setup(), w = workflow({ routing: 'ACROSS' });
+    const run = await reviewed(service, w);
+    expect(run.review.route.fees.map(f => f.kind)).not.toContain('BRIDGE_LP');
+    h.controls.acrossLpShift = 7n;
+    const begun = await service.begin(run.id, ROUTER_OWNER, w);
+    expect(begun.attempt).toMatchObject({ step: 'APPROVAL', note: null });
+    // A fee paid to a new party is still material: LI.FI's integrator fee recipient is compared exactly (route-step and recipient tests below).
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: an L1 data fee that moved after Review (×2.24 in production) keeps the request while the authorized network-fee maximum covers it', async () => {
+    const { service, h } = await setup(), w = workflow();
+    h.controls.l1Fee = 14_907_506_315n;
+    const run = await reviewed(service, w);
+    const approval = run.review.calls.find(c => c.purpose === 'APPROVAL')!;
+    expect(approval.l1FeeUpperBoundWei).toBe((14_907_506_315n * 2n).toString()); // 2× headroom, as the max fee per gas
+    h.controls.l1Fee = 33_462_843_872n; // 54 seconds later in production: the old rule refused (ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED)
+    const begun = await service.begin(run.id, ROUTER_OWNER, w);
+    expect(begun.attempt.step).toBe('APPROVAL');
+    await service.handoff(run.id);
+    expect((await service.load(run.id)).attempts[0]!.state).toBe('SUBMITTING');
+    expect(h.counters.sends).toBe(0);
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: a network fee beyond the authorized maximum still requires a fresh Review (and is re-quoted in place)', async () => {
+    const { service, h } = await setup(), w = workflow();
+    const run = await reviewed(service, w);
+    const approval = run.review.calls.find(c => c.purpose === 'APPROVAL')!;
+    // Exceeds gas limit × max fee + the reviewed L1 bound even at today's gas price.
+    h.controls.l1Fee = BigInt(approval.gasLimit) * BigInt(run.review.fees.maxFeePerGas) + BigInt(approval.l1FeeUpperBoundWei!) + 1n;
+    await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    expect(await service.load(run.id)).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true, attempts: [] });
+    h.controls.l1Fee = 50_000n;
+    const refreshed = await service.refresh(run.id);
+    expect(refreshed.id).toBe(run.id); expect(refreshed.workflow).toEqual(run.workflow);
+    await service.review(run.id, refreshed.review.commitment, w);
+    expect((await service.begin(run.id, ROUTER_OWNER, w)).attempt.step).toBe('APPROVAL');
+    expect(h.counters.sends).toBe(0);
   });
   it('public provider fallback after Review is never used: LI.FI now routing via another bridge is ROUTE_CHANGED, not a silent switch', async () => {
     const { service, h } = await setup(), w = workflow();

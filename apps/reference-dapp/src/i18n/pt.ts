@@ -50,6 +50,7 @@ import { portugueseApprovedUxPages } from './pt-approved-ux-pages';
 import { portugueseApprovedUxEditor } from './pt-approved-ux-editor';
 import { portugueseLocaleContract } from './pt-locale-contract';
 import { portugueseExecutionContinuity } from './pt-execution-continuity';
+import { portugueseMainnetExec } from './pt-mainnet-exec';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseCatalogReliability,
@@ -312,4 +313,5 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseLocaleContract,
   ...portugueseExecutionContinuity,
   ...portugueseApprovedUx,
+  ...portugueseMainnetExec,
 };

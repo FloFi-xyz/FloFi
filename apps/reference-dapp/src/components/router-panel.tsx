@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useState, type FormEvent } from 'react';
@@ -123,6 +124,8 @@ const messagesFor = (l: Labels): Record<string, string> => ({
   ROUTER_WALLET_REQUIRED: 'Connect a wallet first.', ROUTER_WRONG_CHAIN: `Switch your wallet to ${l.src}.`, ROUTER_WRONG_OWNER: 'Select the wallet account shown in Review.',
   ROUTER_REVIEW_REQUIRED: 'Accept the current Review first.', ROUTER_REVIEW_EXPIRED: 'This Review expired. Get a fresh route and review again.',
   ROUTE_CHANGED: 'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.',
+  // BUILD-FLOFI-MAINNET-EXEC-002: re-quoted in place (same run, same workflow); the fresh Review needs its own authorization.
+  ROUTER_REQUOTED_REVIEW_REQUIRED: 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.',
   ROUTER_REQUOTE_REQUIRED: 'A fresh route and Review are required before you can authorize again.',
   ROUTER_STATE_CHANGED_REVIEW_REQUIRED: 'Chain state changed materially since Review. Your authorization was cleared and nothing was sent.',
   ROUTER_ROUTE_REVALIDATION_UNAVAILABLE: 'The routing provider could not confirm the reviewed route right now. Nothing was sent; try again shortly.',
@@ -227,6 +230,7 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
     {view === 'simulate' && <button type="button" disabled={router.busy || !router.available || !fields} onClick={() => void router.simulate()}>{tr("Get route and simulate")}</button>}
     {view === 'simulate' && <PendingExecutionNote pending={pending || settling}/>}
     {record?.error === 'ROUTE_CHANGED' && record.routeChanges.length > 0 && <p role="alert">{tr("Route changed: ")}{tr(record.routeChanges.map(c => changeLabel[c]).join(', '))}.</p>}
+    {router.requoted && <BridgeRequoteChanges changes={router.requoted.changes}/>}
     {r && route && !router.retired && <>
       <dl className="swap-summary" aria-label={tr("Route review")}>
         <dt>{tr("Routing provider")}</dt><dd>{tr(providerLabel(route.routingProvider))}{tr(" · underlying protocol ")}{tr(route.underlyingProtocol)}</dd>

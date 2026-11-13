@@ -92,7 +92,7 @@ describe('BUILD-JOURNEY-001 testnet Router for arbitrary wallets', () => {
     await service.review(run.id, run.review.commitment, w);
     for (const patch of [{ amount: '2' }, { recipient: createTestWallet().address }, { slippage: '60' }, { routing: 'ACROSS' as const }])
       await expect(service.begin(run.id, owner, workflow(patch))).rejects.toThrow('ROUTER_SEMANTIC_REVISION_CHANGED');
-    h.controls.feeBump = 500n;
+    h.controls.feeBump = 20_000n; // BUILD-FLOFI-MAINNET-EXEC-002: beyond the tolerated re-pricing (a quarter of the route fee)
     await expect(service.begin(run.id, owner, w)).rejects.toThrow('ROUTE_CHANGED');
     expect(await service.load(run.id)).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true });
     expect(h.counters.sends).toBe(0);

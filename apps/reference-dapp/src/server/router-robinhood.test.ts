@@ -89,7 +89,7 @@ describe('BUILD-RH-002 Robinhood Chain routes on the canonical Router (MOCKED)',
     const route = ROUTES[0]!, { h, service, owner } = await setup(route), w = workflow(route, { routing: 'ACROSS' });
     const run = await service.simulate(w, owner);
     await service.review(run.id, run.review.commitment, w);
-    h.controls.feeBump = 500n;
+    h.controls.feeBump = 20_000n; // BUILD-FLOFI-MAINNET-EXEC-002: beyond the tolerated re-pricing (a quarter of the route fee)
     await expect(service.begin(run.id, owner, w)).rejects.toThrow('ROUTE_CHANGED');
     expect(await service.load(run.id)).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true });
     expect(h.counters.sends).toBe(0);

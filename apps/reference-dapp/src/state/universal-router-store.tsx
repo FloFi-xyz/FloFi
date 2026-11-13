@@ -13,6 +13,7 @@ import { universalBegin, universalDiscover, universalHandoff, universalInfo, uni
   type UniversalRunSummary } from '../app/universal-router-action';
 import { solanaSessionStatus, solanaSignIn, solanaSignInChallenge, walletSessionStatus, walletSignIn, walletSignInChallenge } from '../app/wallet-session-action';
 import { universalBridgeOfWorkflow, type UniversalBridgeDetails } from '../domain/universal-bridge-authoring';
+import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeReviewChange } from '../domain/bridge-review-recovery';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import type { UniversalRecord, UniversalWalletDiagnostic } from '../server/universal-router/types';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
@@ -32,7 +33,9 @@ type Store = { available: boolean; /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until
   owner: string | null; destinationWallet: string | null; record: UniversalRecord | null; discovery: DiscoveryResult | null; busy: boolean; signing: boolean;
   error: string | null; correlationId: string | null; retired: boolean; recovered: boolean; runs: readonly UniversalRunSummary[]; signedIn: boolean;
   connect(): Promise<void>; signIn(): Promise<void>; discover(): Promise<void>; simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>;
-  execute(): Promise<void>; observe(): Promise<void>; open(runId: string): Promise<void>; loadRuns(): Promise<void>; switchNetwork(): Promise<void> };
+  execute(): Promise<void>; observe(): Promise<void>; open(runId: string): Promise<void>; loadRuns(): Promise<void>; switchNetwork(): Promise<void>;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: the last automatic in-place re-quote (the refusal code and the material values it changed), or null. */
+  requoted: { readonly code: string; readonly runId: string; readonly changes: readonly BridgeReviewChange[] } | null };
 const Context = createContext<Store | null>(null);
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string; correlationId?: string }): T => { if (!result.ok) throw Object.assign(new Error(result.code), { correlationId: result.correlationId }); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
@@ -55,6 +58,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const [record, setRecord] = useState<UniversalRecord | null>(null), [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [busy, setBusy] = useState(false), [signing, setSigning] = useState(false), [error, setError] = useState<string | null>(null);
   const [correlationId, setCorrelationId] = useState<string | null>(null);
+  const [requoted, setRequoted] = useState<Store['requoted']>(null);
   const [available, setAvailable] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false), [recovered, setRecovered] = useState(false);
   const [availabilityKnown, setAvailabilityKnown] = useState(false);
   const [runs, setRuns] = useState<readonly UniversalRunSummary[]>([]), [sessions, setSessions] = useState<{ EVM: string | null; SOLANA: string | null }>({ EVM: null, SOLANA: null });
@@ -313,11 +317,29 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }
   async function execute() { await operation(async () => {
     if (!record || retired || record.phase !== 'AUTHORIZED' || record.authorization !== record.review.commitment) throw new Error('UNIVERSAL_REVIEW_REQUIRED');
-    await (ecosystemOfRecord(record) === 'EVM' ? executeEvm(record) : executeSolana(record));
-    void refreshRuns(ecosystemOfRecord(record));
+    const eco = ecosystemOfRecord(record), reviewed = record;
+    try { await (eco === 'EVM' ? executeEvm(record) : executeSolana(record)); }
+    catch (cause) {
+      // BUILD-FLOFI-MAINNET-EXEC-002: a refusal before any wallet request (route or fee moved, Review expired) leaves the run re-quotable in place:
+      // fresh quote, simulation and Review on the same run and workflow; only the material values that moved are shown, then a new authorization.
+      if (cause instanceof Error && REQUOTE_IN_PLACE.test(cause.message)) {
+        const current = await universalStatus(eco, reviewed.id);
+        if (current.ok && requotableInPlace(current.value)) {
+          const refreshed = await universalRefresh(eco, reviewed.id, reviewed.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? destinationWallet ?? undefined : undefined);
+          if (refreshed.ok) {
+            accept(refreshed.value);
+            setRequoted({ code: cause.message, runId: reviewed.id, changes: bridgeReviewChanges(reviewed.review, refreshed.value.review) });
+            throw new Error('UNIVERSAL_REQUOTED_REVIEW_REQUIRED', { cause });
+          }
+        }
+      }
+      throw cause;
+    }
+    void refreshRuns(eco);
   }); }
   return <Context.Provider value={{ available, availabilityKnown, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
-    signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork }}>
+    signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork,
+    requoted: requoted && requoted.runId === record?.id ? requoted : null }}>
     {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
     <div data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

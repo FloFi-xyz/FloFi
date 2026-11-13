@@ -254,6 +254,10 @@
       "path": "apps/reference-dapp/src/components/flofi-wallet-continue.test.tsx",
       "stage": "unit"
     },
+    "app.components.review-summary-panel": {
+      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
+      "stage": "unit"
+    },
     "app.components.site.typing-text": {
       "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
       "stage": "unit"
@@ -298,6 +302,14 @@
       "path": "apps/reference-dapp/src/developer/webhooks.pg.test.ts",
       "stage": "postgres"
     },
+    "app.domain.approved-ux": {
+      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.bridge-requote": {
+      "path": "apps/reference-dapp/src/domain/bridge-requote.test.ts",
+      "stage": "unit"
+    },
     "app.domain.build-entry": {
       "path": "apps/reference-dapp/src/domain/build-entry.test.ts",
       "stage": "unit"
@@ -326,6 +338,10 @@
       "path": "apps/reference-dapp/src/domain/editor-run.test.ts",
       "stage": "unit"
     },
+    "app.domain.flight-refusal": {
+      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
+      "stage": "unit"
+    },
     "app.domain.intelligence": {
       "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
       "stage": "unit"
@@ -340,6 +356,10 @@
     },
     "app.domain.observation-schedule": {
       "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.p0-swap-bridge-connections": {
+      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
       "stage": "unit"
     },
     "app.domain.privacy-notice": {
@@ -578,6 +598,10 @@
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
     },
+    "app.server.bridge-build-estimate": {
+      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
+      "stage": "unit"
+    },
     "app.server.build-estimate-production": {
       "path": "apps/reference-dapp/src/server/build-estimate-production.test.ts",
       "stage": "unit"
@@ -614,22 +638,6 @@
       "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
       "stage": "unit"
     },
-    "app.domain.approved-ux": {
-      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
-      "stage": "unit"
-    },
-    "app.components.review-summary-panel": {
-      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
-      "stage": "unit"
-    },
-    "app.domain.flight-refusal": {
-      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
-      "stage": "unit"
-    },
-    "app.server.bridge-build-estimate": {
-      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
-      "stage": "unit"
-    },
     "app.server.flight-access": {
       "path": "apps/reference-dapp/src/server/flight-access.test.ts",
       "stage": "unit"
@@ -664,6 +672,10 @@
     },
     "app.server.provider-boundary": {
       "path": "apps/reference-dapp/src/server/provider-boundary.test.ts",
+      "stage": "unit"
+    },
+    "app.server.router-capability": {
+      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
       "stage": "unit"
     },
     "app.server.router-providers": {
@@ -1086,16 +1098,12 @@
       "path": "packages/workflow-contracts/test/native-transfer.test.ts",
       "stage": "unit"
     },
+    "workflow-contracts.network-fee": {
+      "path": "packages/workflow-contracts/test/network-fee.test.ts",
+      "stage": "unit"
+    },
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.p0-swap-bridge-connections": {
-      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
-      "stage": "unit"
-    },
-    "app.server.router-capability": {
-      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
       "stage": "unit"
     }
   },
@@ -2766,6 +2774,7 @@
       "sources": [
         "apps/reference-dapp/src/components/across-panel.tsx",
         "apps/reference-dapp/src/components/bridge-panel.tsx",
+        "apps/reference-dapp/src/components/bridge-requote-changes.tsx",
         "apps/reference-dapp/src/components/bridge-swap-panel.tsx",
         "apps/reference-dapp/src/components/router-panel.tsx",
         "apps/reference-dapp/src/components/universal-bridge-panel.tsx"
@@ -3508,6 +3517,7 @@
         "apps/reference-dapp/src/domain/universal-bridge-authoring.ts"
       ],
       "suites": [
+        "app.domain.bridge-requote",
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
@@ -4109,10 +4119,9 @@
         "apps/reference-dapp/src/i18n/locale.tsx",
         "apps/reference-dapp/src/i18n/preserved-values.ts",
         "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
-        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
         "apps/reference-dapp/src/i18n/pt-approved-ux-editor.ts",
-        "apps/reference-dapp/src/i18n/pt-execution-continuity.ts",
         "apps/reference-dapp/src/i18n/pt-approved-ux-pages.ts",
+        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
         "apps/reference-dapp/src/i18n/pt-authoring.ts",
         "apps/reference-dapp/src/i18n/pt-automations.ts",
         "apps/reference-dapp/src/i18n/pt-base.ts",
@@ -4131,12 +4140,15 @@
         "apps/reference-dapp/src/i18n/pt-domain.ts",
         "apps/reference-dapp/src/i18n/pt-e2e-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-editor-runs.ts",
+        "apps/reference-dapp/src/i18n/pt-execution-continuity.ts",
         "apps/reference-dapp/src/i18n/pt-execution-ux.ts",
         "apps/reference-dapp/src/i18n/pt-financial-execution.ts",
         "apps/reference-dapp/src/i18n/pt-learning.ts",
         "apps/reference-dapp/src/i18n/pt-lending.ts",
         "apps/reference-dapp/src/i18n/pt-lifecycle.ts",
         "apps/reference-dapp/src/i18n/pt-local-runtime.ts",
+        "apps/reference-dapp/src/i18n/pt-locale-contract.ts",
+        "apps/reference-dapp/src/i18n/pt-mainnet-exec.ts",
         "apps/reference-dapp/src/i18n/pt-mainnet-product.ts",
         "apps/reference-dapp/src/i18n/pt-networks.ts",
         "apps/reference-dapp/src/i18n/pt-permissions.ts",
@@ -4155,9 +4167,8 @@
         "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
-        "apps/reference-dapp/src/server/request-language.ts",
         "apps/reference-dapp/src/i18n/translate.ts",
-        "apps/reference-dapp/src/i18n/pt-locale-contract.ts"
+        "apps/reference-dapp/src/server/request-language.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -6854,6 +6865,7 @@
       "sharedFinancialCore": true,
       "sources": [
         "packages/workflow-contracts/src/bridge.ts",
+        "packages/workflow-contracts/src/network-fee.ts",
         "packages/workflow-contracts/src/router-pairs.ts",
         "packages/workflow-contracts/src/router.ts",
         "packages/workflow-contracts/src/universal-router-networks.ts",
@@ -6864,7 +6876,8 @@
         "app.server.universal-router.service",
         "reference-compiler.bridge",
         "reference-executor.bridge",
-        "reference-reconciler.bridge"
+        "reference-reconciler.bridge",
+        "workflow-contracts.network-fee"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."

@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from './canonical.js';
 import { BRIDGE_ACTION } from './bridge.js';
 import type { SemanticWorkflow } from './semantic-workflow.js';
-import type { RouteChange } from './router.js';
+import { feeRecipients, type RouteChange } from './router.js';
 import { canonicalUniversalAddress, canonicalUniversalToken, UNIVERSAL_ROUTE_SELECTIONS, UNIVERSAL_ROUTER_ADAPTER, UNIVERSAL_ROUTER_CAPABILITY,
   UNIVERSAL_ROUTER_MAXIMUM_SLIPPAGE_BPS, UNIVERSAL_ROUTING_PROVIDERS, universalNetworkOfChain, type UniversalNetwork, type UniversalRouteSelection,
   type UniversalRoutingProvider } from './universal-router-networks.js';
@@ -314,8 +314,9 @@ export function compareUniversalRoutes(reviewedInput: UniversalRoute, candidateI
   if (a.protocol !== b.protocol) changes.add('PROTOCOL_CHANGED');
   const shape = (r: UniversalRoute) => r.steps.map(s => [s.kind, s.protocol, s.fromChain, s.toChain, s.fromToken, s.toToken]);
   if (!same(shape(a), shape(b))) changes.add('STEPS_CHANGED');
-  const recipients = (r: UniversalRoute) => [...new Set(r.fees.map(f => `${f.kind}:${f.recipient ?? ''}`))].sort();
-  if (!same(recipients(a), recipients(b))) changes.add('FEE_RECIPIENT_CHANGED');
+  // BUILD-FLOFI-MAINNET-EXEC-002: only lines that pay an identified party are compared (a zero relayer line itemized in one quote only is not
+  // a recipient change).
+  if (!same(feeRecipients(a), feeRecipients(b))) changes.add('FEE_RECIPIENT_CHANGED');
   if (BigInt(b.expectedOutput) < BigInt(a.minimumOutput)) changes.add('MINIMUM_OUTPUT_DECREASED');
   if (a.slippageBps !== b.slippageBps) changes.add('SLIPPAGE_CHANGED');
   if (a.source.ecosystem !== b.source.ecosystem) changes.add('TRANSACTION_TARGET_CHANGED');

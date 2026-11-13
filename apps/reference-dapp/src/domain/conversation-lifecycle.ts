@@ -268,7 +268,9 @@ export function payableCosts(fees: readonly SimulationLine[]) {
  * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: refusals at the execution boundary that mean the reviewed quote or chain state no longer stands (changed or
  * expired). Nothing was sent; the chat re-quotes and asks for a fresh Review instead of offering the dead one again.
  */
-export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
+// BUILD-FLOFI-MAINNET-EXEC-002: FEES_CHANGED (ROUTER_/UNIVERSAL_ L1 or execution fee above the authorized maximum) is re-quoted like the rest;
+// before, the chat stopped at a dead Review after ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED.
+export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|FEES_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
 /**
  * BUILD-FLOFI-E2E-RELIABILITY-001: why the next request of a run with a confirmed earlier request cannot start under its Review, in words that
  * describe that request only (the generic reasons say "nothing was sent", which is false for the run once its approval landed). Null: the
@@ -278,7 +280,7 @@ export function continuationReason(code: string): string | null {
   if (/STOCK_MULTIPLIER_CHANGED/.test(code)) return 'A corporate action changed the shares per token since your Review.';
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'The reviewed quote expired before the next request could start.';
   if (/QUOTE_CHANGED|ROUTE_CHANGED|REQUOTE/.test(code)) return 'The quote moved outside the bounds of your Review.';
-  if (/STATE_CHANGED|GAS_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
+  if (/STATE_CHANGED|GAS_CHANGED|FEES_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
   return null;
 }
 /** What a fresh Review changed against the previous one of the same workflow revision: every step figure and cost line, by label (values as shown). */

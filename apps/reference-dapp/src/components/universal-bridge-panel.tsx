@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeFailureMessage } from '../domain/bridge-failure';
@@ -58,6 +59,8 @@ const MESSAGES: Readonly<Record<string, string>> = {
   UNIVERSAL_WALLET_NONCE_MISMATCH: 'Your wallet would use a different transaction number. Let pending transactions confirm first. Nothing was sent.', UNIVERSAL_WRONG_OWNER: 'Select the wallet account shown in Review.',
   UNIVERSAL_REVIEW_REQUIRED: 'Accept the current Review first.', UNIVERSAL_REVIEW_EXPIRED: 'This Review expired. Get a fresh route and review again.',
   ROUTE_CHANGED: 'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.',
+  // BUILD-FLOFI-MAINNET-EXEC-002: re-quoted in place (same run, same workflow); the fresh Review needs its own authorization.
+  UNIVERSAL_REQUOTED_REVIEW_REQUIRED: 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.',
   UNIVERSAL_REQUOTE_REQUIRED: 'A fresh route and Review are required before you can authorize again.',
   UNIVERSAL_STATE_CHANGED_REVIEW_REQUIRED: 'Chain state changed materially since Review. Your authorization was cleared and nothing was sent.',
   UNIVERSAL_ROUTE_REVALIDATION_UNAVAILABLE: 'The provider could not confirm the reviewed route right now. Nothing was sent; try again shortly.',
@@ -259,6 +262,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <button type="button" disabled={router.busy || !router.available || !d} onClick={() => void router.simulate()}>{tr('Get route and simulate')}</button>
       <PendingExecutionNote pending={pending || settling}/></>}
     {record?.error === 'ROUTE_CHANGED' && record.routeChanges.length > 0 && <p role="alert">{tr('Route changed:')} {record.routeChanges.map(c => tr(CHANGE[c])).join(', ')}.</p>}
+    {router.requoted && <BridgeRequoteChanges changes={router.requoted.changes}/>}
     {r && route && src && !router.retired && <dl className="swap-summary" aria-label={tr('Route review')}>
       <dt>{tr('Provider')}</dt><dd>{PROVIDER_LABEL[route.provider] ?? route.provider} · {route.protocol} · {tr('order')} <code>{route.order.orderId}</code></dd>
       <dt>{tr('Selection')}</dt><dd>{r.selection.considered.map(c => `${PROVIDER_LABEL[c.provider] ?? c.provider}: ${tr(c.outcome === 'SELECTED' ? 'selected' : c.outcome === 'AVAILABLE' ? 'available'

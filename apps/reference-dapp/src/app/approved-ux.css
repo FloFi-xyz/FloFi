@@ -162,3 +162,10 @@
 .workflow-phase-neutral .workflow-progress-step-phase{color:var(--muted)}
 .sequence-continuation .sequence-continuation-values{margin:12px 0}
 .sequence-continuation .sequence-continuation-message{margin:8px 0 12px}
+/* BUILD-FLOFI-MAINNET-EXEC-002: an in-place re-quote lists only the material values that moved. */
+.bridge-requote{margin:12px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.bridge-requote dl{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:4px 12px;margin:8px 0 0}
+.bridge-requote dl>div{display:contents}
+.bridge-requote dt{color:var(--muted)}
+.bridge-requote dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.bridge-requote s{color:var(--muted)}

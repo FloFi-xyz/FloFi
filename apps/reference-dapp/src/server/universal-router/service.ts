@@ -25,7 +25,8 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi
 import { associatedTokenAddress, compileUniversalArtifacts, decodeRelayDepositLog, decodeSplTokenAccount, describeSolanaWalletChange, encodeErc20ApproveExact, readSolanaAccounts,
   solanaAddress, verifySignedSolanaSwap, verifySolanaCluster, SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID, type SignedSolanaTransaction, type SolanaRpc,
   type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
-import { assertRouterTransition, canonicalUniversalAddress, compareUniversalRoutes, hashArtifactBytes, ROUTER_PHASES, universalNetworkOfChain, universalRouteCommitment,
+import { assertRouterTransition, canonicalUniversalAddress, compareUniversalRoutes, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization, ROUTER_PHASES,
+  universalNetworkOfChain, universalRouteCommitment,
   validateUniversalBridgeWorkflow, type EvidenceBundle, type RouteChange, type RouterPhase, type SemanticWorkflow, type UniversalBridgeFields, type UniversalNetwork,
   type UniversalRoute, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
@@ -281,8 +282,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       const { priority, maximum } = await evm.evmFeePrice(rpc, d, head.baseFee);
       const calls = await Promise.all(plan.map(async (c, i) => {
         const gasUsed = simulated[i]!.gasUsed, gasLimit = await evm.evmGasLimit(rpc, d, owner, c, gasUsed, at);
+        // BUILD-FLOFI-MAINNET-EXEC-002: the reviewed L1 bound carries the same 2× headroom as the execution part's max fee per gas.
         const l1 = await evm.evmL1FeeUpperBound(rpc, d, (c.data.length - 2) / 2, at);
-        return { ...c, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1?.toString() ?? null };
+        return { ...c, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1 === null ? null : l1FeeReviewBound(l1).toString() };
       }));
       const gasLimitTotal = calls.reduce((s, c) => s + BigInt(c.gasLimit), 0n), execution = gasLimitTotal * maximum;
       const l1 = calls.map(c => c.l1FeeUpperBoundWei === null ? null : BigInt(c.l1FeeUpperBoundWei));
@@ -380,7 +382,11 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const estimate = evm.quantity(await rpc('eth_estimateGas', [{ from: tx.from, to: tx.to, value: tx.value, data: tx.data }, at]));
     if (estimate <= 0n || estimate > BigInt(tx.gas)) return invalid('UNIVERSAL_GAS_CHANGED_REVIEW_REQUIRED');
     const l1 = await evm.evmL1FeeUpperBound(rpc, d, (tx.data.length - 2) / 2, at), reviewed = src.calls.find(c => c.to === tx.to && c.data === tx.data);
-    if (!reviewed || l1 === null || reviewed.l1FeeUpperBoundWei === null || l1 > BigInt(reviewed.l1FeeUpperBoundWei)) return invalid('UNIVERSAL_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    // BUILD-FLOFI-MAINNET-EXEC-002: one authorized network-fee maximum per call (gas × max fee + reviewed L1 bound); the request stands while its
+    // fee at the current price and L1 estimate is within it.
+    if (!reviewed || l1 === null || reviewed.l1FeeUpperBoundWei === null ||
+        !networkFeeWithinAuthorization({ gasLimit: BigInt(tx.gas), maxFeePerGas: BigInt(tx.maxFeePerGas), l1FeeBound: BigInt(reviewed.l1FeeUpperBoundWei) }, { gasPrice: price, l1Fee: l1 }))
+      return invalid('UNIVERSAL_L1_FEES_CHANGED_REVIEW_REQUIRED');
     const balance = evm.quantity(await rpc('eth_getBalance', [tx.from, at]));
     if (balance < BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + l1 + BigInt(tx.value)) fail('UNIVERSAL_INSUFFICIENT_GAS');
   }

@@ -141,6 +141,10 @@ export function simulationError(error: string): string {
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a refusal at the execution boundary names what happened instead of the generic fallback below.
   if (/SUBMISSION_UNKNOWN|SUBMISSION_RESULT_UNKNOWN|OBSERVE_EXISTING|DEPOSIT_MAY_EXIST|RELAYED_EXECUTION_PENDING/i.test(error)) return 'Your wallet may already have sent this request. FloFi never sends it again; it keeps checking the network for its result.';
   if (/ROUTE_REVALIDATION_UNAVAILABLE/i.test(error)) return 'FloFi could not re-check the route with the provider just before your wallet request, so nothing was sent. Try again in a moment.';
+  // BUILD-FLOFI-MAINNET-EXEC-002: the run was re-quoted in place after the quote or fee moved; the fresh Review waits for a new authorization.
+  if (/_REQUOTED_REVIEW_REQUIRED$/.test(error)) return 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
+  // BUILD-FLOFI-MAINNET-EXEC-002: the network fee now exceeds the maximum the owner authorized (the reviewed request was not sent).
+  if (/FEES_CHANGED/i.test(error)) return 'The network fee rose above the maximum in your Review, so nothing was sent. Get a fresh quote and review it again.';
   if (/ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_CHANGED|STOCK_MULTIPLIER_CHANGED/i.test(error)) return 'The provider quote or the on-chain state changed after your Review, so nothing was sent. Get a fresh quote and review it again.';
   // BUILD-FLOFI-E2E-RELIABILITY-001: the swap engine's own refusals at the execution boundary (they reached the owner as the generic fallback).
   if (/RECONCILIATION_MISMATCH|DIVERGENT/i.test(error)) return 'The observed on-chain result does not match the reviewed bounds, so FloFi stopped and keeps this run for review. Nothing is retried automatically.';
