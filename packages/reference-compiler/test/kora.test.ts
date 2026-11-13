@@ -84,10 +84,10 @@ describe('Jupiter swap with the Kora fee payer (MOCKED)', () => {
     expect(Buffer.from(ixs.at(-1)!.data).toString('hex')).toBe('0c' + '68ad030000000000' + '06');
     expect(parseTransaction(fromBase64(review.unsignedTransaction, 2048)).signatures).toHaveLength(2);
     expect(review.estimatedFeeLamports).toBe(String(10_000 + Math.ceil(review.computeUnitLimit * 1000 / 1_000_000)));
-    // The owner pays no SOL and receives exactly the swap output; the fee budget is the token amount, the SOL gas budget zero.
+    // The owner pays no SOL and receives exactly the swap output; its gas budget is the token repayment.
     expect(review.simulationResult).toMatchObject({ inputSpent: '10000000', accountCreationLamports: '0' });
-    expect(review.manifest.gasBudgets[0]?.maximumAmount).toBe('0');
-    expect(review.manifest.feeBudgets).toEqual([{ asset: { chainId: profile.chain, address: T.USDC.mint, decimals: 6 }, maximumAmount: '241000' }]);
+    expect(review.manifest.gasBudgets).toEqual([{ asset: { chainId: profile.chain, address: T.USDC.mint, decimals: 6 }, maximumAmount: '241000' }]);
+    expect(review.manifest.feeBudgets).toEqual([]);
     expect(() => assertJupiterReview(review, review.workflow, wallet.owner, env.state.blockHeight, NOW)).not.toThrow();
     expect(() => assertJupiterReview({ ...review, gas: { ...review.gas!, amount: '1' } }, review.workflow, wallet.owner, env.state.blockHeight, NOW)).toThrow('JUPITER_AUTHORIZATION_INVALID');
   });

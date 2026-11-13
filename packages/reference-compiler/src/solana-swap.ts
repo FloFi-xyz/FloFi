@@ -129,7 +129,7 @@ export async function simulateSolanaMessage(rpc: SolanaRpc, message: Uint8Array,
 export function buildSolanaSwapArtifacts(input: { runtime: SolanaSwapRuntime; workflow: SemanticWorkflow; nodeId: string; intent: SolanaSwapIntent;
   quote: SolanaSwapQuote; quoteArtifact: unknown; messageHash: string; contract: { address: string; version: string }; functionId: string;
   maximumNetworkCostLamports: bigint; lastValidBlockHeight: number; expiresAt: string; reviewTtlSeconds: number;
-  /** ADR-0010: the network fee the owner repays in a token (Kora mode), bound as a fee budget beside the owner's (zero) SOL gas budget. */
+  /** ADR-0010: the network fee the owner repays in a token (Kora mode): bound as the owner's gas budget, in that token (it pays no SOL). */
   tokenFee?: { mint: string; decimals: number; amount: string } }): SolanaSwapArtifacts {
   const { runtime, workflow, intent, quote } = input, prefix = runtime.idPrefix, chain = runtime.chain;
   const semanticHash = solanaSwapArtifactHash('semantic-workflow', workflow);
@@ -147,8 +147,10 @@ export function buildSolanaSwapArtifacts(input: { runtime: SolanaSwapRuntime; wo
     freshness: { observedAt: quote.fetchedAt, expiresAt: input.expiresAt, maximumAgeSeconds: input.reviewTtlSeconds } };
   const simulationHash = solanaSwapArtifactHash('simulation-bundle', simulation), owner = { chainId: chain, address: intent.owner };
   const spendLimits = [{ asset: inputAsset, maximumAmount: intent.amount, maximumPerStepAmount: intent.amount, maximumCumulativeAmount: intent.amount }];
-  const gasBudgets = [{ asset: { chainId: chain, nativeId: 'SOL', decimals: 9 }, maximumAmount: input.maximumNetworkCostLamports.toString() }];
-  const feeBudgets = input.tokenFee ? [{ asset: { chainId: chain, address: input.tokenFee.mint, decimals: input.tokenFee.decimals }, maximumAmount: input.tokenFee.amount }] : [];
+  // ADR-0010: in Kora mode the owner's whole network cost is the token repayment (it pays no SOL): that is its gas budget, in the token.
+  const gasBudgets = input.tokenFee ? [{ asset: { chainId: chain, address: input.tokenFee.mint, decimals: input.tokenFee.decimals }, maximumAmount: input.tokenFee.amount }]
+    : [{ asset: { chainId: chain, nativeId: 'SOL', decimals: 9 }, maximumAmount: input.maximumNetworkCostLamports.toString() }];
+  const feeBudgets: never[] = [];
   const recovery = { failurePolicy: 'ABORT' as const, residualAssetRecipient: owner, maximumAttemptsPerStep: 1, requiresHumanReview: true as const };
   const providers = { kind: 'FIXED' as const, providerId: runtime.adapterId };
   const policy: AuthorizationPolicy = { schemaVersion: '1.0.0', policyId: `${prefix}-policy`, semanticWorkflowHash: semanticHash, artifactSetHash: artifactHash, simulationHash,
