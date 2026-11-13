@@ -25,6 +25,12 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   // Review UX8 (/approve): cancelling an unrelayed Circle-paid operation is an ordinary transaction paid in ETH.
   'Cancelling is an ordinary transaction from your wallet, and its network fee is paid in ETH, not in USDC through Circle: you need a small amount of ETH on {0} first.':
     'Cancelar é uma transação comum da sua carteira, e a taxa de rede dela é paga em ETH, não em USDC pela Circle: você precisa de um pouco de ETH em {0} antes.',
+  // Review B1/LQ1 (all token-paid mechanisms): a later step on the same network still needs its native coin for the network fee.
+  'A later step on {0} needs {1} for its network fee: {2}. Add {1} before starting, or the run will stop there.':
+    'Uma etapa posterior em {0} precisa de {1} para a taxa de rede: {2}. Adicione {1} antes de começar, ou a execução vai parar ali.',
+  'Later steps on {0} need {1} for their network fee: {2}. Add {1} before starting, or the run will stop there.':
+    'Etapas posteriores em {0} precisam de {1} para a taxa de rede: {2}. Adicione {1} antes de começar, ou a execução vai parar ali.',
+  'step {0} ({1})': 'etapa {0} ({1})',
   // Technical details (collapsed).
   'Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}': 'Paymaster da Circle {0} · EntryPoint {1} · limite da permissão de USDC {2}',
   'What is left of the permit cap stays approved to Circle\'s paymaster until your next USDC permit replaces it.':

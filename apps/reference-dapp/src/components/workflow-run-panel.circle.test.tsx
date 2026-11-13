@@ -50,3 +50,19 @@ describe('review UX8: cancelling an unrelayed Circle-paid operation needs ETH, s
     expect(html).toContain('aria-describedby="revoke-note-0"');
   });
 });
+
+describe('review B1/LQ1: /approve names a later step that needs the native coin, before anything is signed', () => {
+  const nativeLater = [{ chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', network: 'Solana', symbol: 'SOL' as const, after: 0, steps: [{ index: 1, action: 'add_liquidity' }] }];
+  const pending = (patch: Partial<WorkflowRunClaim['run']> = {}): WorkflowRunClaim => {
+    const c = claim(signedOperation());
+    return { ...c, run: { ...c.run, state: 'PENDING', mode: null, nextAction: 'OWNER_CHOOSES_MODE', groups: [], ...patch }, plan: { ...c.plan, nativeLater } };
+  };
+  it('while choosing how to authorize (EN/PT), whatever the mode', () => {
+    expect(render(pending())).toContain('A later step on Solana needs SOL for its network fee: step 2 (Add liquidity). Add SOL before starting, or the run will stop there.');
+    expect(render(pending(), 'PT')).toContain('Uma etapa posterior em Solana precisa de SOL para a taxa de rede: etapa 2 (Adicionar liquidez).');
+  });
+  it('not once something was signed or reconciled, and not for a plan without it', () => {
+    expect(render(pending({ state: 'RUNNING', mode: 'USER_FUNDED', nextAction: 'OWNER_SIGNS_GROUP', groups: [signedOperation()] }))).not.toContain('A later step on Solana');
+    expect(render(claim(signedOperation({ gasPayment: circle })))).not.toContain('A later step on');
+  });
+});

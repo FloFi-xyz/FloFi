@@ -25,6 +25,7 @@ import type { EvmGroupCalls, UserCall } from '../user-funded/evm-calls.ts';
 import { amountOf, plannedSteps, type ReviewAmount } from '../user-funded/planned.ts';
 import { circleFactsOf, circleGasPayment } from '../user-funded/circle-gas.ts';
 import type { GasPayment } from '../gas-abstraction/mechanism.ts';
+import { nativeLaterWarnings, type NativeLaterWarning } from '../gas-abstraction/native-later.ts';
 import { editorWorkflowStrategy } from './workflow-strategy.ts';
 
 export type { ReviewAmount };
@@ -86,6 +87,12 @@ export type EditorExecutionReview = {
   readonly refusal: { readonly code: string; readonly step: number | null;
     /** P0 (board 07): the server's own numbers for a native-fee shortfall, read-only, for the blocker screen and the assistant. */
     readonly evidence?: NativeFeeShortfall } | null;
+  /**
+   * Review B1/LQ1 (ADR-0010 §2): later steps on a chain that need its native coin for their network fee, after an earlier step there whose fee may
+   * be (or, for the prepared first group, is) paid in a token — the run would stop at them with the funds midway. Shown before the first
+   * signature; nothing in the plan changes. Absent: a Review made before this field existed.
+   */
+  readonly nativeLater?: readonly NativeLaterWarning[];
 };
 export type ReviewResult = { readonly ok: true; readonly value: EditorExecutionReview } | { readonly ok: false; readonly code: string; readonly step?: number };
 
@@ -146,6 +153,8 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
   const plan = planExecutionGroups(req.value, input.facts, input.profile, st => closed.has(st.index) ? 'USER_FUNDED_BRIDGE_FLOW_CLOSED' : buildable(st));
   if (!plan.ok) return { ok: false, code: plan.code };
   const preparedCalls = new Map<number, number>(), tokenGas = new Set<number>(), decided = new Set<number>();
+  /** Review B1/LQ1: who pays each prepared group's fee, as this Review found it (USDC through Circle, or the owner's own native coin). */
+  const feePayers = new Map<number, 'TOKEN' | 'NATIVE'>();
   let validUntil: string | null = null, refusal: EditorExecutionReview['refusal'] = null;
   const groups: ReviewGroup[] = [];
   const planned = new Map<number, Pick<ReviewStep, 'spend' | 'expected' | 'minimum'>>();
@@ -169,6 +178,7 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
         preparedCalls.set(g.index, p.group.calls.length);
         // ADR-0010: the owner's native gas is short and Circle is eligible: the fee is paid from the owner's USDC (the permit's cap), no native fee.
         const circle = circleFactsOf(r.value.prepared);
+        feePayers.set(g.index, circle ? 'TOKEN' : 'NATIVE');
         if (circle) { gasPayment = circleGasPayment(circle); tokenGas.add(g.index); }
         // The estimate is the execution gas at about the current price plus the L1 data fee bound (OP Stack only; 0 elsewhere).
         else fee = { estimatedWei: (BigInt(p.fee.estimatedGas) * BigInt(p.fee.maxFeePerGas) / 2n + BigInt(p.fee.l1FeeUpperBound ?? '0')).toString(), maxWei: p.fee.maxCost,
@@ -210,5 +220,7 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
     counts: counts(planGroups, preparedCalls, interactions.networkSwitches, interactions.oneTimeSetup, tokenGas),
     // USER_FUNDED_NOT_FEWER_INTERACTIONS is no longer emitted: groups that are all grouped interactions never need more prompts than their steps.
     reasons: [...new Set(plan.groups.flatMap(g => g.downgrades))].filter(code => code !== 'WALLET_CAPABILITIES_ASSUMED'),
-    refusal } };
+    refusal,
+    // Review B1/LQ1: the run's own groups when it runs grouped (a Circle group may pay in USDC), else each step through its own flow.
+    nativeLater: nativeLaterWarnings(req.value.steps, mode === 'STEP_BY_STEP' ? null : plan.groups, input.facts, feePayers) } };
 }

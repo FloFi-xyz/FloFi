@@ -22,7 +22,7 @@ import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
-import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED, feeAmountText } from '../domain/token-fee';
+import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
 import { circleFactsOf } from '../user-funded/circle-facts';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 import type { ClaimedProposal } from '../platform/approvals';
@@ -1145,6 +1145,11 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
         : 'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee).')}</p>}
   </>;
   const block = review ? reviewBlockView(review) : null;
+  // Review B1/LQ1: a later step on a network that needs its native coin for its fee after an earlier token-paid one there — said visibly before
+  // the first signature (the Review, or a run nothing of which was signed or reconciled yet), never as a refusal: the design stays as it is.
+  const beforeFirstSignature = !run || !run.groups.some(g => g.signed || ANSWERED_STATES.includes(g.state)) && !run.steps.some(s => s.state === 'RECONCILED');
+  const nativeLater = beforeFirstSignature ? (review?.nativeLater ?? []).map(w => <p key={w.chain} className="review-panel-note review-block-native-later" role="note"
+    data-native-later={w.chain}>{nativeLaterMessage(w, tr, action => tr(ACTION[action] ?? action))}</p>) : [];
   // One amber line at the top of the block: what stops or invalidates this Review now (never an extra paragraph).
   // The Review's own refusal and an action's error both stay said (one line); expired prices in a sentence of their own.
   const alert = [refusal, errorText !== refusal ? errorText : null].filter(Boolean).join(' ')
@@ -1189,6 +1194,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
           <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span>{block.setup && <small className="review-block-qualifier">{rich(tr, block.setup)}</small>}
             {block.signatures && <small className="review-block-qualifier">{rich(tr, block.signatures)}</small>}</dd></div>
         </dl>
+        {nativeLater}
         <p className="review-panel-note">{feeNote}</p>
         <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{quietReview === 'details' && <p>{reviewAgain}</p>}{technical}</details>
       </>}
@@ -1222,7 +1228,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       <button type="button" className="secondary" disabled={busy} onClick={() => void state.followEarlier()}>{tr('Show its progress')}</button></div>}
     {!fresh && !review && !run && state.canReview && <p>{tr('FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p>}
     {state.following && <p className="muted">{tr('This is a workflow you authorized earlier, not the one on the Canvas.')}</p>}
-    {review && !fresh && technical}
+    {review && !fresh && <>{nativeLater}{technical}</>}
     {!review && run && <>
       {/* After a reload the Review is not in this tab any more: the run's own progress is shown from the server (amounts as reconciled). */}
       <ol className="editor-run-steps" aria-label={tr('Steps')}>

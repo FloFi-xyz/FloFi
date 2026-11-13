@@ -22,6 +22,7 @@ import { NETWORKS, type WorkflowComposition } from '../engine/strategy-engine';
 import type { Gates } from '../mcp/execution.ts';
 import { planExecutionGroups, type ExecutionGroup, type InteractionSummary, type UserFundedFacts, type WalletProfile } from './execution-groups.ts';
 import { evmStepBuildable } from '../user-funded/evm-calls.ts';
+import { nativeLaterWarnings, type NativeLaterWarning } from '../gas-abstraction/native-later.ts';
 
 /**
  * BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: why `DELEGATED_SINGLE_AUTHORIZATION` is never available any more — its executor (the shared AWS KMS
@@ -59,6 +60,12 @@ export type AuthorizationPlan = {
     /** Delegated: the producer's on-chain guaranteed output (a swap's signed minimum), fixed when the owner signs; any surplus stays in the wallet. */
     readonly delegated: 'SIGNED_GUARANTEED_MINIMUM' }[];
   readonly notes: readonly string[];
+  /**
+   * Review B1/LQ1 (ADR-0010 §2): later steps that need the chain's native coin for their network fee after an earlier step on the same chain whose
+   * fee may be paid in a token (in either mode: user-funded groups, or each step's own flow). Shown before the first signature; the plan is
+   * unchanged. Absent: a plan made before this field existed.
+   */
+  readonly nativeLater?: readonly NativeLaterWarning[];
 };
 /**
  * Whether a delegated run of this workflow is possible on this deployment by code alone (owner-independent): delegation enabled with a signer,
@@ -153,5 +160,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
       interactions: groupsPlan ? userFunded?.wallets ? groupsPlan.interactions : { ...groupsPlan.interactions, single: false, atLeast: true } : null,
       feePayer: 'OWNER_WALLET', wallets: userFunded?.wallets ? 'REPORTED' : 'ASSUMED' },
     recommended: userFundedAvailable && preferred ? 'USER_FUNDED' : confirmAvailable ? 'CONFIRM_EACH_STEP' : userFundedAvailable ? 'USER_FUNDED' : null,
-    steps, bindings: bindingCodes, notes };
+    steps, bindings: bindingCodes, notes,
+    // Review B1/LQ1: the user-funded groups when they are offered (a Circle group may pay in USDC), else each step through its own flow.
+    nativeLater: req.ok && facts ? nativeLaterWarnings(req.value.steps, userFundedAvailable ? groupsPlan?.groups ?? null : null, facts) : [] };
 }

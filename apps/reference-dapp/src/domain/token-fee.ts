@@ -78,5 +78,21 @@ export const CIRCLE_FEE_CONFIRM: Readonly<Record<'ROSE' | 'NEW', string>> = {
   ROSE: 'Network fee, at most {0} — paid from your USDC through Circle (reviewed {1}: the network fee or the ETH price moved since your review)',
   NEW: 'Network fee, at most {0} — paid from your USDC through Circle',
 };
+/**
+ * Review B1/LQ1 (ADR-0010 §2, `gas-abstraction/native-later.ts`): one visible warning per chain, before the first signature, when a later step
+ * there needs the native coin for its network fee after an earlier step whose fee may be paid in a token: {0} the network, {1} ETH or SOL, {2}
+ * the later steps ("step 3 (Add liquidity)"). It never cancels the design and never claims the owner's balance.
+ */
+export const NATIVE_LATER: Readonly<Record<'ONE' | 'MANY' | 'STEP', string>> = {
+  ONE: 'A later step on {0} needs {1} for its network fee: {2}. Add {1} before starting, or the run will stop there.',
+  MANY: 'Later steps on {0} need {1} for their network fee: {2}. Add {1} before starting, or the run will stop there.',
+  STEP: 'step {0} ({1})',
+};
+/** The warning in the reader's language: `tr` translates, `action` names a step's action (translated). */
+export function nativeLaterMessage(warning: { readonly network: string; readonly symbol: string; readonly steps: readonly { readonly index: number; readonly action: string }[] },
+  tr: (key: string, ...parameters: string[]) => string, action: (action: string) => string): string {
+  const steps = warning.steps.map(step => tr(NATIVE_LATER.STEP, String(step.index + 1), action(step.action))).join(', ');
+  return tr(warning.steps.length === 1 ? NATIVE_LATER.ONE : NATIVE_LATER.MANY, tr(warning.network), warning.symbol, steps);
+}
 /** The Circle refusals the browser itself raises before any wallet request: nothing was sent. */
 export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH']);

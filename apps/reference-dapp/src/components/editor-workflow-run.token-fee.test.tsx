@@ -179,3 +179,28 @@ describe('review UX4: the two Circle signatures, one at a time', () => {
     expect(html).toContain('It shows every call of the batch and the network fee.');
   });
 });
+
+describe('review B1/LQ1: a later step that needs the native coin is named before the first signature', () => {
+  const kora = [{ chain: SOLANA, network: 'Solana', symbol: 'SOL' as const, after: 1, steps: [{ index: 2, action: 'add_liquidity' }] }];
+  const robinhood = [{ chain: 'eip155:4663', network: 'Robinhood Chain', symbol: 'ETH' as const, after: 0, steps: [{ index: 1, action: 'bridge' }] }];
+  it('visible in the Review (EN/PT), never a refusal: the Review can still be authorized', () => {
+    const shown = visible(render(state({ review: swapBridgeReview({ nativeLater: kora }) })));
+    expect(shown).toContain('A later step on Solana needs SOL for its network fee: step 3 (Add liquidity). Add SOL before starting, or the run will stop there.');
+    expect(shown).not.toContain('review-block-alert');
+    expect(visible(render(state({ review: swapBridgeReview({ nativeLater: kora }) }), 'PT')))
+      .toContain('Uma etapa posterior em Solana precisa de SOL para a taxa de rede: etapa 3 (Adicionar liquidez). Adicione SOL antes de começar, ou a execução vai parar ali.');
+    expect(visible(render(state({ review: swapBridgeReview() })))).not.toContain('before starting, or the run will stop there');
+  });
+  it('beside the Robinhood step-mode refusal, which then says which later step needs ETH', () => {
+    const shown = visible(render(state({ review: swapBridgeReview({ nativeLater: robinhood, refusal: { code: 'USER_FUNDED_GASLESS_REQUIRES_STEP_MODE', step: 0 } }) })));
+    expect(shown).toContain('Run this workflow with Confirm each step');
+    expect(shown).toContain('A later step on Robinhood Chain needs ETH for its network fee: step 2 (Bridge). Add ETH before starting, or the run will stop there.');
+  });
+  it('still shown once the run exists and nothing was signed; gone once a group was signed', () => {
+    const review = swapBridgeReview({ nativeLater: kora });
+    expect(render(state({ review, phase: 'running', started: true, canReview: false, run: runOf({ groups: [group(0, { state: 'PREPARED', validUntil: FUTURE })] }) })))
+      .toContain('A later step on Solana needs SOL');
+    expect(render(state({ review, phase: 'running', started: true, canReview: false, run: runOf({ groups: [group(0, { state: 'AUTHORIZED', signed: true })] }) })))
+      .not.toContain('A later step on Solana needs SOL');
+  });
+});

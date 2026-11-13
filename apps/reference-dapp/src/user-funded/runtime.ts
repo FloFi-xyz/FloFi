@@ -26,10 +26,20 @@ import type { UserFundedDeps } from './groups.ts';
 import { sponsorshipPort, sponsorshipStorage } from '../gas-sponsorship/runtime.ts';
 import { deploymentPriceSource } from '../automations/config.ts';
 import { circleDepsOf } from './circle-gas.ts';
-import { readCircleGasConfig } from '../gas-abstraction/config.ts';
+import { readCircleGasConfig, readKoraGasConfig } from '../gas-abstraction/config.ts';
+import { gaslessSwapChains } from './gasless-groups.ts';
 import { koraGasForFlow } from '../gas-abstraction/kora/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
+/**
+ * Review B1/LQ1 (ADR-0010 §4, §5): where a step's OWN flow may pay its network fee in a token (Kora on Solana swaps and transfers, 0x Gasless on
+ * Robinhood Chain swaps), whatever the user-funded execution's own switch: read only to warn about a later step on the same chain that still
+ * needs the native coin (`gas-abstraction/native-later.ts`). Never a plan input.
+ */
+function flowTokenGas(env: Env): Pick<UserFundedFacts, 'koraTokenGas' | 'gaslessSwapChains'> {
+  const gasless = gaslessSwapChains(env);
+  return { ...readKoraGasConfig(env).enabled ? { koraTokenGas: true } : {}, ...gasless.length ? { gaslessSwapChains: gasless } : {} };
+}
 export type UserFundedRuntime = { readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null };
 
 /**
@@ -38,18 +48,18 @@ export type UserFundedRuntime = { readonly facts: UserFundedFacts; readonly deps
  */
 export function userFundedFactsOf(env: Env): UserFundedFacts {
   const config = readUserFundedConfig(env);
-  if (!config.enabled) return { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false };
+  if (!config.enabled) return { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false, ...flowTokenGas(env) };
   const chains = config.chains.filter(c => c.startsWith('solana:') || Boolean(config.rpc[c]));
   const bundlerChains = Object.keys(config.bundlers).filter(c => chains.includes(c) && c.startsWith('eip155:'));
   // ADR-0010 review (C5): where a group's fee may be paid in USDC through Circle (the same chains `circleDepsOf` serves): its plan says "at least".
   const circle = readCircleGasConfig(env), tokenGasChains = circle.enabled ? circle.chains.filter(c => bundlerChains.includes(c)) : [];
   return { enabled: true, code: null, chains, bundlerChains, solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES),
-    ...tokenGasChains.length ? { tokenGasChains } : {} };
+    ...tokenGasChains.length ? { tokenGasChains } : {}, ...flowTokenGas(env) };
 }
 /** The deployment's user-funded facts and transports. Disabled or misconfigured: facts say why, and there are no transports at all. */
 export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, host?: { db: Database; tenantId: string }): UserFundedRuntime {
   const config = readUserFundedConfig(env);
-  if (!config.enabled) return { facts: { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false }, deps: null };
+  if (!config.enabled) return { facts: { enabled: false, code: config.code, chains: [], bundlerChains: [], solanaNonceAccounts: false, ...flowTokenGas(env) }, deps: null };
   const evm = new Map<string, ReturnType<typeof guarded>>(), bundlers = new Map<string, BundlerClient>();
   for (const [chain, url] of Object.entries(config.rpc)) if (config.chains.includes(chain)) evm.set(chain, guarded(chain, 'read', 'PUBLIC', httpRpc(url, fetchImpl)));
   for (const [chain, url] of Object.entries(config.bundlers)) if (config.chains.includes(chain) && evm.has(chain))
@@ -63,7 +73,7 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
   const facts: UserFundedFacts = { enabled: true, code: null, chains, bundlerChains: [...bundlers.keys()],
     solanaNonceAccounts: config.solanaNonceAccounts, bridgeRoutes: batchBridgeRoutes(chains, CROSSCHAIN_ROUTER_PROFILES),
     // Review C5: a plan counts a group on these chains as "at least" one interaction (two signatures when Circle pays).
-    ...circle ? { tokenGasChains: circle.chains } : {} };
+    ...circle ? { tokenGasChains: circle.chains } : {}, ...flowTokenGas(env) };
   // The Router's own Across adapter per batchable route (read-only quotes and deposit status; pins: the profile's own, never overridden here).
   const http = createRouterHttp(fetchImpl), acrossRoutes = new Map<string, AcrossRoute>();
   const across = (source: string, destination: string): AcrossRoute | null => {
