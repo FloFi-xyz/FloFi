@@ -1,6 +1,7 @@
 # Network-fee sponsorship: configuration, funding, verification and rollback
 
-BUILD-FLOFI-MAINNET-EXEC-002 ([ADR-0009](../adr/ADR-0009-network-fee-sponsorship.md)). Off by default. Steps marked **[OWNER]** create a paid
+BUILD-FLOFI-MAINNET-EXEC-002 ([ADR-0009](../adr/ADR-0009-network-fee-sponsorship.md)). Off by default. This is the **FloFi-paid** feature; network fees the
+**user** pays in tokens (Circle Paymaster, Pimlico Kora, 0x Gasless) are a separate feature: [GAS-ABSTRACTION.md](GAS-ABSTRACTION.md) ([ADR-0010](../adr/ADR-0010-token-paid-network-fees.md)). Steps marked **[OWNER]** create a paid
 resource, move real funds or change production; none was performed during engineering, and no credential, contract address or balance below
 was invented: each value comes from the operator's own provider account.
 
@@ -62,8 +63,9 @@ machine), fund it with a small SOL float only, store it only as a Vercel Sensiti
 2. Disabled chain: `POST` to `/api/gas/paymaster/10` → `GAS_SPONSORSHIP_DISABLED` or `GAS_SPONSOR_CHAIN_UNEXPECTED`.
 3. Without a grant: `POST {"jsonrpc":"2.0","id":1,"method":"pm_getPaymasterData","params":[{…},"0x0000000071727De22E5E9d8BAf0edAc6f37da032","0x2105",{}]}`
    → `GAS_SPONSOR_GRANT_REQUIRED` (nothing forwarded to the provider).
-4. **[OWNER]** Live acceptance (real funds, explicit owner action): with a wallet that reports `paymasterService` on Base (e.g. Coinbase
-   Smart Wallet), run a 1-step Base swap from the Editor's Review whole workflow → the review shows "Network fee sponsored when your wallet
+4. **[OWNER]** Live acceptance (real funds, explicit owner action): with a wallet that reports `paymasterService` on Base **for an EntryPoint v0.7 account**
+   (note: Coinbase Smart Wallet uses EntryPoint v0.6, which this proxy refuses with `GAS_SPONSOR_ENTRY_POINT_UNEXPECTED`),
+   run a 1-step Base swap from the Editor's Review whole workflow → the review shows "Network fee sponsored when your wallet
    supports it"; the wallet shows the fee as sponsored; after it lands the group shows "Gas paid by FloFi: …" and the explorer's
    `UserOperationEvent` names the pinned paymaster. Then repeat with a wallet without `paymasterService` → owner-paid, unchanged.
 
