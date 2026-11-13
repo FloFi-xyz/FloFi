@@ -170,7 +170,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a 0x Gasless swap is the owner's typed-data signatures, relayed to 0x and settled by its relayer;
       // its fee is the token amount 0x took out of the swap (the owner paid no ETH).
       const gasless = r.gasless?.filter(a => a.state !== 'ABANDONED').at(-1), zx = r.quote.gas?.zeroEx ?? null;
-      if (gasless) add('swap', nodeId, 'Swap', chain, r.divergence ? 'DIVERGENT' : gaslessLifecycleState(gasless.state, r.outcome !== null), gasless.txHash, false, false,
+      if (gasless) add('swap', nodeId, 'Swap', chain, r.divergence ? 'DIVERGENT' : gaslessLifecycleState(gasless.state, r.outcome !== null, gasless.final), gasless.txHash, false, false,
         gasless.state === 'CONFIRMED' && zx ? simulationAmount(zx.gasFee.amount, zx.gasFee.token === r.quote.inputToken ? quoteDecimals(r.quote, 'input') : quoteDecimals(r.quote, 'output'),
           zx.gasFee.token === r.quote.inputToken ? r.quote.inputSymbol : r.quote.outputSymbol) : null);
       // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a WETH9 conversion is one wallet request of its own kind, named as such.

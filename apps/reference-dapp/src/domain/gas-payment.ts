@@ -44,16 +44,31 @@ export function gaslessUnavailableReason(code: string): string {
   return 'FloFi could not verify the provider quote for this swap.';
 }
 
-/** A gasless attempt as the shared transaction lifecycle reads it (signatures in the wallet, relayed to 0x, settled on chain, failed, declined). */
-export function gaslessLifecycleState(state: string, reconciled: boolean): string | null {
+/**
+ * A gasless attempt as the shared transaction lifecycle reads it (signatures in the wallet, relayed to 0x, settled on chain, failed, declined).
+ * Review CH2: a FAILED attempt is a final failure only once the server marked it `final` (the signed trade's deadline passed with its Permit2
+ * nonce unused: it can never execute). Before that, 0x's "failed" (or a reverted candidate) is a hint the chain may still contradict, so it
+ * reads as uncertain — kept under observation, never offered as a reason to swap again. REFUSED is 0x's definitive refusal of the submission:
+ * nothing reached the chain, so it is "not submitted", never a failed action.
+ */
+export function gaslessLifecycleState(state: string, reconciled: boolean, final: boolean): string | null {
   switch (state) {
     case 'SIGNING': return 'PREPARED';
     case 'SUBMITTING': case 'SUBMITTED': return 'HASH';
     case 'UNKNOWN': return 'UNKNOWN';
     case 'PENDING': return 'PENDING';
     case 'CONFIRMED': return reconciled ? 'CONFIRMED' : 'PENDING';
-    case 'FAILED': case 'REFUSED': return 'FAILED';
+    case 'FAILED': return final ? 'FAILED' : 'UNKNOWN';
+    case 'REFUSED': return 'NOT_SUBMITTED';
     case 'REJECTED': return 'REJECTED';
     default: return null;
   }
 }
+/** The gasless states a page keeps following (read-only observe; nothing is signed or submitted again). */
+const GASLESS_FOLLOWED: readonly string[] = Object.freeze(['SUBMITTING', 'SUBMITTED', 'UNKNOWN', 'PENDING']);
+/**
+ * Whether a gasless attempt may still settle on chain: relayed (or possibly relayed) to 0x and not settled, or a failure that is not final yet.
+ * Such an attempt is observed until it settles, and no other swap is simulated for the page's run meanwhile (review CH2).
+ */
+export const gaslessUnsettled = (attempt: { readonly state: string; readonly final?: boolean } | undefined): boolean =>
+  !!attempt && (GASLESS_FOLLOWED.includes(attempt.state) || attempt.state === 'FAILED' && attempt.final !== true);

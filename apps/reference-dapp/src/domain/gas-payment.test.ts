@@ -10,7 +10,10 @@ import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-
 import { editorReducer, initialEditor } from './editor';
 import { payableCosts } from './conversation-lifecycle';
 import { projectSimulation, simulationError, type SimulationSource } from './simulation-presentation';
-import { gaslessLifecycleState, gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL } from './gas-payment';
+import { gaslessLifecycleState, gaslessUnavailableReason, gaslessUnsettled, INCLUDED_NETWORK_FEE_LABEL } from './gas-payment';
+import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
+import { publicRunInProgress } from '../state/public-testnet-store';
+import { readFileSync } from 'node:fs';
 import { compactNetworkFee } from '../components/conversation-cards';
 import { translate } from '../i18n/translate';
 
@@ -100,7 +103,40 @@ describe('the 0x Gasless Review on Robinhood Chain', () => {
     expect(simulationError('ZEROX_OWNER_NOT_EOA')).toMatch(/standard wallet account/);
     expect(gaslessUnavailableReason('ZEROX_PROVIDER_HTTP_500')).toBe('The provider did not answer. Try again shortly.');
     expect(gaslessUnavailableReason('ZEROX_SETTLER_MISMATCH')).toBe('FloFi could not verify the provider quote for this swap.');
-    expect([['SIGNING', false], ['SUBMITTED', false], ['UNKNOWN', false], ['CONFIRMED', false], ['CONFIRMED', true], ['FAILED', false], ['REJECTED', false], ['ABANDONED', false]]
-      .map(([state, reconciled]) => gaslessLifecycleState(state as string, reconciled as boolean))).toEqual(['PREPARED', 'HASH', 'UNKNOWN', 'PENDING', 'CONFIRMED', 'FAILED', 'REJECTED', null]);
+    // Review CH2: FAILED is a final failure only when the server marked it final; REFUSED (0x's definitive refusal) was never submitted.
+    expect([['SIGNING', false, false], ['SUBMITTED', false, false], ['UNKNOWN', false, false], ['CONFIRMED', false, true], ['CONFIRMED', true, true], ['FAILED', false, true],
+      ['FAILED', false, false], ['REFUSED', false, false], ['REJECTED', false, false], ['ABANDONED', false, false]]
+      .map(([state, reconciled, final]) => gaslessLifecycleState(state as string, reconciled as boolean, final as boolean)))
+      .toEqual(['PREPARED', 'HASH', 'UNKNOWN', 'PENDING', 'CONFIRMED', 'FAILED', 'UNKNOWN', 'NOT_SUBMITTED', 'REJECTED', null]);
+  });
+});
+
+describe('review CH2: a 0x "failed" before the signed deadline is not a final failure', () => {
+  const attempt = (state: string, final: boolean) => ({ attemptId: 'rhs-x.gasless.1', state, final, txHash: null });
+  const lifecycle = (gaslessAttempts: object[]) => projectExecutionLifecycle(swap, context, { kind: 'public', state: { busy: null, error: null, retired: false,
+    recoveryOnly: false, available: true, run: { workflow: swap, quote: { ...quote, chainId: 4663, executionId: 'rhs-x', gas: gasless() }, attempts: [], outcome: null,
+      gasless: gaslessAttempts } } } as unknown as ExecutionLifecycleSource);
+  it('reads as uncertain while it may still settle, as failed once final, and a refusal as not submitted', () => {
+    const open = lifecycle([attempt('FAILED', false)]);
+    expect(open.state).toBe('uncertain');
+    expect(open.steps[0]!.operations.at(-1)!.state).toBe('uncertain');
+    const final = lifecycle([attempt('FAILED', true)]);
+    expect(final.state).toBe('attention');
+    expect(final.steps[0]!.operations.at(-1)!.state).toBe('failed');
+    const refused = lifecycle([attempt('REFUSED', false)]);
+    expect(refused.steps[0]!.operations.at(-1)!.state).toBe('not-submitted');
+  });
+  it('keeps the page following it and blocks a new swap of the run until it is final', () => {
+    expect(gaslessUnsettled(attempt('FAILED', false))).toBe(true);
+    expect(gaslessUnsettled(attempt('FAILED', true))).toBe(false);
+    for (const state of ['SUBMITTING', 'SUBMITTED', 'UNKNOWN', 'PENDING']) expect(gaslessUnsettled(attempt(state, false)), state).toBe(true);
+    for (const state of ['SIGNING', 'ABANDONED', 'REJECTED', 'REFUSED', 'CONFIRMED']) expect(gaslessUnsettled(attempt(state, state === 'CONFIRMED')), state).toBe(false);
+    expect(gaslessUnsettled(undefined)).toBe(false);
+    expect(publicRunInProgress({ outcome: null, attempts: [], gasless: [attempt('FAILED', false)] } as never)).toBe(true);
+    expect(publicRunInProgress({ outcome: null, attempts: [], gasless: [attempt('FAILED', true)] } as never)).toBe(false);
+    // The page's own guards use the shared rule (a source check: the store is a React provider).
+    const store = readFileSync(new URL('../state/public-testnet-store.tsx', import.meta.url), 'utf8');
+    expect(store).toMatch(/\(run\?\.gasless \?\? \[\]\)\.some\(gaslessUnsettled\)\)\s*throw new Error\('ATTEMPT_ALREADY_ACTIVE'\)/);
+    expect(store).toMatch(/const gaslessSettled = \(run: PublicRun\) => Boolean\(run\.divergence \|\| run\.outcome\) \|\| !gaslessUnsettled\(run\.gasless\?\.at\(-1\)\);/);
   });
 });
