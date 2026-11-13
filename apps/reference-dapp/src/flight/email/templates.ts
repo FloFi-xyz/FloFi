@@ -16,6 +16,7 @@ import type { FlightCalendar } from '../campaign.ts';
 import { renderEmail as renderEmailV1 } from './templates-v1.ts';
 import { renderEmail as renderEmailV2 } from './templates-v2.ts';
 import { renderEmail as renderEmailV3 } from './templates-v3.ts';
+import { renderEmail as renderEmailV4 } from './templates-v4.ts';
 
 /** Approved Email 6 destination, shared by both locales; historical renderers keep their supplied URL. */
 export const FLIGHT_CREATOR_BRIEF_URL = 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450';
@@ -24,8 +25,18 @@ export type EmailTemplate = 'EARLY_LIST' | 'LIST_CONFIRMATION' | 'EVE' | 'GROUP_
 export type EmailLanguage = 'EN' | 'PT';
 /** The version of each template. Bump it whenever its text or layout changes; every outbox row records the version it was enqueued with. */
 export const TEMPLATE_VERSIONS: Readonly<Record<EmailTemplate, number>> = Object.freeze({
-  EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 2, ACCESS_REQUESTED: 2, CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 4,
+  EARLY_LIST: 1, LIST_CONFIRMATION: 2, EVE: 2, GROUP_BOARDING: 3, ACCESS_REQUESTED: 2, CARD_FOUNDING: 2, CARD_PASSENGER: 2, NEXT_FLIGHT: 2, CREATOR_INVITE: 5,
 });
+/**
+ * Boarding moved to Friday 13 Nov, 09:00 BRT (canvas "Flight FloFi · E-mails de embarque (13/11)"): every recipient of emails 3, 4a, 4b, 5
+ * and 6 is Brazilian, so these are enqueued in Portuguese whatever locale was stored. Every other email (0, 1, 2 and the requested access
+ * email) keeps the recipient's stored locale. Rows already in the outbox keep the language they were enqueued with.
+ */
+export const LAUNCH_LANGUAGE: Readonly<Partial<Record<EmailTemplate, EmailLanguage>>> = Object.freeze({
+  GROUP_BOARDING: 'PT', CARD_FOUNDING: 'PT', CARD_PASSENGER: 'PT', NEXT_FLIGHT: 'PT', CREATOR_INVITE: 'PT',
+});
+/** The language an email is enqueued in: the launch language of its template, else the recipient's stored locale. */
+export const emailLanguage = (template: EmailTemplate, stored: EmailLanguage): EmailLanguage => LAUNCH_LANGUAGE[template] ?? stored;
 /** ESSENTIAL: an access email the person asked for themselves; sent even to an unsubscribed address and while campaign email is paused. */
 export const TEMPLATE_CATEGORY: Readonly<Record<EmailTemplate, 'CAMPAIGN' | 'ESSENTIAL'>> = Object.freeze({
   EARLY_LIST: 'CAMPAIGN', LIST_CONFIRMATION: 'CAMPAIGN', EVE: 'CAMPAIGN', GROUP_BOARDING: 'CAMPAIGN', ACCESS_REQUESTED: 'ESSENTIAL', CARD_FOUNDING: 'CAMPAIGN',
@@ -44,6 +55,7 @@ export const TEMPLATE_DEVIATIONS: readonly string[] = Object.freeze([
   'Email 3: a "Group" line is added when the person has a numbered boarding group.',
   'Email 6 v4 follows Dayane’s approved invited-guest copy (BUILD-FLOFI-FLIGHT-EMAIL6-CONSOLE-FIX-001); v1–v3 remain historical renderers.',
   'Emails 4a and 4b show the real card image (the 1200 × 630 card picture) in place of the drawn card block.',
+  'Email 6 v5 and Email 3 v3 follow the 13/11 boarding canvas: no weekday in Email 6 (preheader, step 1), its Boarding panel reads OPEN (PT: ABERTO, like the Email 3 Gate panel), and Email 3 opens with the one-day delay note. The English copy mirrors the Portuguese change.',
   'Version 2 follows BUILD-FLOFI-FLIGHT-LAUNCH-ADMIN-001: linked-wallet return access in Email 3, @ in Email 4a, official card after the first route in Email 6, Portuguese interface labels and boarding-card footers. Portuguese copy follows section 04 of the supplied Flight FloFi.html; unsupported route-limit and automatic-sign-in promises remain omitted.',
 ]);
 
@@ -237,6 +249,8 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
         throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
       const subject = PT ? 'Seu grupo está embarcando ✈️' : 'Your group is boarding ✈️';
       const preheader = PT ? 'Diga para onde vai. Você aprova cada passo.' : 'Say where you’re going. You approve every step.';
+      const delay = input.template === 'GROUP_BOARDING' ? (PT ? 'Atrasamos um dia para corrigir alguns erros antes de abrir. Obrigado pela paciência.'
+        : 'We held boarding back one day to fix a few bugs before opening. Thanks for your patience.') : null;
       const intro = PT ? 'O seu portão abriu. Diga à FloFi para onde quer levar as suas criptos, veja cada passo simulado e assine só o que aprovar.'
         : 'Your gate is open. Tell FloFi where you want your crypto to go, see every step simulated, and sign only what you approve.';
       const hours = input.linkHours, minutes = input.codeMinutes;
@@ -250,13 +264,13 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
       const founding = PT ? 'As 100 primeiras pessoas a embarcar viram <b>Founding Members</b>: assento numerado, acesso antecipado à FloFi no Claude e no ChatGPT (em breve) e 3 convites.'
         : 'The first 100 to board become <b>Founding Members</b>: a numbered seat, first access to FloFi in Claude and ChatGPT (coming soon), and 3 invites.';
       const rows = [label(PT ? 'Portão' : 'Gate') + flaps(PT ? 'ABERTO' : 'OPEN'), ...input.group ? [label(PT ? 'Grupo' : 'Group') + flaps(PT ? `GRUPO ${input.group}` : `GROUP ${input.group}`)] : []];
-      const body = h1(PT ? 'Seu grupo ' : 'Your group ', PT ? 'está embarcando.' : 'is boarding.') + p(intro) + panel(rows)
+      const body = h1(PT ? 'Seu grupo ' : 'Your group ', PT ? 'está embarcando.' : 'is boarding.') + (delay ? p(e(delay)) : '') + p(intro) + panel(rows)
         + button(input.accessUrl, PT ? 'Embarcar agora →' : 'Board now →') + small(e(note))
         + panel([label(PT ? 'Código de 6 dígitos' : '6-digit code') + flaps(input.code)]) + small(e(other)) + small(e(returning))
         + (input.foundingOpen ? `<div style="border-top:1.5px solid #E2E7EE;padding-top:16px">${p(founding, 16)}</div>` : '');
       const why = input.template === 'ACCESS_REQUESTED' ? reason.access : reason.list;
       return { subject, preheader, html: layout(ctx, { subject, preheader, band: PT ? 'Flight FloFi · Embarcando' : 'Flight FloFi · Now boarding', pose: 'welcome', body, reason: why }),
-        text: plain([subject, strip(intro), ...input.group ? [`${PT ? 'Grupo' : 'Group'}: ${input.group}`] : [], `${PT ? 'Embarcar agora' : 'Board now'}: ${input.accessUrl}`, note,
+        text: plain([subject, delay, strip(intro), ...input.group ? [`${PT ? 'Grupo' : 'Group'}: ${input.group}`] : [], `${PT ? 'Embarcar agora' : 'Board now'}: ${input.accessUrl}`, note,
           `${PT ? 'Código de 6 dígitos' : '6-digit code'}: ${input.code}`, other, returning, input.foundingOpen && strip(founding)], ctx, why) };
     }
     case 'CARD_FOUNDING': {
@@ -306,22 +320,23 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
     case 'CREATOR_INVITE': {
       if (!/^FLF-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/.test(input.code) || input.briefUrl !== FLIGHT_CREATOR_BRIEF_URL) throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
       const subject = PT ? 'Seu convite para o beta da FloFi ✈️' : 'Your invite to the FloFi beta ✈️';
-      const preheader = PT ? 'Seu código e como embarcar na quinta.' : 'Your code, and how to board on Thursday.';
+      const preheader = PT ? 'Seu código e como embarcar.' : 'Your code, and how to board.';
       const headline = PT ? 'Obrigada por embarcar com a gente.' : 'Thanks for coming aboard.';
       const intro = PT ? 'Você está entre as primeiras pessoas a usar a FloFi fora do nosso time. Ainda estamos no começo: é uma primeira versão, e queremos aprender com o seu uso. Comece com valores pequenos, porque é mainnet, com dinheiro de verdade.'
         : "You're one of the first people to use FloFi outside our team. It's still early: this is a first version, and we want to learn from how you use it. Please start with small amounts, since it runs on mainnet with real funds.";
       const steps = PT ? [
-        'Quinta, a partir das 9h, entra em flofi.xyz/board, toca em "I have an invite code" e digita o seu código e o seu e-mail.',
+        'Entra em flofi.xyz/board, toca em "I have an invite code" e digita o seu código e o seu e-mail.',
         'Conecta a sua carteira, escreve o que quer fazer, confere a simulação e assina só o que fizer sentido pra você.',
         'Conta pra nós como foi: onde travou, o que demorou, o que te deixou em dúvida antes de assinar. Pode responder este e-mail ou mandar mensagem pra Dayane no WhatsApp ou no Telegram.']
-        : ['Thursday from 9:00 BRT, go to flofi.xyz/board, tap "I have an invite code" and enter your code and email.',
+        : ['Go to flofi.xyz/board, tap "I have an invite code" and enter your code and email.',
           'Connect your wallet, write what you want to do, check the simulation and sign only what makes sense to you.',
           'Tell us how it went: where you got stuck, what was slow, what made you hesitate before signing. Reply to this email or message Dayane on WhatsApp or Telegram.'];
       const cta = PT ? 'Ler o brief do convidado' : 'Read the guest brief';
       const note = PT ? 'Depois da sua primeira rota, o seu cartão de embarque chega por e-mail. Se você curtir e quiser compartilhar, ajuda muito, mas fica totalmente a seu critério. O seu código é pessoal e funciona uma vez só.'
         : 'After your first route, your boarding card arrives by email. If you enjoy it and feel like sharing, it really helps us, but it is entirely up to you. Your code is personal and works once.';
       const why = PT ? reason.invited : "You're getting this because the FloFi team invited you to the closed beta.";
-      const boarding = flapDay(cal.boardingOpensAt);
+      // Sent at boarding time with access already open: the panel says so instead of repeating a date.
+      const boarding = PT ? 'ABERTO' : 'OPEN';
       const numbered = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">${steps.map((step, index) => `<tr><td style="vertical-align:top;padding:0 12px 12px 0"><div style="width:26px;height:26px;border-radius:26px;background:${C.navy};color:${C.white};font-family:${MONO};font-weight:500;font-size:14px;line-height:26px;text-align:center">${index + 1}</div></td><td style="font-family:${SANS};font-size:16px;line-height:1.5;color:${C.body};padding:0 0 12px">${e(step)}</td></tr>`).join('')}</table>`;
       const body = h1(e(headline)) + p(e(intro))
         + panel([label(PT ? 'CÓDIGO DE CONVITE' : 'Invite code') + flaps(input.code), label(PT ? 'EMBARQUE' : 'Boarding') + flaps(boarding)])
@@ -347,6 +362,7 @@ export function renderEmailForVersion(input: TemplateInput, ctx: EmailContext, v
     if (version === 1) return renderEmailV1(input, legacy);
     if (version === 2) return renderEmailV2(input, legacy);
     if (input.template === 'CREATOR_INVITE' && version === 3) return renderEmailV3(input, ctx);
+    if (input.template === 'CREATOR_INVITE' && version === 4) return renderEmailV4(input, ctx);
     if (version === TEMPLATE_VERSIONS[input.template]) return renderEmail(input, ctx);
   }
   throw new Error('EMAIL_TEMPLATE_VERSION_UNSUPPORTED');

@@ -15,7 +15,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { TEMPLATE_CATEGORY, TEMPLATE_VERSIONS, type EmailLanguage, type EmailTemplate } from './templates.ts';
+import { emailLanguage, LAUNCH_LANGUAGE, TEMPLATE_CATEGORY, TEMPLATE_VERSIONS, type EmailLanguage, type EmailTemplate } from './templates.ts';
 
 export type EmailState = 'PENDING' | 'SENDING' | 'SENT' | 'UNKNOWN' | 'HELD' | 'FAILED' | 'CANCELLED';
 export type EmailLimits = { readonly daily: number; readonly monthly: number; readonly externalDailyReserve: number; readonly externalMonthlyReserve: number };
@@ -61,12 +61,12 @@ export type EnqueueInput = {
   readonly notBefore: number; readonly expiresAt?: number | null; readonly batchKey?: string | null; readonly entryId?: string | null;
   readonly passId?: string | null; readonly inviteCode?: string | null;
 };
-/** Enqueue one email in the caller's transaction; false when its `dedupeKey` was already enqueued (never twice). */
+/** Enqueue one email in the caller's transaction (in its template's launch language, if any); false when its `dedupeKey` was already enqueued (never twice). */
 export async function enqueueEmail(q: Queryable, tenantId: string, input: EnqueueInput): Promise<boolean> {
   const inserted = await q.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger,
     batch_key, entry_id, pass_id, invite_code, not_before, expires_at, next_attempt_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $14)
     ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, newEmailId(), input.dedupeKey, input.template, TEMPLATE_VERSIONS[input.template],
-    TEMPLATE_CATEGORY[input.template], input.recipient.trim().toLowerCase(), input.language, input.trigger, input.batchKey ?? null, input.entryId ?? null,
+    TEMPLATE_CATEGORY[input.template], input.recipient.trim().toLowerCase(), emailLanguage(input.template, input.language), input.trigger, input.batchKey ?? null, input.entryId ?? null,
     input.passId ?? null, input.inviteCode ?? null, at(input.notBefore), input.expiresAt ? at(input.expiresAt) : null]);
   return inserted.rowCount > 0;
 }
@@ -248,18 +248,19 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
   /**
    * Email 3 for every beta-list entry whose group is open (its group's `opens_at`, or boarding opening for an entry with no group) and that
    * has not boarded. One batch per group (`group-<n>`; `group-0` for entries without a group). Valid seven days after it is enqueued.
+   * Enqueued in the template's launch language (Portuguese), not the entry's stored locale.
    */
   async function scheduleBoarding(now: number, boardingOpensAt: number): Promise<number> {
     if (now < boardingOpensAt) return 0;
     return (await db.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger, batch_key,
       entry_id, not_before, expires_at, next_attempt_at)
-      SELECT e.tenant_id, 'fem_' || replace(gen_random_uuid()::text, '-', ''), 'boarding:' || e.entry_id, 'GROUP_BOARDING', $2, 'CAMPAIGN', e.email, e.language,
+      SELECT e.tenant_id, 'fem_' || replace(gen_random_uuid()::text, '-', ''), 'boarding:' || e.entry_id, 'GROUP_BOARDING', $2, 'CAMPAIGN', e.email, coalesce($5::text, e.language),
         'group_opened', 'group-' || coalesce(e.batch_no, 0), e.entry_id, $3, $3::timestamptz + interval '7 days', $3
       FROM flight_list_entries e LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
       WHERE e.tenant_id = $1 AND e.flight = 'FIRST' AND e.boarded_at IS NULL AND greatest(coalesce(b.opens_at, $4::timestamptz), $4::timestamptz) <= $3
         AND NOT EXISTS (SELECT 1 FROM flight_early_list_imports i WHERE i.tenant_id = e.tenant_id AND i.entry_id = e.entry_id AND NOT i.campaign_consent)
         AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = e.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('e.email')})
-      ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.GROUP_BOARDING, at(now), at(boardingOpensAt)])).rowCount;
+      ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, TEMPLATE_VERSIONS.GROUP_BOARDING, at(now), at(boardingOpensAt), LAUNCH_LANGUAGE.GROUP_BOARDING ?? null])).rowCount;
   }
   /** Email 1 once for every beta-list entry that never got one (entries from before the outbox existed). Operator command only. */
   async function backfillConfirmations(now: number, listClosesAt: number): Promise<number> {
