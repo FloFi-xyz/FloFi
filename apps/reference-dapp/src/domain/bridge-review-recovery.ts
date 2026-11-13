@@ -15,8 +15,10 @@ export function refreshBridgeAfterApproval(record: RouterRecord | UniversalRecor
   if (hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(record.workflow))) !==
     hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)))) return false;
   if (record.requote && record.attempts.length === 0) return true;
-  return record.attempts.some(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED' && a.reconciled) &&
-    record.attempts.every(a => a.step === 'APPROVAL' && ['CONFIRMED','CANCELLED','NOT_FOUND'].includes(a.state));
+  // BUILD-FLOFI-MAINNET-EXEC-002: an unwrap (an unwrapping route's first request) is preparatory like an approval.
+  const preparatory = (step: string) => step === 'APPROVAL' || step === 'UNWRAP';
+  return record.attempts.some(a => preparatory(a.step) && a.state === 'CONFIRMED' && a.reconciled) &&
+    record.attempts.every(a => preparatory(a.step) && ['CONFIRMED','CANCELLED','NOT_FOUND'].includes(a.state));
 }
 
 /**

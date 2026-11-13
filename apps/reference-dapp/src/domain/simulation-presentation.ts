@@ -335,7 +335,11 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
         '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
-      if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
+      // BUILD-FLOFI-MAINNET-EXEC-002: the owner's asset identity changes on the way (material, always visible): WETH is unwrapped 1:1 into ETH first.
+      const unwrapping = route.source.ecosystem === 'EVM' && route.source.unwrap !== undefined;
+      if (unwrapping) warn('attention', 'The provider is paid in ETH: your {0} is first unwrapped 1:1 into ETH in your wallet (its own wallet request), then deposited. A refund, if any, arrives as ETH.'
+        .replace('{0}', route.inputToken.symbol));
+      else if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
       if (s) s.destination = q.recipient;
       warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.', true);
       break;

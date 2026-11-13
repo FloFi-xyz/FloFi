@@ -59,7 +59,7 @@ export async function evmBalance(rpc: Rpc, owner: string, token: string | null, 
 export const evmAllowance = async (rpc: Rpc, token: string, owner: string, spender: string, at: string) =>
   wordAt(await evmCall(rpc, token, SEL.allowance + addrWord(owner) + addrWord(spender), at), 0);
 
-export type EvmCall = { purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; to: string; data: string; value: string };
+export type EvmCall = { purpose: 'APPROVAL' | 'UNWRAP' | 'BRIDGE_DEPOSIT'; to: string; data: string; value: string };
 export type EvmLog = RelayEvmLog;
 /** Real public-network simulation of the exact call sequence, from the owner, at the observed block. */
 export async function evmSimulate(rpc: Rpc, owner: string, calls: readonly EvmCall[], at: number): Promise<{ purpose: EvmCall['purpose']; gasUsed: bigint; logs: EvmLog[] }[]> {
@@ -74,14 +74,17 @@ export async function evmSimulate(rpc: Rpc, owner: string, calls: readonly EvmCa
     const out = outputs![i];
     if (!isObject(out)) fail('UNIVERSAL_SIMULATION_INVALID');
     const o = out as Record<string, unknown>;
-    if (quantity(o.status) !== 1n) fail(c.purpose === 'APPROVAL' ? 'UNIVERSAL_SIMULATION_APPROVAL_REVERTED' : 'UNIVERSAL_SIMULATION_DEPOSIT_REVERTED');
+    if (quantity(o.status) !== 1n) fail(c.purpose === 'APPROVAL' ? 'UNIVERSAL_SIMULATION_APPROVAL_REVERTED' : c.purpose === 'UNWRAP' ? 'UNIVERSAL_SIMULATION_UNWRAP_REVERTED'
+      : 'UNIVERSAL_SIMULATION_DEPOSIT_REVERTED');
     return { purpose: c.purpose, gasUsed: quantity(o.gasUsed), logs: Array.isArray(o.logs) ? o.logs.filter(isObject) as unknown as EvmLog[] : [] };
   });
 }
 /** Exactly one Depository deposit of the reviewed order and amount from the owner, and (tokens) exactly the amount debited from the owner. */
 export function assertDepositEffects(route: UniversalRoute, d: UniversalEvmDeployment, logs: readonly EvmLog[], owner: string): { ownerDebit: bigint } {
   const deposits = logs.map(l => decodeRelayDepositLog(l, d.relayDepository)).filter(e => e !== null);
-  const token = route.inputToken.kind === 'TOKEN' ? route.inputToken.address : null;
+  // BUILD-FLOFI-MAINNET-EXEC-002: an unwrapping route deposits the native value its own unwrap produced (the token never reaches the Depository).
+  const unwrapping = route.source.ecosystem === 'EVM' && route.source.unwrap !== undefined;
+  const token = route.inputToken.kind === 'TOKEN' && !unwrapping ? route.inputToken.address : null;
   if (deposits.length !== 1) fail('UNIVERSAL_DEPOSIT_EVENT_MISMATCH');
   const e = deposits[0]!;
   if (e.kind !== (token ? 'ERC20' : 'NATIVE') || e.from !== owner || e.token !== token || e.amount !== BigInt(route.inputAmount) || e.id !== route.order.orderId)

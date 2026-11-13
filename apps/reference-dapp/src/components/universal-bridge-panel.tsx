@@ -314,7 +314,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       {canExecute && <button type="button" className="primary" disabled={router.busy} onClick={() => void router.execute()}>{tr('Execute with your wallet')}</button>}
       {canRefresh && <button type="button" disabled={router.busy} onClick={() => void router.refresh()}>{tr('Get a fresh route and review')}</button>}
       {(pending || settling) && <button type="button" disabled={router.busy} onClick={() => void router.observe()}>{tr('Observe bridge')}</button>}
-      {record.attempts.length > 0 && <ol aria-label={tr('Source transactions')}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.step === 'APPROVAL' ? 'Approval' : 'Bridge deposit')}:
+      {record.attempts.length > 0 && <ol aria-label={tr('Source transactions')}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.step === 'APPROVAL' ? 'Approval' : a.step === 'UNWRAP' ? 'Unwrap' : 'Bridge deposit')}:
         {' '}{tr(a.state.toLowerCase().replaceAll('_', ' '))}{a.transactionHash && <> · <a href={explorer(record.review.route.sourceChain, a.transactionHash)} target="_blank" rel="noreferrer">{tr('view transaction')}</a></>}
         {a.note ? ` · ${tr(message(a.note) ?? a.note)}` : ''}</li>)}</ol>}
       {record.source && <p>{tr('Deposit confirmed on')} {net(record.source.chainId)}{tr(record.source.final ? ' (final)' : '')}: {inp(record.source.ownerDebit)}.</p>}

@@ -136,14 +136,22 @@ export type UniversalToken = { readonly chainId: string; readonly kind: 'NATIVE'
 export type UniversalRouteFeeKind = 'RELAYER_SERVICE' | 'RELAYER_DESTINATION_GAS' | 'INTEGRATOR_THIRD_PARTY' | 'BRIDGE_OTHER' | 'SOURCE_NETWORK_FEE';
 export type UniversalRouteFee = { readonly kind: UniversalRouteFeeKind; readonly label: string; readonly chainId: string; readonly token: string;
   readonly decimals: number; readonly symbol: string; readonly amount: string; readonly included: boolean; readonly recipient: string | null };
-export type UniversalRouteStep = { readonly kind: 'BRIDGE' | 'DESTINATION_SWAP'; readonly protocol: string; readonly fromChain: string; readonly toChain: string;
+/** BUILD-FLOFI-MAINNET-EXEC-002: `SOURCE_UNWRAP` — the owner's own WETH → native ETH conversion (1:1, the network's pinned wrapped-native contract)
+ * on the source chain before a provider order that is paid in native ETH; always the first step, followed by the bridge. */
+export type UniversalRouteStep = { readonly kind: 'BRIDGE' | 'DESTINATION_SWAP' | 'SOURCE_UNWRAP'; readonly protocol: string; readonly fromChain: string; readonly toChain: string;
   readonly fromToken: string; readonly toToken: string; readonly amountIn: string; readonly amountOut: string };
 export type UniversalSolanaAccount = { readonly pubkey: string; readonly isSigner: boolean; readonly isWritable: boolean };
 export type UniversalRouteSource =
   | { readonly ecosystem: 'EVM'; readonly chainId: string;
       /** The exact allowance the deposit needs (token deposits); null for a native deposit. */
       readonly approval: { readonly token: string; readonly spender: string; readonly amount: string } | null;
-      readonly deposit: { readonly to: string; readonly data: string; readonly value: string } }
+      readonly deposit: { readonly to: string; readonly data: string; readonly value: string };
+      /**
+       * BUILD-FLOFI-MAINNET-EXEC-002: present only when the owner's input token is the network's wrapped native token and the provider order is paid
+       * in native ETH: the owner first unwraps exactly `amount` of `token` (its own transaction), then the deposit carries that native value. The
+       * owner's asset is still the WETH named in the intent; the conversion is shown at Review and executed and proven step by step.
+       */
+      readonly unwrap?: { readonly token: string; readonly amount: string } }
   | { readonly ecosystem: 'SOLANA'; readonly chainId: string;
       readonly instruction: { readonly programId: string; readonly accounts: readonly UniversalSolanaAccount[]; readonly data: string } };
 /** The provider order the source deposit commits to (Relay protocol v2: `orderId` = EIP-712 hashStruct of `orderData`). */
@@ -212,14 +220,20 @@ export function canonicalizeUniversalRoute(route: UniversalRoute): UniversalRout
   };
   if (!Array.isArray(route.steps) || route.steps.length < 1 || route.steps.length > 6) fail('UNIVERSAL_ROUTE_STEPS_INVALID');
   const steps = route.steps.map(s => {
-    if (!s || !['BRIDGE', 'DESTINATION_SWAP'].includes(s.kind) || typeof s.protocol !== 'string' || !/^[a-z0-9.-]{1,40}$/.test(s.protocol)) fail('UNIVERSAL_ROUTE_STEPS_INVALID');
+    if (!s || !['BRIDGE', 'DESTINATION_SWAP', 'SOURCE_UNWRAP'].includes(s.kind) || typeof s.protocol !== 'string' || !/^[a-z0-9.-]{1,40}$/.test(s.protocol)) fail('UNIVERSAL_ROUTE_STEPS_INVALID');
     return { kind: s.kind, protocol: s.protocol, fromChain: s.fromChain, toChain: s.toChain, fromToken: chainToken(s.fromChain, s.fromToken),
       toToken: chainToken(s.toChain, s.toToken), amountIn: units(s.amountIn), amountOut: units(s.amountOut) };
   });
   const bridges = steps.filter(s => s.kind === 'BRIDGE');
-  if (bridges.length !== 1 || bridges[0]!.fromChain !== source.chain || bridges[0]!.toChain !== destination.chain || steps[0]!.kind !== 'BRIDGE' ||
-      steps[0]!.fromToken !== tokenKey(inputToken) || steps.at(-1)!.toToken !== tokenKey(outputToken) || steps.at(-1)!.toChain !== destination.chain ||
-      steps[0]!.amountIn !== inputAmount) fail('UNIVERSAL_ROUTE_STEPS_INVALID');
+  // BUILD-FLOFI-MAINNET-EXEC-002: an unwrapping route starts with exactly one SOURCE_UNWRAP of the whole input (token → native, 1:1, on the source
+  // chain); its bridge then starts from the native coin. Any other route starts with its bridge, from the input token.
+  const unwrapSteps = steps.filter(s => s.kind === 'SOURCE_UNWRAP'), unwrapping = unwrapSteps.length > 0, first = unwrapping ? steps[1] : steps[0];
+  if (unwrapping && (unwrapSteps.length !== 1 || steps[0]!.kind !== 'SOURCE_UNWRAP' || inputToken.kind !== 'TOKEN' || steps[0]!.fromChain !== source.chain ||
+      steps[0]!.toChain !== source.chain || steps[0]!.fromToken !== tokenKey(inputToken) || steps[0]!.toToken !== 'native' || steps[0]!.amountIn !== inputAmount ||
+      steps[0]!.amountOut !== inputAmount)) fail('UNIVERSAL_ROUTE_STEPS_INVALID');
+  if (bridges.length !== 1 || bridges[0]!.fromChain !== source.chain || bridges[0]!.toChain !== destination.chain || first?.kind !== 'BRIDGE' ||
+      first.fromToken !== (unwrapping ? 'native' : tokenKey(inputToken)) || steps.at(-1)!.toToken !== tokenKey(outputToken) || steps.at(-1)!.toChain !== destination.chain ||
+      first.amountIn !== inputAmount) fail('UNIVERSAL_ROUTE_STEPS_INVALID');
   if (!Array.isArray(route.fees) || route.fees.length > 16) fail('UNIVERSAL_ROUTE_FEES_INVALID');
   const fees = sortByJson(route.fees.map(f => {
     if (!f || !FEE_KINDS.includes(f.kind) || typeof f.label !== 'string' || f.label.length < 1 || f.label.length > 80 || typeof f.included !== 'boolean' ||
@@ -241,15 +255,25 @@ export function canonicalizeUniversalRoute(route: UniversalRoute): UniversalRout
       fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
     const to = canonicalUniversalAddress(source, d.to, 'UNIVERSAL_ROUTE_TRANSACTION_INVALID');
     let approval: { token: string; spender: string; amount: string } | null = null;
-    if (inputToken.kind === 'NATIVE') { if (s.approval !== null || d.value !== inputAmount) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID'); }
-    else {
+    let unwrap: { token: string; amount: string } | null = null;
+    if (inputToken.kind === 'NATIVE') { if (s.approval !== null || s.unwrap !== undefined || d.value !== inputAmount) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID'); }
+    else if (s.unwrap !== undefined) {
+      // The owner's WETH is unwrapped first; the deposit then carries exactly that native value and needs no token allowance.
+      const u = s.unwrap;
+      if (!unwrapping || !u || s.approval !== null || d.value !== inputAmount || units(u.amount, 'UNIVERSAL_ROUTE_TRANSACTION_INVALID') !== inputAmount ||
+          canonicalUniversalAddress(source, u.token, 'UNIVERSAL_ROUTE_TRANSACTION_INVALID') !== inputToken.address) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
+      unwrap = { token: inputToken.address!, amount: inputAmount };
+    } else {
       if (d.value !== '0' || !s.approval) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
       approval = { token: canonicalUniversalAddress(source, s.approval!.token, 'UNIVERSAL_ROUTE_APPROVAL_INVALID'),
         spender: canonicalUniversalAddress(source, s.approval!.spender, 'UNIVERSAL_ROUTE_APPROVAL_INVALID'), amount: units(s.approval!.amount, 'UNIVERSAL_ROUTE_APPROVAL_INVALID') };
       if (approval.token !== inputToken.address || approval.amount !== inputAmount || approval.spender !== to) fail('UNIVERSAL_ROUTE_APPROVAL_INVALID');
     }
-    sourceTx = { ecosystem: 'EVM', chainId: source.chain, approval, deposit: { to, data: d.data, value: d.value } };
+    if (unwrapping && !unwrap) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
+    // `unwrap` is written only when present, so every route reviewed before it existed keeps its exact commitment.
+    sourceTx = { ecosystem: 'EVM', chainId: source.chain, approval, deposit: { to, data: d.data, value: d.value }, ...unwrap ? { unwrap } : {} };
   } else {
+    if (unwrapping) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
     const ix = s.instruction;
     if (!ix || !Array.isArray(ix.accounts) || ix.accounts.length < 1 || ix.accounts.length > 32 || typeof ix.data !== 'string' || !HEX.test(ix.data) || ix.data.length < 18 ||
         ix.data.length > 2_000) fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
@@ -325,6 +349,7 @@ export function compareUniversalRoutes(reviewedInput: UniversalRoute, candidateI
     if (a.source.deposit.to !== b.source.deposit.to) changes.add('TRANSACTION_TARGET_CHANGED');
     if (a.source.deposit.data.slice(0, 10) !== b.source.deposit.data.slice(0, 10)) changes.add('TRANSACTION_FUNCTION_CHANGED');
     if (a.source.deposit.value !== b.source.deposit.value) changes.add('VALUE_CHANGED');
+    if (canonicalJson(a.source.unwrap ?? null) !== canonicalJson(b.source.unwrap ?? null)) changes.add('STEPS_CHANGED');
   } else if (a.source.ecosystem === 'SOLANA' && b.source.ecosystem === 'SOLANA') {
     if (a.source.instruction.programId !== b.source.instruction.programId) changes.add('TRANSACTION_TARGET_CHANGED');
     if (a.source.instruction.data.slice(0, 18) !== b.source.instruction.data.slice(0, 18)) changes.add('TRANSACTION_FUNCTION_CHANGED');

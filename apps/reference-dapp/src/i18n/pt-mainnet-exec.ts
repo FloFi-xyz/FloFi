@@ -38,4 +38,11 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   'Enter the destination wallet address.': 'Informe o endereço da carteira de destino.',
   'This address is for another kind of network. Enter an address of the destination network.': 'Este endereço é de outro tipo de rede. Informe um endereço da rede de destino.',
   'Enter a valid address for the destination network.': 'Informe um endereço válido da rede de destino.',
+  // WETH paid as native ETH (Relay order paid in ETH).
+  'Unwrap': 'Desembrulhar',
+  'Unwrap transaction': 'Transação de desembrulho',
+  'Unwrap {0} to ETH': 'Desembrulhar {0} em ETH',
+  'Unwrap WETH to ETH': 'Desembrulhar WETH em ETH',
+  'The provider is paid in ETH: your WETH is first unwrapped 1:1 into ETH in your wallet (its own wallet request), then deposited. A refund, if any, arrives as ETH.':
+    'O provedor recebe em ETH: o seu WETH é primeiro desembrulhado 1:1 em ETH na sua carteira (um pedido próprio na carteira) e depois depositado. Um eventual reembolso chega em ETH.',
 };

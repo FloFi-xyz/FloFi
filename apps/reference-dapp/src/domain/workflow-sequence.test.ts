@@ -95,6 +95,18 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     }
   });
 
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (owner screenshots): Swap 2 USDC → WETH on Arbitrum, then Bridge that WETH Arbitrum → Solana USDC: one funded sequence', () => {
+    const workflow = author('swap 2 USDC to WETH on Arbitrum slippage 100 bps', 'bridge 0.0005 WETH from Arbitrum to Solana receive USDC');
+    const sequence = workflowSequence(workflow, lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    expect(sequence.steps[0]).toMatchObject({ output: { chainId: 'eip155:42161', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 }, ownerReceives: true });
+    expect(sequence.steps[1]).toMatchObject({ input: { chainId: 'eip155:42161', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', amount: '500000000000000' },
+      output: { chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } });
+    // The bridge delivers to the owner's Solana wallet (resolved and bound at Review), never to the signing EVM wallet.
+    const bridge = workflow.nodes.find(node => node.actionType === 'asset.bridge')!;
+    expect(bridge.inputs.find(input => input.name === 'recipient')).toEqual({ name: 'recipient', kind: 'IDENTIFIER', value: 'CONNECTED_DESTINATION_WALLET' });
+    expect(() => lint(sequence.steps[1]!.projection)).not.toThrow();
+  });
   it('a bridge of the swap output is funded by the swap; a bridge of another asset is independent', () => {
     const dependent = workflowSequence(author('swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 0.001 WETH from Base to Arbitrum'), lint)!;
     expect(dependent.steps[0]).toMatchObject({ fundedBy: null, input: { chainId: 'eip155:8453', address: BASE_USDC, decimals: 6, amount: '10000000' },

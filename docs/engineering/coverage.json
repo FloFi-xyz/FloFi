@@ -6017,14 +6017,15 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/server/across-adapter.ts",
+        "apps/reference-dapp/src/server/across-route.ts",
         "apps/reference-dapp/src/server/across-service.ts",
         "apps/reference-dapp/src/server/bridge-build-estimate.ts",
-        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/bridge-discovery.ts",
         "apps/reference-dapp/src/server/bridge-read-rpc.ts",
         "apps/reference-dapp/src/server/bridge-service.ts",
         "apps/reference-dapp/src/server/build009-lifi.ts",
         "apps/reference-dapp/src/server/lifi-adapter.ts",
+        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/router-mock.ts",
         "apps/reference-dapp/src/server/router-providers.ts",
         "apps/reference-dapp/src/server/router-runtime.ts",
@@ -6046,7 +6047,7 @@
         "apps/reference-dapp/src/server/universal-router/service.ts",
         "apps/reference-dapp/src/server/universal-router/solana-chain.ts",
         "apps/reference-dapp/src/server/universal-router/types.ts",
-        "apps/reference-dapp/src/server/across-route.ts"
+        "apps/reference-dapp/src/server/universal-router/wrapped-native.ts"
       ],
       "suites": [
         "app.server.router-service",

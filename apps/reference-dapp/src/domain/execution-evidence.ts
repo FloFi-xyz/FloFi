@@ -190,7 +190,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       evidence.wallet = record.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
       const review = record.review, route = review.route;
       for (const attempt of record.attempts) {
-        identifier(attempt.step, attempt.step === 'APPROVAL' ? 'Approval transaction' : 'Source transaction', attempt.transactionHash, 'transaction', route.sourceChain, attempt.state);
+        identifier(attempt.step, attempt.step === 'APPROVAL' ? 'Approval transaction' : attempt.step === 'UNWRAP' ? 'Unwrap transaction' : 'Source transaction', attempt.transactionHash, 'transaction', route.sourceChain, attempt.state);
         if (attempt.ecosystem === 'EVM') {
           identifier(attempt.step, 'Replacement transaction', attempt.replacementHash, 'transaction', route.sourceChain, attempt.state);
           fee(attempt.step, route.sourceChain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei);

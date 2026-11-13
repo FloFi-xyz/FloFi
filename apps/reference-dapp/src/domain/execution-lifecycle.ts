@@ -182,11 +182,13 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
       const nodeId = r.review.nodeId, src = r.review.source, chain = r.review.route.sourceChain;
-      const calls = [...new Set([...r.attempts.map(a => a.step), ...(src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const])])];
+      // BUILD-FLOFI-MAINNET-EXEC-002: an unwrapping route's own WETH → ETH unwrap is a wallet request of its own, before the deposit.
+      const calls = [...new Set([...r.attempts.map(a => a.step), ...(src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const
+        : c.purpose === 'UNWRAP' ? 'UNWRAP' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const])])];
       for (const step of calls) {
         const a = r.attempts.filter(x => x.step === step).at(-1), gas = a?.ecosystem === 'EVM' ? simulationAmount(a.receipt?.gasCostWei, 18, 'ETH')
           : a?.ecosystem === 'SOLANA' ? simulationAmount(a.feeLamports, 9, 'SOL') : null;
-        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', chain, financialAttemptState(a),
+        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : step === 'UNWRAP' ? `Unwrap ${r.review.route.inputToken.symbol} to ETH` : 'Bridge deposit', chain, financialAttemptState(a),
           a?.ecosystem === 'EVM' ? a.replacementHash ?? a.transactionHash : a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', gas);
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);

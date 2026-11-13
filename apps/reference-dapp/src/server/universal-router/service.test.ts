@@ -38,18 +38,26 @@ function workflow(fields: Partial<UniversalBridgeFields> & Pick<UniversalBridgeF
   const node = createUniversalBridgeNode('node-bridge', { slippageBps: 50, providers: ['relay'], selection: 'BEST_MINIMUM_OUTPUT', ...fields });
   return { schemaVersion: '1.0.0', workflowId, revision: 1, nodes: [node], resourceEdges: [] } as SemanticWorkflow;
 }
-async function setup(options: { executionEnabled?: boolean; extraTokens?: Record<string, Record<string, number>> } = {}) {
+/** BUILD-FLOFI-MAINNET-EXEC-002: each network's pinned wrapped-native token (Base: WETH9; Arbitrum One: aeWETH) and how it logs a burn. */
+const WETH = { base: '0x4200000000000000000000000000000000000006', 'arbitrum-one': '0x82af49447d8a07e3bd95bd0d56f35241523fbab1' } as const;
+async function setup(options: { executionEnabled?: boolean; extraTokens?: Record<string, Record<string, number>>; wethPaidInNative?: boolean } = {}) {
   let clock = T0;
   const now = () => clock;
   const D = mockedUniversalDeployment();
   const tokens = (chain: string) => Object.fromEntries(Object.entries(USDC).filter(([k]) => UNIVERSAL_NETWORKS[k as UniversalNetworkKey].chain === chain).map(([, a]) => [a, 6]));
-  const evm: Record<string, EvmMock> = Object.fromEntries(Object.keys(D.evm).map(chain => [chain, createEvmMockChain(D.evm[chain]!, { now, tokens: { ...tokens(chain), ...options.extraTokens?.[chain] } })]));
+  const weth = (chain: string) => chain === 'eip155:8453' ? { [WETH.base]: 18 } : chain === 'eip155:42161' ? { [WETH['arbitrum-one']]: 18 } : {};
+  const wrapped = (chain: string) => chain === 'eip155:8453' ? { [WETH.base]: 'WETH9' as const } : chain === 'eip155:42161' ? { [WETH['arbitrum-one']]: 'MINT_BURN' as const } : {};
+  const evm: Record<string, EvmMock> = Object.fromEntries(Object.keys(D.evm).map(chain => [chain, createEvmMockChain(D.evm[chain]!, { now,
+    tokens: { ...tokens(chain), ...options.wethPaidInNative ? weth(chain) : {}, ...options.extraTokens?.[chain] }, wrapped: options.wethPaidInNative ? wrapped(chain) : {} })]));
   const solana = createSolanaMock(D.solana, { mints: { [USDC.solana]: 6 } });
-  const decimals = (chainId: number, currency: string) => options.extraTokens?.[`eip155:${chainId}`]?.[currency] ?? (currency === '0x0000000000000000000000000000000000000000' ? 18 : currency === '11111111111111111111111111111111' ? 9 : 6);
-  // 1 SOL = 150 USDC; 1 ETH = 4,000 USDC; 1 SOL = 0.0375 ETH. Stablecoins 1:1.
-  const price = (c: string) => c === '11111111111111111111111111111111' ? 150n : c === '0x0000000000000000000000000000000000000000' ? 4000n : 1n;
+  const isWeth = (c: string) => (Object.values(WETH) as string[]).includes(c.toLowerCase());
+  const decimals = (chainId: number, currency: string) => options.extraTokens?.[`eip155:${chainId}`]?.[currency] ?? (currency === '0x0000000000000000000000000000000000000000' || isWeth(currency) ? 18
+    : currency === '11111111111111111111111111111111' ? 9 : 6);
+  // 1 SOL = 150 USDC; 1 ETH (and WETH) = 4,000 USDC; 1 SOL = 0.0375 ETH. Stablecoins 1:1.
+  const price = (c: string) => c === '11111111111111111111111111111111' ? 150n : c === '0x0000000000000000000000000000000000000000' || isWeth(c) ? 4000n : 1n;
   const relayMock = createRelayMock({ now, decimals, rate: (i, o) => 10n ** 18n * price(i) / price(o),
-    symbol: (chainId, c) => c === '11111111111111111111111111111111' ? 'SOL' : c === '0x0000000000000000000000000000000000000000' ? 'ETH' : c === USDC.robinhood ? 'USDG' : 'USDC' });
+    symbol: (chainId, c) => c === '11111111111111111111111111111111' ? 'SOL' : c === '0x0000000000000000000000000000000000000000' ? 'ETH' : isWeth(c) ? 'WETH' : c === USDC.robinhood ? 'USDG' : 'USDC',
+    ...options.wethPaidInNative ? { paidInNative: (_chainId: number, currency: string) => isWeth(currency) } : {} });
   const dir = await mkdtemp(join(tmpdir(), 'flofi-universal-'));
   const service = createUniversalRouterService({ storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), evmRpcs: Object.fromEntries(Object.entries(evm).map(([c, m]) => [c, m.rpc])),
     solanaRpc: solana.rpc, providers: { relay: createRelayProvider({ http: relayMock.http }) }, provenance: 'MOCKED', executionEnabled: options.executionEnabled ?? true,
@@ -60,6 +68,7 @@ async function setup(options: { executionEnabled?: boolean; extraTokens?: Record
   for (const [chain, m] of Object.entries(evm)) {
     m.setNative(EVM_OWNER, 10n ** 18n);
     for (const t of Object.keys(tokens(chain))) m.setToken(t, EVM_OWNER, 1_000_000_000n);
+    if (options.wethPaidInNative) for (const t of Object.keys(weth(chain))) m.setToken(t, EVM_OWNER, 10n ** 16n);
   }
   const chainOf = (key: UniversalNetworkKey) => evm[UNIVERSAL_NETWORKS[key].chain]!;
   return { service, evm, solana, relayMock, wallet, chainOf, storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), tick: (ms: number) => { clock += ms; }, now };
@@ -609,5 +618,69 @@ describe('FIX-FINANCIAL-EXECUTION-TRUTH-001 submission safety', () => {
       calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
     expect(rejected.attempts[0]).toMatchObject({ state: 'CANCELLED', note: 'UNIVERSAL_REJECTED', transactionHash: null });
     expect((await c.service.observe(run.id)).attempts).toEqual(rejected.attempts);
+  });
+});
+
+describe('BUILD-FLOFI-MAINNET-EXEC-002 WETH paid to Relay as native ETH (the owner\'s own unwrap, then the native deposit)', () => {
+  it('Arbitrum One WETH → Solana USDC: Review plans the unwrap and the deposit; each executes in order and is proven; delivery reconciles', async () => {
+    const c = await setup({ wethPaidInNative: true }), arb = c.chainOf('arbitrum-one');
+    const w = workflow({ sourceChain: 'eip155:42161', destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: { kind: 'TOKEN', address: WETH['arbitrum-one'], decimals: 18 },
+      outputAsset: token('solana'), amount: '500000000000000', recipient: 'CONNECTED_DESTINATION_WALLET' });
+    const run = await reviewed(c, w, EVM_OWNER, SOLANA_RECIPIENT);
+    const route = run.review.route, src = run.review.source;
+    expect(route.inputToken).toMatchObject({ kind: 'TOKEN', address: WETH['arbitrum-one'], symbol: 'WETH' });
+    expect(route.source).toMatchObject({ ecosystem: 'EVM', approval: null, unwrap: { token: WETH['arbitrum-one'], amount: '500000000000000' }, deposit: { value: '500000000000000' } });
+    expect(src.ecosystem === 'EVM' && src.calls.map(call => [call.purpose, call.value])).toEqual([['UNWRAP', '0'], ['BRIDGE_DEPOSIT', '500000000000000']]);
+    expect(src.ecosystem === 'EVM' && src.approvals).toEqual([]);
+    expect(run.review.authorizations.sourceSignatures).toBe(2);
+    expect(run.review.recipient).toBe(SOLANA_RECIPIENT);
+    // First request: the unwrap only, proven from aeWETH's own burn; the owner now holds the input as native ETH.
+    const first = await c.service.begin(run.id, EVM_OWNER, w);
+    expect(first.attempt.step).toBe('UNWRAP');
+    if (first.ecosystem !== 'EVM') throw new Error('expected EVM');
+    expect(first.transaction).toMatchObject({ to: WETH['arbitrum-one'], value: '0x0' });
+    await c.service.handoff(run.id);
+    await c.service.report(run.id, { kind: 'HASH', hash: arb.wallet.send(first.transaction).hash });
+    const unwrapped = await c.service.observe(run.id);
+    expect(unwrapped.attempts[0]).toMatchObject({ step: 'UNWRAP', state: 'CONFIRMED', reconciled: true });
+    expect(unwrapped).toMatchObject({ phase: 'AUTHORIZED', verdict: 'PENDING', source: null });
+    // Second request: the exact native deposit of the order.
+    const second = await c.service.begin(run.id, EVM_OWNER, w);
+    if (second.ecosystem !== 'EVM') throw new Error('expected EVM');
+    expect(second.attempt.step).toBe('DEPOSIT');
+    expect(second.transaction).toMatchObject({ to: route.source.ecosystem === 'EVM' ? route.source.deposit.to : '', value: '0x' + 500000000000000n.toString(16) });
+    await c.service.handoff(run.id);
+    await c.service.report(run.id, { kind: 'HASH', hash: arb.wallet.send(second.transaction).hash });
+    const deposited = await c.service.observe(run.id);
+    expect(deposited.phase).toMatch(/SOURCE_CONFIRMED|IN_FLIGHT/);
+    expect(deposited.source).toMatchObject({ ownerDebit: '500000000000000', orderId: route.order.orderId });
+    const done = await settle(c, deposited);
+    expect(done).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED' });
+    expect(financialView(done).progress.steps.flatMap(step => step.operations.map(operation => operation.title))).toEqual(expect.arrayContaining(['Unwrap WETH to ETH', 'Bridge deposit']));
+  });
+  it('after a confirmed unwrap, a re-quote reviews only the native deposit (the owner holds ETH now); nothing is unwrapped twice', async () => {
+    const c = await setup({ wethPaidInNative: true }), base = c.chainOf('base');
+    const w = workflow({ sourceChain: 'eip155:8453', destinationChain: 'eip155:42161', inputAsset: { kind: 'TOKEN', address: WETH.base, decimals: 18 },
+      outputAsset: token('arbitrum-one'), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const run = await reviewed(c, w, EVM_OWNER);
+    const first = await c.service.begin(run.id, EVM_OWNER, w);
+    if (first.ecosystem !== 'EVM') throw new Error('expected EVM');
+    await c.service.handoff(run.id);
+    await c.service.report(run.id, { kind: 'HASH', hash: base.wallet.send(first.transaction).hash });
+    expect((await c.service.observe(run.id)).attempts[0]).toMatchObject({ step: 'UNWRAP', state: 'CONFIRMED', reconciled: true }); // WETH9 Withdrawal proven
+    c.tick(10 * 60_000); for (const m of Object.values(c.evm)) m.mine(); // the Review expires: the run is re-quoted in place
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow('UNIVERSAL_REVIEW_EXPIRED');
+    const fresh = await c.service.refresh(run.id);
+    expect(fresh.review.source.ecosystem === 'EVM' && fresh.review.source.calls.map(call => call.purpose)).toEqual(['BRIDGE_DEPOSIT']);
+    await c.service.review(run.id, fresh.review.commitment, w);
+    const next = await c.service.begin(run.id, EVM_OWNER, w);
+    expect(next.attempt.step).toBe('DEPOSIT');
+    expect(next.record.attempts.filter(a => a.step === 'UNWRAP')).toHaveLength(1);
+  });
+  it('the unwrap is only for the pinned wrapped-native token: a native-paid answer for another token stays a mismatch', async () => {
+    const c = await setup({ wethPaidInNative: true });
+    c.relayMock.setTamper(raw => { raw.protocol.v2.paymentDetails.currency = '0x0000000000000000000000000000000000000000'; });
+    const w = workflow({ sourceChain: 'eip155:8453', destinationChain: 'eip155:42161', inputAsset: token('base'), outputAsset: token('arbitrum-one'), amount: '2000000', recipient: 'CONNECTED_OWNER' });
+    await expect(c.service.simulate(w, EVM_OWNER)).rejects.toThrow('RELAY_PAYMENT_MISMATCH');
   });
 });

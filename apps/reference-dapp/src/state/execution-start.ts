@@ -146,7 +146,7 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       }
       case 'universal': {
         const r = universal.record;
-        safeNext = Boolean(r && r.attempts.length > 0 && r.attempts.every(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED'));
+        safeNext = Boolean(r && r.attempts.length > 0 && r.attempts.every(a => (a.step === 'APPROVAL' || a.step === 'UNWRAP') && a.state === 'CONFIRMED'));
         result.nextLabel = 'Continue to bridge'; break;
       }
       case 'public': {

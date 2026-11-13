@@ -8,7 +8,8 @@ import type { ProviderStatusHint } from './relay-provider.ts';
 
 export const UNIVERSAL_RUN_ID = /^xuni-[a-f0-9]{32}$/;
 export type UniversalProvenance = 'PUBLIC_MAINNET' | 'MOCKED';
-export type UniversalStep = 'APPROVAL' | 'DEPOSIT';
+/** BUILD-FLOFI-MAINNET-EXEC-002: `UNWRAP` — the owner's WETH → ETH unwrap before a native-paid order (`source.unwrap`). */
+export type UniversalStep = 'APPROVAL' | 'UNWRAP' | 'DEPOSIT';
 export type UniversalAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'NOT_FOUND' | 'PENDING' | 'CONFIRMED' | 'REVERTED' |
   'RECONCILIATION_REQUIRED';
 export const UNIVERSAL_ACTIVE: readonly UniversalAttemptState[] = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
@@ -38,12 +39,12 @@ export type ProviderConsideration = { readonly provider: UniversalRoutingProvide
 export type EvmReviewSource = { readonly ecosystem: 'EVM'; readonly chainId: number; readonly block: { readonly number: number; readonly hash: string; readonly timestamp: number };
   readonly balance: string; readonly nativeBalance: string; readonly allowance: string | null; readonly nonce: string; readonly depositoryCodeSha256: string;
   readonly approvals: readonly { readonly token: string; readonly spender: string; readonly amount: string; readonly currentAllowance: string; readonly required: boolean }[];
-  readonly calls: readonly { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly value: string; readonly gasUsed: string;
+  readonly calls: readonly { readonly purpose: 'APPROVAL' | 'UNWRAP' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly value: string; readonly gasUsed: string;
     readonly gasLimit: string; readonly l1FeeUpperBoundWei: string | null }[];
   readonly fees: { readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string; readonly gasLimitTotal: string; readonly executionFeeUpperBoundWei: string;
     readonly l1FeeUpperBoundWei: string | null; readonly totalUpperBoundWei: string | null };
   readonly simulation: { readonly provenance: 'TRANSACTION_SIMULATION'; readonly method: 'eth_simulateV1'; readonly block: number;
-    readonly calls: readonly { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly gasUsed: string }[]; readonly orderId: string; readonly ownerDebit: string;
+    readonly calls: readonly { readonly purpose: 'APPROVAL' | 'UNWRAP' | 'BRIDGE_DEPOSIT'; readonly gasUsed: string }[]; readonly orderId: string; readonly ownerDebit: string;
     readonly notSimulated: readonly ['DESTINATION_DELIVERY', 'SOLVER_BEHAVIOUR', 'REFUND'] } };
 export type SolanaReviewSource = { readonly ecosystem: 'SOLANA'; readonly slot: number; readonly balance: string; readonly lamports: string;
   readonly program: { readonly id: string; readonly programData: string; readonly authority: string | null; readonly deploymentSlot: number };
