@@ -645,6 +645,8 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 WETH paid to Relay as native ETH (the own
     expect(unwrapped.attempts[0]).toMatchObject({ step: 'UNWRAP', state: 'CONFIRMED', reconciled: true });
     // Review P2: the owner's native balance rose by exactly the input minus the fee they paid (proven, so no note).
     expect(unwrapped.attempts[0]!.note ?? null).toBeNull();
+    // Review round 2: the observation says the WETH is ETH now and the deposit still needs its own request (never "source confirmed").
+    expect(unwrapped.observation).toMatchObject({ outcome: 'UNWRAP_CONFIRMED' });
     expect(unwrapped).toMatchObject({ phase: 'AUTHORIZED', verdict: 'PENDING', source: null });
     // Second request: the exact native deposit of the order.
     const second = await c.service.begin(run.id, EVM_OWNER, w);

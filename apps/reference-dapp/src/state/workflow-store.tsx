@@ -377,8 +377,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     // BUILD-FLOFI-MAINNET-EXEC-002: a universal bridge command matches when it is exactly the one the card's drafts produce.
     const universalMatches = () => { try { return JSON.stringify(canvasAmountCommand(state, null, history.amountInputs, target!.id, context, history.bridgeNetworkInputs, history.cryptoSelections,
       history.recipientInputs)) === JSON.stringify(command); } catch { return false; } };
-    const networkMatches = !networks || (command.type === 'SET_ROUTER_BRIDGE' && command.input.source === networks.source && command.input.destination === networks.destination) ||
-      (command.type === 'SET_UNIVERSAL_BRIDGE' && universalMatches());
+    // Review (round 2): a Router bridge command too must be exactly the one the card's drafts produce (networks AND assets AND amount), so a chat
+    // proposal can never replace an asset the owner drafted on the card.
+    const networkMatches = !networks || (command.type === 'SET_ROUTER_BRIDGE' || command.type === 'SET_UNIVERSAL_BRIDGE') && universalMatches();
     if (target && command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) dispatchHistory({ type: 'EDIT_CANVAS_AMOUNT', id: target.id, amount: target.amount, context });
     const amountEdit = target && (history.amountInputs[target.id] === target.amount || command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) ? { authoringId: target.id, authoringAmount: actionReviewValue(null, target.id, target.amount, networks, history.cryptoSelections[target.id], history.recipientInputs[target.id])! } : undefined;
     setPending({ valid: !preview.error && networkMatches, command, diff, review, ...(authoring ?? amountEdit) });
@@ -444,7 +445,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   }
   function editBridgeNetworks(id: string, patch: Partial<CanvasBridgeNetworks>) {
     dispatchHistory({ type: 'EDIT_BRIDGE_NETWORKS', id, patch, context });
-    setPending(current => current?.authoringId === id || (current?.command.type === 'SET_ROUTER_BRIDGE' && current.command.nodeId === id) ? null : current);
+    // Review (round 2): any pending bridge proposal for this card is retired by its new networks (a chat SET_UNIVERSAL_BRIDGE / SET_BRIDGE too).
+    setPending(current => current?.authoringId === id || (current && ['SET_ROUTER_BRIDGE', 'SET_UNIVERSAL_BRIDGE', 'SET_BRIDGE'].includes(current.command.type)
+      && 'nodeId' in current.command && current.command.nodeId === id) ? null : current);
   }
   function cancelCanvasAmount(id: string) { dispatchHistory({ type: 'CANCEL_CANVAS_AMOUNT', id }); setPending(current => current?.authoringId === id ? null : current); }
   function editCanvasRecipient(id: string, recipient: string) {

@@ -608,7 +608,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (approvals.length !== 1 || approvals[0]!.owner !== record.owner || approvals[0]!.spender !== spender || approvals[0]!.amount !== amount) fail('ROUTER_APPROVAL_MISMATCH');
         const effective = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(record.owner) + addrWord(spender), tag(verified.blockNumber)), 0);
         if (effective !== amount) fail('ROUTER_APPROVAL_NOT_EFFECTIVE');
-        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote }));
+        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note }));
       }
       const { deposit, ownerDebit } = depositMatches(record.review.route, logs, record.owner);
       const block = await rpc('eth_getBlockByNumber', [tag(verified.blockNumber), false]);
@@ -619,7 +619,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         ownerDebit: ownerDebit.toString(), safe: false };
       // The authorization is consumed by the confirmed deposit; it can never authorize another one.
       return save(replaceAttempt({ ...transition(record, 'SOURCE_CONFIRMED'), authorization: null, source: settled, error: null },
-        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote }));
+        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note }));
     } catch (cause) {
       const code = cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : null;
       if (!code || code === 'ROUTER_RPC_INVALID') throw cause;
@@ -977,8 +977,13 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     /** The handoff boundary: SUBMITTING is durable before the browser calls the wallet. */
     async handoff(id: string): Promise<RouterRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
-      if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment || now().getTime() >= Date.parse(record.review.expiresAt))
-        fail('ROUTER_WALLET_HANDOFF_NOT_AUTHORIZED');
+      if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment) fail('ROUTER_WALLET_HANDOFF_NOT_AUTHORIZED');
+      // Review (round 2): a Review that expired between begin and this hand-off sent nothing; the attempt is cancelled and the run is re-quotable in
+      // place (the store re-quotes it at once), exactly as an expiry found at begin.
+      if (now().getTime() >= Date.parse(record.review.expiresAt)) {
+        await save(replaceAttempt(deauthorized(record, 'ROUTER_REVIEW_EXPIRED', [], true), { ...attempt!, state: 'CANCELLED', note: 'ROUTER_REVIEW_EXPIRED' }));
+        fail('ROUTER_REVIEW_EXPIRED');
+      }
       const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
       // The reserved nonce must still be the one the wallet assigns next (the owner's other pending transactions come before it).

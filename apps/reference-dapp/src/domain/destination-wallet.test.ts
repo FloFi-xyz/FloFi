@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { readUniversalBridgeNode } from '@defi-workflow-engine/workflow-contracts';
-import { actionReviewValue, canvasAmountCommand, canvasAmountMessage } from './canvas-action-setup';
+import { actionReviewValue, canvasAmountCommand, canvasAmountMessage, keptBridgeRecipient } from './canvas-action-setup';
 import { checkDestinationAddress, destinationLabel, resolveDestinationWallet, type DestinationCandidate } from './destination-wallet';
 import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
 import { createRouterNode, routerDetails } from './router-authoring';
@@ -41,6 +41,15 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 destination wallet resolution', () => {
       saved: [wallet('solana', SAVED_SOL, 'Phantom', 'SAVED')] };
     expect(resolveDestinationWallet('solana', mislabelled)).toMatchObject({ kind: 'RESOLVED', wallet: { address: SAVED_SOL, source: 'SAVED' }, alternatives: [] });
     expect(resolveDestinationWallet('evm', { session: [wallet('evm', PHANTOM, 'MetaMask', 'SESSION')], account: [], saved: [] })).toEqual({ kind: 'NONE' });
+  });
+  it('review round 2: one rule keeps an explicit recipient for the card and for Apply (same destination ecosystem AND same cross/same-ecosystem kind)', () => {
+    const solanaToBase = { source: 'solana' as const, destination: 'base' as const, recipient: METAMASK };
+    expect(keptBridgeRecipient(solanaToBase, 'solana', 'arbitrum-one')).toBe(METAMASK);
+    // Re-pointed to Arbitrum → Base: still EVM destination but no longer cross-ecosystem: the automatic destination applies, on the card and on Apply.
+    expect(keptBridgeRecipient(solanaToBase, 'arbitrum-one', 'base')).toBe('');
+    expect(keptBridgeRecipient({ source: 'arbitrum-one', destination: 'base', recipient: METAMASK }, 'solana', 'base')).toBe('');
+    expect(keptBridgeRecipient({ source: 'base', destination: 'arbitrum-one', recipient: METAMASK }, 'base', 'solana')).toBe('');
+    expect(keptBridgeRecipient({ source: null, destination: 'base', recipient: METAMASK }, 'base', 'arbitrum-one')).toBe('');
   });
   it('checks a typed address for the destination network, naming the wrong kind of address', () => {
     expect(checkDestinationAddress('solana', PHANTOM)).toEqual({ ok: true, address: PHANTOM });

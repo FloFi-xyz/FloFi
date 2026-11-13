@@ -295,6 +295,8 @@ export function reviewChanges(previous: ConversationReview, next: ConversationRe
     if (!old) continue;
     compare('Expected receipt', old.result, step.result);
     compare('Minimum receipt', old.minimum, step.minimum); compare('Provider', old.provider, step.provider); compare('Max slippage', old.slippage, step.slippage);
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review): a fresh quote delivering to another wallet is always named, never "the same amounts".
+    compare('Destination', old.destination, step.destination);
   }
   const labels = [...new Set([...previous.fees, ...next.fees].map(line => line.label))];
   for (const label of labels) compare(label, previous.fees.find(line => line.label === label)?.value, next.fees.find(line => line.label === label)?.value);

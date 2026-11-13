@@ -214,12 +214,13 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       // Solana); across ecosystems it delivers to the owner's destination wallet unless one is typed on the card (`bridgeDestination`).
       : router && universalCanvasPair(bridgeNetworks[id] ?? router) ? (() => { const pair = universalCanvasPair(bridgeNetworks[id] ?? router)!;
         return { ...base, type: 'SET_UNIVERSAL_BRIDGE' as const, input: { ...universalCanvasInput(pair, amount, bridgeNetworks[id]),
-          recipient: bridgeDestination(pair.destination, recipients[id], sameEcosystem(pair.source, pair.destination) ? router.recipient : ''), slippage: router.slippage } }; })()
+          recipient: bridgeDestination(pair.destination, recipients[id], keptBridgeRecipient({ source: universalKeyOfCanvasLabel(router.source), destination: universalKeyOfCanvasLabel(router.destination),
+            recipient: router.recipient }, pair.source, pair.destination)), slippage: router.slippage } }; })()
       : router ? (() => { const input = routerInputForNetworks({ ...routerInputOf(router), amount }, routerNetworks(bridgeNetworks[id] ?? router)), key = universalKeyOfCanvasLabel(input.destination);
         return { ...base, type: 'SET_ROUTER_BRIDGE' as const, input: { ...input, recipient: key ? bridgeDestination(key, recipients[id], input.recipient) : input.recipient } }; })()
       : universalBridgeDetails(node) ? (() => { const details = universalBridgeDetails(node)!, draft = bridgeNetworks[id];
         const source = draft ? universalKeyOfCanvasLabel(draft.source)! : details.source, destination = draft ? universalKeyOfCanvasLabel(draft.destination)! : details.destination;
-        const kept = UNIVERSAL_NETWORKS[destination].ecosystem === UNIVERSAL_NETWORKS[details.destination].ecosystem && sameEcosystem(source, destination) === sameEcosystem(details.source, details.destination) ? details.recipient : '';
+        const kept = keptBridgeRecipient(details, source, destination);
         return { ...base, type: 'SET_UNIVERSAL_BRIDGE' as const, input: { ...universalInputOf(details), ...(draft ? { source, destination, inputAsset: draft.inputAsset!, outputAsset: draft.outputAsset! } : {}), amount,
           recipient: bridgeDestination(destination, recipients[id], kept) } }; })()
       : bridge ? { ...base, type: 'SET_BRIDGE', input: { amount, slippageBps: String(bridge.slippageBps) } }
@@ -275,6 +276,16 @@ const KEEP_OR_SETTINGS = 'Your workflow was not changed. Press Cancel to keep th
  * (`i18n/pt-catalog-reliability.ts`); the one carrying a support reference is the `{0}` template, so its code stays visible in every language.
  */
 const sameEcosystem = (a: UniversalNetworkKey, b: UniversalNetworkKey) => UNIVERSAL_NETWORKS[a].ecosystem === UNIVERSAL_NETWORKS[b].ecosystem;
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): the one rule the card's destination field and the applied command share for a bridge whose
+ * networks change: its explicit recipient stays only while the destination stays in the same ecosystem AND the bridge stays same- or
+ * cross-ecosystem as before; otherwise '' (the owner's destination wallet, resolved automatically). Before, the card and Apply could disagree.
+ */
+export function keptBridgeRecipient(original: { readonly source: UniversalNetworkKey | null | undefined; readonly destination: UniversalNetworkKey | null | undefined;
+  readonly recipient: string }, source: UniversalNetworkKey | null | undefined, destination: UniversalNetworkKey | null | undefined): string {
+  if (!original.source || !original.destination || !source || !destination) return '';
+  return sameEcosystem(destination, original.destination) && sameEcosystem(source, destination) === sameEcosystem(original.source, original.destination) ? original.recipient : '';
+}
 /**
  * BUILD-FLOFI-MAINNET-EXEC-002: a bridge's recipient from its card. No typed text keeps `fallback` ('' = the owner's wallet of the destination
  * ecosystem, resolved and bound at Review); an emptied field returns to that automatic destination; anything else must be an address of the

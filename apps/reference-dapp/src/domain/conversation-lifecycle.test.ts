@@ -5,7 +5,7 @@ import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import type { SimulationSource } from './simulation-presentation';
-import { answerLanguage, bindingIssue, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps, reviewBinding, workflowHash, type LifecycleView, sumByAsset } from './conversation-lifecycle';
+import { answerLanguage, bindingIssue, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps, reviewBinding, reviewChanges, workflowHash, type LifecycleView, sumByAsset } from './conversation-lifecycle';
 import { conversationCopy } from './conversation-copy';
 import { portuguese } from '../i18n/pt';
 import { reviewFixture, reviewNow, reviewOwner } from '../test-utils/review-fixture';
@@ -175,5 +175,16 @@ describe('P0 hotfix (execution continuity): the Assistant reads the whole workfl
       { number: 1, action: 'Swap', amount: null, detail: null, network: 'Arbitrum', state: 'COMPLETED' as const, funding: null, delivered: '2.5 USDC' },
       { number: 2, action: 'Bridge', amount: null, detail: null, network: 'Arbitrum → Base', state: 'CURRENT' as const, funding: null, delivered: null }] };
     expect(conversationExecution({ ...v, sequence, workflowProgress: progress })).toMatchObject({ completed: 1, total: 2, sequenceStep: { current: 2, total: 2, completed: 1 } });
+  });
+});
+
+describe('BUILD-FLOFI-MAINNET-EXEC-002 (review round 2) re-quote changes', () => {
+  it('a fresh quote delivering to another wallet names the destination change, never "the same amounts"', () => {
+    const step = (destination: string | null) => ({ number: 1, action: 'Bridge', input: '2 USDC', pair: null, networks: 'Base → Solana', provider: 'Relay', result: '1.99 USDC', resultLabel: 'Expected output',
+      minimum: '1.98 USDC', slippage: '0.5%', priceImpact: null, details: [], destination });
+    const review = (destination: string | null) => ({ steps: [step(destination)], fees: [] }) as unknown as Parameters<typeof reviewChanges>[0];
+    expect(reviewChanges(review('BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3'), review('8xYk2PvDDaGkR9ZnAwzXeVGkXzW1sTdQfWw3mVdKk2P')))
+      .toEqual([{ label: 'Destination', before: 'BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3', after: '8xYk2PvDDaGkR9ZnAwzXeVGkXzW1sTdQfWw3mVdKk2P' }]);
+    expect(reviewChanges(review('BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3'), review('BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3'))).toEqual([]);
   });
 });

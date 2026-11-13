@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
+import { requotedMessage } from '../domain/simulation-presentation';
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useState, type FormEvent } from 'react';
@@ -230,6 +231,7 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
     {view === 'simulate' && <button type="button" disabled={router.busy || !router.available || !fields} onClick={() => void router.simulate()}>{tr("Get route and simulate")}</button>}
     {view === 'simulate' && <PendingExecutionNote pending={pending || settling}/>}
     {record?.error === 'ROUTE_CHANGED' && record.routeChanges.length > 0 && <p role="alert">{tr("Route changed: ")}{tr(record.routeChanges.map(c => changeLabel[c]).join(', '))}.</p>}
+    {router.requoted && <p className="bridge-requote-reason" role="status">{tr(requotedMessage(router.requoted.code))}</p>}
     {router.requoted && <BridgeRequoteChanges changes={router.requoted.changes}/>}
     {r && route && !router.retired && <>
       <dl className="swap-summary" aria-label={tr("Route review")}>

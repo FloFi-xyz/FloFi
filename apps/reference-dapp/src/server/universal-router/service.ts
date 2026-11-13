@@ -516,9 +516,10 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         try { assertUnwrapEffects(pin!, logs, record.owner, route.inputAmount); } catch { fail('UNIVERSAL_UNWRAP_MISMATCH'); }
         // Review P2: the burn alone does not prove the owner received the ETH. The owner's native balance across the unwrap's block must have
         // risen by exactly the input minus the fee they paid; any other activity of the owner in that block hides it — recorded, never assumed.
-        const [before, after] = await Promise.all([evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber - 1)), evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber))]);
-        const credited = after - before + facts.gasCostWei === BigInt(route.inputAmount);
-        if (!credited && after - before + facts.gasCostWei < 0n) fail('UNIVERSAL_UNWRAP_MISMATCH');
+        // Review (round 2): the burn above is the proof; this balance check only isolates the credit. Another transaction of the owner in the
+        // same block (a second bridge's deposit), or a node without the historical state, makes it inconclusive — recorded, never a mismatch.
+        const credited = await Promise.all([evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber - 1)), evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber))])
+          .then(([before, after]) => after - before + facts.gasCostWei === BigInt(route.inputAmount), () => false);
         return save(replaceAttempt({ ...record, error: null }, { ...confirmed, ...credited ? {} : { note: 'UNIVERSAL_UNWRAP_NATIVE_CREDIT_NOT_ISOLATED' } }));
       }
       if (attempt.step === 'APPROVAL') {
@@ -803,7 +804,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         residualAssets: [], ownership: [{ chainId: route.sourceChain, address: record.owner }, { chainId: route.destinationChain, address: route.recipient }],
         limitations: [provenance === 'PUBLIC_MAINNET' ? 'PUBLIC_MAINNET_OWNER_EXECUTED' : 'MOCKED_CHAINS_ONLY',
           destination.orderBound ? 'DELIVERY_REFERENCES_ORDER_ON_CHAIN' : 'DELIVERY_REFERENCED_BY_PROVIDER_STATUS', 'SOURCE_AND_DESTINATION_FINAL',
-          'FLOFI_FEE_OBLIGATION_RECORDED_NOT_COLLECTED'] },
+          'FLOFI_FEE_OBLIGATION_RECORDED_NOT_COLLECTED',
+          ...record.attempts.some(x => x.step === 'UNWRAP' && x.note === 'UNIVERSAL_UNWRAP_NATIVE_CREDIT_NOT_ISOLATED') ? ['UNWRAP_NATIVE_CREDIT_NOT_ISOLATED'] : []] },
       evidence: [{ evidenceId: 'route-commitment', kind: 'EXTERNAL_REFERENCE', contentHash: record.review.routeCommitment },
         { evidenceId: 'provider-order', kind: 'EXTERNAL_REFERENCE', contentHash: digest(route.order) },
         { evidenceId: 'source-deposit', kind: 'EXTERNAL_REFERENCE', contentHash: digest(source) },
@@ -983,7 +985,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         const last = record.attempts.at(-1);
         const outcome = record.verdict === 'RECONCILED' ? 'RECONCILED' : record.refund ? 'REFUND_OBSERVED'
           : record.destination ? 'DESTINATION_OBSERVED' : last?.state === 'REVERTED' ? 'REVERTED'
-          : last?.state === 'CONFIRMED' ? last.step === 'APPROVAL' ? 'APPROVAL_CONFIRMED' : 'CONFIRMED' : last?.state === 'PENDING' ? 'PENDING'
+          : last?.state === 'CONFIRMED' ? last.step === 'APPROVAL' ? 'APPROVAL_CONFIRMED' : last.step === 'UNWRAP' ? 'UNWRAP_CONFIRMED' : 'CONFIRMED' : last?.state === 'PENDING' ? 'PENDING'
           : !last || last.state === 'CANCELLED' ? 'NOT_SUBMITTED' : 'UNDETERMINED';
         return save({ ...record, observation: { checkedAt: now().toISOString(), outcome,
           reason: record.error ?? (record.destination ? 'UNIVERSAL_DESTINATION_OBSERVED' : record.source ? 'UNIVERSAL_SOURCE_CONFIRMED' : last?.note ?? 'UNIVERSAL_NOT_STARTED') } });

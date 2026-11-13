@@ -337,8 +337,10 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       // BUILD-FLOFI-MAINNET-EXEC-002: a network draft applies as the Router command for a certified Router pair, or as exactly the universal bridge
       // command the card's own drafts produce (e.g. a Base → Arbitrum USDC step re-pointed to Arbitrum WETH → Solana USDC). Before, the universal
       // command was silently ignored here, so such a card stayed a draft.
-      if (networks && !(action.command.type === 'SET_ROUTER_BRIDGE' && action.command.input.source === networks.source && action.command.input.destination === networks.destination)) {
-        if (action.command.type !== 'SET_UNIVERSAL_BRIDGE') return state;
+      // Review (round 2): the Router command too must be exactly the drafts' command (networks, assets, amount) — a proposal matching only the
+      // networks could otherwise replace an asset the owner drafted on the card.
+      if (networks) {
+        if (action.command.type !== 'SET_UNIVERSAL_BRIDGE' && action.command.type !== 'SET_ROUTER_BRIDGE') return state;
         try {
           if (JSON.stringify(canvasAmountCommand(state.editor, null, state.amountInputs, action.authoringId, action.context, state.bridgeNetworkInputs, state.cryptoSelections, state.recipientInputs))
             !== JSON.stringify(action.command)) return state;

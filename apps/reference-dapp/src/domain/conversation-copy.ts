@@ -45,6 +45,8 @@ export type ConversationCopy = {
    */
   readonly continueAfter: (done: string, next: string, approval: boolean) => string;
   readonly continuationRequote: (reason: string | null) => string; readonly continuationReview: (next: string) => string;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: said before an in-place re-quote's reason when an earlier request of the run already landed. */
+  readonly earlierRequestStays: string;
   readonly continuationQuestion: string; readonly continueFailed: (reason: string) => string;
   /** The answer that accepts a fresh continuation Review (distinct from the plain Continue of an already accepted one). */
   readonly continueAccept: string;
@@ -151,6 +153,7 @@ const en: ConversationCopy = {
   refreshing: 'Getting a fresh quote and simulation. Nothing is signed or sent.',
   continueAfter: (done, next, approval) => `${done} is confirmed on-chain.${approval ? ' An approval only allows the spend; it is not the action itself.' : ''} ${next} has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?`,
   continuationRequote: reason => `Your earlier confirmed request stays in place, and nothing new was sent.${reason ? ` ${reason}` : ' The reviewed quote is no longer valid.'} I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.`,
+  earlierRequestStays: 'Your earlier confirmed request stays in place.',
   continuationReview: next => `Here is the fresh quote for ${next}, which has not been sent yet. Your earlier confirmed request stays in place and is not repeated. Amounts are estimates from this simulation, not executed results.`,
   continuationQuestion: 'Accept this updated quote and continue to your wallet for this request?', continueAccept: 'Accept and continue',
   ownerBoundNext: (done, next) => `${done} is confirmed on-chain. An approval only allows the spend; it is not the action itself. ${next} is a new transaction from your wallet, so FloFi is preparing its own fresh Review now (read-only); you confirm it before your wallet is asked.`,
@@ -256,6 +259,7 @@ const pt: ConversationCopy = {
   refreshing: 'Buscando uma nova cotação e simulação. Nada é assinado nem enviado.',
   continueAfter: (done, next, approval) => `${done}: confirmado na rede.${approval ? ' Uma aprovação apenas autoriza o gasto; não é a ação em si.' : ''} ${next}: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?`,
   continuationRequote: reason => `O seu pedido anterior já confirmado continua válido, e nada novo foi enviado.${reason ? ` ${reason}` : ' A cotação revisada já não é válida.'} Estou buscando uma nova cotação para o próximo pedido; você a confirma antes de a carteira ser chamada.`,
+  earlierRequestStays: 'O seu pedido anterior já confirmado continua válido.',
   continuationReview: next => `Esta é a nova cotação para ${next}, que ainda não foi enviado. O seu pedido anterior já confirmado continua válido e não é repetido. Os montantes são estimativas desta simulação, não resultados executados.`,
   continuationQuestion: 'Aceitar esta cotação atualizada e continuar para a carteira com este pedido?', continueAccept: 'Aceitar e continuar',
   ownerBoundNext: (done, next) => `${done}: confirmado na rede. Uma aprovação apenas autoriza o gasto; não é a ação em si. ${next} é uma nova transação da sua carteira, então a FloFi está preparando a revisão própria dela agora (somente leitura); você a confirma antes de a carteira ser chamada.`,

@@ -71,6 +71,8 @@ function readPointer(network: RouterNetwork): Pointer | null {
   } catch { return null; }
 }
 
+/** The store's own signal that a refused request was re-quoted in place (the fresh Review is valid; nothing was sent). */
+export const REQUOTED_IN_PLACE = /_REQUOTED_REVIEW_REQUIRED$/;
 export function RouterProvider({ children }: { children: ReactNode }) {
   const { t: tr } = useLocale();
   const { runtimeWorkflow } = useWorkflow(), wallet = useBuild009Wallet();
@@ -183,7 +185,10 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }, [wallet.account, session?.account]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; setError(cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): a refusal that was re-quoted in place is not an error of the run: its fresh Review is valid and
+    // authorizable. The store keeps no error for it (an error would block that Review); `requoted` carries the original reason and the changes.
+    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; const code = cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED';
+      setError(REQUOTED_IN_PLACE.test(code) ? null : code); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function ownerSession() {
     let current = await wallet.session(); if (!current) current = await wallet.connect();
@@ -231,6 +236,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error('ROUTER_SIMULATION_REQUIRED');
     accept(unwrap(await routerReview(networkOfRecord(record), record.id, record.review.commitment, record.workflow)));
+    // The owner authorized the re-quoted Review: what changed since the earlier one is no longer news.
+    setRequoted(null);
   }); }
   async function observe() { await operation(async () => {
     if (!record) throw new Error('ROUTER_RUN_MISSING');

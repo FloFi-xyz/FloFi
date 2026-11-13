@@ -44,7 +44,7 @@ import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import { counterpartSelection, invertCryptoSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, lendingAction, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
-import { actionReviewValue, amountEditNeedsReview } from '../domain/canvas-action-setup';
+import { actionReviewValue, amountEditNeedsReview, keptBridgeRecipient } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
 import { canDeleteCanvasEdge, canDeleteCanvasNode, isTextEntry } from '../domain/canvas-keyboard';
@@ -713,7 +713,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       if (environment !== 'mainnet' || !sourceKey || !destinationKey || sourceKey === destinationKey) return undefined;
       const ecosystem = destinationEcosystemOf(destinationKey), cross = destinationEcosystemOf(sourceKey) !== ecosystem, network = UNIVERSAL_NETWORKS[destinationKey].name;
       const resolution = ecosystem === 'evm' ? destinations.evm : destinations.solana;
-      const tiers = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved].filter(entry => entry.ecosystem === ecosystem);
+      // Suggestions are the owner's wallets whose ADDRESS is valid for this destination (a mislabelled saved entry is never suggested).
+      const tiers = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved]
+        .filter(entry => entry.ecosystem === ecosystem && checkDestinationAddress(destinationKey, entry.address).ok);
       const candidates = tiers.filter((entry, index) => tiers.findIndex(other => (ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index)
         .map(entry => ({ address: entry.address, label: destinationLabel(destinationKey, entry) }));
       const session = destinations.inventory.session.find(entry => entry.ecosystem === ecosystem) ?? null;
@@ -777,17 +779,18 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
           bridgePair: bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
           amount: `${composerSummary(workflow, node, context).amount.split(' ')[0]} ${bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).split(' → ')[0]}` },
         ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true), tokenSelection: bridgeTokens(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!), ...bridgeInvert(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
-          ...(() => { const networks = bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, keys = [universalKeyOfCanvasLabel(networks.source), universalKeyOfCanvasLabel(routerDetails(node)!.destination)];
-            // A 0x recipient of the Router step stays only while the destination stays EVM.
-            const keep = keys[1] && universalKeyOfCanvasLabel(networks.destination) && destinationEcosystemOf(universalKeyOfCanvasLabel(networks.destination)!) === destinationEcosystemOf(keys[1]) ? routerDetails(node)!.recipient : '';
+          ...(() => { const networks = bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, router = routerDetails(node)!;
+            // A 0x recipient of the Router step stays exactly when Apply keeps it (one shared rule: `keptBridgeRecipient`).
+            const keep = keptBridgeRecipient({ source: universalKeyOfCanvasLabel(router.source), destination: universalKeyOfCanvasLabel(router.destination), recipient: router.recipient },
+              universalKeyOfCanvasLabel(networks.source), universalKeyOfCanvasLabel(networks.destination));
             const field = destinationField(node.nodeId, networks, keep); return (field ? { destination: field } : {}) as Partial<Pick<ComposerCardData, 'destination'>>; })() } : {}),
       } : {}),
       ...(universalBridgeDetails(node) ? (() => {
         const networks = bridgeNetworkInputs[node.nodeId] ?? universalCanvasNetworks(universalBridgeDetails(node)!);
         return { summary: { ...composerSummary(workflow, node, context), chain: `${networks.source} → ${networks.destination}`, bridgePair: bridgePairLabel(networks), amount: `${amountInputs[node.nodeId] ?? universalBridgeDetails(node)!.amount} ${bridgePairLabel(networks).split(' → ')[0]}` },
           networkSelection: bridgeSelection(node.nodeId, networks, true), tokenSelection: bridgeTokens(node.nodeId, networks), ...bridgeInvert(node.nodeId, networks),
-          ...(() => { const details = universalBridgeDetails(node)!, key = universalKeyOfCanvasLabel(networks.destination);
-            const keep = key && destinationEcosystemOf(key) === destinationEcosystemOf(details.destination) ? details.recipient : '';
+          ...(() => { const details = universalBridgeDetails(node)!;
+            const keep = keptBridgeRecipient(details, universalKeyOfCanvasLabel(networks.source), universalKeyOfCanvasLabel(networks.destination));
             const field = canEditCanvasAmount(node, context, workflow) ? destinationField(node.nodeId, networks, keep) : undefined; return (field ? { destination: field } : {}) as Partial<Pick<ComposerCardData, 'destination'>>; })() };
       })() : {}),
       ...(composerSummary(workflow, node, context).action === 'Pool / Liquidity' ? { poolProposal: {

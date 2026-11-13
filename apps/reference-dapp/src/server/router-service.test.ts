@@ -279,6 +279,27 @@ describe('BUILD-ROUTER-001 authorization invalidation (ROUTE_CHANGED and friends
     // The deposit's funds are followed to their fill: the run completes as before.
     expect((await until(service, h, run.id, 'RECONCILED', 5)).phase).toBe('RECONCILED');
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a Review that expires between begin and the hand-off is cancelled and re-quotable in place (nothing sent)', async () => {
+    const { service, h } = await setup(), w = workflow();
+    const run = await reviewed(service, w);
+    await service.begin(run.id, ROUTER_OWNER, w);
+    h.advance(Math.ceil((Date.parse(run.review.expiresAt) - h.clock().getTime()) / 1000) + 1);
+    await expect(service.handoff(run.id)).rejects.toThrow('ROUTER_REVIEW_EXPIRED');
+    const after = await service.load(run.id);
+    expect(after).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true });
+    expect(after.attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'ROUTER_REVIEW_EXPIRED' });
+    expect(h.counters.sends).toBe(0);
+    expect((await service.refresh(run.id)).id).toBe(run.id);
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a tolerated re-pricing stays recorded on the attempt after it confirms', async () => {
+    const { service, h } = await setup(), w = workflow();
+    const run = await reviewed(service, w);
+    h.controls.feeBump = BigInt(run.review.route.feeTotal) / 100n + 1n;
+    const { begun } = await execute(service, h, run.id, w);
+    expect(begun.attempt.note).toMatch(/^ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:/);
+    await service.observe(run.id);
+    expect((await service.load(run.id)).attempts[0]).toMatchObject({ state: 'CONFIRMED', note: begun.attempt.note });
+  });
   it('public provider fallback after Review is never used: LI.FI now routing via another bridge is ROUTE_CHANGED, not a silent switch', async () => {
     const { service, h } = await setup(), w = workflow();
     const run = await reviewed(service, w);

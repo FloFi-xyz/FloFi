@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { BridgeRequoteChanges } from './bridge-requote-changes';
+import { requotedMessage } from '../domain/simulation-presentation';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
 import { useDestinationWallets } from '../state/destination-wallets';
@@ -286,6 +287,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <button type="button" disabled={router.busy || !router.available || !d} onClick={() => void router.simulate()}>{tr('Get route and simulate')}</button>
       <PendingExecutionNote pending={pending || settling}/></>}
     {record?.error === 'ROUTE_CHANGED' && record.routeChanges.length > 0 && <p role="alert">{tr('Route changed:')} {record.routeChanges.map(c => tr(CHANGE[c])).join(', ')}.</p>}
+    {router.requoted && <p className="bridge-requote-reason" role="status">{tr(requotedMessage(router.requoted.code))}</p>}
     {router.requoted && <BridgeRequoteChanges changes={router.requoted.changes}/>}
     {r && route && src && !router.retired && <dl className="swap-summary" aria-label={tr('Route review')}>
       <dt>{tr('Provider')}</dt><dd>{PROVIDER_LABEL[route.provider] ?? route.provider} · {route.protocol} · {tr('order')} <code>{route.order.orderId}</code></dd>

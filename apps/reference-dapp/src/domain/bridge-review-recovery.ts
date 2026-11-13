@@ -15,10 +15,14 @@ export function refreshBridgeAfterApproval(record: RouterRecord | UniversalRecor
   if (hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(record.workflow))) !==
     hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)))) return false;
   if (record.requote && record.attempts.length === 0) return true;
-  // BUILD-FLOFI-MAINNET-EXEC-002: an unwrap (an unwrapping route's first request) is preparatory like an approval.
+  // BUILD-FLOFI-MAINNET-EXEC-002: an unwrap (an unwrapping route's first request) is preparatory like an approval. Review (round 2): a deposit that
+  // provably never reached the chain (CANCELLED before the wallet, or NOT_FOUND) does not block the refresh either — the server's own refresh
+  // allows exactly that — so a run whose unwrap landed is re-quoted in place instead of being simulated again from WETH the owner no longer holds.
   const preparatory = (step: string) => step === 'APPROVAL' || step === 'UNWRAP';
+  const neverSent = (a: { step: string; state: string }) => a.step === 'DEPOSIT' && ['CANCELLED', 'NOT_FOUND'].includes(a.state);
+  if (record.requote && record.attempts.every(neverSent)) return true;
   return record.attempts.some(a => preparatory(a.step) && a.state === 'CONFIRMED' && a.reconciled) &&
-    record.attempts.every(a => preparatory(a.step) && ['CONFIRMED','CANCELLED','NOT_FOUND'].includes(a.state));
+    record.attempts.every(a => preparatory(a.step) && ['CONFIRMED','CANCELLED','NOT_FOUND'].includes(a.state) || neverSent(a));
 }
 
 /**

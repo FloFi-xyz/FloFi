@@ -119,6 +119,12 @@ const providerNames: Record<string, string> = {
 };
 export const simulationProvider = (id: string) => providerNames[id] ?? null;
 /** Only known error meanings reach the primary UI; never echo provider responses or validation paths. */
+/** Why a bridge was re-quoted in place, said once: the original refusal's reason, then what the owner does now. */
+export function requotedMessage(code: string): string {
+  if (/L1_FEES_CHANGED|FEES_CHANGED|GAS_CHANGED/.test(code)) return 'The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
+  if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'Your Review expired before the wallet request, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
+  return 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
+}
 export function simulationError(error: string): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
   const flight = flightRefusalMessage(error);
@@ -215,6 +221,10 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
   const stop = (message: string) => { view.status = 'blocked'; view.message = message; warn('blocking', message); return view; };
   if (source.state.busy) { view.message = 'Updating the simulation…'; return view; }
   if (source.state.error) return stop(simulationError(source.state.error));
+  // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): a bridge re-quoted in place after a refusal shows its fresh, authorizable Review — with why the earlier
+  // one could not run (visible, never technical) — instead of blocking it.
+  const requoted = 'requoted' in source.state ? (source.state as { readonly requoted?: { readonly code: string } | null }).requoted : null;
+  if (requoted) warn('attention', requotedMessage(requoted.code));
   if ('retired' in source.state && source.state.retired) return stop('The workflow or wallet has changed. Simulate again before continuing.');
   if ('recoveryOnly' in source.state && source.state.recoveryOnly) return stop('A previous run needs attention before a new simulation can proceed.');
   if (steps.length && (('available' in source.state && source.state.available === false) ||

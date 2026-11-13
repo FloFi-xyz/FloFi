@@ -136,7 +136,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }, [owner, record?.id, record?.phase]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null); setCorrelationId(null);
-    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'UNIVERSAL_OPERATION_FAILED'); setCorrelationId(cause instanceof Error && 'correlationId' in cause && typeof cause.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(cause.correlationId) ? cause.correlationId : null); }
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): a refusal re-quoted in place leaves no error (its fresh Review is valid; `requoted` explains it).
+    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'UNIVERSAL_OPERATION_FAILED';
+      setError(/_REQUOTED_REVIEW_REQUIRED$/.test(code) ? null : code); setCorrelationId(cause instanceof Error && 'correlationId' in cause && typeof cause.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(cause.correlationId) ? cause.correlationId : null); }
     finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function connect() { await operation(async () => {
@@ -198,6 +200,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error('UNIVERSAL_SIMULATION_REQUIRED');
     accept(unwrap(await universalReview(ecosystemOfRecord(record), record.id, record.review.commitment, record.workflow)));
+    // The owner authorized the re-quoted Review: what changed since the earlier one is no longer news.
+    setRequoted(null);
   }); }
   async function poll(eco: UniversalEcosystem, id: string) {
     for (let i = 0; i < 20; i++) {

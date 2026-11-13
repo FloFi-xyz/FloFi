@@ -21,6 +21,12 @@ type AccountWallets = readonly { readonly ecosystem: DestinationEcosystem; reado
  */
 export const ACCOUNT_WALLETS_FRESH_MS = 60_000;
 let accountRead: { readonly key: string; readonly at: number; readonly promise: Promise<AccountWallets> } | null = null;
+const accountListeners = new Set<() => void>();
+/**
+ * Review (round 2): the account's wallets changed in this page (a wallet linked, removed or renamed in Settings → Wallets): the next read asks the
+ * server again and every mounted reader re-reads now, so Simulate never binds a wallet the account no longer has.
+ */
+export function invalidateAccountWallets(): void { accountRead = null; for (const listener of accountListeners) listener(); }
 function readAccountWallets(key: string, now = Date.now()): Promise<AccountWallets> {
   if (accountRead?.key === key && now - accountRead.at < ACCOUNT_WALLETS_FRESH_MS) return accountRead.promise;
   const promise = accountState().then(state => state.account?.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address,
@@ -35,13 +41,15 @@ export function useDestinationInventory(evm: SessionEvmWallet): DestinationInven
   const solana = useOptionalJupiter(), privy = useFloFiPrivy(), credentials = useCredentials();
   const [account, setAccount] = useState<AccountWallets>([]);
   const sessionKey = privy?.userId ?? 'signed-out';
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => { const listener = () => setGeneration(n => n + 1); accountListeners.add(listener); return () => { accountListeners.delete(listener); }; }, []);
   useEffect(() => {
     let live = true;
     // Another session's wallets are dropped at once; this session's are read (or reused while fresh).
     setAccount([]);
     void readAccountWallets(sessionKey).then(wallets => { if (live) setAccount(wallets); });
     return () => { live = false; };
-  }, [sessionKey]);
+  }, [sessionKey, generation]);
   const solanaSession = solana?.session?.chain === 'solana:mainnet' ? solana.session : null;
   return useMemo(() => {
     const session: DestinationCandidate[] = [

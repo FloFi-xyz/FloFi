@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest';
 import type { RouterRecord } from '../server/router-service';
 import type { UniversalRecord } from '../server/universal-router/service';
-import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace } from './bridge-review-recovery';
+import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
+import { bridgeReviewChanges, refreshBridgeAfterApproval, REQUOTE_IN_PLACE, requotableInPlace } from './bridge-review-recovery';
+import { editorReducer, initialEditor } from './editor';
 
 const routerReview = (patch: { minimumOutput?: string; feeTotal?: string; total?: string; recipient?: string } = {}) => ({
   format: 'flofi.router-review.v1', recipient: patch.recipient ?? '0x' + '1'.repeat(40),
@@ -40,6 +42,17 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 in-place re-quote', () => {
     expect(requotableInPlace(record({ attempts: [{ step: 'DEPOSIT', state: 'PENDING' }] as never }))).toBe(false);
     expect(requotableInPlace(record({ attempts: [{ step: 'DEPOSIT', state: 'CANCELLED' }] as never }))).toBe(true);
     expect(requotableInPlace(null)).toBe(false);
+  });
+  it('review round 2: Simulate refreshes in place past a deposit that never reached the chain (after a confirmed unwrap or approval)', () => {
+    const workflow = editorReducer(initialEditor(), { type: 'ADD_ROUTER_BRIDGE', input: { source: 'Base', destination: 'Arbitrum', token: 'USDC', amount: '2', recipient: '',
+      slippage: '50', routing: 'AUTO' }, source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext()).workflow;
+    const run = (attempts: unknown[], requote = false) => record({ requote, attempts: attempts as never, workflow: workflow as never });
+    expect(refreshBridgeAfterApproval(run([{ step: 'UNWRAP', state: 'CONFIRMED', reconciled: true }, { step: 'DEPOSIT', state: 'CANCELLED' }]), workflow, false)).toBe(true);
+    expect(refreshBridgeAfterApproval(run([{ step: 'APPROVAL', state: 'CONFIRMED', reconciled: true }, { step: 'DEPOSIT', state: 'NOT_FOUND' }]), workflow, false)).toBe(true);
+    expect(refreshBridgeAfterApproval(run([{ step: 'DEPOSIT', state: 'CANCELLED' }], true), workflow, false)).toBe(true);
+    // A deposit that may have reached the chain is never refreshed over.
+    expect(refreshBridgeAfterApproval(run([{ step: 'UNWRAP', state: 'CONFIRMED', reconciled: true }, { step: 'DEPOSIT', state: 'SUBMISSION_RESULT_UNKNOWN' }]), workflow, false)).toBe(false);
+    expect(refreshBridgeAfterApproval(run([{ step: 'DEPOSIT', state: 'CONFIRMED' }], true), workflow, false)).toBe(false);
   });
   it('covers every refusal that leaves the reviewed request unsent and re-quotable (including the fee codes production hit)', () => {
     for (const code of ['ROUTE_CHANGED', 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', 'ROUTER_FEES_CHANGED_REVIEW_REQUIRED', 'UNIVERSAL_L1_FEES_CHANGED_REVIEW_REQUIRED',
