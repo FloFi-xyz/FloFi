@@ -31,6 +31,8 @@
  *                    refund or charge) — charged minus refunded, never negative, never above the signed cap. Those transfers are the fee, not
  *                    step legs; any other owner outflow is still RECONCILIATION_UNEXPECTED_OWNER_OUTFLOW. Gas: the paymaster fronted
  *                    `actualGasCost` in native units and the owner paid it back in USDC (`GasPaidFact.paidInToken`, never `sponsored`).
+ *                    Review (C1): a reconciled user operation returns its own segment of the bundle as its receipt (never the whole bundle), so a
+ *                    Circle-paid batch that carries an Across deposit is matched to its delivery exactly as a wallet batch is.
  */
 import { erc4337 } from '@defi-workflow-engine/reference-compiler';
 import type { ChainTransport } from '../delegation/chains.ts';
@@ -50,7 +52,10 @@ export type StepFacts = { readonly stepIndex: number; readonly spent: readonly {
 export type GroupReconciliation =
   | { readonly status: 'PENDING' }
   | { readonly status: 'RECONCILED'; readonly steps: readonly StepFacts[]; readonly gasPaid: GasPaidFact; readonly transactions: readonly string[]; readonly blockNumber: string | null;
-      /** Wallet batches: each receipt's block and logs, re-read from the chain (a bridge's deposit is identified from them). */
+      /**
+       * Wallet batches: each receipt's block and logs, re-read from the chain (a bridge's deposit is identified from them). A sponsored batch or
+       * a user operation: its bundle transaction's block with this operation's own logs only.
+       */
       readonly receipts?: readonly ReconciledReceipt[];
       /** ADR-0009: the sponsored operation's hash, when the paymaster paid. */ readonly sponsoredOperation?: string }
   | { readonly status: 'REVERTED' | 'MISMATCH'; readonly code: string; readonly gasPaid: GasPaidFact | null; readonly transactions: readonly string[]; readonly sponsoredOperation?: string };
@@ -279,5 +284,9 @@ export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupC
   if (!event.success) return { status: 'REVERTED', code: 'USER_OPERATION_REVERTED', gasPaid, transactions: [transactionHash] };
   const attributed = attributeLegs(group, fee?.ok ? fee.legs : own);
   if (!attributed.ok) return { status: 'MISMATCH', code: attributed.code, gasPaid, transactions: [transactionHash] };
-  return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions: [transactionHash], blockNumber: r.blockNumber ?? null };
+  // ADR-0010 review (C1): the reconciled receipt carries this operation's own logs only, as the sponsored path's does — a bridge's delivery
+  // (`bridge-delivery.ts`) is matched to THIS operation's deposit, never to another sender's FundsDeposited in the same bundle.
+  return { status: 'RECONCILED', steps: attributed.steps, gasPaid, transactions: [transactionHash], blockNumber: r.blockNumber ?? null,
+    receipts: [{ transactionHash: transactionHash.toLowerCase(), blockNumber: String(r.blockNumber ?? ''), blockHash: String(r.blockHash ?? '').toLowerCase(),
+      logs: own.map(l => ({ address: l.address, topics: [...l.topics], data: l.data })) }] };
 }

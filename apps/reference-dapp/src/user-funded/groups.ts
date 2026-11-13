@@ -909,9 +909,13 @@ function circleReconciliationOf(prepared: Prepared): CircleReconciliation | null
 }
 /** The EntryPoint a prepared operation was signed for: a Circle-paid one names its own; FloFi's owner-paid operations are v0.7. */
 const entryPointOf = (prepared: Prepared): string => circleFactsOf(prepared)?.entryPoint ?? erc4337.ENTRY_POINT_V0_7;
-/** What the chain shows of a user operation, as the group's outcome: only a reverted operation FAILED; a mismatch it did not revert is UNMATCHED. */
+/**
+ * What the chain shows of a user operation, as the group's outcome: only a reverted operation FAILED; a mismatch it did not revert is UNMATCHED.
+ * ADR-0010 review (C1): a reconciled operation keeps its own-logs receipt (a Circle-paid group may carry an Across deposit, whose delivery is
+ * matched from it).
+ */
 const userOperationOutcome = (r: Awaited<ReturnType<typeof reconcileUserOperation>>): Reconciled => r.status === 'PENDING' ? r
-  : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions }
+  : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...r.receipts ? { receipts: r.receipts } : {} }
   : { status: r.status === 'REVERTED' ? 'FAILED' : 'UNMATCHED', code: r.code, gasPaid: r.gasPaid, transactions: r.transactions };
 /** Resend refusals that decide nothing about the operation (the bundler, the fee market, a pause, beta access): retried on a later pass. */
 const RESEND_RETRYABLE: ReadonlySet<string> = new Set(['USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'USER_OPERATION_NONCE_INVALID',
