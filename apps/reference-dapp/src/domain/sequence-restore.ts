@@ -15,16 +15,19 @@ import type { Workflow } from './initial-workflow';
 /**
  * Runtimes whose durable record can be read back by run id alone (the Swap → Supply composition's runtimes among them). P0 hotfix (execution
  * continuity): the certified Router too, so a reload after Swap → Bridge re-proves the bridge from its reconciled record instead of offering it
- * again (its reader asks each Router network for the run id; a record it cannot read withholds the step, never offers it as new).
+ * again (its reader asks each Router network for the run id; a record it cannot read withholds the step, never offers it as new). P0 hotfix
+ * (2026-11-13, FIX 2): the universal Router too — a reconciled Swap → universal Bridge reloaded after the bridge settled re-proves the bridge from
+ * its own record (verdict, workflow, owner, proven `received`) instead of making it the current step again.
  */
-export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap', 'router']);
+export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap', 'router', 'universal']);
 export const SEQUENCE_RUN_STORAGE_KEY = 'flofi:sequence-run:v1:';
 export type StoredCompletion = { readonly nodeId: string; readonly node: string; readonly kind: string; readonly runKey: string; readonly received: string | null };
-/** Reads a runtime's durable record by its run id (null when it cannot be read). */
-export type RecordReader = (kind: string, runKey: string) => Promise<unknown>;
+/** Reads a runtime's durable record by its run id (null when it cannot be read); `sourceChain` is the step's input chain when known. */
+export type RecordReader = (kind: string, runKey: string, sourceChain?: string | null) => Promise<unknown>;
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const RUN_KEY = /^[A-Za-z0-9._:-]{8,160}$/;
+const sameEcosystem = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === 'string' && a.split(':')[0] === b.split(':')[0];
 /** The pointers worth re-proving: well-formed, in order, from a runtime whose record can be read back. */
 export function storedCompletions(value: unknown, workflowId: string): readonly StoredCompletion[] {
   if (!isObject(value) || value.workflowId !== workflowId || !Array.isArray(value.completed)) return [];
@@ -39,7 +42,7 @@ export function storedCompletions(value: unknown, workflowId: string): readonly 
 /** A runtime's durable record is final, reconciled and is the run of this workflow's node. */
 export function completedByRecord(kind: string, record: unknown, workflowId: string, nodeId: string): boolean {
   if (!isObject(record)) return false;
-  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : (kind === 'supply' || kind === 'solana-swap' || kind === 'router') && record.verdict === 'RECONCILED';
+  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : ['supply', 'solana-swap', 'router', 'universal'].includes(kind) && record.verdict === 'RECONCILED';
   const workflow = isObject(record.workflow) ? record.workflow : isObject(record.review) && isObject(record.review.workflow) ? record.review.workflow : null;
   return final && Boolean(workflow) && workflow!.workflowId === workflowId && Array.isArray(workflow!.nodes) &&
     workflow!.nodes.some(node => isObject(node) && node.nodeId === nodeId);
@@ -49,7 +52,10 @@ export function ownerByRecord(kind: string, record: unknown): string | null {
   if (!isObject(record)) return null;
   const value = kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
     : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner
-    : kind === 'router' ? record.owner : null;
+    : kind === 'router' ? record.owner
+    // A universal route's owner deposited on the source chain; across ecosystems the funds land with another wallet, so it names none.
+    : kind === 'universal' && isObject(record.review) && isObject(record.review.route) && sameEcosystem(record.review.route.sourceChain, record.review.route.destinationChain)
+      ? record.owner : null;
   return typeof value === 'string' && value ? /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value : null;
 }
 /**
@@ -65,7 +71,7 @@ export async function proveCompletions(stored: readonly StoredCompletion[], work
     const step = sequence.steps[index], node = step && workflow.nodes.find(candidate => candidate.nodeId === step.nodeId);
     if (!step || !node || step.nodeId !== item.nodeId || stepNodeKey(node) !== item.node) break;
     let record: unknown;
-    try { record = await read(item.kind, item.runKey); } catch { return { proven, unreadable: true }; }
+    try { record = await read(item.kind, item.runKey, step.input?.chainId ?? null); } catch { return { proven, unreadable: true }; }
     if (record === null || record === undefined) return { proven, unreadable: true };
     if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) break;
     const received = deliveredByRecord(item.kind, record, step.output), owner = ownerByRecord(item.kind, record);
