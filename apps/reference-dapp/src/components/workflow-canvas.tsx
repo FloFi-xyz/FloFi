@@ -37,7 +37,7 @@ import { PanelRevealer, PanelRevealProvider } from './canvas-panel-reveal';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardDestination, type CardRecipient, type ComposerCardData } from './composer-card';
 import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
-import { resolvedAddress, useDestinationWallets } from '../state/destination-wallets';
+import { localizedProvider, resolvedAddress, useDestinationWallets } from '../state/destination-wallets';
 import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, invertCanvasBridgeNetworks, type CanvasBridgeNetworks, universalCanvasNetworks } from '../domain/canvas-action-setup';
 import { universalCanvasPair, universalKeyOfCanvasLabel, universalFeaturedAssets, universalBridgeDetails, resolveUniversalAsset, defaultUniversalInputAsset, UNIVERSAL_CANVAS_LABEL } from '../domain/universal-bridge-authoring';
 import { ActionIcon } from './action-icon';
@@ -708,6 +708,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     // BUILD-FLOFI-MAINNET-EXEC-002: a mainnet Bridge card's destination wallet, under its networks. Across ecosystems the owner's wallet of the
     // destination ecosystem fills it (session, then FloFi account, then Credentials; several: the owner chooses); within one ecosystem it is the
     // signing wallet. A typed address must belong to the destination network. '' keeps the automatic destination.
+    // Review round 2: FloFi's own fallback wallet name ("Browser wallet") is shown in the reader's language.
     const destinationField = (id: string, networks: CanvasBridgeNetworks, canonical: string): CardDestination | undefined => {
       const sourceKey = universalKeyOfCanvasLabel(networks.source), destinationKey = universalKeyOfCanvasLabel(networks.destination);
       if (environment !== 'mainnet' || !sourceKey || !destinationKey || sourceKey === destinationKey) return undefined;
@@ -717,14 +718,14 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       const tiers = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved]
         .filter(entry => entry.ecosystem === ecosystem && checkDestinationAddress(destinationKey, entry.address).ok);
       const candidates = tiers.filter((entry, index) => tiers.findIndex(other => (ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index)
-        .map(entry => ({ address: entry.address, label: destinationLabel(destinationKey, entry) }));
+        .map(entry => ({ address: entry.address, label: destinationLabel(destinationKey, localizedProvider(entry, tr)) }));
       const session = destinations.inventory.session.find(entry => entry.ecosystem === ecosystem) ?? null;
       const auto = cross ? resolution.kind === 'RESOLVED' ? resolution.wallet : null : session;
       const typed = recipientInputs[id], value = typed ?? canonical;
       const check = value.trim() ? checkDestinationAddress(destinationKey, value) : null;
       const status: CardDestination['status'] = check ? check.ok ? 'valid' : check.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'wrong-ecosystem' : 'invalid'
         : !cross || resolution.kind === 'RESOLVED' ? 'valid' : resolution.kind === 'CHOOSE' ? 'choose' : 'required';
-      return { network, value, auto: auto ? destinationLabel(destinationKey, auto) : null, autoAddress: auto?.address ?? null, candidates, status,
+      return { network, value, auto: auto ? destinationLabel(destinationKey, localizedProvider(auto, tr)) : null, autoAddress: auto?.address ?? null, candidates, status,
         placeholder: ecosystem === 'solana' ? 'Solana address' : 'Address (0x…)', changed: typed !== undefined, onChange: (next: string) => editCanvasRecipient?.(id, next) };
     };
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.

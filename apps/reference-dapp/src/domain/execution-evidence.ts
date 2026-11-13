@@ -205,8 +205,13 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.verdict === 'RECONCILED' && record.destination?.final) amount('destination', 'Actual received', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol, route.expectedOutput);
       if (record.destination && record.verdict !== 'RECONCILED') amount('destination', 'Destination amount observed · awaiting reconciliation', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol);
       if (record.refund) amount('destination', 'Verified refund', record.refund.amount, route.inputToken.decimals, route.inputToken.symbol);
-      if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN') allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);
-      if (!record.attempts.some(a => a.step === 'DEPOSIT')) op('DEPOSIT').note = 'The source deposit has not been requested. A confirmed approval can still have network costs and an open allowance.';
+      // BUILD-FLOFI-MAINNET-EXEC-002 review round 2: an unwrapping route (its source calls unwrap WETH to ETH and approve nothing) grants no token
+      // allowance, so it shows no allowance facts and its pending-deposit note speaks of the unwrap, never of an approval or an open allowance.
+      const unwrapping = review.source.ecosystem === 'EVM' && review.source.calls.some(call => call.purpose === 'UNWRAP') && !review.source.calls.some(call => call.purpose === 'APPROVAL');
+      if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN' && !unwrapping) allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);
+      if (!record.attempts.some(a => a.step === 'DEPOSIT')) op('DEPOSIT').note = unwrapping
+        ? 'The source deposit has not been requested. A confirmed unwrap can still have network costs; its ETH stays in your wallet.'
+        : 'The source deposit has not been requested. A confirmed approval can still have network costs and an open allowance.';
       if (record.observation) {
         detail('Last execution check', record.observation.checkedAt); detail('Observation reason', record.observation.reason);
         op(record.source ? 'destination' : record.attempts.at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);

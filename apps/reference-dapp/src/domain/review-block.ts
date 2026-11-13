@@ -13,7 +13,10 @@ export type ReviewBlockView = {
   readonly steps: readonly ReviewBlockText[];
   /** The workflow's final asset and its signed minimum (a bridge's exact delivery), or "quoted when due". */
   readonly minimum: ReviewBlockText | null;
-  /** The maximum network fee of the prepared requests; `partial` when a later request is quoted only when it is due. */
+  /**
+   * The maximum network fee the owner's wallet may pay for the prepared requests ("+ later requests" when a later one is quoted only when due).
+   * A request whose fee FloFi must sponsor (REQUIRED) is not counted; an OFFERED one is.
+   */
   readonly fee: ReviewBlockText | null;
   /** One sentence per token approval in the prepared request ("Uniswap uses up to 2 USDC"); a fallback sentence when none is known. */
   readonly permissions: readonly ReviewBlockText[];
@@ -86,9 +89,14 @@ export function reviewBlockView(review: EditorExecutionReview): ReviewBlockView 
   const minimum = !last ? null : received ? text('{0}', [amount(received, 'down')], fullOf([received], 'down'))
     : ['swap', 'bridge'].includes(last.action) ? text('Quoted when this step becomes due') : null;
   // The fee: the prepared requests' ceilings, summed (every one is paid in ETH on the EVM networks this path batches).
-  const priced = review.groups.filter(g => g.fee), total = priced.reduce((sum, g) => sum + BigInt(g.fee!.maxWei), 0n);
-  const fee = priced.length === 0 ? text('Quoted when each request is due')
-    : priced.length < review.groups.length ? text('{0} + later requests, quoted when due', [ethUp(total)]) : text('{0}', [ethUp(total)]);
+  // BUILD-FLOFI-MAINNET-EXEC-002 review round 2 (ADR-0009): a request whose fee FloFi must sponsor (REQUIRED: nothing is sent unless the wallet
+  // takes the sponsored fee) costs the owner no network fee, so its ceiling is not in "Network fee, at most". An OFFERED one stays: the wallet
+  // pays it when it cannot take the sponsorship (never understated).
+  const owner = review.groups.filter(g => g.fee?.sponsorship !== 'REQUIRED'), sponsored = owner.length < review.groups.length;
+  const priced = owner.filter(g => g.fee), total = priced.reduce((sum, g) => sum + BigInt(g.fee!.maxWei), 0n);
+  const fee = owner.length === 0 ? text('None from your wallet: FloFi offers to pay it')
+    : priced.length === 0 ? text(sponsored ? 'Later requests, quoted when due' : 'Quoted when each request is due')
+    : priced.length < owner.length ? text('{0} + later requests, quoted when due', [ethUp(total)]) : text('{0}', [ethUp(total)]);
   // Token permissions: each step whose prepared calls include an approval lets its protocol spend exactly the step's amount.
   const prepared = review.groups.filter(g => g.calls);
   const approving = [...new Set(prepared.flatMap(g => g.calls!.filter(c => c.kind === 'ERC20_APPROVE').map(c => c.step)))].sort((a, b) => a - b);

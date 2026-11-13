@@ -25,7 +25,7 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   'at most {0}': 'no máximo {0}',
   '≈ {0} · at most {1}': '≈ {0} · no máximo {1}',
   'Permission': 'Permissão',
-  'Reviewed after step {0}': 'Revisada após a etapa {0}',
+  'Reviewed after step {0}': 'Será revisada após a etapa {0}',
   // Bridge destination wallet.
   'Destination wallet': 'Carteira de destino',
   'Automatic: {0}': 'Automática: {0}',
@@ -39,12 +39,12 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   'This address is for another kind of network. Enter an address of the destination network.': 'Este endereço é de outro tipo de rede. Informe um endereço da rede de destino.',
   'Enter a valid address for the destination network.': 'Informe um endereço válido da rede de destino.',
   // WETH paid as native ETH (Relay order paid in ETH).
-  'Unwrap': 'Desembrulhar',
-  'Unwrap transaction': 'Transação de desembrulho',
-  'Unwrap {0} to ETH': 'Desembrulhar {0} em ETH',
-  'Unwrap WETH to ETH': 'Desembrulhar WETH em ETH',
+  'Unwrap': 'Conversão',
+  'Unwrap transaction': 'Transação de conversão',
+  'Unwrap {0} to ETH': 'Converter {0} em ETH',
+  'Unwrap WETH to ETH': 'Converter WETH em ETH',
   'The provider is paid in ETH: your WETH is first unwrapped 1:1 into ETH in your wallet (its own wallet request), then deposited. A refund, if any, arrives as ETH.':
-    'O provedor recebe em ETH: o seu WETH é primeiro desembrulhado 1:1 em ETH na sua carteira (um pedido próprio na carteira) e depois depositado. Um eventual reembolso chega em ETH.',
+    'O provedor recebe em ETH: o seu WETH é primeiro convertido 1:1 em ETH na sua carteira (um pedido próprio na carteira) e depois depositado. Um eventual reembolso chega em ETH.',
   // BUILD-FLOFI-MAINNET-EXEC-002 — network-fee sponsorship (ADR-0009)
   'Your wallet does not support sponsored network fees on this network, and your balance there cannot pay them, so FloFi did not ask your wallet. Add native gas to this wallet, or use a wallet that supports sponsored fees, then try again.':
     'Sua carteira não oferece suporte a taxas de rede patrocinadas nesta rede, e seu saldo nela não cobre essas taxas, então a FloFi não fez o pedido à sua carteira. Adicione gás nativo a esta carteira ou use uma carteira com suporte a taxas patrocinadas e tente de novo.',
@@ -53,10 +53,10 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   'Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above':
     'Taxa de rede patrocinada: a FloFi se oferece para pagá-la quando sua carteira oferecer suporte; caso contrário, sua carteira paga a estimativa acima',
   'Your wallet pays every network fee, unless FloFi offers to sponsor a step\'s fee and your wallet supports it. FloFi never advances or reimburses gas.':
-    'Sua carteira paga todas as taxas de rede, a menos que a FloFi se ofereça para patrocinar a taxa de uma etapa e sua carteira ofereça suporte. A FloFi nunca adianta nem reembolsa gas.',
-  'Gas paid by FloFi: {0}': 'Gas pago pela FloFi: {0}',
-  'FloFi offers to sponsor a network fee below; every other fee is paid by your wallet. FloFi never advances or reimburses gas, and never signs or sends for you.':
-    'A FloFi se oferece para patrocinar uma taxa de rede abaixo; as demais taxas são pagas pela sua carteira. A FloFi nunca adianta nem reembolsa gas, e nunca assina nem envia por você.',
+    'Sua carteira paga todas as taxas de rede, a menos que a FloFi se ofereça para patrocinar a taxa de uma etapa e sua carteira ofereça suporte. A FloFi nunca adianta nem reembolsa gás.',
+  'Gas paid by FloFi: {0}': 'Gás pago pela FloFi: {0}',
+  'FloFi offers to sponsor the network fee marked "Sponsored network fee"; every other fee is paid by your wallet. FloFi never advances or reimburses gas, and never signs or sends for you.':
+    'A FloFi se oferece para patrocinar a taxa de rede marcada como "Taxa de rede patrocinada"; as demais taxas são pagas pela sua carteira. A FloFi nunca adianta nem reembolsa gás, e nunca assina nem envia por você.',
   'Your WETH is already unwrapped to ETH in your wallet, but the provider now quotes this bridge only for WETH. Nothing else was sent; your ETH stays in your wallet. Start a new bridge from ETH, or wrap it again.':
     'Seu WETH já foi convertido em ETH na sua carteira, mas o provedor agora só cota esta ponte para WETH. Nada mais foi enviado; seu ETH continua na sua carteira. Inicie uma nova ponte a partir de ETH ou converta-o de novo em WETH.',
   'The unwrap of your WETH failed on chain. Nothing was bridged; your WETH stays in your wallet.':

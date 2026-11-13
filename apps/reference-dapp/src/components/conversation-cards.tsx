@@ -55,37 +55,66 @@ export function shortAmount(value: string, mode: 'down' | 'up'): string {
 }
 const NETWORK_FEE = /network|gas|execution fee/i;
 /**
- * BUILD-FLOFI-MAINNET-EXEC-002: the compact figures of one step — what is sent, what is expected (≈), the guaranteed minimum, the network fee and,
- * for a bridge or transfer, the destination (shortened; the full address is its title and is listed under Technical details).
+ * BUILD-FLOFI-MAINNET-EXEC-002: the compact network fee — the estimate and the maximum, each summed per asset and shortened up. Review round 2:
+ * `unreadable` says a network-fee amount could not be read (`sumByAsset`); the row then points to Technical details instead of showing a sum
+ * that silently leaves that amount out (which would understate what is paid).
  */
-export function compactNetworkFee(fees: readonly ConversationReview['fees'][number][]): { readonly estimate: string | null; readonly maximum: string | null } {
+export function compactNetworkFee(fees: readonly ConversationReview['fees'][number][]): { readonly estimate: string | null; readonly maximum: string | null; readonly unreadable: boolean } {
   const network = fees.filter(line => NETWORK_FEE.test(line.label));
+  let unreadable = false;
   const sum = (treatment: string) => { const values = network.filter(line => line.treatment === treatment).map(line => line.value);
-    const { sums } = sumByAsset(values); return sums.length ? sums.map(value => shortAmount(value, 'up')).join(' + ') : null; };
-  return { estimate: sum('ADDITIONAL'), maximum: sum('CEILING') };
+    const summed = sumByAsset(values); if (summed.unreadable) unreadable = true;
+    return summed.sums.length ? summed.sums.map(value => shortAmount(value, 'up')).join(' + ') : null; };
+  const estimate = sum('ADDITIONAL'), maximum = sum('CEILING');
+  return { estimate, maximum, unreadable };
 }
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002 review round 2: the step details that stay visible in the compact block (they change what the owner authorizes:
+ * the Aave health factor after the step, a step already completed, how a step is funded and its bound amount, a Solana token's mint). Every
+ * other detail line stays under Technical details. The labels are the simulation projection's own (`simulation-presentation.ts`).
+ */
+export const MATERIAL_STEP_DETAILS: readonly string[] = ['Health factor after', 'Step status', 'Funded by', 'Bound amount', 'Token mint'];
+const materialDetail = (line: { readonly label: string }) => MATERIAL_STEP_DETAILS.includes(line.label);
+/**
+ * A step of the compact Review. `destinationOwned` (optional, review round 2): the step's producer says whether the destination is one of the
+ * owner's own wallets; absent, the card compares it with the wallet it knows (`review.account`), and otherwise shows the address alone.
+ */
+export type CompactReviewStep = ConversationReview['steps'][number] & { readonly destinationOwned?: boolean };
+const sameWallet = (a: string, b: string) => /^0x/i.test(a) && /^0x/i.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b;
+/** Whether a token permission's value already names its token ("Exactly 2 USDC"), so the symbol is not written twice. */
+const namesSymbol = (value: string, symbol: string) => ` ${value.replace(/\s+/g, ' ')} `.includes(` ${symbol} `);
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: the Review the chat presents, in the language FloFi answered in. Every value is the existing simulation and Review
  * projection's own (no quote, price, fee or result is computed here); a value the simulation does not provide is labelled as not provided.
  * BUILD-FLOFI-MAINNET-EXEC-002 (owner request: "the Review in the chat is too long"): the visible part is one short block per step — network and
- * provider, Sends, Receives ≈, Minimum, Network fee, Destination — plus the costs paid on top, token permissions and material warnings. Exact
- * values, every fee line and its treatment, FloFi's fee, the quote expiry, limits, approvals and evidence caveats are under Technical details,
- * closed by default. Nothing material is dropped: amounts are shortened in the safe direction and their full values stay one click away.
+ * provider, Sends, Receives ≈, Minimum, Network fee, Destination (in full), material step details — plus the costs paid on top, FloFi's recorded
+ * fee, token permissions and every warning that is not an evidence caveat. Exact values, every fee line and its treatment, the quote expiry,
+ * limits, approvals and evidence caveats are under Technical details, closed by default. Nothing material is dropped: amounts are shortened in
+ * the safe direction and their full values stay one click away.
  */
 export function ConversationReviewCard({ review, language }: { review: ConversationReview; language: ConversationLanguage }) {
   const t = (value: string, ...parameters: (string | number)[]) => translate(language, value, ...parameters);
   const sequence = review.sequence, simulated = review.steps[0];
   const fee = compactNetworkFee(review.fees), unknownNetwork = review.unknown.some(name => NETWORK_FEE.test(name));
-  const networkFee = fee.estimate && fee.maximum ? t('≈ {0} · at most {1}', fee.estimate, fee.maximum) : fee.estimate ? t('≈ {0}', fee.estimate)
+  // Review round 2: an unreadable network-fee amount is never dropped from a sum: the row points to the exact lines under Technical details.
+  const networkFee = fee.unreadable ? t('See Technical details') : fee.estimate && fee.maximum ? t('≈ {0} · at most {1}', fee.estimate, fee.maximum) : fee.estimate ? t('≈ {0}', fee.estimate)
     : fee.maximum ? t('at most {0}', fee.maximum) : unknownNetwork ? t('Not provided by this simulation') : null;
+  // Review round 2: the fee lines are the whole Review's, so a multi-step Review (not a step-by-step sequence) says its network fee once, after
+  // the steps, instead of repeating the same total under every step. A single step (or a sequence's current step) keeps it in its block.
+  const sharedFee = !sequence && review.steps.length > 1 ? networkFee : null, stepFee = sharedFee ? null : networkFee;
   // Costs paid on top of the amount sent that are not the network fee (an account deposit, a provider charge billed separately).
   const onTop = review.fees.filter(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && !NETWORK_FEE.test(line.label));
-  const compact = (step: ConversationReview['steps'][number]) => <dl className="conversation-review-compact">
+  // Review round 2: the full destination (a shortened address invites look-alike mistakes), tagged when it is one of the owner's own wallets.
+  const owned = (step: CompactReviewStep) => step.destinationOwned ?? Boolean(step.destination && review.account && sameWallet(step.destination, review.account));
+  const compact = (step: CompactReviewStep) => <dl className="conversation-review-compact">
     {step.input !== '—' && <div><dt>{t('Sends')}</dt><dd title={step.input}>{shortAmount(t(step.input), 'up')}</dd></div>}
     {step.result && <div><dt>{t('Receives')}</dt><dd title={step.result}>{/^\d/.test(step.result) ? t('≈ {0}', shortAmount(step.result, 'down')) : t(step.result)}</dd></div>}
     {step.minimum && <div><dt>{t('Minimum')}</dt><dd title={step.minimum}>{shortAmount(step.minimum, 'down')}</dd></div>}
-    {networkFee && <div><dt>{t('Network fee')}</dt><dd>{networkFee}</dd></div>}
-    {step.destination && <div><dt>{t('Destination')}</dt><dd title={step.destination}><code>{short(step.destination)}</code></dd></div>}
+    {stepFee && <div><dt>{t('Network fee')}</dt><dd>{stepFee}</dd></div>}
+    {step.destination && <div data-wrap="true" data-destination-owned={owned(step) || undefined}><dt>{t('Destination')}</dt>
+      <dd><code>{step.destination}</code>{owned(step) ? <span className="conversation-review-owned"> · {t('Your wallet')}</span> : null}</dd></div>}
+    {step.details.filter(materialDetail).map(line => <div key={`${line.label}:${line.value}`} data-wrap="true" data-detail={line.label}><dt>{t(line.label)}</dt>
+      <dd>{line.label === 'Token mint' ? <code>{line.value}</code> : t(line.value)}</dd></div>)}
   </dl>;
   // The full figures, as before, for Technical details.
   const details = (step: ConversationReview['steps'][number]) => <dl className="conversation-review-figures">
@@ -104,8 +133,9 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
   const costs = review.fees.filter(line => line.treatment !== 'COMPONENT' && line.treatment !== 'OBLIGATION'), parts = review.fees.filter(line => line.treatment === 'COMPONENT');
   const total = review.totals.additional.length ? review.totals.additional.join(' + ') + (review.totals.ceilings.length ? ` · ${t('network fee up to {0}', review.totals.ceilings.join(' + '))}` : '')
     : review.totals.ceilings.length ? t('Up to {0}', review.totals.ceilings.join(' + ')) : review.unknown.length ? t('Not available from this simulation') : t('None beyond the amount sent');
-  const visibleWarnings = review.warnings.filter(warning => !warning.technical && warning.severity !== 'info');
-  const technicalWarnings = review.warnings.filter(warning => warning.technical || warning.severity === 'info');
+  // Review round 2: only an evidence-limit caveat (`technical`) moves under Technical details; every other warning, of any severity, stays visible.
+  const visibleWarnings = review.warnings.filter(warning => warning.technical !== true);
+  const technicalWarnings = review.warnings.filter(warning => warning.technical === true);
   return <section className="conversation-review" aria-label={t('Workflow review')}>
     {/* BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence lists every canonical action in order; only the current step is simulated now. */}
     {sequence ? <ol className="conversation-review-steps" aria-label={t('Workflow actions')}>{sequence.steps.map(step => <li key={step.number} data-sequence-state={step.state}>
@@ -120,10 +150,15 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
       {heading(step, step.networks, step.provider)}
       {compact(step)}
     </li>)}</ol>}
-    {(onTop.length > 0 || review.approvals.length > 0) && <dl className="conversation-review-compact conversation-review-extra">
+    {(sharedFee || review.flofiFee.recorded || onTop.length > 0 || review.approvals.length > 0) && <dl className="conversation-review-compact conversation-review-extra">
+      {sharedFee && <div data-shared-fee="true"><dt>{t('Network fee')}</dt><dd>{sharedFee}</dd></div>}
       {onTop.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd title={line.value}>{line.treatment === 'CEILING' ? t('at most {0}', shortAmount(line.value, 'up')) : t('≈ {0}', shortAmount(line.value, 'up'))}</dd></div>)}
-      {/* A token permission is material: always visible, exact amount and spender. */}
-      {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.spender}`} data-permission="true"><dt>{t('Permission')}</dt><dd>{t(approval.value)} {approval.symbol} → {t(approval.spender)}</dd></div>)}
+      {/* Review round 2: FloFi's own fee, when this route records it, is a visible line; its note and the whole breakdown stay under Technical details. */}
+      {review.flofiFee.recorded && <div data-flofi-fee="obligation"><dt>{t('FloFi fee')}</dt><dd title={review.flofiFee.value}>{t(shortAmount(review.flofiFee.value, 'up'))}</dd></div>}
+      {/* A token permission is material: always visible, exact amount and spender. Its value already names the token ("Exactly 2 USDC"); the symbol
+          is added only to a value that does not ("Unlimited approval"). */}
+      {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.spender}`} data-permission="true"><dt>{t('Permission')}</dt>
+        <dd>{t(approval.value)}{namesSymbol(approval.value, approval.symbol) ? '' : ` ${approval.symbol}`} → {t(approval.spender)}</dd></div>)}
     </dl>}
     {(visibleWarnings.length > 0 || sequence) && <ul className="conversation-review-warnings" aria-label={t('Risks and warnings')}>
       {sequence && <li data-severity="attention">{t('This workflow runs as {0} separate wallet transactions, one step at a time. If a later step fails or you stop, the earlier steps stay executed and their assets stay in your wallet.', sequence.total)}</li>}

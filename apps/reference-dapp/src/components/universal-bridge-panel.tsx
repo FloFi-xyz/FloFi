@@ -4,7 +4,7 @@ import { BridgeRequoteChanges } from './bridge-requote-changes';
 import { requotedMessage } from '../domain/simulation-presentation';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
-import { useDestinationWallets } from '../state/destination-wallets';
+import { localizedProvider, useDestinationWallets } from '../state/destination-wallets';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeFailureMessage } from '../domain/bridge-failure';
@@ -167,7 +167,10 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
   const destinationChoices = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved]
     .filter((entry, index, all) => entry.ecosystem === destinationEcosystem && all.findIndex(other => other.ecosystem === entry.ecosystem &&
       (entry.ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index);
-  const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null;
+  const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null, destinationMessageId = useId();
+  const destinationMessage = destinationCheck && !destinationCheck.ok ? tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)
+    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? tr('Choose one of your wallets or enter an address.')
+    : !input.recipient && cross && destinationResolution.kind === 'NONE' ? tr('Enter the destination address on {0}.', UNIVERSAL_NETWORKS[input.destination].name) : null;
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -197,14 +200,15 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     </>}
     {/* BUILD-FLOFI-MAINNET-EXEC-002: the destination wallet, filled with the owner's own wallet of the destination ecosystem (session → account →
         Credentials; several: a choice), editable to any public address of the destination network, checked as the server checks it. */}
-    <label>{tr('Destination wallet')}<input aria-label={tr('Universal bridge recipient')} autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
+    {/* Review round 2: the field's accessible name is its visible label; the message under it is its description; with no automatic wallet
+        (several to choose from, or none) the placeholder names the kind of address, never "your connected wallet". */}
+    <label>{tr('Destination wallet')}<input autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
       list={destinationChoices.length ? destinationListId : undefined} title={input.recipient || autoDestination?.address || undefined}
-      aria-invalid={destinationCheck && !destinationCheck.ok || undefined}
-      placeholder={autoDestination ? destinationLabel(input.destination, autoDestination) : tr(cross ? 'Your connected destination wallet' : 'Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
-    {destinationChoices.length > 0 && <datalist id={destinationListId}>{destinationChoices.map(choice => <option key={choice.address} value={choice.address} label={destinationLabel(input.destination, choice)}/>)}</datalist>}
-    {destinationCheck && !destinationCheck.ok ? <small role="status">{tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)}</small>
-      : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? <small role="status">{tr('Choose one of your wallets or enter an address.')}</small>
-      : !input.recipient && cross && destinationResolution.kind === 'NONE' ? <small role="status">{tr('Enter the destination address on {0}.', UNIVERSAL_NETWORKS[input.destination].name)}</small> : null}
+      aria-invalid={destinationCheck && !destinationCheck.ok || undefined} aria-describedby={destinationMessage ? destinationMessageId : undefined}
+      placeholder={autoDestination ? destinationLabel(input.destination, localizedProvider(autoDestination, tr))
+        : cross ? tr(destinationEcosystem === 'solana' ? 'Solana address' : 'Address (0x…)') : tr('Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
+    {destinationChoices.length > 0 && <datalist id={destinationListId}>{destinationChoices.map(choice => <option key={choice.address} value={choice.address} label={destinationLabel(input.destination, localizedProvider(choice, tr))}/>)}</datalist>}
+    {destinationMessage && <small id={destinationMessageId} role="status">{destinationMessage}</small>}
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}

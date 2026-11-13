@@ -175,6 +175,9 @@
 .conversation-review .conversation-review-compact code{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px}
 .conversation-review .conversation-review-extra{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
 .conversation-review .conversation-review-extra [data-permission] dd{white-space:normal}
+/* Review round 2: the full destination address and material step details wrap instead of being cut. */
+.conversation-review .conversation-review-compact [data-wrap] dd{white-space:normal;overflow-wrap:anywhere}
+.conversation-review .conversation-review-owned{color:var(--muted)}
 .conversation-review .conversation-review-warnings{margin-top:6px;font-size:12.5px}
 .conversation-review .conversation-review-technical{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
 .conversation-review .conversation-review-technical>summary{cursor:pointer;color:var(--muted);font-size:12.5px}
@@ -186,3 +189,9 @@
 .composer-destination .composer-destination-note{color:var(--muted);font-size:10.5px;line-height:1.3;overflow-wrap:anywhere}
 .composer-destination .composer-destination-auto{color:var(--ink)}
 .composer-destination .composer-recipient-input::placeholder{color:var(--muted)}
+/* Review round 2: several wallets of the destination ecosystem are offered as visible buttons that fill the field. */
+.composer-destination .composer-destination-choices{display:flex;flex-direction:column;gap:3px;min-width:0}
+.composer-destination .composer-destination-choice{min-height:23px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink);font-size:10.5px;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+.composer-destination .composer-destination-choice:hover{border-color:var(--accent-line);background:var(--blue-soft)}
+.composer-destination .composer-destination-choice:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media(pointer:coarse){.composer-destination .composer-destination-choice{min-height:44px}}

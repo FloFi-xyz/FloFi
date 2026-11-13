@@ -188,6 +188,9 @@
   .build-canvas-head .canvas-head-icon,.canvas-selection-toolbar button,.canvas-navigator button,.canvas-navigator .canvas-navigator-step{width:44px;height:44px;min-height:44px}
   .workflow-more-menu [role="menuitem"],.composer-adjust,.editor-overview-toggle{min-height:44px}
   .copilot .chat-form .chat-send{width:44px;height:44px;min-height:44px}
+  /* BUILD-FLOFI-MAINNET-EXEC-002 review round 2: the editor title's New workflow and rename controls keep 44 px targets on any touch screen width. */
+  .build-canvas-head .canvas-name .workflow-new{width:44px;height:44px}
+  .build-canvas-head .canvas-name .workflow-rename{min-height:44px}
   .copilot .chat-form .chat-input{height:56px}
   /* 16 px keeps mobile browsers from zooming into the field on focus. */
   .copilot .chat-form .chat-input input,:root[data-theme="dark"] .copilot .chat-form .chat-input input{font-size:16px}

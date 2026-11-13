@@ -142,25 +142,43 @@ function RecipientField({ recipient, formId, onCommit, onLeave }: { recipient: C
 export type CardDestination = { network: string; value: string; auto: string | null; autoAddress: string | null;
   candidates: readonly { readonly address: string; readonly label: string }[];
   status: 'valid' | 'choose' | 'required' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void };
-function DestinationField({ destination, onCommit, onLeave }: { destination: CardDestination; onCommit?: (() => void) | undefined;
-  onLeave?: ((event: FocusEvent<HTMLElement>) => void) | undefined }) {
+/**
+ * Review round 2: with several wallets to choose from (`choose`) each one is a visible button that fills the field (the datalist stays as a
+ * typing convenience). A destination drafted on its own (no amount draft, whose own form already says so) shows "Press Enter to apply" and
+ * Cancel (`onCancel`: the card's existing cancel, which clears the recipient draft). `aria-describedby` names only elements that are rendered.
+ */
+export function DestinationField({ destination, onCommit, onLeave, onCancel, pending = false }: { destination: CardDestination; onCommit?: (() => void) | undefined;
+  onLeave?: ((event: FocusEvent<HTMLElement>) => void) | undefined; onCancel?: (() => void) | undefined; pending?: boolean | undefined }) {
   const { t: tr } = useLocale();
-  const id = useId(), list = `${id}-wallets`, note = `${id}-note`;
+  const id = useId(), list = `${id}-wallets`, note = `${id}-note`, hint = `${id}-hint`;
+  const field = useRef<HTMLInputElement>(null);
   const message = destination.status === 'invalid' ? tr('Enter a valid {0} address.', destination.network)
     : destination.status === 'wrong-ecosystem' ? tr('This is not a {0} address.', destination.network)
     : destination.status === 'choose' ? tr('Choose one of your wallets or enter an address.')
     : destination.status === 'required' ? tr('Enter the destination address on {0}.', destination.network) : null;
+  const automatic = !message && !destination.value && destination.auto ? destination.auto : null;
+  const applying = pending && Boolean(onCommit);
+  const describedBy = [message || automatic ? note : null, applying ? hint : null].filter(Boolean).join(' ') || undefined;
+  // Enter applies only from the field itself: on a wallet button or on Cancel it keeps that button's own action. A chosen wallet fills the field
+  // and returns focus to it (focus stays on the card, so leaving does not apply it before the owner presses Enter or leaves the card).
   return <div className="composer-recipient composer-destination nodrag nopan" onClick={event => event.stopPropagation()} onBlur={onLeave}
-    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && onCommit) { event.preventDefault(); onCommit(); } }}>
+    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && onCommit && event.target === field.current) { event.preventDefault(); onCommit(); } }}>
     <label htmlFor={id}>{tr('Destination wallet')}</label>
-    <input id={id} className="composer-recipient-input numeric" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
+    <input ref={field} id={id} className="composer-recipient-input numeric" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
       value={destination.value} placeholder={destination.auto ?? tr(destination.placeholder)} list={destination.candidates.length ? list : undefined}
       title={destination.value || destination.autoAddress || tr('Paste or type the destination wallet address')}
-      aria-invalid={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' || undefined} aria-describedby={message || destination.auto ? note : undefined}
+      aria-invalid={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' || undefined} aria-describedby={describedBy}
       onChange={event => destination.onChange(event.target.value)}/>
     {destination.candidates.length > 0 && <datalist id={list}>{destination.candidates.map(candidate => <option key={candidate.address} value={candidate.address} label={candidate.label}/>)}</datalist>}
     {message ? <span id={note} className={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' ? 'composer-recipient-error' : 'composer-destination-note'} role="status">{message}</span>
-      : !destination.value && destination.auto ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', destination.auto)}</span> : null}
+      : automatic ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', automatic)}</span> : null}
+    {destination.status === 'choose' && destination.candidates.length > 0 && <div className="composer-destination-choices" role="group" aria-label={tr('Your wallets')}>
+      {destination.candidates.map(candidate => <button key={candidate.address} type="button" className="composer-destination-choice" title={candidate.address}
+        onClick={() => { destination.onChange(candidate.address); field.current?.focus(); }}>{candidate.label}</button>)}</div>}
+    {applying && <div className="composer-amount-actions composer-amount-direct">
+      <span id={hint} className="composer-amount-hint">{tr('Press Enter to apply')}</span>
+      {onCancel && <button type="button" className="composer-amount-cancel" onClick={onCancel}>{tr('Cancel')}</button>}
+    </div>}
   </div>;
 }
 
@@ -724,8 +742,11 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}
         onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}/>}
+      {/* Review round 2: a destination drafted alone says how it applies (Enter) and can be cancelled with the card's own cancel, which clears the
+          recipient draft; with an amount draft the amount form already says both. */}
       {!card.inspection && card.destination && <DestinationField destination={card.destination}
-        onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}/>}
+        onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}
+        pending={Boolean(card.destination.changed && !editor?.changed)} onCancel={editor?.onCancel ? () => { setAmountError(null); editor.onCancel!(); } : undefined}/>}
       {!card.inspection && card.supplyProposal && <div className="composer-amount-actions composer-supply-actions nodrag nopan" onClick={event => event.stopPropagation()}>
         <button type="submit" form={card.supplyProposal.formId} className="composer-amount-review" title={card.recipient && card.recipient.status !== 'valid' ? tr('Enter the recipient address.') : undefined}
           disabled={!card.supplyProposal.canReview || card.actionSelection?.valid === false || Boolean(card.recipient && card.recipient.status !== 'valid')}>{tr(card.supplyProposal.reviewLabel ?? 'Review Supply change')}</button>

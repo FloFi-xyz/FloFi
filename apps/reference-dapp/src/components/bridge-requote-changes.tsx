@@ -14,7 +14,9 @@ export function BridgeRequoteChanges({ changes }: { readonly changes: readonly B
     {changes.length === 0 ? <p>{tr('Nothing material changed. Authorize the fresh Review to continue.')}</p>
       : <dl>{changes.map(change => <div key={change.label}>
         <dt>{tr(change.label)}</dt>
-        <dd><span aria-label={tr('Before')}><s>{change.before}</s></span> → <span aria-label={tr('Now')}>{change.after}</span></dd>
+        {/* Review round 2: an aria-label on a plain span is not read; screen readers hear "Before:" and "Now:" as visually hidden text, and
+            the arrow, which only draws the change, is hidden from them. */}
+        <dd><span className="sr-only">{`${tr('Before')}: `}</span><s>{change.before}</s> <span aria-hidden="true">→</span> <span className="sr-only">{`${tr('Now')}: `}</span>{change.after}</dd>
       </div>)}</dl>}
   </section>;
 }

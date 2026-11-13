@@ -51,4 +51,12 @@ describe('UX-002 workflow header automation control', () => {
     expect(css).toMatch(/\.build-canvas-head \.canvas-name\{[^}]*flex:0 0 auto[^}]*margin-left:-8px/);
     expect(css).toMatch(/\.build-canvas-head \.canvas-name \.workflow-rename\{[^}]*margin-left:0;/);
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 review round 2: on any touch screen New workflow is a 44 px target and rename at least 44 px tall; desktop sizes stay', () => {
+    const css = readFileSync(new URL('../app/approved-ux-editor.css', import.meta.url), 'utf8');
+    const coarse = css.slice(css.indexOf('@media(pointer:coarse){'), css.indexOf('@media(max-width:800px){'));
+    expect(coarse).toContain('.build-canvas-head .canvas-name .workflow-new{width:44px;height:44px}');
+    expect(coarse).toContain('.build-canvas-head .canvas-name .workflow-rename{min-height:44px}');
+    expect(css).toMatch(/^\.build-canvas-head \.canvas-name \.workflow-new\{[^}]*width:32px;height:32px/m);
+    expect(css).toMatch(/^\.build-canvas-head \.canvas-name \.workflow-rename\{[^}]*height:36px/m);
+  });
 });

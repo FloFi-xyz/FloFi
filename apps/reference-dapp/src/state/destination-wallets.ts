@@ -37,6 +37,15 @@ function readAccountWallets(key: string, now = Date.now()): Promise<AccountWalle
 
 /** The connected EVM wallet as the caller's wallet store reports it (callers already hold it). */
 export type SessionEvmWallet = { readonly account: string | null; readonly provider?: { readonly name: string } | null } | null | undefined;
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002 review round 2: FloFi's own name for a browser wallet that does not name itself (also "Browser wallet 2" when
+ * several are injected). It is product copy, so a component shows it translated (`localizedProvider`); a wallet's own name is never changed.
+ */
+export const BROWSER_WALLET = 'Browser wallet';
+export function localizedProvider<T extends { readonly providerName: string }>(wallet: T, tr: (key: string) => string): T {
+  const fallback = /^Browser wallet(?: (\d+))?$/.exec(wallet.providerName);
+  return fallback ? { ...wallet, providerName: fallback[1] ? `${tr(BROWSER_WALLET)} ${fallback[1]}` : tr(BROWSER_WALLET) } : wallet;
+}
 export function useDestinationInventory(evm: SessionEvmWallet): DestinationInventory {
   const solana = useOptionalJupiter(), privy = useFloFiPrivy(), credentials = useCredentials();
   const [account, setAccount] = useState<AccountWallets>([]);
@@ -53,7 +62,7 @@ export function useDestinationInventory(evm: SessionEvmWallet): DestinationInven
   const solanaSession = solana?.session?.chain === 'solana:mainnet' ? solana.session : null;
   return useMemo(() => {
     const session: DestinationCandidate[] = [
-      ...evm?.account ? [{ ecosystem: 'evm' as const, address: evm.account, providerName: evm.provider?.name ?? 'Browser wallet', source: 'SESSION' as const }] : [],
+      ...evm?.account ? [{ ecosystem: 'evm' as const, address: evm.account, providerName: evm.provider?.name ?? BROWSER_WALLET, source: 'SESSION' as const }] : [],
       ...solanaSession ? [{ ecosystem: 'solana' as const, address: solanaSession.account.address, providerName: solanaSession.wallet.name, source: 'SESSION' as const }] : []];
     const linked: DestinationCandidate[] = [
       ...(privy?.embedded ?? []).map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address, providerName: 'FloFi Wallet', source: 'ACCOUNT' as const })),
