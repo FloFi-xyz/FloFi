@@ -47,9 +47,9 @@ export function createZeroExHttp(config: { readonly apiUrl: string; readonly api
     if (response.status === 429) fail('ZEROX_PROVIDER_RATE_LIMITED');
     if (response.status < 200 || response.status >= 500 || (response.status >= 300 && response.status < 400)) fail('ZEROX_PROVIDER_HTTP_' + response.status);
     if (Number(response.headers.get('content-length') ?? '0') > MAX_BYTES) fail('ZEROX_PROVIDER_RESPONSE_TOO_LARGE');
-    let text: string;
-    try { text = await response.text(); } catch { return fail('ZEROX_PROVIDER_UNAVAILABLE'); }
-    if (text.length > MAX_BYTES) fail('ZEROX_PROVIDER_RESPONSE_TOO_LARGE');
+    let text: string | null;
+    try { text = await boundedText(response); } catch { return fail('ZEROX_PROVIDER_UNAVAILABLE'); }
+    if (text === null) return fail('ZEROX_PROVIDER_RESPONSE_TOO_LARGE');
     let body: unknown;
     try { body = JSON.parse(text) as unknown; } catch { return fail('ZEROX_PROVIDER_RESPONSE_INVALID'); }
     return { status: response.status, body, rawHash: zeroExRawHash(body) };
@@ -62,4 +62,22 @@ export function createZeroExHttp(config: { readonly apiUrl: string; readonly api
       return exchange(path, {}, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: text }, POST_TIMEOUT_MS);
     },
   };
+}
+/**
+ * The body, read incrementally and never past the cap (like the Kora client's reader): a body without a usable `content-length` (chunked, or a
+ * lying header) is cancelled as soon as it exceeds MAX_BYTES, so 0x (or anything in between) can never make the server buffer more than the cap.
+ * null: too large. Strict UTF-8 (a malformed body fails like an unreadable one).
+ */
+async function boundedText(response: Response): Promise<string | null> {
+  if (!response.body) return '';
+  const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BYTES) { await reader.cancel().catch(() => undefined); return null; }
+    chunks.push(value);
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
 }

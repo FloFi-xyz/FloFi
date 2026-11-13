@@ -21,8 +21,26 @@ export const METATXN_FEATURE = 3n;
 export const NATIVE_TOKEN = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 export const OWNER_OF_SELECTOR = erc7710.selectorOf('ownerOf(uint256)');
 export const PREV_SELECTOR = erc7710.selectorOf('prev(uint128)');
-/** Settler `METATXN_TRANSFER_FROM(address recipient, ((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline) permit)`. */
-export const METATXN_TRANSFER_FROM_SELECTOR = erc7710.selectorOf('METATXN_TRANSFER_FROM(address,((address,uint256),uint256,uint256))');
+/** Permit2 `PermitTransferFrom` as the ABI encodes it: `((address token, uint256 amount) permitted, uint256 nonce, uint256 deadline)`, four static words. */
+const PERMIT_TRANSFER_FROM = '((address,uint256),uint256,uint256)';
+/** Settler `METATXN_TRANSFER_FROM(address recipient, PermitTransferFrom permit)`. */
+export const METATXN_TRANSFER_FROM_SELECTOR = erc7710.selectorOf(`METATXN_TRANSFER_FROM(address,${PERMIT_TRANSFER_FROM})`);
+/**
+ * The witness-aware actions SettlerMetaTxn accepts as the FIRST action (0x-settler `ISettlerActions.sol`, every `METATXN_*` declaration, canonical
+ * signatures): selector → signature. Each one is a VIP action that "should always start with `recipient` address and the `permit` from the taker"
+ * — its first five words are the recipient and the four static words of the taker's Permit2 permit, which FloFi binds to the signed permit.
+ * Which of them a given Settler dispatches is the Settler's business (an action it does not dispatch reverts the trade before anything moves).
+ */
+export const METATXN_FIRST_ACTIONS: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries([
+  `METATXN_TRANSFER_FROM(address,${PERMIT_TRANSFER_FROM})`,
+  `METATXN_RFQ_VIP(address,${PERMIT_TRANSFER_FROM},${PERMIT_TRANSFER_FROM},address,bytes)`,
+  `METATXN_UNISWAPV4_VIP(address,${PERMIT_TRANSFER_FROM},uint8,bool,uint256,uint256,bytes,uint256)`,
+  `METATXN_BALANCERV3_VIP(address,${PERMIT_TRANSFER_FROM},bool,uint256,uint256,bytes,uint256)`,
+  `METATXN_PANCAKE_INFINITY_VIP(address,${PERMIT_TRANSFER_FROM},uint8,bool,uint256,uint256,bytes,uint256)`,
+  `METATXN_UNISWAPV3_VIP(address,${PERMIT_TRANSFER_FROM},bytes,uint256)`,
+  `METATXN_CURVE_TRICRYPTO_VIP(address,${PERMIT_TRANSFER_FROM},uint80,uint256)`,
+  `METATXN_EKUBOV3_VIP(address,${PERMIT_TRANSFER_FROM},bool,uint256,uint256,bytes,uint256)`,
+].map(signature => [erc7710.selectorOf(signature), signature])));
 /** SettlerMetaTxn `executeMetaTxn((address,address,uint256) slippage, bytes[] actions, bytes32 zid, address msgSender, bytes sig)`. */
 export const EXECUTE_METATXN_SELECTOR = erc7710.selectorOf('executeMetaTxn((address,address,uint256),bytes[],bytes32,address,bytes)');
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -144,6 +162,14 @@ export function zeroExErrorCode(status: number, body: unknown): string {
   return name && Object.hasOwn(ERROR_CODES, name) ? ERROR_CODES[name]! : `ZEROX_PROVIDER_HTTP_${status}`;
 }
 
+/**
+ * Whether a read failed because the CALL reverted (an answer about the call), never because the node did not answer. FloFi's production read
+ * client (`public-testnet-rpc.ts`) never passes the node's text on: it throws `PUBLIC_RPC_RESPONSE_INVALID` marked `rpcReverted: true` (JSON-RPC
+ * code 3, or revert text under any code). A raw client's "execution reverted" message is the same answer. Anything else (an outage, a missing
+ * history, a malformed answer) is not a revert and is thrown on.
+ */
+export const callReverted = (cause: unknown): boolean => cause instanceof Error &&
+  ((cause as Error & { readonly rpcReverted?: unknown }).rpcReverted === true || /revert/i.test(cause.message));
 /** The genuine MetaTxn Settler(s), read from 0x's registry on FloFi's own read client at `block`. A revert of `ownerOf(3)` means paused. */
 export async function readGenuineSettlers(rpc: Rpc, block: string): Promise<{ readonly current: string; readonly previous: string | null }> {
   const code = await rpc('eth_getCode', [SETTLER_REGISTRY, block]);
@@ -152,7 +178,8 @@ export async function readGenuineSettlers(rpc: Rpc, block: string): Promise<{ re
   const read = async (selector: string): Promise<string | null> => {
     let answer: unknown;
     try { answer = await rpc('eth_call', [{ to: SETTLER_REGISTRY, data: selector + feature }, block]); }
-    catch (cause) { if (cause instanceof Error && /revert/i.test(cause.message)) return null; throw cause; }
+    // `ownerOf(3)` reverts while the MetaTxn feature is paused; `prev(3)` reverts when there is no previous Settler (outside a dwell period).
+    catch (cause) { if (callReverted(cause)) return null; throw cause; }
     if (typeof answer !== 'string' || !/^0x0{24}[0-9a-fA-F]{40}$/.test(answer)) return fail('ZEROX_SETTLER_UNVERIFIED');
     const settler = '0x' + answer.slice(-40).toLowerCase();
     return /^0x0{40}$/.test(settler) ? null : settler;
@@ -237,12 +264,22 @@ export function verifyGaslessQuote(parsed: ParsedQuote, rawHash: string, request
     fail('ZEROX_TRADE_UNVERIFIABLE');
   if (minimum.toString() !== q.minBuyAmount || minimum > BigInt(q.buyAmount)) fail('ZEROX_QUOTE_MISMATCH');
   if (minimum < slippageFloor) fail('ZEROX_MINIMUM_BELOW_SLIPPAGE');
-  // actions[0] must be METATXN_TRANSFER_FROM of exactly the permit, paid to the Settler (the witness-aware VIP action that authenticates the rest).
+  // actions[0] must be one of the Settler's witness-aware METATXN_* actions (the one that authenticates the rest) whose permit words are exactly
+  // the signed permit: METATXN_TRANSFER_FROM, exactly the permit paid to the Settler; a METATXN_*_VIP, the permit right after its recipient (the
+  // first hop's output target: the Settler, or the next pool under 0x's custody optimisation). Whatever the route, the owner's protection is the
+  // populated slippage struct checked above, which the Settler enforces last (its own balance of the buy token ≥ the minimum, paid to the owner),
+  // and the receipt reconciliation. Anything else is refused.
   const actions = witness.actions;
   if (!Array.isArray(actions) || actions.length < 1 || actions.length > 32) return fail('ZEROX_TRADE_UNVERIFIABLE');
   const first = typeof actions[0] === 'string' ? actions[0].toLowerCase() : '';
   const w = (n: bigint) => n.toString(16).padStart(64, '0'), a = (address: string) => address.slice(2).padStart(64, '0');
-  if (first !== METATXN_TRANSFER_FROM_SELECTOR + a(spender) + a(sellToken) + w(BigInt(request.sellAmount)) + w(nonce) + w(deadline)) fail('ZEROX_TRADE_UNVERIFIABLE');
+  const selector = first.slice(0, 10), recipientWord = first.slice(10, 74), permitWords = first.slice(74, 330);
+  // Whole ABI words after the selector; the recipient an address word, never zero.
+  if (!/^0x[0-9a-f]{8}(?:[0-9a-f]{64}){5,}$/.test(first) || !Object.hasOwn(METATXN_FIRST_ACTIONS, selector) ||
+      permitWords !== a(sellToken) + w(BigInt(request.sellAmount)) + w(nonce) + w(deadline) || !/^0{24}[0-9a-f]{40}$/.test(recipientWord) || /^0{64}$/.test(recipientWord))
+    fail('ZEROX_TRADE_UNVERIFIABLE');
+  if (selector === METATXN_TRANSFER_FROM_SELECTOR ? first.length !== 10 + 5 * 64 || recipientWord !== a(spender) : first.length <= 10 + 5 * 64)
+    fail('ZEROX_TRADE_UNVERIFIABLE');
   // --- the optional gasless approval (EIP-2612 permit of Permit2) ---
   let approval: ZeroExGaslessBinding['approval'] = null;
   if (q.approval) {

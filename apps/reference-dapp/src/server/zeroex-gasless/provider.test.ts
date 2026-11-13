@@ -4,12 +4,13 @@
  * OpenAPI examples (read-only copies) and an in-process fetch double. No request leaves the process.
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { eip712 } from '@defi-workflow-engine/reference-compiler';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { eip712, erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { createZeroExHttp } from './transport.ts';
 import { createZeroExGaslessClient } from './client.ts';
-import { EXECUTE_METATXN_SELECTOR, METATXN_TRANSFER_FROM_SELECTOR, OWNER_OF_SELECTOR, parseGaslessChains, parseGaslessQuote, parseGaslessStatus, PERMIT2,
-  verifyGaslessQuote, zeroExErrorCode, type GaslessCheckContext } from './quote.ts';
+import { EXECUTE_METATXN_SELECTOR, METATXN_FIRST_ACTIONS, METATXN_TRANSFER_FROM_SELECTOR, OWNER_OF_SELECTOR, parseGaslessChains, parseGaslessQuote,
+  parseGaslessStatus, PERMIT2, PREV_SELECTOR, readGenuineSettlers, SETTLER_REGISTRY, verifyGaslessQuote, zeroExErrorCode, type GaslessCheckContext } from './quote.ts';
+import { createBaseSepoliaReadRpc } from '../public-testnet-rpc.ts';
 
 const examples = JSON.parse(readFileSync(new URL('../testdata/zeroex/gasless-official-examples.json', import.meta.url), 'utf8')) as { quote: Record<string, unknown>;
   submitResponse: Record<string, unknown>; status: Record<string, unknown> };
@@ -47,6 +48,20 @@ describe('0x transport: pinned host, bounded, server-side key', () => {
   ])('fails closed (%#) with a closed code', async (respond, code) => {
     const { fetcher } = fetchDouble(respond);
     await expect(createZeroExHttp({ apiUrl: 'https://api.0x.org/', apiKey: KEY }, fetcher).get('/gasless/chains', {})).rejects.toThrow(code);
+  });
+  it('review PI4: reads the body incrementally and stops at the cap (a chunked body with no content-length is never buffered whole)', async () => {
+    let pulled = 0;
+    const chunk = new Uint8Array(65_536).fill(0x20);
+    const endless = () => new Response(new ReadableStream<Uint8Array>({ pull(controller) { pulled++; controller.enqueue(chunk); } }), { status: 200 });
+    const { fetcher } = fetchDouble(endless);
+    await expect(createZeroExHttp({ apiUrl: 'https://api.0x.org/', apiKey: KEY }, fetcher).get('/gasless/chains', {})).rejects.toThrow('ZEROX_PROVIDER_RESPONSE_TOO_LARGE');
+    // 1,000,000 bytes is 16 chunks of 64 KiB: the reader cancels on the first chunk past the cap (the stream may have queued one more).
+    expect(pulled).toBeLessThanOrEqual(18);
+    // A body within the cap, split in chunks, still parses (bytes, not characters, are counted: 'é' is two bytes).
+    const parts = [new TextEncoder().encode('{"chains":[{"chainId":4663,"chainName":"Robinhood é"}],'), new TextEncoder().encode('"zid":"0x1"}')];
+    const split = fetchDouble(() => new Response(new ReadableStream<Uint8Array>({ start(controller) { for (const part of parts) controller.enqueue(part); controller.close(); } }), { status: 200 }));
+    expect((await createZeroExHttp({ apiUrl: 'https://api.0x.org/', apiKey: KEY }, split.fetcher).get('/gasless/chains', {})).body)
+      .toEqual({ chains: [{ chainId: 4663, chainName: 'Robinhood é' }], zid: '0x1' });
   });
   it('returns 0x\'s 4xx envelope to the caller and never echoes the key', async () => {
     const { fetcher } = fetchDouble(() => json(400, { name: 'TOKEN_NOT_SUPPORTED', message: 'no', data: { zid: '0x1', token: PERMIT2 } }));
@@ -162,6 +177,87 @@ describe('the pre-sign checklist on 0x\'s official example (Ethereum, chainId 1)
     ['liquidity is unavailable', () => verify({ liquidityAvailable: false, zid: '0x1' }), 'ZEROX_NO_LIQUIDITY'],
   ])('refuses when %s', (_name, run, code) => {
     expect(run).toThrow(code);
+  });
+
+  // Review PI3: 0x-settler's ISettlerActions.sol — "VIP actions should always start with `recipient` address and the `permit` from the taker".
+  const officialFirst = ((funded as unknown as Trade).trade.eip712.message.slippageAndActions as { actions: string[] }).actions[0]!;
+  const permitWords = officialFirst.slice(74, 330), word = (n: bigint) => n.toString(16).padStart(64, '0');
+  const pool = '0x' + '00'.repeat(12) + '88e6a0c2ddd26feeb64f039a2c41296fcb3f5640';
+  const METATXN_UNISWAPV3_VIP = erc7710.selectorOf('METATXN_UNISWAPV3_VIP(address,((address,uint256),uint256,uint256),bytes,uint256)');
+  /** The taker-submitted `TRANSFER_FROM(recipient, permit, sig)`: not witness-aware, never a MetaTxn first action. */
+  const TRANSFER_FROM = erc7710.selectorOf('TRANSFER_FROM(address,((address,uint256),uint256,uint256),bytes)');
+  /** METATXN_UNISWAPV3_VIP(recipient, permit, bytes path, uint256 amountOutMin), ABI-encoded: 7 head words, then the path. */
+  const uniswapV3Vip = (recipientWord: string, permit = permitWords) => {
+    const path = request.sellToken.slice(2) + '0001f4' + request.buyToken.slice(2), padded = path.padEnd(Math.ceil(path.length / 64) * 64, '0');
+    return METATXN_UNISWAPV3_VIP + recipientWord.slice(2) + permit +
+      word(7n * 32n) + word(292_116_101n) + word(BigInt(path.length / 2)) + padded;
+  };
+  const withFirst = (first: string) => verify(withMessage(m => { (m.slippageAndActions as { actions: string[] }).actions[0] = first; }, true));
+  it('PI3: the selectors are computed from the canonical METATXN_* signatures of ISettlerActions.sol', () => {
+    expect(Object.values(METATXN_FIRST_ACTIONS)).toEqual([
+      'METATXN_TRANSFER_FROM(address,((address,uint256),uint256,uint256))',
+      'METATXN_RFQ_VIP(address,((address,uint256),uint256,uint256),((address,uint256),uint256,uint256),address,bytes)',
+      'METATXN_UNISWAPV4_VIP(address,((address,uint256),uint256,uint256),uint8,bool,uint256,uint256,bytes,uint256)',
+      'METATXN_BALANCERV3_VIP(address,((address,uint256),uint256,uint256),bool,uint256,uint256,bytes,uint256)',
+      'METATXN_PANCAKE_INFINITY_VIP(address,((address,uint256),uint256,uint256),uint8,bool,uint256,uint256,bytes,uint256)',
+      'METATXN_UNISWAPV3_VIP(address,((address,uint256),uint256,uint256),bytes,uint256)',
+      'METATXN_CURVE_TRICRYPTO_VIP(address,((address,uint256),uint256,uint256),uint80,uint256)',
+      'METATXN_EKUBOV3_VIP(address,((address,uint256),uint256,uint256),bool,uint256,uint256,bytes,uint256)']);
+    expect(Object.keys(METATXN_FIRST_ACTIONS)).toContain(METATXN_TRANSFER_FROM_SELECTOR);
+    expect(new Set(Object.keys(METATXN_FIRST_ACTIONS)).size).toBe(8);
+    // The official example's first action is METATXN_TRANSFER_FROM of exactly the permit, paid to the Settler.
+    expect(officialFirst.slice(0, 10)).toBe(METATXN_TRANSFER_FROM_SELECTOR);
+  });
+  it('PI3: accepts METATXN_TRANSFER_FROM of exactly the permit to the Settler, and a VIP first action whose permit words are the signed permit', () => {
+    expect(withFirst(officialFirst).settler).toBe(settler);
+    // A METATXN_UNISWAPV3_VIP straight from the owner's permit into the pool (0x's custody optimisation) is the same authorisation.
+    const binding = withFirst(uniswapV3Vip(pool));
+    expect(binding).toMatchObject({ settler, sellAmount: '300000000', minBuyAmount: '292116101' });
+    expect(withFirst(uniswapV3Vip('0x' + settler.slice(2).padStart(64, '0'))).settler).toBe(settler);
+  });
+  it.each([
+    ['a VIP whose permit amount is not the signed one', () => uniswapV3Vip(pool, permitWords.slice(0, 64) + word(300_000_001n) + permitWords.slice(128))],
+    ['a VIP whose permit token is not the sell token', () => uniswapV3Vip(pool, '0'.repeat(24) + request.buyToken.slice(2) + permitWords.slice(64))],
+    ['a VIP whose permit nonce is not the signed one', () => uniswapV3Vip(pool, permitWords.slice(0, 128) + word(1n) + permitWords.slice(192))],
+    ['a VIP whose permit deadline is not the signed one', () => uniswapV3Vip(pool, permitWords.slice(0, 192) + word(1n))],
+    ['a VIP with a zero recipient', () => uniswapV3Vip('0x' + '0'.repeat(64))],
+    ['a VIP whose recipient word is not an address', () => uniswapV3Vip('0x' + 'f'.repeat(64))],
+    ['a VIP truncated to the permit (no route)', () => uniswapV3Vip(pool).slice(0, 330)],
+    ['a VIP that is not whole ABI words', () => uniswapV3Vip(pool) + 'ab'],
+    ['METATXN_TRANSFER_FROM paid elsewhere than the Settler', () => officialFirst.slice(0, 10) + pool.slice(2) + permitWords],
+    ['METATXN_TRANSFER_FROM with trailing words', () => officialFirst + word(1n)],
+    ['the taker-submitted TRANSFER_FROM (not witness-aware)', () => TRANSFER_FROM + officialFirst.slice(10)],
+    ['an unknown selector with the right permit words', () => '0xdeadbeef' + officialFirst.slice(10)],
+  ])('PI3: refuses %s', (_name, first) => {
+    expect(() => withFirst(first())).toThrow('ZEROX_TRADE_UNVERIFIABLE');
+  });
+});
+
+describe('review PI2: the Settler registry read through FloFi\'s production read client', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const SETTLER = '0x5ce929ddb01804bff35b2f5c77b735bdb094aac8', PREVIOUS = '0x7c39a136ea20b3483e402ea031c1f3c019bab24b';
+  /** A JSON-RPC node behind the real `createBaseSepoliaReadRpc` (global fetch stubbed: nothing leaves the process). */
+  function node(answers: { ownerOf: string | 'revert'; prev: string | 'revert' | 'invalid-params' }) {
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const { method, params } = JSON.parse(String(init.body)) as { method: string; params: [{ to?: string; data?: string } | string, string] };
+      const ok = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), { status: 200 });
+      const error = (code: number, message: string) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code, message } }), { status: 200 });
+      if (method === 'eth_getCode') return ok('0x6080');
+      const data = (params[0] as { data: string }).data, answer = data.startsWith(OWNER_OF_SELECTOR) ? answers.ownerOf : data.startsWith(PREV_SELECTOR) ? answers.prev : 'revert';
+      expect((params[0] as { to: string }).to).toBe(SETTLER_REGISTRY);
+      if (answer === 'revert') return error(3, 'execution reverted');
+      if (answer === 'invalid-params') return error(-32602, 'invalid params');
+      return ok('0x' + answer.slice(2).padStart(64, '0'));
+    });
+    return createBaseSepoliaReadRpc('http://127.0.0.1:9/', ['eth_getCode', 'eth_call']);
+  }
+  it('reads a revert of prev(3) (no dwell period) as no previous Settler', async () => {
+    expect(await readGenuineSettlers(node({ ownerOf: SETTLER, prev: 'revert' }), 'latest')).toEqual({ current: SETTLER, previous: null });
+    expect(await readGenuineSettlers(node({ ownerOf: SETTLER, prev: PREVIOUS }), 'latest')).toEqual({ current: SETTLER, previous: PREVIOUS });
+  });
+  it('reads a revert of ownerOf(3) as the MetaTxn Settler paused, and never takes another node error for a revert', async () => {
+    await expect(readGenuineSettlers(node({ ownerOf: 'revert', prev: PREVIOUS }), 'latest')).rejects.toThrow('ZEROX_SETTLER_PAUSED');
+    await expect(readGenuineSettlers(node({ ownerOf: SETTLER, prev: 'invalid-params' }), 'latest')).rejects.toThrow('PUBLIC_RPC_RESPONSE_INVALID');
   });
 });
 
