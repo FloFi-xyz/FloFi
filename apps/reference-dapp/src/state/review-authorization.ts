@@ -209,6 +209,13 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       authorization.owner = q.ownerReview?.account ?? null;
       authorization.chain = `eip155:${q.chainId}`;
       authorization.limits.push({ label: 'Max spend', value: simulationAmount(q.amountIn, quoteDecimals(q, 'input'), q.inputSymbol)! }, { label: 'Max slippage', value: `${(q.slippageBps / 100).toFixed(2)}%` }, { label: 'Minimum received', value: simulationAmount(q.minimumOut, quoteDecimals(q, 'output'), q.outputSymbol)! });
+      // ADR-0010 §5 (review UX5): a 0x Gasless swap's approval signature is an EIP-2612 permit that SETS Permit2's allowance to its value (which
+      // 0x may make unlimited): it is a token permission the owner authorizes, shown as one (the "no spending cap" wording when unlimited).
+      const zx = q.gas?.mechanism === 'ZEROX_GASLESS_SWAP' ? q.gas.zeroEx : null;
+      if (zx?.approval) {
+        authorization.tokens.push({ address: q.inputToken, chain: authorization.chain, symbol: q.inputSymbol, decimals: quoteDecimals(q, 'input') });
+        authorization.approvals.push({ token: q.inputToken, chain: authorization.chain, spender: zx.permit2, spenderName: 'Permit2', amount: zx.approval.value, kind: 'exact' });
+      }
       break;
     }
     case 'uniswap-pool': {
