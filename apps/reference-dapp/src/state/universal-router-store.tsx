@@ -13,6 +13,7 @@ import { universalBegin, universalDiscover, universalHandoff, universalInfo, uni
   type UniversalRunSummary } from '../app/universal-router-action';
 import { solanaSessionStatus, solanaSignIn, solanaSignInChallenge, walletSessionStatus, walletSignIn, walletSignInChallenge } from '../app/wallet-session-action';
 import { universalBridgeOfWorkflow, type UniversalBridgeDetails } from '../domain/universal-bridge-authoring';
+import { resolvedAddress, useDestinationWallets } from './destination-wallets';
 import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeReviewChange } from '../domain/bridge-review-recovery';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import type { UniversalRecord, UniversalWalletDiagnostic } from '../server/universal-router/types';
@@ -68,7 +69,12 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const destinationEcosystem = details ? UNIVERSAL_NETWORKS[details.destination].ecosystem : null;
   const solanaAccount = solana.session?.chain === 'solana:mainnet' ? solana.session.account.address : null;
   const owner = ecosystem === 'EVM' ? wallet.account : ecosystem === 'SOLANA' ? solanaAccount : null;
-  const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem ? destinationEcosystem === 'EVM' ? wallet.account : solanaAccount : null;
+  // BUILD-FLOFI-MAINNET-EXEC-002: across ecosystems the funds go to the owner's wallet of the destination ecosystem — the one connected in this
+  // session, else the one associated with the FloFi account, else the one saved in Credentials (exactly one per tier; several: the owner chooses
+  // on the card, which writes it as an explicit recipient). The Review binds and shows this exact address.
+  const destinations = useDestinationWallets(wallet);
+  const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem
+    ? resolvedAddress(destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana) : null;
   const latest = useRef(workflow); latest.current = workflow;
   const discoveryScope = JSON.stringify([workflow, owner, destinationWallet]);
   const latestDiscoveryScope = useRef(discoveryScope); latestDiscoveryScope.current = discoveryScope;

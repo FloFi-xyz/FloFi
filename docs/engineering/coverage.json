@@ -334,6 +334,10 @@
       "path": "apps/reference-dapp/src/domain/copilot-mainnet-bridge.test.ts",
       "stage": "unit"
     },
+    "app.domain.destination-wallet": {
+      "path": "apps/reference-dapp/src/domain/destination-wallet.test.ts",
+      "stage": "unit"
+    },
     "app.domain.editor-overview": {
       "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
       "stage": "unit"
@@ -3518,11 +3522,13 @@
         "apps/reference-dapp/src/domain/bridge-failure.ts",
         "apps/reference-dapp/src/domain/bridge-review-recovery.ts",
         "apps/reference-dapp/src/domain/bridge-swap-authoring.ts",
+        "apps/reference-dapp/src/domain/destination-wallet.ts",
         "apps/reference-dapp/src/domain/router-authoring.ts",
         "apps/reference-dapp/src/domain/universal-bridge-authoring.ts"
       ],
       "suites": [
         "app.domain.bridge-requote",
+        "app.domain.destination-wallet",
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
@@ -6517,6 +6523,7 @@
         "apps/reference-dapp/src/state/across-store.tsx",
         "apps/reference-dapp/src/state/bridge-store.tsx",
         "apps/reference-dapp/src/state/bridge-swap-store.tsx",
+        "apps/reference-dapp/src/state/destination-wallets.ts",
         "apps/reference-dapp/src/state/router-store.tsx",
         "apps/reference-dapp/src/state/universal-router-store.tsx"
       ],

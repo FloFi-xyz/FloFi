@@ -6,7 +6,7 @@ import { useLocale } from '../i18n/locale';
 import Image from 'next/image';
 import type { WalletEnvironment } from '../wallet/environment';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
-import {isLendingComposition} from '@defi-workflow-engine/workflow-contracts';
+import {isLendingComposition, UNIVERSAL_NETWORKS} from '@defi-workflow-engine/workflow-contracts';
 import {lendingDetails,lendingCanvasEdges} from '../domain/lending-authoring';
 import {useBuild009Wallet} from '../state/build009-wallet-store';
 import { transferCardLabel, transferDetails } from '../domain/robinhood-transfer-authoring';
@@ -35,7 +35,9 @@ import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { PanelRevealer, PanelRevealProvider } from './canvas-panel-reveal';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
-import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardRecipient, type ComposerCardData } from './composer-card';
+import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardDestination, type CardRecipient, type ComposerCardData } from './composer-card';
+import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
+import { resolvedAddress, useDestinationWallets } from '../state/destination-wallets';
 import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, invertCanvasBridgeNetworks, type CanvasBridgeNetworks, universalCanvasNetworks } from '../domain/canvas-action-setup';
 import { universalCanvasPair, universalKeyOfCanvasLabel, universalFeaturedAssets, universalBridgeDetails, resolveUniversalAsset, defaultUniversalInputAsset, UNIVERSAL_CANVAS_LABEL } from '../domain/universal-bridge-authoring';
 import { ActionIcon } from './action-icon';
@@ -391,6 +393,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
   const workflow: Workflow = state.workflow;
   const wallet=useBuild009Wallet();
+  // BUILD-FLOFI-MAINNET-EXEC-002: the owner's wallets a bridge can deliver to (session, account, Credentials), for each card's destination wallet.
+  const destinations = useDestinationWallets(wallet);
   // BUILD-RH-002: catalog-network assets resolve from the official catalog; load it whenever the Canvas shows an action on that network
   // (BUILD-BASE-001: Robinhood Chain and Base). The hook re-renders the Canvas when any catalog registers.
   const catalog = useNetworkCatalog();
@@ -701,6 +705,26 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     const bridgeInvert = (id: string, networks: CanvasBridgeNetworks): Pick<ComposerCardData, 'onInvertBridge'> => invertCanvasBridgeNetworks(networks) ? {
       onInvertBridge: () => { const reversed = invertCanvasBridgeNetworks(networks); if (reversed) editBridgeNetworks(id, reversed); },
     } : {};
+    // BUILD-FLOFI-MAINNET-EXEC-002: a mainnet Bridge card's destination wallet, under its networks. Across ecosystems the owner's wallet of the
+    // destination ecosystem fills it (session, then FloFi account, then Credentials; several: the owner chooses); within one ecosystem it is the
+    // signing wallet. A typed address must belong to the destination network. '' keeps the automatic destination.
+    const destinationField = (id: string, networks: CanvasBridgeNetworks, canonical: string): CardDestination | undefined => {
+      const sourceKey = universalKeyOfCanvasLabel(networks.source), destinationKey = universalKeyOfCanvasLabel(networks.destination);
+      if (environment !== 'mainnet' || !sourceKey || !destinationKey || sourceKey === destinationKey) return undefined;
+      const ecosystem = destinationEcosystemOf(destinationKey), cross = destinationEcosystemOf(sourceKey) !== ecosystem, network = UNIVERSAL_NETWORKS[destinationKey].name;
+      const resolution = ecosystem === 'evm' ? destinations.evm : destinations.solana;
+      const tiers = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved].filter(entry => entry.ecosystem === ecosystem);
+      const candidates = tiers.filter((entry, index) => tiers.findIndex(other => (ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index)
+        .map(entry => ({ address: entry.address, label: destinationLabel(destinationKey, entry) }));
+      const session = destinations.inventory.session.find(entry => entry.ecosystem === ecosystem) ?? null;
+      const auto = cross ? resolution.kind === 'RESOLVED' ? resolution.wallet : null : session;
+      const typed = recipientInputs[id], value = typed ?? canonical;
+      const check = value.trim() ? checkDestinationAddress(destinationKey, value) : null;
+      const status: CardDestination['status'] = check ? check.ok ? 'valid' : check.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'wrong-ecosystem' : 'invalid'
+        : !cross || resolution.kind === 'RESOLVED' ? 'valid' : resolution.kind === 'CHOOSE' ? 'choose' : 'required';
+      return { network, value, auto: auto ? destinationLabel(destinationKey, auto) : null, autoAddress: auto?.address ?? null, candidates, status,
+        placeholder: ecosystem === 'solana' ? 'Solana address' : 'Address (0x…)', changed: typed !== undefined, onChange: (next: string) => editCanvasRecipient?.(id, next) };
+    };
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.
     const recipientField = (id: string, network: string | undefined, canonical: string | null): CardRecipient | undefined => {
       const policy = network ? recipientPolicy(network) : null;
@@ -740,7 +764,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     position: positions[node.nodeId]!,
     selected: selectedIds.includes(node.nodeId) || selectedId === node.nodeId,
     data: { composer: true, connectable: true, ...(['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? liveQuoteTarget(node.nodeId) : { estimateNodeId: node.nodeId }), estimateOwner: node.chainId.startsWith('solana:') ? estimateOwner : wallet.account,
-      estimateEvmOwner: wallet.account, estimateSolanaOwner: estimateOwner,
+      // BUILD-FLOFI-MAINNET-EXEC-002: a read-only bridge quote to the other ecosystem uses the owner's resolved destination wallet.
+      estimateEvmOwner: wallet.account ?? resolvedAddress(destinations.evm), estimateSolanaOwner: estimateOwner ?? resolvedAddress(destinations.solana),
       contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, settingsOpen: settingsId === node.nodeId, step: index + 1, selected: selectedId === node.nodeId,
       vertical: isLendingComposition(workflow), summary: selectedSummary(composerSummary(workflow, node, context), cryptoSelections[node.nodeId]),
       // The rows read the saved step: hidden while a network, pair or route draft on this card could change them.
@@ -751,12 +776,19 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         summary: { ...composerSummary(workflow, node, context), chain: `${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).source} → ${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).destination}`,
           bridgePair: bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
           amount: `${composerSummary(workflow, node, context).amount.split(' ')[0]} ${bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).split(' → ')[0]}` },
-        ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true), tokenSelection: bridgeTokens(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!), ...bridgeInvert(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!) } : {}),
+        ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true), tokenSelection: bridgeTokens(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!), ...bridgeInvert(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
+          ...(() => { const networks = bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, keys = [universalKeyOfCanvasLabel(networks.source), universalKeyOfCanvasLabel(routerDetails(node)!.destination)];
+            // A 0x recipient of the Router step stays only while the destination stays EVM.
+            const keep = keys[1] && universalKeyOfCanvasLabel(networks.destination) && destinationEcosystemOf(universalKeyOfCanvasLabel(networks.destination)!) === destinationEcosystemOf(keys[1]) ? routerDetails(node)!.recipient : '';
+            const field = destinationField(node.nodeId, networks, keep); return (field ? { destination: field } : {}) as Partial<Pick<ComposerCardData, 'destination'>>; })() } : {}),
       } : {}),
       ...(universalBridgeDetails(node) ? (() => {
         const networks = bridgeNetworkInputs[node.nodeId] ?? universalCanvasNetworks(universalBridgeDetails(node)!);
         return { summary: { ...composerSummary(workflow, node, context), chain: `${networks.source} → ${networks.destination}`, bridgePair: bridgePairLabel(networks), amount: `${amountInputs[node.nodeId] ?? universalBridgeDetails(node)!.amount} ${bridgePairLabel(networks).split(' → ')[0]}` },
-          networkSelection: bridgeSelection(node.nodeId, networks, true), tokenSelection: bridgeTokens(node.nodeId, networks), ...bridgeInvert(node.nodeId, networks) };
+          networkSelection: bridgeSelection(node.nodeId, networks, true), tokenSelection: bridgeTokens(node.nodeId, networks), ...bridgeInvert(node.nodeId, networks),
+          ...(() => { const details = universalBridgeDetails(node)!, key = universalKeyOfCanvasLabel(networks.destination);
+            const keep = key && destinationEcosystemOf(key) === destinationEcosystemOf(details.destination) ? details.recipient : '';
+            const field = canEditCanvasAmount(node, context, workflow) ? destinationField(node.nodeId, networks, keep) : undefined; return (field ? { destination: field } : {}) as Partial<Pick<ComposerCardData, 'destination'>>; })() };
       })() : {}),
       ...(composerSummary(workflow, node, context).action === 'Pool / Liquidity' ? { poolProposal: {
         nodeId: node.nodeId, formId: poolReviewFormId(node.nodeId), canReview: selectedId === node.nodeId,
@@ -781,12 +813,14 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) && reviewedAmountEdit(node) ? { formId: supplyReviewFormId(node.nodeId) } : {}),
         value: amountInputs[node.nodeId] ?? composerSummary(workflow, node, context).amount.split(' ')[0]!,
         changed: amountInputs[node.nodeId] !== undefined,
-        canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && (!routerDetails(node) || bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).valid) && pending?.valid && pending.authoringId === node.nodeId && pending.authoringAmount === actionReviewValue(null, node.nodeId, amountInputs[node.nodeId], bridgeNetworkInputs[node.nodeId], cryptoSelections[node.nodeId], recipientInputs[node.nodeId]) && pending.command.baseRevision === workflow.revision),
+        canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && (!routerDetails(node) || bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true).valid) && pending?.valid && pending.authoringId === node.nodeId && pending.authoringAmount === actionReviewValue(null, node.nodeId, amountInputs[node.nodeId], bridgeNetworkInputs[node.nodeId], cryptoSelections[node.nodeId], recipientInputs[node.nodeId]) && pending.command.baseRevision === workflow.revision),
         onChange: (value: string) => editCanvasAmount(node.nodeId, value),
         onReview: () => reviewCanvasAmount(node.nodeId), onCancel: () => cancelCanvasAmount(node.nodeId),
         onApply: applyProposal, onCommit: () => commitCanvasAmount(node.nodeId),
         blocked: cryptoSelectionOf(node) && !actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid ? 'Choose a network available for the connected wallet.'
-          : routerDetails(node) && !bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).valid ? 'Choose matching networks.' : null,
+          : // BUILD-FLOFI-MAINNET-EXEC-002: a bridge first applied as a Base → Arbitrum USDC Router step and then re-pointed on its card (e.g.
+          // Arbitrum WETH → Solana USDC after a swap) is a valid universal pair on mainnet: judged as the pickers offer it, never "Choose matching networks".
+          routerDetails(node) && !bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true).valid ? 'Choose matching networks.' : null,
       } } : {}) },
     }));
     if (actionSetup) projected.push({ id: actionSetup.id, type: 'workflow', ariaLabel: tr('Step {0}: {1}', projected.length + 1, tr(setupSummary(actionSetup, context).action)),
@@ -797,7 +831,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         summary: setupSummary(actionSetup, context),
         ...(actionSetup.action === 'swap' && actionSetup.stocks && actionSetup.cryptoSelection ? { stocks: stocksData(actionSetup.id, actionSetup.cryptoSelection) } : {}),
         ...(actionSetup.action !== 'bridge' ? { actionSelection: actionSelection(actionSetup.id, actionSetup.cryptoSelection ?? selectCryptoNetwork(actionSetup.action as CryptoAction, actionSetup.action === 'swap' ? context.assets.USDC.asset.chainId === 'eip155:84532' ? 'Base Sepolia' : 'Base' : 'Base Sepolia')) } : {}),
-        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true), tokenSelection: bridgeTokens(actionSetup.id, bridgeSetupNetworks(actionSetup)), ...bridgeInvert(actionSetup.id, bridgeSetupNetworks(actionSetup)) } : {}),
+        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true), tokenSelection: bridgeTokens(actionSetup.id, bridgeSetupNetworks(actionSetup)), ...bridgeInvert(actionSetup.id, bridgeSetupNetworks(actionSetup)),
+          ...(() => { const field = destinationField(actionSetup.id, bridgeSetupNetworks(actionSetup), ''); return (field ? { destination: field } : {}) as Partial<Pick<ComposerCardData, 'destination'>>; })() } : {}),
         ...(actionSetup.action === 'swap' ? { tokenSelection: {
           source: directions.map(direction => inputSymbol(direction)), destination: directions.map(direction => outputSymbol(direction)),
           onSelect: (side: 'source' | 'destination', symbol: string) => {
@@ -821,7 +856,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
             : actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid ? null : 'Choose a network available for the connected wallet.' } } : {}),
       } });
     return projected;
-  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
+  }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(projectedNodes);
   useLayoutEffect(() => {

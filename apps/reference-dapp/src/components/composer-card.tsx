@@ -134,6 +134,36 @@ function RecipientField({ recipient, formId, onCommit, onLeave }: { recipient: C
   </div>;
 }
 
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002: a Bridge card's "Destination wallet", under its networks. Empty = the owner's own wallet of the destination
+ * ecosystem, filled automatically (`auto`: "Solana · Phantom · 8xY…k2P", its full address as the title); several wallets of that ecosystem are
+ * offered to choose from (`candidates`); any public address of the destination network may be typed instead. Only public addresses: never a key.
+ */
+export type CardDestination = { network: string; value: string; auto: string | null; autoAddress: string | null;
+  candidates: readonly { readonly address: string; readonly label: string }[];
+  status: 'valid' | 'choose' | 'required' | 'invalid' | 'wrong-ecosystem'; placeholder: string; changed?: boolean; onChange(value: string): void };
+function DestinationField({ destination, onCommit, onLeave }: { destination: CardDestination; onCommit?: (() => void) | undefined;
+  onLeave?: ((event: FocusEvent<HTMLElement>) => void) | undefined }) {
+  const { t: tr } = useLocale();
+  const id = useId(), list = `${id}-wallets`, note = `${id}-note`;
+  const message = destination.status === 'invalid' ? tr('Enter a valid {0} address.', destination.network)
+    : destination.status === 'wrong-ecosystem' ? tr('This is not a {0} address.', destination.network)
+    : destination.status === 'choose' ? tr('Choose one of your wallets or enter an address.')
+    : destination.status === 'required' ? tr('Enter the destination address on {0}.', destination.network) : null;
+  return <div className="composer-recipient composer-destination nodrag nopan" onClick={event => event.stopPropagation()} onBlur={onLeave}
+    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter' && onCommit) { event.preventDefault(); onCommit(); } }}>
+    <label htmlFor={id}>{tr('Destination wallet')}</label>
+    <input id={id} className="composer-recipient-input numeric" type="text" inputMode="text" autoComplete="off" spellCheck={false} maxLength={128}
+      value={destination.value} placeholder={destination.auto ?? tr(destination.placeholder)} list={destination.candidates.length ? list : undefined}
+      title={destination.value || destination.autoAddress || tr('Paste or type the destination wallet address')}
+      aria-invalid={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' || undefined} aria-describedby={message || destination.auto ? note : undefined}
+      onChange={event => destination.onChange(event.target.value)}/>
+    {destination.candidates.length > 0 && <datalist id={list}>{destination.candidates.map(candidate => <option key={candidate.address} value={candidate.address} label={candidate.label}/>)}</datalist>}
+    {message ? <span id={note} className={destination.status === 'invalid' || destination.status === 'wrong-ecosystem' ? 'composer-recipient-error' : 'composer-destination-note'} role="status">{message}</span>
+      : !destination.value && destination.auto ? <span id={note} className="composer-destination-note composer-destination-auto" title={destination.autoAddress ?? undefined}>{tr('Automatic: {0}', destination.auto)}</span> : null}
+  </div>;
+}
+
 function NetworkBadge({ network }: { network: string }) {
   return <span className="composer-bridge-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>;
 }
@@ -464,6 +494,8 @@ export type ComposerCardData = {
   stocks?: { equity: string; onEquityChange(equity: string): void };
   supplyProposal?: { formId: string; reviewLabel?: string; canReview: boolean; hasProposal: boolean; canApply: boolean; onApply(): void };
   recipient?: CardRecipient;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: a Bridge card's destination wallet (auto-filled, editable). */
+  destination?: CardDestination;
   poolProposal?: { nodeId: string; formId: string; canReview: boolean; canApply: boolean; onApply(): void };
   onOpenSettings?: () => void;
   /** BUILD-FLOFI-CONVERSATIONAL-001: this card's settings popover is open. */
@@ -545,7 +577,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const reviewedByForm = Boolean(editor?.formId && card.supplyProposal);
   const directCommit = Boolean(editor?.onCommit && !reviewedByForm && !card.contextualProposal);
   // P0 workflow execution: a Send's typed recipient is part of the same direct edit as its amount.
-  const drafted = Boolean(editor?.changed || card.recipient?.changed);
+  const drafted = Boolean(editor?.changed || card.recipient?.changed || card.destination?.changed);
   function commitAmount() {
     if (!editor || !drafted) return;
     if (!directCommit) { setAmountError(editor.onReview()); return; }
@@ -560,7 +592,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // P0 workflow execution: a valid amount the owner stopped typing applies by itself after a short pause (no Enter needed), but only when
   // applying it cannot change what the field shows (`CANONICAL_TYPED_AMOUNT`): the owner's text and caret are kept and focus stays in place.
   // Never an edit that drops an earlier step's funding of this one (the card asks for Enter for that change, and says so).
-  const autoValue = directCommit && editor?.changed && editor.autoApply !== false && !card.recipient && !card.funding?.changed
+  const autoValue = directCommit && editor?.changed && editor.autoApply !== false && !card.recipient && !card.destination?.changed && !card.funding?.changed
     && CANONICAL_TYPED_AMOUNT.test(editor.value) ? editor.value : null;
   const commitRef = useRef(commitAmount); commitRef.current = commitAmount;
   useEffect(() => {
@@ -691,6 +723,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         })()
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}
+        onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}/>}
+      {!card.inspection && card.destination && <DestinationField destination={card.destination}
         onCommit={directCommit ? commitAmount : undefined} onLeave={directCommit ? commitOnLeave : undefined}/>}
       {!card.inspection && card.supplyProposal && <div className="composer-amount-actions composer-supply-actions nodrag nopan" onClick={event => event.stopPropagation()}>
         <button type="submit" form={card.supplyProposal.formId} className="composer-amount-review" title={card.recipient && card.recipient.status !== 'valid' ? tr('Enter the recipient address.') : undefined}

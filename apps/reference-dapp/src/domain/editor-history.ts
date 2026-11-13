@@ -208,9 +208,20 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   if (action.type === 'EDIT_CANVAS_RECIPIENT') {
     if (typeof action.recipient !== 'string' || action.recipient.length > 128) return state;
     const setup = state.actionSetup?.id === action.id ? state.actionSetup : null;
+    // BUILD-FLOFI-MAINNET-EXEC-002: a new Bridge card's destination wallet is a draft beside it, applied with the card.
+    if (setup?.action === 'bridge') return state.recipientInputs[action.id] === action.recipient ? state
+      : { ...state, recipientInputs: { ...state.recipientInputs, [action.id]: action.recipient }, future: [] };
     if (setup) return setup.cryptoSelection?.action === 'transfer' && recipientPolicy(setup.cryptoSelection.network).kind === 'ADDRESS' && setup.cryptoRecipient !== action.recipient
       ? { ...state, actionSetup: { ...setup, cryptoRecipient: action.recipient }, future: [] } : state;
     const node = state.editor.workflow.nodes.find(item => item.nodeId === action.id);
+    // BUILD-FLOFI-MAINNET-EXEC-002: an applied Bridge step's destination wallet is drafted like a Send's recipient (with its amount, applied together).
+    const bridge = node ? routerDetails(node) ?? universalBridgeDetails(node) : null;
+    if (node && bridge) {
+      if (!canEditCanvasAmount(node, action.context, state.editor.workflow) || state.recipientInputs[action.id] === action.recipient) return state;
+      return { ...state, recipientInputs: { ...state.recipientInputs, [action.id]: action.recipient },
+        amountInputs: { ...state.amountInputs, [action.id]: state.amountInputs[action.id] ?? bridge.amount },
+        past: state.amountInputs[action.id] === undefined ? [...state.past, snapshot(state)] : state.past, future: [] };
+    }
     const transfer = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
     if (!node || !transfer || !canEditCanvasAmount(node, action.context, state.editor.workflow) ||
       recipientPolicy(state.cryptoSelections[action.id]?.network ?? transfer.network).kind !== 'ADDRESS' || state.recipientInputs[action.id] === action.recipient) return state;
@@ -221,7 +232,8 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   if (action.type === 'REMOVE_ACTION_SETUP') {
     if (!state.actionSetup) return state;
     const layout = pinnedLayout(state.editor.workflow, state.layout, state.actionSetup.id); delete layout[state.actionSetup.id];
-    return { ...state, actionSetup: null, layout, past: [...state.past, snapshot(state)], future: [] };
+    const recipientInputs = { ...state.recipientInputs }; delete recipientInputs[state.actionSetup.id];
+    return { ...state, actionSetup: null, layout, recipientInputs, past: [...state.past, snapshot(state)], future: [] };
   }
   // An external proposal is composed on the initial draft. Only an untouched draft (revision 0) takes that draft's identity, so the
   // applied proposal hashes exactly to the proposal; any authored draft keeps its own identity and stays a mismatch.
@@ -322,10 +334,26 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       const selection = state.cryptoSelections[action.authoringId];
       if (selection && (action.command.type !== 'SET_CRYPTO_ACTION' || JSON.stringify(action.command.input.selection) !== JSON.stringify(selection))) return state;
       const networks = state.bridgeNetworkInputs[action.authoringId];
-      if (networks && (action.command.type !== 'SET_ROUTER_BRIDGE' || action.command.input.source !== networks.source || action.command.input.destination !== networks.destination)) return state;
+      // BUILD-FLOFI-MAINNET-EXEC-002: a network draft applies as the Router command for a certified Router pair, or as exactly the universal bridge
+      // command the card's own drafts produce (e.g. a Base → Arbitrum USDC step re-pointed to Arbitrum WETH → Solana USDC). Before, the universal
+      // command was silently ignored here, so such a card stayed a draft.
+      if (networks && !(action.command.type === 'SET_ROUTER_BRIDGE' && action.command.input.source === networks.source && action.command.input.destination === networks.destination)) {
+        if (action.command.type !== 'SET_UNIVERSAL_BRIDGE') return state;
+        try {
+          if (JSON.stringify(canvasAmountCommand(state.editor, null, state.amountInputs, action.authoringId, action.context, state.bridgeNetworkInputs, state.cryptoSelections, state.recipientInputs))
+            !== JSON.stringify(action.command)) return state;
+        } catch { return state; }
+      }
       // UX-001: an applied Send carries exactly the typed destination, validated for its network.
       const typed = state.recipientInputs[action.authoringId];
-      if (typed !== undefined) {
+      // BUILD-FLOFI-MAINNET-EXEC-002: a Bridge with a drafted destination applies exactly the command its card's drafts produce (recipient included).
+      const bridgeCommand = action.command.type === 'SET_UNIVERSAL_BRIDGE' || action.command.type === 'SET_ROUTER_BRIDGE';
+      if (typed !== undefined && bridgeCommand) {
+        try {
+          if (JSON.stringify(canvasAmountCommand(state.editor, null, state.amountInputs, action.authoringId, action.context, state.bridgeNetworkInputs, state.cryptoSelections, state.recipientInputs))
+            !== JSON.stringify(action.command)) return state;
+        } catch { return state; }
+      } else if (typed !== undefined) {
         if (action.command.type !== 'SET_RH_TRANSFER' && !(action.command.type === 'SET_CRYPTO_ACTION' && action.command.input.selection.action === 'transfer')) return state;
         const check = checkRecipient(action.command.type === 'SET_RH_TRANSFER' ? action.command.input.network : action.command.input.selection.network, typed);
         if (!check.ok || (action.command.input.recipient ?? 'CONNECTED_OWNER') !== check.recipient) return state;
@@ -347,7 +375,8 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     if (!node || !canEditCanvasAmount(node, action.context, state.editor.workflow)) delete amountInputs[id];
   }
   for (const id of Object.keys(bridgeNetworkInputs)) {
-    if (amountInputs[id] === undefined || !editor.workflow.nodes.some(node => node.nodeId === id && routerDetails(node))) delete bridgeNetworkInputs[id];
+    // A network draft belongs to a bridge card: a Router step or (BUILD-FLOFI-MAINNET-EXEC-002) a universal one, whose drafts were dropped here.
+    if (amountInputs[id] === undefined || !editor.workflow.nodes.some(node => node.nodeId === id && (routerDetails(node) || universalBridgeDetails(node)))) delete bridgeNetworkInputs[id];
   }
   for (const id of Object.keys(cryptoSelections)) {
     const node = editor.workflow.nodes.find(node => node.nodeId === id);
@@ -355,7 +384,9 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   }
   for (const id of Object.keys(recipientInputs)) {
     const node = editor.workflow.nodes.find(node => node.nodeId === id);
-    if (amountInputs[id] === undefined || !node || !transferDetails(node as Parameters<typeof transferDetails>[0])) delete recipientInputs[id];
+    // A destination drafted on a still-open Bridge card stays with that card (BUILD-FLOFI-MAINNET-EXEC-002).
+    if (id === state.actionSetup?.id && id !== action.authoringId && state.actionSetup.action === 'bridge') continue;
+    if (amountInputs[id] === undefined || !node || !(transferDetails(node as Parameters<typeof transferDetails>[0]) || routerDetails(node) || universalBridgeDetails(node))) delete recipientInputs[id];
   }
   const actionSetup = state.actionSetup?.id === action.authoringId ? null : state.actionSetup;
   if (editor.workflow === state.editor.workflow && actionSetup === state.actionSetup && Object.keys(amountInputs).length === Object.keys(state.amountInputs).length) return { ...state, editor };

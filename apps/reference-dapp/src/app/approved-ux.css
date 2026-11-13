@@ -182,3 +182,7 @@
 .conversation-review .conversation-review-technical[open]>summary{margin-bottom:6px}
 .conversation-review .conversation-review-technical code{font-size:11.5px;overflow-wrap:anywhere}
 .conversation-review .conversation-review-technical .conversation-review-lines:first-of-type{margin-top:6px!important}
+/* BUILD-FLOFI-MAINNET-EXEC-002: a Bridge card's destination wallet (automatic, or a choice / a typed public address). */
+.composer-destination .composer-destination-note{color:var(--muted);font-size:10.5px;line-height:1.3;overflow-wrap:anywhere}
+.composer-destination .composer-destination-auto{color:var(--ink)}
+.composer-destination .composer-recipient-input::placeholder{color:var(--muted)}

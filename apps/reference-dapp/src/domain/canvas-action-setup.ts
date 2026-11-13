@@ -17,6 +17,8 @@ import { createAuthoredTransfer, transferDetails } from './robinhood-transfer-au
 import { singleAmountProposalTarget } from './composer-presentation';
 import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
 import { checkRecipient } from './recipient-address';
+import { checkDestinationAddress } from './destination-wallet';
+import { UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf, resolveUniversalAsset, universalKeyOfCanvasLabel, UNIVERSAL_CANVAS_LABEL } from './universal-bridge-authoring';
 
@@ -171,8 +173,12 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     if (command.type === 'ADD_SWAP' && setup.action === 'swap' && setup.direction) command = { ...command, direction: setup.direction };
     // Preserve certified routes; a different network or asset pair explicitly authors a new Universal Router proposal.
     const universal = setup.action === 'bridge' ? universalCanvasPair(bridgeSetupNetworks(setup)) : null;
-    if (universal && setup.action === 'bridge') command = { type: 'ADD_UNIVERSAL_BRIDGE', input: universalCanvasInput(universal, setup.amount, bridgeSetupNetworks(setup)), source: 'CANVAS', baseRevision: state.workflow.revision };
-    else if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: routerInputForNetworks(command.input, routerNetworks(bridgeSetupNetworks(setup))) };
+    if (universal && setup.action === 'bridge') command = { type: 'ADD_UNIVERSAL_BRIDGE', input: { ...universalCanvasInput(universal, setup.amount, bridgeSetupNetworks(setup)),
+      recipient: bridgeDestination(universal.destination, recipients[id], '') }, source: 'CANVAS', baseRevision: state.workflow.revision };
+    else if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') {
+      const input = routerInputForNetworks(command.input, routerNetworks(bridgeSetupNetworks(setup))), key = universalKeyOfCanvasLabel(input.destination);
+      command = { ...command, input: { ...input, recipient: key ? bridgeDestination(key, recipients[id], input.recipient) : input.recipient } };
+    }
     }
   }
   else {
@@ -204,9 +210,18 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       : repay ? { ...base, type: 'SET_REPAY', input: { ...repay, amount } }
       : withdraw ? { ...base, type: 'SET_WITHDRAW', input: { ...withdraw, amount } }
       : supply ? { ...base, type: 'SET_SUPPLY', input: { ...supply, amount } }
-      : router && universalCanvasPair(bridgeNetworks[id] ?? router) ? { ...base, type: 'SET_UNIVERSAL_BRIDGE', input: { ...universalCanvasInput(universalCanvasPair(bridgeNetworks[id] ?? router)!, amount, bridgeNetworks[id]), recipient: router.recipient, slippage: router.slippage } }
-      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: routerInputForNetworks({ ...routerInputOf(router), amount }, routerNetworks(bridgeNetworks[id] ?? router)) }
-      : universalBridgeDetails(node) ? { ...base, type: 'SET_UNIVERSAL_BRIDGE', input: { ...universalInputOf(universalBridgeDetails(node)!), ...(bridgeNetworks[id] ? { source: universalKeyOfCanvasLabel(bridgeNetworks[id]!.source)!, destination: universalKeyOfCanvasLabel(bridgeNetworks[id]!.destination)!, inputAsset: bridgeNetworks[id]!.inputAsset!, outputAsset: bridgeNetworks[id]!.outputAsset! } : {}), amount } }
+      // BUILD-FLOFI-MAINNET-EXEC-002: a re-pointed Router card keeps its recipient only within the same ecosystem (a 0x address cannot receive on
+      // Solana); across ecosystems it delivers to the owner's destination wallet unless one is typed on the card (`bridgeDestination`).
+      : router && universalCanvasPair(bridgeNetworks[id] ?? router) ? (() => { const pair = universalCanvasPair(bridgeNetworks[id] ?? router)!;
+        return { ...base, type: 'SET_UNIVERSAL_BRIDGE' as const, input: { ...universalCanvasInput(pair, amount, bridgeNetworks[id]),
+          recipient: bridgeDestination(pair.destination, recipients[id], sameEcosystem(pair.source, pair.destination) ? router.recipient : ''), slippage: router.slippage } }; })()
+      : router ? (() => { const input = routerInputForNetworks({ ...routerInputOf(router), amount }, routerNetworks(bridgeNetworks[id] ?? router)), key = universalKeyOfCanvasLabel(input.destination);
+        return { ...base, type: 'SET_ROUTER_BRIDGE' as const, input: { ...input, recipient: key ? bridgeDestination(key, recipients[id], input.recipient) : input.recipient } }; })()
+      : universalBridgeDetails(node) ? (() => { const details = universalBridgeDetails(node)!, draft = bridgeNetworks[id];
+        const source = draft ? universalKeyOfCanvasLabel(draft.source)! : details.source, destination = draft ? universalKeyOfCanvasLabel(draft.destination)! : details.destination;
+        const kept = UNIVERSAL_NETWORKS[destination].ecosystem === UNIVERSAL_NETWORKS[details.destination].ecosystem && sameEcosystem(source, destination) === sameEcosystem(details.source, details.destination) ? details.recipient : '';
+        return { ...base, type: 'SET_UNIVERSAL_BRIDGE' as const, input: { ...universalInputOf(details), ...(draft ? { source, destination, inputAsset: draft.inputAsset!, outputAsset: draft.outputAsset! } : {}), amount,
+          recipient: bridgeDestination(destination, recipients[id], kept) } }; })()
       : bridge ? { ...base, type: 'SET_BRIDGE', input: { amount, slippageBps: String(bridge.slippageBps) } }
         : { ...base, type: 'SET_SWAP_AMOUNT', amount };
   }
@@ -259,11 +274,28 @@ const KEEP_OR_SETTINGS = 'Your workflow was not changed. Press Cancel to keep th
  * `network`: the card's network name, when it has one (BUILD-BASE-001: a catalog network names its own token list). Every message is a catalog key
  * (`i18n/pt-catalog-reliability.ts`); the one carrying a support reference is the `{0}` template, so its code stays visible in every language.
  */
+const sameEcosystem = (a: UniversalNetworkKey, b: UniversalNetworkKey) => UNIVERSAL_NETWORKS[a].ecosystem === UNIVERSAL_NETWORKS[b].ecosystem;
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002: a bridge's recipient from its card. No typed text keeps `fallback` ('' = the owner's wallet of the destination
+ * ecosystem, resolved and bound at Review); an emptied field returns to that automatic destination; anything else must be an address of the
+ * destination network (`checkDestinationAddress`), or the edit is refused with its code.
+ */
+function bridgeDestination(destination: UniversalNetworkKey, typed: string | undefined, fallback: string): string {
+  if (typed === undefined) return fallback;
+  if (!typed.trim()) return '';
+  const check = checkDestinationAddress(destination, typed);
+  if (!check.ok) throw new Error(check.code);
+  return check.address;
+}
 export function canvasAmountMessage(cause: unknown, network?: string | null) {
   const raw = cause instanceof Error ? cause.message : '';
   // The Universal Router's own asset/network codes carry a `UNIVERSAL_` prefix; they mean the same as the Canvas codes below.
   const code = raw.startsWith('UNIVERSAL_') ? raw.slice('UNIVERSAL_'.length) : raw;
   if (code === 'TRANSFER_RECIPIENT_REQUIRED') return 'Enter the recipient address.';
+  // BUILD-FLOFI-MAINNET-EXEC-002: a bridge's destination wallet typed for its destination network.
+  if (raw === 'DESTINATION_REQUIRED') return 'Enter the destination wallet address.';
+  if (raw === 'DESTINATION_WRONG_ECOSYSTEM') return 'This address is for another kind of network. Enter an address of the destination network.';
+  if (raw === 'DESTINATION_INVALID' || code === 'RECIPIENT_INVALID' || code === 'RECIPIENT_REQUIRED_ACROSS_ECOSYSTEMS') return 'Enter a valid address for the destination network.';
   if (code === 'TRANSFER_RECIPIENT_INVALID') return 'Enter a valid recipient address for this network.';
   if (/AMOUNT|PRECISION/.test(code)) return 'Enter a valid amount greater than 0.';
   if (code === 'ACTION_SELECTION_LOCKED') return 'This step cannot change to another kind of action. Remove it and add the new action instead.';

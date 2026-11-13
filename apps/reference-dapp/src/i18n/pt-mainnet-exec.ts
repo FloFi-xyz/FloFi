@@ -26,4 +26,16 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   '≈ {0} · at most {1}': '≈ {0} · no máximo {1}',
   'Permission': 'Permissão',
   'Reviewed after step {0}': 'Revisada após a etapa {0}',
+  // Bridge destination wallet.
+  'Destination wallet': 'Carteira de destino',
+  'Automatic: {0}': 'Automática: {0}',
+  'Enter a valid {0} address.': 'Informe um endereço válido de {0}.',
+  'This is not a {0} address.': 'Este não é um endereço de {0}.',
+  'Choose one of your wallets or enter an address.': 'Escolha uma das suas carteiras ou informe um endereço.',
+  'Enter the destination address on {0}.': 'Informe o endereço de destino em {0}.',
+  'Solana address': 'Endereço Solana',
+  'Address (0x…)': 'Endereço (0x…)',
+  'Enter the destination wallet address.': 'Informe o endereço da carteira de destino.',
+  'This address is for another kind of network. Enter an address of the destination network.': 'Este endereço é de outro tipo de rede. Informe um endereço da rede de destino.',
+  'Enter a valid address for the destination network.': 'Informe um endereço válido da rede de destino.',
 };
