@@ -19,7 +19,7 @@ describe('EIP-712 hashing of provider-built typed data', () => {
     expect(eip712.hashTypedData(example.eip712)).toBe(example.hash);
   });
   it('hashes the same digest whether or not the payload declares EIP712Domain', () => {
-    const { EIP712Domain: _domain, ...types } = examples.quoteTrade!.eip712.types;
+    const types = Object.fromEntries(Object.entries(examples.quoteTrade!.eip712.types).filter(([name]) => name !== 'EIP712Domain'));
     expect(eip712.hashTypedData({ ...examples.quoteTrade!.eip712, types })).toBe(examples.quoteTrade!.hash);
   });
   it('encodes the Permit2 witness type with its dependencies sorted after the primary type', () => {

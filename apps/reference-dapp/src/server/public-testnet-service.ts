@@ -19,6 +19,15 @@ import { catalogSwapKind, hashArtifactBytes, isCatalogSwapNode, isReferencePairS
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { createFileExecutionStorage, discoverTransferByNonce, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { BASE_SEPOLIA, NATIVE_ETH, ownerBoundSwapReview, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
+import { GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
+import { assertUserFundedSubmission, type GasPaidFact } from '../user-funded/gas-payer.ts';
+import { assertExecutionEnabled } from './execution-guard.ts';
+import { GASLESS_DEADLINE_MARGIN_MS, UNSUBMITTED_GASLESS, gaslessCandidate, gaslessFailureCode, gaslessNeedsObservation, gaslessReceiptSwap,
+  gaslessSettlementShape, gaslessTypedData, gasPaymentOf, nativeCoverage, permit2NonceUsed, verifyGaslessSignatures, type GaslessAttempt, type GaslessRuntime,
+  type QuoteGas } from './zeroex-gasless/swap.ts';
+import { PERMIT2, readGenuineSettlers, type TypedData } from './zeroex-gasless/quote.ts';
+import type { SubmitAnswer } from './zeroex-gasless/client.ts';
+export type { GaslessAttempt, QuoteGas } from './zeroex-gasless/swap.ts';
 export { BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, NATIVE_ETH, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
 
 /**
@@ -65,7 +74,13 @@ export type PublicQuote = { readonly executionId: string; readonly revision: num
    * `conversion` marks a WETH9 wrap/unwrap (exactly 1:1, no pool: `pool` is the WETH9 contract, `fee` 0). Absent on every ERC-20 quote.
    */
   readonly native?: 'INPUT' | 'OUTPUT'; readonly conversion?: 'WRAP' | 'UNWRAP';
-  readonly ownerReview?: SwapOwnerReview };
+  readonly ownerReview?: SwapOwnerReview;
+  /**
+   * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): how the network fee is paid, decided for the owner at Simulate and bound into the
+   * manifest (Robinhood Chain catalog swaps whose runtime offers 0x Gasless). With `ZEROX_GASLESS_SWAP`, `expectedOut`/`minimumOut` are 0x's
+   * amounts net of every fee and `expiresAt` closes before the signed trade's deadline. Absent: the quote was made without an owner, as before.
+   */
+  readonly gas?: QuoteGas };
 export type PublicAttempt = { readonly attemptId: string; readonly executionId: string; readonly step: Step;
   readonly state: 'PREPARED' | 'HASH' | 'REJECTED' | 'UNKNOWN' | 'PENDING' | 'REVERTED' | 'CONFIRMED';
   readonly createdAt: string; readonly submittedAt: string | null; readonly account: string; readonly chainId: SwapProfile['chainId']; readonly environment: 'PUBLIC_TESTNET' | 'MAINNET';
@@ -77,14 +92,21 @@ export type PublicReceipt = { readonly transactionHash: string; readonly status:
   readonly blockHash: string; readonly from: string; readonly to: string; readonly gasUsed: string;
   readonly effectiveGasPrice: string; readonly executionGasCostWei: string; readonly l1FeeWei: string;
   readonly gasCostWei: string; readonly gasPayer: string; readonly nonce: string; readonly value: string;
-  readonly submissionKind: 'DIRECT' | 'DELEGATED_SINGLE'; readonly executionTarget: string;
+  /** ADR-0010: `ZEROX_GASLESS` — 0x's relayer sent the owner-signed trade to the genuine MetaTxn Settler (the relayer paid the ETH fee). */
+  readonly submissionKind: 'DIRECT' | 'DELEGATED_SINGLE' | 'ZEROX_GASLESS'; readonly executionTarget: string;
   readonly delegationDepth: number; readonly outerCalldataDigest: string; readonly executionCalldataDigest: string };
 export type PublicOutcome = { readonly inputSpent: string; readonly outputReceived: string;
   readonly inputAfter: string; readonly outputAfter: string; readonly allowanceAfter: string; readonly nativeAfter: string;
   readonly gasCostWei: string; readonly explorer: string; readonly evidence: EvidenceBundle;
-  readonly evidenceBundleHash: string };
+  readonly evidenceBundleHash: string;
+  /** ADR-0010: who fronted the network fee and what the owner paid for it in a token (a 0x Gasless swap); absent: the owner paid ETH. */
+  readonly gasPaid?: GasPaidFact };
 export type PublicRun = { readonly quote: PublicQuote; readonly workflow: SemanticWorkflow; readonly reviewedManifestHash: string | null;
-  readonly attempts: readonly PublicAttempt[]; readonly outcome: PublicOutcome | null; readonly divergence?: string };
+  readonly attempts: readonly PublicAttempt[]; readonly outcome: PublicOutcome | null; readonly divergence?: string;
+  /** ADR-0010: the run's 0x Gasless attempts (typed-data signatures relayed once to 0x); the wallet-sent `attempts` stay as they are. */
+  readonly gasless?: readonly GaslessAttempt[] };
+/** BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: what a gasless `beginGasless` hands the owner's wallet — exactly the reviewed typed data, in order. */
+export type PublicGaslessBegin = { readonly attempt: GaslessAttempt; readonly approval: TypedData | null; readonly trade: TypedData };
 export type PublicBegin = { readonly attempt: PublicAttempt; readonly tx: Tx };
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
@@ -590,17 +612,24 @@ function assertCanonicalQuote(run: PublicRun): void {
   if (run.quote.revision !== run.workflow.revision || run.quote.workflowHash !==
       hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(run.workflow))))
     fail('WORKFLOW_BINDING_REQUIRES_SIMULATION');
-  if (ownerBoundSwapReview(profileOf(run.quote.chainId))) {
+  // ADR-0010: a quote that binds how its fee is paid (and 0x's trade) is authority only while its manifest is exactly its fields.
+  if (ownerBoundSwapReview(profileOf(run.quote.chainId)) || run.quote.gas) {
     const { manifestHash, ...fields } = run.quote;
     if (manifestHash !== digest(canonical(fields))) fail('QUOTE_BINDING_INVALID');
   }
+  const gas = run.quote.gas;
+  if (gas && (gas.mechanism === 'ZEROX_GASLESS_SWAP' ? !gas.zeroEx || gas.payment.mechanism !== 'ZEROX_GASLESS_SWAP' || gas.zeroEx.taker !== gas.owner ||
+      gas.zeroEx.sellAmount !== run.quote.amountIn || gas.zeroEx.sellToken !== run.quote.inputToken || gas.zeroEx.buyToken !== run.quote.outputToken ||
+      gas.zeroEx.minBuyAmount !== run.quote.minimumOut : gas.zeroEx !== null || gas.payment.mechanism !== 'NATIVE_WALLET_GAS')) fail('QUOTE_BINDING_INVALID');
 }
 export function reviewPublicRun(run: PublicRun, manifestHash: string, now: Date): PublicRun {
   assertCanonicalQuote(run);
   if (ownerBoundSwapReview(profileOf(run.quote.chainId)) && !run.quote.ownerReview) fail('OWNER_SIMULATION_REQUIRED');
   if (run.divergence) fail('RECONCILIATION_MISMATCH');
   if (run.quote.manifestHash !== manifestHash || now.getTime() >= Date.parse(run.quote.expiresAt) ||
-      run.attempts.some(a => a.step === 'swap' || ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state)))
+      run.attempts.some(a => a.step === 'swap' || ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state)) ||
+      // ADR-0010: a gasless trade that was (or may have been) submitted is never reviewed again.
+      (run.gasless ?? []).some(a => !UNSUBMITTED_GASLESS.includes(a.state)))
     fail('REVIEW_EXPIRED');
   return { ...run, reviewedManifestHash: manifestHash };
 }
@@ -694,6 +723,256 @@ export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; r
 }
 export type DurablePublicTestnetService = ReturnType<typeof createDurablePublicTestnetService>;
 
+/**
+ * Canonical inclusion of a receipt before it can become evidence (the same rule as `verifyOwnerSubmission`): a preconfirmed receipt (all-zero
+ * block hash) or a hash that is not the canonical block at that height containing the transaction is not final yet (`RECEIPT_NOT_CANONICAL`).
+ */
+async function canonicalInclusion(rpc: Rpc, raw: Record<string, unknown>, tx: unknown, txHash: string, blockNumber: number): Promise<void> {
+  const receiptBlockHash = hex(raw.blockHash);
+  if (/^0x0{64}$/.test(receiptBlockHash)) fail('RECEIPT_NOT_CANONICAL');
+  const block = await rpc('eth_getBlockByNumber', [blockHex(blockNumber), false]);
+  if (!isObject(block) || typeof block.hash !== 'string' || block.hash.toLowerCase() !== receiptBlockHash || typeof block.number !== 'string' ||
+      Number(quantity(block.number)) !== blockNumber || !Array.isArray(block.transactions) ||
+      !block.transactions.some(entry => (isObject(entry) ? entry.hash : entry) === txHash) ||
+      isObject(tx) && typeof tx.blockHash === 'string' && tx.blockHash.toLowerCase() !== receiptBlockHash) fail('RECEIPT_NOT_CANONICAL');
+}
+
+/**
+ * ADR-0010 §5: 0x Gasless execution of a reviewed Robinhood Chain swap, on the swap service's own persistence (run lease, append-only log,
+ * create-once claims). The owner signs typed data only; FloFi relays the two signatures to 0x once, on the owner's explicit action, after the
+ * attempt and the trade hash were durably recorded; workers only observe (status GET and chain reads).
+ */
+type GaslessDeps = { readonly rpcFor: (profile: SwapProfile) => Rpc; readonly now: () => Date; readonly catalog: CatalogSwapRuntime | undefined;
+  readonly persistence: { readonly save: (run: PublicRun) => Promise<PublicRun>; readonly load: (id: string) => Promise<PublicRun>;
+    readonly locked: Persistence['locked']; readonly claims: Persistence['claims'] };
+  /** The owner-less catalog observation (Stock Token state, catalog identity), and the owner-bound quote a new Review presents. */
+  readonly quote: (workflow: SemanticWorkflow, executionId: string) => Promise<PublicQuote>;
+  readonly quoteFor: (workflow: SemanticWorkflow, executionId: string, owner?: string) => Promise<PublicQuote> };
+function createGaslessExecution({ rpcFor, now, catalog, persistence, quote, quoteFor }: GaslessDeps) {
+  const { save, load, locked, claims } = persistence;
+  const tokenBalance = async (rpc: Rpc, token: string, owner: string, block: string) => BigInt(hex(await rpc('eth_call', [{ to: token, data: balanceData(owner) }, block])));
+  const permit2Allowance = async (rpc: Rpc, token: string, owner: string, block: string) =>
+    BigInt(hex(await rpc('eth_call', [{ to: token, data: callData('0xdd62ed3e', addrWord(owner), addrWord(PERMIT2)) }, block])));
+  const gaslessOf = (run: PublicRun) => {
+    const gas = run.quote.gas;
+    if (!gas || gas.mechanism !== 'ZEROX_GASLESS_SWAP' || !gas.zeroEx) return fail(GAS_ABSTRACTION_CODES.mechanismMismatch);
+    return { gas, binding: gas.zeroEx };
+  };
+  const withGasless = (run: PublicRun, attempt: GaslessAttempt): PublicRun => ({ ...run, gasless: (run.gasless ?? []).some(a => a.attemptId === attempt.attemptId)
+    ? run.gasless!.map(a => a.attemptId === attempt.attemptId ? attempt : a) : [...run.gasless ?? [], attempt] });
+  /**
+   * The new Review a gasless run presents when its reviewed trade can no longer be signed or submitted (deadline, mechanism, Settler, allowance,
+   * a refusal): a fresh quote for the same owner, bound again (it may now be native), saved unreviewed. The reviewed trade never changes in place.
+   */
+  async function renew(run: PublicRun, owner: string, code: string, attempt?: GaslessAttempt): Promise<never> {
+    let next = attempt ? withGasless(run, attempt) : run;
+    try { next = { ...next, quote: await quoteFor(run.workflow, run.quote.executionId, owner) }; } catch { /* the reviewed quote stays, unreviewed */ }
+    await save({ ...next, reviewedManifestHash: null });
+    return fail(code);
+  }
+  /** The reviewed gasless swap is still what the policy picks now, for the same genuine Settler and a plain EOA owner. */
+  async function stillReviewed(run: PublicRun, owner: string, rpc: Rpc, at: string, attempt?: GaslessAttempt): Promise<{ current: string; previous: string | null }> {
+    const { binding } = gaslessOf(run);
+    if ((await swapNativeCoverage(run.quote, owner, rpc, at)).covers !== false) await renew(run, owner, GAS_ABSTRACTION_CODES.changed, attempt);
+    const settlers = await readGenuineSettlers(rpc, at);
+    if (binding.settler !== settlers.current && binding.settler !== settlers.previous) await renew(run, owner, 'QUOTE_CHANGED_REVIEW_REQUIRED', attempt);
+    if (ownerAccountCode(await rpc('eth_getCode', [owner, at])).kind !== 'EOA') fail('ZEROX_OWNER_NOT_EOA');
+    return settlers;
+  }
+  /**
+   * Prepares the owner's typed-data signatures for the reviewed gasless swap: the same gates as `begin` (Review, real-funds opt-in, one owner,
+   * no other swap of this run), a quote window that still leaves the signing margin (else a fresh quote to Review), the Stock Token state, the
+   * policy re-checked now (ETH that arrived makes native gas the choice again: `GAS_MECHANISM_CHANGED_REVIEW_REQUIRED`), the genuine Settler,
+   * the owner's balance and Permit2 allowance. Records a SIGNING attempt; nothing leaves the browser before `submitGasless`.
+   */
+  async function begin(id: string, ownerValue: string): Promise<PublicGaslessBegin> {
+    return locked(id, async () => {
+      let run = await load(id);
+      const owner = address(ownerValue);
+      assertCanonicalQuote(run);
+      if (run.divergence) fail('RECONCILIATION_MISMATCH');
+      const { gas, binding } = gaslessOf(run);
+      if (run.outcome || run.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state)) ||
+          (run.gasless ?? []).some(a => !UNSUBMITTED_GASLESS.includes(a.state))) fail('ATTEMPT_ALREADY_ACTIVE');
+      if (run.attempts.some(a => a.step === 'swap' && a.state !== 'REJECTED')) fail('SWAP_ALREADY_ATTEMPTED');
+      if (run.reviewedManifestHash !== run.quote.manifestHash) fail('REVIEW_REQUIRED');
+      const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
+      if (P.kind !== 'CATALOG' || !catalog?.executionEnabled) fail('OWNER_EXECUTION_NOT_ENABLED');
+      if (owner !== gas.owner || owner !== binding.taker || run.attempts.some(a => a.account !== owner)) fail('OWNER_REVIEW_MISMATCH');
+      // A trade 0x refused is never signed again: its quote is renewed for a new Review.
+      if ((run.gasless ?? []).some(a => a.state === 'REFUSED' && a.tradeHash === binding.trade.hash)) await renew(run, owner, 'QUOTE_EXPIRED_REVIEW_REQUIRED');
+      if (now().getTime() >= Date.parse(run.quote.expiresAt) - SIGNING_MARGIN_MS) await renew(run, owner, 'QUOTE_EXPIRED_REVIEW_REQUIRED');
+      // A corporate action on a Stock Token side changes what the tokens represent: the authority is retired, as on the native path.
+      if (stockState(await quote(run.workflow, id)) !== stockState(run.quote)) await renew(run, owner, 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED');
+      const head = Number(quantity(await rpc('eth_blockNumber', []))), at = blockHex(head);
+      await stillReviewed(run, owner, rpc, at);
+      const amountIn = BigInt(run.quote.amountIn);
+      const [inputBefore, outputBefore, nativeBefore, allowed] = await Promise.all([tokenBalance(rpc, run.quote.inputToken, owner, at),
+        tokenBalance(rpc, run.quote.outputToken, owner, at), rpc('eth_getBalance', [owner, at]).then(quantity), permit2Allowance(rpc, run.quote.inputToken, owner, at)]);
+      if (inputBefore < amountIn) fail('INSUFFICIENT_INPUT');
+      // Without a gasless approval in the reviewed trade, Permit2 must still be allowed the whole sell amount (a new quote would offer one).
+      if (!binding.approval && allowed < amountIn) await renew(run, owner, 'QUOTE_CHANGED_REVIEW_REQUIRED');
+      const index = (run.gasless?.length ?? 0) + 1;
+      if (index > 8) fail('ATTEMPT_LIMIT_REACHED');
+      // An earlier SIGNING attempt that never reached FloFi (a reload, a closed wallet) is superseded: nothing of it was submitted.
+      run = { ...run, gasless: (run.gasless ?? []).map(a => a.state === 'SIGNING' ? { ...a, state: 'ABANDONED' as const } : a) };
+      const attempt: GaslessAttempt = { attemptId: `${id}.gasless.${index}`, executionId: id, state: 'SIGNING', createdAt: now().toISOString(), account: owner,
+        manifestHash: run.quote.manifestHash, tradeHash: binding.trade.hash, approvalHash: binding.approval?.hash ?? null, deadline: binding.trade.deadline,
+        preBlock: head, nativeBefore: nativeBefore.toString(), inputBefore: inputBefore.toString(), outputBefore: outputBefore.toString(), signedAt: null,
+        submittedAt: null, code: null, hint: null, candidates: [], txHash: null, receipt: null, final: false };
+      await save(withGasless(run, attempt));
+      return { attempt, ...gaslessTypedData(binding) };
+    });
+  }
+  /** The owner declined (or abandoned) a typed-data prompt: nothing was signed or submitted. */
+  async function report(id: string, attemptId: string, result: { readonly kind: 'REJECTED' | 'ABANDONED' }): Promise<PublicRun> {
+    return locked(id, async () => {
+      const run = await load(id), attempt = run.gasless?.find(a => a.attemptId === attemptId);
+      if (!attempt || attempt.state !== 'SIGNING' || (result.kind !== 'REJECTED' && result.kind !== 'ABANDONED')) return fail('ATTEMPT_STATE_INVALID');
+      return save(withGasless(run, { ...attempt, state: result.kind }));
+    });
+  }
+  /**
+   * Relays the owner's reviewed typed-data signatures to 0x — once, only on the owner's explicit action. Before anything leaves: the kill switch,
+   * the Review and the trade's deadline, both signatures recovered to the owner for the reviewed digests, the policy and the genuine Settler
+   * again, the S1 token-fee claim (0x's relayer fronts the ETH fee; the owner pays `gasFee` in the swap's own token, never zero), a create-once
+   * claim on the trade hash, and the SUBMITTING record. 0x's answer: accepted (its trade hash must be the reviewed one), already submitted
+   * (observed), a definitive refusal (recorded; a fresh quote for a new Review), or anything else — unknown, observed by trade hash only.
+   */
+  async function submit(id: string, attemptId: string, signatures: { readonly trade: string; readonly approval: string | null }): Promise<PublicRun> {
+    assertExecutionEnabled();
+    return locked(id, async () => {
+      let run = await load(id);
+      assertCanonicalQuote(run);
+      if (run.divergence) fail('RECONCILIATION_MISMATCH');
+      const { binding } = gaslessOf(run), attempt = run.gasless?.at(-1);
+      if (!attempt || attempt.attemptId !== attemptId || attempt.state !== 'SIGNING') return fail('ATTEMPT_STATE_INVALID');
+      if (run.outcome || run.reviewedManifestHash !== run.quote.manifestHash || attempt.manifestHash !== run.quote.manifestHash) fail('REVIEW_REQUIRED');
+      const P = profileOf(run.quote.chainId), rpc = rpcFor(P), owner = attempt.account, client = catalog?.gasless?.client ?? null;
+      if (P.kind !== 'CATALOG' || !catalog?.executionEnabled) fail('OWNER_EXECUTION_NOT_ENABLED');
+      if (!client || !catalog.gasless?.config.enabled) fail('ZEROX_GASLESS_NOT_ENABLED');
+      const abandoned: GaslessAttempt = { ...attempt, state: 'ABANDONED' };
+      if (now().getTime() >= binding.trade.deadline * 1000 - GASLESS_DEADLINE_MARGIN_MS) await renew(run, owner, 'QUOTE_EXPIRED_REVIEW_REQUIRED', abandoned);
+      const parts = verifyGaslessSignatures(binding, owner, signatures);
+      const head = Number(quantity(await rpc('eth_blockNumber', []))), at = blockHex(head);
+      const settlers = await stillReviewed(run, owner, rpc, at, abandoned);
+      // S1 (ADR-0010): the relayer is the genuine Settler the owner signed for; the owner pays a positive fee in a token of this swap.
+      assertUserFundedSubmission({ kind: 'EVM_GASLESS_INTENT', feePayer: binding.settler, ownerWallet: owner, tokenFee: { mechanism: 'ZEROX_GASLESS_SWAP',
+        relayer: binding.settler, pinnedRelayers: [settlers.current, ...settlers.previous ? [settlers.previous] : []], token: binding.gasFee.token, amount: binding.gasFee.amount } });
+      if (!await claims.claim(P.chainId, binding.trade.hash, { id, attemptId })) fail('ZEROX_TRADE_ALREADY_CLAIMED');
+      const at_ = now().toISOString(), submitting: GaslessAttempt = { ...attempt, state: 'SUBMITTING', signedAt: at_, submittedAt: at_ };
+      run = await save(withGasless(run, submitting));
+      let answer: SubmitAnswer;
+      try {
+        assertExecutionEnabled();
+        answer = await client!.submit({ chainId: P.chainId, trade: { type: 'settler_metatransaction', eip712: binding.trade.eip712, signature: parts.trade },
+          ...binding.approval && parts.approval ? { approval: { type: binding.approval.type, eip712: binding.approval.eip712, signature: parts.approval } } : {} });
+      } catch (cause) {
+        // The pause landed between the record and the POST: nothing left FloFi; the trade can only expire (observed to its deadline).
+        if (cause instanceof Error && /^EXECUTION_PAUSE/.test(cause.message)) { await save(withGasless(run, { ...submitting, state: 'UNKNOWN', code: cause.message })); throw cause; }
+        return save(withGasless(run, { ...submitting, state: 'UNKNOWN' }));
+      }
+      if (answer.kind === 'REFUSED') return renew(run, owner, answer.code, { ...submitting, state: 'REFUSED', code: answer.code });
+      if (answer.tradeHash !== null && answer.tradeHash !== binding.trade.hash)
+        return save({ ...withGasless(run, { ...submitting, state: 'UNKNOWN' }), divergence: 'ZEROX_SUBMITTED_TRADE_MISMATCH', reviewedManifestHash: null });
+      return save(withGasless(run, { ...submitting, state: 'SUBMITTED' }));
+    });
+  }
+  /**
+   * Observes a submitted gasless trade (under the run lease, from `observe`). 0x's status is a hint: it names candidate settlement transactions
+   * and a failure reason; the chain decides — a candidate's canonical receipt, sent by a relayer to the reviewed genuine Settler, whose logs debit
+   * the owner exactly the signed sell amount and credit at least the signed minimum of the buy token, consuming the trade's Permit2 nonce, with
+   * the owner's ETH untouched. A failure is final only once the signed deadline passed with the Permit2 nonce unused (it can never execute).
+   */
+  async function observe(run: PublicRun, attempt: GaslessAttempt): Promise<PublicRun> {
+    const { binding } = gaslessOf(run), P = profileOf(run.quote.chainId), rpc = rpcFor(P), client = catalog?.gasless?.client ?? null;
+    if (P.kind !== 'CATALOG') fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+    if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+    let hint: Awaited<ReturnType<NonNullable<typeof client>['status']>> | undefined;
+    try { hint = client ? await client.status(attempt.tradeHash, P.chainId) : undefined; } catch { hint = undefined; }
+    const candidates = [...new Set([...attempt.candidates, ...hint?.transactions ?? []])].slice(0, 16);
+    let current: GaslessAttempt = { ...attempt, candidates, ...hint !== undefined ? { hint: { status: hint ? hint.status : 'not_found', reason: hint?.reason ?? null,
+      checkedAt: now().toISOString() } } : {} };
+    let reverted: string | null = null;
+    for (const txHash of candidates) {
+      const raw = await rpc('eth_getTransactionReceipt', [txHash]);
+      if (raw === null) continue;
+      if (!isObject(raw)) fail('RECEIPT_INVALID');
+      const tx = await rpc('eth_getTransactionByHash', [txHash]);
+      const { relayer } = gaslessSettlementShape(tx, P.chainId, txHash, binding);
+      const status = Number(quantity(raw.status)), blockNumber = Number(quantity(raw.blockNumber));
+      if (![0, 1].includes(status) || !Number.isSafeInteger(blockNumber) || hex(raw.transactionHash) !== txHash || address(raw.from) !== relayer ||
+          address(raw.to) !== binding.settler || !HASH.test(hex(raw.blockHash))) fail('RECEIPT_INVALID');
+      try { await canonicalInclusion(rpc, raw, tx, txHash, blockNumber); }
+      catch (cause) { if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL') continue; throw cause; }
+      if (status === 0) { reverted = txHash; continue; }
+      return reconcile(run, current, binding, P, rpc, raw, tx, txHash, relayer, blockNumber);
+    }
+    const deadlinePassed = now().getTime() > (binding.trade.deadline + 60) * 1000;
+    // Past the deadline the signature can only have run if its Permit2 nonce was consumed: a consumed nonce no candidate proves is never guessed.
+    if (deadlinePassed && await permit2NonceUsed(rpc, attempt.account, binding.trade.nonce, 'latest')) return save({ ...withGasless(run, current), divergence: 'ZEROX_SETTLEMENT_UNTRACED' });
+    const failedCode = reverted ? 'ZEROX_TRADE_REVERTED' : hint?.status === 'failed' ? gaslessFailureCode(hint.reason) : deadlinePassed ? 'ZEROX_TRADE_NOT_EXECUTED' : null;
+    if (failedCode) current = { ...current, state: 'FAILED', code: failedCode, txHash: reverted ?? current.txHash, final: deadlinePassed };
+    else if (hint) current = { ...current, state: 'PENDING' };
+    return save(withGasless(run, current));
+  }
+  async function reconcile(run: PublicRun, attempt: GaslessAttempt, binding: ZeroExBinding, P: CatalogSwapProfile, rpc: Rpc, raw: Record<string, unknown>,
+    tx: unknown, txHash: string, relayer: string, blockNumber: number): Promise<PublicRun> {
+    const id = run.quote.executionId, at = blockHex(blockNumber), before = blockHex(blockNumber - 1), owner = attempt.account;
+    // The owner's side, from this transaction's own logs; the signature it consumed (unused just before it); the owner paid no ETH.
+    const { spent, received } = gaslessReceiptSwap(raw.logs, binding);
+    if (!await permit2NonceUsed(rpc, owner, binding.trade.nonce, at) || await permit2NonceUsed(rpc, owner, binding.trade.nonce, before)) fail('TRANSACTION_MISMATCH');
+    const [nativeBefore, nativeAfter, inputAfter, outputAfter, allowanceAfter] = await Promise.all([rpc('eth_getBalance', [owner, before]).then(quantity),
+      rpc('eth_getBalance', [owner, at]).then(quantity), tokenBalance(rpc, run.quote.inputToken, owner, at), tokenBalance(rpc, run.quote.outputToken, owner, at),
+      permit2Allowance(rpc, run.quote.inputToken, owner, at)]);
+    if (nativeAfter < nativeBefore) fail('RECONCILIATION_MISMATCH');
+    // One settlement transaction is credited to one attempt.
+    if (!await claims.claim(P.chainId, txHash, { id, attemptId: attempt.attemptId })) return save({ ...withGasless(run, attempt), divergence: 'ZEROX_SETTLEMENT_ALREADY_CLAIMED' });
+    const record = tx as Record<string, unknown>, gasUsed = quantity(raw.gasUsed), effectiveGasPrice = quantity(raw.effectiveGasPrice), relayerCost = gasUsed * effectiveGasPrice;
+    const receipt: PublicReceipt = { transactionHash: txHash, status: 1, blockNumber, blockHash: hex(raw.blockHash), from: relayer, to: binding.settler,
+      gasUsed: gasUsed.toString(), effectiveGasPrice: effectiveGasPrice.toString(), executionGasCostWei: relayerCost.toString(), l1FeeWei: '0',
+      gasCostWei: relayerCost.toString(), gasPayer: relayer, nonce: quantity(record.nonce).toString(), value: '0', submissionKind: 'ZEROX_GASLESS',
+      executionTarget: binding.settler, delegationDepth: 0, outerCalldataDigest: digest(hex(record.input)), executionCalldataDigest: digest(binding.trade.hash) };
+    run = withGasless(run, { ...attempt, state: 'CONFIRMED', txHash, receipt, code: null, final: true });
+    const explorer = explorerUrl(txHash, P), journalHeadHash = digest(canonical(run)), receiptHash = digest(canonical(raw));
+    const sideOf = (token: string) => token === run.quote.inputToken ? 'input' as const : 'output' as const;
+    const assetOf = (token: string) => ({ chainId: P.chainRef, address: token, decimals: quoteDecimals(run.quote, sideOf(token)) });
+    const inputAsset = assetOf(run.quote.inputToken), outputAsset = assetOf(run.quote.outputToken);
+    // The owner's fees are in the swap's own tokens (0x's gas fee, and 0x's fee when it charges one), never ETH.
+    const reconciliation = { balances: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
+      allowances: [{ asset: inputAsset, amount: allowanceAfter.toString() }], debt: [], positions: [],
+      fees: [{ asset: assetOf(binding.gasFee.token), amount: binding.gasFee.amount }, ...binding.zeroExFee ? [{ asset: assetOf(binding.zeroExFee.token), amount: binding.zeroExFee.amount }] : []],
+      residualAssets: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
+      ownership: [{ chainId: P.chainRef, address: owner }],
+      limitations: ['OWNER_WALLET_MAINNET', ...run.quote.provenance === 'MOCKED' ? ['MOCKED_LOOPBACK_CHAIN'] : [], 'NETWORK_FEE_PAID_IN_TOKEN_VIA_0X_GASLESS',
+        'GASLESS_SETTLEMENT_RECEIPT_RECONCILED', 'TOKEN_FEE_AMOUNT_FROM_SIGNED_QUOTE'] };
+    const bundle = validateArtifact('evidence-bundle', { schemaVersion: '1.0.0', evidenceBundleId: id + '.evidence', version: 1, supersedes: null,
+      semanticWorkflowHash: run.quote.workflowHash, artifactSetHash: digest(canonical(run.quote)),
+      simulationHash: digest(canonical({ expected: run.quote.expectedOut, minimum: run.quote.minimumOut, trade: binding.trade.hash, quote: binding.rawHash })),
+      policyHash: digest(canonical({ amount: run.quote.amountIn, slippageBps: run.quote.slippageBps, mechanism: 'ZEROX_GASLESS_SWAP' })),
+      manifestHash: run.quote.manifestHash, executionPlanHash: digest(canonical({ trade: binding.trade.hash, approval: binding.approval?.hash ?? null })),
+      journalHeadHash, observedAt: now().toISOString(),
+      // A MOCKED loopback run is never labeled as public execution.
+      environment: run.quote.provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' : 'MOCKED', outcome: 'RECONCILED',
+      receipts: [{ receiptId: txHash, contentHash: receiptHash }], differences: [], reconciliation,
+      evidence: [{ evidenceId: 'public-explorer', kind: 'EXTERNAL_REFERENCE', contentHash: digest(explorer) },
+        { evidenceId: 'transaction-readback', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(tx)) },
+        { evidenceId: 'zeroex-gasless-quote', kind: 'EXTERNAL_REFERENCE', contentHash: binding.rawHash },
+        { evidenceId: 'balance-reconciliation', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(reconciliation)) }],
+    }) as EvidenceBundle;
+    const evidenceBundleHash = hashArtifactBytes('evidence-bundle', new TextEncoder().encode(JSON.stringify(bundle)));
+    const feeSide = sideOf(binding.gasFee.token);
+    const gasPaid: GasPaidFact = { payer: relayer, amount: relayerCost.toString(), unit: 'wei', source: 'RECEIPT', paidInToken: { mechanism: 'ZEROX_GASLESS_SWAP',
+      token: binding.gasFee.token, symbol: feeSide === 'input' ? run.quote.inputSymbol : run.quote.outputSymbol, decimals: quoteDecimals(run.quote, feeSide),
+      amount: binding.gasFee.amount, payee: binding.settler } };
+    const outcome: PublicOutcome = { inputSpent: spent.toString(), outputReceived: received.toString(), inputAfter: inputAfter.toString(), outputAfter: outputAfter.toString(),
+      allowanceAfter: allowanceAfter.toString(), nativeAfter: nativeAfter.toString(), gasCostWei: '0', explorer, evidence: bundle, evidenceBundleHash, gasPaid };
+    return save({ ...run, outcome });
+  }
+  return { begin, report, submit, observe };
+}
+type ZeroExBinding = NonNullable<QuoteGas['zeroEx']>;
+
 /** The read client of a profile's chain; a chain without a configured client is not enabled and fails closed. */
 function rpcRouter(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>> }): (profile: SwapProfile) => Rpc {
   return profile => config.rpcs?.[profile.chainRef] ?? (profile.chainRef === BASE_SEPOLIA.chainRef ? config.rpc : fail('PUBLIC_NETWORK_UNAVAILABLE'));
@@ -718,7 +997,22 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
           run.attempts.some(a => !run.quote.ownerReview || a.account !== run.quote.ownerReview.account || a.tx.chainId !== profile.chainHex ||
             a.tx.from !== a.account || a.calldataDigest !== digest(a.tx.data))) fail('PUBLIC_STORE_CORRUPT');
     }
+    // ADR-0010: gasless attempts — bounded, this run's, the trade they signed and its settlement never change once recorded.
+    const gasless = run.gasless ?? [];
+    if (!Array.isArray(gasless) || gasless.length > 8 || new Set(gasless.map(a => isObject(a) ? a.attemptId : null)).size !== gasless.length ||
+        gasless.some((a, i) => !isObject(a) || a.executionId !== run.quote.executionId || a.attemptId !== `${run.quote.executionId}.gasless.${i + 1}` ||
+          !ADDRESS.test(String(a.account)) || !HASH.test(String(a.tradeHash)) || (a.txHash !== null && !HASH.test(String(a.txHash))) ||
+          (a.state === 'CONFIRMED') !== (a.receipt !== null) || (a.state === 'CONFIRMED' && run.outcome === null)))
+      fail('PUBLIC_STORE_CORRUPT');
     if (prior) {
+      for (const [index, before] of (prior.gasless ?? []).entries()) {
+        const after = gasless[index];
+        const terminal = ['CONFIRMED', 'REFUSED', 'REJECTED', 'ABANDONED'].includes(before.state) || before.state === 'FAILED' && before.final;
+        if (!after || after.attemptId !== before.attemptId || after.tradeHash !== before.tradeHash || after.approvalHash !== before.approvalHash ||
+            after.account !== before.account || after.deadline !== before.deadline || after.manifestHash !== before.manifestHash || after.preBlock !== before.preBlock ||
+            before.txHash !== null && after.txHash !== before.txHash && before.state !== 'FAILED' || terminal && after.state !== before.state ||
+            before.state !== 'SIGNING' && after.state === 'SIGNING' || before.submittedAt !== null && after.submittedAt !== before.submittedAt) fail('PUBLIC_STORE_CORRUPT');
+      }
       if (run.quote.executionId !== prior.quote.executionId || run.quote.chainId !== prior.quote.chainId || !same(run.workflow, prior.workflow) || run.attempts.length < prior.attempts.length ||
           prior.outcome && !same(run.outcome, prior.outcome) || prior.divergence && run.divergence !== prior.divergence) fail('PUBLIC_STORE_CORRUPT');
       for (const [index, before] of prior.attempts.entries()) {
@@ -741,7 +1035,12 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
 export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promise<AssetCatalog>; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED';
   readonly codePins?: Partial<Record<string, string>>; readonly executionEnabled: boolean;
   /** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: verified immutable deployment facts; undefined = the process cache on public mainnets, null = off. */
-  readonly deploymentFacts?: DeploymentFactCache | null };
+  readonly deploymentFacts?: DeploymentFactCache | null;
+  /**
+   * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): the network's token-paid alternative to native gas for owner-bound quotes — 0x Gasless
+   * on Robinhood Chain. Absent: quotes never evaluate how the fee is paid (every other network, and tests that do not opt in).
+   */
+  readonly gasless?: GaslessRuntime };
 /**
  * BUILD-FLOFI-EXECUTION-PERFORMANCE-001: positive verifications of IMMUTABLE deployment facts, remembered per process for a bounded time so a
  * quote does not re-read them through the paced transport on every keystroke and every Review. Only facts the EVM cannot change once true are
@@ -1096,6 +1395,50 @@ function ownerReviewChanged(before: SwapOwnerReview, after: SwapOwnerReview): bo
     (BigInt(before.transaction.maxPriorityFeePerGas ?? '0x0') === 0n && BigInt(after.transaction.maxPriorityFeePerGas ?? '0x0') > 0n);
 }
 
+/**
+ * ADR-0010: the native path's worst case for this owner at `block` — the next wallet transaction(s) the existing Uniswap v3 path needs (a finite
+ * approval of the router when the allowance is short, then the swap, whose gas is then bounded instead of estimated) — and whether the owner's
+ * ETH covers it. A coverage that cannot be read is unknown (never short).
+ */
+async function swapNativeCoverage(q: PublicQuote, owner: string, rpc: Rpc, block: string) {
+  const P = profileOf(q.chainId), amountIn = BigInt(q.amountIn);
+  const allowed = needsAllowance(q) ? BigInt(hex(await rpc('eth_call', [{ to: q.inputToken, data: allowanceData(owner, P) }, block]))) : amountIn;
+  const main = mainCall(q, owner, Math.floor(Date.parse(q.expiresAt) / 1000), P, false), approval = allowed < amountIn;
+  const coverage = await nativeCoverage(rpc, { owner, block, nativeSpend: BigInt(main.value), calls: approval
+    ? [{ to: q.inputToken, data: approveData(amountIn, P), value: '0x0', estimate: true }, { ...main, estimate: false }] : [{ ...main, estimate: true }] });
+  return { ...coverage, approval };
+}
+/**
+ * ADR-0010 §2: how this owner's swap pays its network fee, bound into the quote's manifest. Native gas whenever the owner's ETH covers the
+ * native path's worst case (or the coverage is unknown); 0x Gasless only when ETH is short and 0x proved eligible for exactly this swap; else
+ * native, short, with 0x's closed reason (the Review says what is missing before anything is signed). With 0x, the Review's amounts are 0x's
+ * (net of every fee) and it closes before the signed trade's deadline. Read-only.
+ */
+async function bindSwapGas(q: PublicQuote, ownerValue: string, rpc: Rpc, runtime: CatalogSwapRuntime, now: () => Date): Promise<PublicQuote> {
+  const P = profileOf(q.chainId), owner = address(ownerValue), at = blockHex(q.blockNumber);
+  if (P.kind !== 'CATALOG' || ownerBoundSwapReview(P)) fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+  if (owner === '0x' + '0'.repeat(40)) fail('ADDRESS_INVALID');
+  if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+  const native = await swapNativeCoverage(q, owner, rpc, at);
+  const evaluated = native.covers === false ? await gaslessCandidate(runtime.gasless, rpc, { chainId: P.chainId, owner, block: at,
+    sellToken: q.inputToken, buyToken: q.outputToken, sellAmount: q.amountIn, slippageBps: q.slippageBps, conversion: Boolean(q.conversion), nowMs: now().getTime() }) : null;
+  const selection = selectGasMechanism({ chain: P.chainRef, nativeCovers: native.covers, candidate: evaluated?.candidate ?? null });
+  const zeroEx = selection.mechanism === 'ZEROX_GASLESS_SWAP' ? evaluated?.binding ?? fail('ZEROX_TRADE_UNVERIFIABLE') : null;
+  const sides = { input: { token: q.inputToken, symbol: q.inputSymbol, decimals: quoteDecimals(q, 'input') },
+    output: { token: q.outputToken, symbol: q.outputSymbol, decimals: quoteDecimals(q, 'output') } };
+  const worstCaseWei = native.worstCaseWei === null ? null : native.worstCaseWei.toString();
+  const gas: QuoteGas = { owner, mechanism: selection.mechanism, nativeShort: selection.nativeShort, unavailable: selection.unavailable,
+    native: { balanceWei: native.balanceWei.toString(), worstCaseWei },
+    payment: gasPaymentOf(selection.mechanism, zeroEx, { worstCaseWei, signatures: native.approval ? 2 : 1 }, sides), zeroEx };
+  const { manifestHash, ...fields } = q;
+  if (!HASH.test(manifestHash)) fail('QUOTE_BINDING_INVALID');
+  const bound = { ...fields, gas, ...zeroEx ? { expectedOut: zeroEx.buyAmount, minimumOut: zeroEx.minBuyAmount,
+    expiresAt: new Date(Math.min(Date.parse(q.expiresAt), zeroEx.trade.deadline * 1000 - GASLESS_DEADLINE_MARGIN_MS)).toISOString() } : {} };
+  const head = await rpc('eth_getBlockByNumber', [at, false]);
+  if (!isObject(head) || head.hash !== q.blockHash) fail('QUOTE_BLOCK_REORG');
+  return { ...bound, manifestHash: digest(canonical(bound)) };
+}
+
 /** Shared verified read path. It has no persistence, Review or transaction submission port. */
 export function createPublicSwapQuoteReader(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date = () => new Date(), catalog?: CatalogSwapRuntime) {
   const read = async (rpc: Rpc, to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
@@ -1165,12 +1508,18 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
     return BigInt(await read(rpc, token, allowanceData(owner, profile), block));
   }
   const quote = createPublicSwapQuoteReader(rpcFor, now, catalog);
+  /** ADR-0010: a catalog network whose runtime offers a token-paid alternative evaluates, for a named owner, how the fee is paid. */
+  const gasEvaluated = (profile: SwapProfile) => profile.kind === 'CATALOG' && !ownerBoundSwapReview(profile) && catalog?.gasless !== undefined;
+  async function quoteFor(workflow: SemanticWorkflow, executionId: string, owner?: string): Promise<PublicQuote> {
+    const q = await quote(workflow, executionId, owner), P = profileOf(q.chainId);
+    return owner !== undefined && gasEvaluated(P) ? bindSwapGas(q, owner, rpcFor(P), catalog!, now) : q;
+  }
   async function prepare(workflow: SemanticWorkflow, account?: string): Promise<PublicRun> {
     const node = workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input'), profile = node ? swapProfile(node.chainId) : null;
     // Each service serves one namespace; a workflow for the other kind of network is refused before any read.
     if (!profile || prefixFor(profile) !== idPrefix) fail('PUBLIC_WORKFLOW_UNSUPPORTED');
     const executionId = idPrefix + '-' + randomBytes(12).toString('hex');
-    const q = await quote(workflow, executionId, account);
+    const q = await quoteFor(workflow, executionId, account);
     return save({ quote: q, workflow, reviewedManifestHash: null, attempts: [], outcome: null });
   }
   async function refresh(id: string): Promise<PublicRun> {
@@ -1181,7 +1530,7 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       if (run.outcome || last?.step !== 'approval' || last.state !== 'CONFIRMED' ||
           run.quote.ownerReview && last.nativeAfter === null ||
           run.attempts.some(attempt => attempt.step === 'swap')) fail('QUOTE_REFRESH_NOT_ALLOWED');
-      const fresh = await quote(run.workflow, id, run.quote.ownerReview?.account);
+      const fresh = await quoteFor(run.workflow, id, run.quote.ownerReview?.account ?? run.quote.gas?.owner);
       return save({ ...run, quote: fresh, reviewedManifestHash: null });
     });
   }
@@ -1194,17 +1543,23 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       if (run.outcome || run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(attempt.state))) fail('ATTEMPT_ALREADY_ACTIVE');
       if (run.attempts.some(attempt => attempt.step === 'swap' && attempt.state !== 'REJECTED')) fail('SWAP_ALREADY_ATTEMPTED');
       if (run.reviewedManifestHash !== run.quote.manifestHash) fail('REVIEW_REQUIRED');
+      // ADR-0010: this wallet-sent path is the native one; a Review that bound 0x Gasless is executed by `beginGasless`, and a run whose gasless
+      // trade was (or may have been) submitted never prepares another swap.
+      const reviewedGas = run.quote.gas;
+      if (reviewedGas && reviewedGas.mechanism !== 'NATIVE_WALLET_GAS') fail(GAS_ABSTRACTION_CODES.mechanismMismatch);
+      if ((run.gasless ?? []).some(a => !UNSUBMITTED_GASLESS.includes(a.state))) fail('SWAP_ALREADY_ATTEMPTED');
       const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
       // BUILD-RH-002: real-funds execution needs the deployment's explicit owner-execution opt-in; Review stays available without it.
       if (P.kind === 'CATALOG' && !catalog?.executionEnabled) fail('OWNER_EXECUTION_NOT_ENABLED');
       const strict = ownerBoundSwapReview(P), reviewedOwner = run.quote.ownerReview;
       if (strict && (!reviewedOwner || reviewedOwner.account !== owner)) fail('OWNER_REVIEW_MISMATCH');
+      if (reviewedGas && reviewedGas.owner !== owner) fail('OWNER_REVIEW_MISMATCH');
       // BUILD-FLOFI-E2E-RELIABILITY-001 (security review): one run, one wallet. A Review that binds no owner (Base, Robinhood) is never
       // continued by another wallet than the one whose request already landed (its approval would be stranded and the record mixed).
       if (run.attempts.some(attempt => attempt.account !== owner)) fail('OWNER_REVIEW_MISMATCH');
       // A request is prepared only while enough of the quote window is left to sign it (a native swap past its deadline reverts on chain).
       if (now().getTime() >= Date.parse(run.quote.expiresAt) - SIGNING_MARGIN_MS) {
-        const renewed = await quote(run.workflow, id, reviewedOwner?.account);
+        const renewed = await quoteFor(run.workflow, id, reviewedOwner?.account ?? reviewedGas?.owner);
         await save({ ...run, quote: renewed, reviewedManifestHash: null }); fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
       }
       // A fresh read that fails retires an owner-bound Review (its exact preflight no longer stands), and a Stock Token multiplier change now
@@ -1217,7 +1572,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         }
       };
       // The quote a new Review would present: the fresh observation, bound to the reviewed owner where the network binds owners (own fresh expiry).
-      const presentable = (q: PublicQuote) => reread(() => strict ? bindSwapOwner(q, rpc, reviewedOwner!.account) : Promise.resolve(q));
+      const presentable = (q: PublicQuote) => reread(() => strict ? bindSwapOwner(q, rpc, reviewedOwner!.account)
+        : reviewedGas ? bindSwapGas(q, reviewedGas.owner, rpc, catalog!, now) : Promise.resolve(q));
       // BUILD-FLOFI-E2E-RELIABILITY-001: the fresh market observation is compared with the REVIEWED bounds, not with the reviewed observation. The
       // swap is still built from the reviewed quote (route, minimum, deadline), so ordinary movement inside those bounds needs no new Review; see
       // `reviewedBoundsHold`. Production evidence (2026-11-01, Base): a 0.014% and a 0.034% move, both far above the reviewed minimum, each retired
@@ -1271,7 +1627,15 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       const settled = <T,>(r: PromiseSettledResult<T>): T => { if (r.status === 'rejected') throw r.reason; return r.value; };
       const gas = settled(gasRead), gasPrice = settled(priceRead), l1Fee = settled(l1Read);
       // Native ETH in is paid from the same balance as the network fee: the account needs both.
-      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee + BigInt(value)) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
+      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee + BigInt(value)) {
+        // ADR-0010: ETH left since a Review that bound native gas. When the policy would now pay the fee another way (0x Gasless), nothing is
+        // switched silently: the run presents that new Review. Otherwise the existing shortfall stands.
+        if (reviewedGas) {
+          const renewed = await presentable(observed);
+          if (renewed.gas && renewed.gas.mechanism !== 'NATIVE_WALLET_GAS') { await save({ ...run, quote: renewed, reviewedManifestHash: null }); fail(GAS_ABSTRACTION_CODES.changed); }
+        }
+        fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
+      }
       const tx: Tx = strict ? reviewedOwner!.transaction : { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };
       if (strict) {
         const [nonce, pending] = await Promise.all([rpc('eth_getTransactionCount', [owner, 'latest']).then(quantity),
@@ -1325,6 +1689,9 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       try {
         let attempt = run.attempts.at(-1);
         if (run.divergence) return run;
+        // ADR-0010: a submitted 0x Gasless trade is observed by its trade hash and reconciled from chain (never submitted again).
+        const gasless = run.gasless?.at(-1);
+        if (!run.outcome && gasless && gaslessNeedsObservation(gasless)) return await observeGasless(run, gasless);
         if (attempt && !attempt.txHash && run.quote.ownerReview && ['PREPARED', 'UNKNOWN'].includes(attempt.state)) {
           const pending = attempt, profile = profileOf(run.quote.chainId);
           const found = await discoverTransferByNonce({ nonce: run.quote.ownerReview.nonce, transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!, maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpcFor(profile));
@@ -1599,12 +1966,14 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       } catch (cause) {
         // Persist proven semantic mismatches so neither refresh nor a restarted worker can revive this authority.
         // Provider outages and incomplete reads remain retriable observations.
-        if (run.quote.ownerReview && cause instanceof Error &&
+        if ((run.quote.ownerReview || run.gasless?.length) && cause instanceof Error &&
             ['TRANSACTION_MISMATCH', 'APPROVAL_NOT_EFFECTIVE', 'RECONCILIATION_MISMATCH'].includes(cause.message))
           return save({ ...run, divergence: cause.message, reviewedManifestHash: null });
         throw cause;
       }
     });
   }
-  return { prepare, refresh, begin, observe };
+  const gasless = createGaslessExecution({ rpcFor, now, persistence: { save, load, locked, claims: persistence.claims }, catalog, quote, quoteFor });
+  const observeGasless = gasless.observe;
+  return { prepare, refresh, begin, observe, beginGasless: gasless.begin, reportGasless: gasless.report, submitGasless: gasless.submit };
 }
