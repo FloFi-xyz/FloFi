@@ -128,6 +128,18 @@ export function requotedMessage(code: string): string {
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'Your Review expired before the wallet request, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
   return 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
 }
+/** ADR-0010 §4: what the owner does when the network fee cannot be paid in USDC/USDT through Pimlico's Kora fee payer (closed `KORA_*` codes). */
+function koraMessage(error: string): string | null {
+  if (error === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED') return 'How the network fee is paid changed since your Review, so nothing was sent. Review it again.';
+  if (error === 'KORA_FEE_TOKEN_BALANCE_INSUFFICIENT') return 'Your wallet has too little SOL for the network fee and too little USDC or USDT to pay it instead. Add SOL, USDC or USDT, then simulate again.';
+  if (error === 'KORA_PAYMENT_INSUFFICIENT') return 'The network fee in USDC or USDT rose before your transaction was sent, so nothing was sent. Simulate again to review the new fee.';
+  if (error === 'KORA_OPERATION_UNSUPPORTED') return 'This step cannot pay its network fee in USDC or USDT. Add SOL for the network fee, then simulate again.';
+  if (/^KORA_(PROVIDER_UNAVAILABLE|UNREACHABLE|RATE_LIMITED|ERROR_UNKNOWN|RESPONSE_INVALID)$/.test(error))
+    return 'Paying the network fee in USDC or USDT is unavailable right now, so nothing was sent. Try again later, or add SOL for the network fee.';
+  if (/^KORA_(NOT_ENABLED|CONFIGURATION_INVALID|SIGNER_MISMATCH)$/.test(error))
+    return 'Paying the network fee in USDC or USDT is not available right now, so nothing was sent. Add SOL for the network fee, then simulate again.';
+  return 'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.';
+}
 export function simulationError(error: string): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
   const flight = flightRefusalMessage(error);
@@ -135,6 +147,9 @@ export function simulationError(error: string): string {
   // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi Wallet (Privy) refusals keep their own sentence, as on the Canvas.
   const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
   if (floFiWallet) return floFiWallet;
+  // ADR-0010 §4: paying the Solana network fee in USDC/USDT through Pimlico (only offered when the wallet's SOL cannot pay it).
+  const kora = /^KORA_/.test(error) || error === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? koraMessage(error) : null;
+  if (kora) return kora;
   // P0 (2026-11-12): a provider's liquidity and minimum answers before the balance rules (`RELAY_INSUFFICIENT_LIQUIDITY` read "your balance is too
   // low", `RELAY_AMOUNT_TOO_LOW` the generic failure), bridge provider codes only (a lending BORROW_/WITHDRAW_INSUFFICIENT_LIQUIDITY keeps its own
   // wording below). Only refusals before this step was prepared: delivery outcomes such as
@@ -267,6 +282,14 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
     const value = simulationAmount(units, decimalPlaces, symbol);
     if (value !== null) view.fees.push({ label, value, ...(note ? { note } : {}), treatment });
   };
+  /**
+   * ADR-0010 §4 (Pimlico Kora): who pays, in which token — "Network fee, at most 0.0031 USDC · Paid from your USDC to Pimlico." The fee payer and
+   * the payment address are protocol details: under Technical details (non-material step details), never a banner.
+   */
+  const koraFee = (s: SimulationStep | undefined, gas: { amount: string; feePayer: string; paymentAddress: string; token: { symbol: string; decimals: number } }) => {
+    fee('Network fee', gas.amount, gas.token.decimals, gas.token.symbol, `Paid from your ${gas.token.symbol} to Pimlico.`, 'CEILING');
+    if (s) s.details.push({ label: 'Network fee payer (Pimlico)', value: gas.feePayer }, { label: 'Network fee payment address', value: gas.paymentAddress });
+  };
   const approvals = (required: boolean) => { if (required) warn('info', 'Token approval is required before execution.'); };
   const networkFees = (f: { totalUpperBoundWei: string | null; executionFeeUpperBoundWei: string; l1FeeUpperBoundWei: string | null }) => {
     if (f.totalUpperBoundWei !== null) fee('Maximum network fee', f.totalUpperBoundWei, 18, 'ETH', 'Includes execution and L1 data fees.', 'CEILING');
@@ -395,8 +418,13 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         const providers = [...new Set(q.quote.routePlan.map(p => simulationProvider(p.label)).filter(Boolean))];
         if (providers.length) s.details.push({ label: 'Route pools', value: providers.join(' → ') });
       }
-      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
-      if (BigInt(q.simulationResult.accountCreationLamports) > 0n) fee('Account deposits', q.simulationResult.accountCreationLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
+      // ADR-0010 §4: with Pimlico's Kora fee payer the owner pays no SOL; the network fee is the exact token amount it repays (its ceiling).
+      const kora = q.format === 'gryloo.jupiter-review.v1' ? q.gas : undefined;
+      if (kora) koraFee(s, kora);
+      else {
+        fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+        if (BigInt(q.simulationResult.accountCreationLamports) > 0n) fee('Account deposits', q.simulationResult.accountCreationLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
+      }
       if (q.format === 'gryloo.orca-devnet-review.v1') {
         const trade = q.simulatedTrade;
         for (const [label, amount] of [['Liquidity provider fee', trade.lpFee], ['Protocol fee', trade.protocolFee], ['Input transfer fee', trade.inputTransferFee]] as const) {
@@ -479,9 +507,13 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const amount = simulationAmount(q.amount, q.asset.decimals, symbol), s = step();
       result(s, amount, amount ? `Send ${amount} to ${q.recipient}` : null, 'Wallet send');
       if (s) { s.resultLabel = 'Expected action'; s.destination = q.recipient; if (q.asset.mint) s.details.push({ label: 'Token mint', value: q.asset.mint }); }
-      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
-      if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.', 'ADDITIONAL');
-      else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.', 'CEILING');
+      // ADR-0010 §4: with Pimlico's Kora fee payer the owner pays no SOL (Kora also advances any recipient account rent, inside the token fee).
+      if (q.gas) koraFee(s, q.gas);
+      else {
+        fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+        if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.', 'ADDITIONAL');
+        else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.', 'CEILING');
+      }
       if (!q.asset.verified) warn('attention', 'This token is not on FloFi\'s verified list. Its mint, decimals and token program were checked on chain; confirm it is the token you intend to send.');
       if (q.token?.program === 'token-2022') warn('info', 'Token-2022 token: only extensions FloFi can verify were found, and the recipient receives exactly the amount sent.');
       warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');

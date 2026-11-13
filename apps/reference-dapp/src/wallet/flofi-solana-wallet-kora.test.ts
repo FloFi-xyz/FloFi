@@ -35,7 +35,7 @@ describe('FloFi Wallet behind Pimlico\'s Kora fee payer', () => {
     expect(module.signedSameTransaction(unsigned, inSlot(0), 1)).toBe(false);
     const both = inSlot(1); both.fill(5, 1, 65);
     expect(module.signedSameTransaction(unsigned, both, 1)).toBe(false);
-    const changed = inSlot(1); changed[changed.length - 3] ^= 1;
+    const changed = inSlot(1); changed[changed.length - 3] = changed[changed.length - 3]! ^ 1;
     expect(module.signedSameTransaction(unsigned, changed, 1)).toBe(false);
     expect(module.signedSameTransaction(unsigned, inSlot(1), 2)).toBe(false);
   });
