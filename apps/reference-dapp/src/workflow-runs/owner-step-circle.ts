@@ -12,8 +12,12 @@
  *                  as before; the run's confirm pass readies the current one again).
  * The group's strategy itself is changed by the caller (only before authorization, as every Circle preparation does; the database freezes it once
  * the group is signed).
+ *
+ *   asked first    /approve's user-funded start does not load such a group's first step into its own flow at once (`ownerStepCircleFirst`): the
+ *                  owner's browser first asks whether Circle pays it (`prepareUserFundedGroup`); CIRCLE_NOT_NEEDED (the owner's ETH pays) or any
+ *                  other answer that is not a Circle preparation, and the step is loaded exactly as before.
  */
-import type { GroupRecord, WorkflowRunStore } from './pg-store.ts';
+import type { GroupRecord, RunRecord, WorkflowRunStore } from './pg-store.ts';
 
 export const GAS_MECHANISM_SWITCHED = 'GAS_MECHANISM_SWITCHED';
 type Store = Pick<WorkflowRunStore, 'steps' | 'stepTransition'>;
@@ -33,6 +37,19 @@ export async function ownerStepsToGroup(store: Store, runId: string, g: Group): 
     if (!await store.stepTransition(runId, i, ['PENDING'], 'DELEGATED', {}, GAS_MECHANISM_SWITCHED)) return false;
   }
   return true;
+}
+/**
+ * Whether the run's CURRENT group is a FloFi Wallet owner-step group whose fee Circle may pay (this deployment's Circle chains), none of whose
+ * steps was loaded yet and whose first step is due: /approve's user-funded start then leaves that step READY (not loaded), so the owner's browser
+ * can ask first. False for any other wallet, chain, group or state: the step is loaded at once, exactly as before. `wallet` is what the owner's
+ * browser reported; it only decides WHEN the step is loaded (every Circle artifact is still verified on the server and in FloFi Wallet's gate).
+ */
+export async function ownerStepCircleFirst(store: Pick<WorkflowRunStore, 'groups' | 'steps'>, run: Pick<RunRecord, 'runId' | 'mode' | 'state' | 'currentStep'>,
+  wallet: 'INJECTED' | 'FLOFI_WALLET' | undefined, circleChains: readonly string[]): Promise<boolean> {
+  if (wallet !== 'FLOFI_WALLET' || run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) return false;
+  const g = (await store.groups(run.runId)).find(x => x.stepFrom <= run.currentStep && run.currentStep <= x.stepTo);
+  if (!g || g.strategy !== 'EVM_OWNER_STEP' || g.state !== 'PLANNED' || g.prepared !== null || g.stepFrom !== run.currentStep || !circleChains.includes(g.chain)) return false;
+  return ownerStepsUnloaded(store, run.runId, g);
 }
 /** Gives an unsigned Circle preparation's steps back to their owner-step flows (DELEGATED → BLOCKED → PENDING); a step in any other state stays. */
 export async function groupStepsToOwner(store: Store, runId: string, g: Group): Promise<void> {

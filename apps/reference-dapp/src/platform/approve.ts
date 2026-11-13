@@ -21,8 +21,8 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
-  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedConsentSequential, userFundedPermitSequential,
-  userFundedPrepareSequential, userFundedUpgradeSequential,
+  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedConsentSequential, userFundedDeclineSequential,
+  userFundedPermitSequential, userFundedPrepareSequential, userFundedUpgradeSequential,
   userFundedReportSequential, userFundedStartSequential } from './workflow-run-approvals.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
@@ -323,6 +323,14 @@ export async function workflowRunUserFundedUpgrade(surface: ApprovalSurface, app
   const c = await runContext(surface, approvalId, wallets);
   if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return refuse('CIRCLE_AUTHORIZATION_INVALID');
   return userFundedUpgradeSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), signature);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): "Not now" on FloFi's consent card — a Circle preparation planned from owner steps, nothing of which was
+ * signed, is withdrawn and the group's first step is loaded into its own flow (native gas), exactly as when the owner's ETH pays.
+ */
+export async function workflowRunUserFundedDecline(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedDeclineSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), c.base);
 }
 /** The owner's wallet answer for one prepared group, verified against what FloFi prepared. */
 export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, answer: unknown): Promise<ClaimedProposal> {
