@@ -482,6 +482,10 @@
       "path": "apps/reference-dapp/src/flight/launch.test.ts",
       "stage": "unit"
     },
+    "app.flight.launch-1311.pg": {
+      "path": "apps/reference-dapp/src/flight/launch-1311.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.flight.launch.pg": {
       "path": "apps/reference-dapp/src/flight/launch.pg.test.ts",
       "stage": "postgres"
@@ -4043,6 +4047,7 @@
         "apps/reference-dapp/src/flight/email/templates-v1.ts",
         "apps/reference-dapp/src/flight/email/templates-v2.ts",
         "apps/reference-dapp/src/flight/email/templates-v3.ts",
+        "apps/reference-dapp/src/flight/email/templates-v4.ts",
         "apps/reference-dapp/src/flight/email/templates.ts",
         "apps/reference-dapp/src/flight/host.ts",
         "apps/reference-dapp/src/flight/http.ts",
@@ -4059,6 +4064,7 @@
         "cloud-runtime.flight-flofi-migration.pg",
         "app.flight.launch",
         "app.flight.launch.pg",
+        "app.flight.launch-1311.pg",
         "cloud-runtime.flight-launch-migration.pg",
         "app.e2e.flight",
         "app.flight.identity-http",
@@ -7357,6 +7363,7 @@
     "app.developer.sdk.pg",
     "app.developer.webhooks.pg",
     "app.flight.beta-access.pg",
+    "app.flight.launch-1311.pg",
     "app.flight.launch.pg",
     "app.flight.store.pg",
     "app.learning.automatic.pg",

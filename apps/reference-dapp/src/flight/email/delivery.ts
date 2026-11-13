@@ -111,6 +111,7 @@ export function createEmailDelivery(deps: DeliveryDeps) {
           [deps.tenantId, row.inviteCode])).rows[0] : undefined;
         if (!invite) return { kind: 'CANCEL', code: 'INVITE_GONE' };
         if (invite.revoked_at) return { kind: 'CANCEL', code: 'INVITE_REVOKED' };
+        if (invite.redeemed_at) return { kind: 'CANCEL', code: 'INVITE_REDEEMED' }; // the guest is already on board: the code would answer INVITE_USED
         if (invite.expires_at && invite.expires_at.getTime() <= at) return { kind: 'CANCEL', code: 'INVITE_EXPIRED' };
         input = { template: 'CREATOR_INVITE', code: row.inviteCode!, briefUrl: deps.briefUrl ?? FLIGHT_CREATOR_BRIEF_URL };
         break;
