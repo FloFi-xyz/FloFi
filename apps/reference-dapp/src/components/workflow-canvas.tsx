@@ -375,7 +375,9 @@ type BuildCanvasProps = { environment?: WalletEnvironment; selectedId: string | 
    * P0 approved UX (board 08): true while a workflow run is active. The shell already refuses edits then; the header makes it visible (a lock and
    * "Editing paused during execution" instead of Undo, Redo and ···) and the step tools are paused. Optional: absent means no run is active.
    */
-  runActive?: boolean };
+  runActive?: boolean;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: the header's New workflow button (the shell's `startNewWorkflow`); absent: no button. */
+  onNewWorkflow?: (() => void) | undefined };
 const EMPTY_OVERLAY: ReadonlyMap<string, SimulationOverlay> = new Map();
 export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; workflowName: string; overlay?: ReadonlyMap<string, SimulationOverlay>; primaryAction?: ReactNode } | { mode: 'execute'; workflowName: string }) {
   if ('mode' in props && props.mode === 'simulate') return <SimulateWorkflowCanvas workflowName={props.workflowName} primaryAction={props.primaryAction}/>;
@@ -383,7 +385,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
   return <BuildCanvas {...props}/>;
 }
 
-function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false }: BuildCanvasProps) {
+function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, onNewWorkflow }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
     sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
@@ -984,7 +986,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const stepCount = tr(projectedNodes.length === 1 ? '{0} step' : '{0} steps', projectedNodes.length);
   const networkPending = Boolean(overview && overview.count > 0 && overview.networks.length === 0);
   return <section className={`canvas panel ${isLendingComposition(workflow)?'lending-canvas':''}`} tabIndex={-1} aria-label={tr("Workflow canvas")} data-toolbox={toolboxMode} data-toolbox-ready={toolboxReady} data-run-active={runActive || undefined}>
-    <div className="canvas-head build-canvas-head"><div className="canvas-head-main"><WorkflowName name={workflowName} shownName={shownName} rename={renameWorkflow}/>
+    <div className="canvas-head build-canvas-head"><div className="canvas-head-main"><WorkflowName name={workflowName} shownName={shownName} rename={renameWorkflow} onNew={runActive ? undefined : onNewWorkflow}/>
       <div className="canvas-head-meta">
         {overview && overview.networks.length > 0 && <ul className="editor-network-chips" aria-label={tr('Workflow networks')}>{overview.networks.map(network => <li key={network}><span className="editor-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>{tr(network)}</li>)}</ul>}
         {networkPending && <span className="editor-network-chips editor-network-pending"><span className="editor-network-pending-dot" aria-hidden="true"/>{tr('Network?')}</span>}
