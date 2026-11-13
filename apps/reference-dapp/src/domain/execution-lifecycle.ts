@@ -103,8 +103,19 @@ export type LifecycleStep = { id: string; number: number; action: string; input:
   labelArgs?: readonly string[] };
 export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
 
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a router or universal attempt that was CANCELLED (a proven pre-broadcast refusal: the wallet
+ * declined with no result, the hand-off refused it, or FloFi refused a signed transaction before broadcasting it) under another Review than the
+ * record's current one, i.e. superseded by the run's in-place re-quote. It carries no transaction hash and can no longer move funds. Any
+ * other state (sent, unknown, pending, reverted…) and any attempt with a hash always counts.
+ */
+export function supersededUnsent(attempt: { readonly state: string; readonly reviewCommitment?: string; readonly transactionHash?: string | null; readonly replacementHash?: string | null },
+  commitment: string | undefined): boolean {
+  return attempt.state === 'CANCELLED' && !attempt.transactionHash && !attempt.replacementHash
+    && Boolean(attempt.reviewCommitment) && Boolean(commitment) && attempt.reviewCommitment !== commitment;
+}
 export function projectExecutionLifecycle(currentWorkflow: Workflow, context: ReviewContext, source: ExecutionLifecycleSource): ExecutionLifecycle {
-  let workflow = currentWorkflow, runKey: string | null = null, local = false, restored = false;
+  let workflow = currentWorkflow, runKey: string | null = null, local = false, restored = false, superseded = false;
   const reconciliation = source.kind === 'fork-swap' ? source.state.execution?.evidence.at(-1)?.outcome : source.kind === 'fork-pool' ? source.state.status?.reconciliation?.outcome : null;
   const runUncertain = ['DIVERGENT', 'INCONCLUSIVE'].includes(reconciliation ?? '') || 'record' in source.state && source.state.record && 'verdict' in source.state.record && ['DIVERGENT', 'INCONCLUSIVE'].includes(source.state.record.verdict);
   const runFailed = source.kind === 'lending' && source.state.record?.status === 'FAILED';
@@ -166,9 +177,12 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
       const nodeId = r.review.nodeId;
-      const calls = [...new Set([...r.attempts.map(a => a.step), ...r.review.calls.map(call => call.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const)])];
+      // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a never-sent (CANCELLED) attempt of an earlier Review of this same run was superseded by its
+      // in-place re-quote: it stays in the record and its evidence, but the step now waits for the fresh Review (never "needs attention").
+      const attempts = r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)); superseded ||= attempts.length < r.attempts.length;
+      const calls = [...new Set([...attempts.map(a => a.step), ...r.review.calls.map(call => call.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const)])];
       for (const step of calls) {
-        const a = r.attempts.filter(a => a.step === step).at(-1);
+        const a = attempts.filter(a => a.step === step).at(-1);
         add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', r.review.intent.sourceChain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
@@ -182,11 +196,15 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
       const nodeId = r.review.nodeId, src = r.review.source, chain = r.review.route.sourceChain;
-      const calls = [...new Set([...r.attempts.map(a => a.step), ...(src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const])])];
+      // Review round 3: as for the router, a superseded never-sent attempt does not hold its step after the in-place re-quote.
+      const attempts = r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)); superseded ||= attempts.length < r.attempts.length;
+      // BUILD-FLOFI-MAINNET-EXEC-002: an unwrapping route's own WETH → ETH unwrap is a wallet request of its own, before the deposit.
+      const calls = [...new Set([...attempts.map(a => a.step), ...(src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const
+        : c.purpose === 'UNWRAP' ? 'UNWRAP' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const])])];
       for (const step of calls) {
-        const a = r.attempts.filter(x => x.step === step).at(-1), gas = a?.ecosystem === 'EVM' ? simulationAmount(a.receipt?.gasCostWei, 18, 'ETH')
+        const a = attempts.filter(x => x.step === step).at(-1), gas = a?.ecosystem === 'EVM' ? simulationAmount(a.receipt?.gasCostWei, 18, 'ETH')
           : a?.ecosystem === 'SOLANA' ? simulationAmount(a.feeLamports, 9, 'SOL') : null;
-        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', chain, financialAttemptState(a),
+        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : step === 'UNWRAP' ? `Unwrap ${r.review.route.inputToken.symbol} to ETH` : 'Bridge deposit', chain, financialAttemptState(a),
           a?.ecosystem === 'EVM' ? a.replacementHash ?? a.transactionHash : a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', gas);
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
@@ -321,12 +339,13 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const label = lifecycleState === 'uncertain' ? 'Execution status uncertain' : lifecycleState === 'attention' ? 'Execution needs attention' : lifecycleState === 'complete' ? 'Execution confirmed' : lifecycleState === 'active' ? 'Execution in progress' : 'Not started';
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a record with no wallet request (simulated or reviewed only) says that nothing was sent, never "0 of N completed"
   // with operations "Waiting" as if a wallet request were pending.
-  if (!started) for (const step of steps) { step.label = 'Not requested'; delete step.labelArgs; for (const op of step.operations) { op.label = 'Not requested'; delete op.labelArgs; delete op.phase; } }
+  if (!started) for (const step of steps) { step.label = superseded ? 'Awaiting authorization' : 'Not requested'; delete step.labelArgs; for (const op of step.operations) { op.label = 'Not requested'; delete op.labelArgs; delete op.phase; } }
   // BUILD-FLOFI-E2E-RELIABILITY-001: a confirmed token approval of the active step is named as such — it only allows the spend — and the step's
   // own request is said to be not sent yet, so a landed approval is never read as the completed action nor as "nothing was sent".
   const approvalLanded = Boolean(active?.operations.some(op => op.approval && /^Approve\b/.test(op.title) && op.state === 'confirmed') && active?.operations.some(op => !op.approval && op.wallet && op.state === 'waiting'));
   const message = lifecycleState === 'uncertain' ? 'The current request cannot be confirmed or ruled out. No transaction is repeated.' : lifecycleState === 'attention' ? 'The current step could not complete. Any confirmed actions remain recorded. Nothing is retried automatically.' : lifecycleState === 'complete' ? planUnavailable ? 'The saved requests are confirmed. Original workflow details remain unavailable.' : 'All workflow actions are confirmed in the current execution record.'
-    : lifecycleState === 'idle' ? 'Simulated or reviewed only: no wallet request was made, so nothing was sent.'
+    : lifecycleState === 'idle' ? superseded ? 'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.'
+      : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.'
     : approvalLanded ? `${completed} of ${steps.length} actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.`
     : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
   // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.

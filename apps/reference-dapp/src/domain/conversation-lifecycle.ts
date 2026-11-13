@@ -202,7 +202,9 @@ export function conversationPhase(view: LifecycleView, question: PendingQuestion
 // ── Review summary (existing projections only; nothing is estimated here) ───────────────────────────────────────────────────────────────
 export type ConversationReviewStep = { readonly number: number; readonly action: string; readonly input: string; readonly pair: string | null; readonly networks: string;
   readonly provider: string | null; readonly result: string | null; readonly resultLabel: string; readonly minimum: string | null; readonly slippage: string | null;
-  readonly priceImpact: string | null; readonly details: readonly SimulationLine[] };
+  readonly priceImpact: string | null; readonly details: readonly SimulationLine[];
+  /** BUILD-FLOFI-MAINNET-EXEC-002: the full destination address (bridges, transfers), or null. */ readonly destination: string | null;
+  /** Review round 2: whether that destination is one of the owner's own wallets, when the runtime knows it. */ readonly destinationOwned?: boolean };
 export type ConversationReview = {
   readonly status: string; readonly label: string; readonly message: string; readonly canConfirm: boolean; readonly steps: readonly ConversationReviewStep[];
   readonly fees: readonly SimulationLine[]; readonly limits: readonly SimulationLine[]; readonly warnings: readonly SimulationWarning[];
@@ -268,7 +270,9 @@ export function payableCosts(fees: readonly SimulationLine[]) {
  * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: refusals at the execution boundary that mean the reviewed quote or chain state no longer stands (changed or
  * expired). Nothing was sent; the chat re-quotes and asks for a fresh Review instead of offering the dead one again.
  */
-export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
+// BUILD-FLOFI-MAINNET-EXEC-002: FEES_CHANGED (ROUTER_/UNIVERSAL_ L1 or execution fee above the authorized maximum) is re-quoted like the rest;
+// before, the chat stopped at a dead Review after ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED.
+export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|FEES_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
 /**
  * BUILD-FLOFI-E2E-RELIABILITY-001: why the next request of a run with a confirmed earlier request cannot start under its Review, in words that
  * describe that request only (the generic reasons say "nothing was sent", which is false for the run once its approval landed). Null: the
@@ -278,7 +282,7 @@ export function continuationReason(code: string): string | null {
   if (/STOCK_MULTIPLIER_CHANGED/.test(code)) return 'A corporate action changed the shares per token since your Review.';
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'The reviewed quote expired before the next request could start.';
   if (/QUOTE_CHANGED|ROUTE_CHANGED|REQUOTE/.test(code)) return 'The quote moved outside the bounds of your Review.';
-  if (/STATE_CHANGED|GAS_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
+  if (/STATE_CHANGED|GAS_CHANGED|FEES_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
   return null;
 }
 /** What a fresh Review changed against the previous one of the same workflow revision: every step figure and cost line, by label (values as shown). */
@@ -292,6 +296,8 @@ export function reviewChanges(previous: ConversationReview, next: ConversationRe
     if (!old) continue;
     compare('Expected receipt', old.result, step.result);
     compare('Minimum receipt', old.minimum, step.minimum); compare('Provider', old.provider, step.provider); compare('Max slippage', old.slippage, step.slippage);
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review): a fresh quote delivering to another wallet is always named, never "the same amounts".
+    compare('Destination', old.destination, step.destination);
   }
   const labels = [...new Set([...previous.fees, ...next.fees].map(line => line.label))];
   for (const label of labels) compare(label, previous.fees.find(line => line.label === label)?.value, next.fees.find(line => line.label === label)?.value);
@@ -304,7 +310,8 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
     // A sequence simulates its current step alone: number it as that step of the whole workflow.
     return { number: sequence ? sequence.current : step.number, action: step.action, input: step.input, pair: step.pair, networks: step.networks.join(' → ') || reviewed?.network || '—',
       provider: step.provider ?? reviewed?.provider ?? null, result: step.result, resultLabel: step.resultLabel, minimum: step.minimum,
-      slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details };
+      slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details, destination: step.destination ?? null,
+      ...step.destinationOwned !== undefined ? { destinationOwned: step.destinationOwned } : {} };
   });
   const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee } = payableCosts(fees);
   const later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];

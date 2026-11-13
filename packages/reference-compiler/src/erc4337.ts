@@ -208,6 +208,8 @@ export function decodeGetNonce(result: unknown): bigint {
 export const USER_OPERATION_EVENT_TOPIC = keccakHex('UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256)');
 /** `UserOperationRevertReason(bytes32 indexed userOpHash, address indexed sender, uint256 nonce, bytes revertReason)`. */
 export const USER_OPERATION_REVERT_REASON_TOPIC = keccakHex('UserOperationRevertReason(bytes32,address,uint256,bytes)');
+/** `BeforeExecution()`: emitted once by the EntryPoint between the validation of every operation of a bundle and their executions. */
+export const BEFORE_EXECUTION_TOPIC = keccakHex('BeforeExecution()');
 export type UserOperationEvent = { readonly userOpHash: string; readonly sender: string; readonly paymaster: string; readonly nonce: bigint; readonly success: boolean;
   /** What the account actually paid for the operation, in wei (the EntryPoint's own accounting: gas used × effective price). */
   readonly actualGasCost: bigint; readonly actualGasUsed: bigint };
@@ -262,4 +264,67 @@ export function bundlerReceipt(result: unknown): BundlerReceipt | null {
     actualGasCost: parseQuantity(r.actualGasCost, 'ERC4337_RPC_INVALID'), actualGasUsed: parseQuantity(r.actualGasUsed, 'ERC4337_RPC_INVALID'), transactionHash,
     blockNumber: parseQuantity(receipt.blockNumber, 'ERC4337_RPC_INVALID'), logs: Array.isArray(receipt.logs) ? receipt.logs : [],
     reason: typeof r.reason === 'string' ? r.reason.slice(0, 200) : null };
+}
+
+// ── BUILD-FLOFI-MAINNET-EXEC-002: sponsored user operations (an ERC-4337 v0.7 paymaster, through an ERC-7677 paymaster web service) ──────
+/**
+ * A paymaster pays an operation's gas only through the EntryPoint (v0.7: `paymasterAndData` = paymaster ‖ uint128 verification gas ‖ uint128 post-op
+ * gas ‖ paymaster data); it can never pay for a conventional `eth_sendTransaction`. These helpers pack, unpack and bound such an operation; the
+ * paymaster address, the EntryPoint, the chain and the operation's calls are checked by the caller against its own pins and the reviewed calls.
+ */
+export type PaymasterFields = { readonly paymaster: string; readonly verificationGasLimit: bigint; readonly postOpGasLimit: bigint; readonly data: string };
+export function packPaymasterAndData(p: PaymasterFields): string {
+  const pm = evmAddress(p.paymaster);
+  if (pm === '0x' + '0'.repeat(40)) fail('ERC4337_PAYMASTER_INVALID');
+  const gas = (v: bigint) => uint(v, UINT128_MAX, 'ERC4337_GAS_INVALID').toString(16).padStart(32, '0');
+  return pm + gas(p.verificationGasLimit) + gas(p.postOpGasLimit) + data(p.data, 'ERC4337_PAYMASTER_INVALID').slice(2);
+}
+export function unpackPaymasterAndData(value: string): PaymasterFields | null {
+  const hex = data(value, 'ERC4337_PAYMASTER_INVALID');
+  if (hex === '0x') return null;
+  if (hex.length < 2 + 40 + 64) fail('ERC4337_PAYMASTER_INVALID');
+  return { paymaster: '0x' + hex.slice(2, 42), verificationGasLimit: BigInt('0x' + hex.slice(42, 74)), postOpGasLimit: BigInt('0x' + hex.slice(74, 106)), data: '0x' + hex.slice(106) };
+}
+/** The worst-case gas cost of a sponsored operation: every gas limit (the paymaster's included) at its max fee per gas. */
+export function maxSponsoredCost(gas: UserOperationGas, paymaster: Pick<PaymasterFields, 'verificationGasLimit' | 'postOpGasLimit'>): bigint {
+  return (gas.verificationGasLimit + gas.callGasLimit + gas.preVerificationGas + paymaster.verificationGasLimit + paymaster.postOpGasLimit) * gas.maxFeePerGas;
+}
+/** An unpacked v0.7 operation as ERC-7677 / ERC-4337 JSON-RPC carries it (quantities as hex strings). */
+export type RpcUserOperation = { readonly sender: string; readonly nonce: string; readonly factory?: string | null; readonly factoryData?: string | null;
+  readonly callData: string; readonly callGasLimit: string; readonly verificationGasLimit: string; readonly preVerificationGas: string;
+  readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string; readonly paymaster?: string | null; readonly paymasterVerificationGasLimit?: string | null;
+  readonly paymasterPostOpGasLimit?: string | null; readonly paymasterData?: string | null; readonly signature?: string };
+/** The packed v0.7 operation of an RPC one (initCode = factory ‖ factoryData), with `paymaster` fields when present. */
+export function packRpcUserOperation(op: RpcUserOperation): PackedUserOperation {
+  const q = (v: unknown, code: string) => parseQuantity(v, code);
+  const initCode = op.factory ? evmAddress(op.factory) + data(op.factoryData ?? '0x', 'ERC4337_INIT_CODE_INVALID').slice(2) : '0x';
+  const paymasterAndData = op.paymaster ? packPaymasterAndData({ paymaster: op.paymaster, verificationGasLimit: q(op.paymasterVerificationGasLimit ?? '0x0', 'ERC4337_RPC_INVALID'),
+    postOpGasLimit: q(op.paymasterPostOpGasLimit ?? '0x0', 'ERC4337_RPC_INVALID'), data: op.paymasterData ?? '0x' }) : '0x';
+  return { sender: evmAddress(op.sender), nonce: q(op.nonce, 'ERC4337_NONCE_INVALID'), initCode, callData: data(op.callData, 'ERC4337_CALLDATA_INVALID'),
+    accountGasLimits: packUints(q(op.verificationGasLimit, 'ERC4337_RPC_INVALID'), q(op.callGasLimit, 'ERC4337_RPC_INVALID')),
+    preVerificationGas: uint(q(op.preVerificationGas, 'ERC4337_RPC_INVALID'), UINT128_MAX, 'ERC4337_GAS_INVALID'),
+    gasFees: packUints(q(op.maxPriorityFeePerGas, 'ERC4337_RPC_INVALID'), q(op.maxFeePerGas, 'ERC4337_RPC_INVALID')), paymasterAndData,
+    signature: op.signature === undefined ? '0x' : data(op.signature, 'ERC4337_SIGNATURE_INVALID') };
+}
+/** Coinbase Smart Wallet `executeBatch((address target,uint256 value,bytes data)[])` and `execute(address,uint256,bytes)`. */
+export const COINBASE_EXECUTE_BATCH_SELECTOR = selectorOf('executeBatch((address,uint256,bytes)[])');
+export const COINBASE_EXECUTE_SELECTOR = selectorOf('execute(address,uint256,bytes)');
+/**
+ * The calls an account's `callData` executes, for the account encodings FloFi can verify: the MetaMask EIP-7702 DeleGator's ERC-7579 `execute(batch)`
+ * and the Coinbase Smart Wallet's `executeBatch` / `execute`. Anything else is refused (`ERC4337_ACCOUNT_CALLDATA_UNSUPPORTED`): FloFi never sponsors
+ * calls it cannot read.
+ */
+export function decodeAccountCalls(callData: string): Call[] {
+  const hex = data(callData, 'ERC4337_CALLDATA_INVALID');
+  if (hex.startsWith(EXECUTE_SELECTOR)) return decodeBatchCallData(hex);
+  if (hex.startsWith(COINBASE_EXECUTE_BATCH_SELECTOR)) {
+    const [items] = abiDecode([{ array: EXECUTION_TUPLE }], bytesOf('0x' + hex.slice(10))) as [[string, bigint, string][]];
+    if (!items.length || items.length > MAX_BATCH_CALLS) fail('ERC4337_BATCH_INVALID');
+    return items.map(([target, value, calldata]) => ({ target: target.toLowerCase(), value, data: calldata.toLowerCase() }));
+  }
+  if (hex.startsWith(COINBASE_EXECUTE_SELECTOR)) {
+    const [target, value, calldata] = abiDecode(['address', 'uint256', 'bytes'], bytesOf('0x' + hex.slice(10))) as [string, bigint, string];
+    return [{ target: target.toLowerCase(), value, data: calldata.toLowerCase() }];
+  }
+  return fail('ERC4337_ACCOUNT_CALLDATA_UNSUPPORTED');
 }

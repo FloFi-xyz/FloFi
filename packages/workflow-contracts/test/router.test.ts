@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
-import { assertRouterTransition, canonicalizeRoute, compareRoutes, materialRouteChanges, providerFeeDrift, createRouterBridgeNode, isRouterBridgeNode, readRouterBridgeNode, routeCommitment,
+import { assertRouterTransition, canonicalizeRoute, classifyRouteRevalidation, compareRoutes, feeRecipients, materialRouteChanges, providerFeeDrift, createRouterBridgeNode, isRouterBridgeNode, readRouterBridgeNode, routeCommitment,
   ROUTER_PHASE_TRANSITIONS, type CanonicalRoute, type RouterBridgeFields } from '../src/router.js';
 import { validateArtifact } from '../src/schemas.js';
 
@@ -134,29 +134,70 @@ describe('BUILD-ROUTER-001 route comparison (ROUTE_CHANGED detection)', () => {
   });
 });
 
-describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 provider-fee drift between Review and Execute', () => {
-  // The live Across quote of 0.5 USDC Arbitrum One → Base re-priced by 1–3 base units every few seconds (output = minimum); the reviewed
-  // bytes are what executes, so only drift within 1% of the reviewed route fee is set aside — never any other change, never a larger one.
-  const drifted = (units: bigint) => mutate(x => ({ fees: x.fees.map(f => f.kind === 'BRIDGE_DESTINATION_GAS' ? { ...f, amount: (BigInt(f.amount) + units).toString() } : f),
-    feeTotal: (BigInt(x.feeTotal) + units).toString(), expectedOutput: (BigInt(x.expectedOutput) - units).toString(),
-    minimumOutput: (BigInt(x.minimumOutput) - units).toString(), bridge: { ...x.bridge, outputAmount: (BigInt(x.minimumOutput) - units).toString() } }));
-  it('a few base units of relayer re-pricing is the only change and stays within tolerance', () => {
+describe('BUILD-FLOFI-MAINNET-EXEC-002 provider-fee drift between Review and Execute', () => {
+  // The reviewed bytes are what executes: the owner's debit and guaranteed output never move with a re-priced quote. Re-pricing within a tenth
+  // of the reviewed route fee — and never more than the owner's slippage share of the input — is tolerated; anything else is ROUTE_CHANGED.
+  const drifted = (units: bigint, base: CanonicalRoute = route()) => ({ ...base, fees: base.fees.map(f => f.kind === 'BRIDGE_DESTINATION_GAS' ? { ...f, amount: (BigInt(f.amount) + units).toString() } : f),
+    feeTotal: (BigInt(base.feeTotal) + units).toString(), expectedOutput: (BigInt(base.expectedOutput) - units).toString(),
+    minimumOutput: (BigInt(base.minimumOutput) - units).toString(), bridge: { ...base.bridge, outputAmount: (BigInt(base.minimumOutput) - units).toString() } }) as CanonicalRoute;
+  it('a relayer re-pricing is the only change and stays within tolerance (a tenth of the reviewed fee here)', () => {
     const r = route(), fresh = drifted(3n);
     expect(compareRoutes(r, fresh, 'REQUOTE')).toEqual(['FEES_OUT_OF_BOUNDS', 'MINIMUM_OUTPUT_DECREASED']);
-    expect(providerFeeDrift(r, fresh)).toEqual({ feeIncrease: '3', minimumDecrease: '3', tolerance: (BigInt(r.feeTotal) / 100n).toString(), withinTolerance: true });
+    expect(providerFeeDrift(r, fresh)).toEqual({ feeIncrease: '3', minimumDecrease: '3', tolerance: (BigInt(r.feeTotal) / 10n).toString(), withinTolerance: true });
     expect(materialRouteChanges(r, fresh)).toEqual([]);
+    expect(classifyRouteRevalidation(r, fresh).outcome).toBe('MARKET_DRIFT_TOLERATED');
   });
-  it('a larger move, or drift together with any other change, still requires a fresh Review', () => {
+  it('a larger move is OUTSIDE_AUTHORIZED_BOUNDS; drift together with any other change is a MATERIAL_CHANGE', () => {
     const r = route(), tolerance = BigInt(providerFeeDrift(r, r).tolerance);
+    expect(materialRouteChanges(r, drifted(tolerance))).toEqual([]);
     expect(materialRouteChanges(r, drifted(tolerance + 1n))).toEqual(['FEES_OUT_OF_BOUNDS', 'MINIMUM_OUTPUT_DECREASED']);
+    expect(classifyRouteRevalidation(r, drifted(tolerance + 1n)).outcome).toBe('OUTSIDE_AUTHORIZED_BOUNDS');
     const elsewhere = { ...drifted(1n), recipient: OTHER, bridge: { ...drifted(1n).bridge, recipient: OTHER } } as CanonicalRoute;
     expect(materialRouteChanges(r, elsewhere)).toEqual(['FEES_OUT_OF_BOUNDS', 'MINIMUM_OUTPUT_DECREASED', 'RECIPIENT_CHANGED']);
+    expect(classifyRouteRevalidation(r, elsewhere).outcome).toBe('MATERIAL_CHANGE');
   });
-  it('a cheaper or identical requote has no drift at all; the tolerance is 1% of the reviewed route fee', () => {
+  it('a cheaper or identical requote has no drift at all', () => {
     const r = route();
     expect(providerFeeDrift(r, drifted(-5n))).toMatchObject({ feeIncrease: '0', minimumDecrease: '0', withinTolerance: true });
-    expect(BigInt(providerFeeDrift(r, r).tolerance)).toBe(BigInt(r.feeTotal) / 100n);
+    expect(classifyRouteRevalidation(r, drifted(-5n)).outcome).toBe('UNCHANGED');
     expect(providerFeeDrift(r, r)).toMatchObject({ feeIncrease: '0', minimumDecrease: '0', withinTolerance: true });
+    expect(classifyRouteRevalidation(r, r)).toMatchObject({ outcome: 'UNCHANGED', changes: [] });
+  });
+  it('the tolerance never exceeds the owner\'s slippage share of the input (zero slippage share: no drift tolerated)', () => {
+    const tight = { ...route(), slippageBps: 1 } as CanonicalRoute; // 0.01% of 10 USDC = 1 000 base units < a tenth of the 33 773 fee
+    expect(providerFeeDrift(tight, tight).tolerance).toBe('1000');
+    expect(classifyRouteRevalidation(tight, drifted(1_000n, tight)).outcome).toBe('MARKET_DRIFT_TOLERATED');
+    expect(classifyRouteRevalidation(tight, drifted(1_001n, tight)).outcome).toBe('OUTSIDE_AUTHORIZED_BOUNDS');
+  });
+  it('replays production 2026-11-13 (2 USDC Base → Arbitrum One, Across fee 7 296, slippage 1%): the observed re-pricing no longer refuses the run', () => {
+    // Across direct, no integrator fee: relayer capital 2 000 + destination gas 5 296 = 7 296 on 2 000 000 (0.7296%).
+    const reviewed = { ...route(), routingProvider: 'across', inputAmount: '2000000', expectedOutput: '1992704', minimumOutput: '1992704', slippageBps: 100,
+      steps: [{ kind: 'BRIDGE', protocol: 'across', fromChain: 'eip155:8453', toChain: 'eip155:42161', fromToken: BASE_USDC, toToken: ARB_USDC, amountIn: '2000000', amountOut: '1992704' }],
+      fees: [{ kind: 'BRIDGE_RELAYER_CAPITAL', label: 'Across relayer capital fee', chainId: 'eip155:8453', token: BASE_USDC, amount: '2000', recipient: null },
+        { kind: 'BRIDGE_DESTINATION_GAS', label: 'Across destination gas fee', chainId: 'eip155:8453', token: BASE_USDC, amount: '5296', recipient: null }],
+      feeTotal: '7296', approval: { token: BASE_USDC, spender: SPOKE, amount: '2000000' },
+      deposit: { purpose: 'BRIDGE_DEPOSIT', chainId: 'eip155:8453', to: SPOKE, data: '0xad5425c6' + '00'.repeat(64), value: '0x0' },
+      bridge: { ...route().bridge, inputAmount: '2000000', outputAmount: '1992704' } } as CanonicalRoute;
+    expect(providerFeeDrift(reviewed, reviewed).tolerance).toBe('729');
+    // The old rule tolerated 72 base units (1% of the fee); a re-pricing of 150 (≈ 0.0075% of the input) refused the run.
+    expect(classifyRouteRevalidation(reviewed, drifted(150n, reviewed)).outcome).toBe('MARKET_DRIFT_TOLERATED');
+    expect(classifyRouteRevalidation(reviewed, drifted(730n, reviewed)).outcome).toBe('OUTSIDE_AUTHORIZED_BOUNDS');
+  });
+});
+
+describe('BUILD-FLOFI-MAINNET-EXEC-002 fee recipients', () => {
+  it('a recipient-less line that appears or disappears (Across itemizing a zero LP fee) is not FEE_RECIPIENT_CHANGED', () => {
+    const r = route();
+    const split = mutate(x => ({ fees: [...x.fees.map(f => f.kind === 'BRIDGE_RELAYER_CAPITAL' ? { ...f, amount: '990' } : f),
+      { kind: 'BRIDGE_LP', label: 'Across LP fee', chainId: 'eip155:8453', token: BASE_USDC, amount: '7', recipient: null }] }));
+    expect(feeRecipients(split)).toEqual(feeRecipients(r));
+    expect(compareRoutes(r, split, 'REQUOTE')).toEqual([]);
+    expect(classifyRouteRevalidation(r, split).outcome).toBe('UNCHANGED');
+  });
+  it('a fee paid to another party is still a material change', () => {
+    const r = route(), redirected = mutate(x => ({ fees: x.fees.map(f => f.kind === 'INTEGRATOR' ? { ...f, recipient: OTHER } : f) }));
+    expect(compareRoutes(r, redirected, 'REQUOTE')).toEqual(['FEE_RECIPIENT_CHANGED']);
+    expect(classifyRouteRevalidation(r, redirected).outcome).toBe('MATERIAL_CHANGE');
   });
 });
 

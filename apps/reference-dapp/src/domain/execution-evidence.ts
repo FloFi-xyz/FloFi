@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Presentation of recorded evidence only. No runtime calls or state changes. */
+import { supersededUnsent } from './execution-lifecycle';
 import { financialObservationMessage, type AllowanceObservation } from './financial-observation';
 import type { EvidenceBundle } from '@defi-workflow-engine/workflow-contracts';
 import { baseAssetRegistry } from '@defi-workflow-engine/action-registry';
@@ -167,7 +168,10 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       for (const attempt of record.attempts) {
         identifier(attempt.step, attempt.step === 'APPROVAL' ? 'Approval transaction' : 'Source transaction', attempt.transactionHash, 'transaction', review.intent.sourceChain, attempt.state);
         identifier(attempt.step, 'Replacement transaction', attempt.replacementHash, 'transaction', review.intent.sourceChain, attempt.state);
-        fee(attempt.step, review.intent.sourceChain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei); failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
+        fee(attempt.step, review.intent.sourceChain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei);
+        // Review round 3: a never-sent request of an earlier Review stays recorded, but never as the failure of the fresh request of its step.
+        if (supersededUnsent(attempt, review.commitment)) detail('Earlier request not sent (re-quoted)', `${attempt.step} · ${attempt.note ?? 'CANCELLED'}`);
+        else failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
       }
       identifier('DEPOSIT', 'Source transaction', record.source?.transactionHash, 'transaction', review.intent.sourceChain);
       identifier('DEPOSIT', 'Provider reference · Deposit ID', record.source?.depositId);
@@ -178,7 +182,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       allowanceFacts(record.allowanceObservation, review.route.inputToken.decimals, review.route.inputToken.symbol);
       if (record.observation) {
         detail('Last execution check', record.observation.checkedAt); detail('Observation reason', record.observation.reason);
-        op(record.source ? 'destination' : record.attempts.at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);
+        op(record.source ? 'destination' : record.attempts.filter(a => !supersededUnsent(a, review.commitment)).at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);
       }
       if (record.refund) amount('destination', 'Verified refund', record.refund.amount, review.route.inputToken.decimals, review.route.inputToken.symbol);
       detail('Source network', shellChainLabel(review.intent.sourceChain)); detail('Destination network', shellChainLabel(review.intent.destinationChain));
@@ -190,13 +194,14 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       evidence.wallet = record.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
       const review = record.review, route = review.route;
       for (const attempt of record.attempts) {
-        identifier(attempt.step, attempt.step === 'APPROVAL' ? 'Approval transaction' : 'Source transaction', attempt.transactionHash, 'transaction', route.sourceChain, attempt.state);
+        identifier(attempt.step, attempt.step === 'APPROVAL' ? 'Approval transaction' : attempt.step === 'UNWRAP' ? 'Unwrap transaction' : 'Source transaction', attempt.transactionHash, 'transaction', route.sourceChain, attempt.state);
         if (attempt.ecosystem === 'EVM') {
           identifier(attempt.step, 'Replacement transaction', attempt.replacementHash, 'transaction', route.sourceChain, attempt.state);
           fee(attempt.step, route.sourceChain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei);
           detail('Network fee payer', attempt.receipt?.from);
         } else { fee(attempt.step, route.sourceChain, attempt.transactionHash, attempt.feeLamports, 9, 'SOL'); }
-        failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
+        if (supersededUnsent(attempt, review.commitment)) detail('Earlier request not sent (re-quoted)', `${attempt.step} · ${attempt.note ?? 'CANCELLED'}`);
+        else failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
       }
       identifier('DEPOSIT', 'Provider reference · Order ID', route.order.orderId);
       identifier('destination', 'Destination transaction', record.destination?.transactionHash, 'transaction', route.destinationChain);
@@ -205,11 +210,20 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.verdict === 'RECONCILED' && record.destination?.final) amount('destination', 'Actual received', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol, route.expectedOutput);
       if (record.destination && record.verdict !== 'RECONCILED') amount('destination', 'Destination amount observed · awaiting reconciliation', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol);
       if (record.refund) amount('destination', 'Verified refund', record.refund.amount, route.inputToken.decimals, route.inputToken.symbol);
-      if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN') allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);
-      if (!record.attempts.some(a => a.step === 'DEPOSIT')) op('DEPOSIT').note = 'The source deposit has not been requested. A confirmed approval can still have network costs and an open allowance.';
+      // BUILD-FLOFI-MAINNET-EXEC-002 review round 2: an unwrapping route (its source calls unwrap WETH to ETH and approve nothing) grants no token
+      // allowance, so it shows no allowance facts and its pending-deposit note speaks of the unwrap, never of an approval or an open allowance.
+      // Review round 3: after a confirmed unwrap a re-quote in place plans only the deposit; the route's own unwrap still marks it as unwrapping.
+      // A run that ever requested an approval keeps its allowance facts (an earlier Review's approval may still be open).
+      const unwrapping = review.source.ecosystem === 'EVM' && !review.source.calls.some(call => call.purpose === 'APPROVAL')
+        && (review.source.calls.some(call => call.purpose === 'UNWRAP') || (route.source?.ecosystem === 'EVM' && route.source.unwrap !== undefined));
+      const approvedBefore = record.attempts.some(attempt => attempt.step === 'APPROVAL');
+      if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN' && (!unwrapping || approvedBefore)) allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);
+      if (!record.attempts.some(a => a.step === 'DEPOSIT' && !supersededUnsent(a, review.commitment))) op('DEPOSIT').note = unwrapping && !approvedBefore
+        ? 'The source deposit has not been requested. A confirmed unwrap can still have network costs; its ETH stays in your wallet.'
+        : 'The source deposit has not been requested. A confirmed approval can still have network costs and an open allowance.';
       if (record.observation) {
         detail('Last execution check', record.observation.checkedAt); detail('Observation reason', record.observation.reason);
-        op(record.source ? 'destination' : record.attempts.at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);
+        op(record.source ? 'destination' : record.attempts.filter(a => !supersededUnsent(a, review.commitment)).at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);
       }
       evidence.limitations.push('Only receipt-backed network costs are included. Unobserved transaction costs remain unknown.');
       detail('Source network', shellChainLabel(route.sourceChain)); detail('Destination network', shellChainLabel(route.destinationChain));

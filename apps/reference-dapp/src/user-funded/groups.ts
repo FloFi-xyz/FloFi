@@ -5,7 +5,11 @@
  * every artifact the owner signs is exact (calls, amounts, minimum outputs, gas words) and verified here before it is used.
  *
  *   EVM_WALLET_BATCH      prepare: exact calls + `wallet_sendCalls` request + fee estimate; the owner's wallet signs AND sends (FloFi relays
- *                         nothing); authorize: the batch id; report: the transaction hashes; reconcile: receipts re-read from the chain
+ *                         nothing); authorize: the batch id; report: the transaction hashes; reconcile: receipts re-read from the chain.
+ *                         ADR-0009: where the operator configured a paymaster for the chain, the artifact also carries a sponsorship offer (a
+ *                         single-use grant for exactly these calls and FloFi's paymaster proxy URL) that the browser hands to a wallet reporting
+ *                         EIP-5792 `paymasterService`; the owner's balance must cover the fee ceiling unless the offer is then REQUIRED (the
+ *                         owner holds too little native gas: nothing is sent unsponsored)
  *   EVM_USER_OPERATION    prepare: the owner's own user operation (no factory, no paymaster) and its EIP-712 typed data; authorize: the owner's
  *                         signature, recovered to the owner; submit (when due): simulated by the bundler first, then relayed; the EntryPoint
  *                         charges the owner's account; reconcile: the bundle receipt's UserOperationEvent (sender = owner, paymaster = 0)
@@ -29,7 +33,8 @@ import { AAVE_ACTIONS, type GroupStrategy, type OwnerAnswer } from '../workflow-
 import type { BundlerClient } from './bundler.ts';
 import { buildEvmGroupCalls, DEPENDENT_CALL_GAS, evmCallsOf, L1_FEE_UPPER_BOUND_SELECTOR, OP_GAS_PRICE_ORACLE, OP_STACK_CHAIN_IDS, type AssetAmountFact,
   type EvmGroupCalls } from './evm-calls.ts';
-import { reconcileUserOperation, reconcileWalletBatch, type ReconciledReceipt, type StepFacts } from './evm-reconcile.ts';
+import { reconcileUserOperation, reconcileWalletBatch, type ReconciledReceipt, type SponsoredOperations, type StepFacts } from './evm-reconcile.ts';
+import type { SponsorshipPort } from '../gas-sponsorship/runtime.ts';
 import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
@@ -59,9 +64,12 @@ export type UserFundedDeps = {
    * hints), or absent (a bridge then runs through its own flow). Its pins are the router profile's own on a public deployment.
    */
   readonly across?: AcrossRoutes;
+  /** ADR-0009: network-fee sponsorship of wallet batches (`src/gas-sponsorship`), where the operator configured it; absent: owner-paid only. */
+  readonly sponsorship?: SponsorshipPort | null;
 };
+/** `preview`: a review's preparation (nothing is handed to a wallet): no sponsorship grant is created. */
 export type GroupInput = { readonly runId: string; readonly groupIndex: number; readonly strategy: GroupStrategy; readonly chain: string; readonly feePayer: string;
-  readonly stepFrom: number; readonly stepTo: number };
+  readonly stepFrom: number; readonly stepTo: number; readonly preview?: boolean };
 export type Prepared = Readonly<Record<string, unknown>> & { readonly kind: GroupStrategy };
 /**
  * P0 approved UX (board 07): the numbers behind USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE, exactly as this module already read and computed them
@@ -153,16 +161,23 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
     catch (cause) { return no(codeOf(cause, '') === 'DELEGATION_RPC_UNAVAILABLE' ? 'USER_FUNDED_RPC_UNAVAILABLE' : 'USER_FUNDED_L1_FEE_UNAVAILABLE', group.steps[0]?.stepIndex ?? null); }
   }
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas + l1FeeUpperBound;
-  // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does.
-  if (fees.balance < maxCost + nativeSpend(group)) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+  // ADR-0009: FloFi's sponsorship offer for exactly these calls (null where no paymaster is configured, the day's budget is spent, or the offer
+  // cannot be made now: the batch is then owner-paid, as always).
+  const offer = deps.sponsorship ? await deps.sponsorship.offer({ chain: g.chain, owner: group.owner, calls, maxFeePerGas, gas, ttlSeconds: EVM_PREPARED_TTL_MS / 1000,
+    preview: g.preview === true }).catch(() => null) : null;
+  // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does. With a
+  // sponsorship offer it must still cover the native value: the offer is then REQUIRED (sent only sponsored, never owner-paid without the gas).
+  const ownerCovers = fees.balance >= maxCost + nativeSpend(group);
+  if (!ownerCovers && !(offer && fees.balance >= nativeSpend(group))) return nativeShortfall(group, fees.balance, maxCost, nativeSpend(group));
+  const sponsorship = offer ? { ...offer, required: !ownerCovers } : null;
   // One id per group, the same for every preparation of it: a wallet that honours EIP-5792 ids refuses to execute the group twice (a retry
   // after a lost answer, a reload, a re-preparation after expiry) and lets the owner's browser read the first batch back instead.
   const request = eip5792.sendCallsRequest(group.chainId, group.owner, calls, walletBatchId(g.runId, g.groupIndex));
   // Receipts older than this preparation can never reconcile this group (an old owner transaction is not this batch).
   const fromBlock = big(await t.rpc('eth_blockNumber', [])).toString();
-  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation,
+  return ok({ kind: 'EVM_WALLET_BATCH', chainId: group.chainId, owner: group.owner, group, request, fromBlock, simulation, ...sponsorship ? { sponsorship } : {},
     fee: { payer: group.owner, unit: 'wei', estimatedGas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(),
-      l1FeeUpperBound: l1FeeUpperBound.toString(), estimated: true } });
+      l1FeeUpperBound: l1FeeUpperBound.toString(), estimated: true, sponsorship: sponsorship ? sponsorship.required ? 'REQUIRED' : 'OFFERED' : null } });
 }
 
 async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>,
@@ -519,18 +534,30 @@ export const SUPERSEDED_WALLET_BATCH_LIMIT = 8;
  * id, so when a group is prepared again after expiry the wallet may already hold the batch of an earlier one: reconciliation must still
  * recognise it (and its signed minimums), so the new artifact keeps them.
  */
-export function supersededWalletBatches(prepared: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
+/** ADR-0009: the sponsorship a preparation was offered (its grant and the paymaster pinned for its chain then), kept for reconciliation. */
+type Sponsor = { readonly grantId: string; readonly paymaster: string };
+type Superseded = { readonly group: EvmGroupCalls; readonly fromBlock: string | null; readonly sponsor?: Sponsor };
+const sponsorOf = (value: unknown): Sponsor | null => {
+  const s = value && typeof value === 'object' ? value as { grantId?: unknown; paymaster?: unknown } : null;
+  return s && typeof s.grantId === 'string' && typeof s.paymaster === 'string' && /^0x[0-9a-f]{40}$/.test(s.paymaster) ? { grantId: s.grantId, paymaster: s.paymaster } : null;
+};
+export function supersededWalletBatches(prepared: Prepared | null): readonly Superseded[] {
   if (!prepared || prepared.kind !== 'EVM_WALLET_BATCH') return [];
-  const earlier = Array.isArray(prepared.superseded) ? prepared.superseded as { group: EvmGroupCalls; fromBlock: unknown }[] : [];
-  return earlier.filter(e => e && typeof e === 'object' && e.group).map(e => ({ group: e.group, fromBlock: typeof e.fromBlock === 'string' ? e.fromBlock : null }));
+  const earlier = Array.isArray(prepared.superseded) ? prepared.superseded as { group: EvmGroupCalls; fromBlock: unknown; sponsor?: unknown }[] : [];
+  return earlier.filter(e => e && typeof e === 'object' && e.group).map(e => {
+    const sponsor = sponsorOf(e.sponsor);
+    return { group: e.group, fromBlock: typeof e.fromBlock === 'string' ? e.fromBlock : null, ...sponsor ? { sponsor } : {} };
+  });
 }
 /**
  * The superseded list a new preparation of the same wallet batch group carries: the replaced artifact first, then its own earlier ones. A
  * group reset to PLANNED keeps only that history (`{ kind, superseded }`, no artifact of its own) until it is prepared again.
  */
-export function supersede(previous: Prepared | null): readonly { readonly group: EvmGroupCalls; readonly fromBlock: string | null }[] {
+export function supersede(previous: Prepared | null): readonly Superseded[] {
   if (!previous || previous.kind !== 'EVM_WALLET_BATCH') return [];
-  const own = previous.group ? [{ group: previous.group as EvmGroupCalls, fromBlock: typeof previous.fromBlock === 'string' ? previous.fromBlock : null }] : [];
+  const sponsor = sponsorOf(previous.sponsorship);
+  const own = previous.group ? [{ group: previous.group as EvmGroupCalls, fromBlock: typeof previous.fromBlock === 'string' ? previous.fromBlock : null,
+    ...sponsor ? { sponsor } : {} }] : [];
   return [...own, ...supersededWalletBatches(previous)].slice(0, SUPERSEDED_WALLET_BATCH_LIMIT);
 }
 /** Reconciles an EVM group from the chain (wallet batch: the reported hashes; user operation: the bundler's bundle transaction, re-read). */
@@ -540,14 +567,39 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
   if (!t) return { status: 'PENDING' };
   if (prepared.kind === 'EVM_WALLET_BATCH') {
     const hashes = (submission.hashes ?? []) as string[];
-    let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null), matched: EvmGroupCalls | null = null;
+    // ADR-0009: the operations FloFi's paymaster sponsored under a preparation's grant (none: the batch can only reconcile as owner-paid).
+    // A preparation with a grant whose operations cannot be read now (storage unavailable, or this process has no sponsorship port) decides
+    // nothing: the group stays PENDING (review P2), never UNMATCHED for want of a read. BUILD-FLOFI-MAINNET-EXEC-002 review (round 2): a grant
+    // the artifact names that the port does not find (null) is unreadable too, never "no grant" (which would judge a sponsored bundle as a
+    // transaction the owner did not send).
+    const UNREADABLE = Symbol('UNREADABLE');
+    const sponsoredBy = async (sponsor: Sponsor | null | undefined): Promise<SponsoredOperations | null | typeof UNREADABLE> => {
+      if (!sponsor) return null;
+      if (!deps.sponsorship) return UNREADABLE;
+      let hashes: readonly string[] | null;
+      try { hashes = await deps.sponsorship.operations(sponsor.grantId); } catch { return UNREADABLE; }
+      return hashes ? { paymaster: sponsor.paymaster, userOpHashes: hashes } : UNREADABLE;
+    };
+    // "Not this preparation's batch": its calls or block differ, or (a preparation without sponsorship) a bundle the owner did not send — which an
+    // earlier, sponsored preparation of the same group may still own.
+    const notThis = (x: Awaited<ReturnType<typeof reconcileWalletBatch>>, ops: SponsoredOperations | null) =>
+      x.status === 'MISMATCH' && (SUPERSEDED_MISMATCH.has(x.code) || x.code === 'GAS_PAYER_NOT_OWNER' && ops === null);
+    const own = sponsorOf(prepared.sponsorship), ownOps = await sponsoredBy(own);
+    if (ownOps === UNREADABLE) return { status: 'PENDING' };
+    let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null, ownOps),
+      matched: EvmGroupCalls | null = null, grant = own?.grantId ?? null;
     // A batch the wallet sent under this group's id BEFORE the group was prepared again (its answer was lost, then the preparation expired)
     // carries that earlier preparation's calls: it reconciles against the artifact it was sent from (and is recorded with ITS signed amounts),
     // never as a mismatch of the newer one.
-    for (const earlier of r.status === 'MISMATCH' && SUPERSEDED_MISMATCH.has(r.code) ? supersededWalletBatches(prepared) : []) {
-      const again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock);
-      if (again.status !== 'MISMATCH' || !SUPERSEDED_MISMATCH.has(again.code)) { r = again; matched = earlier.group; break; }
+    for (const earlier of notThis(r, ownOps) ? supersededWalletBatches(prepared) : []) {
+      const ops = await sponsoredBy(earlier.sponsor);
+      if (ops === UNREADABLE) return { status: 'PENDING' };
+      const again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock, ops);
+      if (!notThis(again, ops)) { r = again; matched = earlier.group; grant = earlier.sponsor?.grantId ?? null; break; }
     }
+    // The fee the sponsor actually paid replaces its reserved worst case (accounting only: a failure keeps the reservation, never the outcome).
+    if (r.status !== 'PENDING' && r.sponsoredOperation && r.gasPaid?.sponsored && grant && deps.sponsorship)
+      await deps.sponsorship.settle(grant, r.sponsoredOperation, BigInt(r.gasPaid.amount)).catch(() => undefined);
     const from = matched ? { group: matched } : {};
     // Only a reverted batch FAILED; a mismatch the chain did not revert is UNMATCHED (it may have executed).
     return r.status === 'PENDING' ? r : r.status === 'RECONCILED' ? { status: 'RECONCILED', steps: r.steps, gasPaid: r.gasPaid, transactions: r.transactions, ...from,

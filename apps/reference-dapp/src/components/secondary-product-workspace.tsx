@@ -26,6 +26,7 @@ import { exportActions, isLegacyWallet, WALLET_LABEL_MAX } from '../accounts/acc
 import { walletInventory, walletStatus, type WalletInventoryEntry } from '../domain/wallet-inventory';
 import { floFiWalletProviderKey, isFloFiWalletChoice } from '../wallet/flofi-wallet-sync';
 import { StatusTag } from './dashboard/dashboard-status';
+import { invalidateAccountWallets } from '../state/destination-wallets';
 
 type IconName = 'wallet' | 'agent' | 'key' | 'plus' | 'copy' | 'card' | 'secret';
 function WorkspaceIcon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -325,7 +326,8 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
   const [cardEntry, setCardEntry] = useState(false);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-03): the signed-in account's wallets join this one section (read after load, public data only).
   const [account, setAccount] = useState<AccountState | null>(null);
-  const loadAccount = useCallback(() => { void accountState().then(setAccount, () => setAccount(null)); }, []);
+  // BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a wallet linked, removed or renamed here also refreshes the bridge destination resolution.
+  const loadAccount = useCallback(() => { invalidateAccountWallets(); void accountState().then(setAccount, () => setAccount(null)); }, []);
   useEffect(() => { loadAccount(); }, [loadAccount]);
   // A Google/Apple/email link that failed returns here with a classified code.
   useEffect(() => {

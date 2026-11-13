@@ -9,6 +9,8 @@ Steps marked **[OWNER]** change production, create a paid resource or move real 
 ## 0. What changes
 
 - Every network fee of a user workflow is paid by the owner's own wallet (invariant S1). FloFi funds, advances, sponsors and reimburses nothing.
+  BUILD-FLOFI-MAINNET-EXEC-002 ([ADR-0009](../adr/ADR-0009-network-fee-sponsorship.md)) adds one optional exception, off by default: an owner
+  wallet batch whose fee the operator's pinned paymaster pays through FloFi's paymaster proxy ([GAS-SPONSORSHIP.md](./GAS-SPONSORSHIP.md)).
 - New run mode `USER_FUNDED`: execution groups, one wallet interaction per group per chain (EIP-5792 atomic batch, the owner's own ERC-4337
   user operation, one Solana sign-all request), other steps through their own flows. Off unless `FLOFI_USER_FUNDED_EXECUTION=enabled`.
 - The delegated executor can no longer send, sign for, or pay for anything (`EXECUTOR_GAS_PAYER_REFUSED`); new delegated authority is

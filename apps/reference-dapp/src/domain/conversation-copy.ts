@@ -16,7 +16,7 @@ export type ConversationCopy = {
   readonly executedKept: (executed: number) => string; readonly executedAgain: string;
   readonly undone: string; readonly undoUnavailable: string; readonly emptyWorkflow: string; readonly reviewStarting: string; readonly reviewBlocked: (reason: string) => string;
   readonly reviewFailed: (reason: string) => string; readonly reviewReady: string; readonly reviewNotApprovable: (reason: string) => string; readonly confirmWorkflow: string;
-  readonly confirmYes: string; readonly confirmNo: string; readonly workflowConfirmed: (revision: number, account: string) => string; readonly executeQuestion: string;
+  readonly confirmYes: string; readonly confirmNo: string; readonly workflowConfirmed: (revision: number, account: string) => string; readonly workflowConfirmedContinuing: (revision: number, account: string) => string; readonly executeQuestion: string;
   readonly executeYes: string; readonly executeNo: string; readonly walletRequests: (requests: string) => string; readonly walletRequestsUnknown: string;
   readonly executing: string; readonly continueQuestion: string; readonly continueYes: string; readonly declined: string;
   readonly unclear: string; readonly invalidated: Readonly<Record<BindingIssue, string>>; readonly executeNeedsReview: string; readonly executeConfirmedFirst: string;
@@ -45,6 +45,8 @@ export type ConversationCopy = {
    */
   readonly continueAfter: (done: string, next: string, approval: boolean) => string;
   readonly continuationRequote: (reason: string | null) => string; readonly continuationReview: (next: string) => string;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: said before an in-place re-quote's reason when an earlier request of the run already landed. */
+  readonly earlierRequestStays: string;
   readonly continuationQuestion: string; readonly continueFailed: (reason: string) => string;
   /** The answer that accepts a fresh continuation Review (distinct from the plain Continue of an already accepted one). */
   readonly continueAccept: string;
@@ -85,10 +87,12 @@ const en: ConversationCopy = {
   reviewStarting: 'Simulating your workflow with current provider data. Nothing is signed or sent.',
   reviewBlocked: reason => `I can’t start the review yet: ${reason}`,
   reviewFailed: reason => `The simulation did not produce a review: ${reason}`,
-  reviewReady: 'Here is the review of your workflow. Amounts are estimates from this simulation, not executed results.',
+  // BUILD-FLOFI-MAINNET-EXEC-002: one short sentence; the card says the rest (≈ marks estimates; the full note is under Technical details).
+  reviewReady: 'Here is the review of your workflow.',
   reviewNotApprovable: reason => `This review cannot be confirmed yet: ${reason}`,
   confirmWorkflow: 'Do you confirm this workflow?', confirmYes: 'Yes, I confirm', confirmNo: 'No',
   workflowConfirmed: (revision, account) => `Workflow confirmed (revision ${revision}, wallet ${account}). Nothing has been signed or sent.`,
+  workflowConfirmedContinuing: (revision, account) => `Workflow confirmed (revision ${revision}, wallet ${account}). Your earlier confirmed request stays in place; nothing new has been signed or sent.`,
   executeQuestion: 'Would you like to execute this workflow now?', executeYes: 'Yes, execute', executeNo: 'Not now',
   walletRequests: requests => `Your wallet will ask you to confirm each request separately: ${requests}.`,
   walletRequestsUnknown: 'Your wallet shows each request before you confirm it; FloFi never signs for you.',
@@ -121,7 +125,7 @@ const en: ConversationCopy = {
   positionPrepared: 'Prepared for simulation. Nothing is removed until you review, confirm and sign in your wallet.',
   noChange: 'That step already has these values. Nothing changed.',
   locked: 'That step’s amount is locked. Unlock it in the step’s settings first. Nothing changed.',
-  sequenceReviewReady: (current, total) => `Here is the review of step ${current} of ${total}. Amounts are estimates from this simulation, not executed results. Each later step is simulated with a fresh quote after the steps before it reconcile, and you confirm it before your wallet is asked.`,
+  sequenceReviewReady: (current, total) => `Here is the review of step ${current} of ${total}. Each later step gets its own fresh quote and confirmation.`,
   confirmStep: (current, total) => current === 1 ? 'Do you confirm this workflow?' : `Do you confirm step ${current} of ${total}?`,
   executeStepQuestion: (current, total) => current === 1 && total === 1 ? 'Would you like to execute this workflow now?' : `Would you like to execute step ${current} of ${total} now?`,
   stepCompleted: (current, total, delivered) => `Step ${current} of ${total} is completed and reconciled${delivered ? `: it delivered ${delivered}` : ''}.`,
@@ -150,6 +154,7 @@ const en: ConversationCopy = {
   refreshing: 'Getting a fresh quote and simulation. Nothing is signed or sent.',
   continueAfter: (done, next, approval) => `${done} is confirmed on-chain.${approval ? ' An approval only allows the spend; it is not the action itself.' : ''} ${next} has not been sent yet and needs its own confirmation in your wallet. Continue to your wallet?`,
   continuationRequote: reason => `Your earlier confirmed request stays in place, and nothing new was sent.${reason ? ` ${reason}` : ' The reviewed quote is no longer valid.'} I am getting a fresh quote for the next request now; you confirm it before your wallet is asked.`,
+  earlierRequestStays: 'Your earlier confirmed request stays in place.',
   continuationReview: next => `Here is the fresh quote for ${next}, which has not been sent yet. Your earlier confirmed request stays in place and is not repeated. Amounts are estimates from this simulation, not executed results.`,
   continuationQuestion: 'Accept this updated quote and continue to your wallet for this request?', continueAccept: 'Accept and continue',
   ownerBoundNext: (done, next) => `${done} is confirmed on-chain. An approval only allows the spend; it is not the action itself. ${next} is a new transaction from your wallet, so FloFi is preparing its own fresh Review now (read-only); you confirm it before your wallet is asked.`,
@@ -190,10 +195,11 @@ const pt: ConversationCopy = {
   reviewStarting: 'Simulando o seu fluxo com dados atuais dos provedores. Nada é assinado nem enviado.',
   reviewBlocked: reason => `Ainda não consigo iniciar a revisão: ${reason}`,
   reviewFailed: reason => `A simulação não gerou uma revisão: ${reason}`,
-  reviewReady: 'Esta é a revisão do seu fluxo. Os montantes são estimativas desta simulação, não resultados executados.',
+  reviewReady: 'Esta é a revisão do seu fluxo.',
   reviewNotApprovable: reason => `Esta revisão ainda não pode ser confirmada: ${reason}`,
   confirmWorkflow: 'Você confirma este fluxo?', confirmYes: 'Sim, confirmo', confirmNo: 'Não',
   workflowConfirmed: (revision, account) => `Fluxo confirmado (revisão ${revision}, carteira ${account}). Nada foi assinado nem enviado.`,
+  workflowConfirmedContinuing: (revision, account) => `Fluxo confirmado (revisão ${revision}, carteira ${account}). O seu pedido anterior já confirmado continua válido; nada novo foi assinado nem enviado.`,
   executeQuestion: 'Quer executar este fluxo agora?', executeYes: 'Sim, executar', executeNo: 'Agora não',
   walletRequests: requests => `A sua carteira vai pedir a confirmação de cada pedido separadamente: ${requests}.`,
   walletRequestsUnknown: 'A sua carteira mostra cada pedido antes de você confirmar; a FloFi nunca assina por você.',
@@ -226,7 +232,7 @@ const pt: ConversationCopy = {
   positionPrepared: 'Preparado para a simulação. Nada é removido até você revisar, confirmar e assinar na sua carteira.',
   noChange: 'Essa etapa já tem esses valores. Nada mudou.',
   locked: 'O montante dessa etapa está travado. Destrave-o nas configurações da etapa primeiro. Nada mudou.',
-  sequenceReviewReady: (current, total) => `Esta é a revisão da etapa ${current} de ${total}. Os montantes são estimativas desta simulação, não resultados executados. Cada etapa seguinte é simulada com uma cotação nova depois que as anteriores forem reconciliadas, e você a confirma antes de a carteira ser chamada.`,
+  sequenceReviewReady: (current, total) => `Esta é a revisão da etapa ${current} de ${total}. Cada etapa seguinte tem cotação nova e confirmação própria.`,
   confirmStep: (current, total) => current === 1 ? 'Você confirma este fluxo?' : `Você confirma a etapa ${current} de ${total}?`,
   executeStepQuestion: (current, total) => current === 1 && total === 1 ? 'Quer executar este fluxo agora?' : `Quer executar a etapa ${current} de ${total} agora?`,
   stepCompleted: (current, total, delivered) => `A etapa ${current} de ${total} foi concluída e reconciliada${delivered ? `: entregou ${delivered}` : ''}.`,
@@ -255,6 +261,7 @@ const pt: ConversationCopy = {
   refreshing: 'Buscando uma nova cotação e simulação. Nada é assinado nem enviado.',
   continueAfter: (done, next, approval) => `${done}: confirmado na rede.${approval ? ' Uma aprovação apenas autoriza o gasto; não é a ação em si.' : ''} ${next}: ainda não enviado, precisa da sua própria confirmação na carteira. Continuar para a carteira?`,
   continuationRequote: reason => `O seu pedido anterior já confirmado continua válido, e nada novo foi enviado.${reason ? ` ${reason}` : ' A cotação revisada já não é válida.'} Estou buscando uma nova cotação para o próximo pedido; você a confirma antes de a carteira ser chamada.`,
+  earlierRequestStays: 'O seu pedido anterior já confirmado continua válido.',
   continuationReview: next => `Esta é a nova cotação para ${next}, que ainda não foi enviado. O seu pedido anterior já confirmado continua válido e não é repetido. Os montantes são estimativas desta simulação, não resultados executados.`,
   continuationQuestion: 'Aceitar esta cotação atualizada e continuar para a carteira com este pedido?', continueAccept: 'Aceitar e continuar',
   ownerBoundNext: (done, next) => `${done}: confirmado na rede. Uma aprovação apenas autoriza o gasto; não é a ação em si. ${next} é uma nova transação da sua carteira, então a FloFi está preparando a revisão própria dela agora (somente leitura); você a confirma antes de a carteira ser chamada.`,

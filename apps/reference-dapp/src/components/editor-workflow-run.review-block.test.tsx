@@ -17,7 +17,7 @@ vi.mock('../app/approve-action', () => {
   return { authorizeUserFundedGroup: never, cancelWorkflowRunHandoff: never, prepareUserFundedGroup: never, reportUserFundedBatch: never, resumeWorkflowRunHandoff: never,
     workflowRunStatusHandoff: never };
 });
-vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, keepBatchHandout: () => undefined, sendWalletBatch: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn(), walletBatchHashes: vi.fn(), walletProfile: vi.fn() }));
+vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn(), walletBatchHashes: vi.fn(), walletProfile: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
 const { EditorWorkflowRunPanel, EditorWorkflowRunPrimaryAction } = await import('./editor-workflow-run');
 const { LocaleProvider } = await import('../i18n/locale');
@@ -115,6 +115,31 @@ describe('board 06: the Review before authorization', () => {
       networkSwitches: 1, oneTimeSetup: ['EVM_SMART_ACCOUNT_UPGRADE'] } }) }), 'PT'));
     expect(upgrade).toContain('<span class="numeric">1</span> + <span class="numeric">1</span> troca(s) de rede');
     expect(upgrade).toContain('inclui uma atualização única desta conta para conta inteligente');
+  });
+  it('review round 2 (ADR-0009): who pays each network fee follows its sponsorship — REQUIRED is not in "Network fee, at most"; OFFERED says when the wallet pays', () => {
+    const base = swapBridgeReview(), g = base.groups[0]!;
+    const sponsored = (sponsorship: 'OFFERED' | 'REQUIRED') => swapBridgeReview({ groups: [{ ...g, fee: { ...g.fee!, sponsorship } }] });
+    const required = render(state({ review: sponsored('REQUIRED') }));
+    expect(visible(required)).toContain('<dt>Network fee, at most</dt><dd><span>None from your wallet: FloFi offers to pay it</span></dd>');
+    expect(visible(required)).toContain('<p class="review-panel-note">FloFi offers to pay the network fee; your wallet must support sponsored fees on Base. FloFi never signs or sends for you.</p>');
+    expect(visible(required)).not.toContain('Your wallet pays the network fees');
+    expect(required).toContain('one atomic transaction from your own wallet; FloFi offers to pay its network fee (your wallet must support sponsored fees on this network).');
+    // The technical note no longer points "below" (the sponsored fee is listed above it).
+    expect(required).toContain('FloFi offers to sponsor the network fee marked &quot;Sponsored network fee&quot;; every other fee is paid by your wallet.');
+    expect(required).not.toContain('network fee below');
+    const offered = render(state({ review: sponsored('OFFERED') }));
+    expect(visible(offered)).toContain('<dt>Network fee, at most</dt><dd><span><span class="numeric">0.000454 ETH</span></span><small class="review-block-qualifier">');
+    expect(visible(offered)).toContain('FloFi offers to pay the network fee; your wallet pays it only if it does not support sponsored fees. FloFi never signs or sends for you.');
+    expect(offered).toContain('one atomic transaction from your own wallet; FloFi offers to pay its network fee, and your wallet pays it only if it does not support sponsored fees.');
+    // Two groups: the sponsored one is named; the wallet pays the other one's fee.
+    const grouped = visible(render(state({ review: swapBridgeReview({ mode: 'GROUPED', groups: [{ ...g, steps: [0, 0], fee: { ...g.fee!, sponsorship: 'REQUIRED' } },
+      { ...g, index: 1, steps: [1, 1], fee: { ...g.fee!, maxWei: '1000000000000000' } }] }) })));
+    expect(grouped).toContain('<span class="numeric">0.001 ETH</span>');
+    expect(grouped).toContain('FloFi offers to pay the network fee of group 1; your wallet must support sponsored fees on Base. Your wallet pays every other network fee. FloFi never signs or sends for you.');
+    const pt = visible(render(state({ review: sponsored('REQUIRED') }), 'PT'));
+    expect(pt).toContain('Nada da sua carteira: a FloFi se oferece para pagá-la');
+    expect(pt).toContain('A FloFi se oferece para pagar a taxa de rede; sua carteira precisa oferecer suporte a taxas patrocinadas na Base. A FloFi nunca assina nem envia por você.');
+    expect(render(state({ review: sponsored('OFFERED') }), 'PT')).toContain('A FloFi se oferece para patrocinar a taxa de rede marcada como &quot;Taxa de rede patrocinada&quot;');
   });
   it('while the Review is prepared it says so, in the same block', () => {
     const html = render(state({ review: null, phase: 'reviewing' }));

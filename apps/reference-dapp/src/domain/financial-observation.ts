@@ -2,7 +2,7 @@
 /** Durable observation facts, separate from authorization and from a final evidence bundle. */
 export type FinancialObservation = {
   checkedAt: string;
-  outcome: 'CONFIRMED' | 'APPROVAL_CONFIRMED' | 'DESTINATION_OBSERVED' | 'REFUND_OBSERVED' | 'PENDING' | 'REVERTED' | 'NOT_SUBMITTED' | 'UNDETERMINED' | 'TEMPORARY_FAILURE' | 'RECONCILED';
+  outcome: 'CONFIRMED' | 'APPROVAL_CONFIRMED' | 'UNWRAP_CONFIRMED' | 'DESTINATION_OBSERVED' | 'REFUND_OBSERVED' | 'PENDING' | 'REVERTED' | 'NOT_SUBMITTED' | 'UNDETERMINED' | 'TEMPORARY_FAILURE' | 'RECONCILED';
   reason: string;
 };
 export type AllowanceObservation = {
@@ -12,6 +12,8 @@ export type AllowanceObservation = {
 export function financialObservationMessage(observation: FinancialObservation): string {
   switch (observation.outcome) {
     case 'APPROVAL_CONFIRMED': return 'The token approval is confirmed. Approval does not transfer your tokens. The source deposit needs its own wallet request.';
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): the owner's own unwrap landed; nothing was bridged yet.
+    case 'UNWRAP_CONFIRMED': return 'Your WETH is now ETH in your wallet. Nothing was bridged yet: the bridge deposit needs its own wallet request.';
     case 'DESTINATION_OBSERVED': return 'A destination transfer was verified on-chain. Finality and full reconciliation are still pending.';
     case 'REFUND_OBSERVED': return 'A refund was verified on-chain. Review its actual amount and the known transaction costs.';
     case 'CONFIRMED': return 'The source transaction is confirmed. Destination delivery and the final result are checked separately.';

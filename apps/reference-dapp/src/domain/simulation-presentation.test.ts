@@ -161,6 +161,16 @@ describe('router and liquidity records', () => {
     expect(result.warnings.some(w => w.message.includes('delivery and refunds are not simulated'))).toBe(true);
     expect(result.expiresAt).toBe(now + 60_000); expect(result.status).toBe('attention');
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a run re-quoted in place is authorizable — its fresh Review shows, with the reason visible, never blocked', () => {
+    const requoted = { ...router(), state: { ...router().state, requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as unknown as SimulationSource;
+    const result = project(requoted, now, bridge);
+    expect(result.status).not.toBe('blocked');
+    expect(result.steps[0]).toMatchObject({ result: '4.4 USDC' });
+    expect(result.warnings).toContainEqual({ severity: 'attention',
+      message: 'The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.' });
+    // A store error (anything not re-quoted) still blocks, as before.
+    expect(project({ ...router(), state: { ...router().state, error: 'ROUTE_CHANGED' } } as SimulationSource, now, bridge).status).toBe('blocked');
+  });
   it('does not substitute execution fees for a missing complete network total', () => {
     const result = project(router(null), now, bridge);
     expect(result.fees[0]?.label).toBe('Maximum execution fee');

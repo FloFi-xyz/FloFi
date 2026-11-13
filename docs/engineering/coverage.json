@@ -234,6 +234,10 @@
       "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
       "stage": "unit"
     },
+    "app.components.conversation-cards": {
+      "path": "apps/reference-dapp/src/components/conversation-cards.test.tsx",
+      "stage": "unit"
+    },
     "app.components.copilot-automation-proposal": {
       "path": "apps/reference-dapp/src/components/copilot-automation-proposal.test.tsx",
       "stage": "unit"
@@ -254,8 +258,16 @@
       "path": "apps/reference-dapp/src/components/flofi-wallet-continue.test.tsx",
       "stage": "unit"
     },
+    "app.components.review-summary-panel": {
+      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
+      "stage": "unit"
+    },
     "app.components.site.typing-text": {
       "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
+      "stage": "unit"
+    },
+    "app.components.user-funded-browser": {
+      "path": "apps/reference-dapp/src/components/user-funded-browser.test.ts",
       "stage": "unit"
     },
     "app.config.product": {
@@ -298,6 +310,14 @@
       "path": "apps/reference-dapp/src/developer/webhooks.pg.test.ts",
       "stage": "postgres"
     },
+    "app.domain.approved-ux": {
+      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.bridge-requote": {
+      "path": "apps/reference-dapp/src/domain/bridge-requote.test.ts",
+      "stage": "unit"
+    },
     "app.domain.build-entry": {
       "path": "apps/reference-dapp/src/domain/build-entry.test.ts",
       "stage": "unit"
@@ -318,12 +338,20 @@
       "path": "apps/reference-dapp/src/domain/copilot-mainnet-bridge.test.ts",
       "stage": "unit"
     },
+    "app.domain.destination-wallet": {
+      "path": "apps/reference-dapp/src/domain/destination-wallet.test.ts",
+      "stage": "unit"
+    },
     "app.domain.editor-overview": {
       "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
       "stage": "unit"
     },
     "app.domain.editor-run": {
       "path": "apps/reference-dapp/src/domain/editor-run.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.flight-refusal": {
+      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
       "stage": "unit"
     },
     "app.domain.intelligence": {
@@ -340,6 +368,10 @@
     },
     "app.domain.observation-schedule": {
       "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.p0-swap-bridge-connections": {
+      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
       "stage": "unit"
     },
     "app.domain.privacy-notice": {
@@ -462,6 +494,10 @@
       "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
       "stage": "postgres"
     },
+    "app.gas-sponsorship.gas-sponsorship": {
+      "path": "apps/reference-dapp/src/gas-sponsorship/gas-sponsorship.test.ts",
+      "stage": "unit"
+    },
     "app.i18n.catalog": {
       "path": "apps/reference-dapp/src/i18n/catalog.test.ts",
       "stage": "unit"
@@ -582,6 +618,10 @@
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
     },
+    "app.server.bridge-build-estimate": {
+      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
+      "stage": "unit"
+    },
     "app.server.build-estimate-production": {
       "path": "apps/reference-dapp/src/server/build-estimate-production.test.ts",
       "stage": "unit"
@@ -618,22 +658,6 @@
       "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
       "stage": "unit"
     },
-    "app.domain.approved-ux": {
-      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
-      "stage": "unit"
-    },
-    "app.components.review-summary-panel": {
-      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
-      "stage": "unit"
-    },
-    "app.domain.flight-refusal": {
-      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
-      "stage": "unit"
-    },
-    "app.server.bridge-build-estimate": {
-      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
-      "stage": "unit"
-    },
     "app.server.flight-access": {
       "path": "apps/reference-dapp/src/server/flight-access.test.ts",
       "stage": "unit"
@@ -668,6 +692,10 @@
     },
     "app.server.provider-boundary": {
       "path": "apps/reference-dapp/src/server/provider-boundary.test.ts",
+      "stage": "unit"
+    },
+    "app.server.router-capability": {
+      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
       "stage": "unit"
     },
     "app.server.router-providers": {
@@ -744,6 +772,10 @@
     },
     "app.user-funded.solana-nonce-codec": {
       "path": "apps/reference-dapp/src/user-funded/solana-nonce-codec.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.sponsored-batch": {
+      "path": "apps/reference-dapp/src/user-funded/sponsored-batch.test.ts",
       "stage": "unit"
     },
     "app.user-funded.universal-batch": {
@@ -1090,16 +1122,12 @@
       "path": "packages/workflow-contracts/test/native-transfer.test.ts",
       "stage": "unit"
     },
+    "workflow-contracts.network-fee": {
+      "path": "packages/workflow-contracts/test/network-fee.test.ts",
+      "stage": "unit"
+    },
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
-      "stage": "unit"
-    },
-    "app.domain.p0-swap-bridge-connections": {
-      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
-      "stage": "unit"
-    },
-    "app.server.router-capability": {
-      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
       "stage": "unit"
     }
   },
@@ -2770,6 +2798,7 @@
       "sources": [
         "apps/reference-dapp/src/components/across-panel.tsx",
         "apps/reference-dapp/src/components/bridge-panel.tsx",
+        "apps/reference-dapp/src/components/bridge-requote-changes.tsx",
         "apps/reference-dapp/src/components/bridge-swap-panel.tsx",
         "apps/reference-dapp/src/components/router-panel.tsx",
         "apps/reference-dapp/src/components/universal-bridge-panel.tsx"
@@ -2832,6 +2861,7 @@
         "apps/reference-dapp/src/components/proposal-review.tsx"
       ],
       "suites": [
+        "app.components.conversation-cards",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.e2e.chat-assistant",
@@ -3508,10 +3538,13 @@
         "apps/reference-dapp/src/domain/bridge-failure.ts",
         "apps/reference-dapp/src/domain/bridge-review-recovery.ts",
         "apps/reference-dapp/src/domain/bridge-swap-authoring.ts",
+        "apps/reference-dapp/src/domain/destination-wallet.ts",
         "apps/reference-dapp/src/domain/router-authoring.ts",
         "apps/reference-dapp/src/domain/universal-bridge-authoring.ts"
       ],
       "suites": [
+        "app.domain.bridge-requote",
+        "app.domain.destination-wallet",
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
@@ -4115,10 +4148,9 @@
         "apps/reference-dapp/src/i18n/locale.tsx",
         "apps/reference-dapp/src/i18n/preserved-values.ts",
         "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
-        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
         "apps/reference-dapp/src/i18n/pt-approved-ux-editor.ts",
-        "apps/reference-dapp/src/i18n/pt-execution-continuity.ts",
         "apps/reference-dapp/src/i18n/pt-approved-ux-pages.ts",
+        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
         "apps/reference-dapp/src/i18n/pt-authoring.ts",
         "apps/reference-dapp/src/i18n/pt-automations.ts",
         "apps/reference-dapp/src/i18n/pt-base.ts",
@@ -4137,12 +4169,17 @@
         "apps/reference-dapp/src/i18n/pt-domain.ts",
         "apps/reference-dapp/src/i18n/pt-e2e-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-editor-runs.ts",
+        "apps/reference-dapp/src/i18n/pt-execution-continuity.ts",
         "apps/reference-dapp/src/i18n/pt-execution-ux.ts",
         "apps/reference-dapp/src/i18n/pt-financial-execution.ts",
         "apps/reference-dapp/src/i18n/pt-learning.ts",
         "apps/reference-dapp/src/i18n/pt-lending.ts",
         "apps/reference-dapp/src/i18n/pt-lifecycle.ts",
         "apps/reference-dapp/src/i18n/pt-local-runtime.ts",
+        "apps/reference-dapp/src/i18n/pt-locale-contract.ts",
+        "apps/reference-dapp/src/i18n/pt-mainnet-exec.ts",
+        "apps/reference-dapp/src/i18n/pt-round2-requote.ts",
+        "apps/reference-dapp/src/i18n/pt-round2-frontend.ts",
         "apps/reference-dapp/src/i18n/pt-mainnet-product.ts",
         "apps/reference-dapp/src/i18n/pt-networks.ts",
         "apps/reference-dapp/src/i18n/pt-permissions.ts",
@@ -4161,9 +4198,8 @@
         "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
-        "apps/reference-dapp/src/server/request-language.ts",
         "apps/reference-dapp/src/i18n/translate.ts",
-        "apps/reference-dapp/src/i18n/pt-locale-contract.ts"
+        "apps/reference-dapp/src/server/request-language.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -6001,14 +6037,15 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/server/across-adapter.ts",
+        "apps/reference-dapp/src/server/across-route.ts",
         "apps/reference-dapp/src/server/across-service.ts",
         "apps/reference-dapp/src/server/bridge-build-estimate.ts",
-        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/bridge-discovery.ts",
         "apps/reference-dapp/src/server/bridge-read-rpc.ts",
         "apps/reference-dapp/src/server/bridge-service.ts",
         "apps/reference-dapp/src/server/build009-lifi.ts",
         "apps/reference-dapp/src/server/lifi-adapter.ts",
+        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/router-mock.ts",
         "apps/reference-dapp/src/server/router-providers.ts",
         "apps/reference-dapp/src/server/router-runtime.ts",
@@ -6030,7 +6067,7 @@
         "apps/reference-dapp/src/server/universal-router/service.ts",
         "apps/reference-dapp/src/server/universal-router/solana-chain.ts",
         "apps/reference-dapp/src/server/universal-router/types.ts",
-        "apps/reference-dapp/src/server/across-route.ts"
+        "apps/reference-dapp/src/server/universal-router/wrapped-native.ts"
       ],
       "suites": [
         "app.server.router-service",
@@ -6507,6 +6544,7 @@
         "apps/reference-dapp/src/state/across-store.tsx",
         "apps/reference-dapp/src/state/bridge-store.tsx",
         "apps/reference-dapp/src/state/bridge-swap-store.tsx",
+        "apps/reference-dapp/src/state/destination-wallets.ts",
         "apps/reference-dapp/src/state/router-store.tsx",
         "apps/reference-dapp/src/state/universal-router-store.tsx"
       ],
@@ -6801,10 +6839,38 @@
         "app.user-funded.universal-batch",
         "app.user-funded.arbitrum-batch",
         "app.workflow-runs.user-funded-due-refusal.pg",
-        "app.e2e.editor-wallet-batch"
+        "app.e2e.editor-wallet-batch",
+        "app.user-funded.sponsored-batch"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
+      ]
+    },
+    {
+      "id": "gas-sponsorship--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/app/api/gas/paymaster/[chainId]/route.ts",
+        "apps/reference-dapp/src/gas-sponsorship/config.ts",
+        "apps/reference-dapp/src/gas-sponsorship/http.ts",
+        "apps/reference-dapp/src/gas-sponsorship/ledger.ts",
+        "apps/reference-dapp/src/gas-sponsorship/paymaster-service.ts",
+        "apps/reference-dapp/src/gas-sponsorship/runtime.ts",
+        "apps/reference-dapp/src/gas-sponsorship/solana-fee-payer.ts"
+      ],
+      "suites": [
+        "app.gas-sponsorship.gas-sponsorship",
+        "app.user-funded.sponsored-batch",
+        "app.components.user-funded-browser"
+      ],
+      "gaps": [
+        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md §3.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
       ]
     },
     {
@@ -6860,6 +6926,7 @@
       "sharedFinancialCore": true,
       "sources": [
         "packages/workflow-contracts/src/bridge.ts",
+        "packages/workflow-contracts/src/network-fee.ts",
         "packages/workflow-contracts/src/router-pairs.ts",
         "packages/workflow-contracts/src/router.ts",
         "packages/workflow-contracts/src/universal-router-networks.ts",
@@ -6870,7 +6937,8 @@
         "app.server.universal-router.service",
         "reference-compiler.bridge",
         "reference-executor.bridge",
-        "reference-reconciler.bridge"
+        "reference-reconciler.bridge",
+        "workflow-contracts.network-fee"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."

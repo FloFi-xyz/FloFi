@@ -17,7 +17,7 @@ vi.mock('../wallet/evm-discovery', () => {
   } };
   return { chosenEvmProvider: () => provider, injected: () => provider, evmWalletIdentity: () => null, isFloFiWalletKey: () => false };
 });
-const { batchOutcome, revokeUserOperation, sendWalletBatch } = await import('./user-funded-browser');
+const { batchOutcome, batchSponsorshipOf, reportedPaymasterService, revokeUserOperation, sendWalletBatch } = await import('./user-funded-browser');
 
 const HASH = '0x' + 'ab'.repeat(32);
 const status = (code: number, receipts: unknown[] = []) => eip5792.callsStatus({ version: '2.0.0', id: '0x01', chainId: '0xa4b1', status: code, atomic: true, receipts });
@@ -121,6 +121,66 @@ describe('sendWalletBatch', () => {
     const raw = await sendWalletBatch(request, onSending).catch((cause: unknown) => cause);
     expect(raw).toMatchObject({ code: -32603 });
     expect(onSending).toHaveBeenCalledTimes(2);
+  });
+
+  // BUILD-FLOFI-MAINNET-EXEC-002 (ADR-0009): FloFi's sponsorship offer reaches only a wallet that reports `paymasterService` on the batch's chain.
+  describe('network-fee sponsorship (EIP-5792 paymasterService)', () => {
+    const offer = { url: 'https://flofi.example/api/gas/paymaster/8453', context: { flofiGrant: 'ab'.repeat(16) }, required: false };
+    const sentWith = () => (wallet.answers.wallet_sendCalls as Mock).mock.calls.map(c => ((c[0] as unknown[])[0] as { capabilities?: unknown }).capabilities ?? null);
+    beforeEach(() => { wallet.answers.wallet_sendCalls = vi.fn(() => ({ id: BATCH })); });
+    it('a wallet reporting paymasterService on this chain gets the capability (FloFi\'s proxy URL and grant, optional); the calls are unchanged', async () => {
+      wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { paymasterService: { supported: true }, atomic: { status: 'supported' } } });
+      await expect(sendWalletBatch(request, onSending, offer)).resolves.toBe(BATCH);
+      expect(sentWith()).toEqual([{ paymasterService: { url: offer.url, context: offer.context, optional: true } }]);
+      const params = ((wallet.answers.wallet_sendCalls as Mock).mock.calls[0]![0] as unknown[])[0] as { calls: unknown[] };
+      expect(params.calls).toEqual(request.calls);
+      // The account check stays the last read before the wallet is asked to send.
+      expect(wallet.log).toEqual(['eth_chainId', 'wallet_getCapabilities', 'eth_accounts', 'onSending', 'wallet_sendCalls']);
+    });
+    it('a wallet without it (or that cannot say) gets the plain owner-paid batch; a wallet refusing the capability (5700) gets it once more without', async () => {
+      wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { atomic: { status: 'supported' } } });
+      await sendWalletBatch(request, onSending, offer);
+      delete wallet.answers.wallet_getCapabilities;
+      await sendWalletBatch(request, onSending, offer);
+      expect(sentWith()).toEqual([null, null]);
+      wallet.answers.wallet_getCapabilities = () => ({ '0x0': { paymasterService: { supported: true } } });
+      let first = true;
+      wallet.answers.wallet_sendCalls = vi.fn(() => { if (first) { first = false; throw Object.assign(new Error('unsupported'), { code: 5700 }); } return { id: BATCH }; });
+      await expect(sendWalletBatch(request, onSending, offer)).resolves.toBe(BATCH);
+      expect(sentWith()).toEqual([{ paymasterService: { url: offer.url, context: offer.context, optional: true } }, null]);
+    });
+    it('a REQUIRED offer (the owner cannot pay the fee) is never sent unsponsored: an unsupporting wallet is not asked; a refusal is not retried', async () => {
+      wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { atomic: { status: 'supported' } } });
+      await expect(sendWalletBatch(request, onSending, { ...offer, required: true })).rejects.toThrow('GAS_SPONSORSHIP_WALLET_UNSUPPORTED');
+      expect(sent()).toBe(0);
+      expect(onSending).not.toHaveBeenCalled();
+      wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { paymasterService: { supported: true } } });
+      wallet.answers.wallet_sendCalls = vi.fn(() => { throw Object.assign(new Error('unsupported'), { code: 5700 }); });
+      await expect(sendWalletBatch(request, onSending, { ...offer, required: true })).rejects.toThrow('WALLET_BATCH_NOT_SENT');
+      expect(sentWith()).toEqual([{ paymasterService: { url: offer.url, context: offer.context } }]);
+    });
+    it('reads the offer only from FloFi\'s own proxy URL; a review preview (no grant) is never handed to a wallet', () => {
+      expect(reportedPaymasterService({ '0x2105': { paymasterService: { supported: true } } }, 8453n)).toBe(true);
+      expect(reportedPaymasterService({ '0xa4b1': { paymasterService: { supported: true } } }, 8453n)).toBe(false);
+      expect(batchSponsorshipOf({ sponsorship: { url: offer.url, context: offer.context, required: true } })).toEqual({ ...offer, required: true });
+      expect(batchSponsorshipOf({ sponsorship: { url: 'https://user:pass@flofi.example/x', context: null } })).toBeNull();
+      expect(batchSponsorshipOf({ sponsorship: { url: 'http://flofi.example/x', context: null } })).toBeNull();
+      expect(batchSponsorshipOf({})).toBeNull();
+    });
+    it('review round 2: a batch that REQUIRES sponsorship but carries no usable offer fails closed before the wallet is asked anything', async () => {
+      const unusable = { url: null, context: null, required: true };
+      for (const prepared of [{ fee: { sponsorship: 'REQUIRED' } }, { sponsorship: { url: 'http://flofi.example/x', context: offer.context, required: true } },
+        { sponsorship: { url: 'https://user:pass@flofi.example/x', context: offer.context }, fee: { sponsorship: 'REQUIRED' } }, { sponsorship: { url: 'not a url', required: true } },
+        { sponsorship: { context: offer.context, required: true } }])
+        expect(batchSponsorshipOf(prepared)).toEqual(unusable);
+      wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { paymasterService: { supported: true } } });
+      await expect(sendWalletBatch(request, onSending, batchSponsorshipOf({ fee: { sponsorship: 'REQUIRED' } }))).rejects.toThrow('GAS_SPONSORSHIP_WALLET_UNSUPPORTED');
+      // Nothing was asked of the wallet (no network read, no capability or account read, no send) and no "may have been sent" marker was kept.
+      expect(wallet.log).toEqual([]);
+      expect(onSending).not.toHaveBeenCalled();
+      // An offer the artifact marks optional, but unusable here, is no offer: the plain owner-paid batch, exactly as before.
+      expect(batchSponsorshipOf({ sponsorship: { url: 'http://flofi.example/x', context: offer.context }, fee: { sponsorship: 'OFFERED' } })).toBeNull();
+    });
   });
 });
 

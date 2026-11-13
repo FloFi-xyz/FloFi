@@ -10,7 +10,13 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
  * P0 approved UX (board 04): the name itself is the rename control — a button with a muted pencil; a click (or Enter) turns it into a text field,
  * Enter or leaving the field saves, Escape cancels. Save, Automate and the toolbar layout moved to the header's ··· menu (`WorkflowMoreMenu`).
  */
-export function WorkflowName({ name, shownName = name, rename }: { name: string; shownName?: string; rename: (name: string) => void }) {
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002: beside the name, a New workflow icon button (`onNew`): it starts an empty workflow in the Editor — Canvas,
+ * proposals, drafts, the workflow's conversation, name and selection — exactly as `startNewWorkflow` does. Wallets, Credentials, preferences,
+ * saved workflows and on-chain history (including runs already sent, which keep being observed) are untouched.
+ */
+export function WorkflowName({ name, shownName = name, rename, onNew }: { name: string; shownName?: string; rename: (name: string) => void;
+  onNew?: (() => void) | undefined }) {
   const { t: tr } = useLocale();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -44,6 +50,10 @@ export function WorkflowName({ name, shownName = name, rename }: { name: string;
         <span className="workflow-name-text">{shownName}</span>
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/></svg>
       </button></h2>}
+    {onNew && !editing && <button type="button" className="workflow-new" aria-label={tr('New workflow')} title={tr('New workflow')} onClick={onNew}>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M3 15h6"/><path d="M6 12v6"/></svg>
+    </button>}
   </div>;
 }
 

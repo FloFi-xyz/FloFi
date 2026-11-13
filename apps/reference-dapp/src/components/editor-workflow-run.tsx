@@ -9,7 +9,8 @@
  *              borrow's delivery), the whole-batch simulation (Aave health factor after it) and the fee estimate, and how many wallet
  *              prompts, signatures, transactions, batched calls and network switches the workflow needs (never rounded down)
  *   Authorize  one click: the shared workflow run starts (claimed for the wallet this browser proved), its first group is prepared from fresh
- *              chain facts and handed to the wallet as ONE `wallet_sendCalls` (atomic, no capabilities: the owner's own account sends and pays).
+ *              chain facts and handed to the wallet as ONE `wallet_sendCalls` (atomic; the only capability ever added is FloFi's own paymaster
+ *              service, when FloFi offers to sponsor the fee and the wallet reports it — ADR-0009; otherwise the owner's own account sends and pays).
  *              A minimum below the reviewed one is shown and confirmed before the wallet is asked
  *   Progress   the persisted run (status poll): each step's state, transactions and reconciled amounts; a batch the wallet already sent is read
  *              back by its id (never sent twice); a later group is offered when it becomes due. The run id survives a reload or a tab change
@@ -28,7 +29,7 @@ import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
 import { BlockerPanel } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
-import { batchHandout, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { batchHandout, batchSponsorshipOf, keepBatchHandout, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
 import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
 import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
@@ -100,7 +101,7 @@ export const reviewOffersStepByStep = (review: Pick<EditorExecutionReview, 'mode
  * or this browser could not keep its "handed to the wallet" record, WALLET_ATTEMPT_UNRECORDABLE).
  */
 const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
-  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE']);
+  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'GAS_SPONSORSHIP_WALLET_UNSUPPORTED']);
 /**
  * The run already recorded ANOTHER batch id (or other transactions) for the group than the one this browser reports: the group may have
  * executed twice. The server refuses and logs it; it is shown as such, never as "not recorded yet" and never as "nothing was sent".
@@ -372,7 +373,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
           }
           setUnrecorded(true);
         };
-        try { batchId = await sendWalletBatch(request, handOver); }
+        try { batchId = await sendWalletBatch(request, handOver, batchSponsorshipOf(p)); }
         catch (cause) {
           if (NOTHING_SENT.has(codeOf(cause))) {
             // Only this send's own attempt (none exists when the wallet was never asked to send; another tab's record stays, and so does what
@@ -754,6 +755,7 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   // Final review: a wallet batch goes to ONE browser (workflow-runs/service.ts `handedTo`); another one is refused before any wallet request.
   WALLET_BATCH_HANDED_OUT_ELSEWHERE: 'This step\'s wallet request was already handed to another browser or wallet, and FloFi gives it only to that one: if it was confirmed there, it may already have executed. Continue in that browser; once the request has expired you can end the workflow here and check your wallet\'s activity.',
   WALLET_BATCH_ANSWER_MISMATCH: 'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.',
+  GAS_SPONSORSHIP_WALLET_UNSUPPORTED: 'Your wallet does not support sponsored network fees on this network, and your balance there cannot pay them, so FloFi did not ask your wallet. Add native gas to this wallet, or use a wallet that supports sponsored fees, then try again.',
   WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
   // A wallet answer (or report) for a group FloFi had already stopped while its batch was unanswered: never recorded, never "nothing was sent".
   WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
@@ -950,8 +952,14 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   // The chat-first Editor hosts this Review's ONE primary action (Review / Authorize) in its footer (`EditorWorkflowRunPrimaryAction`).
   const footerActions = fresh && actionsOutside;
   const technical = review && <>
+      {/* Review round 2 (ADR-0009): who pays the one confirmation's network fee follows its sponsorship — FloFi offers to pay a REQUIRED one (the
+          wallet must take it, or nothing is sent); an OFFERED one is paid by the wallet only when it cannot take the sponsorship. */}
       <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode === 'ONE_WALLET_CONFIRMATION'
-        ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
+        ? review.groups[0]?.fee?.sponsorship === 'REQUIRED'
+          ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee (your wallet must support sponsored fees on this network).'
+          : review.groups[0]?.fee?.sponsorship === 'OFFERED'
+          ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee, and your wallet pays it only if it does not support sponsored fees.'
+          : 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
         : review.mode === 'GROUPED' ? 'All {0} steps run in {2} wallet confirmations, one per group; a later group is asked when it becomes due.'
         : 'This workflow needs a confirmation in your wallet for each step on its own.', String(review.stepCount), review.groups[0]?.network ?? '', String(review.counts.walletPrompts))}
         {bridgeTo && review.mode !== 'STEP_BY_STEP' ? <> {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</> : null}</p>
@@ -985,10 +993,13 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
       <dl className="editor-run-facts">
         {review.groups.map(g => <div key={g.index}><dt>{review.groups.length > 1 ? tr('Group {0} · {1}', String(g.index + 1), g.network) : g.network}</dt>
           <dd>{tr(HOW[g.strategy] ?? g.strategy)}{g.calls ? ` · ${tr('{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}` : ''}
-            {g.fee ? ` · ${tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))}`
+            {g.fee?.sponsorship === 'REQUIRED' ? ` · ${tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}`
+              : g.fee ? ` · ${tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))}`
               : run?.groups[g.index]?.maxFee?.unit === 'wei' ? ` · ${tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))}` : ''}
+            {g.fee?.sponsorship === 'OFFERED' ? ` · ${tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}` : ''}
             {run?.groups[g.index] ? ` · ${groupWords(run.groups[g.index]!)}` : ''}
-            {run?.groups[g.index]?.gasPaid ? ` · ${tr('network fees paid: {0}', eth(run.groups[g.index]!.gasPaid!.amount))}` : ''}
+            {run?.groups[g.index]?.gasPaid ? ` · ${run.groups[g.index]!.gasPaid!.sponsored ? tr('Gas paid by FloFi: {0}', eth(run.groups[g.index]!.gasPaid!.amount))
+              : tr('network fees paid: {0}', eth(run.groups[g.index]!.gasPaid!.amount))}` : ''}
             {/* While the wallet prompt is open, an expired request is always rejected there (its on-chain deadline would refuse it and the wallet
                 would still pay the fee); a fresh one is promised only when this page would send one. */}
             {run?.groups[g.index]?.state === 'PREPARED' && run.groups[g.index]!.validUntil && Date.parse(run.groups[g.index]!.validUntil!) <= now
@@ -1012,7 +1023,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
         {review.validUntil && !run && <div><dt>{tr('Prices')}</dt><dd>{expired ? tr('Expired at {0}: review again to refresh them before authorizing.', fmtTime(review.validUntil, language))
           : tr('Quoted at {0}, valid until {1}', fmtTime(review.reviewedAt, language), fmtTime(review.validUntil, language))}</dd></div>}
       </dl>
-      <p className="muted">{tr('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas, and never signs or sends for you.')}</p>
+      <p className="muted">{review.groups.some(g => g.fee?.sponsorship)
+        ? tr('FloFi offers to sponsor the network fee marked "Sponsored network fee"; every other fee is paid by your wallet. FloFi never advances or reimburses gas, and never signs or sends for you.')
+        : tr('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas, and never signs or sends for you.')}</p>
       {/* Every wallet batch expires on chain at its preparation's validity: through each swap's own deadline, else a deadline guard as its first
           call (a transfer-only batch too). A batch FloFi cannot give one is refused (USER_FUNDED_DEADLINE_UNAVAILABLE), never sent without it. */}
       {review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH') && <p className="muted">{tr(review.steps.some(step => step.action === 'swap'
@@ -1026,7 +1039,19 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
   const alert = [refusal, errorText !== refusal ? errorText : null].filter(Boolean).join(' ')
     || (review?.validUntil && expired ? tr(EXECUTION_REFUSAL.REVIEW_EXPIRED!) : null);
   const feeBlocked = Boolean(review?.refusal?.evidence && !run && !state.started && !state.unloaded);
-  const priced = Boolean(review?.groups.some(g => g.fee));
+  // Review round 2: the "your wallet sets the final fee" qualifier only where the wallet may pay a priced fee (never a REQUIRED-sponsored one).
+  const priced = Boolean(review?.groups.some(g => g.fee && g.fee.sponsorship !== 'REQUIRED'));
+  // Review round 2 (ADR-0009): the visible note says who pays each network fee. FloFi offers to pay a sponsored request's fee (REQUIRED: the
+  // wallet must support sponsored fees, or nothing is sent; OFFERED: the wallet pays it only when it cannot take the sponsorship); the wallet
+  // pays every other fee. Without any sponsorship it is the existing sentence.
+  const sponsoredGroups = review?.groups.filter(g => g.fee?.sponsorship) ?? [], grouped = (review?.groups.length ?? 0) > 1;
+  const feeNote = !review || sponsoredGroups.length === 0 ? tr('Your wallet pays the network fees. FloFi never signs or sends for you.') : [
+    ...sponsoredGroups.map(g => g.fee!.sponsorship === 'REQUIRED'
+      ? grouped ? tr('FloFi offers to pay the network fee of group {0}; your wallet must support sponsored fees on {1}.', String(g.index + 1), tr(g.network))
+        : tr('FloFi offers to pay the network fee; your wallet must support sponsored fees on {0}.', tr(g.network))
+      : grouped ? tr('FloFi offers to pay the network fee of group {0}; your wallet pays it only if it does not support sponsored fees.', String(g.index + 1))
+        : tr('FloFi offers to pay the network fee; your wallet pays it only if it does not support sponsored fees.')),
+    ...sponsoredGroups.length < review.groups.length ? [tr('Your wallet pays every other network fee.')] : [], tr('FloFi never signs or sends for you.')].join(' ');
   // "Review again" stays reachable before a run, never as a second primary: the footer's when it offers it (expired, or not groupable), else a quiet
   // control beside the amber line (a refusal may ask for a fresh quote) or under "Technical details".
   const footerReviews = footerActions && (!state.grouped || expired);
@@ -1049,7 +1074,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
           <div><dt>{tr('Token permission')}</dt><dd>{block.permissions.map((line, index) => <span key={index} className="review-block-permission" title={line.full ?? undefined}>{rich(tr, line)}</span>)}</dd></div>
           <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span>{block.setup && <small className="review-block-qualifier">{rich(tr, block.setup)}</small>}</dd></div>
         </dl>
-        <p className="review-panel-note">{tr('Your wallet pays the network fees. FloFi never signs or sends for you.')}</p>
+        <p className="review-panel-note">{feeNote}</p>
         <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{quietReview === 'details' && <p>{reviewAgain}</p>}{technical}</details>
       </>}
     </>}
@@ -1092,7 +1117,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
         })}
       </ol>
       <dl className="editor-run-facts">{run.groups.map(g => <div key={g.index}><dt>{run.groups.length > 1 ? tr('Group {0}', String(g.index + 1)) : tr('Wallet request')}</dt>
-        <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}{g.gasPaid ? ` · ${tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
+        {/* Review round 2: a reconciled sponsored batch says FloFi paid its gas (as with a Review in this tab), never that the wallet did. */}
+        <dd>{tr(HOW[g.strategy] ?? g.strategy)} · {groupWords(g)}{g.gasPaid ? ` · ${g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', eth(g.gasPaid.amount))
+          : tr('network fees paid: {0}', eth(g.gasPaid.amount))}` : ''}</dd></div>)}</dl>
     </>}
     {refusal && !fresh && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}

@@ -121,7 +121,11 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
     // A bridge record that cannot be read is reported as unreadable (retry), never as a new step.
     expect(await proveCompletions(stored, s.workflow, sequence, read(null))).toMatchObject({ unreadable: true, proven: [{ kind: 'public' }] });
     expect(ownerByRecord('universal', universal('RECONCILED'))).toBe(OWNER);
-    // Across ecosystems the source wallet is not the one that received (flofi-workflow review): no owner is named.
+    // Across ecosystems the source wallet is not the one that received (flofi-workflow review): never the source owner. BUILD-FLOFI-MAINNET-EXEC-002
+    // (review round 2): the wallet the Review bound as recipient is named, so a later step spending the delivery continues only with that wallet.
+    const solanaRecipient = 'BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3';
+    expect(ownerByRecord('universal', universal('RECONCILED', { review: { recipient: solanaRecipient, route: { sourceChain: 'eip155:8453', destinationChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } } })))
+      .toBe(solanaRecipient);
     expect(ownerByRecord('universal', universal('RECONCILED', { review: { route: { sourceChain: 'eip155:8453', destinationChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } } }))).toBeNull();
   });
 });

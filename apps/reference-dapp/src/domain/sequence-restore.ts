@@ -53,9 +53,11 @@ export function ownerByRecord(kind: string, record: unknown): string | null {
   const value = kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
     : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner
     : kind === 'router' ? record.owner
-    // A universal route's owner deposited on the source chain; across ecosystems the funds land with another wallet, so it names none.
-    : kind === 'universal' && isObject(record.review) && isObject(record.review.route) && sameEcosystem(record.review.route.sourceChain, record.review.route.destinationChain)
-      ? record.owner : null;
+    // A universal route's owner deposited on the source chain. Review (round 2): across ecosystems the funds land with the wallet the Review bound
+    // as recipient (the owner's wallet of the other ecosystem, possibly resolved from the account or Credentials): a later step that spends that
+    // delivery continues only with that wallet (never "nobody", which skipped the wallet-continuity check).
+    : kind === 'universal' && isObject(record.review) && isObject(record.review.route)
+      ? sameEcosystem(record.review.route.sourceChain, record.review.route.destinationChain) ? record.owner : record.review.recipient : null;
   return typeof value === 'string' && value ? /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value : null;
 }
 /**

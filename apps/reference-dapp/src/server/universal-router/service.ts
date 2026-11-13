@@ -25,7 +25,8 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi
 import { associatedTokenAddress, compileUniversalArtifacts, decodeRelayDepositLog, decodeSplTokenAccount, describeSolanaWalletChange, encodeErc20ApproveExact, readSolanaAccounts,
   solanaAddress, verifySignedSolanaSwap, verifySolanaCluster, SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID, type SignedSolanaTransaction, type SolanaRpc,
   type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
-import { assertRouterTransition, canonicalUniversalAddress, compareUniversalRoutes, hashArtifactBytes, ROUTER_PHASES, universalNetworkOfChain, universalRouteCommitment,
+import { assertRouterTransition, canonicalUniversalAddress, compareUniversalRoutes, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization, ROUTER_PHASES,
+  universalNetworkOfChain, universalRouteCommitment,
   validateUniversalBridgeWorkflow, type EvidenceBundle, type RouteChange, type RouterPhase, type SemanticWorkflow, type UniversalBridgeFields, type UniversalNetwork,
   type UniversalRoute, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
@@ -38,6 +39,7 @@ import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from '../evm-
 import * as sol from './solana-chain.ts';
 import type { ProviderStatusHint, UniversalProviderAdapter, UniversalQuoteRequest } from './relay-provider.ts';
 import { feeObligationFor, flofiFeePolicy } from './fee-obligation.ts';
+import { assertUnwrapEffects, unwrapCall, wrappedNativeOf } from './wrapped-native.ts';
 import { UNIVERSAL_ACTIVE, UNIVERSAL_OBSERVABLE, UNIVERSAL_RUN_ID, UNIVERSAL_SETTLING, UNIVERSAL_TERMINAL, type DestinationDelivery, type EvmReviewSource, type EvmTx,
   type ProviderConsideration, type SolanaReviewSource, type SourceSettlement, type TokenFacts, type UniversalAttempt, type UniversalBegin, type UniversalEvidence,
   type UniversalEvmAttempt, type UniversalProvenance, type UniversalRecord, type UniversalReview, type UniversalSolanaAttempt, type UniversalWalletDiagnostic } from './types.ts';
@@ -255,7 +257,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       nowMs: now().getTime(), reviewTtlSeconds: D.reviewTtlSeconds, inputTokenProgram: programIdOf(input) });
 
   // --- Review -----------------------------------------------------------------------------------------------------------
-  async function buildReview(workflow: SemanticWorkflow, ownerInput: string, destinationWallet?: string): Promise<UniversalReview> {
+  /** `unwrapped`: a refresh of a run whose own unwrap is confirmed — the owner already holds the input as native ETH; only the deposit remains. */
+  async function buildReview(workflow: SemanticWorkflow, ownerInput: string, destinationWallet?: string, unwrapped = false): Promise<UniversalReview> {
     const f = intentOf(workflow), owner = canonicalUniversalAddress(f.source, ownerInput, 'UNIVERSAL_OWNER_INVALID');
     const { recipient, kind } = bindRecipient(f, f.destination, owner, destinationWallet);
     const inputFacts = await tokenFacts(f.source, f.inputAsset), outputFacts = await tokenFacts(f.destination, f.outputAsset);
@@ -270,24 +273,35 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       if (route.source.ecosystem !== 'EVM') return fail('UNIVERSAL_ROUTE_TRANSACTION_INVALID');
       if (route.source.deposit.to !== d.relayDepository) fail('UNIVERSAL_UNEXPECTED_CONTRACT');
       const token = inputFacts.address, amount = BigInt(f.amount);
+      // BUILD-FLOFI-MAINNET-EXEC-002: a native-paid order for the owner's WETH is paid by the owner's own unwrap on the pinned contract, then the
+      // exact native deposit: no token allowance; the unwrap and the deposit are simulated together and each is proven from its own events.
+      const unwrap = route.source.unwrap ?? null, pin = unwrap ? wrappedNativeOf(f.source.chain, unwrap.token) ?? fail('UNIVERSAL_UNEXPECTED_CONTRACT') : null;
+      // Review P2: the owner already holds this input as ETH after their own unwrap. A fresh route that no longer takes native ETH for it cannot be
+      // paid from what the owner now holds: refused with a code that says so (the ETH stays in the owner's wallet), never a misleading balance error.
+      if (unwrapped && !pin) fail('UNIVERSAL_UNWRAP_DONE_ROUTE_CHANGED');
+      if (pin) await evm.evmCodeSha256(rpc, pin.address, at);
       const [balance, native, allowance, nonce] = await Promise.all([evm.evmBalance(rpc, owner, token, at), evm.evmBalance(rpc, owner, null, at),
-        token ? evm.evmAllowance(rpc, token, owner, d.relayDepository, at) : Promise.resolve(null), rpc('eth_getTransactionCount', [owner, at]).then(evm.quantity)]);
-      if (balance < amount) fail(token ? 'UNIVERSAL_INSUFFICIENT_TOKEN' : 'UNIVERSAL_INSUFFICIENT_NATIVE');
-      const approvalRequired = token !== null && allowance! < amount;
+        token && !pin ? evm.evmAllowance(rpc, token, owner, d.relayDepository, at) : Promise.resolve(null), rpc('eth_getTransactionCount', [owner, at]).then(evm.quantity)]);
+      const done = Boolean(pin && unwrapped);
+      if ((done ? native : balance) < amount) fail(done ? 'UNIVERSAL_INSUFFICIENT_NATIVE' : token ? 'UNIVERSAL_INSUFFICIENT_TOKEN' : 'UNIVERSAL_INSUFFICIENT_NATIVE');
+      const approvalRequired = token !== null && !pin && allowance! < amount;
       const plan: evm.EvmCall[] = [...approvalRequired ? [{ purpose: 'APPROVAL' as const, to: token!, data: encodeErc20ApproveExact(d.relayDepository, amount), value: '0' }] : [],
+        ...pin && !done ? [unwrapCall(pin, f.amount)] : [],
         { purpose: 'BRIDGE_DEPOSIT', to: route.source.deposit.to, data: route.source.deposit.data, value: route.source.deposit.value }];
       const simulated = await evm.evmSimulate(rpc, owner, plan, head.number);
+      if (pin && !done) assertUnwrapEffects(pin, simulated[0]!.logs, owner, f.amount);
       const { ownerDebit } = evm.assertDepositEffects(route, d, simulated.at(-1)!.logs, owner);
       const { priority, maximum } = await evm.evmFeePrice(rpc, d, head.baseFee);
       const calls = await Promise.all(plan.map(async (c, i) => {
         const gasUsed = simulated[i]!.gasUsed, gasLimit = await evm.evmGasLimit(rpc, d, owner, c, gasUsed, at);
+        // BUILD-FLOFI-MAINNET-EXEC-002: the reviewed L1 bound carries the same 2× headroom as the execution part's max fee per gas.
         const l1 = await evm.evmL1FeeUpperBound(rpc, d, (c.data.length - 2) / 2, at);
-        return { ...c, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1?.toString() ?? null };
+        return { ...c, gasUsed: gasUsed.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1 === null ? null : l1FeeReviewBound(l1).toString() };
       }));
       const gasLimitTotal = calls.reduce((s, c) => s + BigInt(c.gasLimit), 0n), execution = gasLimitTotal * maximum;
       const l1 = calls.map(c => c.l1FeeUpperBoundWei === null ? null : BigInt(c.l1FeeUpperBoundWei));
       const l1Total = l1.every(v => v !== null) ? l1.reduce((s, v) => s + v!, 0n) : null;
-      if (native < execution + (l1Total ?? 0n) + (token ? 0n : amount)) fail('UNIVERSAL_INSUFFICIENT_GAS');
+      if (native < execution + (l1Total ?? 0n) + (token && !done ? 0n : amount)) fail('UNIVERSAL_INSUFFICIENT_GAS');
       const expiresMs = Math.min(observed.getTime() + D.reviewTtlSeconds * 1000, Date.parse(route.quote.expiresAt));
       if (expiresMs <= observed.getTime()) fail('UNIVERSAL_QUOTE_EXPIRED');
       const expiresAt = new Date(expiresMs).toISOString(), commitment = universalRouteCommitment(route), networkFee = (execution + (l1Total ?? 0n)).toString();
@@ -296,7 +310,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         simulation: { position: { kind: 'BLOCK', height: head.number }, observedAt: observed.toISOString(), networkFeeUpperBound: networkFee }, expiresAt });
       const source: EvmReviewSource = { ecosystem: 'EVM', chainId: d.chainId, block: { number: head.number, hash: head.hash, timestamp: head.timestamp },
         balance: balance.toString(), nativeBalance: native.toString(), allowance: allowance?.toString() ?? null, nonce: nonce.toString(), depositoryCodeSha256,
-        approvals: token ? [{ token, spender: d.relayDepository, amount: f.amount, currentAllowance: allowance!.toString(), required: approvalRequired }] : [], calls,
+        approvals: token && !pin ? [{ token, spender: d.relayDepository, amount: f.amount, currentAllowance: allowance!.toString(), required: approvalRequired }] : [], calls,
         fees: { maxFeePerGas: maximum.toString(), maxPriorityFeePerGas: priority.toString(), gasLimitTotal: gasLimitTotal.toString(), executionFeeUpperBoundWei: execution.toString(),
           l1FeeUpperBoundWei: l1Total?.toString() ?? null, totalUpperBoundWei: l1Total === null ? null : networkFee },
         simulation: { provenance: 'TRANSACTION_SIMULATION', method: 'eth_simulateV1', block: head.number, calls: simulated.map(s => ({ purpose: s.purpose, gasUsed: s.gasUsed.toString() })),
@@ -380,7 +394,11 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const estimate = evm.quantity(await rpc('eth_estimateGas', [{ from: tx.from, to: tx.to, value: tx.value, data: tx.data }, at]));
     if (estimate <= 0n || estimate > BigInt(tx.gas)) return invalid('UNIVERSAL_GAS_CHANGED_REVIEW_REQUIRED');
     const l1 = await evm.evmL1FeeUpperBound(rpc, d, (tx.data.length - 2) / 2, at), reviewed = src.calls.find(c => c.to === tx.to && c.data === tx.data);
-    if (!reviewed || l1 === null || reviewed.l1FeeUpperBoundWei === null || l1 > BigInt(reviewed.l1FeeUpperBoundWei)) return invalid('UNIVERSAL_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    // BUILD-FLOFI-MAINNET-EXEC-002: one authorized network-fee maximum per call (gas × max fee + reviewed L1 bound); the request stands while its
+    // fee at the current price and L1 estimate is within it.
+    if (!reviewed || l1 === null || reviewed.l1FeeUpperBoundWei === null ||
+        !networkFeeWithinAuthorization({ gasLimit: BigInt(tx.gas), maxFeePerGas: BigInt(tx.maxFeePerGas), l1FeeBound: BigInt(reviewed.l1FeeUpperBoundWei) }, { gasPrice: price, l1Fee: l1 }))
+      return invalid('UNIVERSAL_L1_FEES_CHANGED_REVIEW_REQUIRED');
     const balance = evm.quantity(await rpc('eth_getBalance', [tx.from, at]));
     if (balance < BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + l1 + BigInt(tx.value)) fail('UNIVERSAL_INSUFFICIENT_GAS');
   }
@@ -391,20 +409,30 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const head = await evm.evmHead(rpc, d), at = evm.tag(head.number);
     try { await evm.assertEvmDepository(rpc, d, at, src.depositoryCodeSha256); } catch { return invalidate('UNIVERSAL_STATE_CHANGED_REVIEW_REQUIRED'); }
     const token = route.inputToken.address, amount = BigInt(route.inputAmount);
+    // BUILD-FLOFI-MAINNET-EXEC-002: an unwrapping route asks for the unwrap first; once it is confirmed and reconciled, only the native deposit.
+    const unwrap = route.source.ecosystem === 'EVM' ? route.source.unwrap ?? null : null;
+    const pin = unwrap ? wrappedNativeOf(route.sourceChain, unwrap.token) ?? fail('UNIVERSAL_UNEXPECTED_CONTRACT') : null;
+    const unwrapped = Boolean(pin && record.attempts.some(a => a.step === 'UNWRAP' && a.state === 'CONFIRMED' && a.reconciled));
     const [balance, native, allowance, pendingNonce, latestNonce] = await Promise.all([evm.evmBalance(rpc, owner, token, at), evm.evmBalance(rpc, owner, null, at),
-      token ? evm.evmAllowance(rpc, token, owner, d.relayDepository, at) : Promise.resolve(null), rpc('eth_getTransactionCount', [owner, 'pending']).then(evm.quantity),
+      token && !pin ? evm.evmAllowance(rpc, token, owner, d.relayDepository, at) : Promise.resolve(null), rpc('eth_getTransactionCount', [owner, 'pending']).then(evm.quantity),
       rpc('eth_getTransactionCount', [owner, at]).then(evm.quantity)]);
     if (pendingNonce < latestNonce) fail('UNIVERSAL_RPC_INVALID');
     // The same provider re-quotes the same intent; any material change is ROUTE_CHANGED, never a substitution.
     await revalidateRoute(record, invalidate);
-    const step = token !== null && allowance! < amount ? 'APPROVAL' as const : 'DEPOSIT' as const, purpose = step === 'APPROVAL' ? 'APPROVAL' : 'BRIDGE_DEPOSIT';
+    const step = pin ? unwrapped ? 'DEPOSIT' as const : 'UNWRAP' as const : token !== null && allowance! < amount ? 'APPROVAL' as const : 'DEPOSIT' as const;
+    const purpose = step === 'APPROVAL' ? 'APPROVAL' : step === 'UNWRAP' ? 'UNWRAP' : 'BRIDGE_DEPOSIT';
     const index = src.calls.findIndex(c => c.purpose === purpose);
     if (index < 0) return invalidate('UNIVERSAL_STATE_CHANGED_REVIEW_REQUIRED');
     const remaining = src.calls.slice(index);
     let simulated: Awaited<ReturnType<typeof evm.evmSimulate>>;
-    try { simulated = await evm.evmSimulate(rpc, owner, remaining, head.number); evm.assertDepositEffects(route, d, simulated.at(-1)!.logs, owner); }
+    try {
+      simulated = await evm.evmSimulate(rpc, owner, remaining, head.number);
+      if (step === 'UNWRAP') assertUnwrapEffects(pin!, simulated[0]!.logs, owner, route.inputAmount);
+      evm.assertDepositEffects(route, d, simulated.at(-1)!.logs, owner);
+    }
     catch (cause) { if (cause instanceof Error && cause.message === 'UNIVERSAL_SIMULATION_UNAVAILABLE') throw cause; return invalidate('UNIVERSAL_STATE_CHANGED_REVIEW_REQUIRED'); }
-    if (balance < amount) fail(token ? 'UNIVERSAL_INSUFFICIENT_TOKEN' : 'UNIVERSAL_INSUFFICIENT_NATIVE');
+    // After its own unwrap the owner holds the input as native ETH (the deposit's value); before, as the token.
+    if ((unwrapped ? native : balance) < amount) fail(unwrapped ? 'UNIVERSAL_INSUFFICIENT_NATIVE' : token ? 'UNIVERSAL_INSUFFICIENT_TOKEN' : 'UNIVERSAL_INSUFFICIENT_NATIVE');
     if (simulated.some((c, i) => c.gasUsed > BigInt(remaining[i]!.gasLimit))) return invalidate('UNIVERSAL_GAS_CHANGED_REVIEW_REQUIRED');
     const reviewed = src.calls[index]!, maxFee = BigInt(src.fees.maxFeePerGas);
     if (native < BigInt(reviewed.gasLimit) * maxFee + BigInt(reviewed.value)) fail('UNIVERSAL_INSUFFICIENT_GAS');
@@ -474,12 +502,28 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       if (attempt.step === 'DEPOSIT') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED',
         feeObligation: feeObligationFor(record.review.route, 'FAILED') },
         { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt, note: 'UNIVERSAL_DEPOSIT_REVERTED' }));
-      return save(replaceAttempt(deauthorized(record, 'UNIVERSAL_APPROVAL_REVERTED'), { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt,
-        note: 'UNIVERSAL_APPROVAL_REVERTED' }));
+      const reverted = attempt.step === 'UNWRAP' ? 'UNIVERSAL_UNWRAP_REVERTED' : 'UNIVERSAL_APPROVAL_REVERTED';
+      return save(replaceAttempt(deauthorized(record, reverted), { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt,
+        note: reverted }));
     }
     const logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as evm.EvmLog[] : fail('UNIVERSAL_RECEIPT_INVALID');
-    const confirmed = { ...attempt, state: 'CONFIRMED' as const, transactionHash: attempt.transactionHash ?? hash, receipt, reconciled: true };
+    // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a transaction proven on chain drops an earlier uncertainty note (UNIVERSAL_SUBMISSION_UNKNOWN,
+    // UNIVERSAL_REPORTED_REJECTED_UNPROVEN), as the router does; its evidence must never call a confirmed request uncertain.
+    const confirmed = { ...attempt, state: 'CONFIRMED' as const, transactionHash: attempt.transactionHash ?? hash, receipt, reconciled: true, note: null };
     try {
+      if (attempt.step === 'UNWRAP') {
+        // BUILD-FLOFI-MAINNET-EXEC-002: proof is the pinned contract's own burn of exactly the input from the owner (the native value is then the owner's).
+        const route = record.review.route, pin = route.source.ecosystem === 'EVM' && route.source.unwrap ? wrappedNativeOf(route.sourceChain, route.source.unwrap.token) : null;
+        if (!pin) fail('UNIVERSAL_UNEXPECTED_CONTRACT');
+        try { assertUnwrapEffects(pin!, logs, record.owner, route.inputAmount); } catch { fail('UNIVERSAL_UNWRAP_MISMATCH'); }
+        // Review P2: the burn alone does not prove the owner received the ETH. The owner's native balance across the unwrap's block must have
+        // risen by exactly the input minus the fee they paid; any other activity of the owner in that block hides it — recorded, never assumed.
+        // Review (round 2): the burn above is the proof; this balance check only isolates the credit. Another transaction of the owner in the
+        // same block (a second bridge's deposit), or a node without the historical state, makes it inconclusive — recorded, never a mismatch.
+        const credited = await Promise.all([evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber - 1)), evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber))])
+          .then(([before, after]) => after - before + facts.gasCostWei === BigInt(route.inputAmount), () => false);
+        return save(replaceAttempt({ ...record, error: null }, { ...confirmed, ...credited ? {} : { note: 'UNIVERSAL_UNWRAP_NATIVE_CREDIT_NOT_ISOLATED' } }));
+      }
       if (attempt.step === 'APPROVAL') {
         // Proof is the approval's own event: exactly the reviewed spender and amount. The allowance may already be consumed by another of the
         // owner's bridges (ERC-20 approvals overwrite); the deposit's begin re-reads it and asks for a new approval if it is short.
@@ -642,6 +686,11 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     return { ok: true, final: true, delivery: { chainId: chain, transactionHash: hash, position: { kind: 'SLOT', height: check.slot }, blockHash: null, timestamp: check.timestamp,
       recipient, token: token.address ?? 'native', amount: check.amount.toString(), orderBound: check.orderBound, contentHash: check.contentHash } };
   }
+  /** The native coin of a chain as a route token (what an unwrapping order is paid, and refunded, in). */
+  const sourceNative = (chain: string): UniversalToken => {
+    const n = universalNetworkOfChain(chain)!.native;
+    return { chainId: chain, kind: 'NATIVE', address: null, decimals: n.decimals, symbol: n.symbol };
+  };
   async function findDelivery(record: UniversalRecord, h: ProviderStatusHint): Promise<{ delivery: DestinationDelivery } | { divergent: string } | { waiting: string }> {
     const route = record.review.route;
     let waiting = 'UNIVERSAL_DESTINATION_PENDING';
@@ -660,8 +709,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   /** A refund verified on chain: the order allows refunds to the owner on the source chain (input token) or to the recipient on the destination chain. */
   async function findRefund(record: UniversalRecord, h: ProviderStatusHint): Promise<UniversalRecord['refund']> {
     const route = record.review.route;
+    // Review P1: an order paid in native ETH after the owner's own unwrap is refunded in what was paid (native), never in the wrapped token.
+    const candidates: (readonly [string, string, UniversalToken])[] = [...route.source.ecosystem === 'EVM' && route.source.unwrap
+      ? [[route.sourceChain, route.depositor, sourceNative(route.sourceChain)] as const] : [], [route.sourceChain, route.depositor, route.inputToken],
+      [route.destinationChain, route.recipient, route.outputToken]];
     for (const hash of h.refundTxHashes) {
-      for (const [chain, recipient, token] of [[route.sourceChain, route.depositor, route.inputToken], [route.destinationChain, route.recipient, route.outputToken]] as const) {
+      for (const [chain, recipient, token] of candidates) {
         const network = universalNetworkOfChain(chain)!;
         if (network.ecosystem === 'EVM' ? !/^0x[0-9a-f]{64}$/.test(hash) : !/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(hash)) continue;
         let check: Credit;
@@ -735,7 +788,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const asset = (t: UniversalToken) => t.kind === 'NATIVE' ? { chainId: t.chainId, nativeId: universalNetworkOfChain(t.chainId)!.native.nativeId, decimals: t.decimals }
       : { chainId: t.chainId, address: t.address!, decimals: t.decimals };
     const networkFee = record.attempts.reduce((sum, x) => sum + (x.ecosystem === 'EVM' ? BigInt(x.receipt?.gasCostWei ?? '0') : BigInt(x.feeLamports ?? '0')), 0n);
-    const included = route.fees.filter(f => f.included && f.chainId === route.sourceChain && f.token === (route.inputToken.address ?? 'native')).reduce((s, f) => s + BigInt(f.amount), 0n);
+    // An unwrapping order was paid in native ETH: its included fees are native (review nit), never reported in the wrapped token.
+    const paidIn = route.source.ecosystem === 'EVM' && route.source.unwrap ? sourceNative(route.sourceChain) : route.inputToken;
+    const included = route.fees.filter(f => f.included && f.chainId === route.sourceChain && f.token === (paidIn.address ?? 'native')).reduce((s, f) => s + BigInt(f.amount), 0n);
     const transactions = [...record.attempts.filter(x => x.state === 'CONFIRMED' && x.transactionHash).map(x => ({ chain: route.sourceChain, step: x.step,
       transactionHash: x.transactionHash!, explorer: universalExplorerTx(route.sourceChain, x.transactionHash!, D) })),
       { chain: route.destinationChain, step: 'DELIVERY', transactionHash: destination.transactionHash, explorer: universalExplorerTx(route.destinationChain, destination.transactionHash, D) }];
@@ -747,11 +802,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       differences: [], reconciliation: {
         balances: [{ asset: asset(route.outputToken), amount: destination.amount }], allowances: [], debt: [], positions: [],
         fees: [{ asset: { chainId: route.sourceChain, nativeId: network.native.nativeId, decimals: network.native.decimals }, amount: networkFee.toString() },
-          { asset: asset(route.inputToken), amount: included.toString() }],
+          { asset: asset(paidIn), amount: included.toString() }],
         residualAssets: [], ownership: [{ chainId: route.sourceChain, address: record.owner }, { chainId: route.destinationChain, address: route.recipient }],
         limitations: [provenance === 'PUBLIC_MAINNET' ? 'PUBLIC_MAINNET_OWNER_EXECUTED' : 'MOCKED_CHAINS_ONLY',
           destination.orderBound ? 'DELIVERY_REFERENCES_ORDER_ON_CHAIN' : 'DELIVERY_REFERENCED_BY_PROVIDER_STATUS', 'SOURCE_AND_DESTINATION_FINAL',
-          'FLOFI_FEE_OBLIGATION_RECORDED_NOT_COLLECTED'] },
+          'FLOFI_FEE_OBLIGATION_RECORDED_NOT_COLLECTED',
+          ...record.attempts.some(x => x.step === 'UNWRAP' && x.note === 'UNIVERSAL_UNWRAP_NATIVE_CREDIT_NOT_ISOLATED') ? ['UNWRAP_NATIVE_CREDIT_NOT_ISOLATED'] : []] },
       evidence: [{ evidenceId: 'route-commitment', kind: 'EXTERNAL_REFERENCE', contentHash: record.review.routeCommitment },
         { evidenceId: 'provider-order', kind: 'EXTERNAL_REFERENCE', contentHash: digest(route.order) },
         { evidenceId: 'source-deposit', kind: 'EXTERNAL_REFERENCE', contentHash: digest(source) },
@@ -779,7 +835,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       if (record.verdict !== 'PENDING' || active(record) || !['PREPARED', 'AUTHORIZED'].includes(record.phase) ||
           record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state))) fail('UNIVERSAL_REFRESH_NOT_ALLOWED');
       const wallet = destinationWallet ?? (record.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? record.review.recipient : undefined);
-      const review = await buildReview(record.workflow, record.owner, wallet);
+      const unwrapped = record.attempts.some(a => a.step === 'UNWRAP' && a.state === 'CONFIRMED' && a.reconciled);
+      const review = await buildReview(record.workflow, record.owner, wallet, unwrapped);
       if (review.owner !== record.owner) fail('UNIVERSAL_WRONG_OWNER');
       return save({ ...record, phase: 'PREPARED', review, authorization: null, error: null, requote: false, routeChanges: compareUniversalRoutes(record.review.route, review.route, 'REQUOTE') });
     }); },
@@ -930,7 +987,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         const last = record.attempts.at(-1);
         const outcome = record.verdict === 'RECONCILED' ? 'RECONCILED' : record.refund ? 'REFUND_OBSERVED'
           : record.destination ? 'DESTINATION_OBSERVED' : last?.state === 'REVERTED' ? 'REVERTED'
-          : last?.state === 'CONFIRMED' ? last.step === 'APPROVAL' ? 'APPROVAL_CONFIRMED' : 'CONFIRMED' : last?.state === 'PENDING' ? 'PENDING'
+          : last?.state === 'CONFIRMED' ? last.step === 'APPROVAL' ? 'APPROVAL_CONFIRMED' : last.step === 'UNWRAP' ? 'UNWRAP_CONFIRMED' : 'CONFIRMED' : last?.state === 'PENDING' ? 'PENDING'
           : !last || last.state === 'CANCELLED' ? 'NOT_SUBMITTED' : 'UNDETERMINED';
         return save({ ...record, observation: { checkedAt: now().toISOString(), outcome,
           reason: record.error ?? (record.destination ? 'UNIVERSAL_DESTINATION_OBSERVED' : record.source ? 'UNIVERSAL_SOURCE_CONFIRMED' : last?.note ?? 'UNIVERSAL_NOT_STARTED') } });

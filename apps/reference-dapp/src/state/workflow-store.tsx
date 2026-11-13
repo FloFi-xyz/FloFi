@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { forgetAaveReserves } from './aave-reserve-reads';
-import { routerDetails } from '../domain/router-authoring';
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useMemo, type Dispatch, type ReactNode } from 'react';
 import { BaseObservationError, createReviewContext, lintWorkflow, reviewContextForChain, type ReviewContext, type ReviewResult } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, type EditorState } from '../domain/editor';
@@ -375,7 +374,12 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     }
     const target = amountCommandTarget(command, state.workflow);
     const networks = target ? history.bridgeNetworkInputs[target.id] : undefined;
-    const networkMatches = !networks || (command.type === 'SET_ROUTER_BRIDGE' && command.input.source === networks.source && command.input.destination === networks.destination);
+    // BUILD-FLOFI-MAINNET-EXEC-002: a universal bridge command matches when it is exactly the one the card's drafts produce.
+    const universalMatches = () => { try { return JSON.stringify(canvasAmountCommand(state, null, history.amountInputs, target!.id, context, history.bridgeNetworkInputs, history.cryptoSelections,
+      history.recipientInputs)) === JSON.stringify(command); } catch { return false; } };
+    // Review (round 2): a Router bridge command too must be exactly the one the card's drafts produce (networks AND assets AND amount), so a chat
+    // proposal can never replace an asset the owner drafted on the card.
+    const networkMatches = !networks || (command.type === 'SET_ROUTER_BRIDGE' || command.type === 'SET_UNIVERSAL_BRIDGE') && universalMatches();
     if (target && command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) dispatchHistory({ type: 'EDIT_CANVAS_AMOUNT', id: target.id, amount: target.amount, context });
     const amountEdit = target && (history.amountInputs[target.id] === target.amount || command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) ? { authoringId: target.id, authoringAmount: actionReviewValue(null, target.id, target.amount, networks, history.cryptoSelections[target.id], history.recipientInputs[target.id])! } : undefined;
     setPending({ valid: !preview.error && networkMatches, command, diff, review, ...(authoring ?? amountEdit) });
@@ -441,7 +445,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   }
   function editBridgeNetworks(id: string, patch: Partial<CanvasBridgeNetworks>) {
     dispatchHistory({ type: 'EDIT_BRIDGE_NETWORKS', id, patch, context });
-    setPending(current => current?.authoringId === id || (current?.command.type === 'SET_ROUTER_BRIDGE' && current.command.nodeId === id) ? null : current);
+    // Review (round 2): any pending bridge proposal for this card is retired by its new networks (a chat SET_UNIVERSAL_BRIDGE / SET_BRIDGE too).
+    setPending(current => current?.authoringId === id || (current && ['SET_ROUTER_BRIDGE', 'SET_UNIVERSAL_BRIDGE', 'SET_BRIDGE'].includes(current.command.type)
+      && 'nodeId' in current.command && current.command.nodeId === id) ? null : current);
   }
   function cancelCanvasAmount(id: string) { dispatchHistory({ type: 'CANCEL_CANVAS_AMOUNT', id }); setPending(current => current?.authoringId === id ? null : current); }
   function editCanvasRecipient(id: string, recipient: string) {
@@ -483,8 +489,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       const command = canvasAmountCommand(state, history.actionSetup, history.amountInputs, id, context, history.bridgeNetworkInputs, history.cryptoSelections, history.recipientInputs);
       const amount = actionReviewValue(history.actionSetup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id], history.recipientInputs[id]);
       if (amount === undefined) return null;
-      // Changing an existing Router adapter needs a visible proposal; ordinary amount edits retain direct Enter-to-apply behavior.
-      if (command.type === 'SET_UNIVERSAL_BRIDGE' && state.workflow.nodes.some(node => node.nodeId === command.nodeId && routerDetails(node))) return reviewCanvasAmount(id);
+      // BUILD-FLOFI-MAINNET-EXEC-002: re-pointing a Router bridge card to another pair (it becomes a universal bridge) is the owner's own card edit
+      // and applies directly, like every other card edit (nothing is simulated, signed or sent). It used to wait for a proposal tagged with this
+      // card, which no control on screen could apply, so the card stayed a draft.
       // The history guard re-checks that the draft is still exactly this one, so a repeated commit of the same draft is a no-op.
       dispatchHistory({ type: 'COMMAND', command, context, authoringId: id, authoringAmount: amount });
       setPending(current => current?.authoringId === id ? null : current);

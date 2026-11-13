@@ -24,7 +24,7 @@ import { composerActions } from '../domain/composer-presentation';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
 import { STEPS_COMPLETED } from '../domain/workflow-progress';
-import { simulationError } from '../domain/simulation-presentation';
+import { requotedMessage, simulationError } from '../domain/simulation-presentation';
 import { translate } from '../i18n/locale';
 import type { ExecutionControls } from './execution-controls';
 import { conversationCopy } from '../domain/conversation-copy';
@@ -110,6 +110,12 @@ function questionOptions(kind: Question['open']['kind'], c: ReturnType<typeof co
   return kind === 'RESOLVE_EDIT' ? [c.applyEdit, c.discardEdit] : kind === 'CONFIRM_WORKFLOW' ? [c.confirmYes, c.confirmNo]
     : kind === 'CONFIRM_EXECUTION' ? [c.executeYes, c.executeNo] : kind === 'CONFIRM_CONTINUE_REVIEW' ? [c.continueAccept, c.executeNo] : [c.continueYes, c.executeNo];
 }
+/** The runtime's in-place re-quote, when its state carries one (Router and universal bridges: BUILD-FLOFI-MAINNET-EXEC-002). */
+function requotedOf(state: unknown): { readonly code: string; readonly runId?: string } | null {
+  const value = state && typeof state === 'object' ? (state as { readonly requoted?: unknown }).requoted : null;
+  return value && typeof value === 'object' && typeof (value as { code?: unknown }).code === 'string' ? value as { readonly code: string; readonly runId?: string } : null;
+}
+
 export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLanguage }: {
   owner: WorkflowOwner | null; epoch: number; bridge: ConversationBridge; direct: boolean; interfaceLanguage: ConversationLanguage;
 }) {
@@ -154,14 +160,17 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
    * error it saw then, and whether the authorize/request controls became active, so a start that ends without any execution record is reported.
    */
   const watch = useRef<{ scope: number; language: ConversationLanguage; phase: string | null; runKey: string | null; continued: string | null;
-    start?: { error: string | null; active: boolean; idle: number } | undefined;
+    /** `requoted`: the runtime's in-place re-quote at the start (BUILD-FLOFI-MAINNET-EXEC-002); a different one after it is this start's refusal. */
+    start?: { error: string | null; active: boolean; idle: number; requoted?: unknown } | undefined;
     /**
      * BUILD-FLOFI-E2E-RELIABILITY-001: the next wallet request of a run that already has a confirmed one (a continuation), while it starts. A start
      * that ends without a new wallet request is reported with its reason (before, the chat stayed silent and repeated "0 of 1 actions completed").
      */
-    continuing?: { error: string | null; cleared: boolean; active: boolean; idle: number; fingerprint: string } | undefined;
+    continuing?: { error: string | null; cleared: boolean; active: boolean; idle: number; fingerprint: string; requoted?: unknown } | undefined;
     /** The continuation (run and record fingerprint) whose fresh Review FloFi already prepared, so it is never re-offered in a loop. */
     requoted?: string | null | undefined;
+    /** Review round 3: the runtime's in-place re-quote this follow-up already accounted for (present when it began, or already presented). */
+    inPlace?: unknown;
     /**
      * Whether FloFi may prepare the next request's fresh Review by itself: only for a continuation the owner started in this conversation
      * (Execute or Continue). A run restored after a reload stays observation-only until the owner asks (“Review workflow”).
@@ -437,7 +446,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     // asked about, the fresh Review it prepared, and whether the owner started it here.
     const same = Boolean(previous && previous.scope === scope && previous.runKey !== null && previous.runKey === (live?.runKey ?? null));
     watch.current = { scope, language, phase: null, runKey: live?.runKey ?? null, continued: same ? previous!.continued : null, auto: auto || Boolean(same && previous!.auto),
-      requoted: same ? previous!.requoted : undefined };
+      requoted: same ? previous!.requoted : undefined, inPlace: same ? previous!.inPlace : requotedOf(latest.current.bridge.source.state) };
     setTick(n => n + 1);
   }
   /** The next request's own fresh Review, read-only (the runtime re-quotes the remaining request of the same run), then one question. */
@@ -466,7 +475,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const notStarted = (c: Copy, reason: string) => currentExecution(view.progress)?.started ? c.continueFailed(aboutNextRequest(reason)) : c.executionNotStarted(reason);
     const account = view.wallet.account;
     if (floFiWalletRefusal(account, language, false)) { say(scope, language, (language, c) => [notStarted(c, floFiWalletRefusal(account, language, false) ?? ''), { options: [c.review] }]); return; }
-    const startError = view.source.state.error, started = controls.authorize();
+    const startError = view.source.state.error, startRequote = requotedOf(view.source.state), started = controls.authorize();
     if (!started.started) {
       const issue = started.issue ?? 'Execution cannot begin with the current wallet or execution state. Check this workflow\'s simulation.';
       say(scope, language, (language, c) => [notStarted(c, translate(language, issue)), { options: [c.review] }]); return;
@@ -474,9 +483,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     say(scope, language, (_, c) => c.executing);
     const live = currentExecution(view.progress);
     watch.current = live?.started
-      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted, auto: true,
-        continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live.fingerprint } }
-      : { scope, language, phase: null, runKey: null, continued: null, auto: true, start: { error: startError, active: false, idle: 0 } };
+      ? { scope, language, phase: null, runKey: live.runKey, continued: null, requoted: watch.current?.requoted, auto: true, inPlace: startRequote,
+        continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live.fingerprint, requoted: startRequote } }
+      : { scope, language, phase: null, runKey: null, continued: null, auto: true, inPlace: startRequote, start: { error: startError, active: false, idle: 0, requoted: startRequote } };
   }
   function answer(scope: number, open: Question, text: string) {
     const language = open.language, verdict = classifyAnswer(text, open.open.kind), view = latest.current.bridge;
@@ -513,7 +522,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       say(scope, language, (_, c) => c.executing);
       const followed = watch.current?.scope === scope ? watch.current : null, startError = view.source.state.error;
       watch.current = { scope, language, phase: followed?.phase ?? null, runKey: live?.runKey ?? null, continued: followed?.continued ?? null, requoted: followed?.requoted, auto: true,
-        continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live?.fingerprint ?? '' } };
+        inPlace: requotedOf(view.source.state),
+        continuing: { error: startError, cleared: startError === null, active: false, idle: 0, fingerprint: live?.fingerprint ?? '', requoted: requotedOf(view.source.state) } };
       view.controls.request(true);
       return true;
     }
@@ -528,7 +538,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const review = conversationReview(view);
       setQuestion({ open: { kind: 'CONFIRM_EXECUTION', binding: open.open.binding }, language });
       const account = short(open.open.binding.account), sequence = view.sequence, revision = view.workflow.revision;
-      say(scope, language, (language, c) => [c.workflowConfirmed(revision, account), {
+      // Review round 3: a fresh Review of a run whose earlier request already landed (router/universal re-quote) never says nothing was sent.
+      const landed = Boolean(currentExecution(view.progress)?.steps.some(step => step.operations.some(operation => operation.state === 'confirmed')));
+      say(scope, language, (language, c) => [landed ? c.workflowConfirmedContinuing(revision, account) : c.workflowConfirmed(revision, account), {
         notes: [review.walletRequests.length ? c.walletRequests(review.walletRequests.map(item => translate(language, item)).join(', ')) : c.walletRequestsUnknown,
           ...review.approvals.length || review.walletRequests.some(item => /^Approve\b/.test(item)) ? [c.approvalIfNeeded] : [],
           ...review.providerSteps.length ? [c.providerSettles(review.providerSteps.map(item => translate(language, item).toLowerCase()).join(', '))] : []],
@@ -606,11 +618,29 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       restored.current = live.runKey;
       const language = interfaceLanguage, check = bridge.controls.canCheck;
       say(session.current, language, (_, c) => [c.restored, check ? { options: [c.checkStatus] } : {}]);
-      watch.current = { scope: session.current, language, phase: null, runKey: live.runKey, continued: null };
+      watch.current = { scope: session.current, language, phase: null, runKey: live.runKey, continued: null, inPlace: requotedOf(bridge.source.state) };
     }
     const followed = watch.current;
     if (!followed || followed.scope !== session.current) return;
     const language = followed.language, check = bridge.controls.canCheck;
+    // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a refusal at the wallet hand-off, after begin had recorded the attempt (so neither this start
+    // nor a continuation is still pending), that the runtime re-quoted in place: FloFi says why once and presents that fresh Review of the same
+    // run, as at the start. Never "needs attention" for a request that was never sent, never a second simulation; the owner authorizes again.
+    // It is presented only once the controls settled (the wallet request lock is released in the render after the re-quote lands; presenting
+    // earlier would report "still working" and consume it), and only for the run this conversation started.
+    const inPlace = requotedOf(bridge.source.state);
+    const settled = !bridge.controls.authorizing && !bridge.controls.requesting && !bridge.source.state.busy;
+    const ours = !followed.runKey || !inPlace?.runId || inPlace.runId === followed.runKey;
+    if (inPlace && inPlace !== followed.inPlace && !followed.start && !followed.continuing && followed.auto && ours) {
+      if (!settled) return;
+      followed.inPlace = inPlace;
+      const earlier = Boolean(live?.steps.some(step => step.operations.some(operation => operation.state === 'confirmed')));
+      if (live) followed.phase = conversationExecution(bridge)?.phase ?? followed.phase;
+      say(followed.scope, language, (language, c) => earlier ? `${c.earlierRequestStays} ${translate(language, requotedMessage(inPlace.code))}` : translate(language, requotedMessage(inPlace.code)));
+      requote.current = { scope: followed.scope };
+      startReview(followed.scope, language, false, earlier);
+      return;
+    }
     if (!live) {
       const start = followed.start, active = bridge.controls.authorizing || bridge.controls.requesting || Boolean(bridge.source.state.busy);
       if (start && active) { start.active = true; start.idle = 0; return; }
@@ -621,6 +651,15 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const ended = !active && (bridge.controls.requestFailed || newError || Boolean(start && start.active) || Boolean(start && ++start.idle > 1));
       if (ended && (start || bridge.controls.requestFailed)) {
         watch.current = null;
+        // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): the runtime already re-quoted this run in place (nothing was sent): FloFi says why once and
+        // presents that fresh Review with what changed — it never simulates again over it, and the owner confirms it again.
+        const rq = requotedOf(bridge.source.state);
+        if (rq && rq !== start?.requoted && rq !== followed.inPlace) {
+          say(followed.scope, language, language => translate(language, requotedMessage(rq.code)));
+          requote.current = { scope: followed.scope };
+          startReview(followed.scope, language);
+          return;
+        }
         // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a quote or state the execution boundary found changed (or expired) after the Review is re-quoted at once;
         // the fresh Review names its changes and needs its own confirmations. Nothing was sent, and the earlier run stays on record.
         if (error && newError && QUOTE_MOVED.test(error)) {
@@ -651,6 +690,15 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         if (bridge.controls.requestFailed || newError || going.active || ++going.idle > 1) {
           followed.continuing = undefined;
           followed.requoted = executionContinuation(bridge)?.key ?? `${live.runKey}:${live.fingerprint}`;
+          // The next request was re-quoted in place by the runtime (nothing new was sent): its fresh Review is presented, never simulated again.
+          const rq = requotedOf(bridge.source.state);
+          if (rq && rq !== going.requoted) {
+            followed.inPlace = rq;
+            say(followed.scope, language, (language, c) => `${c.earlierRequestStays} ${translate(language, requotedMessage(rq.code))}`);
+            requote.current = { scope: followed.scope };
+            startReview(followed.scope, language, false, true);
+            return;
+          }
           if (error && newError && QUOTE_MOVED.test(error)) {
             const why = continuationReason(error);
             say(followed.scope, language, (language, c) => c.continuationRequote(why ? translate(language, why) : null));

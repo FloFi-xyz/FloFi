@@ -14,7 +14,7 @@ const H = (kind: Parameters<typeof hashArtifactBytes>[0], value: unknown) => has
 const fail = (code: string): never => { throw new Error(code); };
 export const UNIVERSAL_ARTIFACT_ADAPTER = Object.freeze({ id: 'flofi.router.universal', version: '1.0.0' } as const);
 export type UniversalSourcePayload =
-  | { readonly ecosystem: 'EVM'; readonly calls: readonly { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly value: string }[] }
+  | { readonly ecosystem: 'EVM'; readonly calls: readonly { readonly purpose: 'APPROVAL' | 'UNWRAP' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly value: string }[] }
   | { readonly ecosystem: 'SOLANA'; readonly messageHash: string; readonly programId: string };
 export type UniversalArtifactInput = {
   readonly workflow: SemanticWorkflow; readonly nodeId: string; readonly route: UniversalRoute; readonly routeCommitment: string; readonly owner: string;
@@ -107,8 +107,10 @@ export function compileUniversalArtifacts(input: UniversalArtifactInput): Univer
     enforcement: 'NOT_ENFORCED' });
   const manifestHash = H('strategy-manifest', manifest);
   const steps = input.payload.ecosystem === 'EVM'
-    ? input.payload.calls.map((c, i) => ({ stepId: c.purpose === 'APPROVAL' ? 'universal.step.approval' : 'universal.step.deposit', nodeId: input.nodeId, chainId: src,
-      adapter: UNIVERSAL_ARTIFACT_ADAPTER, dependencies: i === 0 ? [] : ['universal.step.approval'], requiredAuthorizationClass: 'MODE_A' as const,
+    // BUILD-FLOFI-MAINNET-EXEC-002: an unwrapping route's first step is the owner's unwrap (its own step id); the deposit depends on it.
+    ? input.payload.calls.map((c, i, calls) => ({ stepId: c.purpose === 'APPROVAL' ? 'universal.step.approval' : c.purpose === 'UNWRAP' ? 'universal.step.unwrap' : 'universal.step.deposit',
+      nodeId: input.nodeId, chainId: src,
+      adapter: UNIVERSAL_ARTIFACT_ADAPTER, dependencies: i === 0 ? [] : [calls[0]!.purpose === 'UNWRAP' ? 'universal.step.unwrap' : 'universal.step.approval'], requiredAuthorizationClass: 'MODE_A' as const,
       executionKind: 'DIRECT_TRANSACTION' as const, payloadHash: payloads[i]! }))
     : [{ stepId: 'universal.step.deposit', nodeId: input.nodeId, chainId: src, adapter: UNIVERSAL_ARTIFACT_ADAPTER, dependencies: [], requiredAuthorizationClass: 'MODE_A' as const,
       executionKind: 'DIRECT_TRANSACTION' as const, payloadHash: payloads[0]! }];

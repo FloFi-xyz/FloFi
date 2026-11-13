@@ -594,9 +594,9 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   /** Always the run's own wallet on this network (S1). */
   readonly feePayer: string;
   /** The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. */
-  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean } | null;
+  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED' } | null;
   /** Network fees actually paid, from the chain (null until reconciled). */
-  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string } | null;
+  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true } | null;
   /** Transactions of the group (public hashes / signatures only, never bytes): what was sent and reconciled. Named like a step's `submissions`. */
   readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
@@ -660,8 +660,8 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
   };
   const groups: RunGroupView[] = groupRecords.map(g => {
-    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean } } | null)?.fee;
-    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string } } | null)?.gasPaid ?? null;
+    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null } } | null)?.fee;
+    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean } } | null)?.gasPaid ?? null;
     // Reconciled transactions first; before that, what was sent (a Solana group's signatures are known before sending: listed only once reconciled).
     // An owner-step group's outcome lists its steps' own {chain, hash} records; a relayed group lists hashes on its own chain.
     const recorded = (g.outcome as { transactions?: readonly unknown[] } | null)?.transactions
@@ -674,8 +674,10 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
       // Requesters see that the owner's wallet pays, never which wallet, its batch id or its fees; shared status adds hashes and the gas amount.
       code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: owner ? g.feePayer : 'OWNER_WALLET',
-      maxFee: owner && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false } : null,
-      gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : 'OWNER_WALLET' } : null,
+      maxFee: owner && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false, ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {} } : null,
+      // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet).
+      gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : paid.sponsored ? 'FLOFI_PAYMASTER' : 'OWNER_WALLET',
+        ...paid.sponsored ? { sponsored: true as const } : {} } : null,
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,

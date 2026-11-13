@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { supersededUnsent } from '../domain/execution-lifecycle';
 import type { ExecutionStart } from '../domain/execution-presentation';
 import type { ReviewWallet } from '../domain/review-presentation';
 import type { SimulationSource } from '../domain/simulation-presentation';
@@ -44,19 +45,21 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       attach(Boolean(r?.authorization && !pending && r.status !== 'COMPLETED' && !lending.retired && !lending.busy && next), Boolean(r?.attempts.length), lending.execute); break;
     }
     case 'router': {
-      const r = router.record, last = r?.attempts.at(-1);
+      // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a never-sent attempt of an earlier Review (superseded by the in-place re-quote) is not this
+      // run's request: the fresh Review starts as the lifecycle shows it (the server's begin re-checks every attempt and the authorization).
+      const r = router.record, attempts = r ? r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)) : [], last = attempts.at(-1);
       const pending = Boolean(last && r?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
-      const confirmed = new Set(r?.attempts.filter(a => a.state === 'CONFIRMED').map(a => a.step));
+      const confirmed = new Set(attempts.filter(a => a.state === 'CONFIRMED').map(a => a.step));
       const next = r?.review.calls.find(c => !confirmed.has(c.purpose === 'APPROVAL' ? 'APPROVAL' : 'DEPOSIT'));
-      attach(Boolean(r?.phase === 'AUTHORIZED' && r.authorization === r.review.commitment && !router.retired && !router.busy && !pending && router.executionEnabled && router.sessionReady && next), Boolean(r?.attempts.length), router.execute);
+      attach(Boolean(r?.phase === 'AUTHORIZED' && r.authorization === r.review.commitment && !router.retired && !router.busy && !pending && router.executionEnabled && router.sessionReady && next), attempts.length > 0, router.execute);
       if (!router.executionEnabled) result.reason = 'Execution is unavailable for this route.'; break;
     }
     case 'universal': {
       // BUILD-CROSSCHAIN-UNIVERSAL-001: one Execute click = one exact wallet request (the exact approval, or the deposit).
-      const r = universal.record, last = r?.attempts.at(-1);
+      const r = universal.record, attempts = r ? r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)) : [], last = attempts.at(-1);
       const pending = Boolean(last && r?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
       attach(Boolean(r?.phase === 'AUTHORIZED' && r.authorization === r.review.commitment && !universal.retired && !universal.busy && !pending && universal.executionEnabled),
-        Boolean(r?.attempts.length), universal.execute);
+        attempts.length > 0, universal.execute);
       if (!universal.executionEnabled) result.reason = 'Execution is unavailable for this route.'; break;
     }
     case 'public': {
@@ -140,13 +143,13 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
         if (next) result.nextLabel = `Continue to ${next.id.replaceAll('_', ' ').toLowerCase()}`; break;
       }
       case 'router': {
-        const r = router.record;
-        safeNext = Boolean(r && r.attempts.every(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED'));
+        const r = router.record, attempts = r ? r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)) : [];
+        safeNext = Boolean(r && attempts.every(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED'));
         result.nextLabel = 'Continue to bridge'; break;
       }
       case 'universal': {
-        const r = universal.record;
-        safeNext = Boolean(r && r.attempts.length > 0 && r.attempts.every(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED'));
+        const r = universal.record, attempts = r ? r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)) : [];
+        safeNext = Boolean(r && attempts.length > 0 && attempts.every(a => (a.step === 'APPROVAL' || a.step === 'UNWRAP') && a.state === 'CONFIRMED'));
         result.nextLabel = 'Continue to bridge'; break;
       }
       case 'public': {
