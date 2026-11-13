@@ -384,7 +384,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {plan.userFunded.groups.map(g => <li key={g.index}>{tr('{0} on {1}', stepsOf(tr, g.stepFrom, g.stepTo), NETWORK[g.chain] ?? g.chain)}
           {' · '}{tr(GROUP_HOW[g.strategy] ?? g.strategy)}{' · '}{tr(g.signing === 'UPFRONT' ? 'signed now' : 'signed when it becomes due')}
           {g.awaitsDelivery !== null && <> · {tr('waits for the delivery of step {0}', String(g.awaitsDelivery + 1))}</>}
-          {g.setup.includes('EVM_SMART_ACCOUNT_UPGRADE') && <> · {tr('your wallet upgrades this account inside the same confirmation (one time)')}</>}</li>)}
+          {g.setup.includes('EVM_SMART_ACCOUNT_UPGRADE') && <> · {tr('your wallet upgrades this account inside the same confirmation (one time)')}</>}
+          {/* ADR-0010 review C5: whether ETH or USDC pays this group's fee is decided when it is prepared; Circle then needs two signatures. */}
+          {g.tokenGas && <> · {tr('if your ETH cannot pay its network fee, it can be paid from your USDC through Circle: then two signatures (a USDC permit, then the operation)')}</>}</li>)}
       </ol>}
       {plan.userFunded?.available && <p className="muted">{tr('Your wallet pays every network fee, unless FloFi offers to sponsor a step\'s fee and your wallet supports it. FloFi never advances or reimburses gas.')}
         {plan.userFunded.wallets === 'ASSUMED' && <> {tr('The grouping depends on what your wallet supports: FloFi asks your wallet before anything is signed, and a wallet that cannot batch confirms each step.')}</>}</p>}

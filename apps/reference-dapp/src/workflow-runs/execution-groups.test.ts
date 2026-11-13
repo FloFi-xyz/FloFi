@@ -34,6 +34,30 @@ const SEND_BASE = { action: 'transfer', network: 'base', asset: 'USDC', amount: 
 const SOL_SWAP = { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '5' };
 const SOL_SEND = { action: 'transfer', network: 'solana', asset: 'SOL', amount: '0.01', recipient: '7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2' };
 
+describe('ADR-0010 review C5: a group whose network fee Circle may pay is never counted as one sure wallet interaction', () => {
+  it('on a chain where the fee may be paid in USDC: flagged, "at least", never "single"; native-only deployments, other chains and FloFi Wallet unchanged', () => {
+    const facts: UserFundedFacts = { ...ALL, tokenGasChains: ['eip155:8453'] };
+    const p = plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, METAMASK, facts);
+    // The plan cannot know the owner's ETH when the group becomes due: one confirmation if ETH pays, two signatures (permit, operation) if Circle does.
+    expect(p.groups[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', interactions: 1, tokenGas: 'CIRCLE_USDC_PAYMASTER' });
+    expect(p.interactions).toMatchObject({ upfront: 1, whenDue: 0, single: false, atLeast: true });
+    expect(describeGroup(p.groups[0]!)).toMatch(/one wallet confirmation \(atomic batch\).*two signatures \(a USDC permit, then the operation\)/);
+    // Before /approve (assumed wallet capabilities) too.
+    expect(plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, undefined, facts).interactions).toMatchObject({ single: false, atLeast: true });
+    // A native-only deployment: exactly as before.
+    const native = plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, METAMASK);
+    expect(native.groups[0]).not.toHaveProperty('tokenGas');
+    expect(native.interactions).toMatchObject({ single: true, atLeast: false });
+    // A chain where Circle is not offered, and FloFi Wallet (never handed a Circle permit): unchanged.
+    const arbitrum = plan({ version: 2, steps: [{ ...SWAP_BASE, network: 'arbitrum-one' }, { ...SEND_BASE, network: 'arbitrum-one' }] }, METAMASK, facts);
+    expect(arbitrum.groups[0]).not.toHaveProperty('tokenGas');
+    expect(arbitrum.interactions).toMatchObject({ single: true });
+    const flofi = plan({ version: 2, steps: [SWAP_BASE, SEND_BASE] }, { eip155: { wallet: 'FLOFI_WALLET', atomic: { 'eip155:8453': 'supported' }, typedData: true } }, facts);
+    expect(flofi.groups[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH' });
+    expect(flofi.groups[0]).not.toHaveProperty('tokenGas');
+  });
+});
+
 describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 execution groups', () => {
   it('batches consecutive buildable same-chain steps into ONE owner-paid wallet interaction, with in-group bindings fixed to the signed minimum', () => {
     const p = plan({ version: 2, steps: [SWAP_BASE, SUPPLY_BASE, SEND_BASE], bindings: [{ step: 1, amountFrom: 0 }] }, METAMASK);

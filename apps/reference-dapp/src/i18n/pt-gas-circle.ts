@@ -8,6 +8,8 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   // Review, Editor and /approve.
   'Network fee, at most {0} — paid from your USDC through Circle': 'Taxa de rede, no máximo {0} — paga com seu USDC pela Circle',
   'Two signatures: a USDC permit for the fee, then the operation': 'Duas assinaturas: uma permissão de USDC para a taxa e, depois, a operação',
+  'if your ETH cannot pay its network fee, it can be paid from your USDC through Circle: then two signatures (a USDC permit, then the operation)':
+    'se o seu ETH não puder pagar a taxa de rede deste grupo, ela pode ser paga com seu USDC pela Circle: então são duas assinaturas (uma permissão de USDC e, depois, a operação)',
   'Network fee paid: {0}': 'Taxa de rede paga: {0}',
   '{0} — paid from your USDC through Circle': '{0} — paga com seu USDC pela Circle',
   '{0} — paid from your USDC through Circle + later requests, quoted when due':

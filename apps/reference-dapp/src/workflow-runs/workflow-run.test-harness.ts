@@ -109,7 +109,7 @@ export async function workflowRunHarness(db: Database, options: {
   const log = (event: string, fields: Readonly<Record<string, unknown>>) => { lines.push(JSON.stringify({ event, ...fields })); };
   const ufChains = options.userFundedChains ?? null;
   const userFundedFacts = ufChains ? { enabled: true, code: null, chains: ufChains, bundlerChains: options.bundler ? ufChains.filter(c => options.bundler!(c)) : [],
-    solanaNonceAccounts: false, ...options.across ? { bridgeRoutes: options.across.routes } : {} } : undefined;
+    solanaNonceAccounts: false, ...options.across ? { bridgeRoutes: options.across.routes } : {}, ...options.circle ? { tokenGasChains: options.circle.chains } : {} } : undefined;
   const userFunded: UserFundedDeps | null = ufChains ? { chains: ufChains, now: d.now, bundler: options.bundler ?? (() => null), solana: null, jupiter: null,
     ...options.across ? { across: options.across.route } : {}, ...options.circle ? { circle: options.circle } : {},
     evm: chain => { const rpc = ufChains.includes(chain) ? options.userFundedRpc?.(chain) ?? d.rpc(chain) : null; return rpc ? guarded(chain, 'read', 'MOCKED', rpc) : null; } } : null;
