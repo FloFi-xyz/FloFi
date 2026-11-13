@@ -150,7 +150,8 @@ describe('Jupiter swap with the Kora fee payer (MOCKED)', () => {
 describe('K1: no transaction without the verified payment', () => {
   const owner = createMockedSolanaWallet().owner, recipient = createMockedSolanaWallet().owner, blockhash = kora.owner;
   const terms = { mechanism: 'PIMLICO_KORA_SPL_FEE' as const, feePayer: kora.owner, paymentAddress: payee, paymentAccount: koraAta(payee, T.USDC.mint),
-    feeAccount: koraAta(owner, T.USDC.mint), token: { symbol: 'USDC', mint: T.USDC.mint, decimals: 6 }, amount: '5000', quotedFeeLamports: '10000', quotedAt: new Date(NOW).toISOString() };
+    feeAccount: koraAta(owner, T.USDC.mint), token: { symbol: 'USDC', mint: T.USDC.mint, decimals: 6 }, amount: '5000', quotedFeeLamports: '10000', quotedAt: new Date(NOW).toISOString(),
+    nativeWorstCaseLamports: '45000' };
   const payment = (amount: bigint, from = terms.feeAccount) => ({ programId: KORA_TOKEN_PROGRAM,
     data: Uint8Array.from([12, ...u64Bytes(amount), 6]), accounts: [{ pubkey: from, isSigner: false, isWritable: true },
       { pubkey: T.USDC.mint, isSigner: false, isWritable: false }, { pubkey: terms.paymentAccount, isSigner: false, isWritable: true }, { pubkey: owner, isSigner: true, isWritable: false }] });

@@ -430,7 +430,7 @@ export async function simulateKoraSolanaTransfer(workflow: SemanticWorkflow, own
     if (available < quote.feeInToken) { unavailable.push('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT'); continue; }
     chosen = { units, terms: { mechanism: KORA_MECHANISM, feePayer: kora.feePayer, paymentAddress: kora.paymentAddress, ...payment,
       token: { symbol: feeToken.symbol, mint: feeToken.mint, decimals: feeToken.decimals }, amount: quote.feeInToken.toString(),
-      quotedFeeLamports: quote.feeInLamports.toString(), quotedAt: new Date(now).toISOString() } };
+      quotedFeeLamports: quote.feeInLamports.toString(), quotedAt: new Date(now).toISOString(), nativeWorstCaseLamports: nativeWorstCase.toString() } };
     break;
   }
   if (!chosen) return koraFail(unavailable.includes('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT') ? 'KORA_FEE_TOKEN_BALANCE_INSUFFICIENT' : unavailable[0] ?? 'KORA_FEE_TOKEN_UNSUPPORTED');

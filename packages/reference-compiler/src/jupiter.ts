@@ -328,7 +328,8 @@ export async function simulateKoraJupiterSwap(workflow: SemanticWorkflow, ownerI
     const quote = assertKoraQuote(await kora.estimate(toBase64(unsignedTransactionBytes(compile(units, payment, 0n))), token.mint), kora);
     if (available < quote.feeInToken) { unavailable.push('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT'); continue; }
     chosen = { units, terms: { mechanism: KORA_MECHANISM, feePayer: kora.feePayer, paymentAddress: kora.paymentAddress, ...payment, token: { symbol: token.symbol, mint: token.mint,
-      decimals: token.decimals }, amount: quote.feeInToken.toString(), quotedFeeLamports: quote.feeInLamports.toString(), quotedAt: fetchedAt } };
+      decimals: token.decimals }, amount: quote.feeInToken.toString(), quotedFeeLamports: quote.feeInLamports.toString(), quotedAt: fetchedAt,
+      nativeWorstCaseLamports: nativeWorstCase.toString() } };
     break;
   }
   if (!chosen) return fail(unavailable.includes('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT') ? 'KORA_FEE_TOKEN_BALANCE_INSUFFICIENT' : unavailable[0] ?? 'KORA_FEE_TOKEN_UNSUPPORTED');

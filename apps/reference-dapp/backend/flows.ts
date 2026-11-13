@@ -29,6 +29,7 @@ import { createSolanaRpc, solanaRpcOverride } from '../src/server/solana-rpc.ts'
 import { createJupiterHttp } from '../src/server/jupiter-http.ts';
 import { createJupiterService, createSolanaDevnetService, type JupiterRecord, type JupiterWalletDiagnostic } from '../src/server/jupiter-service.ts';
 import { createSolanaTransferService, type SolanaTransferRecord, type SolanaTransferWalletDiagnostic } from '../src/server/solana-transfer-service.ts';
+import { koraGasForFlow } from '../src/gas-abstraction/kora/runtime.ts';
 import { createOrcaLiquidityService, type OrcaLiquidityRecord, type OrcaLiquidityWalletDiagnostic } from '../src/server/orca-liquidity-service.ts';
 import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionRecord } from '../src/server/solana-composition-service.ts';
 import { createUniswapLiquidityService, uniswapNeedsObservation, type UniswapLiquidityRecord,
@@ -493,8 +494,9 @@ const jupiterSwap: FlowDefinition = {
   create(storage, { rpc, http, mode, env }) {
     if (!http) throw new Error('JUPITER_CONFIGURATION_INVALID');
     // Real-funds execution stays a separate explicit owner opt-in; Simulate and Review remain read-only without it.
+    // ADR-0010 §4: Pimlico's Kora fee payer when FLOFI_KORA_TOKEN_GAS is enabled (the harness only with its loopback double); native stays the default.
     const s = createJupiterService({ storage, rpc, http, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET',
-      executionEnabled: mode === 'harness' || env.GRYLOO_JUPITER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED' });
+      executionEnabled: mode === 'harness' || env.GRYLOO_JUPITER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED', kora: koraGasForFlow(env, mode === 'harness') });
     const table = solanaSwapTable(s);
     return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
   },
@@ -513,9 +515,10 @@ const solanaTransferFlow = (name: 'solana-transfer' | 'solana-devnet-transfer', 
       : (profile.realFunds ? solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_TRANSFER_RPC_CONFIGURATION_INVALID')
         : solanaRpcOverride(env.GRYLOO_SOLANA_DEVNET_RPC_URL, 'SOLANA_TRANSFER_RPC_CONFIGURATION_INVALID')) ?? profile.rpc, mode === 'harness') }),
     create(storage, { rpc, mode, env }) {
+      // ADR-0010 §4: Kora only on mainnet-beta (Devnet stays native); the harness only with its loopback double.
       const s = createSolanaTransferService({ storage, rpc, profile, provenance: mode === 'harness' ? 'MOCKED' : profile.provenance,
         executionEnabled: profile.realFunds ? mode === 'harness' || env.GRYLOO_SOLANA_TRANSFER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED'
-          : env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED' });
+          : env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED', kora: profile.realFunds ? koraGasForFlow(env, mode === 'harness') : null });
       const table: Record<string, (args: Args) => Promise<unknown>> = {
         info: async () => ({ executionEnabled: s.executionEnabled }),
         simulate: ([w, o]) => s.simulate(w, o as string),

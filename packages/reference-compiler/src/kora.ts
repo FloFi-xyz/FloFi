@@ -51,7 +51,9 @@ export type KoraPort = { readonly feePayer: string; readonly paymentAddress: str
  * account, to whom. `amount` is the exact token amount of the payment instruction; `quotedFeeLamports` is Kora's quote of its own SOL outflow.
  */
 export type KoraGasTerms = { readonly mechanism: typeof KORA_MECHANISM; readonly feePayer: string; readonly paymentAddress: string; readonly paymentAccount: string;
-  readonly feeAccount: string; readonly token: KoraFeeToken; readonly amount: string; readonly quotedFeeLamports: string; readonly quotedAt: string };
+  readonly feeAccount: string; readonly token: KoraFeeToken; readonly amount: string; readonly quotedFeeLamports: string; readonly quotedAt: string;
+  /** The worst-case native cost the owner's SOL did not cover at Review: once the owner holds it, the policy picks native again (a new Review). */
+  readonly nativeWorstCaseLamports: string };
 
 const fail = (code: string): never => { throw new Error(code); };
 export const koraAta = (wallet: string, mint: string) => associatedTokenAddress(wallet, mint, KORA_TOKEN_PROGRAM, KORA_ASSOCIATED_TOKEN_PROGRAM);
