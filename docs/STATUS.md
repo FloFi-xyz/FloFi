@@ -7,6 +7,17 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-FLIGHT-EMAILS-1311-001 — Boarding emails for Friday 13 Nov
+
+**Status: PR #189 — unit, disposable-PostgreSQL and CI evidence; nothing was sent from this work, and production operations are the
+operator's.**
+- Launch Fri 13 Nov 09:00 BRT sends **only Email 3** (v3, the team-approved "estamos começando" copy) to the waiting list, in Portuguese.
+- Email 6 (guests) is postponed: invites and codes are preserved.
+- `email-launch-upgrade` moves the 48 queued Email 3 v2 rows to v3 + PT in place.
+- `email-hold-campaign --keep GROUP_BOARDING` holds every other pending campaign email before `email-resume`.
+
+See the [build note](builds/BUILD-FLOFI-FLIGHT-EMAILS-1311-001.md) and the [runbook](deploy/FLIGHT-1311-LAUNCH-RUNBOOK.md).
+
 ## P0 — Review block before authorization (board 06)
 
 **Status: PR FOR OWNER REVIEW on `claude/peaceful-galileo-7r9j2j` (from main `d3f30a2`) — presentation only; unit and MOCKED loopback-browser

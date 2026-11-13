@@ -138,11 +138,12 @@ describe('the seven emails', () => {
     const moved = { ...ctx('EN'), calendar: { ...FLIGHT_DEFAULT_CALENDAR, boardingOpensAt: Date.parse('2026-11-19T12:30:00Z') } };
     expect(renderEmail({ template: 'EVE' }, moved).subject).toBe('Boarding starts tomorrow, 9:30 BRT ✈️');
     const creator = renderEmail({ template: 'CREATOR_INVITE', code: 'FLF-7Q2K-9XMB', briefUrl: 'https://cooked-goat-9ec.notion.site/Flight-FloFi-Brief-do-criador-4147b5d0a5fd81afb15ffdeb090a6450' }, ctx('EN'));
-    expect(creator.text).toContain('Thursday from 9:00 BRT');
+    expect(creator.text).toContain('Go to flofi.xyz/board, tap');
+    expect(creator.text).toContain('Boarding = OPEN');
     expect(creator.text).toContain('FLF-7Q2K-9XMB');
-    expect(creator.text).not.toMatch(/TEST|Wednesday|test flight|early boarding/i);
-    expect(creator.preheader).toBe('Your code, and how to board on Thursday.');
-    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(4);
+    expect(creator.text).not.toMatch(/TEST|Wednesday|Thursday|test flight|early boarding/i);
+    expect(creator.preheader).toBe('Your code, and how to board.');
+    expect(TEMPLATE_VERSIONS.CREATOR_INVITE).toBe(5);
   });
   it('shows the card’s real seat, route and image in 4a/4b, the three invites only in 4a, and escapes the handle', () => {
     const founding = renderEmail(inputs[4]!, ctx('EN')), passenger = renderEmail(inputs[5]!, ctx('EN'));

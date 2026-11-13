@@ -408,7 +408,10 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
           [tenantId, code, at(input.now), input.email])).rowCount;
       }
       await enqueueEmail(tx, tenantId, { template: 'CREATOR_INVITE', recipient: input.email, language: input.language, trigger: 'creator_invited',
-        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt, expiresAt: calendar.boardingOpensAt, inviteCode: code, batchKey: null });
+        dedupeKey: `creator:${code.toLowerCase()}`, notBefore: input.sendAt,
+        // Valid as long as the invite (30 days), not only until boarding opens: Email 6 goes out at opening (13/11 launch). Delivery still
+        // cancels it once the invite is revoked, redeemed or expired.
+        expiresAt: input.now + 30 * DAY_MS, inviteCode: code, batchKey: null });
       return { code, created: true, state: 'AVAILABLE' as const };
     });
   }
