@@ -132,7 +132,8 @@ async function solanaSwap(flow: 'jupiter-swap', runId: string, run: JupiterRecor
     ['Expected to receive', units(review.quote.outAmount, review.output.decimals, review.output.symbol)],
     ['Minimum received', units(review.quote.otherAmountThreshold, review.output.decimals, review.output.symbol)],
     ['Max slippage', percent(review.slippageBps)],
-    ['Network fee (estimate)', units(review.estimatedFeeLamports, 9, 'SOL')],
+    // ADR-0010: with Pimlico's Kora fee payer the owner pays no SOL; it repays the exact network fee in a token inside this transaction.
+    ...review.gas ? [koraFeeLine(review.gas)] : [['Network fee (estimate)', units(review.estimatedFeeLamports, 9, 'SOL')] as const],
     ['Provider', 'Jupiter']), 'Swap');
 }
 async function solanaTransfer(flow: 'solana-transfer', runId: string, run: SolanaTransferRecord, request: ManagedSigningRequest, deps: ManagedSigningDeps, now: number): Promise<ManagedSigningResult> {
@@ -147,7 +148,12 @@ async function solanaTransfer(flow: 'solana-transfer', runId: string, run: Solan
     ['You send', units(review.amount, review.asset.decimals, symbol)],
     ['Recipient', review.recipient],
     ['Token mint', review.asset.mint ?? undefined],
-    ['Max network cost', units(review.maximumNetworkCostLamports, 9, 'SOL')]), 'Transfer');
+    ...review.gas ? [koraFeeLine(review.gas)] : [['Max network cost', units(review.maximumNetworkCostLamports, 9, 'SOL')] as const]), 'Transfer');
+}
+/** "Network fee: 0.0031 USDC (paid to Pimlico)": the token amount the owner repays to Pimlico's Kora fee payer (ADR-0010 §4); never "free". */
+function koraFeeLine(gas: { readonly amount: string; readonly token: { readonly decimals: number; readonly symbol: string } }): readonly [string, string | null] {
+  const amount = units(gas.amount, gas.token.decimals, gas.token.symbol);
+  return ['Network fee', amount === null ? null : `${amount} (paid to Pimlico)`];
 }
 async function solanaMatch(flow: SigningFlow, runId: string, owner: string, message: string, expiresAt: string, attempt: string, request: ManagedSigningRequest,
   deps: ManagedSigningDeps, now: number, build: () => Line[] | null, action: string): Promise<ManagedSigningResult> {

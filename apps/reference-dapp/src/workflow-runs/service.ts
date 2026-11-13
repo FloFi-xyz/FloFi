@@ -657,13 +657,14 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly feePayer: string;
   /**
    * The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. ADR-0010:
-   * `unit` 'token' with `token` (address, symbol, decimals) when the owner pays it in a token (Circle: the permit's cap, in USDC).
+   * `unit` 'token' with `token` (symbol, decimals; Circle also names the USDC address) when the owner pays it in a token — Circle: the permit's
+   * cap in USDC; Kora (§4): the quoted fee in USDC/USDT paid to Pimlico.
    */
   readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED';
-    readonly token?: { readonly address: string; readonly symbol: string; readonly decimals: number } } | null;
+    readonly token?: { readonly address?: string; readonly symbol: string; readonly decimals: number } } | null;
   /** Network fees actually paid, from the chain (null until reconciled). `paidInToken` (ADR-0010): what the owner paid back in a token. */
   readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true;
-    readonly paidInToken?: { readonly mechanism: string; readonly symbol: string; readonly decimals: number; readonly amount: string } } | null;
+    readonly paidInToken?: { readonly mechanism?: string; readonly symbol: string; readonly decimals: number; readonly amount: string } } | null;
   /**
    * ADR-0010 (owner only): a token-paid fee's mechanism and protocol facts for Technical details — the paymaster, its EntryPoint, the permit's
    * allowance cap — and the wallet prompts it needs; null for a native fee.
@@ -733,15 +734,18 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
   };
   const groups: RunGroupView[] = groupRecords.map(g => {
-    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null; token?: string; symbol?: string;
-      decimals?: number } } | null)?.fee;
+    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null;
+      token?: string | { symbol?: unknown; decimals?: unknown }; symbol?: string; decimals?: number } } | null)?.fee;
     const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean;
       paidInToken?: { mechanism?: unknown; symbol?: unknown; decimals?: unknown; amount?: unknown } } } | null)?.gasPaid ?? null;
-    // ADR-0010: a token-paid fee carries its token (Circle: USDC) — never shown in native units.
-    const tokenFee = fee?.unit === 'token' && typeof fee.token === 'string' && typeof fee.symbol === 'string' && Number.isInteger(fee.decimals)
-      ? { address: fee.token, symbol: fee.symbol, decimals: fee.decimals! } : null;
-    const inToken = paid?.paidInToken && typeof paid.paidInToken.symbol === 'string' && typeof paid.paidInToken.amount === 'string' && Number.isInteger(paid.paidInToken.decimals)
-      ? { mechanism: String(paid.paidInToken.mechanism), symbol: paid.paidInToken.symbol, decimals: paid.paidInToken.decimals as number, amount: paid.paidInToken.amount } : null;
+    // ADR-0010: a token-paid fee carries its token — Circle names the USDC address with symbol/decimals beside it, Kora (§4) a {symbol, decimals}
+    // object; anything malformed is never shown as a native amount.
+    const tokenFee = fee?.unit !== 'token' ? null
+      : typeof fee.token === 'string' ? typeof fee.symbol === 'string' && Number.isInteger(fee.decimals) ? { address: fee.token, symbol: fee.symbol, decimals: fee.decimals! } : null
+        : fee.token && typeof fee.token.symbol === 'string' && Number.isSafeInteger(fee.token.decimals) ? { symbol: fee.token.symbol, decimals: fee.token.decimals as number } : null;
+    const inToken = paid?.paidInToken && typeof paid.paidInToken.symbol === 'string' && typeof paid.paidInToken.amount === 'string' && Number.isSafeInteger(paid.paidInToken.decimals)
+      ? { ...typeof paid.paidInToken.mechanism === 'string' ? { mechanism: paid.paidInToken.mechanism } : {}, symbol: paid.paidInToken.symbol,
+        decimals: paid.paidInToken.decimals as number, amount: paid.paidInToken.amount } : null;
     const circle = circleFactsOf(g.prepared);
     // Reconciled transactions first; before that, what was sent (a Solana group's signatures are known before sending: listed only once reconciled).
     // An owner-step group's outcome lists its steps' own {chain, hash} records; a relayed group lists hashes on its own chain.
@@ -758,7 +762,7 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       maxFee: owner && fee?.maxCost && fee.unit && (fee.unit !== 'token' || tokenFee) ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false,
         ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {}, ...tokenFee ? { token: tokenFee } : {} } : null,
       // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet). ADR-0010: a fee
-      // Circle fronted and the owner paid back in USDC is the owner's (a requester sees OWNER_WALLET), with the token amount.
+      // Circle or Kora fronted and the owner paid back in a token is the owner's (a requester sees OWNER_WALLET), with the token amount.
       gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : paid.sponsored ? 'FLOFI_PAYMASTER' : 'OWNER_WALLET',
         ...paid.sponsored ? { sponsored: true as const } : {}, ...inToken && !paid.sponsored ? { paidInToken: inToken } : {} } : null,
       gasPayment: owner && circle ? { mechanism: 'CIRCLE_USDC_PAYMASTER', stage: circle.stage, signatures: 2, paymaster: circle.paymaster, entryPoint: circle.entryPoint,

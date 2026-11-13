@@ -251,7 +251,9 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.attempt) failure('transaction', record.attempt.state, record.attempt.signature, record.notSubmitted ? record.walletDiagnostic?.code : undefined);
       refused('transaction', record);
       const observed = record.observations?.findLast(item => item.signature === record.attempt?.signature);
-      fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
+      // ADR-0010 §4: with Pimlico's Kora fee payer the owner's network cost is its token repayment, never Kora's SOL fee.
+      if (observed?.tokenFee) fee('transaction', record.review.chain, observed.signature, observed.tokenFee.amount, observed.tokenFee.token.decimals, observed.tokenFee.token.symbol);
+      else fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
       if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED') {
         amount('transaction', 'Executed input', observed.inputSpent, record.review.input.decimals, record.review.input.symbol, record.review.amount);
         amount('transaction', 'Actual received', observed.outputReceived, record.review.output.decimals, record.review.output.symbol, record.review.quote.outAmount);
@@ -264,7 +266,8 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.attempt) failure('transaction', record.attempt.state, record.attempt.signature, record.notSubmitted ? record.walletDiagnostic?.code : undefined);
       refused('transaction', record);
       const observed = record.observations?.findLast(item => item.signature === record.attempt?.signature);
-      fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
+      if (observed?.tokenFee) fee('transaction', record.review.chain, observed.signature, observed.tokenFee.amount, observed.tokenFee.token.decimals, observed.tokenFee.token.symbol);
+      else fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
       if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED') {
         const symbol = record.review.asset.mint === null ? 'SOL' : record.review.asset.symbol;
         amount('transaction', 'Sent', observed.amountSent, record.review.asset.decimals, symbol, record.review.amount);

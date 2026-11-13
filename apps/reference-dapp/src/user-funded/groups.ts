@@ -19,6 +19,11 @@
  *                         with the same bytes while its blockhash is valid; expiry only when provable); reconcile: each finalized
  *                         transaction's owner balance deltas and fee
  *
+ * ADR-0010 §4 (Pimlico Kora): when the owner's SOL cannot pay a sign-all group, every transaction of the group is built with Pimlico's Kora
+ * fee payer and its own token repayment (one fee token per group; the owner's balance must cover every quoted fee plus the group's own spends
+ * of that token). The owner signs slot 1 of each; the transaction ids become known one by one, as Kora answers (the owner-signed bytes are the
+ * durable identity before), and a lost answer is recovered by the owner's signature — never re-created.
+ *
  * Nothing here chooses a wallet, holds a key or signs. A failed check is a closed code; a submitted artifact is never replaced by another.
  *
  * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): when the owner's native balance does not cover an EVM group's worst-case fee, and only
@@ -27,8 +32,11 @@
  * operation), relayed when due, reconciled from the EntryPoint's event and the USDC the owner paid. Otherwise native gas, with the reason the
  * alternative was not available attached to the shortfall evidence. Native gas is unchanged for anyone who holds enough of it.
  */
-import { erc4337, eip5792, fromBase64, parseMessageV0, parseTransaction, simulateJupiterSwap, simulateSolanaTransfer, verifySignedJupiterTransaction,
-  verifySignedSolanaTransfer, type JupiterHttp, type JupiterReview, type LookupTables, type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
+import { erc4337, eip5792, decompileMessageV0, decodeTokenAccount, fromBase64, isSolanaNativeFeeShortfall, koraCreatedAccounts, parseMessageV0, parseTransaction, readSolanaAccounts,
+  simulateJupiterSwap, simulateKoraJupiterSwap, simulateKoraSolanaTransfer, simulateSolanaTransfer, verifySignedJupiterTransaction, verifySignedSolanaTransfer, KORA_MECHANISM,
+  KORA_TOKEN_PROGRAM, type JupiterHttp, type JupiterReview, type KoraGasTerms, type LookupTables, type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
+import { koraLamportRefund, recoverKoraTransaction } from '@defi-workflow-engine/reference-reconciler';
+import type { KoraGas } from '../gas-abstraction/kora/runtime.ts';
 import { createHash } from 'node:crypto';
 import type { BetaPrincipal } from '../flight/beta-access.ts';
 import { assertExecutionEnabled, executionRefusal } from '../server/execution-guard.ts';
@@ -81,6 +89,8 @@ export type UserFundedDeps = {
   readonly sponsorship?: SponsorshipPort | null;
   /** ADR-0010: Circle's USDC paymaster where the operator enabled it (`FLOFI_CIRCLE_USDC_GAS`) on a bundler chain; absent: native gas only. */
   readonly circle?: CircleDeps | null;
+  /** ADR-0010 §4: Pimlico's Kora fee payer for Solana groups the owner's SOL cannot pay (the owner repays in USDC/USDT); absent: native only. */
+  readonly kora?: KoraGas | null;
 };
 /**
  * `preview`: a review's preparation (nothing is handed to a wallet): no sponsorship grant is created. `tokenGas` false: a token-paid fee is not
@@ -314,8 +324,38 @@ export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITE
   readonly unsignedTransaction: string; readonly lookupTables: LookupTables; readonly lastValidBlockHeight: number; readonly estimatedFeeLamports: string;
   readonly spend: AssetAmountFact; readonly minimumOut: AssetAmountFact | null;
   /** The network fee plus the (refundable) account-creation deposits this transaction may charge the owner, in lamports. */
-  readonly maximumNetworkCostLamports?: string };
+  readonly maximumNetworkCostLamports?: string;
+  /** ADR-0010 §4: Pimlico's Kora fee payer fronts this transaction's SOL fee; the owner repays `gas.amount` in it. Absent: the owner pays in SOL. */
+  readonly gas?: KoraGasTerms;
+  /** Kora transactions: the owner token account the step itself spends from (its fee account may be the same one). */
+  readonly spendAccount?: string;
+  /** Kora transactions: the slot the Review read the chain at (a lost answer is searched for in the owner's history from there). */
+  readonly sinceSlot?: number };
+/**
+ * ADR-0010 §2 per execution group: the native group exactly as before; only when a member failed for lack of SOL (and Kora is configured), every
+ * member with the Kora fee payer — then only if the group's native worst case provably exceeds the owner's SOL, all members repay in ONE fee
+ * token, and the owner's fee account covers every quoted fee plus the group's own spends from that account.
+ */
 async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput): Promise<Result<Prepared>> {
+  const native = await buildSolanaGroup(deps, composition, requirement, g, null);
+  if (native.ok || !deps.kora || !deps.solana || !isSolanaNativeFeeShortfall(new Error(native.code))) return native;
+  const kora = await buildSolanaGroup(deps, composition, requirement, g, deps.kora);
+  if (!kora.ok) return /^KORA_/.test(kora.code) && kora.code !== 'KORA_NATIVE_COVERS' ? kora : native;
+  const txs = kora.value.transactions as readonly SolanaGroupTx[], terms = txs.map(x => x.gas!);
+  const token = terms[0]!.token, feeAccount = terms[0]!.feeAccount, last = txs.at(-1)!.stepIndex;
+  if (terms.some(t => t.token.mint !== token.mint)) return no('KORA_GROUP_FEE_TOKEN_MIXED', last);
+  let read: Awaited<ReturnType<typeof readSolanaAccounts>>;
+  try { read = await readSolanaAccounts(deps.solana, [g.feePayer, feeAccount]); } catch { return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE', last); }
+  // The policy for the group: the owner's SOL must not cover the members' native worst case together (otherwise native, with its own error).
+  if ((read.accounts[0]?.lamports ?? 0n) >= terms.reduce((sum, t) => sum + BigInt(t.nativeWorstCaseLamports), 0n)) return native;
+  const balance = (() => { const a = read.accounts[1]; if (!a || a.owner !== KORA_TOKEN_PROGRAM || a.data.length !== 165) return 0n;
+    const t = decodeTokenAccount(a.data); return t.owner === g.feePayer && t.mint === token.mint ? t.amount : 0n; })();
+  const required = terms.reduce((sum, t) => sum + BigInt(t.amount), 0n) + txs.reduce((sum, x) => sum + (x.spendAccount === feeAccount ? BigInt(x.spend.amount) : 0n), 0n);
+  if (balance < required) return no('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT', last);
+  return ok({ ...kora.value, fee: { payer: g.feePayer, unit: 'token', maxCost: terms.reduce((sum, t) => sum + BigInt(t.amount), 0n).toString(), estimated: false,
+    mechanism: KORA_MECHANISM, token: { mint: token.mint, symbol: token.symbol, decimals: token.decimals }, relayer: terms[0]!.feePayer, payee: terms[0]!.paymentAddress } });
+}
+async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput, kora: KoraGas | null): Promise<Result<Prepared>> {
   if (!deps.solana) return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
   const txs: SolanaGroupTx[] = [];
   for (let index = g.stepFrom; index <= g.stepTo; index++) {
@@ -325,27 +365,32 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
     // Independent steps only: a step bound to an earlier step of this group could not be simulated before that step lands (it is cut off by the planner).
     if (requirement.bindings.some(b => b.step === index && b.amountFrom >= g.stepFrom)) return no('SOLANA_GROUP_STEP_DEPENDENT', index);
     try {
+      const now = deps.now().getTime();
       if (step.action === 'transfer') {
-        const review: SolanaTransferReview = await simulateSolanaTransfer(workflow, g.feePayer, deps.solana, deps.now().getTime());
+        const review: SolanaTransferReview = kora ? await simulateKoraSolanaTransfer(workflow, g.feePayer, deps.solana, kora.port, now, { groupShortfall: true })
+          : await simulateSolanaTransfer(workflow, g.feePayer, deps.solana, now);
         txs.push({ stepIndex: index, kind: 'TRANSFER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
           spend: { asset: assetKey({ chain: step.chain, address: review.asset.mint ?? WSOL }), amount: review.amount }, minimumOut: null,
-          maximumNetworkCostLamports: review.maximumNetworkCostLamports });
+          maximumNetworkCostLamports: review.maximumNetworkCostLamports, ...review.gas ? { gas: review.gas, spendAccount: review.token?.sourceAccount ?? '', sinceSlot: review.simulationResult.slot } : {} });
       } else if (step.action === 'swap') {
         if (!deps.jupiter) return no('JUPITER_UNAVAILABLE', index);
-        const review: JupiterReview = await simulateJupiterSwap(workflow, g.feePayer, deps.jupiter, deps.solana, deps.now().getTime());
+        const review: JupiterReview = kora ? await simulateKoraJupiterSwap(workflow, g.feePayer, deps.jupiter, deps.solana, kora.port, now, { groupShortfall: true })
+          : await simulateJupiterSwap(workflow, g.feePayer, deps.jupiter, deps.solana, now);
         const r = review as unknown as { lookupTables?: LookupTables; maximumNetworkCostLamports?: string | bigint;
           quote: { inputMint: string; outputMint: string; inAmount: string; otherAmountThreshold: string } };
         txs.push({ stepIndex: index, kind: 'JUPITER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: r.lookupTables ?? {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
           spend: { asset: assetKey({ chain: step.chain, address: r.quote.inputMint }), amount: r.quote.inAmount },
           minimumOut: { asset: assetKey({ chain: step.chain, address: r.quote.outputMint }), amount: r.quote.otherAmountThreshold },
-          ...r.maximumNetworkCostLamports !== undefined ? { maximumNetworkCostLamports: String(r.maximumNetworkCostLamports) } : {} });
+          ...r.maximumNetworkCostLamports !== undefined ? { maximumNetworkCostLamports: String(r.maximumNetworkCostLamports) } : {},
+          ...review.gas ? { gas: review.gas, spendAccount: review.inspection.ownerInputAccount, sinceSlot: review.simulationResult.slot } : {} });
       } else return no(`USER_FUNDED_ACTION_NOT_BUILDABLE:${step.action.toUpperCase()}`, index);
     } catch (cause) { return no(codeOf(cause, 'SIMULATION_FAILED'), index); }
-    const last = txs.at(-1)!;
-    // S1: the fee payer of every transaction (static key 0 of its message) is the owner.
-    assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: parseMessageV0(fromBase64(last.message)).staticKeys[0] ?? '', ownerWallet: g.feePayer });
+    const last = txs.at(-1)!, feePayer = parseMessageV0(fromBase64(last.message)).staticKeys[0] ?? '';
+    // S1: the fee payer of every transaction (static key 0 of its message) is the owner — or, ADR-0010, the pinned Kora signer the owner repays.
+    assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer, ownerWallet: g.feePayer, ...last.gas && kora ? { tokenFee: { mechanism: KORA_MECHANISM,
+      relayer: last.gas.feePayer, pinnedRelayers: [kora.feePayer], token: last.gas.token.mint, amount: last.gas.amount } } : {} });
   }
   // Two byte-identical messages would carry one signature: the chain runs it once while reconciliation would count it twice.
   if (new Set(txs.map(x => x.messageHash)).size !== txs.length) return no('SOLANA_GROUP_DUPLICATE_TRANSACTION', txs.at(-1)!.stepIndex);
@@ -408,13 +453,14 @@ export function authorizeGroup(prepared: Prepared, answer: OwnerAnswer, owner: s
   }
   const txs = prepared.transactions as readonly SolanaGroupTx[];
   if (!Array.isArray(answer.transactions) || answer.transactions.length !== txs.length) return no('SOLANA_SIGNED_COUNT_MISMATCH');
-  const signed: { signature: string; transaction: string }[] = [];
+  const signed: { signature: string; transaction: string; kora?: true }[] = [];
   for (const [i, tx] of txs.entries()) {
     try {
-      const review = { message: tx.message, owner, lookupTables: tx.lookupTables };
+      // ADR-0010: a Kora transaction needs Kora's empty slot 0, the owner's signature in slot 1 and the reviewed payment (K1 on the exact bytes).
+      const review = { message: tx.message, owner, lookupTables: tx.lookupTables, ...tx.gas ? { gas: tx.gas } : {} };
       const verified = tx.kind === 'TRANSFER' ? verifySignedSolanaTransfer(review, answer.transactions[i]) : verifySignedJupiterTransaction(review as unknown as JupiterReview, answer.transactions[i]);
       // A wallet guard (Lighthouse) may append assertions; the signed message must still be the reviewed one or the verifier refused above.
-      signed.push({ signature: verified.signature, transaction: verified.transaction });
+      signed.push({ signature: verified.signature, transaction: verified.transaction, ...tx.gas ? { kora: true as const } : {} });
     } catch (cause) { return no(codeOf(cause, 'SOLANA_SIGNATURE_INVALID'), tx.stepIndex); }
   }
   return ok({ kind: answer.kind, transactions: signed, at });
@@ -479,11 +525,19 @@ export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepare
     return ok(await bundler.send(op));
   } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
 }
-/** The Solana submission record: every signature is known before anything is sent (the first signature of each owner-signed transaction). */
+/**
+ * The Solana submission record: every signature is known before anything is sent (the first signature of each owner-signed transaction).
+ * ADR-0010 §4, a Kora group: the owner's signatures are the identities; each transaction id (`hashes[i]`, Kora's slot-0 signature) and Kora's
+ * fully signed bytes (`relayed[i]`) are recorded as each Kora answer arrives; `relayAttempts[i]` counts the Kora calls (recorded before each).
+ */
 export function solanaSubmission(authorization: Readonly<Record<string, unknown>>, now: Date): Readonly<Record<string, unknown>> {
-  const txs = authorization.transactions as readonly { signature: string }[];
-  return { kind: 'SOLANA_SIGN_ALL', hashes: txs.map(t => t.signature), submittedAt: now.toISOString() };
+  const txs = authorization.transactions as readonly { signature: string; kora?: boolean }[];
+  if (!txs.some(t => t.kora)) return { kind: 'SOLANA_SIGN_ALL', hashes: txs.map(t => t.signature), submittedAt: now.toISOString() };
+  return { kind: 'SOLANA_SIGN_ALL', hashes: txs.map(t => t.kora ? null : t.signature), ownerSignatures: txs.map(t => t.signature), relayed: txs.map(() => null),
+    relayAttempts: txs.map(() => 0), submittedAt: now.toISOString() };
 }
+/** At most this many Kora calls per transaction: the first, and one retry with the identical bytes when its answer was lost. */
+export const KORA_GROUP_RELAY_ATTEMPTS = 2;
 type SignatureStatus = { readonly confirmationStatus?: string; readonly err?: unknown } | null;
 /**
  * Block heights one transaction of a sign-all group needs, from its send to its confirmation and the next pass (about 400 ms per block: a
@@ -538,11 +592,14 @@ async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<
  * may already have been sent (a sent transaction stays unknown until processed): EXPIRED is returned only when provable, never for a
  * shortage of budget (that is decided before the group leaves AUTHORIZED, `solanaSendBudget`).
  */
-export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string, runOwner?: BetaPrincipal)
+export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string, runOwner?: BetaPrincipal,
+  submission?: Readonly<Record<string, unknown>>, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
   : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
   const rpc = deps.solana;
   if (!rpc) return { state: 'WAITING', index: null, code: 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE' };
   const txs = prepared.transactions as readonly SolanaGroupTx[], signed = authorization.transactions as readonly { signature: string; transaction: string }[];
+  // ADR-0010 §4: a Kora group's transaction ids become known one by one (null until Kora answered for that transaction).
+  if (submission && Array.isArray(submission.ownerSignatures)) return advanceKoraGroup(deps, rpc, txs, signed, submission, owner, runOwner, persist);
   const known = await statuses(rpc, signed.map(s => s.signature));
   for (const [i, status] of known.entries()) {
     if (status?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
@@ -577,6 +634,84 @@ export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Pr
   return { state: 'DONE', index: null, code: null };
 }
 
+/**
+ * ADR-0010 §4, one pass of a Kora group, in order, each transaction after its predecessor confirmed:
+ *   id known      its status decides (confirmed: next; seen: wait; unseen: Kora's fully signed bytes are (re)sent by FloFi while valid)
+ *   id unknown    a Kora call already made: the owner's history is searched for the owner's signature (read-only); found: recorded.
+ *                 Otherwise, while the blockhash is valid and fewer than two calls were made: the call is RECORDED first, then Kora is asked
+ *                 with the identical owner-signed bytes (K1 and the S1 claim inside the relay); its verified answer is recorded, then broadcast.
+ *                 Kora refused (it never signed): EXPIRED for this transaction (it can never exist). Two lost answers: only the chain decides.
+ */
+async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: readonly SolanaGroupTx[], signed: readonly { signature: string; transaction: string }[],
+  submission: Readonly<Record<string, unknown>>, owner: string, runOwner: BetaPrincipal | undefined, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
+  : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
+  const hashes = [...submission.hashes as readonly (string | null)[]], relayed = [...submission.relayed as readonly (string | null)[]];
+  const attempts = [...submission.relayAttempts as readonly number[]], ownerSignatures = submission.ownerSignatures as readonly string[];
+  const record = async (patch: { hashes?: (string | null)[]; relayed?: (string | null)[]; relayAttempts?: number[] }) => persist ? persist({ ...submission, hashes, relayed,
+    relayAttempts: attempts, ...patch }) : false;
+  const known = hashes.some(Boolean) ? await statuses(rpc, hashes.filter((h): h is string => Boolean(h))) : [];
+  const statusOf = (i: number) => { const at = hashes.slice(0, i).filter(Boolean).length; return hashes[i] ? known[at] ?? null : null; };
+  for (const [i, tx] of txs.entries()) {
+    const id = hashes[i] ?? null, status = statusOf(i), bytes = relayed[i] ?? signed[i]!.transaction;
+    if (status?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
+    if (status && ['confirmed', 'finalized'].includes(String(status.confirmationStatus))) continue;
+    if (status) return { state: 'WAITING', index: i, code: null };
+    const paused = executionRefusal();
+    if (paused) return { state: 'WAITING', index: i, code: paused };
+    const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }]));
+    if (!id && tx.gas && (attempts[i] ?? 0) > 0) {
+      const found = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas.feePayer, sinceSlot: tx.sinceSlot ?? 0 });
+      if (found.state === 'FOUND') {
+        hashes[i] = found.signature; relayed[i] = found.transaction;
+        return { state: 'WAITING', index: i, code: await record({}) ? null : 'KORA_RELAY_NOT_RECORDED' };
+      }
+    }
+    if (height > tx.lastValidBlockHeight) {
+      // Never relayed: these bytes can never land. Relayed (or sent): expired only when provable, as for the native group.
+      if (!id && (attempts[i] ?? 0) === 0) return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+      const finalized = Number(await rpc('getBlockHeight', [{ commitment: 'finalized' }]));
+      if (!(finalized > tx.lastValidBlockHeight)) return { state: 'WAITING', index: i, code: null };
+      if (id) {
+        const again = (await statuses(rpc, [id]))[0] ?? null;
+        if (again?.err) return { state: 'FAILED', index: i, code: 'SOLANA_TRANSACTION_FAILED' };
+        if (again) return { state: 'WAITING', index: i, code: null };
+        return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
+      }
+      const last = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas!.feePayer, sinceSlot: tx.sinceSlot ?? 0 });
+      return last.state === 'ABSENT' ? { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' } : { state: 'WAITING', index: i, code: null };
+    }
+    const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);
+    if (denied) return { state: 'WAITING', index: i, code: denied };
+    if (!id) {
+      const gas = tx.gas;
+      if (!gas) return { state: 'FAILED', index: i, code: 'SOLANA_GROUP_SUBMISSION_INVALID' };
+      if ((attempts[i] ?? 0) >= KORA_GROUP_RELAY_ATTEMPTS) return { state: 'WAITING', index: i, code: 'KORA_ANSWER_LOST_OBSERVING' };
+      if (!deps.kora) return { state: 'WAITING', index: i, code: 'KORA_NOT_ENABLED' };
+      // The call is durable BEFORE it is made: at most two calls per transaction, whatever happens to this process.
+      attempts[i] = (attempts[i] ?? 0) + 1;
+      if (!await record({})) return { state: 'WAITING', index: i, code: 'KORA_RELAY_NOT_RECORDED' };
+      assertExecutionEnabled();
+      let outcome: Awaited<ReturnType<KoraGas['relay']>>;
+      try { outcome = await deps.kora.relay({ review: { message: tx.message, owner, gas, lookupTables: tx.lookupTables }, ownerSigned: signed[i]!.transaction,
+        prefix: tx.kind === 'TRANSFER' ? 'SOLANA_TRANSFER' : 'JUPITER' }); }
+      catch (cause) { outcome = { kind: 'REFUSED', code: codeOf(cause, 'KORA_TRANSACTION_REFUSED') }; }
+      // Kora refused before signing (or FloFi never called it): this transaction can never exist; nothing later is sent.
+      if (outcome.kind === 'REFUSED') return { state: 'EXPIRED', index: i, code: outcome.code };
+      if (outcome.kind === 'UNKNOWN') return { state: 'WAITING', index: i, code: outcome.code };
+      hashes[i] = outcome.signature; relayed[i] = outcome.transaction;
+      if (!await record({})) return { state: 'WAITING', index: i, code: 'KORA_RELAY_NOT_RECORDED' };
+    }
+    // The fully signed bytes (Kora's slot 0 and the owner's slot 1): S1 with the token-fee claim, then FloFi's own broadcast of exactly them.
+    const message = parseMessageV0(parseTransaction(fromBase64(relayed[i] ?? bytes)).message);
+    assertUserFundedSubmission({ kind: 'SOLANA_TRANSACTION', feePayer: message.staticKeys[0] ?? '', ownerWallet: owner, ...tx.gas && deps.kora ? { tokenFee: {
+      mechanism: KORA_MECHANISM, relayer: tx.gas.feePayer, pinnedRelayers: [deps.kora.feePayer], token: tx.gas.token.mint, amount: tx.gas.amount } } : {} });
+    assertExecutionEnabled();
+    await rpc('sendTransaction', [relayed[i] ?? bytes, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
+    return { state: 'SENT', index: i, code: null };
+  }
+  return { state: 'DONE', index: null, code: null };
+}
+
 // ── Reconciliation ────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** `group`: an EVM wallet batch reconciled against an EARLIER preparation of the group (the one the wallet sent): what its steps were signed to spend. */
 export type Reconciled = { readonly status: 'PENDING' }
@@ -594,40 +729,84 @@ export type Reconciled = { readonly status: 'PENDING' }
 type TokenBalance = { readonly accountIndex: number; readonly mint: string; readonly owner?: string; readonly uiTokenAmount: { readonly amount: string } };
 type SolanaTxMeta = { readonly err: unknown; readonly fee: number | string; readonly preBalances: readonly (number | string)[]; readonly postBalances: readonly (number | string)[];
   readonly preTokenBalances?: readonly TokenBalance[]; readonly postTokenBalances?: readonly TokenBalance[] };
-/** The owner's balance deltas of one finalized Solana transaction (native SOL keyed by the wrapped mint, fee separated). */
-export function solanaOwnerDeltas(chain: string, owner: string, meta: SolanaTxMeta): { readonly spent: AssetAmountFact[]; readonly received: AssetAmountFact[]; readonly fee: bigint } {
-  const fee = BigInt(meta.fee), spent: AssetAmountFact[] = [], received: AssetAmountFact[] = [];
-  const sol = BigInt(meta.preBalances[0]!) - BigInt(meta.postBalances[0]!) - fee;
+/**
+ * The owner's balance deltas of one finalized Solana transaction (native SOL keyed by the wrapped mint, fee separated). ADR-0010 `kora`: the
+ * owner is found by key (`ownerIndex`), Kora paid the fee, the rent Kora advanced for an account closed to the owner is not the owner's SOL
+ * (`lamportRefund`), and the owner's token repayment (`feeLeg`) is the network fee, not a step spend.
+ */
+export function solanaOwnerDeltas(chain: string, owner: string, meta: SolanaTxMeta,
+  kora?: { readonly ownerIndex: number; readonly lamportRefund: bigint; readonly feeLeg: { readonly mint: string; readonly amount: bigint } }): { readonly spent: AssetAmountFact[]; readonly received: AssetAmountFact[]; readonly fee: bigint } {
+  const fee = BigInt(meta.fee), spent: AssetAmountFact[] = [], received: AssetAmountFact[] = [], o = kora?.ownerIndex ?? 0;
+  const sol = kora ? BigInt(meta.preBalances[o]!) - BigInt(meta.postBalances[o]!) + kora.lamportRefund : BigInt(meta.preBalances[0]!) - BigInt(meta.postBalances[0]!) - fee;
   if (sol > 0n) spent.push({ asset: assetKey({ chain, address: WSOL }), amount: sol.toString() });
   if (sol < 0n) received.push({ asset: assetKey({ chain, address: WSOL }), amount: (-sol).toString() });
   const mints = new Set([...meta.preTokenBalances ?? [], ...meta.postTokenBalances ?? []].filter(b => b.owner === owner).map(b => b.mint));
   for (const mint of mints) {
     const sum = (xs: readonly TokenBalance[] | undefined) => (xs ?? []).filter(b => b.owner === owner && b.mint === mint).reduce((s, b) => s + BigInt(b.uiTokenAmount.amount), 0n);
-    const delta = sum(meta.postTokenBalances) - sum(meta.preTokenBalances);
+    const delta = sum(meta.postTokenBalances) - sum(meta.preTokenBalances) + (kora?.feeLeg.mint === mint ? kora.feeLeg.amount : 0n);
     if (delta < 0n) spent.push({ asset: assetKey({ chain, address: mint }), amount: (-delta).toString() });
     if (delta > 0n) received.push({ asset: assetKey({ chain, address: mint }), amount: delta.toString() });
   }
   return { spent, received, fee };
 }
+/**
+ * ADR-0010: one finalized Kora transaction of a group, read from the chain: the pinned signer at key 0 and the owner at key 1, the rent Kora
+ * advanced for an account closed to the owner (a refund, not the owner's SOL), and — unless it failed (the repayment reverted with it) — the
+ * pinned payment account credited exactly the reviewed fee. Anything else is UNMATCHED (funds may have moved), never reconciled.
+ */
+function koraTransactionFacts(tx: { meta?: SolanaTxMeta & { loadedAddresses?: { writable?: string[]; readonly?: string[] } }; transaction?: unknown }, expected: SolanaGroupTx,
+  gas: KoraGasTerms, owner: string): Result<NonNullable<Parameters<typeof solanaOwnerDeltas>[3]>> {
+  const meta = tx.meta!, wire = Array.isArray(tx.transaction) && tx.transaction[1] === 'base64' ? tx.transaction[0] : null;
+  let message: ReturnType<typeof parseMessageV0>;
+  try { message = parseMessageV0(parseTransaction(fromBase64(wire, 2048)).message); } catch { return no('KORA_TRANSACTION_MISMATCH'); }
+  if (message.staticKeys[0] !== gas.feePayer || message.staticKeys[1] !== owner) return no('KORA_TRANSACTION_MISMATCH');
+  if (meta.err !== null && meta.err !== undefined) return ok({ ownerIndex: 1, lamportRefund: 0n, feeLeg: { mint: gas.token.mint, amount: 0n } });
+  const keys = [...message.staticKeys, ...meta.loadedAddresses?.writable ?? [], ...meta.loadedAddresses?.readonly ?? []];
+  const pre = meta.preBalances.map(v => BigInt(v)), post = meta.postBalances.map(v => BigInt(v));
+  let refund: bigint;
+  try { refund = koraLamportRefund(keys, pre, post, BigInt(meta.fee), koraCreatedAccounts(decompileMessageV0(message, expected.lookupTables), gas.feePayer), 'KORA_LAMPORTS_MISMATCH'); }
+  catch { return no('KORA_LAMPORTS_MISMATCH'); }
+  const payment = keys.indexOf(gas.paymentAccount);
+  const credited = (list: readonly TokenBalance[] | undefined) => BigInt(list?.find(b => b.accountIndex === payment && b.mint === gas.token.mint && b.owner === gas.paymentAddress)
+    ?.uiTokenAmount.amount ?? '0');
+  if (payment < 0 || credited(meta.postTokenBalances) - credited(meta.preTokenBalances) !== BigInt(gas.amount)) return no('KORA_PAYMENT_MISMATCH');
+  return ok({ ownerIndex: 1, lamportRefund: refund, feeLeg: { mint: gas.token.mint, amount: BigInt(gas.amount) } });
+}
 export async function reconcileSolanaGroup(deps: UserFundedDeps, prepared: Prepared, submission: Readonly<Record<string, unknown>>, chain: string, owner: string): Promise<Reconciled> {
   const rpc = deps.solana;
   if (!rpc) return { status: 'PENDING' };
-  const txs = prepared.transactions as readonly SolanaGroupTx[], signatures = submission.hashes as readonly string[];
+  const txs = prepared.transactions as readonly SolanaGroupTx[], signatures = submission.hashes as readonly (string | null)[];
   const steps: StepFacts[] = [];
-  let fee = 0n;
+  let fee = 0n, tokenFee = 0n;
+  // ADR-0010: a Kora group's fee was fronted by the pinned Kora signer and repaid by the owner in one token (proven per transaction below).
+  const koraTerms = txs[0]?.gas ?? null, sent = (n: number) => signatures.slice(0, n).filter((s): s is string => Boolean(s));
+  const paid = (): GasPaidFact => koraTerms ? { payer: koraTerms.feePayer, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META', paidInToken: { mechanism: KORA_MECHANISM,
+    token: koraTerms.token.mint, symbol: koraTerms.token.symbol, decimals: koraTerms.token.decimals, amount: tokenFee.toString(), payee: koraTerms.paymentAddress } }
+    : { payer: owner, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META' };
   for (const [i, signature] of signatures.entries()) {
-    const tx = await rpc('getTransaction', [signature, { encoding: 'base64', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]) as { meta?: SolanaTxMeta } | null;
+    if (!signature) return { status: 'PENDING' };
+    const tx = await rpc('getTransaction', [signature, { encoding: 'base64', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]) as
+      { meta?: SolanaTxMeta & { loadedAddresses?: { writable?: string[]; readonly?: string[] } }; transaction?: unknown } | null;
     if (!tx?.meta) return { status: 'PENDING' };
-    const deltas = solanaOwnerDeltas(chain, owner, tx.meta);
+    const expectedGas = txs[i]?.gas;
+    let kora: Parameters<typeof solanaOwnerDeltas>[3];
+    if (expectedGas) {
+      const proven = koraTransactionFacts(tx, txs[i]!, expectedGas, owner);
+      if (!proven.ok) return { status: 'UNMATCHED', code: proven.code, gasPaid: null, transactions: signatures.slice(0, i + 1).filter((s): s is string => Boolean(s)) };
+      kora = proven.value;
+      // A transaction that failed on chain reverted the owner's repayment with it (Kora's SOL fee is charged to the operator).
+      if (tx.meta.err === null || tx.meta.err === undefined) tokenFee += BigInt(expectedGas.amount);
+    }
+    const deltas = solanaOwnerDeltas(chain, owner, tx.meta, kora);
     fee += deltas.fee;
-    const gasPaid: GasPaidFact = { payer: owner, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META' };
-    if (tx.meta.err) return { status: 'FAILED', code: 'SOLANA_TRANSACTION_FAILED', gasPaid, transactions: signatures.slice(0, i + 1), steps };
+    const gasPaid = paid();
+    if (tx.meta.err) return { status: 'FAILED', code: 'SOLANA_TRANSACTION_FAILED', gasPaid, transactions: sent(i + 1), steps };
     const expected = txs[i]!;
     const min = expected.minimumOut, got = min ? deltas.received.find(r => r.asset === min.asset) : null;
-    if (min && (!got || BigInt(got.amount) < BigInt(min.amount))) return { status: 'FAILED', code: 'RECONCILIATION_BELOW_SIGNED_MINIMUM', gasPaid, transactions: signatures.slice(0, i + 1), steps };
+    if (min && (!got || BigInt(got.amount) < BigInt(min.amount))) return { status: 'FAILED', code: 'RECONCILIATION_BELOW_SIGNED_MINIMUM', gasPaid, transactions: sent(i + 1), steps };
     steps.push({ stepIndex: expected.stepIndex, spent: deltas.spent, received: deltas.received });
   }
-  return { status: 'RECONCILED', steps, gasPaid: { payer: owner, amount: fee.toString(), unit: 'lamports', source: 'SOLANA_META' }, transactions: [...signatures] };
+  return { status: 'RECONCILED', steps, gasPaid: paid(), transactions: sent(signatures.length) };
 }
 /** The mismatches that mean "these transactions are not THIS preparation's calls" (they may be an earlier preparation's, under the same id). */
 const SUPERSEDED_MISMATCH: ReadonlySet<string> = new Set(['RECONCILIATION_CALLS_MISMATCH', 'RECONCILIATION_TRANSACTION_BEFORE_PREPARATION']);

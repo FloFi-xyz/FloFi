@@ -421,14 +421,18 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           : tr(stateText(GROUP_STATE, g))}</span>
         {g.gasPaid?.sponsored || g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
         {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}</span>}
-        {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.token
-          // ADR-0010: a fee paid from the owner's USDC through Circle (the permit's cap): who pays it and in which token, never as ETH.
-          ? tr('Network fee, at most {0} — paid from your USDC through Circle', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token))
-          : g.maxFee.estimated ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
+        {/* ADR-0010: a fee the owner pays in a token names the token and who receives it — Circle (USDC permit cap) on EVM, Pimlico's Kora fee payer on Solana. */}
+        {g.maxFee?.token && !g.gasPaid && <span className="muted">{g.chain.startsWith('solana:')
+          ? tr('Network fee, at most {0} · paid from your {1} to Pimlico', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token), g.maxFee.token.symbol)
+          : tr('Network fee, at most {0} — paid from your USDC through Circle', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token))}</span>}
+        {g.maxFee && !g.maxFee.token && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
+          ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
         {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</span>}
-        {g.gasPaid && <span className="muted">{g.gasPaid.paidInToken ? tr('Network fee paid: {0}', units(g.gasPaid.paidInToken.amount, 'token', 'up', g.gasPaid.paidInToken))
-          : g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
+        {g.gasPaid && <span className="muted">{g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
+          : g.gasPaid.paidInToken ? g.chain.startsWith('solana:')
+            ? tr('Network fees paid: {0} from your wallet to Pimlico', units(g.gasPaid.paidInToken.amount, 'token', 'up', g.gasPaid.paidInToken))
+            : tr('Network fee paid: {0}', units(g.gasPaid.paidInToken.amount, 'token', 'up', g.gasPaid.paidInToken))
           : tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
         {/* ADR-0010: Circle's protocol facts stay behind the collapsed technical details. */}
         {g.gasPayment && <details className="review-panel-technical"><summary>{tr('Technical details')}</summary>

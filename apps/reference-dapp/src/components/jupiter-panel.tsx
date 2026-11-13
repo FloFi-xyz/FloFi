@@ -116,7 +116,10 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
         <dt>{tr(devnet ? 'Expected output' : 'Quoted output')}</dt><dd>{tr(amount(review.quote.outAmount, 'output'))}</dd>
         <dt>{tr("Minimum received")}</dt><dd>{tr(amount(review.quote.otherAmountThreshold, 'output'))}</dd>
         <dt>{tr("Slippage")}</dt><dd>{tr((review.slippageBps / 100).toFixed(2))}%</dd>
-        <dt>{tr("Estimated network fee")}</dt><dd>{tr(sol(review.estimatedFeeLamports))}</dd>
+        {/* ADR-0010 §4: with Pimlico's Kora fee payer the owner pays the network fee in a token, never in SOL. */}
+        {'gas' in review && review.gas ? <><dt>{tr("Network fee")}</dt><dd>{formatTokenAmount(review.gas.amount, review.gas.token.decimals)} {review.gas.token.symbol}
+          <small>{tr('Paid from your {0} to Pimlico.', review.gas.token.symbol)}</small></dd></>
+          : <><dt>{tr("Estimated network fee")}</dt><dd>{tr(sol(review.estimatedFeeLamports))}</dd></>}
         {review.simulationResult.accountCreationLamports !== '0' && <><dt>{tr("Token account deposit")}</dt><dd>{tr(sol(review.simulationResult.accountCreationLamports))}{tr(" (refundable)")}</dd></>}
         <dt>{tr("Quote freshness")}</dt><dd>{tr(fresh > 0 ? `Valid for ${fresh}s` : 'Expired — simulate again')}</dd>
       </dl>}
@@ -136,7 +139,8 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
       {pending && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
       {record?.evidence && observation && <section aria-label={tr("Swap result")} className="swap-result">
         <h3>{tr("Success")}</h3>
-        <p>{tr("Swap independently reconciled. Paid ")}{tr(amount(observation.inputSpent, 'input'))}{tr("; received ")}{tr(amount(observation.outputReceived, 'output'))}{tr("; fee ")}{tr(sol(observation.feeLamports))}.</p>
+        <p>{tr("Swap independently reconciled. Paid ")}{tr(amount(observation.inputSpent, 'input'))}{tr("; received ")}{tr(amount(observation.outputReceived, 'output'))}{tr("; fee ")}{observation.tokenFee
+          ? `${formatTokenAmount(observation.tokenFee.amount, observation.tokenFee.token.decimals)} ${observation.tokenFee.token.symbol}` : tr(sol(observation.feeLamports))}.</p>
         <dl className="swap-summary"><dt>{tr("Transaction")}</dt><dd><code>{tr(observation.signature)}</code></dd>
           {observation.explorer && <><dt>{tr("Explorer")}</dt><dd><a href={observation.explorer} target="_blank" rel="noreferrer">{tr(devnet ? 'View on Solana Explorer (Devnet)' : 'View transaction')}</a></dd></>}
           <dt>{tr("Network")}</dt><dd>{tr(labels.network)}</dd><dt>{tr("Slot")}</dt><dd>{tr(observation.slot ?? '--')}</dd></dl>
