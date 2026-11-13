@@ -71,6 +71,17 @@ const tokenAmount = (account: RawSolanaAccount, programId: string, mint: string,
   if (decoded.state !== 1) fail('UNIVERSAL_TOKEN_ACCOUNT_FROZEN');
   return decoded.amount;
 };
+/**
+ * A failed deposit simulation: the owner (the fee payer, account 0) could not pay the network fee or its own rent — the node refuses the whole
+ * transaction before any instruction runs (`InsufficientFundsForFee`, `AccountNotFound`, `InsufficientFundsForRent` of account 0): a SOL
+ * shortfall (UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES). Any other simulated error is the deposit itself reverting; an unreadable answer is unavailability.
+ */
+function simulationFailure(cause: unknown): string {
+  if (!(cause instanceof Error) || cause.message !== 'UNIVERSAL_SIMULATION_FAILED') return 'UNIVERSAL_SIMULATION_UNAVAILABLE';
+  const err = (cause.cause as { err?: unknown } | undefined)?.err;
+  const rent = err && typeof err === 'object' ? (err as { InsufficientFundsForRent?: { account_index?: unknown } }).InsufficientFundsForRent : undefined;
+  return err === 'InsufficientFundsForFee' || err === 'AccountNotFound' || rent?.account_index === 0 ? 'UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES' : 'UNIVERSAL_SIMULATION_DEPOSIT_REVERTED';
+}
 export type SolanaDepositReview = { message: string; messageHash: string; unsignedTransaction: string; blockhash: string; lastValidBlockHeight: number; slot: number;
   computeUnitLimit: number; computeUnitPrice: string; estimatedFeeLamports: string; vaultTokenCreationLamports: string; unitsConsumed: number;
   ownerBalanceBefore: string; ownerLamportsBefore: string; ownerDebit: string; logs: string[] };
@@ -83,8 +94,10 @@ export async function simulateSolanaDeposit(rpc: SolanaRpc, d: UniversalSolanaDe
   const ix = solanaInstructionOf(route), accounts = solanaDepositAccounts(route, programId), amount = BigInt(route.inputAmount), owner = route.depositor;
   const keys = [owner, ...accounts.ownerToken ? [accounts.ownerToken] : [], accounts.vault, ...accounts.vaultToken ? [accounts.vaultToken] : []];
   const before = await readSolanaAccounts(rpc, keys);
-  const ownerAccount = before.accounts[0] ?? fail('UNIVERSAL_OWNER_NOT_WALLET');
-  if (ownerAccount.owner !== SOLANA_SYSTEM_PROGRAM_ID || ownerAccount.data.length) fail('UNIVERSAL_OWNER_NOT_WALLET');
+  // No account at all: a wallet that never held SOL (`ownerAccount: 'ABSENT'`: adding SOL is what it needs). An account owned by a program or
+  // holding data is not a wallet (adding SOL would not help).
+  const ownerAccount = before.accounts[0] ?? fail('UNIVERSAL_OWNER_NOT_WALLET', { ownerAccount: 'ABSENT' });
+  if (ownerAccount.owner !== SOLANA_SYSTEM_PROGRAM_ID || ownerAccount.data.length) fail('UNIVERSAL_OWNER_NOT_WALLET', { ownerAccount: 'NOT_A_WALLET' });
   const mint = route.inputToken.address;
   const ownerTokenBefore = accounts.ownerToken ? tokenAmount(before.accounts[1]!, programId!, mint!, owner) : null;
   if (accounts.ownerToken && (ownerTokenBefore ?? 0n) < amount) fail('UNIVERSAL_INSUFFICIENT_TOKEN');
@@ -97,12 +110,12 @@ export async function simulateSolanaDeposit(rpc: SolanaRpc, d: UniversalSolanaDe
   const compile = (units: number) => serializeMessageV0(compileMessageV0(owner, [setComputeUnitLimit(units), ...setComputeUnitPrice(price), ix], blockhash, {}));
   let measured: Awaited<ReturnType<typeof simulateSolanaMessage>>;
   try { measured = await simulateSolanaMessage(rpc, compile(d.maximumComputeUnits), keys, 'UNIVERSAL'); }
-  catch (cause) { return fail(cause instanceof Error && cause.message === 'UNIVERSAL_SIMULATION_FAILED' ? 'UNIVERSAL_SIMULATION_DEPOSIT_REVERTED' : 'UNIVERSAL_SIMULATION_UNAVAILABLE', cause); }
+  catch (cause) { return fail(simulationFailure(cause), cause); }
   const units = Math.min(d.maximumComputeUnits, Math.ceil(measured.unitsConsumed * 1.2) + 5_000);
   const message = compile(units);
   let simulated: Awaited<ReturnType<typeof simulateSolanaMessage>>;
   try { simulated = await simulateSolanaMessage(rpc, message, keys, 'UNIVERSAL'); }
-  catch (cause) { return fail(cause instanceof Error && cause.message === 'UNIVERSAL_SIMULATION_FAILED' ? 'UNIVERSAL_SIMULATION_DEPOSIT_REVERTED' : 'UNIVERSAL_SIMULATION_UNAVAILABLE', cause); }
+  catch (cause) { return fail(simulationFailure(cause), cause); }
   const fee = BigInt(estimateFee(units, price));
   const ownerAfter = simulated.accounts[0]?.lamports ?? 0n;
   let ownerDebit: bigint, creation = 0n;
