@@ -40,8 +40,41 @@ old code.
   `TEMPLATE_VERSION_REVIEW`; housekeeping holds PENDING/HELD v4 rows; SENT, SENDING and UNKNOWN rows stay untouched. **Any Email 6 v4
   row still queued is held, never sent with the Thursday text.** The existing `creator-supersede-templates` (dry-run by default; `--apply`
   is an owner action) replaces eligible held rows with v5, keeping code and recipient, and now enqueues them in Portuguese.
-- Email 3 rows already enqueued as v2 (if boarding was scheduled under the old date) keep their v2 text and language: retries must
-  keep the provider idempotency payload. Inspect `email-status` before 09:00 if the worker ran past the old opening.
+- Email 3 rows already enqueued as v2 keep their v2 text and language until an operator runs `email-launch-upgrade` (below). Production
+  had 48 such rows (22 EN, 26 PT), all PENDING with no attempt, reservation or lease, plus one CARD_FOUNDING v2 in English.
+
+## Pre-launch operations (follow-up, operator-run; never run by this PR)
+
+The runbook with the exact commands is [FLIGHT-1311-LAUNCH-RUNBOOK.md](../deploy/FLIGHT-1311-LAUNCH-RUNBOOK.md).
+
+- **`email-launch-upgrade`** (`upgradeLaunchPending` in `outbox.ts`). This moves rows **in place**: unsent Email 3 v2 becomes v3 + PT,
+  and unsent 4a/4b/5/6 rows in English become PT at the same version (`LAUNCH_UPGRADABLE_FROM` in `templates.ts`). It keeps `email_id`,
+  which is the Resend idempotency key and also the seed of the access link, code and unsubscribe token. It also keeps `dedupe_key`,
+  `recipient`, `not_before`, `expires_at`, the entry/pass/invite links and the batch. No row is created, so no duplicate can appear.
+  - Eligible rows only: PENDING with `attempts = 0` and no `first_attempt_at`, `reserved_at`, lease, `provider_id` or `sent_at`.
+  - Everything else is counted under `skipped` and left alone: SENT, SENDING, UNKNOWN, HELD, attempted or reserved rows.
+  - Dry-run is the default. Apply refuses unless campaign email is paused and `--confirm-worker-deployed` is passed.
+  - Apply runs under the quota advisory lock that `lease` takes, and re-checks every condition in the UPDATE itself.
+  - Output for audit: counts before and after, the planned and updated ids, the skipped counts, and the guest/waitlist overlap.
+  - A re-run is a no-op.
+  - Email 6 v1–v4 are excluded: their copy changed, so they stay on the held-for-review / supersede path.
+- **Deployment gate.** Old code cannot render v3. If a worker still on the old release leases a v3 row, it holds the row as `RENDER_FAILED`
+  and never calls Resend. The command cannot see the worker's deployed commit from the database, so apply requires two things: the
+  campaign paused (no worker leases campaign rows), and the operator's confirmation flag after checking the worker's active SHA in Railway.
+- **`creator-requeue-missing`** (`enqueueMissingCreatorInvites`). For each active CREATOR invite (addressed, unredeemed, unrevoked,
+  unexpired, not suppressed) with no Email 6 in PENDING/HELD/SENDING/UNKNOWN/SENT, it enqueues Email 6 v5 in PT.
+  - It reuses the existing code and creates no invite.
+  - The row is enqueued **HELD** (`OPERATOR_REVIEW`, batch `creators-v5`) and is sent only after `email-release --batch creators-v5`.
+  - Its dedupe key `creator-v5:<code>` is the one `creator-supersede-templates` uses, so a code never gets two v5 rows from either path.
+  - Dry-run reports every invite by status.
+- **Guest also on the waitlist.** They receive Email 6 and Email 3, with two valid access paths. Neither blocks the other. Boarding
+  cancels any Email 3 not yet sent (`BOARDED`). The recommended fix keeps access: cancel only that person's Email 3 by id before
+  resuming. Their list entry and invite stay valid. The dry-run lists the overlap with a masked address and the Email 3 id.
+- Tests: `launch-1311.pg.test.ts` (new suite `app.flight.launch-1311.pg`). It covers the dry-run changing nothing, both apply gates,
+  two concurrent applies plus a concurrent lease (no double update, no new row, a reserved or leased row left as enqueued), preservation
+  of every key and link, untouched SENT/SENDING/HELD/CANCELLED rows, idempotence, and an English waitlist entry receiving the PT v3 Email 3
+  under its original id with the same link and code. For Email 6 it covers status counts, concurrent apply, no new invite, HELD until
+  release, then PT v5 with the existing codes.
 
 ## Not done by this build (operator / owner actions)
 
@@ -62,9 +95,8 @@ No production query, configuration change, deployment, enqueue or email send was
   (BUILD-FLOFI-FLIGHT-LAUNCH-ADMIN-001, enforced by `templates.test.ts`) renders them in Portuguese (`CÓDIGO DE CONVITE`, `EMBARQUE`,
   `PORTÃO`, `ABERTO`, `Convite`, `Embarcando`). This build keeps the repository convention, so the new Boarding value is `ABERTO`, matching
   the Email 3 Gate panel next to it. Switching the panels to English is a one-line-per-label change if the team confirms the canvas.
-- **"Waitlist minus invited guests" for Email 3.** The scheduler sends Email 3 to every un-boarded FIRST-flight list entry. An invited
-  guest who is also on the list and has not boarded would get both emails. This build does not change sending logic; check the overlap
-  before 09:00.
+- **"Waitlist minus invited guests" for Email 3.** The scheduler still sends Email 3 to every un-boarded FIRST-flight list entry; the
+  overlap is reported and handled by the operator (above), without changing who is scheduled.
 - A retired Email 6 v4 row left in `SENDING` by a worker crash is not moved to `UNKNOWN` by lease recovery (only the current version
   is, an existing rule since v1–v3). It can never be resent; check `email-status` for `CREATOR_INVITE`/`SENDING` after deploy.
 - Email 3's access note keeps the repository's documented wording ("confirma o seu embarque…, uma vez") rather than the canvas's older
@@ -72,7 +104,9 @@ No production query, configuration change, deployment, enqueue or email send was
 
 ## Evidence
 
-Local only (Node 22.23.4 here; the pinned toolchain is Node 24.21.0): Flight and backend unit suites 93/93; database-backed suites on a
-disposable loopback PostgreSQL 16 (`launch.pg`, `flight-admin.pg`, `beta-access.pg` and the other Flight `*.pg.test.ts`) 142/142 in the
-combined run (now 135/135 with the Email 6 opening regression). Tests use a fake provider: delivery, inbox placement and the real Resend quota are not proven. CircleCI remains the
-certification authority.
+Local evidence is in the PR description, run on Node 24.21.0 (official build, SHA-256 verified) and a disposable loopback PostgreSQL 16.
+Tests use a fake provider, so delivery, inbox placement and the real Resend quota are not proven. CircleCI remains the certification
+authority.
+
+The first CircleCI run (`25ac8a6`) failed only at the governance gate's `git diff --check`, on a blank line at the end of
+`templates-v4.ts`. The file now ends in one newline and its SHA-256 pin was updated: this frozen file had not been deployed yet.

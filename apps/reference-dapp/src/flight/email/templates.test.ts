@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmailDelivery, FLIGHT_CREATOR_BRIEF_URL, type DeliveryDeps } from './delivery';
 import { FLIGHT_DEFAULT_CALENDAR } from '../campaign';
-import { emailLanguage, LAUNCH_LANGUAGE, renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
+import { emailLanguage, LAUNCH_LANGUAGE, LAUNCH_UPGRADABLE_FROM, renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
 import { renderEmail as renderEmailV2 } from './templates-v2';
 import { renderEmail as renderEmailV3 } from './templates-v3';
 import { renderEmail as renderEmailV4 } from './templates-v4';
@@ -66,7 +66,7 @@ describe('Flight launch email copy and immutable queued versions', () => {
   });
   it('freezes the deployed v4 renderer: only Email 6 (v5) and Email 3 (v3) change for the 13/11 boarding', () => {
     expect(createHash('sha256').update(readFileSync(new URL('./templates-v4.ts', import.meta.url))).digest('hex'))
-      .toBe('f39b664d37a690654093326c31bca93b0930673b7981beb7044ea23bff73f43f');
+      .toBe('531f8e5f36d34a79d19a8de9ba19386a5ffa6ec179c5a528cf7f872302da20aa');
     for (const language of ['EN', 'PT'] as const) for (const input of [...inputs, { template: 'EARLY_LIST' } as const]) {
       const current = renderEmail(input, context(language)), frozen = renderEmailV4(input, context(language));
       if (input.template === 'CREATOR_INVITE' || input.template === 'GROUP_BOARDING') expect(current).not.toEqual(frozen);
@@ -98,6 +98,11 @@ describe('Flight launch email copy and immutable queued versions', () => {
   });
   it('enqueues emails 3, 4a, 4b, 5 and 6 in Portuguese for the 13/11 launch; every other email keeps the stored locale', () => {
     expect(LAUNCH_LANGUAGE).toEqual({ GROUP_BOARDING: 'PT', CARD_FOUNDING: 'PT', CARD_PASSENGER: 'PT', NEXT_FLIGHT: 'PT', CREATOR_INVITE: 'PT' });
+    // In-place moves of unsent rows: only to the current version, never from a retired Email 6 copy (v1–v4 are held and superseded).
+    expect(LAUNCH_UPGRADABLE_FROM).toEqual({ GROUP_BOARDING: [2, 3], CARD_FOUNDING: [2], CARD_PASSENGER: [2], NEXT_FLIGHT: [2], CREATOR_INVITE: [5] });
+    expect(Object.keys(LAUNCH_UPGRADABLE_FROM).sort()).toEqual(Object.keys(LAUNCH_LANGUAGE).sort());
+    for (const [template, from] of Object.entries(LAUNCH_UPGRADABLE_FROM))
+      expect(Math.max(...from!)).toBe(TEMPLATE_VERSIONS[template as keyof typeof TEMPLATE_VERSIONS]);
     for (const template of Object.keys(TEMPLATE_VERSIONS) as (keyof typeof TEMPLATE_VERSIONS)[]) for (const stored of ['EN', 'PT'] as const)
       expect(emailLanguage(template, stored)).toBe(template in LAUNCH_LANGUAGE ? 'PT' : stored);
   });

@@ -35,6 +35,15 @@ export const TEMPLATE_VERSIONS: Readonly<Record<EmailTemplate, number>> = Object
 export const LAUNCH_LANGUAGE: Readonly<Partial<Record<EmailTemplate, EmailLanguage>>> = Object.freeze({
   GROUP_BOARDING: 'PT', CARD_FOUNDING: 'PT', CARD_PASSENGER: 'PT', NEXT_FLIGHT: 'PT', CREATOR_INVITE: 'PT',
 });
+/**
+ * Rows enqueued before the 13/11 change that an operator may move in place to the current version and the launch language, while they
+ * are still unsent (never attempted, reserved or leased): template → the versions it may come from. Email 3 v2 → v3 adds only the delay
+ * note; 4a, 4b, 5 and 6 keep their current version and change language only. Email 6 v1–v4 are never moved: their copy changed, so they
+ * are held for review and replaced with new ids (`supersedeCreatorTemplates`).
+ */
+export const LAUNCH_UPGRADABLE_FROM: Readonly<Partial<Record<EmailTemplate, readonly number[]>>> = Object.freeze({
+  GROUP_BOARDING: [2, 3], CARD_FOUNDING: [2], CARD_PASSENGER: [2], NEXT_FLIGHT: [2], CREATOR_INVITE: [5],
+});
 /** The language an email is enqueued in: the launch language of its template, else the recipient's stored locale. */
 export const emailLanguage = (template: EmailTemplate, stored: EmailLanguage): EmailLanguage => LAUNCH_LANGUAGE[template] ?? stored;
 /** ESSENTIAL: an access email the person asked for themselves; sent even to an unsubscribed address and while campaign email is paused. */

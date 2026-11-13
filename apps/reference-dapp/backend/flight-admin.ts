@@ -36,6 +36,14 @@
  *   creator-supersede-templates [--max <n>] [--apply]
  *                                                  dry-run by default; replace unsent TEMPLATE_VERSION_REVIEW creator rows with the current version,
  *                                                  preserving invite codes. Never touches SENT/UNKNOWN. Inspect Resend before apply.
+ *   email-launch-upgrade [--max <n>] [--apply --confirm-worker-deployed]
+ *                                                  13/11 launch, dry-run by default: unsent Email 3 v2 rows → v3 and unsent 3/4a/4b/5/6 rows → PT,
+ *                                                  in place (same email id, dedupe key, recipient, not_before, links). Only PENDING rows never
+ *                                                  attempted, reserved or leased. Apply needs `email-pause` first and the worker already on this
+ *                                                  release. Prints counts before/after, the ids changed, what was skipped and guest/waitlist overlaps.
+ *   creator-requeue-missing [--max <n>] [--apply]  13/11 launch, dry-run by default: Email 6 (current version, PT) for active creator invites
+ *                                                  with no Email 6 queued, in flight or sent, reusing their codes; enqueued HELD in batch
+ *                                                  creators-v<version>, sent only after `email-release --batch creators-v<version>`.
  *   import-google-forms --file <csv> [--apply]      dry-run by default; columns email,submitted_at,language,consent; ISO timestamp with explicit offset,
  *                                                  consent true/false is required; language EN/PT may be blank. Preserves original signup order.
  *   email-early-list [--send-at <ISO>] [--apply]    separately reserve Email 0 once for eligible consented imports; never sends directly
@@ -61,7 +69,7 @@ import { createFlightStore, type FlightStore } from '../src/flight/store.ts';
 
 export const FLIGHT_COMMANDS = ['stats', 'create-batch', 'assign-batch', 'export-batch', 'issue-invites', 'erase-email', 'hide-pass', 'prune', 'purge-lists',
   'email-status', 'email-attention', 'email-release', 'email-cancel', 'email-pause', 'email-resume', 'email-unblock', 'email-mark-delivered',
-  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'creator-supersede-templates',
+  'email-backfill-confirmations', 'email-send-due', 'creator-invite', 'creator-invites', 'creator-supersede-templates', 'email-launch-upgrade', 'creator-requeue-missing',
   'import-google-forms', 'email-early-list', 'remove-card', 'revoke-access'] as const;
 const TEMPLATES: readonly EmailTemplate[] = ['EARLY_LIST', 'LIST_CONFIRMATION', 'EVE', 'GROUP_BOARDING', 'ACCESS_REQUESTED', 'CARD_FOUNDING', 'CARD_PASSENGER', 'NEXT_FLIGHT', 'CREATOR_INVITE'];
 /** What the email and access commands need besides the store; `sendDue` runs one delivery cycle (absent: not configured). */
@@ -169,6 +177,14 @@ export async function runFlightCommand(command: Command, values: Values, store: 
       const max = flag(values, 'max') ? integer(values, 'max') : undefined;
       return ctx().outbox.supersedeCreatorTemplates(now, { ...max ? { max } : {}, apply: values.apply === true });
     }
+    case 'email-launch-upgrade': {
+      const max = flag(values, 'max') ? integer(values, 'max') : undefined;
+      return ctx().outbox.upgradeLaunchPending(now, { ...max ? { max } : {}, apply: values.apply === true, workerDeployed: values['confirm-worker-deployed'] === true });
+    }
+    case 'creator-requeue-missing': {
+      const max = flag(values, 'max') ? integer(values, 'max') : undefined;
+      return ctx().outbox.enqueueMissingCreatorInvites(now, { ...max ? { max } : {}, apply: values.apply === true });
+    }
     case 'creator-invites': {
       const text = await readFile(required(values, 'file'), 'utf8').catch(() => { throw new Error('FILE_UNREADABLE'); });
       const parsed = parseFlightCsv(text), rows = parsed[0]?.[0]?.trim().toLowerCase() === 'email' ? parsed.slice(1) : parsed;
@@ -258,7 +274,7 @@ async function main(): Promise<void> {
     batch: { type: 'string' }, 'opens-at': { type: 'string' }, count: { type: 'string' }, flight: { type: 'string' }, out: { type: 'string' },
     email: { type: 'string' }, pass: { type: 'string' }, 'email-id': { type: 'string' }, max: { type: 'string' }, reason: { type: 'string' },
     template: { type: 'string' }, 'provider-id': { type: 'string' }, language: { type: 'string' }, 'send-at': { type: 'string' }, file: { type: 'string' },
-    card: { type: 'string' }, apply: { type: 'boolean', default: false } } });
+    card: { type: 'string' }, apply: { type: 'boolean', default: false }, 'confirm-worker-deployed': { type: 'boolean', default: false } } });
   const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-flight-admin' });

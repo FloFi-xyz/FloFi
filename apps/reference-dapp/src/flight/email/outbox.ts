@@ -15,7 +15,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { emailLanguage, LAUNCH_LANGUAGE, TEMPLATE_CATEGORY, TEMPLATE_VERSIONS, type EmailLanguage, type EmailTemplate } from './templates.ts';
+import { emailLanguage, LAUNCH_LANGUAGE, LAUNCH_UPGRADABLE_FROM, TEMPLATE_CATEGORY, TEMPLATE_VERSIONS, type EmailLanguage, type EmailTemplate } from './templates.ts';
 
 export type EmailState = 'PENDING' | 'SENDING' | 'SENT' | 'UNKNOWN' | 'HELD' | 'FAILED' | 'CANCELLED';
 export type EmailLimits = { readonly daily: number; readonly monthly: number; readonly externalDailyReserve: number; readonly externalMonthlyReserve: number };
@@ -425,8 +425,123 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
     });
   }
 
+  /** Never attempted, never reserved, not leased, never reached the provider: the only rows whose content may still change in place. */
+  const UNTOUCHED = `e.state = 'PENDING' AND e.attempts = 0 AND e.first_attempt_at IS NULL AND e.reserved_at IS NULL AND e.lease_token IS NULL
+    AND e.lease_until IS NULL AND e.provider_id IS NULL AND e.sent_at IS NULL`;
+  const LAUNCH_PAIRS = () => {
+    const pairs = Object.entries(LAUNCH_UPGRADABLE_FROM).flatMap(([template, from]) => from!.map(version => ({ template: template as EmailTemplate, version,
+      to: TEMPLATE_VERSIONS[template as EmailTemplate], language: LAUNCH_LANGUAGE[template as EmailTemplate]! })));
+    return [pairs.map(p => p.template), pairs.map(p => p.version), pairs.map(p => p.to), pairs.map(p => p.language)];
+  };
+  const LAUNCH_JOIN = `JOIN unnest($2::text[], $3::int[], $4::int[], $5::text[]) AS u(template, from_version, to_version, language)
+    ON u.template = e.template AND u.from_version = e.template_version`;
+  const NEEDS_LAUNCH = `(e.template_version <> u.to_version OR e.language <> u.language)`;
+  async function launchSummary(q: Queryable) {
+    return (await q.query<{ template: string; template_version: number; language: string; state: string; n: string }>(`SELECT e.template, e.template_version,
+      e.language, e.state, count(*)::text AS n FROM flight_emails e WHERE e.tenant_id = $1 AND e.template = ANY($2::text[])
+      GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4`, [tenantId, Object.keys(LAUNCH_LANGUAGE)])).rows
+      .map(r => ({ template: r.template, version: r.template_version, language: r.language, state: r.state, emails: Number(r.n) }));
+  }
+  /**
+   * 13/11 launch, operator-only: move unsent Email 3 v2 rows to v3 and unsent 3/4a/4b/5/6 rows to Portuguese IN PLACE. email_id (the
+   * provider idempotency key, and the seed of the row's access link, code and unsubscribe token), dedupe_key, recipient, not_before,
+   * entry/pass/invite links and batch are kept, so no duplicate can appear and nothing already given to the provider changes. Only rows
+   * that never reached a send attempt qualify (`UNTOUCHED`); SENT, SENDING, UNKNOWN, HELD and anything attempted or reserved are counted
+   * and left alone. Dry-run by default. Apply requires campaign email paused (no worker leases campaign rows meanwhile) and the operator's
+   * confirmation that the deployed worker renders the current versions; it runs under the quota lock that `lease` takes, and re-checks
+   * every condition in the UPDATE itself, so a concurrent lease or a second run never double-applies. Idempotent: a re-run finds nothing.
+   */
+  async function upgradeLaunchPending(now: number, options: { readonly apply?: boolean; readonly max?: number; readonly workerDeployed?: boolean } = {}) {
+    const max = options.max ?? 10_000;
+    if (!Number.isSafeInteger(max) || max < 1) throw new Error('FLIGHT_UPGRADE_MAX_INVALID');
+    const [templates, from, to, languages] = LAUNCH_PAIRS();
+    return db.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2))', [QUOTA_LOCK_CLASS, tenantId]);
+      const paused = (await control(tx)).paused;
+      if (options.apply && !paused) throw new Error('FLIGHT_UPGRADE_REQUIRES_PAUSED_CAMPAIGN');
+      if (options.apply && !options.workerDeployed) throw new Error('FLIGHT_UPGRADE_WORKER_DEPLOY_UNCONFIRMED');
+      const before = await launchSummary(tx);
+      const args = [tenantId, templates, from, to, languages];
+      const eligible = (await tx.query<{ email_id: string; template: EmailTemplate; template_version: number; language: EmailLanguage; to_version: number }>(
+        `SELECT e.email_id, e.template, e.template_version, e.language, u.to_version FROM flight_emails e ${LAUNCH_JOIN}
+        WHERE e.tenant_id = $1 AND ${NEEDS_LAUNCH} AND ${UNTOUCHED} ORDER BY e.created_at, e.email_id LIMIT $6 FOR UPDATE OF e`, [...args, max])).rows;
+      // Rows that would need the change but already went further (attempted, reserved, leased, held, sent): never touched.
+      const skipped = (await tx.query<{ template: string; state: string; reason: string; n: string }>(`SELECT e.template, e.state,
+        CASE WHEN e.attempts > 0 OR e.first_attempt_at IS NOT NULL THEN 'ATTEMPTED' WHEN e.reserved_at IS NOT NULL THEN 'RESERVED'
+          WHEN e.lease_token IS NOT NULL THEN 'LEASED' WHEN e.provider_id IS NOT NULL OR e.sent_at IS NOT NULL THEN 'PROVIDER' ELSE 'NOT_PENDING' END AS reason,
+        count(*)::text AS n FROM flight_emails e ${LAUNCH_JOIN} WHERE e.tenant_id = $1 AND ${NEEDS_LAUNCH} AND e.state <> 'CANCELLED' AND e.state <> 'FAILED'
+        AND NOT (${UNTOUCHED}) GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, args)).rows.map(r => ({ template: r.template, state: r.state, reason: r.reason, emails: Number(r.n) }));
+      const planned = eligible.map(r => ({ emailId: r.email_id, template: r.template, from: { version: r.template_version, language: r.language },
+        to: { version: r.to_version, language: LAUNCH_LANGUAGE[r.template]! } }));
+      const report = { dryRun: !options.apply, campaignPaused: paused, codeVersions: TEMPLATE_VERSIONS, before, eligible: planned.length, planned, skipped,
+        guestOnWaitlist: await guestWaitlistOverlap(tx), updated: 0, updatedIds: [] as string[], after: null as typeof before | null };
+      if (!options.apply) return report;
+      const updated = (await tx.query<{ email_id: string }>(`UPDATE flight_emails e SET template_version = u.to_version, language = u.language, updated_at = clock_timestamp()
+        FROM unnest($2::text[], $3::int[], $4::int[], $5::text[]) AS u(template, from_version, to_version, language)
+        WHERE e.tenant_id = $1 AND e.email_id = ANY($6::text[]) AND u.template = e.template AND u.from_version = e.template_version
+          AND ${NEEDS_LAUNCH} AND ${UNTOUCHED} RETURNING e.email_id`, [...args, eligible.map(r => r.email_id)])).rows.map(r => r.email_id);
+      return { ...report, dryRun: false, updated: updated.length, updatedIds: updated.sort(), after: await launchSummary(tx) };
+    });
+  }
+  /**
+   * An invited guest who is also on the FIRST-flight waiting list and has not boarded gets Email 6 (their invite) and Email 3 (their list
+   * group). Both give access; neither is required. Read-only: masked address, the Email 3 row (if any) and the active invite.
+   */
+  async function guestWaitlistOverlap(q: Queryable = db) {
+    return (await q.query<{ recipient: string; email_id: string | null; state: string | null }>(`SELECT l.email AS recipient, m.email_id, m.state
+      FROM flight_list_entries l JOIN flight_invites i ON i.tenant_id = l.tenant_id AND i.recipient = l.email AND i.issuer = 'CREATOR'
+        AND i.redeemed_at IS NULL AND i.revoked_at IS NULL
+      LEFT JOIN flight_emails m ON m.tenant_id = l.tenant_id AND m.entry_id = l.entry_id AND m.template = 'GROUP_BOARDING' AND m.state <> 'CANCELLED'
+      WHERE l.tenant_id = $1 AND l.flight = 'FIRST' AND l.boarded_at IS NULL ORDER BY l.joined_at, m.created_at`, [tenantId])).rows
+      .map(r => ({ to: maskAddress(r.recipient), groupBoardingEmailId: r.email_id, groupBoardingState: r.state }));
+  }
+  /**
+   * 13/11 launch, operator-only: Email 6 (current version, Portuguese) for each active CREATOR invite (addressed, unredeemed, unrevoked,
+   * unexpired) that has no Email 6 at all in PENDING, HELD, SENDING, UNKNOWN or SENT, reusing the invite's code: no new invite is created.
+   * The row is enqueued HELD (`OPERATOR_REVIEW`, batch `creators-v<version>`): nothing is sent until the operator runs
+   * `email-release --batch creators-v<version>`. Its dedupe key is the one `supersedeCreatorTemplates` uses (`creator-v<version>:<code>`),
+   * so a code never gets two rows of the current version from either path. Dry-run by default; idempotent.
+   */
+  async function enqueueMissingCreatorInvites(now: number, options: { readonly apply?: boolean; readonly max?: number } = {}) {
+    const max = options.max ?? 1_000, version = TEMPLATE_VERSIONS.CREATOR_INVITE, batchKey = `creators-v${version}`;
+    if (!Number.isSafeInteger(max) || max < 1) throw new Error('FLIGHT_CREATOR_REQUEUE_MAX_INVALID');
+    return db.transaction(async tx => {
+      const counts = (await tx.query<{ status: string; n: string }>(`SELECT CASE
+          WHEN i.redeemed_at IS NOT NULL THEN 'REDEEMED' WHEN i.revoked_at IS NOT NULL THEN 'REVOKED' WHEN i.expires_at IS NOT NULL AND i.expires_at <= $2 THEN 'EXPIRED'
+          WHEN EXISTS (SELECT 1 FROM flight_emails m WHERE m.tenant_id = i.tenant_id AND m.invite_code = i.code AND m.template = 'CREATOR_INVITE' AND m.state = 'SENT') THEN 'EMAIL6_SENT'
+          WHEN EXISTS (SELECT 1 FROM flight_emails m WHERE m.tenant_id = i.tenant_id AND m.invite_code = i.code AND m.template = 'CREATOR_INVITE' AND m.state IN ('SENDING', 'UNKNOWN')) THEN 'EMAIL6_IN_FLIGHT'
+          WHEN EXISTS (SELECT 1 FROM flight_emails m WHERE m.tenant_id = i.tenant_id AND m.invite_code = i.code AND m.template = 'CREATOR_INVITE' AND m.state IN ('PENDING', 'HELD')) THEN 'EMAIL6_QUEUED'
+          WHEN EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = i.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('i.recipient')}) THEN 'SUPPRESSED'
+          ELSE 'MISSING' END AS status, count(*)::text AS n
+        FROM flight_invites i WHERE i.tenant_id = $1 AND i.issuer = 'CREATOR' AND i.recipient IS NOT NULL GROUP BY 1 ORDER BY 1`, [tenantId, at(now)])).rows
+        .reduce<Record<string, number>>((all, r) => ({ ...all, [r.status]: Number(r.n) }), {});
+      const missing = (await tx.query<{ code: string; recipient: string; expires_at: Date | null }>(`SELECT i.code, i.recipient, i.expires_at FROM flight_invites i
+        WHERE i.tenant_id = $1 AND i.issuer = 'CREATOR' AND i.recipient IS NOT NULL AND i.redeemed_at IS NULL AND i.revoked_at IS NULL
+          AND (i.expires_at IS NULL OR i.expires_at > $2)
+          AND NOT EXISTS (SELECT 1 FROM flight_emails m WHERE m.tenant_id = i.tenant_id AND m.invite_code = i.code AND m.template = 'CREATOR_INVITE'
+            AND m.state IN ('PENDING', 'HELD', 'SENDING', 'UNKNOWN', 'SENT'))
+          AND NOT EXISTS (SELECT 1 FROM flight_email_suppressions s WHERE s.tenant_id = i.tenant_id AND s.address_hash = ${SQL_ADDRESS_HASH('i.recipient')})
+        ORDER BY i.created_at, i.code LIMIT $3 FOR UPDATE OF i`, [tenantId, at(now), max])).rows;
+      const report = { dryRun: !options.apply, version, batch: batchKey, invites: counts, eligible: missing.length, recipients: missing.map(r => maskAddress(r.recipient)),
+        enqueued: 0, blockedByExistingKey: 0 };
+      if (!options.apply) return report;
+      let enqueued = 0, blocked = 0;
+      for (const invite of missing) {
+        const dedupeKey = `creator-v${version}:${invite.code.toLowerCase()}`;
+        if (await enqueueEmail(tx, tenantId, { template: 'CREATOR_INVITE', recipient: invite.recipient, language: 'PT', trigger: 'creator_requeued', dedupeKey,
+          notBefore: now, expiresAt: invite.expires_at?.getTime() ?? null, inviteCode: invite.code, batchKey })) {
+          await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'OPERATOR_REVIEW', updated_at = clock_timestamp()
+            WHERE tenant_id = $1 AND dedupe_key = $2 AND state = 'PENDING' AND attempts = 0`, [tenantId, dedupeKey]);
+          enqueued++;
+        } else blocked++; // A row of this version already exists for the code (for example cancelled): never a second one.
+      }
+      return { ...report, dryRun: false, enqueued, blockedByExistingKey: blocked };
+    });
+  }
+
   return { usage, control, setPaused, block, clearBlock, housekeeping, lease, settle, scheduleEve, scheduleBoarding, backfillConfirmations, scheduleEarlyList, suppress, isSuppressed,
-    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, supersedeCreatorTemplates, limits: { daily: dailyLimit, monthly: monthlyLimit } };
+    unsubscribe, status, listAttention, release, cancel, markDelivered, prune, supersedeCreatorTemplates, upgradeLaunchPending, guestWaitlistOverlap,
+    enqueueMissingCreatorInvites, limits: { daily: dailyLimit, monthly: monthlyLimit } };
 }
 export type EmailOutbox = ReturnType<typeof createEmailOutbox>;
 

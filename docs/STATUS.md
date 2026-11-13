@@ -12,7 +12,7 @@ This separate branding build does not resume its execution work. BUILD-CLOUD-001
 **Status: PR FOR OWNER REVIEW on `claude/design-implementation-qwurbw` (from main `bef4419`) — unit and disposable-PostgreSQL evidence;
 nothing sent, configured or deployed.** Boarding moved to Friday 13 Nov, 09:00 BRT. Emails 3, 4a, 4b, 5 and 6 are enqueued in Portuguese
 for everyone. Email 6 (v5) drops the weekday from its preheader and step 1, and its Boarding panel reads ABERTO. Email 3 (v3) opens with
-the one-day delay note. Queued Email 6 v4 rows are held for review, as for earlier versions; Email 6 rows now live as long as the invite, so the 09:00 send is not cancelled as expired. `FLOFI_FLIGHT_BOARDING_OPENS_AT`, batch 1
+the one-day delay note. Queued Email 6 v4 rows are held for review, as for earlier versions; Email 6 rows now live as long as the invite, so the 09:00 send is not cancelled as expired. Operator commands `email-launch-upgrade` and `creator-requeue-missing` (dry-run by default) prepare the queued rows; see the [runbook](deploy/FLIGHT-1311-LAUNCH-RUNBOOK.md). `FLOFI_FLIGHT_BOARDING_OPENS_AT`, batch 1
 `opens_at`, test sends and the 09:00 sends remain owner actions. See the [build note](builds/BUILD-FLOFI-FLIGHT-EMAILS-1311-001.md).
 
 ## P0 — Review block before authorization (board 06)
