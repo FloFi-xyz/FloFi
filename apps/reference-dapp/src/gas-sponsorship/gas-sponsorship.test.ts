@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { base58Encode, erc4337, parseTransaction, serializeSignedTransaction, setComputeUnitLimit, setComputeUnitPrice, type SolanaInstruction } from '@defi-workflow-engine/reference-compiler';
 import { readGasSponsorshipConfig, paymasterProxyUrl, solanaSecretKey } from './config';
-import { callsHash, createGrantStore, createSponsorLedger } from './ledger';
+import { callsHash, createGrantStore, createSponsorLedger, RESERVATION_HOLD_MS } from './ledger';
 import { handlePaymasterRpc, reconcileSponsoredOperation, type PaymasterTransport } from './paymaster-service';
 import { assertSponsorableMessage, cosignSponsoredTransaction, solanaSponsorSigner, sponsoredMessage, sponsoredTransactionId } from './solana-fee-payer';
 import { gasSponsorshipRuntime, sponsorshipPort } from './runtime';
@@ -21,10 +21,11 @@ const OWNER = '0x4b212af0a923256961487ae72499ca79f920b3ce', PAYMASTER = '0x' + '
 const ENV = { FLOFI_GAS_SPONSORSHIP: 'enabled', FLOFI_GAS_SPONSOR_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_PAYMASTER_RPC_8453: 'https://paymaster.provider.example/v2/8453?apikey=SERVER_ONLY',
   FLOFI_PAYMASTER_ADDRESS_8453: PAYMASTER, FLOFI_SPONSOR_MAX_WEI_PER_OP_8453: '50000000000000', FLOFI_SPONSOR_DAILY_BUDGET_WEI_8453: '120000000000000',
   FLOFI_PAYMASTER_CONTEXT_8453: '{"sponsorshipPolicyId":"sp_flofi"}' };
+const FEE = 0x5f5e100n; // the preparation's fee ceiling per gas (0.1 gwei)
 const calls = [{ target: USDC, value: 0n, data: '0x095ea7b3' + '00'.repeat(64) }, { target: '0x' + '22'.repeat(20), value: 0n, data: '0x12345678' }];
 const op = (callData = erc4337.batchCallData(calls), sender = OWNER) => ({ sender, nonce: '0x5', callData, callGasLimit: '0x30000', verificationGasLimit: '0x20000',
   preVerificationGas: '0xc350', maxFeePerGas: '0x5f5e100', maxPriorityFeePerGas: '0x989680' });
-async function setup(answer?: (body: { method: string; params: unknown[] }) => unknown, env: Record<string, string> = {}) {
+async function setup(answer?: (body: { method: string; params: unknown[] }) => unknown, env: Record<string, string> = {}, grantFee = FEE) {
   const config = readGasSponsorshipConfig({ ...ENV, ...env }), sponsor = config.evm['eip155:8453']!;
   const storage = createFileExecutionStorage(await mkdtemp(join(tmpdir(), 'flofi-sponsor-')), 'GAS_SPONSOR_BUSY');
   let clock = Date.parse('2026-11-13T12:00:00Z');
@@ -33,9 +34,9 @@ async function setup(answer?: (body: { method: string; params: unknown[] }) => u
   const transport: PaymasterTransport = async (url, body) => { seen.push({ url, body: body as { method: string; params: unknown[] } });
     return answer ? answer(body as { method: string; params: unknown[] }) : { jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER, paymasterData: '0xabcdef',
       paymasterVerificationGasLimit: '0x10000', paymasterPostOpGasLimit: '0x5000' } }; };
-  const grant = await grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), ttlSeconds: 600 });
+  const grant = await grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), maxFeePerGas: grantFee, callGasLimit: 0x30000n, ttlSeconds: 600 });
   const rpc = (method: string, params: unknown[]) => handlePaymasterRpc({ sponsor, grants, ledger, transport, now }, { jsonrpc: '2.0', id: 7, method, params });
-  return { config, sponsor, grants, ledger, grant, rpc, seen, tick: (ms: number) => { clock += ms; } };
+  return { config, sponsor, grants, ledger, grant, rpc, seen, storage, tick: (ms: number) => { clock += ms; } };
 }
 
 describe('BUILD-FLOFI-MAINNET-EXEC-002 sponsorship configuration', () => {
@@ -56,8 +57,12 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 sponsorship configuration', () => {
     expect(solanaSecretKey(JSON.stringify([...key.secret]))).toEqual(key.secret);
     expect(solanaSecretKey(base58Encode(key.secret))).toEqual(key.secret);
     expect(solanaSecretKey('[1,2,3]')).toBeNull();
-    expect(readGasSponsorshipConfig({ FLOFI_GAS_SPONSORSHIP: 'enabled', FLOFI_SOLANA_SPONSOR_SECRET_KEY: 'x', FLOFI_SOLANA_SPONSOR_MAX_LAMPORTS_PER_TX: '20000',
-      FLOFI_SOLANA_SPONSOR_DAILY_BUDGET_LAMPORTS: '1000000', FLOFI_SOLANA_SPONSOR_MIN_BALANCE_LAMPORTS: '0' })).toMatchObject({ enabled: false, solana: null });
+    const solanaEnv = { FLOFI_GAS_SPONSORSHIP: 'enabled', FLOFI_SOLANA_SPONSOR_SECRET_KEY: base58Encode(key.secret), FLOFI_SOLANA_SPONSOR_MAX_LAMPORTS_PER_TX: '20000',
+      FLOFI_SOLANA_SPONSOR_DAILY_BUDGET_LAMPORTS: '1000000', FLOFI_SOLANA_SPONSOR_MIN_BALANCE_LAMPORTS: '0' };
+    // Not decoded unless a Solana sponsoring flow asks for it (none does yet): the web tier never holds the key.
+    expect(readGasSponsorshipConfig(solanaEnv)).toMatchObject({ enabled: false, solana: null });
+    expect(readGasSponsorshipConfig(solanaEnv, { solana: true }).solana?.secretKey).toEqual(key.secret);
+    expect(readGasSponsorshipConfig({ ...solanaEnv, FLOFI_SOLANA_SPONSOR_SECRET_KEY: 'x' }, { solana: true })).toMatchObject({ enabled: false, solana: null });
   });
 });
 
@@ -107,24 +112,67 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 ERC-7677 paymaster proxy (EVM)', () => {
     expect((await wrong.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: wrong.grant.id }])).error?.message).toBe('GAS_SPONSOR_PAYMASTER_UNEXPECTED');
     const refused = await setup(() => ({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'policy rejected' } }));
     expect((await refused.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: refused.grant.id }])).error?.message).toBe('GAS_SPONSOR_PROVIDER_REFUSED');
+    const pricey = await setup(undefined, {}, 0x3b9aca00n); // a preparation at 1 gwei: its 0.00046 ETH worst case is above the 0.00005 ETH cap
+    const costly = { ...op(), maxFeePerGas: '0x3b9aca00' };
+    expect((await pricey.rpc('pm_getPaymasterData', [costly, erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: pricey.grant.id }])).error?.message).toBe('GAS_SPONSOR_COST_ABOVE_CAP');
+    expect(await pricey.ledger.spentToday('eip155:8453')).toBe(0n);
     const s = await setup();
-    const costly = { ...op(), maxFeePerGas: '0x3b9aca00' }; // 1 gwei: 0.00046 ETH worst case, above the 0.00005 ETH cap
-    expect((await s.rpc('pm_getPaymasterData', [costly, erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: s.grant.id }])).error?.message).toBe('GAS_SPONSOR_COST_ABOVE_CAP');
     // Daily budget 0.00012 ETH; each operation reserves its 0.0000464 ETH worst case: two fit, the third is refused.
-    const grants = await Promise.all([0, 1, 2].map(() => s.grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), ttlSeconds: 600 })));
+    const grants = await Promise.all([0, 1, 2].map(() => s.grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), maxFeePerGas: FEE, callGasLimit: 0x30000n, ttlSeconds: 600 })));
     const answers = [];
     for (const [i, g] of grants.entries()) answers.push(await s.rpc('pm_getPaymasterData', [{ ...op(), nonce: '0x' + (10 + i).toString(16) }, erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: g.id }]));
     expect(answers.map(a => a.error?.message ?? 'OK')).toEqual(['OK', 'OK', 'GAS_SPONSOR_BUDGET_EXHAUSTED']);
   });
-  it('a grant sponsors at most three final operations (one owner nonce lets only one land); the same operation asked again is not reserved twice', async () => {
+  it('a grant sponsors at most three final operations, all on ONE pinned owner nonce (only one can land), under ONE reservation', async () => {
     const s = await setup(undefined, { FLOFI_SPONSOR_DAILY_BUDGET_WEI_8453: '1000000000000000' }), ctx = { flofiGrant: s.grant.id };
     const results = [];
-    for (const fee of ['0x5f5e100', '0x5f5e100', '0x5f5e101', '0x5f5e102', '0x5f5e103']) results.push(await s.rpc('pm_getPaymasterData', [{ ...op(), maxFeePerGas: fee }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]));
+    for (const tip of ['0x989680', '0x989680', '0x989681', '0x989682', '0x989683']) results.push(await s.rpc('pm_getPaymasterData', [{ ...op(), maxPriorityFeePerGas: tip }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]));
     expect(results.map(r => r.error?.message ?? 'OK')).toEqual(['OK', 'OK', 'OK', 'OK', 'GAS_SPONSOR_GRANT_USED']);
     expect((await s.grants.read(s.grant.id))!.uses).toHaveLength(3);
-    // Three distinct operations reserved (the repeat is not reserved twice, the refused fourth reserves nothing).
+    // Review P1: another nonce would let a second operation of the same grant land (and execute the reviewed calls again): refused.
+    const fresh = await s.grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), maxFeePerGas: FEE, callGasLimit: 0x30000n, ttlSeconds: 600 }), freshCtx = { flofiGrant: fresh.id };
+    expect((await s.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', freshCtx])).error).toBeUndefined();
+    expect((await s.rpc('pm_getPaymasterData', [{ ...op(), nonce: '0x6' }, erc4337.ENTRY_POINT_V0_7, '0x2105', freshCtx])).error?.message).toBe('GAS_SPONSOR_NONCE_CHANGED');
+    // One reservation per grant (its worst case), never one per operation.
     const per = (fee: bigint) => (0x20000n + 0x30000n + 0xc350n + 0x10000n + 0x5000n) * fee;
-    expect(await s.ledger.spentToday('eip155:8453')).toBe(per(0x5f5e100n) + per(0x5f5e101n) + per(0x5f5e102n));
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(2n * per(FEE));
+  });
+  it('review P1: a stub never carries isFinal; final data asking for more fee or gas than the reviewed batch is refused before the provider is asked', async () => {
+    const s = await setup(body => ({ jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER, paymasterData: '0x01', paymasterVerificationGasLimit: '0x10000', paymasterPostOpGasLimit: '0x5000',
+      isFinal: body.method === 'pm_getPaymasterStubData' } }));
+    const ctx = { flofiGrant: s.grant.id };
+    const stub = await s.rpc('pm_getPaymasterStubData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx]);
+    expect(stub.result).not.toHaveProperty('isFinal');
+    const asked = s.seen.length;
+    expect((await s.rpc('pm_getPaymasterData', [{ ...op(), maxFeePerGas: '0x5f5e101' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_FEE_ABOVE_REVIEW');
+    expect((await s.rpc('pm_getPaymasterData', [{ ...op(), maxPriorityFeePerGas: '0x5f5e101' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_FEE_ABOVE_REVIEW');
+    expect((await s.rpc('pm_getPaymasterData', [{ ...op(), callGasLimit: '0x60001' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_GAS_ABOVE_REVIEW');
+    expect((await s.rpc('pm_getPaymasterData', [{ ...op(), preVerificationGas: '0x2dc6c1' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_GAS_ABOVE_REVIEW');
+    expect((await s.rpc('pm_getPaymasterData', [{ ...op(), verificationGasLimit: '0xf4241' }, erc4337.ENTRY_POINT_V0_7, '0x2105', ctx])).error?.message).toBe('GAS_SPONSOR_GAS_ABOVE_REVIEW');
+    expect(s.seen.length).toBe(asked);
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
+  });
+  it('review P2: storage failures reach the caller only as closed codes; a reservation is released when the use cannot be recorded; an unsettled one stops counting after the hold', async () => {
+    const s = await setup(), ctx = { flofiGrant: s.grant.id };
+    const broken = { ...s.ledger, reserve: async () => { throw new Error('connect ECONNREFUSED 10.0.0.7:5432 user=flofi_prod'); } };
+    const failed = await handlePaymasterRpc({ sponsor: s.sponsor, grants: s.grants, ledger: broken, transport: async () => ({ jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER,
+      paymasterData: '0x', paymasterVerificationGasLimit: '0x1', paymasterPostOpGasLimit: '0x1' } }), now: () => new Date('2026-11-13T12:00:00Z') },
+      { jsonrpc: '2.0', id: 1, method: 'pm_getPaymasterData', params: [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx] });
+    expect(failed.error?.message).toBe('GAS_SPONSOR_UNAVAILABLE');
+    expect(JSON.stringify(failed)).not.toContain('ECONNREFUSED');
+    // The use cannot be recorded (here: the grant's storage refuses it): the reservation just made is released.
+    const lost = { ...s.grants, use: async () => { throw new Error('GAS_SPONSOR_BUSY'); } };
+    const refused = await handlePaymasterRpc({ sponsor: s.sponsor, grants: lost, ledger: s.ledger, transport: async () => ({ jsonrpc: '2.0', id: 1, result: { paymaster: PAYMASTER,
+      paymasterData: '0x', paymasterVerificationGasLimit: '0x1', paymasterPostOpGasLimit: '0x1' } }), now: () => new Date('2026-11-13T12:00:00Z') },
+      { jsonrpc: '2.0', id: 1, method: 'pm_getPaymasterData', params: [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', ctx] });
+    expect(refused.error?.message).toBe('GAS_SPONSOR_BUSY');
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
+    // A reservation whose operation never landed (nothing settles it) counts for RESERVATION_HOLD_MS only.
+    const other = await s.grants.create({ network: 'eip155:8453', owner: OWNER, callsHash: callsHash(calls), maxFeePerGas: FEE, callGasLimit: 0x30000n, ttlSeconds: 600 });
+    expect((await s.rpc('pm_getPaymasterData', [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', { flofiGrant: other.id }])).error).toBeUndefined();
+    expect(await s.ledger.spentToday('eip155:8453')).toBeGreaterThan(0n);
+    s.tick(RESERVATION_HOLD_MS + 1);
+    expect(await s.ledger.spentToday('eip155:8453')).toBe(0n);
   });
 });
 
@@ -169,6 +217,10 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 Solana sponsored fee payer', () => {
     expect(() => assertSponsorableMessage(foreign.message, f.policy)).toThrow('GAS_SPONSOR_SOLANA_PROGRAM_NOT_ALLOWED');
     expect(() => assertSponsorableMessage(f.built.message, { ...f.policy, blockhash: base58Encode(new Uint8Array(32).fill(9)) })).toThrow('GAS_SPONSOR_SOLANA_BLOCKHASH_MISMATCH');
     expect(() => solanaSponsorSigner(Uint8Array.from([...f.sponsorKey.secret.slice(0, 32), ...new Uint8Array(32)]))).toThrow('GAS_SPONSOR_SOLANA_KEY_INVALID');
+    // A signature-verification precompile is never sponsored, even when a caller lists it (its signatures are charged outside the fee bound).
+    const precompile = sponsoredMessage(f.signer.publicKey, [{ programId: 'Ed25519SigVerify111111111111111111111111111', accounts: [], data: Uint8Array.from([0]) }, f.deposit], BLOCKHASH);
+    expect(() => assertSponsorableMessage(precompile.message, { ...f.policy, allowedPrograms: [PROGRAM, 'Ed25519SigVerify111111111111111111111111111'] }))
+      .toThrow('GAS_SPONSOR_SOLANA_PROGRAM_NOT_ALLOWED');
   });
 });
 
@@ -191,10 +243,10 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 sponsorship runtime and the paymaster HTT
   });
   it('offers per configured chain only; a preview creates no grant; a spent daily budget makes no offer; settles what a grant sponsored', async () => {
     const rt = (await runtimeFor())!;
-    expect(await rt.offer({ chain: 'eip155:42161', owner: OWNER, calls, ttlSeconds: 600, preview: false })).toBeNull();
-    expect(await rt.offer({ chain: 'eip155:8453', owner: OWNER, calls, ttlSeconds: 600, preview: true }))
+    expect(await rt.offer({ chain: 'eip155:42161', owner: OWNER, calls, maxFeePerGas: FEE, gas: 0x30000n, ttlSeconds: 600, preview: false })).toBeNull();
+    expect(await rt.offer({ chain: 'eip155:8453', owner: OWNER, calls, maxFeePerGas: FEE, gas: 0x30000n, ttlSeconds: 600, preview: true }))
       .toEqual({ grantId: null, chain: 'eip155:8453', paymaster: PAYMASTER, url: 'https://flofi.example/api/gas/paymaster/8453', context: null });
-    const offer = (await rt.offer({ chain: 'eip155:8453', owner: OWNER, calls, ttlSeconds: 600, preview: false }))!;
+    const offer = (await rt.offer({ chain: 'eip155:8453', owner: OWNER, calls, maxFeePerGas: FEE, gas: 0x30000n, ttlSeconds: 600, preview: false }))!;
     expect(offer.context).toEqual({ flofiGrant: offer.grantId });
     const final = await rt.paymaster(8453, { jsonrpc: '2.0', id: 1, method: 'pm_getPaymasterData', params: [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', offer.context] });
     expect(final.error).toBeUndefined();
@@ -203,14 +255,14 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 sponsorship runtime and the paymaster HTT
     await rt.settle(offer.grantId!, ops[0]!, 1_000n);
     // A process without the sponsorship configuration (a worker) reads and settles the same grant from the shared state.
     const reader = sponsorshipPort({}, () => storageOf(rt))!;
-    expect(await reader.offer({ chain: 'eip155:8453', owner: OWNER, calls, ttlSeconds: 600, preview: false })).toBeNull();
+    expect(await reader.offer({ chain: 'eip155:8453', owner: OWNER, calls, maxFeePerGas: FEE, gas: 0x30000n, ttlSeconds: 600, preview: false })).toBeNull();
     expect(await reader.operations(offer.grantId!)).toEqual(ops);
     await expect(rt.settle(offer.grantId!, '0x' + '0'.repeat(64), 1n)).rejects.toThrow('GAS_SPONSOR_OPERATION_UNKNOWN');
     // Budget 0.00012 ETH, cap 0.00005 ETH: once more than 0.00007 ETH is spent today, no further offer is made.
     const tight = (await runtimeFor({ ...ENV, FLOFI_SPONSOR_DAILY_BUDGET_WEI_8453: '50000000000000' }))!;
-    const one = (await tight.offer({ chain: 'eip155:8453', owner: OWNER, calls, ttlSeconds: 600, preview: false }))!;
+    const one = (await tight.offer({ chain: 'eip155:8453', owner: OWNER, calls, maxFeePerGas: FEE, gas: 0x30000n, ttlSeconds: 600, preview: false }))!;
     await tight.paymaster(8453, { jsonrpc: '2.0', id: 1, method: 'pm_getPaymasterData', params: [op(), erc4337.ENTRY_POINT_V0_7, '0x2105', one.context] });
-    expect(await tight.offer({ chain: 'eip155:8453', owner: OWNER, calls, ttlSeconds: 600, preview: false })).toBeNull();
+    expect(await tight.offer({ chain: 'eip155:8453', owner: OWNER, calls, maxFeePerGas: FEE, gas: 0x30000n, ttlSeconds: 600, preview: false })).toBeNull();
   });
   it('the HTTP proxy answers CORS preflight, refuses other methods, unknown chains, oversized or batch bodies, and is 404 when disabled', async () => {
     const rt = await runtimeFor(), url = 'https://flofi.example/api/gas/paymaster/8453';

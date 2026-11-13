@@ -643,6 +643,8 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 WETH paid to Relay as native ETH (the own
     await c.service.report(run.id, { kind: 'HASH', hash: arb.wallet.send(first.transaction).hash });
     const unwrapped = await c.service.observe(run.id);
     expect(unwrapped.attempts[0]).toMatchObject({ step: 'UNWRAP', state: 'CONFIRMED', reconciled: true });
+    // Review P2: the owner's native balance rose by exactly the input minus the fee they paid (proven, so no note).
+    expect(unwrapped.attempts[0]!.note ?? null).toBeNull();
     expect(unwrapped).toMatchObject({ phase: 'AUTHORIZED', verdict: 'PENDING', source: null });
     // Second request: the exact native deposit of the order.
     const second = await c.service.begin(run.id, EVM_OWNER, w);
@@ -676,6 +678,33 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 WETH paid to Relay as native ETH (the own
     const next = await c.service.begin(run.id, EVM_OWNER, w);
     expect(next.attempt.step).toBe('DEPOSIT');
     expect(next.record.attempts.filter(a => a.step === 'UNWRAP')).toHaveLength(1);
+  });
+  it('review P1: a refund of an unwrapped order is verified in what was paid — native ETH to the owner on the source chain', async () => {
+    const c = await setup({ wethPaidInNative: true }), base = c.chainOf('base');
+    const w = workflow({ sourceChain: 'eip155:8453', destinationChain: 'eip155:42161', inputAsset: { kind: 'TOKEN', address: WETH.base, decimals: 18 },
+      outputAsset: token('arbitrum-one'), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const run = await reviewed(c, w, EVM_OWNER);
+    const deposited = await executeEvm(c, base, run.id, w);
+    expect(deposited.source).toMatchObject({ ownerDebit: '1000000000000000' });
+    const refund = base.deliver({ recipient: EVM_OWNER, token: null, amount: 1_000_000_000_000_000n, orderId: deposited.review.route.order.orderId });
+    c.relayMock.setStatus(deposited.review.route.quote.id, { status: 'refund', txHashes: [refund], failReason: 'EXECUTION_REVERTED' });
+    base.mine(); base.mine(); base.mine();
+    const refunded = await c.service.observe(run.id);
+    expect(refunded).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', refund: { chainId: 'eip155:8453', recipient: EVM_OWNER, token: 'native', amount: '1000000000000000' } });
+  });
+  it('review P2: after a confirmed unwrap, a fresh route that no longer takes ETH is refused with what happened (the ETH stays the owner\'s)', async () => {
+    const c = await setup({ wethPaidInNative: true }), base = c.chainOf('base');
+    const w = workflow({ sourceChain: 'eip155:8453', destinationChain: 'eip155:42161', inputAsset: { kind: 'TOKEN', address: WETH.base, decimals: 18 },
+      outputAsset: token('arbitrum-one'), amount: '1000000000000000', recipient: 'CONNECTED_OWNER' });
+    const run = await reviewed(c, w, EVM_OWNER);
+    const first = await c.service.begin(run.id, EVM_OWNER, w);
+    if (first.ecosystem !== 'EVM') throw new Error('expected EVM');
+    await c.service.handoff(run.id);
+    await c.service.report(run.id, { kind: 'HASH', hash: base.wallet.send(first.transaction).hash });
+    expect((await c.service.observe(run.id)).attempts[0]).toMatchObject({ step: 'UNWRAP', state: 'CONFIRMED' });
+    // Relay now answers this WETH order as an ERC-20 payment (no native unwrap path).
+    c.relayMock.setPaidInNative(() => false);
+    await expect(c.service.refresh(run.id)).rejects.toThrow('UNIVERSAL_UNWRAP_DONE_ROUTE_CHANGED');
   });
   it('the unwrap is only for the pinned wrapped-native token: a native-paid answer for another token stays a mismatch', async () => {
     const c = await setup({ wethPaidInNative: true });

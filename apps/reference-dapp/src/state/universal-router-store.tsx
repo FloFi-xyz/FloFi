@@ -331,7 +331,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       if (cause instanceof Error && REQUOTE_IN_PLACE.test(cause.message)) {
         const current = await universalStatus(eco, reviewed.id);
         if (current.ok && requotableInPlace(current.value)) {
-          const refreshed = await universalRefresh(eco, reviewed.id, reviewed.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? destinationWallet ?? undefined : undefined);
+          // Review P2: an automatic re-quote keeps the REVIEWED recipient (the server reuses it); only the owner's own Refresh may pick another.
+          const refreshed = await universalRefresh(eco, reviewed.id, undefined);
           if (refreshed.ok) {
             accept(refreshed.value);
             setRequoted({ code: cause.message, runId: reviewed.id, changes: bridgeReviewChanges(reviewed.review, refreshed.value.review) });

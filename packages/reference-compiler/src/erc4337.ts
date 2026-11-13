@@ -208,6 +208,8 @@ export function decodeGetNonce(result: unknown): bigint {
 export const USER_OPERATION_EVENT_TOPIC = keccakHex('UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256)');
 /** `UserOperationRevertReason(bytes32 indexed userOpHash, address indexed sender, uint256 nonce, bytes revertReason)`. */
 export const USER_OPERATION_REVERT_REASON_TOPIC = keccakHex('UserOperationRevertReason(bytes32,address,uint256,bytes)');
+/** `BeforeExecution()`: emitted once by the EntryPoint between the validation of every operation of a bundle and their executions. */
+export const BEFORE_EXECUTION_TOPIC = keccakHex('BeforeExecution()');
 export type UserOperationEvent = { readonly userOpHash: string; readonly sender: string; readonly paymaster: string; readonly nonce: bigint; readonly success: boolean;
   /** What the account actually paid for the operation, in wei (the EntryPoint's own accounting: gas used × effective price). */
   readonly actualGasCost: bigint; readonly actualGasUsed: bigint };

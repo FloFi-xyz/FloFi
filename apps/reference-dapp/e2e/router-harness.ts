@@ -74,6 +74,8 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
     /** BUILD-FLOFI-MAINNET-EXEC-002: the OP Stack GasPriceOracle `getL1FeeUpperBound` answer (wei), and base units of the Across relayer-capital
      * line itemized as an LP line instead (same total: a zero LP line appearing in a re-quote). */
     l1Fee: 50_000n, acrossLpShift: 0n,
+    /** The L1 data fee an OP Stack receipt reports as charged at inclusion (wei): no transaction can cap it. */
+    receiptL1Fee: 10_000n,
     autoFillSeconds: options.autoFillSeconds === undefined ? 5 : options.autoFillSeconds, fillMode: 'normal' as FillMode, receiptLost: false,
     baseSafeLag: options.baseSafeLagBlocks ?? 5, arbitrumSafeLag: options.arbitrumSafeLagBlocks ?? 40,
   };
@@ -214,7 +216,7 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   };
 
   const receipt = (m: Mined) => ({ transactionHash: m.hash, status: hx(m.status), blockNumber: hx(m.block), blockHash: blockHash(m.chain, m.block), from: m.from, to: m.to,
-    gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), ...m.chain === 'base' && !SRC.l1DataFee ? { gasUsedForL1: hx(1_234n) } : { l1Fee: hx(10_000n) }, logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
+    gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), ...m.chain === 'base' && !SRC.l1DataFee ? { gasUsedForL1: hx(1_234n) } : { l1Fee: hx(controls.receiptL1Fee) }, logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
   const txObject = (m: Mined) => ({ hash: m.hash, from: m.from, to: m.to, input: m.input, value: '0x0', nonce: hx(m.nonce), chainId: hx(m.chain === 'base' ? SRC.chainId : DST.chainId),
     gas: requests.get(m.hash)?.gas ?? hx(m.gasUsed * 2n), maxFeePerGas: requests.get(m.hash)?.maxFeePerGas ?? hx(11_000_000n),
     maxPriorityFeePerGas: requests.get(m.hash)?.maxPriorityFeePerGas ?? hx(1_000_000n), type: '0x2', blockHash: blockHash(m.chain, m.block), blockNumber: hx(m.block) });

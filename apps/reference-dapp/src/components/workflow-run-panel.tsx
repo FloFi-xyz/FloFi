@@ -179,7 +179,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       else { unknownOutcome.current = result.code === 'DELEGATION_OUTCOME_UNKNOWN' ? lastSent.current : null; onError(result.code); }
     }
     catch (cause) {
-      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
+      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
       onError(code);
     }
     finally { acting.current = false; setBusy(false); }
@@ -380,7 +380,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           {g.awaitsDelivery !== null && <> · {tr('waits for the delivery of step {0}', String(g.awaitsDelivery + 1))}</>}
           {g.setup.includes('EVM_SMART_ACCOUNT_UPGRADE') && <> · {tr('your wallet upgrades this account inside the same confirmation (one time)')}</>}</li>)}
       </ol>}
-      {plan.userFunded?.available && <p className="muted">{tr('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas.')}
+      {plan.userFunded?.available && <p className="muted">{tr('Your wallet pays every network fee, unless FloFi offers to sponsor a step\'s fee and your wallet supports it. FloFi never advances or reimburses gas.')}
         {plan.userFunded.wallets === 'ASSUMED' && <> {tr('The grouping depends on what your wallet supports: FloFi asks your wallet before anything is signed, and a wallet that cannot batch confirms each step.')}</>}</p>}
       {!plan.delegatedSingleAuthorization.available && plan.delegatedSingleAuthorization.reason && plan.delegatedSingleAuthorization.reason !== 'EXECUTOR_FUNDED_GAS_RETIRED' &&
         <p className="muted">{tr('Authorizing once is not available here.')} {tr(WHY_NOT_ONCE[plan.delegatedSingleAuthorization.reason] ?? plan.delegatedSingleAuthorization.reason)}</p>}
@@ -412,12 +412,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
           ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
           : tr(stateText(GROUP_STATE, g))}</span>
-        {g.gasPaid?.sponsored ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
-        {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Network fee sponsored: gas paid by FloFi (your wallet must support sponsored fees on this network)')}</span>}
+        {g.gasPaid?.sponsored || g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
+        {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}</span>}
         {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
-        {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Network fee sponsored when your wallet supports it: gas paid by FloFi; otherwise your wallet pays the estimate above')}</span>}
+        {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</span>}
         {g.gasPaid && <span className="muted">{g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
           : tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
         {g.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}

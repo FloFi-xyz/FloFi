@@ -14,12 +14,19 @@ import { useCredentials } from './credentials-store';
 import { useOptionalJupiter } from './jupiter-store';
 
 type AccountWallets = readonly { readonly ecosystem: DestinationEcosystem; readonly address: string; readonly providerName: string }[];
-/** The signed-in account's wallets are read once per page (public data; a failure or a signed-out visitor is simply "none"). */
-let accountRead: Promise<AccountWallets> | null = null;
-function readAccountWallets(): Promise<AccountWallets> {
-  accountRead ??= accountState().then(state => state.account?.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address,
+/**
+ * The signed-in account's wallets (public data; a failure or a signed-out visitor is simply "none"), shared by this page's readers. Review P2: the
+ * value belongs to ONE session — it is read again when the page observes another Privy user (or none), and after `ACCOUNT_WALLETS_FRESH_MS`, so a
+ * sign-out and sign-in without a reload never fills another account's wallet. Never written to Web Storage.
+ */
+export const ACCOUNT_WALLETS_FRESH_MS = 60_000;
+let accountRead: { readonly key: string; readonly at: number; readonly promise: Promise<AccountWallets> } | null = null;
+function readAccountWallets(key: string, now = Date.now()): Promise<AccountWallets> {
+  if (accountRead?.key === key && now - accountRead.at < ACCOUNT_WALLETS_FRESH_MS) return accountRead.promise;
+  const promise = accountState().then(state => state.account?.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address,
     providerName: wallet.provider === 'privy' || wallet.provider === 'turnkey' ? 'FloFi Wallet' : wallet.providerName })) ?? [], () => []);
-  return accountRead;
+  accountRead = { key, at: now, promise };
+  return promise;
 }
 
 /** The connected EVM wallet as the caller's wallet store reports it (callers already hold it). */
@@ -27,7 +34,14 @@ export type SessionEvmWallet = { readonly account: string | null; readonly provi
 export function useDestinationInventory(evm: SessionEvmWallet): DestinationInventory {
   const solana = useOptionalJupiter(), privy = useFloFiPrivy(), credentials = useCredentials();
   const [account, setAccount] = useState<AccountWallets>([]);
-  useEffect(() => { let live = true; void readAccountWallets().then(wallets => { if (live) setAccount(wallets); }); return () => { live = false; }; }, []);
+  const sessionKey = privy?.userId ?? 'signed-out';
+  useEffect(() => {
+    let live = true;
+    // Another session's wallets are dropped at once; this session's are read (or reused while fresh).
+    setAccount([]);
+    void readAccountWallets(sessionKey).then(wallets => { if (live) setAccount(wallets); });
+    return () => { live = false; };
+  }, [sessionKey]);
   const solanaSession = solana?.session?.chain === 'solana:mainnet' ? solana.session : null;
   return useMemo(() => {
     const session: DestinationCandidate[] = [

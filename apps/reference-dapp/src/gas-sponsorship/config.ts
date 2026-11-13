@@ -54,7 +54,11 @@ export function solanaSecretKey(text: string | undefined): Uint8Array | null {
   return bytes && bytes.length === 64 ? bytes : null;
 }
 
-export function readGasSponsorshipConfig(env: Env): GasSponsorshipConfig {
+/**
+ * `options.solana`: decode the Solana sponsor key too. Off by default (review): no flow uses Solana sponsorship yet, so no process holds that
+ * key in memory unless a Solana sponsoring flow asks for it explicitly.
+ */
+export function readGasSponsorshipConfig(env: Env, options: { readonly solana?: boolean } = {}): GasSponsorshipConfig {
   const off = (code: string): GasSponsorshipConfig => ({ enabled: false, code, publicOrigin: null, evm: {}, solana: null, refusals: {} });
   if (env.FLOFI_GAS_SPONSORSHIP !== 'enabled') return off('GAS_SPONSORSHIP_DISABLED');
   const urlOf = (text: string | undefined): URL | null => { try { return text ? new URL(text) : null; } catch { return null; } };
@@ -75,7 +79,7 @@ export function readGasSponsorshipConfig(env: Env): GasSponsorshipConfig {
       maxWeiPerOp: BigInt(max), dailyBudgetWei: BigInt(budget) };
   }
   let solana: SolanaSponsor | null = null;
-  if (env.FLOFI_SOLANA_SPONSOR_SECRET_KEY !== undefined) {
+  if (options.solana === true && env.FLOFI_SOLANA_SPONSOR_SECRET_KEY !== undefined) {
     const secretKey = solanaSecretKey(env.FLOFI_SOLANA_SPONSOR_SECRET_KEY), max = env.FLOFI_SOLANA_SPONSOR_MAX_LAMPORTS_PER_TX, budget = env.FLOFI_SOLANA_SPONSOR_DAILY_BUDGET_LAMPORTS,
       floor = env.FLOFI_SOLANA_SPONSOR_MIN_BALANCE_LAMPORTS;
     if (!secretKey || !max || !UNITS.test(max) || !budget || !UNITS.test(budget) || BigInt(budget) < BigInt(max) || !floor || !/^(0|[1-9][0-9]{0,30})$/.test(floor))

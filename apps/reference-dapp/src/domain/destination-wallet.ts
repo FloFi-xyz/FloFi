@@ -32,12 +32,17 @@ export type DestinationResolution =
   | { readonly kind: 'NONE' };
 
 const canonical = (ecosystem: DestinationEcosystem, address: string) => ecosystem === 'evm' ? address.toLowerCase() : address;
+/** Review P2: a candidate is used only when its ADDRESS is valid for the ecosystem (the same canonical check the server binds), not just its label. */
+const validFor = (ecosystem: DestinationEcosystem, address: string) => {
+  try { canonicalUniversalAddress(UNIVERSAL_NETWORKS[ecosystem === 'solana' ? 'solana' : 'base'], address.trim(), 'DESTINATION_INVALID'); return true; }
+  catch { return false; }
+};
 const unique = (wallets: readonly DestinationCandidate[]) => wallets.filter((wallet, index) =>
   wallets.findIndex(other => canonical(other.ecosystem, other.address) === canonical(wallet.ecosystem, wallet.address)) === index);
 
 /** The owner's destination wallet of `ecosystem` by the order above. */
 export function resolveDestinationWallet(ecosystem: DestinationEcosystem, inventory: DestinationInventory): DestinationResolution {
-  const of = (tier: readonly DestinationCandidate[]) => unique(tier.filter(wallet => wallet.ecosystem === ecosystem && wallet.address.trim() !== ''));
+  const of = (tier: readonly DestinationCandidate[]) => unique(tier.filter(wallet => wallet.ecosystem === ecosystem && validFor(ecosystem, wallet.address)));
   const all = unique([...of(inventory.session), ...of(inventory.account), ...of(inventory.saved)]);
   for (const tier of [of(inventory.session), of(inventory.account), of(inventory.saved)]) {
     if (tier.length === 1) return { kind: 'RESOLVED', wallet: tier[0]!, alternatives: all.filter(wallet => wallet !== tier[0]) };

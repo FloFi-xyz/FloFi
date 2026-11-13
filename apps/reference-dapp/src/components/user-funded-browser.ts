@@ -110,14 +110,14 @@ export async function sendWalletBatch(request: eip5792.SendCallsRequest, onSendi
   // A wallet that ignores `from` sends the batch from its SELECTED account (`eth_accounts[0]`), so that account must be the run's own
   // (compared case-insensitively); being merely connected is not enough. A locked wallet (no account) or an unreadable answer: not asked.
   // Read last, right before sending (after any network switch).
-  const accounts = await provider.request({ method: 'eth_accounts', params: [] }).catch(notSent('WALLET_ACCOUNT_MISMATCH'));
-  const selected = Array.isArray(accounts) && typeof accounts[0] === 'string' ? accounts[0].toLowerCase() : null;
-  if (selected !== request.from.toLowerCase()) fail('WALLET_ACCOUNT_MISMATCH');
   // ADR-0009: the sponsorship capability only for a wallet that reports it on this chain. A REQUIRED offer the wallet cannot take: nothing is sent
-  // (the owner's balance cannot pay the fee, and FloFi never sends the batch hoping it can).
+  // (the owner's balance cannot pay the fee, and FloFi never sends the batch hoping it can). Asked before the account check, which stays last.
   const sponsored = sponsorship?.context ? await provider.request({ method: 'wallet_getCapabilities', params: [request.from, [request.chainId]] })
     .then(caps => reportedPaymasterService(caps, BigInt(request.chainId)), () => false) : false;
   if (sponsorship?.required && !sponsored) fail('GAS_SPONSORSHIP_WALLET_UNSUPPORTED');
+  const accounts = await provider.request({ method: 'eth_accounts', params: [] }).catch(notSent('WALLET_ACCOUNT_MISMATCH'));
+  const selected = Array.isArray(accounts) && typeof accounts[0] === 'string' ? accounts[0].toLowerCase() : null;
+  if (selected !== request.from.toLowerCase()) fail('WALLET_ACCOUNT_MISMATCH');
   // A throw from `onSending` (e.g. another tab already handed this group to the wallet) propagates as is: `wallet_sendCalls` is never requested.
   onSending?.();
   // Exactly the prepared request: atomic required; the only capability ever added is FloFi's own paymaster service (an optional one unless required).

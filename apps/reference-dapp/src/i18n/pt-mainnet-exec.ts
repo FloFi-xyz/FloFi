@@ -48,9 +48,18 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-MAINNET-EXEC-002 — network-fee sponsorship (ADR-0009)
   'Your wallet does not support sponsored network fees on this network, and your balance there cannot pay them, so FloFi did not ask your wallet. Add native gas to this wallet, or use a wallet that supports sponsored fees, then try again.':
     'Sua carteira não oferece suporte a taxas de rede patrocinadas nesta rede, e seu saldo nela não cobre essas taxas, então a FloFi não fez o pedido à sua carteira. Adicione gás nativo a esta carteira ou use uma carteira com suporte a taxas patrocinadas e tente de novo.',
-  'Network fee sponsored: gas paid by FloFi (your wallet must support sponsored fees on this network)':
-    'Taxa de rede patrocinada: gas pago pela FloFi (sua carteira precisa oferecer suporte a taxas patrocinadas nesta rede)',
-  'Network fee sponsored when your wallet supports it: gas paid by FloFi; otherwise your wallet pays the estimate above':
-    'Taxa de rede patrocinada quando sua carteira oferecer suporte: gas pago pela FloFi; caso contrário, sua carteira paga a estimativa acima',
+  'Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)':
+    'Taxa de rede patrocinada: a FloFi se oferece para pagá-la (sua carteira precisa oferecer suporte a taxas patrocinadas nesta rede)',
+  'Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above':
+    'Taxa de rede patrocinada: a FloFi se oferece para pagá-la quando sua carteira oferecer suporte; caso contrário, sua carteira paga a estimativa acima',
+  'Your wallet pays every network fee, unless FloFi offers to sponsor a step\'s fee and your wallet supports it. FloFi never advances or reimburses gas.':
+    'Sua carteira paga todas as taxas de rede, a menos que a FloFi se ofereça para patrocinar a taxa de uma etapa e sua carteira ofereça suporte. A FloFi nunca adianta nem reembolsa gas.',
   'Gas paid by FloFi: {0}': 'Gas pago pela FloFi: {0}',
+  'FloFi offers to sponsor a network fee below; every other fee is paid by your wallet. FloFi never advances or reimburses gas, and never signs or sends for you.':
+    'A FloFi se oferece para patrocinar uma taxa de rede abaixo; as demais taxas são pagas pela sua carteira. A FloFi nunca adianta nem reembolsa gas, e nunca assina nem envia por você.',
+  'Your WETH is already unwrapped to ETH in your wallet, but the provider now quotes this bridge only for WETH. Nothing else was sent; your ETH stays in your wallet. Start a new bridge from ETH, or wrap it again.':
+    'Seu WETH já foi convertido em ETH na sua carteira, mas o provedor agora só cota esta ponte para WETH. Nada mais foi enviado; seu ETH continua na sua carteira. Inicie uma nova ponte a partir de ETH ou converta-o de novo em WETH.',
+  'The unwrap of your WETH failed on chain. Nothing was bridged; your WETH stays in your wallet.':
+    'A conversão do seu WETH falhou na rede. Nada foi enviado pela ponte; seu WETH continua na sua carteira.',
+  'The simulation of the WETH unwrap failed. Nothing was signed.': 'A simulação da conversão de WETH falhou. Nada foi assinado.',
 };

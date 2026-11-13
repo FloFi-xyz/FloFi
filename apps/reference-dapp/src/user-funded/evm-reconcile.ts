@@ -155,8 +155,11 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
     if (!r) return { status: 'PENDING' };
     receipts.push({ ...r, transactionHash: hash });
   }
-  // ADR-0009: one bundle transaction that the owner did not send is reconciled only as an operation FloFi's paymaster sponsored for this group.
-  if (sponsored && receipts.length === 1 && String(receipts[0]!.from ?? '').toLowerCase() !== group.owner) return reconcileSponsoredBatch(group, receipts[0]!, fromBlock, sponsored);
+  // ADR-0009: one bundle transaction (sent by a bundler, or by the owner's own self-bundling wallet to the EntryPoint) is reconciled only as an
+  // operation FloFi's paymaster sponsored for this group.
+  const only = receipts.length === 1 ? receipts[0]! : null;
+  if (sponsored && only && (String(only.from ?? '').toLowerCase() !== group.owner || String(only.to ?? '').toLowerCase() === erc4337.ENTRY_POINT_V0_7))
+    return reconcileSponsoredBatch(group, only, fromBlock, sponsored);
   let gas = 0n;
   for (const r of receipts) {
     // S1 on the chain itself: the account that sent (and paid for) every transaction of the batch is the owner.
@@ -184,9 +187,15 @@ export async function reconcileWalletBatch(t: ChainTransport, group: EvmGroupCal
 
 /** ADR-0009: the operations FloFi's paymaster proxy sponsored for a group (hashes recorded on its grant) and the paymaster pinned for the chain. */
 export type SponsoredOperations = { readonly paymaster: string; readonly userOpHashes: readonly string[] };
-/** The logs of one operation's execution inside a bundle: after the previous `UserOperationEvent`, before its own (at index `at`). */
+/**
+ * The logs of one operation's execution inside a bundle: after the EntryPoint's previous boundary — its `BeforeExecution` (which ends the
+ * validation of every operation of the bundle) or the previous operation's `UserOperationEvent` — and before its own (at index `at`). Only
+ * logs the EntryPoint itself emitted count as boundaries (an account or token could emit a look-alike topic).
+ */
 function operationLogs(logs: readonly Log[], at: number): readonly Log[] {
-  const previous = logs.slice(0, at).map((l, i) => l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
+  const boundary = (l: Log) => l.address.toLowerCase() === erc4337.ENTRY_POINT_V0_7
+    && (l.topics[0]?.toLowerCase() === erc4337.USER_OPERATION_EVENT_TOPIC || l.topics[0]?.toLowerCase() === erc4337.BEFORE_EXECUTION_TOPIC);
+  const previous = logs.slice(0, at).map((l, i) => boundary(l) ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
   return logs.slice(previous + 1, at);
 }
 /** The index of the EntryPoint's own `UserOperationEvent` of `hash` (another operation of the bundle could emit a look-alike log). */

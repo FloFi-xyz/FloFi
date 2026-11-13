@@ -253,18 +253,20 @@ export function compareRoutes(reviewedInput: CanonicalRoute, candidateInput: Can
 export const feeRecipients = (r: { readonly fees: readonly { readonly kind: string; readonly recipient: string | null }[] }): readonly string[] =>
   [...new Set(r.fees.filter(f => f.recipient !== null).map(f => `${f.kind}:${f.recipient}`))].sort();
 /**
- * BUILD-FLOFI-MAINNET-EXEC-002: the provider re-pricing a revalidation tolerates, as a share of the reviewed route fee (25%), never more than
+ * BUILD-FLOFI-MAINNET-EXEC-002: the provider re-pricing a revalidation tolerates, as a share of the reviewed route fee (10%), never more than
  * the owner's own slippage share of the input. History: BUILD-FLOFI-BRIDGE-LIVE-FIX-003 tolerated 1% of the fee; production 2026-11-13
- * (2 USDC Base → Arbitrum One, Across, fee 0.007296 USDC, tolerance 72 base units) still refused runs 10–33 seconds after their Review while the
- * very next quote was 13 base units (0.18%) away from the reviewed one: Across re-prices its destination-gas line with the destination gas
- * price and ETH price every few seconds, routinely by more than 1% of the fee.
+ * (2 USDC Base → Arbitrum One, Across, fee 0.007296 USDC, tolerance 72 base units) refused runs 10–33 seconds after their Review on a
+ * re-pricing of about 150 base units (2% of the fee), while the very next quote was 13 base units away: Across re-prices its destination-gas
+ * line with the destination gas price and ETH price every few seconds, routinely by a few percent of the fee.
  *
- * Why this is safe: the reviewed bytes are what executes. The owner's debit and the guaranteed output are fixed by the reviewed calldata, so a
- * re-priced quote never changes what the owner pays or receives; it is only evidence that relayers still fill the reviewed deposit. A
- * relayer re-pricing within a quarter of its fee leaves the reviewed deposit within its usual fill margin; a larger move, or a move larger than
- * the owner's slippage, is a change outside the authorized bounds and requires a fresh Review.
+ * Why this is safe for the owner: the reviewed bytes are what executes. The owner's debit and the guaranteed output are fixed by the reviewed
+ * calldata, so a re-priced quote never changes what the owner pays or receives. The trade-off is on the fill: the reviewed deposit pays the
+ * relayer up to 10% of its fee less than the current quote asks. Across relayers fill a deposit whose fee stays within their margin; one they
+ * decline is filled late or refunded to the owner on the source chain at its fill deadline (never lost) — so the tolerance is kept to the
+ * routine re-pricing (review: tightened from 25%). A larger move, or one larger than the owner's slippage, is outside the authorized bounds:
+ * the run is re-quoted in place and the owner confirms the changed values.
  */
-export const PROVIDER_FEE_DRIFT_BPS = 2_500;
+export const PROVIDER_FEE_DRIFT_BPS = 1_000;
 export type ProviderFeeDrift = { readonly feeIncrease: string; readonly minimumDecrease: string; readonly tolerance: string; readonly withinTolerance: boolean };
 /** The fee/minimum drift of a fresh quote against the reviewed route, and whether it stays within the tolerance above. */
 export function providerFeeDrift(reviewedInput: CanonicalRoute, candidateInput: CanonicalRoute): ProviderFeeDrift {

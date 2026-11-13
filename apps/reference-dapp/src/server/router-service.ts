@@ -20,7 +20,7 @@ import { ARBITRUM_ONE, CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkfl
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateRouterBridgeWorkflow } from '@defi-workflow-engine/reference-linter';
 import { compileRouterArtifacts, decodeErc20Approval, decodeFundsDeposited, decodeRouterApprove, EIP1967_IMPLEMENTATION_SLOT, ROUTER_SELECTORS as SEL,
   ROUTER_TOPICS as TOPIC, type FundsDeposited, type RouterArtifacts, type RouterLog } from '@defi-workflow-engine/reference-compiler';
-import { assertRouterTransition, chargedNetworkFeeWithinAuthorization, classifyRouteRevalidation, compareRoutes, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization,
+import { assertRouterTransition, authorizedNetworkFee, chargedNetworkFeeWithinAuthorization, classifyRouteRevalidation, compareRoutes, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization,
   routeCommitment, ROUTER_PHASES, type CanonicalRoute, type EvidenceBundle, type RouteChange, type RouterPhase, type RoutingProvider,
   type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
@@ -578,15 +578,21 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     }
     const reviewedCall = record.review.calls.find(c => c.to === attempt.tx.to && c.data === attempt.tx.data);
     const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? record.review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
+    // What the transaction itself fixes (nonce, gas limit, max fee, priority fee, hence its execution gas price) must be what was authorized:
+    // anything else is another transaction than the reviewed one (DIVERGENT, as before).
     if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > BigInt(attempt.tx.gas) ||
         quantity(tx.maxFeePerGas ?? tx.gasPrice) > BigInt(attempt.tx.maxFeePerGas) || verified.gasUsed > BigInt(attempt.tx.gas) ||
         quantity(tx.maxPriorityFeePerGas ?? '0x0') > BigInt(attempt.tx.maxPriorityFeePerGas) ||
-        verified.effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas) ||
-        // BUILD-FLOFI-MAINNET-EXEC-002: the network fee actually charged (execution + L1) must be within the authorized maximum.
-        !chargedNetworkFeeWithinAuthorization({ gasLimit: BigInt(attempt.tx.gas), maxFeePerGas: BigInt(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound ?? '0') },
-          { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee })))
+        verified.effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas)))
       return save(replaceAttempt({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', authorization: null, error: 'ROUTER_TRANSACTION_FEE_BOUNDS_MISMATCH' },
         { ...attempt, state: 'RECONCILIATION_REQUIRED', note: 'ROUTER_TRANSACTION_FEE_BOUNDS_MISMATCH' }));
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): the L1 data fee is charged by the sequencer at inclusion and no transaction can cap it. A confirmed
+    // transaction whose charged total (execution + L1) ended above the authorized maximum IS the reviewed one: the overrun is recorded on the
+    // attempt (and in its receipt's gas cost), never a reason to stop tracking a deposit whose funds are in flight to their fill or refund.
+    const authorizedFee = { gasLimit: BigInt(attempt.tx.gas), maxFeePerGas: BigInt(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound ?? '0') };
+    const chargedFee = { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee };
+    const feeNote = verified.direct && !chargedNetworkFeeWithinAuthorization(authorizedFee, chargedFee)
+      ? `ROUTER_NETWORK_FEE_ABOVE_AUTHORIZED:${chargedFee.gasUsed * chargedFee.effectiveGasPrice + chargedFee.l1Fee}:${authorizedNetworkFee(authorizedFee)}` : null;
     const receipt: RouterReceipt = { transactionHash: hash, status: verified.status, blockNumber: verified.blockNumber, blockHash: hex(raw.blockHash), from: verified.txFrom,
       gasCostWei: (verified.gasUsed * verified.effectiveGasPrice + verified.l1Fee).toString(), submissionKind: verified.delegated ? 'DELEGATED_SINGLE' : 'DIRECT', contentHash: digest(raw) };
     if (verified.status === 0) {
@@ -602,7 +608,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (approvals.length !== 1 || approvals[0]!.owner !== record.owner || approvals[0]!.spender !== spender || approvals[0]!.amount !== amount) fail('ROUTER_APPROVAL_MISMATCH');
         const effective = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(record.owner) + addrWord(spender), tag(verified.blockNumber)), 0);
         if (effective !== amount) fail('ROUTER_APPROVAL_NOT_EFFECTIVE');
-        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }));
+        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote }));
       }
       const { deposit, ownerDebit } = depositMatches(record.review.route, logs, record.owner);
       const block = await rpc('eth_getBlockByNumber', [tag(verified.blockNumber), false]);
@@ -613,7 +619,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         ownerDebit: ownerDebit.toString(), safe: false };
       // The authorization is consumed by the confirmed deposit; it can never authorize another one.
       return save(replaceAttempt({ ...transition(record, 'SOURCE_CONFIRMED'), authorization: null, source: settled, error: null },
-        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }));
+        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote }));
     } catch (cause) {
       const code = cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : null;
       if (!code || code === 'ROUTER_RPC_INVALID') throw cause;
@@ -935,7 +941,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (AVAILABILITY.test(code) || !/^[A-Z][A-Z0-9_]{2,80}$/.test(code)) fail('ROUTER_ROUTE_REVALIDATION_UNAVAILABLE');
         return invalidate('ROUTE_CHANGED', ['PROTOCOL_CHANGED']);
       }
-      // BUILD-FLOFI-MAINNET-EXEC-002: the reviewed bytes are what executes. A relayer re-pricing within the tolerance (`providerFeeDrift`: a quarter
+      // BUILD-FLOFI-MAINNET-EXEC-002: the reviewed bytes are what executes. A relayer re-pricing within the tolerance (`providerFeeDrift`: a tenth
       // of the reviewed fee, at most the owner's slippage) is recorded on the attempt; a re-pricing beyond it (outside the authorized bounds) or
       // any material change (recipient, assets, amounts, contracts, calldata function, fee recipients…) still needs a new quote and Review.
       const revalidation = classifyRouteRevalidation(route, fresh), drift = revalidation.drift;

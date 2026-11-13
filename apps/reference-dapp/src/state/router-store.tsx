@@ -293,8 +293,23 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
       diagnostic.code = refused ? sendError!.code === 4001 ? 'ROUTER_REJECTED' : sendError!.code === 4100 ? 'ROUTER_WALLET_UNAUTHORIZED' : 'ROUTER_WALLET_METHOD_UNSUPPORTED' : !diagnostic.invoked ? (cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'ROUTER_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'ROUTER_SUBMISSION_UNKNOWN';
       if (refused) rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: record.owner, network: net, kind: 'REJECTED', code: diagnostic.code, rejectionCode: diagnostic.rejectionCode! });
+      // BUILD-FLOFI-MAINNET-EXEC-002: nothing was sent and the reviewed quote no longer stands (refused at begin, or at the wallet hand-off). The
+      // same run is re-quoted at once (fresh quote, simulation and Review, same workflow); only the material values that moved are shown, and the
+      // owner authorizes the new Review again.
+      const requoteInPlace = async (code: string) => {
+        if (!REQUOTE_IN_PLACE.test(code)) return;
+        const latestRun = await routerStatus(net, id); if (latestRun.ok) acceptCurrent(latestRun.value);
+        if (!latestRun.ok || !requotableInPlace(latestRun.value)) return;
+        const refreshed = await routerRefresh(net, id);
+        if (!refreshed.ok) return;
+        acceptCurrent(refreshed.value);
+        setRequoted({ code, runId: id, changes: bridgeReviewChanges(record.review, refreshed.value.review) });
+        throw new Error('ROUTER_REQUOTED_REVIEW_REQUIRED', { cause });
+      };
       if (prepared && (!diagnostic.invoked || refused)) {
         const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) { acceptCurrent(failure.value); forgetWalletReport(walletResultStorage(), attemptId); }
+        // Review P2: a refusal at the hand-off (the wallet was never asked) is re-quoted in place too, exactly as one at begin.
+        if (!diagnostic.invoked) await requoteInPlace(diagnostic.code);
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
@@ -302,19 +317,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
         const report = await routerReport(net, id, { kind: 'UNKNOWN', code: diagnostic.code, attemptId }); if (report.ok) acceptCurrent(report.value);
         throw new Error('ROUTER_SUBMISSION_UNKNOWN_OBSERVE_EXISTING', { cause });
       }
-      if (cause instanceof Error && REQUOTE_IN_PLACE.test(cause.message)) {
-        const latestRun = await routerStatus(net, id); if (latestRun.ok) acceptCurrent(latestRun.value);
-        // BUILD-FLOFI-MAINNET-EXEC-002: nothing was sent and the reviewed quote no longer stands. The same run is re-quoted at once (fresh quote,
-        // simulation and Review, same workflow); only the material values that moved are shown, and the owner authorizes the new Review again.
-        if (latestRun.ok && requotableInPlace(latestRun.value)) {
-          const refreshed = await routerRefresh(net, id);
-          if (refreshed.ok) {
-            acceptCurrent(refreshed.value);
-            setRequoted({ code: cause.message, runId: id, changes: bridgeReviewChanges(record.review, refreshed.value.review) });
-            throw new Error('ROUTER_REQUOTED_REVIEW_REQUIRED', { cause });
-          }
-        }
-      }
+      if (cause instanceof Error) await requoteInPlace(cause.message);
       throw cause;
     }
     for (let i = 0; i < 20; i++) {

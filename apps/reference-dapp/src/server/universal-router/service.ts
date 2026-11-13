@@ -276,6 +276,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       // BUILD-FLOFI-MAINNET-EXEC-002: a native-paid order for the owner's WETH is paid by the owner's own unwrap on the pinned contract, then the
       // exact native deposit: no token allowance; the unwrap and the deposit are simulated together and each is proven from its own events.
       const unwrap = route.source.unwrap ?? null, pin = unwrap ? wrappedNativeOf(f.source.chain, unwrap.token) ?? fail('UNIVERSAL_UNEXPECTED_CONTRACT') : null;
+      // Review P2: the owner already holds this input as ETH after their own unwrap. A fresh route that no longer takes native ETH for it cannot be
+      // paid from what the owner now holds: refused with a code that says so (the ETH stays in the owner's wallet), never a misleading balance error.
+      if (unwrapped && !pin) fail('UNIVERSAL_UNWRAP_DONE_ROUTE_CHANGED');
       if (pin) await evm.evmCodeSha256(rpc, pin.address, at);
       const [balance, native, allowance, nonce] = await Promise.all([evm.evmBalance(rpc, owner, token, at), evm.evmBalance(rpc, owner, null, at),
         token && !pin ? evm.evmAllowance(rpc, token, owner, d.relayDepository, at) : Promise.resolve(null), rpc('eth_getTransactionCount', [owner, at]).then(evm.quantity)]);
@@ -511,7 +514,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         const route = record.review.route, pin = route.source.ecosystem === 'EVM' && route.source.unwrap ? wrappedNativeOf(route.sourceChain, route.source.unwrap.token) : null;
         if (!pin) fail('UNIVERSAL_UNEXPECTED_CONTRACT');
         try { assertUnwrapEffects(pin!, logs, record.owner, route.inputAmount); } catch { fail('UNIVERSAL_UNWRAP_MISMATCH'); }
-        return save(replaceAttempt({ ...record, error: null }, confirmed));
+        // Review P2: the burn alone does not prove the owner received the ETH. The owner's native balance across the unwrap's block must have
+        // risen by exactly the input minus the fee they paid; any other activity of the owner in that block hides it — recorded, never assumed.
+        const [before, after] = await Promise.all([evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber - 1)), evm.evmBalance(rpc, record.owner, null, evm.tag(facts.blockNumber))]);
+        const credited = after - before + facts.gasCostWei === BigInt(route.inputAmount);
+        if (!credited && after - before + facts.gasCostWei < 0n) fail('UNIVERSAL_UNWRAP_MISMATCH');
+        return save(replaceAttempt({ ...record, error: null }, { ...confirmed, ...credited ? {} : { note: 'UNIVERSAL_UNWRAP_NATIVE_CREDIT_NOT_ISOLATED' } }));
       }
       if (attempt.step === 'APPROVAL') {
         // Proof is the approval's own event: exactly the reviewed spender and amount. The allowance may already be consumed by another of the
@@ -675,6 +683,11 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     return { ok: true, final: true, delivery: { chainId: chain, transactionHash: hash, position: { kind: 'SLOT', height: check.slot }, blockHash: null, timestamp: check.timestamp,
       recipient, token: token.address ?? 'native', amount: check.amount.toString(), orderBound: check.orderBound, contentHash: check.contentHash } };
   }
+  /** The native coin of a chain as a route token (what an unwrapping order is paid, and refunded, in). */
+  const sourceNative = (chain: string): UniversalToken => {
+    const n = universalNetworkOfChain(chain)!.native;
+    return { chainId: chain, kind: 'NATIVE', address: null, decimals: n.decimals, symbol: n.symbol };
+  };
   async function findDelivery(record: UniversalRecord, h: ProviderStatusHint): Promise<{ delivery: DestinationDelivery } | { divergent: string } | { waiting: string }> {
     const route = record.review.route;
     let waiting = 'UNIVERSAL_DESTINATION_PENDING';
@@ -693,8 +706,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   /** A refund verified on chain: the order allows refunds to the owner on the source chain (input token) or to the recipient on the destination chain. */
   async function findRefund(record: UniversalRecord, h: ProviderStatusHint): Promise<UniversalRecord['refund']> {
     const route = record.review.route;
+    // Review P1: an order paid in native ETH after the owner's own unwrap is refunded in what was paid (native), never in the wrapped token.
+    const candidates: (readonly [string, string, UniversalToken])[] = [...route.source.ecosystem === 'EVM' && route.source.unwrap
+      ? [[route.sourceChain, route.depositor, sourceNative(route.sourceChain)] as const] : [], [route.sourceChain, route.depositor, route.inputToken],
+      [route.destinationChain, route.recipient, route.outputToken]];
     for (const hash of h.refundTxHashes) {
-      for (const [chain, recipient, token] of [[route.sourceChain, route.depositor, route.inputToken], [route.destinationChain, route.recipient, route.outputToken]] as const) {
+      for (const [chain, recipient, token] of candidates) {
         const network = universalNetworkOfChain(chain)!;
         if (network.ecosystem === 'EVM' ? !/^0x[0-9a-f]{64}$/.test(hash) : !/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(hash)) continue;
         let check: Credit;
@@ -768,7 +785,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const asset = (t: UniversalToken) => t.kind === 'NATIVE' ? { chainId: t.chainId, nativeId: universalNetworkOfChain(t.chainId)!.native.nativeId, decimals: t.decimals }
       : { chainId: t.chainId, address: t.address!, decimals: t.decimals };
     const networkFee = record.attempts.reduce((sum, x) => sum + (x.ecosystem === 'EVM' ? BigInt(x.receipt?.gasCostWei ?? '0') : BigInt(x.feeLamports ?? '0')), 0n);
-    const included = route.fees.filter(f => f.included && f.chainId === route.sourceChain && f.token === (route.inputToken.address ?? 'native')).reduce((s, f) => s + BigInt(f.amount), 0n);
+    // An unwrapping order was paid in native ETH: its included fees are native (review nit), never reported in the wrapped token.
+    const paidIn = route.source.ecosystem === 'EVM' && route.source.unwrap ? sourceNative(route.sourceChain) : route.inputToken;
+    const included = route.fees.filter(f => f.included && f.chainId === route.sourceChain && f.token === (paidIn.address ?? 'native')).reduce((s, f) => s + BigInt(f.amount), 0n);
     const transactions = [...record.attempts.filter(x => x.state === 'CONFIRMED' && x.transactionHash).map(x => ({ chain: route.sourceChain, step: x.step,
       transactionHash: x.transactionHash!, explorer: universalExplorerTx(route.sourceChain, x.transactionHash!, D) })),
       { chain: route.destinationChain, step: 'DELIVERY', transactionHash: destination.transactionHash, explorer: universalExplorerTx(route.destinationChain, destination.transactionHash, D) }];
@@ -780,7 +799,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       differences: [], reconciliation: {
         balances: [{ asset: asset(route.outputToken), amount: destination.amount }], allowances: [], debt: [], positions: [],
         fees: [{ asset: { chainId: route.sourceChain, nativeId: network.native.nativeId, decimals: network.native.decimals }, amount: networkFee.toString() },
-          { asset: asset(route.inputToken), amount: included.toString() }],
+          { asset: asset(paidIn), amount: included.toString() }],
         residualAssets: [], ownership: [{ chainId: route.sourceChain, address: record.owner }, { chainId: route.destinationChain, address: route.recipient }],
         limitations: [provenance === 'PUBLIC_MAINNET' ? 'PUBLIC_MAINNET_OWNER_EXECUTED' : 'MOCKED_CHAINS_ONLY',
           destination.orderBound ? 'DELIVERY_REFERENCES_ORDER_ON_CHAIN' : 'DELIVERY_REFERENCED_BY_PROVIDER_STATUS', 'SOURCE_AND_DESTINATION_FINAL',

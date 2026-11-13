@@ -11,13 +11,17 @@
  *           plus price × limit) is within the per-transaction cap; and use the reviewed recent blockhash;
  *   verify  the owner's signature over exactly that message (the sponsor's slot still empty: the owner's signature is never replaced);
  *   cosign  the sponsor's signature added in slot 0; the transaction is then complete and broadcast by the caller exactly once.
- * The budget and the sponsor's balance floor are the caller's (ledger) checks. Nothing here broadcasts.
+ * The budget (a ledger reservation BEFORE co-signing) and the sponsor's balance floor are the caller's checks. Nothing here broadcasts. Not wired
+ * into a Solana flow in this build (ADR-0009): no FloFi key co-signs any owner transaction today.
  */
 import { createPrivateKey, createPublicKey, sign as signBytes } from 'node:crypto';
 import { base58Decode, base58Encode, compileMessageV0, parseMessageV0, parseTransaction, serializeMessageV0, serializeSignedTransaction, solanaMessageHash, verifyEd25519,
   type LookupTables, type SolanaInstruction } from '@defi-workflow-engine/reference-compiler';
 
 export const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111';
+/** Signature-verification precompiles: their signatures are charged per signature verified, outside the fee bound computed here. */
+export const SIGNATURE_PRECOMPILES: readonly string[] = Object.freeze(['Ed25519SigVerify111111111111111111111111111', 'KeccakSecp256k11111111111111111111111111111',
+  'Secp256r1SigVerify1111111111111111111111111']);
 export const LAMPORTS_PER_SIGNATURE = 5_000n;
 const fail = (code: string): never => { throw new Error(code); };
 
@@ -62,7 +66,9 @@ export function assertSponsorableMessage(messageBytes: Uint8Array, policy: Spons
   if (message.blockhash !== policy.blockhash) fail('GAS_SPONSOR_SOLANA_BLOCKHASH_MISMATCH');
   // Address lookup tables could hide the sponsor in an instruction: a sponsored message carries none.
   if (message.lookups.length) fail('GAS_SPONSOR_SOLANA_LOOKUP_TABLES_REFUSED');
-  const allowed = new Set([COMPUTE_BUDGET_PROGRAM, ...policy.allowedPrograms]);
+  // The sponsor key appears exactly once (as the fee payer); a message naming it twice is never co-signed.
+  if (message.staticKeys.filter(k => k === policy.sponsor).length !== 1) fail('GAS_SPONSOR_SOLANA_SPONSOR_REFERENCED');
+  const allowed = new Set([COMPUTE_BUDGET_PROGRAM, ...policy.allowedPrograms.filter(p => !SIGNATURE_PRECOMPILES.includes(p))]);
   for (const ix of message.instructions) {
     if (!allowed.has(message.staticKeys[ix.programIdIndex] ?? '')) fail('GAS_SPONSOR_SOLANA_PROGRAM_NOT_ALLOWED');
     if (ix.accounts.includes(0) || ix.programIdIndex === 0) fail('GAS_SPONSOR_SOLANA_SPONSOR_REFERENCED');

@@ -6,7 +6,7 @@
  * aeWETH logs a `Transfer(holder → 0x0)` burn. Read-only and deterministic: nothing here reads a chain, signs or sends.
  */
 import { encodeWethWithdraw, toHex } from '@defi-workflow-engine/reference-compiler';
-import { ARBITRUM_MAINNET_SWAP, BASE_MAINNET_SWAP, ETHEREUM_MAINNET_SWAP, ROBINHOOD_MAINNET_SWAP } from '../../domain/public-testnet-swap';
+import { ARBITRUM_MAINNET_SWAP, BASE_MAINNET_SWAP, ETHEREUM_MAINNET_SWAP, ROBINHOOD_MAINNET_SWAP } from '../../domain/public-testnet-swap.ts';
 
 export type WrappedNative = { readonly chain: string; readonly address: string; readonly events: 'WETH9' | 'MINT_BURN' };
 const PINS: readonly WrappedNative[] = [BASE_MAINNET_SWAP, ARBITRUM_MAINNET_SWAP, ETHEREUM_MAINNET_SWAP, ROBINHOOD_MAINNET_SWAP]

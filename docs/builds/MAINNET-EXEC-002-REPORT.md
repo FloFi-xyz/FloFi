@@ -21,7 +21,7 @@ The Router run log of the refused attempt showed two independent false refusals 
 - `packages/workflow-contracts/src/network-fee.ts`: the reviewed L1 bound gets ×2 headroom; a call is accepted when its **total** network fee
   (`gasLimit × gasPrice + l1Fee`) is within the authorized maximum; reconciliation checks the charged total the same way. Nothing above the
   authorized maximum is ever sent.
-- `router.ts` `classifyRouteRevalidation`: `UNCHANGED` / `MARKET_DRIFT_TOLERATED` (provider fee within min(max(1, 25 % of the fee), the owner's
+- `router.ts` `classifyRouteRevalidation`: `UNCHANGED` / `MARKET_DRIFT_TOLERATED` (provider fee within min(max(1, 10 % of the fee), the owner's
   slippage share of the input), same route, recipients, assets and minimum) / `OUTSIDE_AUTHORIZED_BOUNDS` / `MATERIAL_CHANGE`. Tolerated
   drift executes the **reviewed** transaction (no substitution) and is noted `ROUTER_PROVIDER_FEE_DRIFT_TOLERATED`; only non-null recipients
   are compared.

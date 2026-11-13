@@ -20,6 +20,24 @@ let deployment: Promise<GasSponsorshipRuntime | null> | null = null;
 const deploymentRuntime = (env: Env) => deployment ??= platformStateHost(env).then(host => gasSponsorshipRuntime(env, () => sponsorshipStorage(host)))
   .catch(() => { deployment = null; return null; });
 
+/** The body as text, read no further than `limit` bytes (a body without a length is never buffered whole); null when larger. */
+async function boundedText(request: Request, limit: number): Promise<string | null> {
+  if (!request.body) return '';
+  const reader = request.body.getReader(), chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) { await reader.cancel().catch(() => undefined); return null; }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
 export async function handlePaymasterHttp(request: Request, env: Env = process.env,
   runtimeOf: (env: Env) => Promise<GasSponsorshipRuntime | null> = deploymentRuntime): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: HEADERS });
@@ -31,8 +49,8 @@ export async function handlePaymasterHttp(request: Request, env: Env = process.e
   if (!runtime) return rpcError(404, -32601, 'GAS_SPONSORSHIP_DISABLED');
   const declared = Number(request.headers.get('content-length') ?? '0');
   if (declared > MAX_BODY_BYTES) return rpcError(413, -32600, 'GAS_SPONSOR_REQUEST_TOO_LARGE');
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return rpcError(413, -32600, 'GAS_SPONSOR_REQUEST_TOO_LARGE');
+  const text = await boundedText(request, MAX_BODY_BYTES);
+  if (text === null) return rpcError(413, -32600, 'GAS_SPONSOR_REQUEST_TOO_LARGE');
   let body: unknown;
   try { body = JSON.parse(text); } catch { return rpcError(400, -32700, 'GAS_SPONSOR_REQUEST_INVALID'); }
   // One request at a time (no JSON-RPC batches): every sponsorship is decided and recorded on its own.

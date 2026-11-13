@@ -70,6 +70,10 @@ const MESSAGES: Readonly<Record<string, string>> = {
   UNIVERSAL_NO_EXECUTABLE_ROUTE: 'No provider returned a route FloFi can verify and execute for this bridge. See the routes found for the reasons.',
   UNIVERSAL_INSUFFICIENT_TOKEN: 'Your wallet needs more of the source asset for this bridge.', UNIVERSAL_INSUFFICIENT_NATIVE: 'Your wallet needs more of the source asset for this bridge.',
   UNIVERSAL_INSUFFICIENT_GAS: 'Your wallet needs more native coin on the source network for network fees.',
+  // BUILD-FLOFI-MAINNET-EXEC-002 (review): after the owner's own unwrap, a route that no longer takes ETH for this input cannot be paid.
+  UNIVERSAL_UNWRAP_DONE_ROUTE_CHANGED: 'Your WETH is already unwrapped to ETH in your wallet, but the provider now quotes this bridge only for WETH. Nothing else was sent; your ETH stays in your wallet. Start a new bridge from ETH, or wrap it again.',
+  UNIVERSAL_UNWRAP_REVERTED: 'The unwrap of your WETH failed on chain. Nothing was bridged; your WETH stays in your wallet.',
+  UNIVERSAL_SIMULATION_UNWRAP_REVERTED: 'The simulation of the WETH unwrap failed. Nothing was signed.',
   UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES: 'Your Solana wallet needs more SOL for the network fee.',
   UNIVERSAL_SIMULATION_UNAVAILABLE: 'The network provider cannot simulate this transaction right now. Nothing was signed.',
   UNIVERSAL_SIMULATION_DEPOSIT_REVERTED: 'The simulation of the bridge deposit failed. Nothing was signed.',

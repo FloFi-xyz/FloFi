@@ -163,7 +163,7 @@ async function prepareWalletBatch(deps: UserFundedDeps, requirement: WorkflowReq
   const maxFeePerGas = fees.gasPrice * 2n + fees.priority, maxCost = gas * maxFeePerGas + l1FeeUpperBound;
   // ADR-0009: FloFi's sponsorship offer for exactly these calls (null where no paymaster is configured, the day's budget is spent, or the offer
   // cannot be made now: the batch is then owner-paid, as always).
-  const offer = deps.sponsorship ? await deps.sponsorship.offer({ chain: g.chain, owner: group.owner, calls, ttlSeconds: EVM_PREPARED_TTL_MS / 1000,
+  const offer = deps.sponsorship ? await deps.sponsorship.offer({ chain: g.chain, owner: group.owner, calls, maxFeePerGas, gas, ttlSeconds: EVM_PREPARED_TTL_MS / 1000,
     preview: g.preview === true }).catch(() => null) : null;
   // Financial isolation: the owner's own native balance must cover the fee ceiling plus any native value sent; nobody else's ever does. With a
   // sponsorship offer it must still cover the native value: the offer is then REQUIRED (sent only sponsored, never owner-paid without the gas).
@@ -568,22 +568,31 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
   if (prepared.kind === 'EVM_WALLET_BATCH') {
     const hashes = (submission.hashes ?? []) as string[];
     // ADR-0009: the operations FloFi's paymaster sponsored under a preparation's grant (none: the batch can only reconcile as owner-paid).
-    const sponsoredBy = async (sponsor: Sponsor | null | undefined): Promise<SponsoredOperations | null> => {
-      const hashes = sponsor && deps.sponsorship ? await deps.sponsorship.operations(sponsor.grantId).catch(() => null) : null;
-      return sponsor && hashes ? { paymaster: sponsor.paymaster, userOpHashes: hashes } : null;
+    // A preparation with a grant whose operations cannot be read now (storage unavailable, or this process has no sponsorship port) decides
+    // nothing: the group stays PENDING (review P2), never UNMATCHED for want of a read.
+    const UNREADABLE = Symbol('UNREADABLE');
+    const sponsoredBy = async (sponsor: Sponsor | null | undefined): Promise<SponsoredOperations | null | typeof UNREADABLE> => {
+      if (!sponsor) return null;
+      if (!deps.sponsorship) return UNREADABLE;
+      let hashes: readonly string[] | null;
+      try { hashes = await deps.sponsorship.operations(sponsor.grantId); } catch { return UNREADABLE; }
+      return hashes ? { paymaster: sponsor.paymaster, userOpHashes: hashes } : null;
     };
     // "Not this preparation's batch": its calls or block differ, or (a preparation without sponsorship) a bundle the owner did not send — which an
     // earlier, sponsored preparation of the same group may still own.
     const notThis = (x: Awaited<ReturnType<typeof reconcileWalletBatch>>, ops: SponsoredOperations | null) =>
       x.status === 'MISMATCH' && (SUPERSEDED_MISMATCH.has(x.code) || x.code === 'GAS_PAYER_NOT_OWNER' && ops === null);
     const own = sponsorOf(prepared.sponsorship), ownOps = await sponsoredBy(own);
+    if (ownOps === UNREADABLE) return { status: 'PENDING' };
     let r = await reconcileWalletBatch(t, group, hashes, typeof prepared.fromBlock === 'string' ? prepared.fromBlock : null, ownOps),
       matched: EvmGroupCalls | null = null, grant = own?.grantId ?? null;
     // A batch the wallet sent under this group's id BEFORE the group was prepared again (its answer was lost, then the preparation expired)
     // carries that earlier preparation's calls: it reconciles against the artifact it was sent from (and is recorded with ITS signed amounts),
     // never as a mismatch of the newer one.
     for (const earlier of notThis(r, ownOps) ? supersededWalletBatches(prepared) : []) {
-      const ops = await sponsoredBy(earlier.sponsor), again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock, ops);
+      const ops = await sponsoredBy(earlier.sponsor);
+      if (ops === UNREADABLE) return { status: 'PENDING' };
+      const again = await reconcileWalletBatch(t, earlier.group, hashes, earlier.fromBlock, ops);
       if (!notThis(again, ops)) { r = again; matched = earlier.group; grant = earlier.sponsor?.grantId ?? null; break; }
     }
     // The fee the sponsor actually paid replaces its reserved worst case (accounting only: a failure keeps the reservation, never the outcome).

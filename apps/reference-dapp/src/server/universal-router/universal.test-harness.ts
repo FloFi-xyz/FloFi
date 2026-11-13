@@ -108,8 +108,9 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
       const full = { hash: h, from, to: tx.to.toLowerCase(), input: tx.data.toLowerCase(), value: tagN(Number(BigInt(tx.value))), nonce: tagN(nonce), chainId: tagN(d.chainId),
         gas: tagN(500_000), maxFeePerGas: tagN(Number(state.baseFee) * 2), maxPriorityFeePerGas: '0x0', type: '0x2' };
       const land = () => {
-        const result = execute(state, from, full.to, full.input, BigInt(tx.value));
+        // The block before keeps the state before this transaction (a historical read at N-1 never sees its effects).
         mine();
+        const result = execute(state, from, full.to, full.input, BigInt(tx.value));
         state.nonces.set(from, nonce + 1);
         state.native.set(from, (state.native.get(from) ?? 0n) - state.gasUsed * state.baseFee);
         const receipt: Receipt = { transactionHash: h, status: result.ok ? '0x1' : '0x0', blockNumber: tagN(state.head), blockHash: hash(state.head), from, to: full.to,
@@ -331,6 +332,7 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
   paidInNative?: (chainId: number, currency: string) => boolean }) {
   const status = new Map<string, Record<string, unknown>>(), quotes: Record<string, unknown>[] = [];
   let tamper: ((raw: Record<string, any>) => void) | null = null, refuse: string | null = null, expectedFactor = 10_000n; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let paidInNative = options.paidInNative;
   const network = (chainId: number) => Object.values(UNIVERSAL_NETWORKS).find(n => n.providers.relay.chainId === chainId)!;
   function quote(body: Record<string, any>): Record<string, unknown> { // eslint-disable-line @typescript-eslint/no-explicit-any
     if (refuse) return { __httpStatus: 400, __body: { message: refuse } };
@@ -340,7 +342,7 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
     const rate = options.rate?.(body.originCurrency, body.destinationCurrency) ?? 10n ** 18n;
     const expected = net * rate * 10n ** BigInt(outDec) / 10n ** BigInt(inDec) / 10n ** 18n * expectedFactor / 10_000n;
     const minimum = expected * (10_000n - slip) / 10_000n, deadline = Math.floor(options.now() / 1000) + (options.orderLifetimeSeconds?.() ?? 7 * 86_400);
-    const paidNative = options.paidInNative?.(body.originChainId, body.originCurrency) ?? false, payCurrency = paidNative ? NATIVE(S) : body.originCurrency;
+    const paidNative = paidInNative?.(body.originChainId, body.originCurrency) ?? false, payCurrency = paidNative ? NATIVE(S) : body.originCurrency;
     const orderData: RelayOrderData = { version: 'v1', solverChainId: 'base', solver: '0xf70da97812cb96acdf810712aa562db8dfa3dbef', salt: '0x' + randomBytes(32).toString('hex'),
       inputs: [{ payment: { chainId: SLUG(S), currency: payCurrency, amount: body.amount, weight: '1' },
         refunds: [{ chainId: SLUG(S), recipient: body.user, currency: payCurrency, minimumAmount: '0', deadline, extraData: '0x' }] }],
@@ -383,6 +385,8 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
   };
   return { http, quotes, setStatus: (requestId: string, value: Record<string, unknown>) => status.set(requestId, value),
     setTamper: (f: typeof tamper) => { tamper = f; }, setRefusal: (message: string | null) => { refuse = message; },
+    /** Whether Relay answers a currency with a native-paid order from now on (a provider changing its answer between two quotes). */
+    setPaidInNative: (f: typeof options.paidInNative) => { paidInNative = f; },
     /** Scales the next quotes' expected output (basis points of the normal rate), e.g. to make a re-quote worse than the reviewed minimum. */
     setExpectedFactor: (bps: bigint) => { expectedFactor = bps; } };
 }

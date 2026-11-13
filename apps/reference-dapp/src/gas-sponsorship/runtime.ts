@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { createPostgresLeaseStore, createPostgresLogStore, type Database } from '@defi-workflow-engine/cloud-runtime';
 import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { paymasterProxyUrl, readGasSponsorshipConfig, type GasSponsorshipConfig } from './config.ts';
+import { paymasterProxyUrl, readGasSponsorshipConfig } from './config.ts';
 import { callsHash, createGrantStore, createSponsorLedger } from './ledger.ts';
 import { handlePaymasterRpc, paymasterTransport, type JsonRpcRequest, type JsonRpcResponse, type PaymasterTransport } from './paymaster-service.ts';
 
@@ -24,7 +24,8 @@ export type SponsorshipOffer = { readonly grantId: string | null; readonly chain
 export type SponsorshipPort = {
   /** An offer for exactly these calls of this owner on this chain, or null when the chain is not sponsored. `preview`: no grant is created. */
   readonly offer: (input: { readonly chain: string; readonly owner: string; readonly calls: readonly { readonly target: string; readonly value: bigint; readonly data: string }[];
-    readonly ttlSeconds: number; readonly preview: boolean }) => Promise<SponsorshipOffer | null>;
+    /** The preparation's own fee ceiling per gas and simulated batch gas: a sponsored operation is never allowed more. */
+    readonly maxFeePerGas: bigint; readonly gas: bigint; readonly ttlSeconds: number; readonly preview: boolean }) => Promise<SponsorshipOffer | null>;
   /**
    * The operation hashes a grant sponsored, or null when the grant is unknown. Read from the durable grant alone: a process without the
    * sponsorship configuration (a worker) still reconciles a batch sponsored elsewhere; the paymaster it must name is pinned in the artifact.
@@ -33,8 +34,8 @@ export type SponsorshipPort = {
   /** Records the fee the sponsor actually paid for one of them (from the chain), on the grant's own network ledger. */
   readonly settle: (grantId: string, userOpHash: string, actualGasCost: bigint) => Promise<void>;
 };
+/** The proxy's runtime. It never exposes its configuration (the provider URL carries the provider's key). */
 export type GasSponsorshipRuntime = SponsorshipPort & {
-  readonly config: GasSponsorshipConfig;
   /** One ERC-7677 request to FloFi's paymaster proxy for `chainId`. */
   readonly paymaster: (chainId: number, request: JsonRpcRequest) => Promise<JsonRpcResponse>;
 };
@@ -59,7 +60,7 @@ function lazyState(storageOf: StorageOf, now: () => Date) {
 async function settleOn(state: ReturnType<ReturnType<typeof lazyState>>, grantId: string, userOpHash: string, actualGasCost: bigint): Promise<void> {
   const found = await state.grants.read(grantId), use = found?.uses.find(u => u.userOpHash === userOpHash.toLowerCase());
   if (!found || !use) throw new Error('GAS_SPONSOR_OPERATION_UNKNOWN');
-  await state.ledger.settle(found.grant.network, use.userOpHash, actualGasCost, use.userOpHash, new Date(use.at));
+  await state.ledger.settle(found.grant.network, grantId, actualGasCost, use.userOpHash, new Date(found.grant.createdAt));
 }
 
 /**
@@ -70,14 +71,14 @@ export function sponsorshipPort(env: Env, storageOf: StorageOf | null, options: 
   if (!storageOf) return null;
   const config = readGasSponsorshipConfig(env), now = options.now ?? (() => new Date()), state = lazyState(storageOf, now);
   return {
-    async offer({ chain, owner, calls, ttlSeconds, preview }) {
+    async offer({ chain, owner, calls, maxFeePerGas, gas, ttlSeconds, preview }) {
       const sponsor = config.enabled ? config.evm[chain] ?? null : null, url = paymasterProxyUrl(config, chain);
       if (!sponsor || !url) return null;
       const { grants, ledger } = state();
       // The day's budget already spent: no offer (the batch stays user-funded); the proxy re-checks the exact cost when the wallet asks.
       if (await ledger.spentToday(chain) + sponsor.maxWeiPerOp > sponsor.dailyBudgetWei) return null;
       if (preview) return { grantId: null, chain, paymaster: sponsor.paymaster, url, context: null };
-      const grant = await grants.create({ network: chain, owner, callsHash: callsHash(calls), ttlSeconds });
+      const grant = await grants.create({ network: chain, owner, callsHash: callsHash(calls), maxFeePerGas, callGasLimit: gas, ttlSeconds });
       return { grantId: grant.id, chain, paymaster: sponsor.paymaster, url, context: { flofiGrant: grant.id } };
     },
     async operations(grantId) {
@@ -95,7 +96,7 @@ export function gasSponsorshipRuntime(env: Env, storageOf: StorageOf | null, opt
   const now = options.now ?? (() => new Date()), state = lazyState(storageOf, now), port = sponsorshipPort(env, storageOf, options)!;
   const transport = options.transport ?? paymasterTransport();
   return {
-    ...port, config,
+    ...port,
     async paymaster(chainId, request) {
       const sponsor = config.evm[`eip155:${chainId}`] ?? null;
       if (!sponsor) return { jsonrpc: '2.0', id: request.id ?? null, error: { code: -32602, message: 'GAS_SPONSOR_CHAIN_UNEXPECTED' } };

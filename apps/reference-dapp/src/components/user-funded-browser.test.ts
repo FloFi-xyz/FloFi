@@ -134,7 +134,8 @@ describe('sendWalletBatch', () => {
       expect(sentWith()).toEqual([{ paymasterService: { url: offer.url, context: offer.context, optional: true } }]);
       const params = ((wallet.answers.wallet_sendCalls as Mock).mock.calls[0]![0] as unknown[])[0] as { calls: unknown[] };
       expect(params.calls).toEqual(request.calls);
-      expect(wallet.log).toEqual(['eth_chainId', 'eth_accounts', 'wallet_getCapabilities', 'onSending', 'wallet_sendCalls']);
+      // The account check stays the last read before the wallet is asked to send.
+      expect(wallet.log).toEqual(['eth_chainId', 'wallet_getCapabilities', 'eth_accounts', 'onSending', 'wallet_sendCalls']);
     });
     it('a wallet without it (or that cannot say) gets the plain owner-paid batch; a wallet refusing the capability (5700) gets it once more without', async () => {
       wallet.answers.wallet_getCapabilities = () => ({ '0x2105': { atomic: { status: 'supported' } } });

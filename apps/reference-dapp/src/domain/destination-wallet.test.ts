@@ -14,7 +14,7 @@ import { createRouterNode, routerDetails } from './router-authoring';
 import { universalBridgeDetails } from './universal-bridge-authoring';
 
 const context = createBaseSepoliaReviewContext();
-const PHANTOM = '8xYk2PvDDaGkR9ZnAwzXeVGkXzW1sTdQfWw3mVdKk2P', FLOFI_SOL = '7mAQ2pYQnV8uE5k1R1X1kbtYkZy4b7r2vZKk3Wfp9R', SAVED_SOL = 'HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH';
+const PHANTOM = '8xYk2PvDDaGkR9ZnAwzXeVGkXzW1sTdQfWw3mVdKk2P', FLOFI_SOL = 'BrDmMFX2tb7nNy5EmSm6DTzCWYCc2NkufZ1MK2PYWDp3', SAVED_SOL = 'HN7cABqLq46Es1jh92dQQisAq662SmxELLLsHHe4YWrH';
 const METAMASK = '0x4b212af0a923256961487ae72499ca79f920b3ce';
 const wallet = (ecosystem: 'evm' | 'solana', address: string, providerName: string, source: DestinationCandidate['source']): DestinationCandidate => ({ ecosystem, address, providerName, source });
 
@@ -34,6 +34,13 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 destination wallet resolution', () => {
     expect(resolveDestinationWallet('solana', { session: [], account: [wallet('solana', PHANTOM, 'Phantom', 'ACCOUNT'), wallet('solana', PHANTOM, 'Phantom', 'ACCOUNT')], saved: [] }))
       .toMatchObject({ kind: 'RESOLVED' });
     expect(resolveDestinationWallet('solana', { session: [], account: [], saved: [] })).toEqual({ kind: 'NONE' });
+  });
+  it('review P2: a candidate is used only when its address is valid for the ecosystem, whatever its label says', () => {
+    // A saved entry labelled Solana that holds an EVM address (or garbage) is never filled in; the next valid wallet is.
+    const mislabelled = { session: [wallet('solana', METAMASK, 'Phantom', 'SESSION')], account: [wallet('solana', 'not-an-address', 'FloFi Wallet', 'ACCOUNT')],
+      saved: [wallet('solana', SAVED_SOL, 'Phantom', 'SAVED')] };
+    expect(resolveDestinationWallet('solana', mislabelled)).toMatchObject({ kind: 'RESOLVED', wallet: { address: SAVED_SOL, source: 'SAVED' }, alternatives: [] });
+    expect(resolveDestinationWallet('evm', { session: [wallet('evm', PHANTOM, 'MetaMask', 'SESSION')], account: [], saved: [] })).toEqual({ kind: 'NONE' });
   });
   it('checks a typed address for the destination network, naming the wrong kind of address', () => {
     expect(checkDestinationAddress('solana', PHANTOM)).toEqual({ ok: true, address: PHANTOM });

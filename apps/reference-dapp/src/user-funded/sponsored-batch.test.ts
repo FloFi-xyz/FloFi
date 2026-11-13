@@ -112,6 +112,21 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002: a sponsored owner wallet batch (ADR-0009
     expect((r as { gasPaid: { sponsored?: true } }).gasPaid.sponsored).toBeUndefined();
     expect(s.settled).toEqual([]);
   });
+  it('review P2: a grant that cannot be read now (storage down, or a process without the sponsorship port) keeps the group PENDING, never UNMATCHED', async () => {
+    const s = setup(), p = await prepared(s);
+    const tx = s.chain.control.sponsoredOperation(OWNER, evmCallsOf(p.group), { userOpHash: OP_HASH, paymaster: PAYMASTER, bundler: BUNDLER, actualGasCost: 7n });
+    const down = { ...s.deps, sponsorship: { ...s.deps.sponsorship!, operations: async () => { throw new Error('GAS_SPONSOR_BUSY'); } } };
+    expect(await reconcileEvmGroup(down, p, { hashes: [tx] })).toEqual({ status: 'PENDING' });
+    const { sponsorship: _port, ...without } = s.deps; void _port;
+    expect(await reconcileEvmGroup(without, p, { hashes: [tx] })).toEqual({ status: 'PENDING' });
+    // Once it can be read, the same batch reconciles.
+    expect(await reconcileEvmGroup(s.deps, p, { hashes: [tx] })).toMatchObject({ status: 'RECONCILED', gasPaid: { sponsored: true } });
+  });
+  it('a self-bundling wallet (the owner sends the bundle to the EntryPoint) reconciles through the sponsored operation too', async () => {
+    const s = setup(), p = await prepared(s);
+    const tx = s.chain.control.sponsoredOperation(OWNER, evmCallsOf(p.group), { userOpHash: OP_HASH, paymaster: PAYMASTER, bundler: OWNER, actualGasCost: 11n });
+    expect(await reconcileEvmGroup(s.deps, p, { hashes: [tx] })).toMatchObject({ status: 'RECONCILED', gasPaid: { payer: PAYMASTER, amount: '11', sponsored: true } });
+  });
   it('a re-preparation keeps the earlier grant, so a sponsored batch of the earlier preparation still reconciles against it', async () => {
     const s = setup(), first = await prepared(s);
     const history = supersede(first);
