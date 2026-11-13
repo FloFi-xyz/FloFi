@@ -9,7 +9,7 @@ import { assertMessageRoundTrip, assertSolanaSwapReview, verifySignedSolanaSwap,
   rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapArtifactHash, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySolanaCluster,
   type RawSolanaAccount, type SolanaBalances, type SolanaRouteStep, type SolanaRpc, type SolanaSwapQuote, type SolanaSwapSimulation } from './solana-swap.js';
 import { assertKoraMessage, assertKoraQuote, koraAta, koraPaidAccountCreation, koraPaymentInstruction, unsignedTransactionBytes, KORA_BASE_FEE_LAMPORTS,
-  KORA_JUPITER_MAX_ACCOUNTS, KORA_MAX_COMPUTE_UNIT_PRICE, KORA_MECHANISM, KORA_TOKEN_PROGRAM, type KoraFeeToken, type KoraGasTerms, type KoraPort } from './kora.js';
+  KORA_JUPITER_MAX_ACCOUNTS, KORA_MAX_COMPUTE_UNIT_PRICE, KORA_MECHANISM, KORA_TOKEN_PROGRAM, type KoraBuildOptions, type KoraFeeToken, type KoraGasTerms, type KoraPort } from './kora.js';
 export { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 export type { SolanaToken, SolanaTokenSymbol } from '@defi-workflow-engine/action-registry';
 // Shared Solana swap core, re-exported under its BUILD-014 import path.
@@ -276,7 +276,8 @@ export function koraFeeTokenOrder(tokens: readonly KoraFeeToken[], inputMint: st
  * the rent of the owner's ATA creations (charged in the token fee), caps the priority fee, and ends with the owner's repayment `TransferChecked`
  * of exactly the quoted amount. Never signs or sends; refusals are closed `KORA_*` codes.
  */
-export async function simulateKoraJupiterSwap(workflow: SemanticWorkflow, ownerInput: string, http: JupiterHttp, rpc: SolanaRpc, kora: KoraPort, now = Date.now()): Promise<JupiterReview> {
+export async function simulateKoraJupiterSwap(workflow: SemanticWorkflow, ownerInput: string, http: JupiterHttp, rpc: SolanaRpc, kora: KoraPort, now = Date.now(),
+  options: KoraBuildOptions = {}): Promise<JupiterReview> {
   const intent = jupiterIntent(workflow, ownerInput), owner = intent.owner;
   const fetchedAt = new Date(now).toISOString();
   const [cluster, build, tokensRead] = await Promise.allSettled([verifySolanaCluster(rpc, profile.genesisHash),
@@ -301,7 +302,7 @@ export async function simulateKoraJupiterSwap(workflow: SemanticWorkflow, ownerI
   // input) keeps the native message. Only a provable shortfall continues.
   const nativeWorstCase = BigInt(estimateFee(profile.maximumComputeUnits, inspection.computeUnitPrice, profile.baseFeeLamports)) +
     (!intent.output.native && pre.output === null ? rent : 0n) + (inspection.wrappedSolAccount ? rent : 0n) + (intent.input.native ? amount : 0n);
-  if (BigInt(pre.ownerLamports) >= nativeWorstCase) fail('KORA_NATIVE_COVERS');
+  if (!options.groupShortfall && BigInt(pre.ownerLamports) >= nativeWorstCase) fail('KORA_NATIVE_COVERS');
   const price = BigInt(inspection.computeUnitPrice) > KORA_MAX_COMPUTE_UNIT_PRICE ? KORA_MAX_COMPUTE_UNIT_PRICE : BigInt(inspection.computeUnitPrice);
   // Kora pays the rent of the ATAs the owner would have paid (the output account, the temporary wrapped-SOL account): it charges it in the fee.
   const body = [...setComputeUnitPrice(price.toString()), ...parsed.setup.map(ix => koraPaidAccountCreation(ix, owner, kora.feePayer)), parsed.swap,

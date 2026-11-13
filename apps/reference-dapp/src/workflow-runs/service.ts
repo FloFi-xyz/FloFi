@@ -594,9 +594,13 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   /** Always the run's own wallet on this network (S1). */
   readonly feePayer: string;
   /** The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. */
-  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED' } | null;
+  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED';
+    /** ADR-0010 §4: the owner pays the network fee in this token (`unit` 'token', `amount` in its base units), through Pimlico's Kora fee payer. */
+    readonly token?: { readonly symbol: string; readonly decimals: number } } | null;
   /** Network fees actually paid, from the chain (null until reconciled). */
-  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true } | null;
+  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true;
+    /** ADR-0010: what the owner repaid in a token for the fee `payer` fronted (base units), proven from the same transactions. */
+    readonly paidInToken?: { readonly amount: string; readonly symbol: string; readonly decimals: number } } | null;
   /** Transactions of the group (public hashes / signatures only, never bytes): what was sent and reconciled. Named like a step's `submissions`. */
   readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
@@ -660,8 +664,15 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
   };
   const groups: RunGroupView[] = groupRecords.map(g => {
-    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null } } | null)?.fee;
-    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean } } | null)?.gasPaid ?? null;
+    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null;
+      token?: { symbol?: unknown; decimals?: unknown } } } | null)?.fee;
+    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean;
+      paidInToken?: { amount?: unknown; symbol?: unknown; decimals?: unknown } } } | null)?.gasPaid ?? null;
+    // ADR-0010 §4: a token-paid fee (Pimlico Kora) names its token; anything malformed is never shown as a native amount.
+    const feeToken = fee?.unit === 'token' && typeof fee.token?.symbol === 'string' && Number.isSafeInteger(fee.token.decimals)
+      ? { symbol: fee.token.symbol, decimals: fee.token.decimals as number } : null;
+    const paidToken = paid?.paidInToken && typeof paid.paidInToken.amount === 'string' && typeof paid.paidInToken.symbol === 'string' && Number.isSafeInteger(paid.paidInToken.decimals)
+      ? { amount: paid.paidInToken.amount, symbol: paid.paidInToken.symbol, decimals: paid.paidInToken.decimals as number } : null;
     // Reconciled transactions first; before that, what was sent (a Solana group's signatures are known before sending: listed only once reconciled).
     // An owner-step group's outcome lists its steps' own {chain, hash} records; a relayed group lists hashes on its own chain.
     const recorded = (g.outcome as { transactions?: readonly unknown[] } | null)?.transactions
@@ -674,10 +685,12 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
       // Requesters see that the owner's wallet pays, never which wallet, its batch id or its fees; shared status adds hashes and the gas amount.
       code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: owner ? g.feePayer : 'OWNER_WALLET',
-      maxFee: owner && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false, ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {} } : null,
-      // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet).
+      maxFee: owner && fee?.maxCost && fee.unit && (fee.unit !== 'token' || feeToken) ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false,
+        ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {}, ...feeToken ? { token: feeToken } : {} } : null,
+      // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet). ADR-0010: a fee the
+      // owner repaid in a token carries that amount (the payer is then the relayer that fronted the SOL, never FloFi).
       gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : paid.sponsored ? 'FLOFI_PAYMASTER' : 'OWNER_WALLET',
-        ...paid.sponsored ? { sponsored: true as const } : {} } : null,
+        ...paid.sponsored ? { sponsored: true as const } : {}, ...paidToken ? { paidInToken: paidToken } : {} } : null,
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,

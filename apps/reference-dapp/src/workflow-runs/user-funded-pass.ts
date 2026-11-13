@@ -171,11 +171,20 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   let r: Reconciled;
   try {
     if (g.strategy === 'SOLANA_SIGN_ALL') {
-      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner);
-      if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, false, step.code);
-      if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...submission, hashes: (submission.hashes as string[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
+      // ADR-0010 §4: a Kora group records each Kora call before it is made and each verified answer (the transaction id) as it arrives, on the
+      // group's own submission (compare-and-set on the group's version: a concurrent pass never overwrites what it did not see).
+      let latest = submission, version = g.version;
+      const persist = async (next: Readonly<Record<string, unknown>>) => {
+        const written = await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'SUBMITTED', { submission: next }, 'GROUP_KORA_RELAY', version);
+        if (!written) return false;
+        latest = next; version = written.version;
+        return true;
+      };
+      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner, submission, persist);
+      if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, latest !== submission, step.code);
+      if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...latest, hashes: (latest.hashes as (string | null)[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
-      else r = await reconcileSolanaGroup(deps.userFunded, prepared, submission, g.chain, g.feePayer);
+      else r = await reconcileSolanaGroup(deps.userFunded, prepared, latest, g.chain, g.feePayer);
     } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization, run.owner);
   } catch (cause) {
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'RECONCILIATION_FAILED';

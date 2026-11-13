@@ -68,6 +68,13 @@ const units = (amount: string, unit: string, round: 'down' | 'up' = 'down') => {
   const whole = shown / 10n ** BigInt(d), frac = (shown % 10n ** BigInt(d)).toString().padStart(d, '0').slice(0, 6).replace(/0+$/, '');
   return `${whole}${frac ? '.' + frac : ''} ${symbol}`;
 };
+/** A token amount the owner pays (ADR-0010), exact: no rounding in the owner's favour. */
+const tokenUnits = (amount: string, token: { readonly symbol: string; readonly decimals: number }) => {
+  if (!/^(0|[1-9][0-9]*)$/.test(amount) || !Number.isSafeInteger(token.decimals) || token.decimals < 0 || token.decimals > 36) return `— ${token.symbol}`;
+  const padded = amount.padStart(token.decimals + 1, '0'), whole = token.decimals ? padded.slice(0, -token.decimals) : padded;
+  const fraction = token.decimals ? padded.slice(-token.decimals).replace(/0+$/, '') : '';
+  return `${whole}${fraction ? `.${fraction}` : ''} ${token.symbol}`;
+};
 /** "Steps 2–3" or "Step 2": a single-step group is never "Steps 3–3". */
 const stepsOf = (tr: (key: string, ...args: string[]) => string, from: number, to: number) => from === to ? tr('Step {0}', String(from + 1)) : tr('Steps {0}–{1}', String(from + 1), String(to + 1));
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
@@ -414,11 +421,15 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           : tr(stateText(GROUP_STATE, g))}</span>
         {g.gasPaid?.sponsored || g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
         {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}</span>}
-        {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
+        {/* ADR-0010 §4: a fee the owner pays in a token through Pimlico's Kora fee payer names the token and who receives it. */}
+        {g.maxFee?.token && !g.gasPaid && <span className="muted">{tr('Network fee, at most {0} · paid from your {1} to Pimlico',
+          tokenUnits(g.maxFee.amount, g.maxFee.token), g.maxFee.token.symbol)}</span>}
+        {g.maxFee && !g.maxFee.token && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
         {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</span>}
         {g.gasPaid && <span className="muted">{g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
+          : g.gasPaid.paidInToken ? tr('Network fees paid: {0} from your wallet to Pimlico', tokenUnits(g.gasPaid.paidInToken.amount, g.gasPaid.paidInToken))
           : tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
         {g.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}

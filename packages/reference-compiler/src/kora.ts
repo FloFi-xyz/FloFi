@@ -55,6 +55,12 @@ export type KoraGasTerms = { readonly mechanism: typeof KORA_MECHANISM; readonly
   /** The worst-case native cost the owner's SOL did not cover at Review: once the owner holds it, the policy picks native again (a new Review). */
   readonly nativeWorstCaseLamports: string };
 
+/**
+ * `groupShortfall`: the native shortfall was proven for the whole execution group (the owner's SOL cannot pay every transaction of a sign-all
+ * group, ADR-0010 §2: the mechanism is chosen per execution group), so this member is built with Kora even if its own native cost alone fits; the
+ * caller proves the group shortfall with the members' `nativeWorstCaseLamports`.
+ */
+export type KoraBuildOptions = { readonly groupShortfall?: boolean };
 const fail = (code: string): never => { throw new Error(code); };
 export const koraAta = (wallet: string, mint: string) => associatedTokenAddress(wallet, mint, KORA_TOKEN_PROGRAM, KORA_ASSOCIATED_TOKEN_PROGRAM);
 

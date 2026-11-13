@@ -24,6 +24,7 @@ import { bundlerRpc, createBundlerClient, type BundlerClient } from './bundler.t
 import { readUserFundedConfig } from './config.ts';
 import type { UserFundedDeps } from './groups.ts';
 import { sponsorshipPort, sponsorshipStorage } from '../gas-sponsorship/runtime.ts';
+import { koraGasForFlow } from '../gas-abstraction/kora/runtime.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type UserFundedRuntime = { readonly facts: UserFundedFacts; readonly deps: UserFundedDeps | null };
@@ -84,6 +85,8 @@ export function userFundedRuntime(env: Env, fetchImpl: typeof fetch = fetch, hos
       return payer.ok ? null : payer.code;
     },
     solana: solanaUrl ? createSolanaRpc(solanaUrl, false) : null,
-    jupiter: solanaEnabled ? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY) : null, now: () => new Date() };
+    jupiter: solanaEnabled ? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY) : null, now: () => new Date(),
+    // ADR-0010 §4: Pimlico's Kora fee payer for Solana groups the owner's SOL cannot pay (FLOFI_KORA_TOKEN_GAS=enabled; the public endpoint only).
+    kora: solanaEnabled ? koraGasForFlow(env, false) : null };
   return { facts, deps };
 }

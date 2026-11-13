@@ -20,7 +20,7 @@ import { associatedTokenAddress, base58Encode, compileMessageV0, fromBase64, rea
 import { assertMessageRoundTrip, readSolanaAccounts, rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapArtifactHash,
   solanaSwapHash, solanaRecord, decodeRpcAccount, verifySignedSolanaSwap, verifySolanaCluster, type RawSolanaAccount, type SignedSolanaTransaction, type SolanaRpc } from './solana-swap.js';
 import { assertKoraMessage, assertKoraQuote, koraAta, koraPaidAccountCreation, koraPaymentInstruction, unsignedTransactionBytes, KORA_MAX_COMPUTE_UNIT_PRICE, KORA_MECHANISM,
-  KORA_TOKEN_PROGRAM, type KoraFeeToken, type KoraGasTerms, type KoraPort } from './kora.js';
+  KORA_TOKEN_PROGRAM, type KoraBuildOptions, type KoraFeeToken, type KoraGasTerms, type KoraPort } from './kora.js';
 import { parseMessageV0 } from './solana.js';
 
 export { SOLANA_TRANSFER_PROFILES, SOLANA_MAINNET_TRANSFER, SOLANA_DEVNET_TRANSFER, solanaTransferProfile, solanaTransferAsset } from '@defi-workflow-engine/action-registry';
@@ -385,7 +385,8 @@ export function verifySignedSolanaTransfer(review: Pick<SolanaTransferReview, 'm
  * (`KORA_OPERATION_UNSUPPORTED`). Kora pays the fee and the recipient account's rent (charged in the token fee); the owner's SOL account may not
  * even exist. The message ends with the owner's repayment `TransferChecked` of exactly the quoted amount. Never signs or sends.
  */
-export async function simulateKoraSolanaTransfer(workflow: SemanticWorkflow, ownerInput: string, rpc: SolanaRpc, kora: KoraPort, now = Date.now()): Promise<SolanaTransferReview> {
+export async function simulateKoraSolanaTransfer(workflow: SemanticWorkflow, ownerInput: string, rpc: SolanaRpc, kora: KoraPort, now = Date.now(),
+  options: KoraBuildOptions = {}): Promise<SolanaTransferReview> {
   const intent = solanaTransferIntent(workflow, ownerInput), { profile, owner, recipient } = intent;
   if (!profile.realFunds || !intent.fields.token) koraFail('KORA_OPERATION_UNSUPPORTED');
   await verifySolanaCluster(rpc, profile.genesisHash).catch((cause: unknown) => fail('WRONG_CLUSTER', cause));
@@ -402,7 +403,7 @@ export async function simulateKoraSolanaTransfer(workflow: SemanticWorkflow, own
   // reserve. An owner whose SOL covers them keeps the native message.
   const nativeWorstCase = 5_000n + (BigInt(profile.maximumComputeUnits) * BigInt(profile.computeUnitPriceMicroLamports) + 999_999n) / 1_000_000n +
     BigInt(depositRead as number) + BigInt(state.rentExemptMinimum);
-  if (BigInt(state.ownerLamports) >= nativeWorstCase) koraFail('KORA_NATIVE_COVERS');
+  if (!options.groupShortfall && BigInt(state.ownerLamports) >= nativeWorstCase) koraFail('KORA_NATIVE_COVERS');
   const price = BigInt(profile.computeUnitPriceMicroLamports) > KORA_MAX_COMPUTE_UNIT_PRICE ? KORA_MAX_COMPUTE_UNIT_PRICE.toString() : profile.computeUnitPriceMicroLamports;
   type Payment = Pick<KoraGasTerms, 'feeAccount' | 'paymentAccount' | 'token'>;
   const body = solanaTransferInstructions(intent, token).map(ix => koraPaidAccountCreation(ix, owner, kora.feePayer));

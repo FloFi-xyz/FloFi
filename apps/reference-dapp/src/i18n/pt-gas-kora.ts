@@ -8,6 +8,9 @@ export const portugueseGasKora: Readonly<Record<string, string>> = {
   'Paid from your {0} to Pimlico.': 'Paga com os seus {0} à Pimlico.',
   'Paid from your USDC to Pimlico.': 'Paga com os seus USDC à Pimlico.',
   'Paid from your USDT to Pimlico.': 'Paga com os seus USDT à Pimlico.',
+  // /approve run panel: a sign-all Solana group whose network fees the owner pays in a token.
+  'Network fee, at most {0} · paid from your {1} to Pimlico': 'Taxa de rede, no máximo {0} · paga com os seus {1} à Pimlico',
+  'Network fees paid: {0} from your wallet to Pimlico': 'Taxas de rede pagas: {0} da sua carteira à Pimlico',
   // Technical details (protocol facts, collapsed).
   'Network fee payer (Pimlico)': 'Pagador da taxa de rede (Pimlico)',
   'Network fee payment address': 'Endereço de pagamento da taxa de rede',
