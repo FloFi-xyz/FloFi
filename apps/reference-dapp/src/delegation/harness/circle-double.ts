@@ -88,6 +88,9 @@ export function createCircleDouble(evm: EvmDouble, options: CircleDoubleOptions)
     if (erc4337.OWNER_ACCOUNT_KINDS[kind].entryPoint !== ep) return refuse('AA23 reverted: not from EntryPoint');
     const { key, sequence } = erc4337.userOpNonceParts(op.nonce);
     if ((entryPointNonces.get(nonceKey(ep, sender, key)) ?? 0n) !== sequence) return refuse('AA25 invalid account nonce');
+    // Both pinned accounts validate with OpenZeppelin's ECDSA.recover: a malformed or high-s signature REVERTS (estimation included); a canonical
+    // one of another key only fails validation (tolerated by estimation, refused on send).
+    try { erc7710.recoverDigestSigner(erc4337.userOpHashFor(op, chainId, ep), op.signature); } catch { return refuse('AA23 reverted: ECDSAInvalidSignature'); }
     if (send) {
       const valid = kind === 'SIMPLE_7702_V0_8' ? erc4337.verifyOwnerUserOpSignatureV08(chainId, op, op.signature, ep) : erc4337.verifyOwnerUserOpSignature(chainId, op, op.signature, ep);
       if (!valid) return refuse('AA24 signature error');

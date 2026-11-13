@@ -145,8 +145,13 @@ async function entryPointSequence(rpc: Rpc, entryPoint: string, owner: string, k
 // ── Phase 1: eligibility, the operation's conservative limits, the cap and the permit ────────────────────────────────────────
 /** Conservative phase-1 limits (the final ones come from the bundler's estimate of the operation WITH the signed permit, phase 2). */
 export const CIRCLE_PHASE1 = Object.freeze({ accountVerificationGas: 250_000n, preVerificationGas: 150_000n, callGasPaddingPercent: 130n, callGasExtra: 50_000n });
-/** A well-formed 65-byte ECDSA signature that recovers to nobody: the bundler estimates the final operation before the owner signs it. */
-const ESTIMATION_SIGNATURE = '0x' + 'ff'.repeat(32) + '7f' + 'ff'.repeat(31) + '1c';
+/**
+ * The bundler estimates the final operation before the owner signs it, so it carries a stub signature: a canonical (r < n, low-s) 65-byte ECDSA
+ * signature that recovers to an unrelated address — both pinned accounts validate with OpenZeppelin's `ECDSA.recover`, which REVERTS on a malformed
+ * or high-s signature but returns that address for this one (SIG_VALIDATION_FAILED, which estimation tolerates). viem 2.57.8's
+ * `toSimple7702SmartAccount.getStubSignature()` value.
+ */
+export const CIRCLE_ESTIMATION_SIGNATURE = '0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c';
 export type CircleAttemptInput = {
   readonly runId: string; readonly groupIndex: number; readonly chain: string; readonly strategy: GroupStrategy; readonly wallet?: 'INJECTED' | 'FLOFI_WALLET';
   /** The wallet batch's exact calls (deadline-bounded), its whole-batch simulation and simulated gas. */
@@ -252,7 +257,7 @@ export async function finalizeCirclePermit(deps: CircleRuntimeDeps, prepared: Re
   if (nonce !== 'OK') return no(nonce === 'MOVED' ? 'CIRCLE_PERMIT_EXPIRED' : 'USER_FUNDED_RPC_UNAVAILABLE');
   const signed: CircleFacts = { ...c, permitSignature: signature };
   let estimate: Awaited<ReturnType<NonNullable<typeof bundler.estimateCircle>>>;
-  try { estimate = await bundler.estimateCircle({ ...circleOperationOf(signed, owner), signature: ESTIMATION_SIGNATURE }, c.entryPoint); }
+  try { estimate = await bundler.estimateCircle({ ...circleOperationOf(signed, owner), signature: CIRCLE_ESTIMATION_SIGNATURE }, c.entryPoint); }
   catch (cause) { return no(codeOf(cause, 'CIRCLE_PAYMASTER_REFUSED')); }
   const before = gasOf(c.gas), pmBefore = paymasterGasOf(c.gas);
   const atLeast = (estimated: bigint, floor: bigint) => estimated > floor ? estimated : floor;
