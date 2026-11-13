@@ -33,7 +33,14 @@ and never chosen by the policy below.
    each alternative that was considered carries its closed code (e.g. `CIRCLE_SMART_ACCOUNT_REQUIRED`, `KORA_FEE_TOKEN_BALANCE_INSUFFICIENT`,
    `ZEROX_GASLESS_APPROVAL_UNAVAILABLE`), so the Review says what is missing instead of a dead end.
 4. **Bound at Review, re-checked at authorization.** The chosen mechanism and its fee are part of what the owner reviews and signs; when the
-   policy would now pick another mechanism (ETH arrived or left), nothing switches silently: `GAS_MECHANISM_CHANGED_REVIEW_REQUIRED`.
+   policy would now pick another mechanism (ETH or SOL arrived or left), nothing switches silently: `GAS_MECHANISM_CHANGED_REVIEW_REQUIRED` (the
+   Editor offers *End and review again*; on `/approve` the group is planned again and simply authorized again). A Circle fee cap that rose since
+   the Review is shown next to the reviewed one and confirmed in place (`CIRCLE_FEE_CAP_ROSE_CONFIRM`) before anything is signed; a lower cap
+   goes straight to the wallet.
+5. **Later steps that still need native gas are said before the first signature.** A token-paid step can be followed, on the same chain, by a
+   step whose own flow has no token-fee option (Orca or Uniswap liquidity, a Robinhood bridge, a Relay Solana deposit). The Editor Review and the
+   `/approve` plan name those steps and the native token they need ("Later steps on Solana need SOL for their network fee: …"), so a run never
+   stops midway by surprise; the design itself is never cancelled.
 
 ### S1, second narrowing (`user-funded/gas-payer.ts`)
 
@@ -93,9 +100,36 @@ permit (an ERC-7677 server cannot produce it) and MetaMask does not implement it
 the owner paid = Σ USDC `Transfer(owner → paymaster)` − Σ `Transfer(paymaster → owner)` in that operation's receipt, excluded from the step legs;
 `GasPaidFact { payer: paymaster, amount: actualGasCost, paidInToken: { mechanism, token: USDC, amount } }`.
 
-**Not offered:** FloFi Wallet (an embedded EOA without a 7702 delegation), Coinbase Smart Wallet (EntryPoint v0.6), Robinhood Chain, delayed user
-operations signed upfront (a permit could be overtaken by a later permit of the same owner), and single-step pages (they keep native gas; the
-Editor's whole-workflow execution and `/approve` carry it).
+**Safety rules added by the review.** Circle is offered only when the bundler reports the EntryPoint the account needs
+(`CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED` otherwise, before any permit is asked); an operation is never (re)sent at or after its calls' on-chain
+deadline (a late send would revert while the paymaster still charges USDC: the group ends `CIRCLE_OPERATION_DEADLINE_PASSED`, nothing charged);
+a group carrying an Across deposit reconciles from the operation's own logs, so its bridge delivery is verified like a wallet batch's; plans never
+claim one interaction for a group whose fee Circle may pay.
+
+**FloFi Wallet (Privy embedded EOA).** Privy's embedded wallets sign EIP-7702 authorizations (`useSign7702Authorization`; external wallets are
+refused by the SDK) and typed data, but not EIP-5792 batches. FloFi Wallet can therefore use Circle v0.8 on Ethereum, Base and Arbitrum One by
+**upgrading its own address** to the pinned `Simple7702Account` v0.8 inside its first Circle operation: the operation carries the authorization
+(`eip7702Auth`, `0x7702` initCode marker) and the bundler includes it in its own type-4 transaction, so no ETH is needed. Rules: only when the
+account has no code (an account already delegated to the pinned delegate uses it; any other code is never replaced: `CIRCLE_ACCOUNT_UNSUPPORTED`);
+only the pinned delegate, the specific chain id (never 0) and the account's current nonce (no pending transaction: `CIRCLE_ACCOUNT_NONCE_PENDING`;
+re-checked before each signature: `CIRCLE_AUTHORIZATION_STALE`); FloFi's own explicit consent first, recorded server-side
+(`FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED` without it) — Privy shows no confirmation screen for an authorization, so FloFi's consent is the only
+place the owner reads what the upgrade does; three signatures on first use (upgrade, USDC permit, operation), two afterwards; reconciliation
+requires the account code to be `0xef0100 ‖ Simple7702Account` (`CIRCLE_DELEGATION_NOT_LANDED`). The upgrade stays after a failed operation
+(it is applied at the start of the bundler's transaction), as the consent says. FloFi Wallet's traditional owner-paid path is unchanged.
+
+**MetaMask on Ethereum: native ETH (provider/wallet limit, with evidence).** MetaMask's `EIP7702StatelessDeleGator` v1.3.0 takes its EntryPoint as
+an immutable constructor argument, includes it in its user-operation typehash and accepts `validateUserOp` only from it (`EIP7702DeleGatorCore.sol`
+l.50-57, l.116, l.147-162); the deployed implementation `0x63c0…e32b` is built for v0.7. Circle has no v0.7 paymaster on Ethereum. MetaMask exposes
+no dapp-requested EIP-7702 authorization to another delegate (only its own upgrade inside `wallet_sendCalls`), and its EIP-5792 middleware
+implements `atomic` and `auxiliaryFunds` only: a required `paymasterService` is refused with 5700 and an optional one ignored
+(`processSendCalls` l.421-485, `getCapabilities` l.111-129). Its own `alternateGasFees` (MetaMask's fee-token relay) is chosen inside MetaMask after
+FloFi hands over the batch — token, amount and relayer are not part of what FloFi reviews, so FloFi cannot bind or reconcile it (S1). What
+MetaMask would need: a v0.8 DeleGator, a dapp-requested authorization to a v0.8 account, or EIP-5792 `paymasterService` with an ERC-7677 permit
+flow. Until then MetaMask on Ethereum pays in ETH (Base and Arbitrum One work through the v0.7 paymaster).
+
+**Not offered:** Coinbase Smart Wallet (EntryPoint v0.6), Robinhood Chain, delayed user operations signed upfront (a permit could be overtaken by
+a later permit of the same owner), and single-step pages (they keep native gas; the Editor's whole-workflow execution and `/approve` carry it).
 
 ## 4. Pimlico hosted Kora (Solana)
 
@@ -109,11 +143,17 @@ valid payment: before `signAndSendTransaction` FloFi verifies, on the exact byte
 everything else, exactly one payment `TransferChecked` to the pinned payment ATA carries the reviewed amount, and the signer key appears in no
 other instruction except as `payer` of an associated-token-account creation (Kora then charges that rent in the token fee).
 
-**Identity.** The transaction id is the fee payer's signature, unknown until Kora signs. FloFi records the owner's signature and the signed bytes
+**Refusals and identity.** A Kora answer is a definitive refusal only when it is Kora's own JSON-RPC pre-signing validation error to the
+**first** call for those bytes; HTTP errors, -32603, rate limits and any answer after a lost call are unknown and the transaction is recovered by
+the owner's signature until its blockhash is provably expired at finalized height (the recovery scans only that slot window, page by page). The
+transaction id is the fee payer's signature, unknown until Kora signs. FloFi records the owner's signature and the signed bytes
 durably first, calls `signAndSendTransaction` with `respond_after: "signed"`, verifies the answer (same message, owner signature intact, pinned
 signer), records the transaction id, and broadcasts the same fully signed bytes itself through its own RPC (the existing single-broadcaster
 path). A lost answer is retried with the identical owner-signed bytes (ed25519 is deterministic: the same transaction, at most once), or
 recovered by scanning the owner's recent signatures for the owner's slot-1 signature until the blockhash expires.
+
+Group progress (attempts, Kora ids, adopted signatures) is stored beside the written-once submission, so PostgreSQL's immutability
+rule for submissions holds; transient RPC failures make a pass wait rather than mark the group uncertain.
 
 **Residual exposure (disclosed, bounded).** If a transaction that passed simulation fails on chain, its SOL fee is charged to the operator's
 Pimlico balance (the owner's token payment reverts with it). FloFi bounds it with the priority-fee cap and the existing slippage limits;
@@ -131,9 +171,18 @@ the sell token and amount, the spender = the genuine Settler read from 0x's regi
 recipient = owner, the buy token and a minimum output at least FloFi's slippage minimum; refuses a quote whose `fees.gasFee` is absent or zero
 (FloFi must never be the sponsor) or whose approval is unlimited without being shown as such.
 
+A 0x `failed` status before the signed deadline is shown as *uncertain* and still observed (only a deadline passed with the Permit2 nonce
+unused is final); a refused submit is *not submitted*; no new swap is simulated while a gasless attempt is unsettled. A Robinhood batch whose
+ETH is short and whose swaps 0x could carry halts with `USER_FUNDED_GASLESS_REQUIRES_STEP_MODE`; Resume runs those swaps as owner steps.
+
 **Not gasless (precise reasons, shown before anything is signed):** selling native ETH (`ZEROX_GASLESS_NATIVE_SELL_UNSUPPORTED`), a token without
 a gasless approval and without an existing Permit2 allowance (`ZEROX_GASLESS_APPROVAL_UNAVAILABLE`), no liquidity, a token 0x does not authorize
 for this integrator (Stock Tokens need 0x's tokenized-equity opt-in), and every non-swap step (transfers, bridges, liquidity) on Robinhood Chain.
+
+**Reference price.** FloFi keeps its own on-chain Uniswap v3 quote beside the 0x quote and refuses a 0x minimum below FloFi's slippage
+minimum net of the disclosed 0x fees (`ZEROX_QUOTE_WORSE_THAN_REFERENCE`); both appear in Technical details. A pair with no Uniswap route has no
+reference and is refused at Simulate in this build (a Stock Token only 0x can route is therefore not offered yet). The first trade action may be
+any of the Settler's `METATXN_*` actions, provided its permit words equal the signed permit.
 
 **Execution and reconciliation.** The submit is made once, only on the owner's explicit action, after the trade hash was recorded; a lost answer
 is observed by trade hash, never resubmitted. Status is a hint; the chain decides: the receipt of a status transaction, sent to the genuine

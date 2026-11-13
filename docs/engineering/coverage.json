@@ -1225,6 +1225,54 @@
     "app.workflow-runs.circle-gas-run.pg": {
       "path": "apps/reference-dapp/src/workflow-runs/circle-gas-run.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.components.editor-workflow-run-circle": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.circle.test.ts",
+      "stage": "unit"
+    },
+    "app.components.editor-workflow-run-token-fee": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.token-fee.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.kora-fee-visible": {
+      "path": "apps/reference-dapp/src/components/kora-fee-visible.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.workflow-run-panel-circle": {
+      "path": "apps/reference-dapp/src/components/workflow-run-panel.circle.test.tsx",
+      "stage": "unit"
+    },
+    "app.editor.workflow-execution-native-later": {
+      "path": "apps/reference-dapp/src/editor/workflow-execution-native-later.test.ts",
+      "stage": "unit"
+    },
+    "app.gas-abstraction.native-later": {
+      "path": "apps/reference-dapp/src/gas-abstraction/native-later.test.ts",
+      "stage": "unit"
+    },
+    "app.server.managed-signing-circle": {
+      "path": "apps/reference-dapp/src/server/managed-signing-circle.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.circle-bridge": {
+      "path": "apps/reference-dapp/src/user-funded/circle-bridge.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.circle-flofi-wallet": {
+      "path": "apps/reference-dapp/src/user-funded/circle-flofi-wallet.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.flofi-wallet-circle-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/flofi-wallet-circle-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.workflow-runs.kora-gas-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/kora-gas-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "reference-compiler.eip7702-upgrade": {
+      "path": "packages/reference-compiler/test/eip7702-upgrade.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1317,7 +1365,17 @@
     "app.user-funded.groups-kora",
     "app.wallet.flofi-solana-wallet-kora",
     "app.wallet.solana-wallet-kora",
-    "app.wallet.zeroex-gasless-signing"
+    "app.wallet.zeroex-gasless-signing",
+    "app.components.editor-workflow-run-circle",
+    "app.components.editor-workflow-run-token-fee",
+    "app.components.kora-fee-visible",
+    "app.components.workflow-run-panel-circle",
+    "app.editor.workflow-execution-native-later",
+    "app.gas-abstraction.native-later",
+    "app.server.managed-signing-circle",
+    "app.user-funded.circle-bridge",
+    "app.user-funded.circle-flofi-wallet",
+    "reference-compiler.eip7702-upgrade"
   ],
   "modules": [
     {
@@ -5259,7 +5317,8 @@
         "reference-compiler.erc4337",
         "reference-compiler.solana-nonce",
         "reference-compiler.circle-paymaster",
-        "reference-compiler.eip712"
+        "reference-compiler.eip712",
+        "reference-compiler.eip7702-upgrade"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
@@ -6968,7 +7027,8 @@
         "apps/reference-dapp/src/user-funded/bridge-delivery.ts",
         "apps/reference-dapp/src/user-funded/circle-facts.ts",
         "apps/reference-dapp/src/user-funded/circle-gas.ts",
-        "apps/reference-dapp/src/user-funded/gasless-groups.ts"
+        "apps/reference-dapp/src/user-funded/gasless-groups.ts",
+        "apps/reference-dapp/src/workflow-runs/owner-step-circle.ts"
       ],
       "suites": [
         "app.user-funded.groups",
@@ -6986,7 +7046,13 @@
         "app.user-funded.circle-gas",
         "app.user-funded.gasless-groups",
         "app.user-funded.groups-kora",
-        "app.workflow-runs.circle-gas-run.pg"
+        "app.workflow-runs.circle-gas-run.pg",
+        "app.components.editor-workflow-run-circle",
+        "app.components.workflow-run-panel-circle",
+        "app.user-funded.circle-bridge",
+        "app.user-funded.circle-flofi-wallet",
+        "app.workflow-runs.flofi-wallet-circle-run.pg",
+        "app.workflow-runs.kora-gas-run.pg"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
@@ -7057,7 +7123,8 @@
         "app.server.managed-signing-kora",
         "app.wallet.flofi-solana-wallet-kora",
         "app.wallet.solana-wallet-kora",
-        "app.wallet.zeroex-gasless-signing"
+        "app.wallet.zeroex-gasless-signing",
+        "app.server.managed-signing-circle"
       ],
       "gaps": [
         "Injected test wallets do not certify browser extension hardware/user ceremonies or real signatures; production delegated signing is unavailable.",
@@ -7511,7 +7578,8 @@
         "apps/reference-dapp/src/server/zeroex-gasless/quote.ts",
         "apps/reference-dapp/src/server/zeroex-gasless/swap.ts",
         "apps/reference-dapp/src/server/zeroex-gasless/transport.ts",
-        "apps/reference-dapp/src/server/testdata/zeroex/gasless-official-examples.json"
+        "apps/reference-dapp/src/server/testdata/zeroex/gasless-official-examples.json",
+        "apps/reference-dapp/src/gas-abstraction/native-later.ts"
       ],
       "suites": [
         "app.gas-abstraction.gas-abstraction",
@@ -7538,7 +7606,19 @@
         "app.wallet.flofi-solana-wallet-kora",
         "app.wallet.solana-wallet-kora",
         "app.wallet.zeroex-gasless-signing",
-        "app.workflow-runs.circle-gas-run.pg"
+        "app.workflow-runs.circle-gas-run.pg",
+        "app.components.editor-workflow-run-circle",
+        "app.components.editor-workflow-run-token-fee",
+        "app.components.kora-fee-visible",
+        "app.components.workflow-run-panel-circle",
+        "app.editor.workflow-execution-native-later",
+        "app.gas-abstraction.native-later",
+        "app.server.managed-signing-circle",
+        "app.user-funded.circle-bridge",
+        "app.user-funded.circle-flofi-wallet",
+        "app.workflow-runs.flofi-wallet-circle-run.pg",
+        "app.workflow-runs.kora-gas-run.pg",
+        "reference-compiler.eip7702-upgrade"
       ],
       "gaps": [
         "ADR-0010: token-paid network fees (Circle Paymaster, Pimlico Kora, 0x Gasless) are proven with deterministic loopback doubles only; no provider, bundler, wallet or mainnet is reached in CI, and no real-funds token-paid transaction has been recorded."
@@ -7590,6 +7670,8 @@
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
     "cloud-runtime.user-funded-groups-migration.pg",
-    "app.workflow-runs.circle-gas-run.pg"
+    "app.workflow-runs.circle-gas-run.pg",
+    "app.workflow-runs.flofi-wallet-circle-run.pg",
+    "app.workflow-runs.kora-gas-run.pg"
   ]
 }
