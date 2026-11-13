@@ -569,7 +569,8 @@ function koraProgressValid(p: unknown, n: number): p is KoraGroupProgress {
   const x = p as Partial<KoraGroupProgress> | null;
   return Boolean(x) && Array.isArray(x!.hashes) && Array.isArray(x!.relayed) && Array.isArray(x!.relayAttempts) && x!.hashes.length === n && x!.relayed.length === n
     && x!.relayAttempts.length === n && x!.hashes.every(h => h === null || typeof h === 'string' && KORA_ID.test(h))
-    && x!.relayed.every((b, i) => (b === null) === (x!.hashes![i] === null) && (b === null || typeof b === 'string' && b.length <= 2048))
+    // Kora's bytes only beside its id (a member without them is sent with the owner's own signed bytes).
+    && x!.relayed.every((b, i) => b === null || x!.hashes![i] !== null && typeof b === 'string' && b.length <= 2048)
     && x!.relayAttempts.every(a => Number.isSafeInteger(a) && a >= 0 && a <= KORA_GROUP_RELAY_ATTEMPTS);
 }
 /** The live view of a Kora group: its written-once submission with the recorded progress over it. A malformed record decides nothing (fails closed). */
