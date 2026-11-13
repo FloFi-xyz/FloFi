@@ -32,7 +32,7 @@ import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '.
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
-import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
+import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, koraGroupNativeCovers, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { circleFactsOf, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
 import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
@@ -511,6 +511,17 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
     const covers = await nativeNowCovers(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
     if (covers === null) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
     try { assertReviewedMechanism('CIRCLE_USDC_PAYMASTER', selectGasMechanism({ chain: g.chain, nativeCovers: covers, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true } })); }
+    catch {
+      await expireTokenGasPreparation(deps, run.runId, g, GAS_ABSTRACTION_CODES.changed);
+      return refuse(GAS_ABSTRACTION_CODES.changed);
+    }
+  }
+  // ADR-0010 §4, the same for a Kora group: SOL that arrived since the Review (the owner's SOL now covers the members' native worst case) means the
+  // policy would pick native gas — nothing switches silently and nothing reaches Kora: the preparation expires and the owner reviews again.
+  if (isKoraGroup(g.prepared)) {
+    const covers = await koraGroupNativeCovers(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
+    if (covers === null) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+    try { assertReviewedMechanism('PIMLICO_KORA_SPL_FEE', selectGasMechanism({ chain: g.chain, nativeCovers: covers, candidate: { mechanism: 'PIMLICO_KORA_SPL_FEE', eligible: true } })); }
     catch {
       await expireTokenGasPreparation(deps, run.runId, g, GAS_ABSTRACTION_CODES.changed);
       return refuse(GAS_ABSTRACTION_CODES.changed);

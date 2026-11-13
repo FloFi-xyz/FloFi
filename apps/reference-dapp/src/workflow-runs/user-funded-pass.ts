@@ -27,8 +27,8 @@
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
-import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget, solanaSubmission, type Prepared,
-  type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
+import { advanceSolanaSubmission, checkUserOperation, koraGroupProgress, koraGroupSubmission, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget,
+  solanaSubmission, type Prepared, type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { bridgeOf, bridgeProgressOf, observeBridgeDelivery, type BridgeDelivery } from '../user-funded/bridge-delivery.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
@@ -175,17 +175,22 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   let r: Reconciled;
   try {
     if (g.strategy === 'SOLANA_SIGN_ALL') {
-      // ADR-0010 §4: a Kora group records each Kora call before it is made and each verified answer (the transaction id) as it arrives, on the
-      // group's own submission (compare-and-set on the group's version: a concurrent pass never overwrites what it did not see).
-      let latest = submission, version = g.version;
+      // ADR-0010 §4: a Kora group records each Kora call before it is made and each verified answer (the transaction id) as it arrives. The
+      // submission was written once (0023 never lets it change): the progress is kept on the group's outcome while it is in flight, from the
+      // group's current state (SUBMITTED, or UNCERTAIN after a failed pass) and by compare-and-set on its version — a concurrent pass never
+      // overwrites what it did not see, and only a monotonic step is ever written (attempts never fall, a recorded id never changes).
+      const live = koraGroupSubmission(submission, g.outcome);
+      let latest = live, version = g.version;
       const persist = async (next: Readonly<Record<string, unknown>>) => {
-        const written = await deps.store.groupTransition(run.runId, g.groupIndex, ['SUBMITTED'], 'SUBMITTED', { submission: next }, 'GROUP_KORA_RELAY', version);
+        const progress = koraGroupProgress(latest, next);
+        if (!progress) return false;
+        const written = await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], g.state, { outcome: progress }, 'GROUP_KORA_RELAY', version);
         if (!written) return false;
         latest = next; version = written.version;
         return true;
       };
-      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner, submission, persist);
-      if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, latest !== submission, step.code);
+      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner, live, persist);
+      if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, latest !== live, step.code);
       if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...latest, hashes: (latest.hashes as (string | null)[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
       else r = await reconcileSolanaGroup(deps.userFunded, prepared, latest, g.chain, g.feePayer);

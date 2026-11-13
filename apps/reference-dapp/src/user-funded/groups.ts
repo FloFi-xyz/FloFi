@@ -360,6 +360,20 @@ async function prepareSolanaSignAll(deps: UserFundedDeps, composition: WorkflowC
   return ok({ ...kora.value, fee: { payer: g.feePayer, unit: 'token', maxCost: terms.reduce((sum, t) => sum + BigInt(t.amount), 0n).toString(), estimated: false,
     mechanism: KORA_MECHANISM, token: { mint: token.mint, symbol: token.symbol, decimals: token.decimals }, relayer: terms[0]!.feePayer, payee: terms[0]!.paymentAddress } });
 }
+/** ADR-0010 §4: whether a prepared group is a Kora group (its transactions' fees fronted by Pimlico's Kora fee payer). */
+export const isKoraGroup = (prepared: Readonly<Record<string, unknown>> | null): boolean => prepared?.kind === 'SOLANA_SIGN_ALL' && Array.isArray(prepared.transactions)
+  && (prepared.transactions as readonly Partial<SolanaGroupTx>[]).some(x => Boolean(x?.gas));
+/**
+ * ADR-0010 §2 at authorization, for a Kora group: does the owner's SOL now cover the members' native worst case together (the same test that chose
+ * Kora at preparation)? True: the policy would now pick native gas — the owner reviews again. Null: unreadable (nothing is decided).
+ */
+export async function koraGroupNativeCovers(deps: Pick<UserFundedDeps, 'solana'>, prepared: Readonly<Record<string, unknown>>): Promise<boolean | null> {
+  const txs = prepared.transactions as readonly SolanaGroupTx[], owner = String(prepared.owner ?? '');
+  if (!deps.solana || !txs.every(x => x.gas && /^(0|[1-9][0-9]{0,19})$/.test(x.gas.nativeWorstCaseLamports))) return null;
+  let read: Awaited<ReturnType<typeof readSolanaAccounts>>;
+  try { read = await readSolanaAccounts(deps.solana, [owner]); } catch { return null; }
+  return (read.accounts[0]?.lamports ?? 0n) >= txs.reduce((sum, x) => sum + BigInt(x.gas!.nativeWorstCaseLamports), 0n);
+}
 async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowComposition, requirement: WorkflowRequirement, g: GroupInput, kora: KoraGas | null): Promise<Result<Prepared>> {
   if (!deps.solana) return no('USER_FUNDED_SOLANA_RPC_UNAVAILABLE');
   const txs: SolanaGroupTx[] = [];
@@ -543,6 +557,47 @@ export function solanaSubmission(authorization: Readonly<Record<string, unknown>
 }
 /** At most this many Kora calls per transaction: the first, and one retry with the identical bytes when its answer was lost. */
 export const KORA_GROUP_RELAY_ATTEMPTS = 2;
+/**
+ * ADR-0010 §4: a Kora group's progress while it is in flight — each Kora call counted BEFORE it is made (`relayAttempts`), each verified answer or
+ * recovered transaction (`hashes`, `relayed`). The submission itself is written once (migration 0023 never lets it change); the progress is kept on
+ * the group's outcome (mutable until the group is terminal) under `kora`, written by compare-and-set on the group's version. Absent: nothing
+ * happened yet beyond the submission.
+ */
+export type KoraGroupProgress = { readonly hashes: readonly (string | null)[]; readonly relayed: readonly (string | null)[]; readonly relayAttempts: readonly number[] };
+const KORA_ID = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+function koraProgressValid(p: unknown, n: number): p is KoraGroupProgress {
+  const x = p as Partial<KoraGroupProgress> | null;
+  return Boolean(x) && Array.isArray(x!.hashes) && Array.isArray(x!.relayed) && Array.isArray(x!.relayAttempts) && x!.hashes.length === n && x!.relayed.length === n
+    && x!.relayAttempts.length === n && x!.hashes.every(h => h === null || typeof h === 'string' && KORA_ID.test(h))
+    && x!.relayed.every((b, i) => (b === null) === (x!.hashes![i] === null) && (b === null || typeof b === 'string' && b.length <= 2048))
+    && x!.relayAttempts.every(a => Number.isSafeInteger(a) && a >= 0 && a <= KORA_GROUP_RELAY_ATTEMPTS);
+}
+/** The live view of a Kora group: its written-once submission with the recorded progress over it. A malformed record decides nothing (fails closed). */
+export function koraGroupSubmission(submission: Readonly<Record<string, unknown>>, outcome: Readonly<Record<string, unknown>> | null): Readonly<Record<string, unknown>> {
+  if (!Array.isArray(submission.ownerSignatures)) return submission;
+  const n = submission.ownerSignatures.length, kora = (outcome as { kora?: unknown } | null)?.kora;
+  if (kora === undefined) return submission;
+  if (!koraProgressValid(kora, n)) throw new Error('SOLANA_GROUP_SUBMISSION_INVALID');
+  // A transaction id the submission already names (a native member) is never replaced by the progress.
+  const fixed = submission.hashes as readonly (string | null)[];
+  if (kora.hashes.some((h, i) => fixed[i] !== null && h !== fixed[i])) throw new Error('SOLANA_GROUP_SUBMISSION_INVALID');
+  return { ...submission, hashes: kora.hashes, relayed: kora.relayed, relayAttempts: kora.relayAttempts };
+}
+/**
+ * The outcome patch that records a Kora group's progress, only when it is a monotonic step from `prior`: attempts never fall (and never exceed
+ * two), an id or Kora's bytes, once recorded, never change. Null otherwise (nothing is written).
+ */
+export function koraGroupProgress(prior: Readonly<Record<string, unknown>>, next: Readonly<Record<string, unknown>>): { readonly kora: KoraGroupProgress } | null {
+  const n = Array.isArray(prior.ownerSignatures) ? prior.ownerSignatures.length : -1;
+  const before = { hashes: prior.hashes, relayed: prior.relayed, relayAttempts: prior.relayAttempts }, after = { hashes: next.hashes, relayed: next.relayed,
+    relayAttempts: next.relayAttempts };
+  if (!koraProgressValid(before, n) || !koraProgressValid(after, n)) return null;
+  for (let i = 0; i < n; i++) {
+    if (after.relayAttempts[i]! < before.relayAttempts[i]!) return null;
+    if (before.hashes[i] !== null && (after.hashes[i] !== before.hashes[i] || after.relayed[i] !== before.relayed[i])) return null;
+  }
+  return { kora: after };
+}
 type SignatureStatus = { readonly confirmationStatus?: string; readonly err?: unknown } | null;
 /**
  * Block heights one transaction of a sign-all group needs, from its send to its confirmation and the next pass (about 400 ms per block: a
