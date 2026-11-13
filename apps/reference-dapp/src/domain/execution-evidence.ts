@@ -112,6 +112,14 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
         failure(attempt.step, attempt.state, attempt.txHash); detail(`${attempt.step} recorded at`, attempt.createdAt);
         detail('Network fee payer', attempt.receipt?.gasPayer);
       }
+      // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a 0x Gasless swap's settlement (sent by 0x's relayer) and the fee the owner paid in a token.
+      for (const attempt of run.gasless ?? []) {
+        identifier('swap', 'Action transaction', attempt.txHash, 'transaction', `eip155:${run.quote.chainId}`, attempt.state);
+        detail('Network fee payer', attempt.receipt?.gasPayer);
+        detail('0x trade hash', attempt.tradeHash);
+      }
+      const paid = run.outcome?.gasPaid?.paidInToken;
+      if (paid) amount('swap', 'Network fee paid from the swap', paid.amount, paid.decimals, paid.symbol);
       const actual = run.outcome;
       bundle(actual?.evidence, actual?.evidenceBundleHash);
       if (actual?.evidence.outcome === 'RECONCILED') {

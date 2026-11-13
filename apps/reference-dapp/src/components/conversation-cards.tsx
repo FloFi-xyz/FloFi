@@ -4,6 +4,7 @@ import { useId } from 'react';
 import { translate, useLocale } from '../i18n/locale';
 import { sumByAsset, type ConversationLanguage, type ConversationReview } from '../domain/conversation-lifecycle';
 import { shortDecimal } from '../domain/review-block';
+import { isIncludedNetworkFee } from '../domain/gas-payment';
 import { networkChoiceOptions, networkOfOption } from '../domain/approved-ux';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { walletChainRef } from '../wallet/evm-networks';
@@ -59,21 +60,25 @@ const NETWORK_FEE = /network|gas|execution fee/i;
  * `unreadable` says a network-fee amount could not be read (`sumByAsset`); the row then points to Technical details instead of showing a sum
  * that silently leaves that amount out (which would understate what is paid).
  */
-export function compactNetworkFee(fees: readonly ConversationReview['fees'][number][]): { readonly estimate: string | null; readonly maximum: string | null; readonly unreadable: boolean } {
+export function compactNetworkFee(fees: readonly ConversationReview['fees'][number][]): { readonly estimate: string | null; readonly maximum: string | null; readonly unreadable: boolean;
+  /** BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a network fee taken out of the swap itself (0x Gasless), shown visibly instead of dropped. */
+  readonly included?: string } {
   const network = fees.filter(line => NETWORK_FEE.test(line.label));
   let unreadable = false;
-  const sum = (treatment: string) => { const values = network.filter(line => line.treatment === treatment).map(line => line.value);
+  const sum = (treatment: string, lines = network) => { const values = lines.filter(line => line.treatment === treatment).map(line => line.value);
     const summed = sumByAsset(values); if (summed.unreadable) unreadable = true;
     return summed.sums.length ? summed.sums.map(value => shortAmount(value, 'up')).join(' + ') : null; };
-  const estimate = sum('ADDITIONAL'), maximum = sum('CEILING');
-  return { estimate, maximum, unreadable };
+  const estimate = sum('ADDITIONAL'), maximum = sum('CEILING'), included = sum('INCLUDED', network.filter(isIncludedNetworkFee));
+  return { estimate, maximum, unreadable, ...included ? { included } : {} };
 }
 /**
  * BUILD-FLOFI-MAINNET-EXEC-002 review round 2: the step details that stay visible in the compact block (they change what the owner authorizes:
  * the Aave health factor after the step, a step already completed, how a step is funded and its bound amount, a Solana token's mint). Every
  * other detail line stays under Technical details. The labels are the simulation projection's own (`simulation-presentation.ts`).
  */
-export const MATERIAL_STEP_DETAILS: readonly string[] = ['Health factor after', 'Step status', 'Funded by', 'Bound amount', 'Token mint'];
+export const MATERIAL_STEP_DETAILS: readonly string[] = ['Health factor after', 'Step status', 'Funded by', 'Bound amount', 'Token mint',
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: how many wallet prompts a 0x Gasless swap needs, when more than one.
+  'Signatures'];
 const materialDetail = (line: { readonly label: string }) => MATERIAL_STEP_DETAILS.includes(line.label);
 /**
  * A step of the compact Review. `destinationOwned` (optional, review round 2): the step's producer says whether the destination is one of the
@@ -97,8 +102,10 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
   const sequence = review.sequence, simulated = review.steps[0];
   const fee = compactNetworkFee(review.fees), unknownNetwork = review.unknown.some(name => NETWORK_FEE.test(name));
   // Review round 2: an unreadable network-fee amount is never dropped from a sum: the row points to the exact lines under Technical details.
-  const networkFee = fee.unreadable ? t('See Technical details') : fee.estimate && fee.maximum ? t('≈ {0} · at most {1}', fee.estimate, fee.maximum) : fee.estimate ? t('≈ {0}', fee.estimate)
-    : fee.maximum ? t('at most {0}', fee.maximum) : unknownNetwork ? t('Not provided by this simulation') : null;
+  const paidOnTop = fee.unreadable ? t('See Technical details') : fee.estimate && fee.maximum ? t('≈ {0} · at most {1}', fee.estimate, fee.maximum) : fee.estimate ? t('≈ {0}', fee.estimate)
+    : fee.maximum ? t('at most {0}', fee.maximum) : unknownNetwork && !fee.included ? t('Not provided by this simulation') : null;
+  // ADR-0010: a fee 0x takes out of the swap is shown as such (included, in the swap's token), never hidden and never added on top.
+  const networkFee = [paidOnTop, fee.included ? t('{0}, included in the swap', fee.included) : null].filter(Boolean).join(' · ') || null;
   // Review round 2: the fee lines are the whole Review's, so a multi-step Review (not a step-by-step sequence) says its network fee once, after
   // the steps, instead of repeating the same total under every step. A single step (or a sequence's current step) keeps it in its block.
   const sharedFee = !sequence && review.steps.length > 1 ? networkFee : null, stepFee = sharedFee ? null : networkFee;

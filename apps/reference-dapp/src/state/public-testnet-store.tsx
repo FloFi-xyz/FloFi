@@ -2,7 +2,10 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { catalogSwapAvailability, publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
+import { catalogSwapAvailability, publicAvailability, publicBegin, publicBeginGasless, publicObserve, publicPrepare, publicRefresh, publicReport, publicReportGasless, publicReview,
+  publicStatus, publicSubmitGasless } from '../app/public-testnet-action';
+import { gaslessRequestMatches, signGaslessTypedData } from '../wallet/zeroex-gasless-signing';
+import type { EvmProvider } from '../wallet/evm-discovery';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import type { PublicRun } from '../server/public-testnet-service';
 import { swapWalletRequestMatches, ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
@@ -24,8 +27,13 @@ const TAB_KEY = KEY + ':tab';
 const markTab = (id: string) => { try { sessionStorage.setItem(TAB_KEY, id); } catch { /* the tab marker is a convenience only */ } };
 const tabRun = () => { try { return sessionStorage.getItem(TAB_KEY); } catch { return null; } };
 /** An execution the owner must still continue or observe: no settled outcome yet, and an attempt that was prepared, sent or confirmed. */
-export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'>) =>
-  !run.outcome && run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN', 'CONFIRMED'].includes(attempt.state));
+export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'> & Partial<Pick<PublicRun, 'gasless'>>) =>
+  !run.outcome && (run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN', 'CONFIRMED'].includes(attempt.state)) ||
+    // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a 0x Gasless trade relayed (or possibly relayed) to 0x, or a failure not yet final.
+    (run.gasless ?? []).some(attempt => GASLESS_FOLLOWED.includes(attempt.state) || attempt.state === 'FAILED' && !attempt.final));
+/** The gasless states a page keeps following (read-only observe; nothing is signed or submitted again). */
+const GASLESS_FOLLOWED: readonly string[] = ['SUBMITTING', 'SUBMITTED', 'UNKNOWN', 'PENDING'];
+const gaslessSettled = (run: PublicRun) => Boolean(run.divergence || run.outcome) || !GASLESS_FOLLOWED.includes(run.gasless?.at(-1)?.state ?? '');
 const sameWorkflow = (a: unknown, b: unknown) => { try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; } };
 type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
@@ -190,7 +198,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         setRun(recovered); setRecoveryOnly(true);
         // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: a run that came back with a submitted transaction keeps being followed (read-only observe; nothing
         // is signed, submitted or retried), instead of waiting for "Check result" or the worker's backoff.
-        if (['HASH', 'PENDING'].includes(recovered.attempts.at(-1)?.state ?? '')) {
+        const gaslessFollowed = GASLESS_FOLLOWED.includes(recovered.gasless?.at(-1)?.state ?? '');
+        if (gaslessFollowed || ['HASH', 'PENDING'].includes(recovered.attempts.at(-1)?.state ?? '')) {
           // Applied only while that run is still the page's run: a newer simulation is never replaced by an older run's observation.
           const sameRun = (current: PublicRun | null) => current?.quote.executionId === id;
           let following = true;
@@ -198,7 +207,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
             const observed = unwrap(await publicObserve(id));
             if (!cancelled) setRun(current => { following = sameRun(current); return following ? observed : current; });
             return observed;
-          }, observed => Boolean(observed.divergence || observed.outcome) || (observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH'),
+          }, observed => gaslessFollowed ? gaslessSettled(observed) : Boolean(observed.divergence || observed.outcome) || (observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH'),
           { active: () => !cancelled && following }).catch(() => undefined);
         }
       }
@@ -217,6 +226,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       approval.state === 'CONFIRMED' && (recoveryOnly || source === workflow));
     const owner = profile && ownerBoundSwapReview(profile) ? await wallet.session() : null;
     if (profile && ownerBoundSwapReview(profile) && !owner) throw new Error('WALLET_NOT_CONNECTED');
+    // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: on Robinhood Chain a connected wallet lets the quote decide how the network fee is paid
+    // (its ETH first; 0x Gasless only when ETH is short). Read silently; without a wallet the quote is made as before.
+    const gasOwner = profile?.kind === 'CATALOG' && profile.chainId === 4663 && !ownerBoundSwapReview(profile) ? await wallet.session() : null;
     if (owner && owner.chainId !== profile?.chainHex) throw new Error('WRONG_WALLET_CHAIN');
     if (resumeApproval && run?.quote.ownerReview && owner?.account !== run.quote.ownerReview.account) throw new Error('OWNER_REVIEW_MISMATCH');
     // P0 hotfix (execution continuity): a confirmed approval is shown as confirmed as soon as its receipt is; on an owner-bound network the swap's
@@ -227,7 +239,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       if (observed.attempts.at(-1)?.nativeAfter === null) throw new Error('APPROVAL_NOT_RECONCILED');
     }
     const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
-      await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account));
+      await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account ?? gasOwner?.account));
     localStorage.setItem(KEY, prepared.quote.executionId); markTab(prepared.quote.executionId);
     journey.mark('review_ready'); journeyRef.current = journey;
     setSource(workflow as unknown as SemanticWorkflow); setRecoveryOnly(false); setRun(prepared);
@@ -246,6 +258,73 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     if (!profile) throw new Error('REVIEW_REQUIRED');
     await wallet.switchTo(profile.chainHex);
   }), [guarded, wallet, run]);
+  /**
+   * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010 §5): a reviewed 0x Gasless swap. The server prepares the signing attempt; the page checks
+   * the typed data is exactly the reviewed one, asks the wallet for the approval (when needed) and the trade, and hands both signatures to the
+   * server, which verifies them and relays them to 0x once. A declined or unclear prompt submits nothing; an unclear relay is only observed.
+   */
+  const executeGasless = useCallback(async (current: PublicRun, provider: EvmProvider, account: string, startedAt: number) => {
+    const id = current.quote.executionId;
+    const begun = await publicBeginGasless(id, account);
+    if (!begun.ok) {
+      const status = await publicStatus(id);
+      if (status.ok) setRun(status.value);
+      throw new Error(begun.code);
+    }
+    const { attempt } = begun.value;
+    const journey = journeyRef.current ?? createJourney({ operation: 'swap', network: `eip155:${current.quote.chainId}`, provider: '0x' });
+    journeyRef.current = null;
+    journey.mark('authorize_clicked', startedAt);
+    journey.describe({ wallet: usesFloFiWallet(account) ? 'privy-embedded' : 'external' });
+    const finish = (outcome: Parameters<typeof journey.event>[0]) => reportJourney(journey.event(outcome));
+    const acceptCurrent = (value: PublicRun) => setRun(shown => shown?.quote.executionId === id ? value : shown);
+    const report = async (kind: 'REJECTED' | 'ABANDONED') => {
+      try { const result = await publicReportGasless(id, attempt.attemptId, { kind }); if (result.ok) acceptCurrent(result.value); } catch { /* nothing was submitted either way */ }
+    };
+    acceptCurrent({ ...current, gasless: [...(current.gasless ?? []).map(a => a.state === 'SIGNING' ? { ...a, state: 'ABANDONED' as const } : a), attempt] });
+    if (!gaslessRequestMatches(current.quote, begun.value, account)) { await report('ABANDONED'); throw new Error('TRANSACTION_ARTIFACT_CHANGED'); }
+    const profile = swapProfile(current.quote.chainId);
+    const actualChain = await provider.request({ method: 'eth_chainId' }), accounts = await provider.request({ method: 'eth_accounts' });
+    if (!profile || typeof actualChain !== 'string' || actualChain.toLowerCase() !== profile.chainHex || !Array.isArray(accounts) || typeof accounts[0] !== 'string' ||
+        accounts[0].toLowerCase() !== account) { await report('ABANDONED'); throw new Error('WRONG_WALLET_CHAIN'); }
+    busyRef.current = false; setBusy(null);
+    setSigningAttempt(attempt.attemptId);
+    journey.mark('wallet_open');
+    let approval: string | null = null, trade: string;
+    try {
+      // FloFi Wallet signs only for the reviewed run it is told about, once per prompt (no effect on any other wallet).
+      if (begun.value.approval) { bindFloFiSigning(provider, signingContextOf(id, 'robinhood-swap')); approval = await signGaslessTypedData(provider, account, begun.value.approval); }
+      bindFloFiSigning(provider, signingContextOf(id, 'robinhood-swap'));
+      trade = await signGaslessTypedData(provider, account, begun.value.trade);
+    } catch (cause) {
+      journey.mark('user_decision'); finish(rejected(cause) ? 'rejected' : 'inconclusive');
+      // Nothing leaves this page without both signatures: a declined, refused or unclear prompt submitted nothing.
+      await report(rejected(cause) ? 'REJECTED' : 'ABANDONED');
+      const refusal = floFiRefusal(cause);
+      if (refusal) throw new Error(refusal, { cause });
+      if (rejected(cause)) throw new Error('WALLET_AUTHORIZATION_REJECTED', { cause });
+      throw new Error(cause instanceof Error && /^ZEROX_SIGN/.test(cause.message) ? cause.message : 'GASLESS_SIGNATURE_NOT_RECEIVED', { cause });
+    } finally { setSigningAttempt(shown => shown === attempt.attemptId ? null : shown); }
+    journey.mark('user_decision');
+    const submitted = await publicSubmitGasless(id, attempt.attemptId, { trade, approval }).catch(() => null);
+    if (!submitted?.ok) {
+      const status = await publicStatus(id).catch(() => null);
+      if (status?.ok) acceptCurrent(status.value);
+      // The server records the submission before relaying it: a submission it may have relayed is only observed, never repeated.
+      if (!submitted || status?.ok && GASLESS_FOLLOWED.includes(status.value.gasless?.at(-1)?.state ?? '')) { finish('inconclusive'); throw new Error('SUBMISSION_RESULT_UNKNOWN'); }
+      finish('failed'); throw new Error(submitted.code);
+    }
+    acceptCurrent(submitted.value);
+    journey.mark('submission');
+    try {
+      const followed = await observeUntilSettled(async () => {
+        const observed = unwrap(await publicObserve(id)); acceptCurrent(observed);
+        if (observed.outcome) { journey.mark('confirmation'); journey.mark('reconciliation'); }
+        return observed;
+      }, gaslessSettled, { active: () => mountedRef.current });
+      finish(followed.value?.outcome ? 'reconciled' : followed.value?.gasless?.at(-1)?.state === 'FAILED' ? 'failed' : 'in_progress');
+    } catch (cause) { finish('in_progress'); throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause }); }
+  }, []);
   const execute = useCallback(() => guarded('Preparing transaction', async () => {
     const startedAt = performance.now();
     if (!run || retired) throw new Error('REVIEW_REQUIRED');
@@ -259,6 +338,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     if (!session) session = await wallet.connect();
     if (!session) throw new Error('WALLET_CONNECTION_REJECTED');
     if (session.chainId !== profile.chainHex) throw new Error('WRONG_WALLET_CHAIN');
+    if (run.quote.gas?.mechanism === 'ZEROX_GASLESS_SWAP') return executeGasless(run, provider, session.account, startedAt);
     const begun = await publicBegin(run.quote.executionId, session.account);
     if (!begun.ok) {
       const current = await publicStatus(run.quote.executionId);
@@ -346,8 +426,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw afterHash(cause); }
-  }), [guarded, run, retired, wallet]);
-  const signing = Boolean(signingAttempt && run?.attempts.some(attempt => attempt.attemptId === signingAttempt));
+  }), [guarded, run, retired, wallet, executeGasless]);
+  const signing = Boolean(signingAttempt && (run?.attempts.some(attempt => attempt.attemptId === signingAttempt) || run?.gasless?.some(attempt => attempt.attemptId === signingAttempt)));
   return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error,
     simulate, review, execute, observe, switchNetwork }}>{children}</Context.Provider>;
 }

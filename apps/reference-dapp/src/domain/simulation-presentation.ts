@@ -26,6 +26,7 @@ import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
+import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -135,6 +136,14 @@ export function simulationError(error: string): string {
   // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi Wallet (Privy) refusals keep their own sentence, as on the Canvas.
   const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
   if (floFiWallet) return floFiWallet;
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): how the network fee is paid changed, or a 0x Gasless swap's own refusals and outcomes.
+  if (/^GAS_MECHANISM_CHANGED_REVIEW_REQUIRED$|^TOKEN_GAS_MECHANISM_MISMATCH$/.test(error)) return 'How the network fee is paid changed since your Review (your ETH balance moved), so nothing was signed or sent. Review the updated swap.';
+  if (/^ZEROX_(?:SIGNER_MISMATCH|SIGNATURE_INVALID|SIGNATURE_REFUSED)$/.test(error)) return 'The signature did not match the reviewed swap, so nothing was submitted. Authorize again with the reviewed wallet.';
+  if (/^ZEROX_(?:OWNER_NOT_EOA|SMART_WALLET_NOT_SUPPORTED)$/.test(error)) return 'Paying the network fee in tokens needs a standard wallet account, and this one is a smart account. Add ETH for the network fee instead. Nothing was signed.';
+  if (/^ZEROX_(?:TRADE_REVERTED|TRADE_FAILED|TRADE_SIMULATION_FAILED|TRADE_NOT_EXECUTED|MARKET_MAKER_DECLINED|TRADE_REFUSED|APPROVAL_REFUSED|PENDING_TRADE_EXISTS)$/.test(error)) return 'The swap through 0x did not go through, and none of your tokens moved. Simulate again for a fresh quote.';
+  if (/^ZEROX_TRADE_ALREADY_CLAIMED$/.test(error)) return 'This signed swap is already handled by another FloFi execution, which keeps tracking it. Simulate again for a fresh, separate swap.';
+  if (/^ZEROX_PROVIDER_/.test(error)) return 'The 0x service did not answer, so nothing was signed or submitted. Try again shortly.';
+  if (error === 'GASLESS_SIGNATURE_NOT_RECEIVED') return 'Your wallet did not return the signatures, so nothing was submitted. Authorize again when ready.';
   // P0 (2026-11-12): a provider's liquidity and minimum answers before the balance rules (`RELAY_INSUFFICIENT_LIQUIDITY` read "your balance is too
   // low", `RELAY_AMOUNT_TOO_LOW` the generic failure), bridge provider codes only (a lending BORROW_/WITHDRAW_INSUFFICIENT_LIQUIDITY keeps its own
   // wording below). Only refusals before this step was prepared: delivery outcomes such as
@@ -368,6 +377,29 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       // BUILD-RH-002: a catalog quote carries its own provenance (PUBLIC_MAINNET, or MOCKED for the loopback harness) and decimals.
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), q.provenance ?? 'PUBLIC_TESTNET', iso(q.expiresAt))) break;
       const s = step(q.nodeId), din = quoteDecimals(q, 'input'), dout = quoteDecimals(q, 'output');
+      // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a Review that binds 0x Gasless shows 0x's amounts (net of every fee), who pays the
+      // network fee and in which token, and the signatures; 0x's Settler, route, trade hash and approval go under Technical details.
+      const zx = q.gas?.mechanism === 'ZEROX_GASLESS_SWAP' ? q.gas.zeroEx : null;
+      if (zx) {
+        result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), '0x', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
+        const side = (token: string) => token === q.inputToken ? { decimals: din, symbol: q.inputSymbol } : { decimals: dout, symbol: q.outputSymbol };
+        const gasSide = side(zx.gasFee.token);
+        fee(INCLUDED_NETWORK_FEE_LABEL, zx.gasFee.amount, gasSide.decimals, gasSide.symbol, `Paid from your ${gasSide.symbol}: 0x takes it out of the swap, so no ETH is needed. The amounts you receive are after this fee.`, 'INCLUDED');
+        if (zx.zeroExFee) { const feeSide = side(zx.zeroExFee.token); fee(ZEROX_FEE_LABEL, zx.zeroExFee.amount, feeSide.decimals, feeSide.symbol, 'The provider\'s own fee, taken out of the swap.', 'INCLUDED'); }
+        if (s) {
+          s.resultLabel = 'Quoted output';
+          if (zx.approval) s.details.push({ label: SIGNATURES_LABEL, value: '2 (token approval, then the trade)' });
+          s.details.push({ label: 'Executed by', value: `0x Settler ${zx.settler}` }, { label: 'Route sources', value: zx.sources.join(', ') || '0x' },
+            { label: 'Trade hash', value: zx.trade.hash }, { label: 'Signed trade valid until', value: new Date(zx.trade.deadline * 1000).toISOString() });
+          if (zx.approval) s.details.push({ label: 'Token approval by signature', value: zx.approval.unlimited ? `Permit2 ${zx.permit2} may spend any amount of ${q.inputSymbol}`
+            : `Permit2 ${zx.permit2} may spend at most ${simulationAmount(zx.approval.value, din, q.inputSymbol)}` });
+        }
+        for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
+        if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
+        if (zx.approval?.unlimited) warn('attention', `This approval lets Permit2 spend any amount of ${q.inputSymbol} from this wallet until you change or revoke it.`);
+        warn('info', 'This swap is executed by 0x\'s settlement contract along 0x\'s quoted route, not the Uniswap pool. You sign; 0x\'s relayer sends it and takes the network fee from the swap.', true);
+        break;
+      }
       result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), q.conversion ? 'WETH9' : 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
@@ -382,7 +414,14 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (Number.isSafeInteger(q.fee) && q.fee > 0) view.fees.push({ label: 'Pool fee', value: `${(q.fee / 10_000).toFixed(2)}%`, note: 'Uniswap v3 fee tier, already reflected in the quoted output.', treatment: 'INCLUDED' });
       if (q.ownerReview) fee('Maximum network fee', q.ownerReview.feeBudgetWei, 18, 'ETH', q.ownerReview.step === 'approval'
         ? 'Ceiling for the token approval request; the swap\'s own network fee is checked after the approval confirms.' : 'Ceiling for this wallet request, separate from the swap output.', 'CEILING');
-      if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
+      // ADR-0010: a quote made for the owner on Robinhood Chain knows the native path's worst-case fee, and says before anything is signed when the
+      // wallet's ETH does not cover it and why paying it in tokens is not available.
+      else if (q.gas?.native.worstCaseWei) fee('Maximum network fee', q.gas.native.worstCaseWei, 18, 'ETH', 'Paid in ETH by your wallet, separate from the swap output.', 'CEILING');
+      if (q.gas?.nativeShort) {
+        warn('attention', 'This wallet does not have enough ETH for the network fee of this swap. Add ETH on this network before you authorize.');
+        for (const reason of q.gas.unavailable) warn('attention', gaslessUnavailableReason(reason.code));
+      }
+      if (!q.ownerReview && !q.gas) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
     case 'solana-swap': {
