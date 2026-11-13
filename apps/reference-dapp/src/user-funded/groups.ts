@@ -259,7 +259,9 @@ export type SolanaGroupTx = { readonly stepIndex: number; readonly kind: 'JUPITE
   /** ADR-0010 §4: Pimlico's Kora fee payer fronts this transaction's SOL fee; the owner repays `gas.amount` in it. Absent: the owner pays in SOL. */
   readonly gas?: KoraGasTerms;
   /** Kora transactions: the owner token account the step itself spends from (its fee account may be the same one). */
-  readonly spendAccount?: string };
+  readonly spendAccount?: string;
+  /** Kora transactions: the slot the Review read the chain at (a lost answer is searched for in the owner's history from there). */
+  readonly sinceSlot?: number };
 /**
  * ADR-0010 §2 per execution group: the native group exactly as before; only when a member failed for lack of SOL (and Kora is configured), every
  * member with the Kora fee payer — then only if the group's native worst case provably exceeds the owner's SOL, all members repay in ONE fee
@@ -301,7 +303,7 @@ async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowCompo
         txs.push({ stepIndex: index, kind: 'TRANSFER', owner: review.owner, message: review.message, messageHash: review.messageHash, unsignedTransaction: review.unsignedTransaction,
           lookupTables: {}, lastValidBlockHeight: review.lastValidBlockHeight, estimatedFeeLamports: review.estimatedFeeLamports,
           spend: { asset: assetKey({ chain: step.chain, address: review.asset.mint ?? WSOL }), amount: review.amount }, minimumOut: null,
-          maximumNetworkCostLamports: review.maximumNetworkCostLamports, ...review.gas ? { gas: review.gas, spendAccount: review.token?.sourceAccount ?? '' } : {} });
+          maximumNetworkCostLamports: review.maximumNetworkCostLamports, ...review.gas ? { gas: review.gas, spendAccount: review.token?.sourceAccount ?? '', sinceSlot: review.simulationResult.slot } : {} });
       } else if (step.action === 'swap') {
         if (!deps.jupiter) return no('JUPITER_UNAVAILABLE', index);
         const review: JupiterReview = kora ? await simulateKoraJupiterSwap(workflow, g.feePayer, deps.jupiter, deps.solana, kora.port, now, { groupShortfall: true })
@@ -313,7 +315,7 @@ async function buildSolanaGroup(deps: UserFundedDeps, composition: WorkflowCompo
           spend: { asset: assetKey({ chain: step.chain, address: r.quote.inputMint }), amount: r.quote.inAmount },
           minimumOut: { asset: assetKey({ chain: step.chain, address: r.quote.outputMint }), amount: r.quote.otherAmountThreshold },
           ...r.maximumNetworkCostLamports !== undefined ? { maximumNetworkCostLamports: String(r.maximumNetworkCostLamports) } : {},
-          ...review.gas ? { gas: review.gas, spendAccount: review.inspection.ownerInputAccount } : {} });
+          ...review.gas ? { gas: review.gas, spendAccount: review.inspection.ownerInputAccount, sinceSlot: review.simulationResult.slot } : {} });
       } else return no(`USER_FUNDED_ACTION_NOT_BUILDABLE:${step.action.toUpperCase()}`, index);
     } catch (cause) { return no(codeOf(cause, 'SIMULATION_FAILED'), index); }
     const last = txs.at(-1)!, feePayer = parseMessageV0(fromBase64(last.message)).staticKeys[0] ?? '';
@@ -554,7 +556,7 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
     if (paused) return { state: 'WAITING', index: i, code: paused };
     const height = Number(await rpc('getBlockHeight', [{ commitment: 'confirmed' }]));
     if (!id && tx.gas && (attempts[i] ?? 0) > 0) {
-      const found = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas.feePayer, sinceSlot: 0 });
+      const found = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas.feePayer, sinceSlot: tx.sinceSlot ?? 0 });
       if (found.state === 'FOUND') {
         hashes[i] = found.signature; relayed[i] = found.transaction;
         return { state: 'WAITING', index: i, code: await record({}) ? null : 'KORA_RELAY_NOT_RECORDED' };
@@ -571,7 +573,7 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
         if (again) return { state: 'WAITING', index: i, code: null };
         return { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' };
       }
-      const last = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas!.feePayer, sinceSlot: 0 });
+      const last = await recoverKoraTransaction(rpc, { owner, ownerSignature: ownerSignatures[i]!, ownerSigned: signed[i]!.transaction, feePayer: tx.gas!.feePayer, sinceSlot: tx.sinceSlot ?? 0 });
       return last.state === 'ABSENT' ? { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' } : { state: 'WAITING', index: i, code: null };
     }
     const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);
