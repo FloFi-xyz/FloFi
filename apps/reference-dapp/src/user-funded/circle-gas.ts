@@ -10,8 +10,12 @@
  *   (d) the owner's account is a pinned EIP-7702 smart account whose EntryPoint has a Circle paymaster on this chain: MetaMask's
  *       EIP7702StatelessDeleGator (v0.7: Base, Arbitrum One) or eth-infinitism's Simple7702Account (v0.8: Ethereum, Base, Arbitrum One)
  *       (CIRCLE_SMART_ACCOUNT_REQUIRED, CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED, CIRCLE_ACCOUNT_UNSUPPORTED)
- *   (e) an injected wallet that signs typed data, as the owner's browser reported it (FloFi Wallet has no EIP-7702 delegation and no typed data:
- *       CIRCLE_WALLET_UNSUPPORTED; a wallet nobody reported is never assumed: CIRCLE_WALLET_UNKNOWN)
+ *   (e) the owner's wallet as the browser reported it (a wallet nobody reported is never assumed: CIRCLE_WALLET_UNKNOWN): an injected wallet that
+ *       signs typed data for one of the pinned smart accounts above; or FloFi Wallet (Privy embedded EOA, owner requirement): an account already
+ *       delegated to Simple7702Account v0.8, or a PLAIN account (no code, no pending transaction: CIRCLE_ACCOUNT_NONCE_PENDING) on a chain with
+ *       Circle's v0.8 paymaster — then upgraded to Simple7702Account v0.8 INSIDE this operation (`upgrade`, stage AUTHORIZATION: the owner's
+ *       explicit consent in FloFi, then an EIP-7702 authorization of exactly this chain, the pinned delegate and the account's nonce). Any
+ *       other code, for FloFi Wallet, is never replaced: CIRCLE_ACCOUNT_UNSUPPORTED
  *   (f) the paymaster and USDC are verified on chain — code present, `entryPoint()` = the pinned EntryPoint, USDC `name()`/`version()` = the pinned
  *       permit domain (CIRCLE_PAYMASTER_UNVERIFIED; a success is cached per process for an hour, a failure never)
  *   (g) a fresh ETH/USD price from the deployment's verified price source (CIRCLE_PRICE_UNAVAILABLE)
@@ -21,6 +25,9 @@
  * The group then runs as an ERC-4337 operation of the owner's own account (`EVM_USER_OPERATION`, relayed when due — never an operation signed
  * upfront), in two owner signatures, both typed data:
  *
+ *   phase 0 (FloFi Wallet upgrade)     `consentCircleUpgrade` records the owner's consent in FloFi's own Review; `finalizeCircleAuthorization`
+ *                                      verifies the owner's EIP-7702 authorization (signer = owner, this chain, the pinned delegate, the recorded
+ *                                      nonce still current and the code still empty) — three signatures in all on first use, two afterwards
  *   phase 1 (`circleAttempt`)          the exact calls of the wallet batch (deadline-bounded swaps or a deadline guard), simulated whole first;
  *                                      conservative gas limits, the USDC cap they price to, and the permit typed data (spender = the pinned
  *                                      paymaster, value = the cap, the owner's USDC permit nonce, the never-expiring deadline Circle requires)
@@ -48,11 +55,11 @@ import type { BundlerClient } from './bundler.ts';
 import type { EvmGroupCalls, UserCall } from './evm-calls.ts';
 import { assertUserFundedSubmission } from './gas-payer.ts';
 import type { GroupStrategy } from '../workflow-runs/execution-groups.ts';
-import { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, expectationOf, gasOf, paymasterGasOf,
-  verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
+import { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleSignedAuthorization, circleUpgradeAuthorization,
+  circleUserOpHash, expectationOf, gasOf, paymasterGasOf, verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
 
-export { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, plannedStrategyOf, verifyCircleOperationSignature,
-  type CircleFacts, type CircleGas } from './circle-facts.ts';
+export { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleSignedAuthorization, circleUpgradeAuthorization,
+  circleUserOpHash, plannedStrategyOf, verifyCircleOperationSignature, type CircleFacts, type CircleGas, type CircleUpgrade } from './circle-facts.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Rpc = ChainTransport['rpc'];
@@ -145,9 +152,48 @@ async function entryPointSequence(rpc: Rpc, entryPoint: string, owner: string, k
   return n >> 64n === key ? n & ((1n << 64n) - 1n) : n >> 64n === 0n ? n : null;
 }
 
+// ── Owner requirement: FloFi Wallet (a Privy embedded EOA) ─────────────────────────────────────────────────────────────────────
+type FloFiWalletAccount = { readonly ok: true; readonly code: string; readonly upgrade: CircleFacts['upgrade'] } | { readonly ok: false; readonly code: string };
+/**
+ * A FloFi Wallet account's Circle eligibility, read at ONE block (code and transaction nonce together) plus the pending nonce:
+ *   delegated to Simple7702Account v0.8   used as it is (no upgrade; two signatures)
+ *   no code                                upgraded inside the operation, only where Circle's v0.8 paymaster exists and no transaction is pending
+ *                                          (the authorization's nonce must be the account's next one): `upgrade` with that nonce
+ *   any other code                         never replaced (CIRCLE_ACCOUNT_UNSUPPORTED: a MetaMask DeleGator, another delegate, a contract)
+ */
+async function floFiWalletAccount(rpc: Rpc, owner: string, chainId: number): Promise<FloFiWalletAccount> {
+  let code: string, nonce: bigint, pending: bigint;
+  try {
+    const block = String(await rpc('eth_blockNumber', []));
+    if (!/^0x[0-9a-fA-F]{1,16}$/.test(block)) return { ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE' };
+    const [atCode, atNonce, pendingNonce] = await Promise.all([rpc('eth_getCode', [owner, block]), rpc('eth_getTransactionCount', [owner, block]),
+      rpc('eth_getTransactionCount', [owner, 'pending'])]);
+    code = String(atCode).toLowerCase(); nonce = big(atNonce); pending = big(pendingNonce);
+  } catch { return { ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE' }; }
+  if (erc4337.ownerAccountKindOfCode(code) === 'SIMPLE_7702_V0_8') return { ok: true, code, upgrade: undefined };
+  if (code !== '0x' && code !== '') return { ok: false, code: 'CIRCLE_ACCOUNT_UNSUPPORTED' };
+  if (!C.circlePaymasterOf(chainId, erc4337.ENTRY_POINT_V0_8)) return { ok: false, code: 'CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED' };
+  if (pending !== nonce || nonce >= 1n << 64n) return { ok: false, code: 'CIRCLE_ACCOUNT_NONCE_PENDING' };
+  return { ok: true, code: '0x', upgrade: { delegate: erc4337.SIMPLE_7702_ACCOUNT_V0_8, chainId, nonce: nonce.toString() } };
+}
+/**
+ * Whether an upgrade's authorization still applies now: the account's transaction nonce (latest and pending) is still the recorded one — then no
+ * transaction and no other EIP-7702 authorization touched the account since its code was read empty — and its code is still empty.
+ */
+async function upgradeStillApplies(rpc: Rpc, owner: string, upgrade: NonNullable<CircleFacts['upgrade']>): Promise<'OK' | 'STALE' | 'UNAVAILABLE'> {
+  try {
+    const [code, latest, pending] = await Promise.all([rpc('eth_getCode', [owner, 'latest']), rpc('eth_getTransactionCount', [owner, 'latest']),
+      rpc('eth_getTransactionCount', [owner, 'pending'])]);
+    const empty = String(code).toLowerCase() === '0x' || code === '';
+    return empty && big(latest) === BigInt(upgrade.nonce) && big(pending) === BigInt(upgrade.nonce) ? 'OK' : 'STALE';
+  } catch { return 'UNAVAILABLE'; }
+}
+
 // ── Phase 1: eligibility, the operation's conservative limits, the cap and the permit ────────────────────────────────────────
 /** Conservative phase-1 limits (the final ones come from the bundler's estimate of the operation WITH the signed permit, phase 2). */
-export const CIRCLE_PHASE1 = Object.freeze({ accountVerificationGas: 250_000n, preVerificationGas: 150_000n, callGasPaddingPercent: 130n, callGasExtra: 50_000n });
+export const CIRCLE_PHASE1 = Object.freeze({ accountVerificationGas: 250_000n, preVerificationGas: 150_000n, callGasPaddingPercent: 130n, callGasExtra: 50_000n,
+  /** An upgrade's authorization costs the bundler's type-4 transaction 25,000 gas (EIP-7702 PER_EMPTY_ACCOUNT_COST), repaid in preVerificationGas. */
+  eip7702AuthorizationGas: 30_000n });
 /**
  * The bundler estimates the final operation before the owner signs it, so it carries a stub signature: a canonical (r < n, low-s) 65-byte ECDSA
  * signature that recovers to an unrelated address — both pinned accounts validate with OpenZeppelin's `ECDSA.recover`, which REVERTS on a malformed
@@ -176,18 +222,24 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
   if (!deps.circle?.chains.includes(input.chain)) return { considered: false };
   const t = deps.evm(input.chain), bundler = deps.bundler(input.chain), group = input.group, owner = group.owner.toLowerCase(), chainId = group.chainId;
   if (!t || !bundler?.estimateCircle || !bundler.sendCircle || !bundler.servesEntryPoint) return unavailable('USER_OPERATION_BUNDLER_UNAVAILABLE');
-  // (e) Fail closed (review C4): only a wallet the owner's browser REPORTED as an injected wallet. FloFi Wallet signs no permit, and a wallet nobody
-  // reported may be FloFi Wallet: the owner would be handed a permit that wallet cannot sign.
-  if (input.wallet !== 'INJECTED') return unavailable(input.wallet === 'FLOFI_WALLET' ? 'CIRCLE_WALLET_UNSUPPORTED' : 'CIRCLE_WALLET_UNKNOWN');
+  // (e) Fail closed (review C4): only a wallet the owner's browser REPORTED (an injected wallet, or FloFi Wallet, each with its own account rule
+  // below). A wallet nobody reported is never assumed: the owner would be handed signatures that wallet may not produce.
+  if (input.wallet !== 'INJECTED' && input.wallet !== 'FLOFI_WALLET') return unavailable('CIRCLE_WALLET_UNKNOWN');
   // The fee only: any native value the group sends is still the owner's own ETH.
   if (input.fees.balance < input.nativeSpend) return unavailable('CIRCLE_NATIVE_VALUE_UNCOVERED');
   if (!input.simulation) return unavailable('USER_FUNDED_SIMULATION_UNAVAILABLE');
   const pins = C.circlePinsOf(chainId);
   if (!pins) return unavailable('TOKEN_GAS_CHAIN_UNSUPPORTED');
-  let code: string;
-  try { code = String(await t.rpc('eth_getCode', [owner, 'latest'])).toLowerCase(); } catch { return unavailable('USER_FUNDED_RPC_UNAVAILABLE'); }
-  if (code === '0x' || code === '') return unavailable('CIRCLE_SMART_ACCOUNT_REQUIRED');
-  const accountKind = erc4337.ownerAccountKindOfCode(code);
+  let code: string, upgrade: CircleFacts['upgrade'];
+  if (input.wallet === 'FLOFI_WALLET') {
+    const account = await floFiWalletAccount(t.rpc, owner, chainId);
+    if (!account.ok) return unavailable(account.code);
+    code = account.code; upgrade = account.upgrade;
+  } else {
+    try { code = String(await t.rpc('eth_getCode', [owner, 'latest'])).toLowerCase(); } catch { return unavailable('USER_FUNDED_RPC_UNAVAILABLE'); }
+    if (code === '0x' || code === '') return unavailable('CIRCLE_SMART_ACCOUNT_REQUIRED');
+  }
+  const accountKind: erc4337.OwnerAccountKind | null = upgrade ? 'SIMPLE_7702_V0_8' : erc4337.ownerAccountKindOfCode(code);
   if (!accountKind) return unavailable('CIRCLE_ACCOUNT_UNSUPPORTED');
   const entryPoint = erc4337.OWNER_ACCOUNT_KINDS[accountKind].entryPoint, paymaster = C.circlePaymasterOf(chainId, entryPoint);
   if (!paymaster) return unavailable('CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED');
@@ -217,7 +269,8 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
   const l1Allowance = input.l1FeeUpperBound > 0n && input.fees.gasPrice > 0n ? (input.l1FeeUpperBound * 2n + input.fees.gasPrice - 1n) / input.fees.gasPrice : 0n;
   const gas: erc4337.UserOperationGas = { verificationGasLimit: CIRCLE_PHASE1.accountVerificationGas,
     callGasLimit: input.simulatedGas * CIRCLE_PHASE1.callGasPaddingPercent / 100n + CIRCLE_PHASE1.callGasExtra,
-    preVerificationGas: CIRCLE_PHASE1.preVerificationGas + input.simulatedGas / 2n + l1Allowance, maxFeePerGas, maxPriorityFeePerGas: input.fees.priority };
+    preVerificationGas: CIRCLE_PHASE1.preVerificationGas + input.simulatedGas / 2n + l1Allowance + (upgrade ? CIRCLE_PHASE1.eip7702AuthorizationGas : 0n), maxFeePerGas,
+    maxPriorityFeePerGas: input.fees.priority };
   const pmGas = { verificationGasLimit: C.CIRCLE_PAYMASTER_GAS.verification, postOpGasLimit };
   const nativeWorst = C.circleMaxNativeCost(gas, pmGas);
   const permitCap = C.circleUsdcWorstCase({ nativeWei: nativeWorst, ethUsd: price.ethUsd, usdcUsd: price.usdcUsd });
@@ -228,13 +281,14 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
   let callData: string;
   try { callData = erc4337.ownerAccountCallData(accountKind, input.calls); } catch (cause) { return unavailable(codeOf(cause, 'USER_FUNDED_GROUP_NOT_PREPARABLE')); }
   const nonce = erc4337.userOpNonce(key, sequence);
-  const facts: CircleFacts = { stage: 'PERMIT', accountKind, entryPoint, paymaster, usdc: pins.usdc, permitCap: permitCap.toString(), permitNonce: permitNonce.toString(),
+  const facts: CircleFacts = { stage: upgrade ? 'AUTHORIZATION' : 'PERMIT', accountKind, entryPoint, paymaster, usdc: pins.usdc, permitCap: permitCap.toString(), permitNonce: permitNonce.toString(),
     price: { ethUsd: price.ethUsd.toString(), usdcUsd: price.usdcUsd?.toString() ?? null, observedAt: price.observedAt },
     surchargeBps: C.CIRCLE_SURCHARGE_BPS.toString(), marginBps: C.CIRCLE_PRICE_MARGIN_BPS.toString(), nonce: nonce.toString(), callData,
     gas: { verificationGasLimit: gas.verificationGasLimit.toString(), callGasLimit: gas.callGasLimit.toString(), preVerificationGas: gas.preVerificationGas.toString(),
       maxFeePerGas: gas.maxFeePerGas.toString(), maxPriorityFeePerGas: gas.maxPriorityFeePerGas.toString(), paymasterVerificationGasLimit: pmGas.verificationGasLimit.toString(),
       paymasterPostOpGasLimit: pmGas.postOpGasLimit.toString() },
-    nativeRequired: input.nativeRequired.toString(), usdcSpend: usdcSpend.toString(), plannedStrategy: input.strategy, deadline: String(input.deadline) };
+    nativeRequired: input.nativeRequired.toString(), usdcSpend: usdcSpend.toString(), plannedStrategy: input.strategy, deadline: String(input.deadline),
+    ...upgrade ? { upgrade } : {} };
   const permit = circlePermitOf(facts, chainId, owner);
   return { considered: true, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true }, prepared: {
     kind: 'EVM_USER_OPERATION', chainId, owner, group, upgraded: true, simulation: input.simulation, circle: facts, gasPayment: circleGasPayment(facts),
@@ -243,9 +297,45 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
       maxFeePerGas: maxFeePerGas.toString(), estimated: false } } };
 }
 
-// ── Phase 2: the owner's permit, the final operation ────────────────────────────────────────────────────────────────────────
+// ── Phase 0 (FloFi Wallet's first use): the owner's consent, then the owner's EIP-7702 authorization ────────────────────────────
 export type CircleResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
 const no = (code: string): CircleResult<never> => ({ ok: false, code });
+/**
+ * The owner's explicit consent to the upgrade, given in FloFi's own Review BEFORE the wallet is asked (Privy shows no confirmation screen for an
+ * EIP-7702 authorization: FloFi's consent is the only one). Recorded on the artifact; the signing gate refuses the authorization without it. Pure
+ * and idempotent (a repeated consent keeps the first time).
+ */
+export function consentCircleUpgrade(prepared: Readonly<Record<string, unknown>>, now: Date): CircleResult<Readonly<Record<string, unknown>>> {
+  const c = circleFactsOf(prepared);
+  if (!c?.upgrade) return no('CIRCLE_UPGRADE_NOT_PREPARED');
+  if (c.stage !== 'AUTHORIZATION') return no('CIRCLE_AUTHORIZATION_STAGE_INVALID');
+  if (c.upgrade.consentedAt) return { ok: true, value: prepared };
+  return { ok: true, value: { ...prepared, circle: { ...c, upgrade: { ...c.upgrade, consentedAt: now.toISOString() } } } };
+}
+/**
+ * Phase 0: the owner signed the upgrade's EIP-7702 authorization. Verified (signer = the owner; exactly the recorded tuple: this chain, the pinned
+ * `Simple7702Account` v0.8, the recorded nonce) only after the owner's consent was recorded, and only while it still applies (the account's
+ * nonce unchanged and its code still empty: CIRCLE_AUTHORIZATION_STALE otherwise — nothing can then replace a delegation made meanwhile).
+ * Returns the artifact at stage PERMIT.
+ */
+export async function finalizeCircleAuthorization(deps: CircleRuntimeDeps, prepared: Readonly<Record<string, unknown>>, signature: string): Promise<CircleResult<Readonly<Record<string, unknown>>>> {
+  const c = circleFactsOf(prepared);
+  if (!c?.upgrade) return no('CIRCLE_UPGRADE_NOT_PREPARED');
+  if (c.stage !== 'AUTHORIZATION') return no('CIRCLE_AUTHORIZATION_STAGE_INVALID');
+  if (!c.upgrade.consentedAt) return no('CIRCLE_UPGRADE_CONSENT_REQUIRED');
+  const chainId = Number(prepared.chainId), owner = String(prepared.owner).toLowerCase();
+  if (c.upgrade.chainId !== chainId) return no('CIRCLE_AUTHORIZATION_INVALID');
+  if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return no('CIRCLE_AUTHORIZATION_INVALID');
+  try { erc4337.signedEip7702Authorization(circleUpgradeAuthorization(c), signature, owner); } catch { return no('CIRCLE_AUTHORIZATION_INVALID'); }
+  const t = deps.evm(`eip155:${chainId}`);
+  if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
+  const applies = await upgradeStillApplies(t.rpc, owner, c.upgrade);
+  if (applies !== 'OK') return no(applies === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE');
+  const facts: CircleFacts = { ...c, stage: 'PERMIT', upgrade: { ...c.upgrade, signature: signature.toLowerCase() } };
+  return { ok: true, value: { ...prepared, circle: facts, gasPayment: circleGasPayment(facts) } };
+}
+
+// ── Phase 2: the owner's permit, the final operation ────────────────────────────────────────────────────────────────────────
 /** The owner's current USDC permit nonce: the signed permit is usable only while it is unmoved (it is consumed by the paymaster's validation). */
 async function permitNonceUnmoved(rpc: Rpc, c: CircleFacts, owner: string): Promise<'OK' | 'MOVED' | 'UNAVAILABLE'> {
   try { return await readUint(rpc, c.usdc, C.permitNoncesCall(owner)) === BigInt(c.permitNonce) ? 'OK' : 'MOVED'; } catch { return 'UNAVAILABLE'; }
@@ -267,9 +357,16 @@ export async function finalizeCirclePermit(deps: CircleRuntimeDeps, prepared: Re
   if (!bundler?.estimateCircle) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
   const nonce = await permitNonceUnmoved(t.rpc, c, owner);
   if (nonce !== 'OK') return no(nonce === 'MOVED' ? 'CIRCLE_PERMIT_EXPIRED' : 'USER_FUNDED_RPC_UNAVAILABLE');
+  // An upgrade is estimated WITH the owner's authorization (the bundler simulates the account as delegated), while it still applies.
+  let auth: erc4337.SignedEip7702Authorization | null;
+  try { auth = circleSignedAuthorization(c, owner); } catch { return no('CIRCLE_AUTHORIZATION_INVALID'); }
+  if (c.upgrade) {
+    const applies = await upgradeStillApplies(t.rpc, owner, c.upgrade);
+    if (applies !== 'OK') return no(applies === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE');
+  }
   const signed: CircleFacts = { ...c, permitSignature: signature };
   let estimate: Awaited<ReturnType<NonNullable<typeof bundler.estimateCircle>>>;
-  try { estimate = await bundler.estimateCircle({ ...circleOperationOf(signed, owner), signature: CIRCLE_ESTIMATION_SIGNATURE }, c.entryPoint); }
+  try { estimate = await bundler.estimateCircle({ ...circleOperationOf(signed, owner), signature: CIRCLE_ESTIMATION_SIGNATURE }, c.entryPoint, auth ?? undefined); }
   catch (cause) { return no(codeOf(cause, 'CIRCLE_PAYMASTER_REFUSED')); }
   const before = gasOf(c.gas), pmBefore = paymasterGasOf(c.gas);
   const atLeast = (estimated: bigint, floor: bigint) => estimated > floor ? estimated : floor;
@@ -293,7 +390,7 @@ export async function finalizeCirclePermit(deps: CircleRuntimeDeps, prepared: Re
   return { ok: true, value: { ...prepared, circle: final, gasPayment: circleGasPayment(final),
     op: { sender: op.sender, nonce: op.nonce.toString(), callData: op.callData, accountGasLimits: op.accountGasLimits, preVerificationGas: op.preVerificationGas.toString(),
       gasFees: op.gasFees, paymasterAndData: op.paymasterAndData },
-    userOpHash: erc4337.userOpHashFor(op, chainId, final.entryPoint), typedData: circleOperationTypedData(final, chainId, op),
+    userOpHash: circleUserOpHash(final, chainId, op), typedData: circleOperationTypedData(final, chainId, op),
     fee: { ...fee, nativeMaxCost: nativeWorst.toString() } } };
 }
 
@@ -326,6 +423,13 @@ export async function checkCircleSubmission(deps: CircleRuntimeDeps, prepared: R
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
   const nonce = await permitNonceUnmoved(t.rpc, c, owner.toLowerCase());
   if (nonce !== 'OK') return no(nonce === 'MOVED' ? 'CIRCLE_PERMIT_EXPIRED' : 'USER_FUNDED_RPC_UNAVAILABLE');
+  // An upgrade is relayed only with the owner's own authorization of exactly the recorded tuple, while it still applies (never one that would
+  // replace a delegation made meanwhile: the account's nonce would have moved).
+  if (c.upgrade) {
+    try { circleSignedAuthorization(c, owner.toLowerCase()); } catch { return no('CIRCLE_AUTHORIZATION_INVALID'); }
+    const applies = await upgradeStillApplies(t.rpc, owner.toLowerCase(), c.upgrade);
+    if (applies !== 'OK') return no(applies === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE');
+  }
   return { ok: true, value: c };
 }
 /**

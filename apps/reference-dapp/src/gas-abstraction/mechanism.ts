@@ -41,9 +41,13 @@ export type TokenAmount = { readonly token: string; readonly symbol: string; rea
  */
 export type GasPayment =
   | { readonly mechanism: 'NATIVE_WALLET_GAS'; readonly maxFee: { readonly amount: string; readonly unit: 'wei' | 'lamports' } | null; readonly signatures: number }
-  | { readonly mechanism: 'CIRCLE_USDC_PAYMASTER'; readonly maxFee: TokenAmount; readonly signatures: 2;
+  | { readonly mechanism: 'CIRCLE_USDC_PAYMASTER'; readonly maxFee: TokenAmount;
+      /** 2: a USDC permit, then the operation. 3: a FloFi Wallet's first use — its EIP-7702 upgrade authorization first (owner consent required). */
+      readonly signatures: 2 | 3;
       /** The pinned Circle paymaster, its EntryPoint and the permit's allowance cap (spender = paymaster). */
-      readonly paymaster: string; readonly entryPoint: string; readonly permitCap: string }
+      readonly paymaster: string; readonly entryPoint: string; readonly permitCap: string;
+      /** The EIP-7702 upgrade inside this operation (FloFi Wallet's first use only): the pinned delegate the owner's address designates. */
+      readonly upgrade?: { readonly delegate: string; readonly chainId: number } }
   | { readonly mechanism: 'PIMLICO_KORA_SPL_FEE'; readonly maxFee: TokenAmount; readonly signatures: 1;
       /** Pimlico's fee payer (static key 0) and the wallet whose associated token account receives the fee. */
       readonly feePayer: string; readonly paymentAddress: string }

@@ -63,6 +63,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   /** Aave positions per user: supplied (collateral when enabled) and variable debt, by reserve asset. */
   const supplied = new Map<string, bigint>(), debt = new Map<string, bigint>(), collateralOn = new Set<string>();
   const balances = new Map<string, bigint>(), allowances = new Map<string, bigint>(), code = new Map<string, string>(), nonces = new Map<string, bigint>();
+  /** An account's pending transaction count when a transaction of it waits in the mempool (`eth_getTransactionCount(…, 'pending')`). */
+  const pendingNonces = new Map<string, bigint>();
   const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>(), usedIds = new Set<string>();
   const receipts = new Map<string, Receipt>(), txs = new Map<string, Tx>();
   const pool = profile.pool, opStack = chainId === 8453;
@@ -324,7 +326,10 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         return code.get(lower(String(p[0]))) ?? ([...tokens(), profile.router, profile.quoter, F.delegationManager, ...Object.values(F.enforcers),
         ...aave ? [aave.pool] : [], ...canonicalPools].includes(lower(String(p[0]))) ? '0x6080' : '0x');
       case 'eth_getBalance': return '0x' + (native.get(lower(String(p[0]))) ?? 0n).toString(16);
-      case 'eth_getTransactionCount': return '0x' + (nonces.get(lower(String(p[0]))) ?? 0n).toString(16);
+      case 'eth_getTransactionCount': {
+        const account = lower(String(p[0])), latest = nonces.get(account) ?? 0n;
+        return '0x' + (p[1] === 'pending' ? pendingNonces.get(account) ?? latest : latest).toString(16);
+      }
       case 'eth_getTransactionReceipt': {
         const r = receipts.get(String(p[0])), t = txs.get(String(p[0]));
         return r && t ? { transactionHash: t.hash, status: r.status ? '0x1' : '0x0', blockNumber: '0x' + r.blockNumber.toString(16), blockHash: blockOf(r.blockNumber).hash,
@@ -511,6 +516,11 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
     setDecimals(token: string, decimals: number) { decimalsOverride.set(lower(token), decimals); },
     /** Replaces an account's code (`'0x'`: a token address without code). */
     setCode(account: string, bytecode: string) { code.set(lower(account), bytecode); },
+    /** An account's transaction nonce (a transaction it sent elsewhere moves it), and a pending one (`null`: none waiting). */
+    setNonce(account: string, nonce: bigint) { nonces.set(lower(account), nonce); },
+    nonceOf: (account: string) => nonces.get(lower(account)) ?? 0n,
+    setPendingNonce(account: string, nonce: bigint | null) { if (nonce === null) pendingNonces.delete(lower(account)); else pendingNonces.set(lower(account), nonce); },
+    codeOf: (account: string) => code.get(lower(account)) ?? '0x',
     /** A fee-on-transfer token: each transfer of it delivers `bps` basis points less to the recipient (the fee is burned). */
     setTransferFeeBps(token: string, bps: bigint) { transferFeeBps.set(lower(token), bps); },
     accountData: (user: string) => accountData(lower(user)),

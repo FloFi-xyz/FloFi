@@ -248,10 +248,12 @@ describe('ADR-0010 Circle USDC paymaster: every reason it is not offered, attach
     expect(e).toMatchObject({ chainId: 'eip155:1', unit: 'wei', unavailable: [{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED' }] });
     expect(BigInt(e.shortfall) > 0n).toBe(true);
   });
-  it('a plain EOA, another delegation, FloFi Wallet', async () => {
+  it('a plain EOA, another delegation, FloFi Wallet over a delegation it never replaces', async () => {
     expect(await unavailableOf({ chainId: 8453, account: 'EOA' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_SMART_ACCOUNT_REQUIRED' }]);
     expect(await unavailableOf({ chainId: 8453, account: 'OTHER' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_ACCOUNT_UNSUPPORTED' }]);
-    expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', wallet: 'FLOFI_WALLET' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_WALLET_UNSUPPORTED' }]);
+    // Owner requirement (FloFi Wallet + Circle): FloFi Wallet uses only a plain account (upgraded inside the operation) or one already delegated to
+    // Simple7702Account v0.8; an account delegated to anything else (here MetaMask's DeleGator) is never replaced, so Circle is not offered.
+    expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', wallet: 'FLOFI_WALLET' })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_ACCOUNT_UNSUPPORTED' }]);
   });
   it('review C4: a wallet type nobody reported is never offered Circle (fail closed: it may be FloFi Wallet, which cannot sign the permit)', async () => {
     expect(await unavailableOf({ chainId: 8453, account: 'DELEGATOR', wallet: null })).toEqual([{ mechanism: 'CIRCLE_USDC_PAYMASTER', code: 'CIRCLE_WALLET_UNKNOWN' }]);

@@ -53,8 +53,8 @@ import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 import { selectGasMechanism, type MechanismUnavailable } from '../gas-abstraction/mechanism.ts';
-import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleDeadlinePassed, circleFactsOf, circleOperationOf, circleRelayOpen, type CircleDeps,
-  type CircleFacts } from './circle-gas.ts';
+import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleDeadlinePassed, circleFactsOf, circleOperationOf, circleRelayOpen, circleSignedAuthorization,
+  circleUserOpHash, type CircleDeps, type CircleFacts } from './circle-gas.ts';
 import { gaslessStepModeRefusal } from './gasless-groups.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
@@ -303,6 +303,17 @@ async function prepareUserOperation(deps: UserFundedDeps, requirement: WorkflowR
     op: serialOp(op), userOpHash: erc4337.userOpHash(op, group.chainId), typedData: erc4337.delegatorUserOpTypedData(group.chainId, op),
     fee: { payer: group.owner, unit: 'wei', maxFeePerGas: maxFeePerGas.toString(), maxCost: maxCost.toString(), estimated: !delayed } });
 }
+/**
+ * Owner requirement (FloFi Wallet + Circle): a FloFi Wallet group planned as owner steps (each step through its own flow, the owner's ETH paying)
+ * is prepared here ONLY as a Circle-paid operation, and only when the owner's ETH does NOT cover the group's worst-case fee and Circle is proven
+ * eligible for exactly these calls (`circle-gas.ts`: a plain account is upgraded inside the operation after the owner's consent). Otherwise
+ * nothing is prepared: CIRCLE_NOT_NEEDED when ETH covers (the owner-step path continues exactly as before), or the native shortfall with the
+ * reasons Circle could not be used. Never for another wallet, a delayed group, or a chain without Circle.
+ */
+async function prepareFloFiWalletCircle(deps: UserFundedDeps, requirement: WorkflowRequirement, g: GroupInput, guaranteed: ReadonlyMap<number, AssetAmountFact>): Promise<Result<Prepared>> {
+  if (g.wallet !== 'FLOFI_WALLET' || g.tokenGas !== true || !g.chain.startsWith('eip155:') || !deps.circle?.chains.includes(g.chain)) return no('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  return prepareWalletBatch(deps, requirement, { ...g, strategy: 'EVM_WALLET_BATCH', preview: true }, guaranteed, { circleOnly: true, plannedStrategy: 'EVM_OWNER_STEP' });
+}
 /** `paymasterAndData`: ADR-0010 only — a Circle-paid operation's (verified against its facts by `circle-gas.ts` before any use); absent: none. */
 export type SerialOp = { readonly sender: string; readonly nonce: string; readonly callData: string; readonly accountGasLimits: string; readonly preVerificationGas: string;
   readonly gasFees: string; readonly paymasterAndData?: string };
@@ -431,6 +442,7 @@ export async function prepareGroup(deps: UserFundedDeps, composition: WorkflowCo
     if (g.strategy === 'EVM_WALLET_BATCH') r = await prepareWalletBatch(deps, requirement, g, guaranteed);
     else if (g.strategy === 'EVM_USER_OPERATION') r = await prepareUserOperation(deps, requirement, g, guaranteed, options.delayed === true);
     else if (g.strategy === 'SOLANA_SIGN_ALL') r = await prepareSolanaSignAll(deps, composition, requirement, g);
+    else if (g.strategy === 'EVM_OWNER_STEP') r = await prepareFloFiWalletCircle(deps, requirement, g, guaranteed);
     else return no('USER_FUNDED_GROUP_NOT_PREPARABLE');
     if (!r.ok) return r;
     assertExecutionEnabled();
@@ -522,12 +534,13 @@ async function checkCircleOperation(deps: UserFundedDeps, prepared: Prepared, au
   if (!checked.ok) return no(checked.code);
   const c = checked.value;
   try {
-    const need = await bundler.estimateCircle(op, c.entryPoint);
+    // Owner requirement: an upgrade is simulated with the owner's own authorization (checked to still apply by `checkCircleSubmission`).
+    const need = await bundler.estimateCircle(op, c.entryPoint, circleSignedAuthorization(c, owner.toLowerCase()) ?? undefined);
     const [verificationGasLimit, callGasLimit] = erc4337.unpackUints(op.accountGasLimits), pm = erc4337.unpackPaymasterAndData(op.paymasterAndData)!;
     if (need.verificationGasLimit > verificationGasLimit || need.callGasLimit > callGasLimit || need.preVerificationGas > op.preVerificationGas
       || need.paymasterVerificationGasLimit > pm.verificationGasLimit || need.paymasterPostOpGasLimit > pm.postOpGasLimit) return no('USER_OPERATION_GAS_LIMIT_TOO_LOW');
   } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
-  return ok({ kind: 'EVM_USER_OPERATION', userOpHash: erc4337.userOpHashFor(op, Number(prepared.chainId), c.entryPoint), entryPoint: c.entryPoint, hashes: [],
+  return ok({ kind: 'EVM_USER_OPERATION', userOpHash: circleUserOpHash(c, Number(prepared.chainId), op), entryPoint: c.entryPoint, hashes: [],
     submittedAt: deps.now().toISOString() });
 }
 /**
@@ -545,7 +558,9 @@ export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepare
     // ADR-0010: a Circle-paid operation goes to its own EntryPoint, through the bundler's Circle-only path (any other paymaster is refused there),
     // and never at or after its calls' deadline minus the margin (review C2: first relay and resend alike).
     if (circle && !circleRelayOpen(prepared, deps.now())) return no('CIRCLE_OPERATION_DEADLINE_PASSED');
-    if (circle) return bundler.sendCircle ? ok(await bundler.sendCircle(op, circle.entryPoint)) : no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+    // Owner requirement: an upgrade travels with exactly the owner's recorded authorization (the same bytes on every resend, like the operation).
+    if (circle) return bundler.sendCircle ? ok(await bundler.sendCircle(op, circle.entryPoint, circleSignedAuthorization(circle, String(prepared.owner)) ?? undefined))
+      : no('USER_OPERATION_BUNDLER_UNAVAILABLE');
     return ok(await bundler.send(op));
   } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
 }
@@ -998,7 +1013,7 @@ export async function reconcileEvmGroup(deps: UserFundedDeps, prepared: Prepared
 /** ADR-0010: what a Circle-paid group's reconciliation checks (its EntryPoint, the pinned paymaster, USDC and the cap); null for any other group. */
 function circleReconciliationOf(prepared: Prepared): CircleReconciliation | null {
   const c = circleFactsOf(prepared);
-  return c ? { entryPoint: c.entryPoint, paymaster: c.paymaster, usdc: c.usdc, cap: BigInt(c.permitCap) } : null;
+  return c ? { entryPoint: c.entryPoint, paymaster: c.paymaster, usdc: c.usdc, cap: BigInt(c.permitCap), ...c.upgrade ? { delegate: c.upgrade.delegate } : {} } : null;
 }
 /** The EntryPoint a prepared operation was signed for: a Circle-paid one names its own; FloFi's owner-paid operations are v0.7. */
 const entryPointOf = (prepared: Prepared): string => circleFactsOf(prepared)?.entryPoint ?? erc4337.ENTRY_POINT_V0_7;

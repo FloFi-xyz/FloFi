@@ -82,8 +82,14 @@ export type BundlerClient = {
    * paymaster's limits; the send checks the bundler's hash against FloFi's own (`getUserOpHash` of that EntryPoint). Absent on a test double that
    * models no paymaster: the caller then refuses (USER_OPERATION_BUNDLER_UNAVAILABLE).
    */
-  readonly estimateCircle?: (op: erc4337.PackedUserOperation, entryPoint: string) => Promise<ReturnType<typeof erc4337.bundlerPaymasterGasEstimate>>;
-  readonly sendCircle?: (op: erc4337.PackedUserOperation, entryPoint: string) => Promise<string>;
+  readonly estimateCircle?: (op: erc4337.PackedUserOperation, entryPoint: string, eip7702Auth?: erc4337.SignedEip7702Authorization) =>
+    Promise<ReturnType<typeof erc4337.bundlerPaymasterGasEstimate>>;
+  /**
+   * `eip7702Auth` (owner requirement: FloFi Wallet's first use): the owner's signed EIP-7702 authorization of the pinned `Simple7702Account` v0.8 on
+   * this chain — sent exactly with an operation that carries the EIP-7702 initCode marker on EntryPoint v0.8 (the bundler then applies it in its own
+   * type-4 transaction before validation), and refused with any other operation (ERC4337_EIP7702_AUTH_REFUSED).
+   */
+  readonly sendCircle?: (op: erc4337.PackedUserOperation, entryPoint: string, eip7702Auth?: erc4337.SignedEip7702Authorization) => Promise<string>;
   /**
    * ADR-0010 review (C3): whether the bundler serves `entryPoint` (its `eth_supportedEntryPoints`, read once per client and cached on success).
    * Throws the transport's closed code (or USER_OPERATION_ENTRY_POINT_UNSUPPORTED when it serves neither v0.7 nor v0.8). Asked before Circle is
@@ -116,24 +122,44 @@ export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
     try { named = erc4337.unpackPaymasterAndData(op.paymasterAndData)?.paymaster ?? null; } catch { /* malformed: refused below */ }
     if (!pinned || named !== pinned) throw new BundlerError('ERC4337_SPONSORED_REFUSED');
   };
+  /**
+   * The owner's authorization travels only with an operation that carries the EIP-7702 marker, and only one designating the pinned v0.8 delegate on
+   * THIS chain for the EntryPoint that delegate serves (the wire format then checks it is the sender's own); anything else is refused before the
+   * bundler is asked. Returns the delegate the operation is hashed with.
+   */
+  const upgradeOf = (op: erc4337.PackedUserOperation, entryPoint: string, auth: erc4337.SignedEip7702Authorization | undefined): string | undefined => {
+    const marker = op.initCode.toLowerCase() === erc4337.EIP7702_INIT_CODE_MARKER;
+    if (!marker && auth === undefined) return undefined;
+    // The marker never travels without the owner's authorization (refused as any initCode, ERC4337_INIT_CODE_REFUSED).
+    if (marker && auth === undefined) throw new BundlerError('ERC4337_INIT_CODE_REFUSED');
+    if (!marker || !auth || auth.address.toLowerCase() !== erc4337.SIMPLE_7702_ACCOUNT_V0_8 || auth.chainId !== chainId
+      || entryPoint.toLowerCase() !== erc4337.ENTRY_POINT_V0_8) throw new BundlerError('ERC4337_EIP7702_AUTH_REFUSED');
+    return erc4337.SIMPLE_7702_ACCOUNT_V0_8;
+  };
   return {
     chainId, verify,
     async servesEntryPoint(entryPoint) { await verify(); return verified!.has(entryPoint.toLowerCase()); },
     async estimate(op) { await served(erc4337.ENTRY_POINT_V0_7); return erc4337.bundlerGasEstimate(await rpc('eth_estimateUserOperationGas', [erc4337.toBundlerUserOperation(op), erc4337.ENTRY_POINT_V0_7])); },
-    async estimateCircle(op, entryPoint) {
+    async estimateCircle(op, entryPoint, eip7702Auth) {
       await served(entryPoint);
       circleOnly(op, entryPoint);
-      try { return erc4337.bundlerPaymasterGasEstimate(await rpc('eth_estimateUserOperationGas', [erc4337.toBundlerUserOperationWithPaymaster(op), entryPoint.toLowerCase()])); }
+      upgradeOf(op, entryPoint, eip7702Auth);
+      let wire: erc4337.BundlerPaymasterUserOperation;
+      try { wire = erc4337.toBundlerUserOperationWithPaymaster(op, eip7702Auth); } catch (cause) { throw new BundlerError(cause instanceof Error ? cause.message : 'ERC4337_EIP7702_AUTH_REFUSED'); }
+      try { return erc4337.bundlerPaymasterGasEstimate(await rpc('eth_estimateUserOperationGas', [wire, entryPoint.toLowerCase()])); }
       catch (cause) { throw circleBundlerRefusal(cause); }
     },
-    async sendCircle(op, entryPoint) {
+    async sendCircle(op, entryPoint, eip7702Auth) {
       await served(entryPoint);
       circleOnly(op, entryPoint);
+      const delegate = upgradeOf(op, entryPoint, eip7702Auth);
       if (!/^0x[0-9a-f]{130}$/.test(op.signature)) throw new BundlerError('USER_OPERATION_SIGNATURE_INVALID');
-      const expected = erc4337.userOpHashFor(op, chainId, entryPoint);
+      let wire: erc4337.BundlerPaymasterUserOperation;
+      try { wire = erc4337.toBundlerUserOperationWithPaymaster(op, eip7702Auth); } catch (cause) { throw new BundlerError(cause instanceof Error ? cause.message : 'ERC4337_EIP7702_AUTH_REFUSED'); }
+      const expected = erc4337.userOpHashFor(op, chainId, entryPoint, delegate);
       assertExecutionEnabled();
       let hash: unknown;
-      try { hash = await rpc('eth_sendUserOperation', [erc4337.toBundlerUserOperationWithPaymaster(op), entryPoint.toLowerCase()]); }
+      try { hash = await rpc('eth_sendUserOperation', [wire, entryPoint.toLowerCase()]); }
       catch (cause) { throw circleBundlerRefusal(cause); }
       if (typeof hash !== 'string' || hash.toLowerCase() !== expected) throw new BundlerError('USER_OPERATION_HASH_MISMATCH');
       return expected;
