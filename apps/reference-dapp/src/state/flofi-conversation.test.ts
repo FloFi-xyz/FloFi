@@ -225,6 +225,19 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     const native = await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps');
     expect(last(native).text).toMatch(/^On this network FloFi has no native ETH swap/); expect(editor.workflow.revision).toBe(1);
   });
+  it('P0 FIX 1 (production 2026-11-13): "swap 1 usdc to eth on base and then bridge to arbitrum" reaches the Copilot, never the native-ETH refusal', async () => {
+    const asked: string[] = [];
+    f.respond = async text => { asked.push(text); return { kind: 'QUESTION', text: 'How much should the bridge send?', notes: [], options: [], sentence: null, command: null }; };
+    for (const request of ['swap 1 usdc to eth on base and then bridge to arbitrum', 'swap 1 USDC to ETH on Base, then bridge it to Arbitrum One',
+      'swap 1 usdc to eth on base then bridge to arbitrum'])
+      expect(last(await say(request)).text, request).not.toMatch(/native ETH swap/);
+    expect(asked).toEqual(['swap 1 usdc to eth on base and then bridge to arbitrum', 'swap 1 USDC to ETH on Base, then bridge it to Arbitrum One',
+      'swap 1 usdc to eth on base then bridge to arbitrum']);
+    expect(editor.workflow.revision).toBe(0);
+    // One network that has no native ETH swap is still refused deterministically (ETH is never authored as WETH).
+    expect(last(await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps')).text).toMatch(/^On this network FloFi has no native ETH swap/);
+    expect(asked).toHaveLength(3);
+  });
   it('in an approval context the chat keeps its proposal behaviour and has no lifecycle controls', async () => {
     direct = false;
     const chat = await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
