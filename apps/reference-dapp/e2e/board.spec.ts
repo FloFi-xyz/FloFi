@@ -508,7 +508,13 @@ test('a real simulation issues the boarding pass: Founding seat #001, the real r
   // The holder's choice: their handle, shown on the public departures board.
   await expect(page.locator('section[aria-labelledby="departures-title"]')).toHaveCount(0);
   await page.getByRole('checkbox', { name: /public departures board/ }).check();
+  // "Saved." is still visible from printing the card. Wait for this opt-in to persist before reloading.
+  const saved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/board/handle'
+    && response.request().method() === 'POST' && response.request().postDataJSON()?.public === true);
   await page.getByRole('button', { name: 'Save' }).click();
+  const response = await saved;
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toMatchObject({ ok: true, pass: { handle: 'ana_flight', public: true } });
   await expect(page.getByText('Saved.')).toBeVisible();
   await page.reload();
   const departures = page.locator('section[aria-labelledby="departures-title"]');
