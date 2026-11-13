@@ -19,4 +19,11 @@ export const portugueseMainnetExec: Readonly<Record<string, string>> = {
   'Provider': 'Provedor',
   'Before': 'Antes',
   'Now': 'Agora',
+  // Compact chat Review.
+  'Receives': 'Recebe',
+  '≈ {0}': '≈ {0}',
+  'at most {0}': 'no máximo {0}',
+  '≈ {0} · at most {1}': '≈ {0} · no máximo {1}',
+  'Permission': 'Permissão',
+  'Reviewed after step {0}': 'Revisada após a etapa {0}',
 };

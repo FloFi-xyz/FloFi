@@ -234,6 +234,10 @@
       "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
       "stage": "unit"
     },
+    "app.components.conversation-cards": {
+      "path": "apps/reference-dapp/src/components/conversation-cards.test.tsx",
+      "stage": "unit"
+    },
     "app.components.copilot-automation-proposal": {
       "path": "apps/reference-dapp/src/components/copilot-automation-proposal.test.tsx",
       "stage": "unit"
@@ -2837,6 +2841,7 @@
         "apps/reference-dapp/src/components/proposal-review.tsx"
       ],
       "suites": [
+        "app.components.conversation-cards",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.e2e.chat-assistant",

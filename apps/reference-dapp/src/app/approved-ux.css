@@ -169,3 +169,16 @@
 .bridge-requote dt{color:var(--muted)}
 .bridge-requote dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .bridge-requote s{color:var(--muted)}
+/* BUILD-FLOFI-MAINNET-EXEC-002: the compact chat Review — one short block per step; exact values and technical lines under a closed disclosure. */
+.conversation-review .conversation-review-compact{gap:2px;margin-top:4px}
+.conversation-review .conversation-review-compact dd{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conversation-review .conversation-review-compact code{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px}
+.conversation-review .conversation-review-extra{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
+.conversation-review .conversation-review-extra [data-permission] dd{white-space:normal}
+.conversation-review .conversation-review-warnings{margin-top:6px;font-size:12.5px}
+.conversation-review .conversation-review-technical{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
+.conversation-review .conversation-review-technical>summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+.conversation-review .conversation-review-technical>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.conversation-review .conversation-review-technical[open]>summary{margin-bottom:6px}
+.conversation-review .conversation-review-technical code{font-size:11.5px;overflow-wrap:anywhere}
+.conversation-review .conversation-review-technical .conversation-review-lines:first-of-type{margin-top:6px!important}
