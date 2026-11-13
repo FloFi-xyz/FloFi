@@ -363,3 +363,37 @@ describe('the robinhood-swap cloud flow carries the gasless methods', () => {
     expect(flow.evidence(done)).toMatchObject({ environment: 'MOCKED', outcome: 'RECONCILED' });
   });
 });
+
+describe('FloFi Wallet signs a gasless swap only through the reviewed attempt', () => {
+  it('re-derives the exact approval and trade from the SIGNING attempt, summarises the fee in the swap\'s token, refuses anything else', async () => {
+    const { resolveManagedSigning, parseSigningRequest } = await import('../managed-signing.ts');
+    const s = service(), run = await reviewed(s), runId = run.quote.executionId;
+    const deps = { load: async () => s.load(runId), managed: (_e: string, address: string) => address === owner.address, now: () => clock };
+    const context = { flow: 'robinhood-swap', runId };
+    const ask = (typedData: unknown, address = owner.address) =>
+      resolveManagedSigning(context, { ecosystem: 'evm-typed-data', address, typedData: typedData as eip712.TypedData }, deps);
+    // Before beginGasless there is no attempt waiting for signatures.
+    expect(await ask(run.quote.gas!.zeroEx!.trade.eip712)).toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+    const begun = await s.beginGasless(runId, owner.address);
+    const trade = await ask(begun.trade), approval = await ask(begun.approval);
+    expect(trade).toMatchObject({ ok: true, value: { attempt: `robinhood-swap:${begun.attempt.attemptId}:trade`, owner: owner.address,
+      typedData: { kind: 'trade', digest: run.quote.gas!.zeroEx!.trade.hash }, summary: { action: 'Swap (signature)', network: 'Robinhood Chain' } } });
+    expect(trade.ok && trade.value.summary.lines).toEqual([{ label: 'Swap', value: '100 USDG → TSLA on Robinhood Chain' },
+      { label: 'Minimum received', value: expect.stringMatching(/ TSLA$/) }, { label: 'Fees included in the swap', value: '0.42 USDG' },
+      { label: 'Executed by', value: `0x Settler ${MOCK_SETTLER}` }]);
+    expect(approval).toMatchObject({ ok: true, value: { typedData: { kind: 'approval' }, summary: { lines: expect.arrayContaining([{ label: 'Approve', value: '100 USDG' }]) } } });
+    // The same digest without the declared EIP712Domain is the same payload; any changed value, another wallet or a stale Review is not.
+    const types = Object.fromEntries(Object.entries(begun.trade.types).filter(([name]) => name !== 'EIP712Domain'));
+    expect((await ask({ ...begun.trade, types })).ok).toBe(true);
+    const message = begun.trade.message as { slippageAndActions: Record<string, unknown> };
+    expect(await ask({ ...begun.trade, message: { ...message, slippageAndActions: { ...message.slippageAndActions, minAmountOut: '1' } } }))
+      .toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+    expect(await ask(begun.trade, createTestWallet().address)).toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+    clock = Date.parse(s.load(runId).quote.expiresAt) + 1;
+    expect(await ask(begun.trade)).toEqual({ ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRED' });
+    // The page's request body, exactly as FloFi Wallet's provider builds it.
+    expect(parseSigningRequest({ op: 'evm_sign_typed_data', address: owner.address, typedData: begun.trade, signing: context }))
+      .toEqual({ context, request: { ecosystem: 'evm-typed-data', address: owner.address, typedData: begun.trade } });
+    expect(parseSigningRequest({ op: 'evm_sign_typed_data', address: owner.address, typedData: { ...begun.trade, extra: 1 }, signing: context })).toBeNull();
+  });
+});

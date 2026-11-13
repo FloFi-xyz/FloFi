@@ -11,7 +11,7 @@ import { classifySigningFailure } from './flofi-signing';
 const gate = vi.fn(), messageGate = vi.fn();
 vi.mock('../app/flofi-wallet-action', () => ({ floFiSigningGate: (...args: unknown[]) => gate(...args), floFiMessageGate: (...args: unknown[]) => messageGate(...args) }));
 const privy = { ready: true, authenticated: true, embedded: [] as { ecosystem: string; address: string; imported: boolean }[], canSign: vi.fn<(ecosystem: string, address: string) => boolean>(() => true),
-  signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn() };
+  signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn(), signEvmTypedData: vi.fn() };
 let current: typeof privy | null = privy;
 vi.mock('../accounts/privy-context', async importOriginal => ({ ...await importOriginal<object>(), currentFloFiPrivy: () => current }));
 const { requestThroughPrivy } = await import('./flofi-privy-signer');
@@ -122,5 +122,39 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 Privy confirmation text', () => 
     expect(privyReview(deadline, 180).description).toMatch(/· Confirm before 09:34:56 UTC-03:00 ·/);
     expect(privyReview(deadline, -330).description).toMatch(/· Confirm before 18:04:56 UTC\+05:30 ·/);
     expect(privyReview(SUMMARY as Parameters<typeof privyReview>[0]).description).not.toMatch(/Confirm before/);
+  });
+});
+
+describe('typed data (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a reviewed 0x Gasless trade or approval)', async () => {
+  const { createTestWallet } = await import('../../../../packages/reference-reconciler/test/test-wallet.ts');
+  const { eip712 } = await import('@defi-workflow-engine/reference-compiler');
+  const wallet = createTestWallet(), stranger = createTestWallet();
+  const typedData = { types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' },
+    { name: 'verifyingContract', type: 'address' }], Permit: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }, { name: 'value', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }] }, domain: { name: 'Global Dollar', version: '1', chainId: 4663,
+    verifyingContract: '0x' + '5'.repeat(40) }, primaryType: 'Permit', message: { owner: wallet.address, spender: '0x000000000022d473030f116ddee9f6b43ac78ba3',
+    value: '100000000', nonce: 0, deadline: '1800000000' } };
+  const request = { op: 'evm_sign_typed_data' as const, address: wallet.address, typedData, signing: { flow: 'robinhood-swap', runId: `rhs-${'c'.repeat(24)}` } };
+  const summary = { ...SUMMARY, flow: 'robinhood-swap', runId: request.signing.runId, network: 'Robinhood Chain', chain: 'eip155:4663', action: 'Token approval (signature)',
+    lines: [{ label: 'Approve', value: '100 USDG' }] };
+  it('asks the server first, then Privy, and returns only this wallet\'s signature of exactly the approved typed data', async () => {
+    gate.mockResolvedValue({ ok: true, value: summary });
+    const signature = wallet.signDigest(eip712.hashTypedData(typedData));
+    privy.signEvmTypedData.mockResolvedValue(signature);
+    await expect(requestThroughPrivy(request)).resolves.toEqual({ signature });
+    expect(gate).toHaveBeenCalledWith(request);
+    expect(privy.signEvmTypedData).toHaveBeenCalledWith(wallet.address, typedData, expect.objectContaining({ action: 'Token approval (signature)' }));
+    expect(gate.mock.invocationCallOrder[0]!).toBeLessThan(privy.signEvmTypedData.mock.invocationCallOrder[0]!);
+  });
+  it('drops a signature by another key, refuses before Privy when the gate refuses, and maps a cancel to a rejection', async () => {
+    gate.mockResolvedValue({ ok: true, value: summary });
+    privy.signEvmTypedData.mockResolvedValueOnce(stranger.signDigest(eip712.hashTypedData(typedData)));
+    expect(await code(requestThroughPrivy(request))).toBe('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+    gate.mockResolvedValueOnce({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+    privy.signEvmTypedData.mockClear();
+    expect(await code(requestThroughPrivy(request))).toBe('FLOFI_WALLET_NO_MATCHING_REVIEW');
+    expect(privy.signEvmTypedData).not.toHaveBeenCalled();
+    privy.signEvmTypedData.mockRejectedValueOnce(Object.assign(new Error('closed'), { privyErrorCode: 'user_exited_auth_flow' }));
+    expect(classifySigningFailure(await code(requestThroughPrivy(request)))).not.toBe('refused');
   });
 });

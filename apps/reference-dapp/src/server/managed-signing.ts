@@ -17,7 +17,7 @@
  * Nothing here signs, broadcasts or writes; claims (one signature and one broadcast per attempt) are the caller's.
  */
 import { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
-import { erc7710, parseRlpInteger, rlpBytes, rlpDecode, rlpList } from '@defi-workflow-engine/reference-compiler';
+import { eip712, erc7710, parseRlpInteger, rlpBytes, rlpDecode, rlpList } from '@defi-workflow-engine/reference-compiler';
 import { isSigningFlow, SIGNING_FLOWS, type SigningContext, type SigningFlow, type SigningSummary } from '../wallet/flofi-signing.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry.ts';
 import type { JupiterRecord } from './jupiter-service.ts';
@@ -29,7 +29,9 @@ import type { PublicAttempt, PublicRun } from './public-testnet-service.ts';
 export type ManagedEvmTransaction = { readonly from: string; readonly to: string; readonly value: bigint; readonly data: string; readonly chainId: bigint;
   readonly nonce: bigint; readonly gas: bigint; readonly maxFeePerGas: bigint; readonly maxPriorityFeePerGas: bigint };
 export type ManagedSigningRequest = { readonly ecosystem: 'evm'; readonly tx: ManagedEvmTransaction }
-  | { readonly ecosystem: 'solana'; readonly message: Uint8Array; readonly chain?: 'solana:mainnet'; readonly address?: string };
+  | { readonly ecosystem: 'solana'; readonly message: Uint8Array; readonly chain?: 'solana:mainnet'; readonly address?: string }
+  /** BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: `eth_signTypedData_v4` of a reviewed 0x Gasless attempt (its trade or its gasless approval). */
+  | { readonly ecosystem: 'evm-typed-data'; readonly address: string; readonly typedData: eip712.TypedData };
 export type ManagedSigningDeps = {
   /** The run as its own service's `status` returns it; throws (any error) when it cannot be read. */
   readonly load: (flow: SigningFlow, runId: string) => Promise<unknown>;
@@ -49,7 +51,9 @@ export type ManagedSigningDeps = {
 /** A matched attempt: what FloFi Wallet shows, and the identity the caller claims once (signature, broadcast). */
 export type ManagedSigningMatch = { readonly summary: SigningSummary; readonly attempt: string; readonly owner: string; readonly expiresAtMs: number;
   /** EVM only: the attempt's chain and the exact fields FloFi will broadcast (the request's, after every check). */
-  readonly evm?: { readonly chainId: number; readonly tx: ManagedEvmTransaction } };
+  readonly evm?: { readonly chainId: number; readonly tx: ManagedEvmTransaction };
+  /** Typed data only: the reviewed EIP-712 digest the signature must recover against (FloFi relays it itself, after verifying it again). */
+  readonly typedData?: { readonly digest: string; readonly kind: 'approval' | 'trade' } };
 export type ManagedSigningResult = { readonly ok: true; readonly value: ManagedSigningMatch } | { readonly ok: false; readonly code: string };
 
 /** The fee cap a provider-filled request may carry, as a multiple of the network's current suggestion. */
@@ -256,6 +260,55 @@ async function evmSwap(flow: SigningFlow, runId: string, run: PublicRun, request
       action: attempt.step === 'approval' ? 'Token approval' : 'Swap', owner, lines: summaryLines, expiresAt: new Date(expires).toISOString() } } };
 }
 
+/** Canonical JSON (sorted keys) of typed data without its `EIP712Domain` declaration (derived from the domain, checked by the hasher). */
+function typedContent(data: eip712.TypedData): string {
+  const sorted = (value: unknown): unknown => Array.isArray(value) ? value.map(sorted) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted((value as Record<string, unknown>)[key])])) : value;
+  const types = Object.fromEntries(Object.entries(data.types).filter(([name]) => name !== 'EIP712Domain'));
+  return JSON.stringify(sorted({ types, domain: data.domain, primaryType: data.primaryType, message: data.message }));
+}
+const GASLESS_DEADLINE_MARGIN_MS = 30_000;
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: FloFi Wallet may sign typed data only for the reviewed 0x Gasless attempt now waiting for its
+ * signatures (SIGNING) on a Robinhood Chain swap Review: exactly the reviewed approval or the reviewed trade (same content, same EIP-712 digest),
+ * for the attempt's owner. The summary is the Review's: the swap, the minimum received and the fee taken out of the swap, never "free".
+ */
+async function gaslessTypedData(flow: SigningFlow, runId: string, run: PublicRun, request: ManagedSigningRequest, deps: ManagedSigningDeps, now: number): Promise<ManagedSigningResult> {
+  if (request.ecosystem !== 'evm-typed-data' || flow !== 'robinhood-swap') return refuse(NO_MATCH);
+  const q = run.quote, gas = q?.gas, binding = gas?.zeroEx, attempt = run.gasless?.at(-1);
+  if (q?.executionId !== runId || q.chainId !== 4663 || q.environment !== 'MAINNET' || run.reviewedManifestHash !== q.manifestHash || run.divergence || run.outcome
+    || gas?.mechanism !== 'ZEROX_GASLESS_SWAP' || !binding || !attempt || attempt.state !== 'SIGNING' || attempt.executionId !== runId
+    || attempt.manifestHash !== q.manifestHash || attempt.tradeHash !== binding.trade.hash) return refuse(NO_MATCH);
+  const owner = attempt.account.toLowerCase();
+  if (!ADDRESS.test(owner) || owner !== binding.taker || request.address.toLowerCase() !== owner) return refuse(NO_MATCH);
+  let digest: string;
+  try { digest = eip712.hashTypedData(request.typedData); } catch { return refuse('FLOFI_WALLET_TYPED_DATA_UNSUPPORTED'); }
+  const content = typedContent(request.typedData);
+  const kind = binding.approval && digest === binding.approval.hash && content === typedContent(binding.approval.eip712) ? 'approval' as const
+    : digest === binding.trade.hash && content === typedContent(binding.trade.eip712) ? 'trade' as const : null;
+  if (!kind) return refuse(NO_MATCH);
+  if (!await deps.managed('evm', owner)) return refuse(NO_MATCH);
+  const expires = Math.min(Date.parse(q.expiresAt), binding.trade.deadline * 1000 - GASLESS_DEADLINE_MARGIN_MS);
+  if (!Number.isFinite(expires) || expires <= now) return refuse('FLOFI_WALLET_REVIEW_EXPIRED');
+  const inDecimals = sideDecimals(q.inputDecimals, q.inputSymbol), outDecimals = sideDecimals(q.outputDecimals, q.outputSymbol);
+  if (inDecimals === null || outDecimals === null) return refuse('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
+  const sideOf = (token: string) => token === q.inputToken ? { decimals: inDecimals, symbol: q.inputSymbol } : { decimals: outDecimals, symbol: q.outputSymbol };
+  const feeOf = (fee: { readonly token: string; readonly amount: string }) => units(fee.amount, sideOf(fee.token).decimals, sideOf(fee.token).symbol);
+  const fees = [binding.gasFee, ...binding.zeroExFee ? [binding.zeroExFee] : []];
+  const sameToken = fees.every(fee => fee.token === fees[0]!.token);
+  const feeText = sameToken ? feeOf({ token: fees[0]!.token, amount: fees.reduce((sum, fee) => sum + BigInt(fee.amount), 0n).toString() })
+    : fees.map(feeOf).every(Boolean) ? fees.map(feeOf).join(' + ') : null;
+  const summaryLines = kind === 'approval' ? lines(
+    ['Approve', binding.approval!.unlimited ? `Unlimited ${q.inputSymbol}` : units(binding.approval!.value, inDecimals, q.inputSymbol)],
+    ['Spender', `Permit2 ${binding.permit2}`], ['For', `Swap ${q.inputSymbol} → ${q.outputSymbol} on Robinhood Chain`], ['Network fee', 'Included in the swap'])
+    : lines(['Swap', `${units(q.amountIn, inDecimals, q.inputSymbol)} → ${q.outputSymbol} on Robinhood Chain`],
+      ['Minimum received', units(q.minimumOut, outDecimals, q.outputSymbol)], ['Fees included in the swap', feeText], ['Executed by', `0x Settler ${binding.settler}`]);
+  if (!summaryLines) return refuse(NO_MATCH);
+  return { ok: true, value: { attempt: `${flow}:${attempt.attemptId}:${kind}`, owner, expiresAtMs: expires, typedData: { digest, kind },
+    summary: { flow: flow as SigningSummary['flow'], runId, network: 'Robinhood Chain', chain: 'eip155:4663', realFunds: true,
+      action: kind === 'approval' ? 'Token approval (signature)' : 'Swap (signature)', owner, lines: summaryLines, expiresAt: new Date(expires).toISOString() } } };
+}
+
 /**
  * The reviewed attempt `request` may be signed for, or the refusal. Unsupported flows are refused by name; every mismatch, foreign owner,
  * stale or already-signed attempt is `FLOFI_WALLET_NO_MATCHING_REVIEW` (the caller learns nothing about other runs).
@@ -263,7 +316,8 @@ async function evmSwap(flow: SigningFlow, runId: string, run: PublicRun, request
 export async function resolveManagedSigning(context: SigningContext, request: ManagedSigningRequest, deps: ManagedSigningDeps): Promise<ManagedSigningResult> {
   const { flow, runId } = context;
   if (!isSigningFlow(flow)) return refuse('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
-  if (!SIGNING_FLOWS[flow].run.test(runId) || SIGNING_FLOWS[flow].ecosystem !== request.ecosystem) return refuse(NO_MATCH);
+  const ecosystem = request.ecosystem === 'evm-typed-data' ? 'evm' : request.ecosystem;
+  if (!SIGNING_FLOWS[flow].run.test(runId) || SIGNING_FLOWS[flow].ecosystem !== ecosystem) return refuse(NO_MATCH);
   let loaded: unknown;
   try { loaded = await deps.load(flow, runId); } catch { return refuse('FLOFI_WALLET_REVIEW_UNAVAILABLE'); }
   const run = record(loaded), now = (deps.now ?? Date.now)();
@@ -272,6 +326,7 @@ export async function resolveManagedSigning(context: SigningContext, request: Ma
     if (flow === 'jupiter-swap') return await solanaSwap(flow, runId, run as unknown as JupiterRecord, request, deps, now);
     if (flow === 'solana-transfer') return await solanaTransfer(flow, runId, run as unknown as SolanaTransferRecord, request, deps, now);
     if (flow.endsWith('-mainnet-transfer')) return await evmTransfer(flow, runId, run as unknown as TransferRecord, request, deps, now);
+    if (request.ecosystem === 'evm-typed-data') return await gaslessTypedData(flow, runId, run as unknown as PublicRun, request, deps, now);
     return await evmSwap(flow, runId, run as unknown as PublicRun, request, deps, now);
   } catch {
     // A record of an unexpected shape never matches (fail closed); it is not a read failure.
@@ -304,6 +359,12 @@ export function parseSigningRequest(value: unknown): { readonly context: Signing
       maxPriorityFeePerGas: quantity('maxPriorityFeePerGas') };
     if (Object.values(fields).some(field => field === null)) return null;
     return { context, request: { ecosystem: 'evm', tx: { from: lower.from!, to: lower.to!, data: lower.data!, ...fields as { [K in keyof typeof fields]: bigint } } } };
+  }
+  if (r.op === 'evm_sign_typed_data' && Object.keys(r).length === 5) {
+    const typed = record(r.typedData), address = typeof r.address === 'string' ? r.address.toLowerCase() : '';
+    if (!typed || !ADDRESS.test(address) || Object.keys(typed).length !== 4 || !record(typed.types) || !record(typed.domain) || !record(typed.message)
+      || typeof typed.primaryType !== 'string' || JSON.stringify(typed).length > 65_536) return null;
+    return { context, request: { ecosystem: 'evm-typed-data', address, typedData: typed as unknown as eip712.TypedData } };
   }
   if (r.op === 'solana_sign_transaction' && Object.keys(r).length === 6 && r.chain === 'solana:mainnet'
     && typeof r.address === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.address)) {

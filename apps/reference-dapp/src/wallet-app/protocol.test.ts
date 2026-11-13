@@ -33,3 +33,20 @@ describe('run binding on transaction requests', () => {
     expect(signingHeader(signing)).toBe(`base-swap:bas-${'c'.repeat(24)}`);
   });
 });
+
+describe('typed-data requests (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003)', () => {
+  const typedData = { types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }], Permit: [{ name: 'value', type: 'uint256' }],
+    SlippageAndActions: [{ name: 'actions', type: 'bytes[]' }] }, domain: { name: 'Permit2', chainId: 4663 }, primaryType: 'Permit', message: { value: '1' } };
+  const bound = { flow: 'robinhood-swap', runId: `rhs-${'c'.repeat(24)}` };
+  it('parses an eth_signTypedData_v4 payload with its run binding, lower-casing the address', () => {
+    expect(request({ op: 'evm_sign_typed_data', address: EVM.toUpperCase().replace('0X', '0x'), typedData, signing: bound })?.request)
+      .toEqual({ op: 'evm_sign_typed_data', address: EVM, typedData, signing: bound });
+  });
+  it('refuses a payload that is not strictly typed data', () => {
+    for (const bad of [{ ...typedData, extra: 1 }, { ...typedData, types: { Permit: typedData.types.Permit } }, { ...typedData, primaryType: 'Missing' },
+      { ...typedData, domain: { ...typedData.domain, other: 'x' } }, { ...typedData, types: { ...typedData.types, Permit: [{ name: 'value', type: 'uint256', extra: 1 }] } },
+      { ...typedData, types: { ...typedData.types, Permit: [{ name: 'value', type: 'uint 256' }] } }, { ...typedData, message: { value: 'x'.repeat(70_000) } }])
+      expect(request({ op: 'evm_sign_typed_data', address: EVM, typedData: bad, signing: bound })).toBeNull();
+    expect(request({ op: 'evm_sign_typed_data', address: EVM, typedData, signing: bound, extra: 1 })).toBeNull();
+  });
+});

@@ -100,7 +100,8 @@ export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: 
   return async (context: SigningContext, request: ManagedSigningRequest): Promise<ManagedSigningResult> => {
     const resolved = await resolveManagedSigning(context, request, deps);
     if (!resolved.ok || !options.claim) return resolved;
-    if (resolved.value.evm && resolved.value.expiresAtMs - (deps.now ?? Date.now)() < PRIVY_EVM_SIGNING_WINDOW_MS) return { ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' };
+    // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a typed-data signature must also reach FloFi's relay before its Review closes.
+    if ((resolved.value.evm || resolved.value.typedData) && resolved.value.expiresAtMs - (deps.now ?? Date.now)() < PRIVY_EVM_SIGNING_WINDOW_MS) return { ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' };
     let claimed: boolean;
     try { claimed = await claimAttempt(store, 'signature', resolved.value.attempt, resolved.value.expiresAtMs); }
     catch { return { ok: false, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }; }
