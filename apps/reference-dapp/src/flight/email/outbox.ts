@@ -587,13 +587,27 @@ export function createEmailOutbox(host: { readonly db: Database; readonly tenant
       const kept = (await tx.query<{ template: string; n: string }>(`SELECT template, count(*)::text AS n FROM flight_emails WHERE tenant_id = $1 AND state = 'PENDING'
         AND (template = ANY($2::text[]) OR category = 'ESSENTIAL') GROUP BY 1 ORDER BY 1`, [tenantId, options.keep])).rows
         .reduce<Record<string, number>>((all, r) => ({ ...all, [r.template]: Number(r.n) }), {});
+      // An attempt of unknown outcome would be retried at resume (same key). It is held as UNRESOLVED_OUTCOME, the established state that
+      // only `email-release --email-id` lifts after the Resend log was checked; its reservation is kept (it may have spent quota).
+      const unknown = (await tx.query<{ email_id: string; template: EmailTemplate }>(`SELECT email_id, template FROM flight_emails WHERE tenant_id = $1
+        AND state = 'UNKNOWN' AND category = 'CAMPAIGN' AND NOT (template = ANY($2::text[])) ORDER BY created_at, email_id FOR UPDATE`, [tenantId, options.keep])).rows;
+      // In flight right now: cannot be held. Apply waits until it settles (campaign paused: it drains within a lease).
+      const sending = (await tx.query<{ email_id: string; template: EmailTemplate }>(`SELECT email_id, template FROM flight_emails WHERE tenant_id = $1
+        AND state = 'SENDING' AND category = 'CAMPAIGN' AND NOT (template = ANY($2::text[])) ORDER BY created_at, email_id`, [tenantId, options.keep])).rows;
       const report = { dryRun: !options.apply, keep: options.keep, toHold: pending.length, toHoldByTemplate: byTemplate, toHoldIds: pending.map(r => r.email_id),
-        stillPending: kept, held: 0 };
+        unknownToHoldIds: unknown.map(r => r.email_id), sendingIds: sending.map(r => r.email_id), stillPending: kept, held: 0, heldUnknown: 0 };
       if (!options.apply) return report;
-      const held = (await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'OPERATOR_HOLD', updated_at = clock_timestamp()
-        WHERE tenant_id = $1 AND email_id = ANY($2::text[]) AND state = 'PENDING' AND category = 'CAMPAIGN' AND NOT (template = ANY($3::text[]))`,
-      [tenantId, pending.map(r => r.email_id), options.keep])).rowCount;
-      return { ...report, dryRun: false, held };
+      if (sending.length) throw new Error('FLIGHT_HOLD_CAMPAIGN_IN_FLIGHT');
+      // Released later by `email-release --reason OPERATOR_HOLD --template T`, which reserves quota again: the reservation is freed now.
+      const held = (await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'OPERATOR_HOLD', reserved_at = NULL, updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND email_id = ANY($2::text[]) AND state = 'PENDING' AND category = 'CAMPAIGN' AND NOT (template = ANY($3::text[]))
+          AND attempts = 0 AND first_attempt_at IS NULL`, [tenantId, pending.map(r => r.email_id), options.keep])).rowCount
+        + (await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'OPERATOR_HOLD', updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND email_id = ANY($2::text[]) AND state = 'PENDING' AND category = 'CAMPAIGN' AND NOT (template = ANY($3::text[]))
+          AND (attempts > 0 OR first_attempt_at IS NOT NULL)`, [tenantId, pending.map(r => r.email_id), options.keep])).rowCount;
+      const heldUnknown = (await tx.query(`UPDATE flight_emails SET state = 'HELD', status_reason = 'UNRESOLVED_OUTCOME', updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND email_id = ANY($2::text[]) AND state = 'UNKNOWN'`, [tenantId, unknown.map(r => r.email_id)])).rowCount;
+      return { ...report, dryRun: false, held, heldUnknown };
     });
   }
 

@@ -37,8 +37,8 @@ export const LAUNCH_LANGUAGE: Readonly<Partial<Record<EmailTemplate, EmailLangua
 });
 /**
  * Rows enqueued before the 13/11 change that an operator may move in place to the current version and the launch language, while they
- * are still unsent (never attempted, reserved or leased): template → the versions it may come from. Email 3 v2 → v3 adds only the delay
- * note; 4a, 4b, 5 and 6 keep their current version and change language only. Email 6 v1–v4 are never moved: their copy changed, so they
+ * are still unsent (never attempted, reserved or leased): template → the versions it may come from. Email 3 v2 → v3 is the approved 13/11
+ * launch copy (v3 was never deployed before it carried that copy: no v3 row was ever attempted with other text); 4a, 4b, 5 and 6 keep their current version and change language only. Email 6 v1–v4 are never moved: their copy changed, so they
  * are held for review and replaced with new ids (`supersedeCreatorTemplates`).
  */
 export const LAUNCH_UPGRADABLE_FROM: Readonly<Partial<Record<EmailTemplate, readonly number[]>>> = Object.freeze({

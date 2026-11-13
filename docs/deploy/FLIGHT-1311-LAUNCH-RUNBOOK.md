@@ -18,7 +18,9 @@ umask 077; A="node apps/reference-dapp/backend/flight-admin.ts"; T="--tenant def
 ## Não executar neste lançamento
 
 - `creator-requeue-missing`, `creator-supersede-templates` e `email-release --batch creators-v5` (Email 6 adiado).
-- `email-release --reason OPERATOR_HOLD` **sem** `--template`: isso liberaria também o Email 6 retido.
+- `email-release --reason …` **sem** `--template GROUP_BOARDING` durante o lançamento. Qualquer liberação por motivo pode devolver à
+  fila e-mails retidos de outros templates (cartões, Email 6) com outro motivo (`RENDER_FAILED`, `QUOTA_DAILY`…). Exemplo correto:
+  `$A email-release $T --reason QUOTA_DAILY --template GROUP_BOARDING`.
 - `email-resume` antes do passo 5: ele libera toda a campanha pendente.
 
 ## Pré-condições
@@ -28,7 +30,8 @@ umask 077; A="node apps/reference-dapp/backend/flight-admin.ts"; T="--tenant def
    - **Worker do Railway.** Em Railway → serviço worker → Deployments, o SHA ativo tem de ser o do merge.
 
    O banco não enxerga o commit do worker, por isso o passo 3 pede a sua confirmação. Se um worker antigo pegar uma linha v3, ele a
-   segura como `RENDER_FAILED` sem chamar o Resend. Depois do deploy certo, recupere com `$A email-release $T --reason RENDER_FAILED`.
+   segura como `RENDER_FAILED` sem chamar o Resend. Depois do deploy certo e **antes do passo 4**, recupere só o Email 3 com
+   `$A email-release $T --reason RENDER_FAILED --template GROUP_BOARDING`.
    Atenção: o link de acesso dessa linha começa a contar as 72 h na tentativa que falhou.
 2. Teste do Email 3 em português para a Dayane antes das 09:00, seguindo o procedimento do time, com o OK dela.
 
@@ -91,13 +94,20 @@ Email 5 pendente e qualquer outro e-mail de campanha. Nada é cancelado: só pas
 $A email-hold-campaign $T --keep GROUP_BOARDING > /secure/1311-04-hold-dryrun.json
 ```
 
-Confira `toHoldByTemplate` (por exemplo `CARD_FOUNDING: 2`) e `stillPending` (`GROUP_BOARDING: 48`, mais os e-mails de acesso). Depois:
+Confira:
+- `toHoldByTemplate` (por exemplo `CARD_FOUNDING: 2`) e `stillPending` (`GROUP_BOARDING: 48`, mais os e-mails de acesso).
+- `unknownToHoldIds`: tentativas de resultado desconhecido de outros templates. Seriam retentadas na retomada, então o apply as retém
+  como `UNRESOLVED_OUTCOME` (liberação só por id, depois de conferir o log do Resend).
+- `sendingIds` tem de estar vazio. Se não estiver, o apply recusa (`FLIGHT_HOLD_CAMPAIGN_IN_FLIGHT`): espere 2 minutos e repita.
+
+Depois:
 
 ```bash
 $A email-hold-campaign $T --keep GROUP_BOARDING --apply > /secure/1311-04b-hold-apply.json
 ```
 
-Os Email 6 de versão antiga (v1–v4) já ficam retidos sozinhos como `TEMPLATE_VERSION_REVIEW`.
+Os Email 6 de versão antiga (v1–v4) já ficam retidos sozinhos como `TEMPLATE_VERSION_REVIEW`. A retenção libera a reserva de cota dos
+e-mails retidos. Um e-mail retido continua com a validade dele: um cartão retido além de 7 dias é cancelado como `EXPIRED`.
 
 **5. Às 09:00.** O worker agenda o Email 3 dos grupos que abriram, já na v3 em PT, mesmo com a campanha pausada. Logo antes de retomar,
 repita a retenção, que pega qualquer outro e-mail de campanha criado nesse meio-tempo:
@@ -112,6 +122,9 @@ $A email-resume $T
 
 O worker envia o Email 3 (2 por segundo) dentro da cota do dia. A conta: 48 + os novos, dentro de 95 envios de campanha por dia; os
 outros 5 do limite de 100 ficam para os e-mails de acesso. Confira antes a cota real no painel do Resend.
+
+Os dois comandos acima são separados. Um e-mail automático criado entre eles (um cartão emitido nesse segundo) sai na retomada, e pode
+sair antes dos dois cartões que ficaram retidos.
 
 O convidado que também está na lista de espera recebe o Email 3 normalmente. Ele não sai da lista e o convite dele continua valendo.
 
@@ -130,7 +143,7 @@ Confira:
 - `CREATOR_INVITE` **sem** nenhum `SENT` a mais que na foto do passo 0.
 - `CARD_FOUNDING` retidos em `HELD` / `OPERATOR_HOLD`.
 
-Reenvie só o que falhou, com `email-release` por `--email-id` ou `--reason`. Nunca libere `UNRESOLVED_OUTCOME` sem conferir o log do
+Reenvie só o que falhou, com `email-release` por `--email-id`, ou por `--reason` sempre com `--template GROUP_BOARDING`. Nunca libere `UNRESOLVED_OUTCOME` sem conferir o log do
 Resend.
 
 ## Depois do lançamento

@@ -103,6 +103,11 @@ The runbook with the exact commands is [FLIGHT-1311-LAUNCH-RUNBOOK.md](../deploy
   - Nothing is cancelled. `email-release` takes a new `--template` filter, so a template can be released later on its own (e.g. the
     cards), without releasing Email 6.
   - It runs under the quota lock. Dry-run by default; idempotent.
+  - Review fixes (third pass):
+    - Campaign rows of other templates in UNKNOWN would be retried at resume; they are held as `UNRESOLVED_OUTCOME`, releasable only by id.
+    - Apply refuses while one is SENDING.
+    - Held rows free their quota reservation.
+    - The runbook requires `--template GROUP_BOARDING` on every reason-based release during the launch.
   - Emails created after release (cards issued, new sign-ups) follow the normal automatic flow.
 - **Invited guest on the waiting list.** With Email 6 postponed, they receive Email 3 normally. They stay on the list and keep their invite.
 - Tests: `launch-1311.pg.test.ts` (new suite `app.flight.launch-1311.pg`). It covers the dry-run changing nothing, both apply gates,

@@ -306,7 +306,23 @@ describe('13/11 release: only Email 3 goes out; Email 6 and every other campaign
     expect((dry.toHoldIds as string[]).sort()).toEqual([...others].sort());
     expect(await rows(`SELECT DISTINCT state FROM flight_emails WHERE email_id = ANY($1::text[])`, [others])).toEqual([{ state: 'PENDING' }]);
     await expect(runFlightCommand('email-hold-campaign', { apply: true }, store, OPEN, ctx)).rejects.toThrow('ARGUMENT_REQUIRED: --keep');
-    expect(await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING', apply: true }, store, OPEN, ctx)).toMatchObject({ held: 4 });
+    // An Email 6 attempt of unknown outcome would be retried at resume; a card in flight cannot be held. Apply refuses while one is in flight.
+    const unknownInvite = await legacy('CREATOR_INVITE', 5, 'PT', 'release-unknown@flofi-test.dev');
+    const inFlight = await legacy('CARD_PASSENGER', 2, 'PT', 'release-sending@flofi-test.dev');
+    await t.db.query(`UPDATE flight_emails SET state = 'UNKNOWN', attempts = 1, first_attempt_at = $2, reserved_at = $2 WHERE email_id = $1`, [unknownInvite, new Date(OPEN)]);
+    await t.db.query(`UPDATE flight_emails SET state = 'SENDING', attempts = 1, first_attempt_at = $2, reserved_at = $2, lease_token = $3, lease_until = $4
+      WHERE email_id = $1`, [inFlight, new Date(OPEN), hex(16), new Date(OPEN + 3_600_000)]);
+    expect(await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING' }, store, OPEN, ctx))
+      .toMatchObject({ unknownToHoldIds: [unknownInvite], sendingIds: [inFlight] });
+    await expect(runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING', apply: true }, store, OPEN, ctx)).rejects.toThrow('FLIGHT_HOLD_CAMPAIGN_IN_FLIGHT');
+    // It settles (test only: sent), then the hold applies.
+    await t.db.query(`UPDATE flight_emails SET state = 'SENT', sent_at = $2, lease_token = NULL, lease_until = NULL, provider_id = 'prov-x' WHERE email_id = $1`, [inFlight, new Date(OPEN)]);
+    expect(await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING', apply: true }, store, OPEN, ctx)).toMatchObject({ held: 4, heldUnknown: 1 });
+    expect(await rows('SELECT state, status_reason, reserved_at IS NOT NULL AS reserved FROM flight_emails WHERE email_id = $1', [unknownInvite]))
+      .toEqual([{ state: 'HELD', status_reason: 'UNRESOLVED_OUTCOME', reserved: true }]);
+    expect(await rows(`SELECT DISTINCT reserved_at FROM flight_emails WHERE email_id = ANY($1::text[])`, [others])).toEqual([{ reserved_at: null }]);
+    // A release by reason and template never lifts it (only by id, after the Resend log was checked).
+    expect(await outbox.release({ reason: 'UNRESOLVED_OUTCOME', template: 'CREATOR_INVITE' }, OPEN)).toBe(0);
     expect(await runFlightCommand('email-hold-campaign', { keep: 'GROUP_BOARDING', apply: true }, store, OPEN, ctx)).toMatchObject({ toHold: 0, held: 0 });
     // 09:00: resume. One cycle sends Email 3 (all in Portuguese, the guest included) and the access email, nothing else.
     await outbox.setPaused(false, null);
@@ -318,6 +334,7 @@ describe('13/11 release: only Email 3 goes out; Email 6 and every other campaign
     expect(await rows(`SELECT DISTINCT template FROM flight_emails WHERE email_id = ANY($1::text[]) ORDER BY 1`, [sentIds]))
       .toEqual([{ template: 'ACCESS_REQUESTED' }, { template: 'GROUP_BOARDING' }]);
     expect(sentIds.some(id => others.includes(id))).toBe(false);
+    expect(sentIds).not.toContain(unknownInvite);
     for (const email of fake.sent.filter(e => listed.includes(e.idempotencyKey))) {
       expect(email.subject).toBe('Seu grupo está embarcando ✈️');
       expect(email.text).toContain('O que dá para testar hoje');
