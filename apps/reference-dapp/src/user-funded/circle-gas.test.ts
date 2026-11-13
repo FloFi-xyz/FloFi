@@ -338,7 +338,7 @@ describe('ADR-0010 Circle facts are read back strictly', () => {
     expect(circleFactsOf({ circle: { stage: 'OTHER' } })).toBeNull();
     const facts = { stage: 'PERMIT', accountKind: 'METAMASK_DELEGATOR_V1_3', entryPoint: erc4337.ENTRY_POINT_V0_7, paymaster: C.CIRCLE_PAYMASTER_V07, usdc: BASE_MAINNET_SWAP.usdc,
       permitCap: '1', permitNonce: '0', surchargeBps: '1000', marginBps: '2000', nonce: '0', callData: '0x', nativeRequired: '1', usdcSpend: '0',
-      plannedStrategy: 'EVM_WALLET_BATCH', gas: {}, price: {} } satisfies Partial<CircleFacts> & Record<string, unknown>;
+      plannedStrategy: 'EVM_WALLET_BATCH', gas: {}, price: {} } satisfies Record<keyof Omit<CircleFacts, 'permitSignature'>, unknown>;
     expect(circleFactsOf({ circle: facts })?.stage).toBe('PERMIT');
     expect(circleFactsOf({ circle: { ...facts, permitCap: '-1' } })).toBeNull();
     expect(circleFactsOf({ circle: { ...facts, accountKind: 'COINBASE' } })).toBeNull();

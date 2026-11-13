@@ -15,8 +15,12 @@
  *                  and the receipts' transaction hashes are read back with `wallet_getCallsStatus`
  *   user operation `eth_signTypedData_v4` of the owner's own ERC-4337 operation (MetaMask EIP7702StatelessDeleGator domain)
  *   Solana         one `solana:signTransaction` request for every transaction of the group
+ *   Circle fee     ADR-0010: two `eth_signTypedData_v4` prompts — the USDC permit (spender = Circle's pinned paymaster, value = the reviewed cap),
+ *                  then the operation that carries it — each re-derived here from the artifact's facts and FloFi's pins and compared with the
+ *                  server's typed data before the wallet is asked; FloFi Wallet is never asked (CIRCLE_WALLET_UNSUPPORTED)
  */
-import { eip5792, erc4337 } from '@defi-workflow-engine/reference-compiler';
+import { circlePaymaster, eip5792, erc4337 } from '@defi-workflow-engine/reference-compiler';
+import { circleFactsOf, circleOperationOf, circleOperationTypedData, circlePermitOf } from '../user-funded/circle-facts';
 import { chosenEvmProvider, evmWalletIdentity, injected, isFloFiWalletKey, type EvmProvider } from '../wallet/evm-discovery';
 import { connectSolanaWallet, signAllWithSolanaWallet } from '../wallet/solana-wallet';
 import { walletPreference } from '../wallet/wallet-registry';
@@ -189,10 +193,11 @@ export function batchOutcome(status: eip5792.CallsStatus): { readonly hashes: re
  * The network is checked exactly as for a batch (`onChainOrFail`, read again after a switch): on another network the nonce key would be
  * spent on the wrong chain's EntryPoint and the signed operation would stay valid, so nothing is sent there (WALLET_WRONG_NETWORK).
  */
-export async function revokeUserOperation(owner: string, chainId: number, runId: string, groupIndex: number): Promise<string> {
+export async function revokeUserOperation(owner: string, chainId: number, runId: string, groupIndex: number, entryPoint: string = erc4337.ENTRY_POINT_V0_7): Promise<string> {
+  if (entryPoint !== erc4337.ENTRY_POINT_V0_7 && entryPoint !== erc4337.ENTRY_POINT_V0_8) fail('ERC4337_ENTRY_POINT_UNSUPPORTED');
   const provider = evmProvider();
   await onChainOrFail(provider, BigInt(chainId), '0x' + chainId.toString(16));
-  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: erc4337.ENTRY_POINT_V0_7,
+  const hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: owner, to: entryPoint,
     data: erc4337.incrementNonceCall(erc4337.nonceKeyOf(`${runId}:g${groupIndex}`)) }] }).catch(rejected);
   return typeof hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hash) ? hash : fail('WALLET_RESPONSE_INVALID');
 }
@@ -200,6 +205,64 @@ export async function revokeUserOperation(owner: string, chainId: number, runId:
 export async function signUserOperation(address: string, chainId: number, typedData: unknown): Promise<string> {
   return signWorkflowGrant(address, chainId, typedData);
 }
+
+// ── BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a group whose network fee the owner pays in USDC through Circle ───────────────────
+/** Whether a prepared group's fee is paid in the owner's USDC through Circle (two typed-data signatures: the permit, then the operation). */
+export const isCirclePaid = (prepared: Readonly<Record<string, unknown>>) => prepared.kind === 'EVM_USER_OPERATION' && circleFactsOf(prepared) !== null;
+/** FloFi Wallet has no EIP-7702 account and signs no typed data: a Circle-paid group is never asked of it (nothing is sent). */
+function refuseFloFiWallet() {
+  const provider = chosenEvmProvider() ?? injected();
+  if (provider && isFloFiWalletKey(evmWalletIdentity(provider)?.key)) fail('CIRCLE_WALLET_UNSUPPORTED');
+}
+/**
+ * The owner's USDC permit for a Circle-paid group. Before the wallet is asked, the page re-derives the permit from the artifact's facts and FloFi's
+ * own pins alone — USDC's domain on this chain (`USD Coin`/`2`), spender = Circle's paymaster pinned for this chain and the account's EntryPoint,
+ * value = the reviewed cap (the fee shown), the owner, the never-expiring deadline — and requires the server's typed data to be exactly it
+ * (CIRCLE_PERMIT_MISMATCH otherwise: nothing is signed). The wallet then shows exactly these fields.
+ */
+export async function signCirclePermit(address: string, prepared: Readonly<Record<string, unknown>>): Promise<string> {
+  const facts = circleFactsOf(prepared), chainId = Number(prepared.chainId), pins = circlePaymaster.circlePinsOf(chainId);
+  if (!facts || facts.stage !== 'PERMIT' || !pins || facts.usdc !== pins.usdc || circlePaymaster.circlePaymasterOf(chainId, facts.entryPoint) !== facts.paymaster
+    || String(prepared.owner).toLowerCase() !== address.toLowerCase()) fail('CIRCLE_PERMIT_MISMATCH');
+  refuseFloFiWallet();
+  const expected = circlePaymaster.permitTypedData(circlePermitOf(facts!, chainId, address.toLowerCase()));
+  const shown = prepared.gasPayment as { permitCap?: unknown; paymaster?: unknown; maxFee?: { amount?: unknown } } | undefined;
+  if (JSON.stringify((prepared.permit as { typedData?: unknown } | undefined)?.typedData) !== JSON.stringify(expected) || shown?.permitCap !== facts!.permitCap
+    || shown?.maxFee?.amount !== facts!.permitCap || shown?.paymaster !== facts!.paymaster) fail('CIRCLE_PERMIT_MISMATCH');
+  return signWorkflowGrant(address, chainId, expected);
+}
+/**
+ * The owner's signature of a Circle-paid operation, once its permit was verified (stage OPERATION): the operation is rebuilt here from the facts
+ * (the exact calls, gas words, the pinned paymaster with the signed permit and the reviewed cap) and its typed data must be exactly the server's.
+ */
+export async function signCircleOperation(address: string, prepared: Readonly<Record<string, unknown>>): Promise<string> {
+  const facts = circleFactsOf(prepared), chainId = Number(prepared.chainId);
+  if (!facts || facts.stage !== 'OPERATION' || circlePaymaster.circlePaymasterOf(chainId, facts.entryPoint) !== facts.paymaster
+    || String(prepared.owner).toLowerCase() !== address.toLowerCase()) fail('CIRCLE_PERMIT_MISMATCH');
+  refuseFloFiWallet();
+  let expected: unknown;
+  try { expected = circleOperationTypedData(facts!, chainId, circleOperationOf(facts!, address.toLowerCase())); } catch { return fail('CIRCLE_PERMIT_MISMATCH'); }
+  if (JSON.stringify(prepared.typedData) !== JSON.stringify(expected)) fail('CIRCLE_PERMIT_MISMATCH');
+  return signWorkflowGrant(address, chainId, expected);
+}
+/**
+ * The whole Circle sequence for one prepared group: the permit (when not signed yet) handed to the server's permit step, then the operation's
+ * signature — two wallet prompts, both typed data, nothing sent by the wallet. Returns the operation signature to authorize the group with.
+ */
+export async function signCirclePaidGroup(address: string, prepared: Readonly<Record<string, unknown>>,
+  permit: (signature: string) => Promise<{ ok: true; value: { prepared: unknown } } | { ok: false; code: string }>): Promise<string> {
+  let current = prepared;
+  if (circleFactsOf(current)?.stage === 'PERMIT') {
+    const answered = await permit(await signCirclePermit(address, current));
+    if (!answered.ok) fail(answered.code);
+    current = (answered as { value: { prepared: Readonly<Record<string, unknown>> } }).value.prepared;
+  }
+  return signCircleOperation(address, current);
+}
+/**
+ * The owner revokes a signed operation of a Circle-paid group exactly as an owner-paid one, on the EntryPoint its account uses (v0.7 or v0.8).
+ */
+export const entryPointOfGroup = (gasPayment: { readonly entryPoint?: string } | null | undefined): string => gasPayment?.entryPoint ?? erc4337.ENTRY_POINT_V0_7;
 /** The owner signs every transaction of a Solana group in one wallet request. */
 export async function signSolanaGroup(address: string, unsignedTransactions: readonly string[]): Promise<string[]> {
   const chosen = walletPreference().solana ?? fail('SOLANA_WALLET_SESSION_REQUIRED');

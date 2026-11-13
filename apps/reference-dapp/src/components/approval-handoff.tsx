@@ -28,6 +28,7 @@ import { EDITOR_LINK_PREFIX } from '../editor/link-format';
 import type { ApprovalPreview } from '../platform/approve';
 import { APPROVAL_SECRET_FORMAT } from '../platform/approval-link-format';
 import { walletDeepLinks } from '../platform/wallet-links';
+import { CIRCLE_REFUSAL } from '../domain/token-fee';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from '../state/workflow-store';
@@ -100,6 +101,8 @@ const CLAIM_TEXT: Record<string, string> = {
   // The run's window has passed, or ends before a new wallet request could expire: nothing new is prepared, but a request prepared earlier may
   // still be in the wallet (never "nothing was sent"). The Editor's words.
   WORKFLOW_RUN_EXPIRED: 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.',
+  // ADR-0010: a network fee paid from the owner's USDC through Circle — refusals before anything is relayed (the Editor's words).
+  ...CIRCLE_REFUSAL,
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**

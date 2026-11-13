@@ -36,7 +36,7 @@
  */
 import { circlePaymaster as C, erc4337, type erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { readCircleGasConfig } from '../gas-abstraction/config.ts';
-import { type GasPayment, type MechanismCandidate } from '../gas-abstraction/mechanism.ts';
+import type { MechanismCandidate } from '../gas-abstraction/mechanism.ts';
 import { observationFresh, type PriceSource } from '../automations/price-source.ts';
 import { parseScaled, PRICE_SCALE } from '../automations/decimal.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
@@ -45,6 +45,11 @@ import type { BundlerClient } from './bundler.ts';
 import type { EvmGroupCalls, UserCall } from './evm-calls.ts';
 import { assertUserFundedSubmission } from './gas-payer.ts';
 import type { GroupStrategy } from '../workflow-runs/execution-groups.ts';
+import { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, expectationOf, gasOf, paymasterGasOf,
+  verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
+
+export { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, plannedStrategyOf, verifyCircleOperationSignature,
+  type CircleFacts, type CircleGas } from './circle-facts.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Rpc = ChainTransport['rpc'];
@@ -78,49 +83,6 @@ export function circleDepsOf(env: Env, bundlerChains: readonly string[], prices:
     return { ethUsd: eth.value, usdcUsd: usdc?.value ?? null, observedAt: eth.at };
   } };
 }
-
-// ── What a Circle-prepared group carries (`prepared.circle`) ─────────────────────────────────────────────────────────────────
-export type CircleGas = { readonly verificationGasLimit: string; readonly callGasLimit: string; readonly preVerificationGas: string; readonly maxFeePerGas: string;
-  readonly maxPriorityFeePerGas: string; readonly paymasterVerificationGasLimit: string; readonly paymasterPostOpGasLimit: string };
-export type CircleFacts = {
-  /** PERMIT: the owner signs the permit next; OPERATION: the permit is signed and verified, the owner signs the operation next. */
-  readonly stage: 'PERMIT' | 'OPERATION';
-  readonly accountKind: erc4337.OwnerAccountKind; readonly entryPoint: string; readonly paymaster: string; readonly usdc: string;
-  /** The reviewed allowance cap (USDC base units): the most the owner can pay for this fee. */
-  readonly permitCap: string; readonly permitNonce: string; readonly permitSignature?: string;
-  readonly price: { readonly ethUsd: string; readonly usdcUsd: string | null; readonly observedAt: string };
-  readonly surchargeBps: string; readonly marginBps: string;
-  readonly nonce: string; readonly callData: string; readonly gas: CircleGas;
-  /** What native gas would have needed (the batch's fee ceiling plus any native value): re-checked at authorization. */
-  readonly nativeRequired: string;
-  /** The group's own USDC need at its worst point (base units), reserved beside the cap. */
-  readonly usdcSpend: string;
-  /** The strategy the group was planned with (restored when this preparation expires). */
-  readonly plannedStrategy: GroupStrategy;
-};
-const DECIMAL = /^(0|[1-9][0-9]{0,77})$/;
-/** The Circle facts of a prepared artifact (strictly read back), or null for any artifact that is not Circle-paid. */
-export function circleFactsOf(prepared: Readonly<Record<string, unknown>> | null | undefined): CircleFacts | null {
-  const c = prepared && typeof prepared === 'object' && prepared.circle && typeof prepared.circle === 'object' ? prepared.circle as Record<string, unknown> : null;
-  if (!c || (c.stage !== 'PERMIT' && c.stage !== 'OPERATION') || typeof c.accountKind !== 'string' || !(c.accountKind in erc4337.OWNER_ACCOUNT_KINDS)) return null;
-  const strings = ['entryPoint', 'paymaster', 'usdc', 'permitCap', 'permitNonce', 'surchargeBps', 'marginBps', 'nonce', 'callData', 'nativeRequired', 'usdcSpend', 'plannedStrategy'];
-  if (strings.some(k => typeof c[k] !== 'string') || !c.gas || typeof c.gas !== 'object' || !c.price || typeof c.price !== 'object') return null;
-  if (![c.permitCap, c.permitNonce, c.nonce, c.nativeRequired, c.usdcSpend].every(v => DECIMAL.test(String(v)))) return null;
-  return c as unknown as CircleFacts;
-}
-/** The strategy a Circle preparation replaced (restored when it expires or must be prepared again), else null. */
-export const plannedStrategyOf = (prepared: Readonly<Record<string, unknown>> | null | undefined): GroupStrategy | null => circleFactsOf(prepared)?.plannedStrategy ?? null;
-const gasOf = (g: CircleGas): erc4337.UserOperationGas => ({ verificationGasLimit: BigInt(g.verificationGasLimit), callGasLimit: BigInt(g.callGasLimit),
-  preVerificationGas: BigInt(g.preVerificationGas), maxFeePerGas: BigInt(g.maxFeePerGas), maxPriorityFeePerGas: BigInt(g.maxPriorityFeePerGas) });
-const paymasterGasOf = (g: CircleGas) => ({ verificationGasLimit: BigInt(g.paymasterVerificationGasLimit), postOpGasLimit: BigInt(g.paymasterPostOpGasLimit) });
-/** The token-paid fee the owner reviews and signs (`GasPayment`), from the facts. */
-export function circleGasPayment(c: CircleFacts): Extract<GasPayment, { mechanism: 'CIRCLE_USDC_PAYMASTER' }> {
-  return { mechanism: 'CIRCLE_USDC_PAYMASTER', maxFee: { token: c.usdc, symbol: 'USDC', decimals: C.CIRCLE_USDC_DECIMALS, amount: c.permitCap }, signatures: 2,
-    paymaster: c.paymaster, entryPoint: c.entryPoint, permitCap: c.permitCap };
-}
-/** The permit the owner signs for these facts (pure: rebuilt identically by the server and by the owner's browser). */
-export const circlePermitOf = (c: CircleFacts, chainId: number, owner: string) =>
-  C.circlePermit({ chainId, entryPoint: c.entryPoint, owner, cap: BigInt(c.permitCap), nonce: BigInt(c.permitNonce) });
 
 // ── The USDC reserve ────────────────────────────────────────────────────────────────────────────────────────────────────────
 /**
@@ -267,25 +229,6 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
 // ── Phase 2: the owner's permit, the final operation ────────────────────────────────────────────────────────────────────────
 export type CircleResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
 const no = (code: string): CircleResult<never> => ({ ok: false, code });
-/** The final operation of a Circle group from its facts (the signed permit inside its paymasterAndData). */
-export function circleOperationOf(c: CircleFacts, sender: string, signature = '0x'): erc4337.PackedUserOperation {
-  if (!c.permitSignature) throw new Error('CIRCLE_PERMIT_REQUIRED');
-  const pm = paymasterGasOf(c.gas);
-  return erc4337.packedUserOperationWithPaymaster({ sender, nonce: BigInt(c.nonce), callData: c.callData, gas: gasOf(c.gas), signature,
-    paymasterAndData: C.circlePaymasterAndData({ paymaster: c.paymaster, verificationGasLimit: pm.verificationGasLimit, postOpGasLimit: pm.postOpGasLimit, token: c.usdc,
-      permitAmount: BigInt(c.permitCap), permitSignature: c.permitSignature }) });
-}
-const expectationOf = (c: CircleFacts, chainId: number, owner: string): C.CircleOperationExpectation => ({ chainId, entryPoint: c.entryPoint, owner, accountKind: c.accountKind,
-  permitCap: BigInt(c.permitCap), permitNonce: BigInt(c.permitNonce) });
-/** The typed data the owner's wallet signs for the final operation (the account's own scheme) and the operation's EntryPoint hash. */
-export function circleOperationTypedData(c: CircleFacts, chainId: number, op: erc4337.PackedUserOperation) {
-  return c.accountKind === 'SIMPLE_7702_V0_8' ? erc4337.entryPointV08TypedData(chainId, op, c.entryPoint) : erc4337.delegatorUserOpTypedData(chainId, op, c.entryPoint);
-}
-/** Whether `signature` is the owner's signature of the final operation, as the owner's account validates it. */
-export function verifyCircleOperationSignature(c: CircleFacts, chainId: number, op: erc4337.PackedUserOperation, signature: string): boolean {
-  return c.accountKind === 'SIMPLE_7702_V0_8' ? erc4337.verifyOwnerUserOpSignatureV08(chainId, op, signature, c.entryPoint)
-    : erc4337.verifyOwnerUserOpSignature(chainId, op, signature, c.entryPoint);
-}
 /** The owner's current USDC permit nonce: the signed permit is usable only while it is unmoved (it is consumed by the paymaster's validation). */
 async function permitNonceUnmoved(rpc: Rpc, c: CircleFacts, owner: string): Promise<'OK' | 'MOVED' | 'UNAVAILABLE'> {
   try { return await readUint(rpc, c.usdc, C.permitNoncesCall(owner)) === BigInt(c.permitNonce) ? 'OK' : 'MOVED'; } catch { return 'UNAVAILABLE'; }
