@@ -4,18 +4,19 @@ import { ENVIRONMENT_LABELS, type NetworkInfo } from '../../admin/analytics/netw
 import { param, withParams, workflowView, type AnalyticsParams } from '../../admin/analytics/view';
 import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/workflows';
 import { adminPage } from '../../admin/page-context';
+import { copilotStatus, healthAttention, healthStatus } from '../../admin/attention';
+import { copilotSettingsView } from '../../admin/copilot-view';
+import { healthReport } from '../../admin/health';
 import { AnalyticsFilters } from '../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../components/admin/admin-shell';
 import { DataNotes } from '../../components/admin/data-notes';
+import { AttentionList, Kpi, StatusTile } from '../../components/admin/admin-ui';
 import { Donut, fmt, NetworkMark, OUTCOME_KEYS, OUTCOME_META, OutcomeLegend, pct, seriesColor, StackedBars, StackedColumns, TrendLines,
   type DonutSegment } from '../../components/admin/charts';
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
 const OUTCOME_LABEL: Record<string, string> = { ALL: 'All outcomes', COMPLETED: 'Completed', FAILED: 'Failed', PARTIAL: 'Partial', IN_PROGRESS: 'In progress', UNCERTAIN: 'Uncertain' };
 
-function Kpi({ label, value, note, tone }: { label: string; value: string; note?: string | undefined; tone?: string | undefined }) {
-  return <div className="admin-kpi" data-tone={tone}><span>{label}</span><strong>{value}</strong>{note ? <small>{note}</small> : null}</div>;
-}
 function NetworkName({ network, environment }: { network: NetworkInfo; environment?: string | undefined }) {
   return <span className="admin-bar-label"><NetworkMark network={network}/><span title={network.chain}>{network.name}</span>
     {environment ? <span className="admin-badge">{environment}</span> : null}</span>;
@@ -34,6 +35,25 @@ function donutSegments(rows: WorkflowAnalytics['networks']['rows']): { segments:
   return { segments, named };
 }
 
+/** BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): status at a glance, then what needs attention, each linking to where it is handled. */
+function Glance({ health, copilot, attention }: { health: Awaited<ReturnType<typeof healthReport>> | null; copilot: Awaited<ReturnType<typeof copilotSettingsView>> | null;
+  attention: number | null }) {
+  const system = health ? healthStatus(health) : { tone: 'warn' as const, value: 'Unknown', detail: 'The health checks could not run' };
+  const ai = copilot ? copilotStatus(copilot) : { tone: 'warn' as const, value: 'Unknown', detail: 'AI settings could not be read', items: [] };
+  const items = [...health ? healthAttention(health) : [{ key: 'health', tone: 'warn' as const, title: 'The health checks could not run', href: '/admin/health', action: 'View health' }],
+    ...ai.items];
+  return <section className="admin-card" aria-labelledby="admin-glance">
+    <header><div><h2 id="admin-glance">Status at a glance</h2><p>Live checks of this deployment. Select a card for details.</p></div></header>
+    <div className="admin-tiles">
+      <StatusTile label="System health" tone={system.tone} value={system.value} detail={system.detail} href="/admin/health"/>
+      <StatusTile label="AI Copilot" tone={ai.tone} value={ai.value} detail={ai.detail} href="/admin/ai-settings"/>
+      <StatusTile label="Executions needing attention" tone={attention === null ? 'warn' : attention ? 'warn' : 'ok'}
+        value={attention === null ? 'Unknown' : attention ? fmt(attention) : 'None'} detail="In the selected range and environment" href="/admin/workflows"/>
+    </div>
+    <div style={{ marginTop: 14 }}><AttentionList items={items} allClear="Nothing needs your attention right now."/></div>
+  </section>;
+}
+
 /** BUILD-ADMIN-001: the operational overview — executions, outcomes, activity, network distribution, utilization and fee observability. */
 export default async function AdminOverviewPage({ searchParams }: { searchParams: Search }) {
   const page = await adminPage();
@@ -41,8 +61,11 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
   const search = await searchParams;
   const params: AnalyticsParams = Object.fromEntries((['range', 'from', 'to', 'env', 'action', 'outcome'] as const).flatMap(key => {
     const value = param(search[key]); return value ? [[key, value]] : []; }));
-  const view = await workflowView(page.host, params, page.now);
-  if (!view.ok) return <AdminShell active="overview" context={page.context} title="Overview"><p className="admin-alert" data-tone="bad">Analytics are unavailable ({view.code}).</p></AdminShell>;
+  // BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): the same probes System Health and AI Settings show, summarized first ("is everything normal?").
+  const [view, health, copilot] = await Promise.all([workflowView(page.host, params, page.now), healthReport(process.env, page.host, page.now).catch(() => null),
+    copilotSettingsView(process.env, page.host).catch(() => null)]);
+  const glance = <Glance health={health} copilot={copilot} attention={view.ok ? view.analytics.attention : null}/>;
+  if (!view.ok) return <AdminShell active="overview" context={page.context} title="Overview">{glance}<p className="admin-alert" data-tone="bad">Analytics are unavailable ({view.code}).</p></AdminShell>;
   const a = view.analytics, env = ENVIRONMENT_LABELS[view.environment];
   const { segments, named } = donutSegments(a.networks.rows);
   const trendSeries: { key: string; name: string; color: string; index: number }[] = [];
@@ -53,7 +76,9 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
     other: point.other + point.counts.reduce((n, v, i) => trendSeries.some(s => s.index === i) ? n : n + v, 0) }));
   const networkRows = a.networks.rows.filter(row => row.actions > 0 || row.asDestination > 0);
   const filtered = view.action !== 'ALL' || view.outcome !== 'ALL';
-  return <AdminShell active="overview" context={page.context} title="Overview" description="Platform-wide workflow activity from FloFi's durable execution records.">
+  return <AdminShell active="overview" context={page.context} title="Overview" description="How FloFi is doing right now, and its workflow activity from durable execution records.">
+    {glance}
+    <h2 className="admin-section-title">Workflow activity</h2>
     <AnalyticsFilters base="/admin" params={params} range={view.range} environment={view.environment} executedByEnvironment={a.executedByEnvironment} defaulted={view.environmentDefaulted}/>
     <DataNotes view={view}/>
 
