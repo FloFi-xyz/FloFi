@@ -95,6 +95,16 @@ describe('P0 hotfix (execution continuity): one progress truth', () => {
     expect(workflowProgressView({ sequence: sequence(['COMPLETED', 'CURRENT']), live: null, prepared: true })).toMatchObject({ completed: 1, total: 2, current: 2,
       steps: [{ phase: 'RECONCILED' }, { phase: 'PREPARED', text: { key: 'Prepared', args: [] } }] });
   });
+  it('P0 FIX 2: a next step whose simulation was refused says why and needs attention; it is still not started (nothing was sent)', () => {
+    const refusal = 'FloFi cannot bridge WETH on this route: the bridge provider converts it to native ETH through contracts FloFi does not verify, so this step was not simulated or sent. Bridge ETH (unwrap the WETH first) or USDC instead.';
+    const view = workflowProgressView({ sequence: sequence(['COMPLETED', 'CURRENT']), live: null, refusal })!;
+    expect(view).toMatchObject({ completed: 1, total: 2, current: 2, finished: false, attention: true,
+      steps: [{ phase: 'RECONCILED' }, { phase: null, current: true, text: { key: 'Not started: its simulation was refused', args: [] } }] });
+    // Without a refusal the step reads as before; a refusal never re-words a step that has a phase.
+    expect(workflowProgressView({ sequence: sequence(['COMPLETED', 'CURRENT']), live: null })).toMatchObject({ attention: false, steps: [{}, { text: { key: 'Not started' } }] });
+    expect(workflowProgressView({ sequence: sequence(['COMPLETED', 'CURRENT']), live: null, prepared: true, refusal })).toMatchObject({ attention: false,
+      steps: [{}, { phase: 'PREPARED', text: { key: 'Prepared' } }] });
+  });
   it('a failed or unknown outcome needs attention and never counts; a run of another workflow is never this workflow\'s progress', () => {
     const unknown = ownerBoundSwap([{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: '1' }, { step: 'swap', state: 'UNKNOWN', txHash: null }]);
     expect(workflowProgressView({ sequence: sequence(['CURRENT', 'NEXT']), live: unknown })).toMatchObject({ completed: 0, attention: true, steps: [{ phase: 'OUTCOME_UNKNOWN' }, { phase: null }] });

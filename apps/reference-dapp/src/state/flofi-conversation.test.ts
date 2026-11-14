@@ -225,6 +225,19 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     const native = await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps');
     expect(last(native).text).toMatch(/^On this network FloFi has no native ETH swap/); expect(editor.workflow.revision).toBe(1);
   });
+  it('P0 FIX 1 (production 2026-11-13): "swap 1 usdc to eth on base and then bridge to arbitrum" reaches the Copilot, never the native-ETH refusal', async () => {
+    const asked: string[] = [];
+    f.respond = async text => { asked.push(text); return { kind: 'QUESTION', text: 'How much should the bridge send?', notes: [], options: [], sentence: null, command: null }; };
+    for (const request of ['swap 1 usdc to eth on base and then bridge to arbitrum', 'swap 1 USDC to ETH on Base, then bridge it to Arbitrum One',
+      'swap 1 usdc to eth on base then bridge to arbitrum'])
+      expect(last(await say(request)).text, request).not.toMatch(/native ETH swap/);
+    expect(asked).toEqual(['swap 1 usdc to eth on base and then bridge to arbitrum', 'swap 1 USDC to ETH on Base, then bridge it to Arbitrum One',
+      'swap 1 usdc to eth on base then bridge to arbitrum']);
+    expect(editor.workflow.revision).toBe(0);
+    // One network that has no native ETH swap is still refused deterministically (ETH is never authored as WETH).
+    expect(last(await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps')).text).toMatch(/^On this network FloFi has no native ETH swap/);
+    expect(asked).toHaveLength(3);
+  });
   it('in an approval context the chat keeps its proposal behaviour and has no lifecycle controls', async () => {
     direct = false;
     const chat = await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
@@ -478,6 +491,142 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its 
     expect(last(chat).question).toBe('Would you like to execute this workflow now?');
     await say('Yes, execute');
     expect(controls.authorize).toHaveBeenCalledTimes(2);
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a run the runtime already re-quoted in place is presented at once — one sentence, its changes, no second simulation', async () => {
+    // Production 2026-11-13: an L1 fee move refused the bridge; the store re-quoted the same run in place and keeps no blocking error, only
+    // `requoted` with the original reason. The chat must not simulate over that fresh Review, nor repeat "nothing was sent" twice.
+    await confirmedAndExecuting();
+    simulate.mockClear();
+    controls.authorizing = false;
+    const fresh = requoted('24990000000000000', '24865050000000000');
+    reviewedPatch = { ...fresh, source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
+      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as unknown as SimulationSource };
+    lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); const chat = render();
+    const texts = chat.messages.map(message => message.text);
+    expect(texts).toContain('The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.');
+    expect(texts.filter(text => /nothing was sent/i.test(text ?? ''))).toHaveLength(1);
+    expect(simulate).not.toHaveBeenCalled();
+    expect(last(chat).notes).toEqual(['The quote changed since your last Review: Expected receipt 0.025 WETH → 0.02499 WETH; Minimum receipt 0.024875 WETH → 0.02486505 WETH.']);
+    expect(last(chat).question).toBe('Do you confirm the updated workflow?');
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): a re-quote in place after a refusal at the wallet hand-off is presented as the fresh Review, never as an execution needing attention', async () => {
+    // The 13/11 class of refusal, one step later: begin recorded the attempt (the run is live), then the hand-off refused it (L1 fee beyond the
+    // authorized bound), nothing was sent, and the runtime re-quoted the same run in place.
+    await confirmedAndExecuting();
+    simulate.mockClear();
+    controls.authorizing = false;
+    const began = { started: true, restored: false, local: false, matchesWorkflow: true, completed: 0, label: 'Execution in progress', state: 'active', message: '', runKey: 'run-1',
+      fingerprint: 'prepared', busy: false, steps: [{ id: 'swap', number: 1, action: 'Bridge', operations: [op('approval', 'Approve USDC', 'preparing', true), op('deposit', 'Bridge deposit', 'waiting', false)] }] };
+    (began as unknown as { active: unknown }).active = began.steps[0];
+    reviewedPatch = { ...reviewedPatch, progress: began as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
+    // The superseded, never-sent attempt no longer holds the run (no live execution); the fresh Review waits for the owner's authorization.
+    // As in the stores, the re-quote lands in the render where the wallet request lock is still held: nothing is said until it is released.
+    (controls as Record<string, unknown>).requesting = true;
+    const fresh = requoted('24990000000000000', '24865050000000000');
+    reviewedPatch = { ...fresh, progress: null, source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
+      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId: 'run-1', changes: [] } } } as unknown as SimulationSource };
+    lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); let chat = render();
+    const texts = () => chat.messages.map(message => message.text);
+    const notice = 'The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
+    expect(texts()).not.toContain(notice);
+    expect(texts().some(text => /still working|needs attention/i.test(text ?? ''))).toBe(false);
+    (controls as Record<string, unknown>).requesting = false;
+    lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); chat = render();
+    expect(texts().filter(text => text === notice)).toHaveLength(1);
+    expect(texts().some(text => /needs attention|could not complete/i.test(text ?? ''))).toBe(false);
+    expect(simulate).not.toHaveBeenCalled();
+    expect(last(chat).notes).toEqual(['The quote changed since your last Review: Expected receipt 0.025 WETH → 0.02499 WETH; Minimum receipt 0.024875 WETH → 0.02486505 WETH.']);
+    expect(last(chat).question).toBe('Do you confirm the updated workflow?');
+    // Presented once: later renders of the same re-quote add nothing, and nothing is authorized by itself.
+    const count = chat.messages.length;
+    render(); await flush(); render(); await flush(); chat = render();
+    expect(chat.messages).toHaveLength(count);
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+  });
+  /** A 0x Gasless swap's run while the owner signs: its attempt is recorded first, so the run is live (one request waiting in the wallet). */
+  const signing = { started: true, restored: false, local: false, matchesWorkflow: true, completed: 0, label: 'Execution in progress', state: 'active', message: '', runKey: 'rhs-1',
+    fingerprint: 'signing', busy: false, steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [op('swap', 'Swap', 'wallet', false)] }] };
+  (signing as unknown as { active: unknown }).active = signing.steps[0];
+  async function gaslessSigning() {
+    await confirmedAndExecuting();
+    simulate.mockClear();
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: signing as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
+  }
+  /** At submit the attempt is abandoned: the lifecycle filters it out (no live run), and the runtime keeps the refusal as its error. */
+  const abandoned = (error: string) => {
+    reviewedPatch = { ...reviewedPatch, progress: null, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error } } as SimulationSource };
+    lifecycle(reviewedPatch);
+  };
+  it('review CH3: a 0x Gasless Review lists its two signatures (approval, then trade) from the reviewed fee payment, never one "Swap"', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    const base = reviewed(), run = (base.source.state as { run: { quote: Record<string, unknown> } }).run;
+    const zeroEx = (approval: object | null) => ({ taker: reviewOwner, settler: '0x' + '5c'.repeat(20), permit2: '0x000000000022d473030f116ddee9f6b43ac78ba3', sources: ['0x_RFQ'],
+      gasFee: { token: '0x' + '1'.repeat(40), amount: '420000' }, zeroExFee: null, trade: { hash: '0x' + 'ab'.repeat(32), deadline: Math.floor(reviewNow / 1000) + 300 },
+      buyAmount: '25000000000000000', minBuyAmount: '24875000000000000', approval });
+    const notStarted = { started: false, restored: false, local: false, matchesWorkflow: true, completed: 0, label: 'Not started', state: 'idle', message: '', runKey: 'rhs-1',
+      fingerprint: '', busy: false, steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [op('swap', 'Swap', 'waiting', false)] }] };
+    const gasless = (approval: object | null): Partial<ConversationBridge> => ({ ...base, progress: notStarted as unknown as ConversationBridge['progress'],
+      source: { ...base.source, state: { ...base.source.state, run: { ...run, quote: { ...run.quote, gas: { owner: reviewOwner, mechanism: 'ZEROX_GASLESS_SWAP', nativeShort: true,
+        unavailable: [], native: { balanceWei: '0', worstCaseWei: null }, payment: { mechanism: 'ZEROX_GASLESS_SWAP' }, zeroEx: zeroEx(approval) } } } } } as unknown as SimulationSource });
+    reviewedPatch = gasless({ type: 'permit', value: '100000000', unlimited: false }); lifecycle(reviewedPatch); render();
+    let chat = await say('Yes, I confirm');
+    expect(last(chat).notes).toContain('Your wallet will ask you to confirm each request separately: Token approval (signature), Swap (signature).');
+    // The gasless approval is one of the reviewed signatures, never "requested only if your allowance is still too low".
+    expect(last(chat).notes!.some(note => /only if your current allowance/.test(note))).toBe(false);
+    expect(translate('PT', 'Token approval (signature)')).toBe('Aprovação do token (assinatura)');
+    expect(translate('PT', 'Swap (signature)')).toBe('Swap (assinatura)');
+    // Permit2 already allowed: one signature, the trade.
+    await say('No');
+    reviewedPatch = gasless(null); lifecycle(reviewedPatch); render();
+    await say('Review workflow');
+    reviewedPatch = gasless(null); lifecycle(reviewedPatch); render();
+    chat = await say('Yes, I confirm');
+    expect(last(chat).notes).toContain('Your wallet will ask you to confirm each request separately: Swap (signature).');
+  });
+  it('review CH1: a 0x Gasless start abandoned at submit for a moved quote is re-quoted at once (the chat never goes silent)', async () => {
+    await gaslessSigning();
+    let chat = render();
+    expect(last(chat).text).toMatch(/Confirm or decline the reviewed request in your wallet|confirm or reject it in your wallet/);
+    // The run vanishes first (the abandoned attempt), then the error lands: nothing is said until the refusal is known, then once.
+    reviewedPatch = { ...reviewedPatch, progress: null }; lifecycle(reviewedPatch); render(); await flush();
+    const before = render().messages.length;
+    abandoned('QUOTE_EXPIRED_REVIEW_REQUIRED'); render(); await flush(); render(); await flush(); chat = render();
+    const said = chat.messages.slice(before).map(message => message.text);
+    expect(said[0]).toMatch(/^Nothing was sent\. .*I am getting a fresh quote now; you review and confirm it again before anything is signed\.$/);
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+    const count = chat.messages.length;
+    render(); await flush(); render(); await flush();
+    expect(render().messages.slice(count).some(message => /Nothing was sent/.test(message.text ?? ''))).toBe(false);
+  });
+  it('review CH1: a 0x Gasless start abandoned without the signatures says it could not start and why, and offers the Review', async () => {
+    await gaslessSigning();
+    abandoned('GASLESS_SIGNATURE_NOT_RECEIVED'); render(); await flush(); render(); await flush();
+    const chat = render();
+    expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. Your wallet did not return the signatures, so nothing was submitted. Authorize again when ready.');
+    expect(last(chat).options).toEqual(['Review workflow']);
+    expect(simulate).not.toHaveBeenCalled();
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): after an earlier confirmed request, the hand-off re-quote keeps that request and presents the next one only', async () => {
+    await confirmedAndExecuting();
+    simulate.mockClear();
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: approvalLanded as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
+    const fresh = requoted('24990000000000000', '24865050000000000');
+    const withRequote = (runId: string) => ({ ...fresh, progress: approvalLanded as unknown as ConversationBridge['progress'], source: { ...fresh.source!, state: { ...fresh.source!.state, error: null,
+      requoted: { code: 'ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED', runId, changes: [] } } } as unknown as SimulationSource });
+    // Another run's re-quote (e.g. one started from the Canvas) is never presented as this conversation's.
+    reviewedPatch = withRequote('another-run'); lifecycle(reviewedPatch); render(); await flush(); render(); await flush();
+    expect(render().messages.some(message => /fresh quote for the same workflow/.test(message.text))).toBe(false);
+    reviewedPatch = withRequote('bas-1'); lifecycle(reviewedPatch); render(); await flush(); render(); await flush(); const chat = render();
+    const texts = chat.messages.map(message => message.text);
+    expect(texts.filter(text => text === 'Your earlier confirmed request stays in place. The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.')).toHaveLength(1);
+    expect(texts.some(text => /needs attention|could not complete/i.test(text ?? ''))).toBe(false);
+    expect(simulate).not.toHaveBeenCalled();
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
   });
   it('a start the controls refuse at once never says it is preparing a wallet request, and says why', async () => {
     controls.authorize = vi.fn(() => ({ started: false, issue: 'Execution is unavailable for this route.' }));

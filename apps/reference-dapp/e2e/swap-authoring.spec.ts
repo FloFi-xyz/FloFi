@@ -119,6 +119,10 @@ test('chat-committed and blocked review snapshots show unquoted unavailable stat
   await commit(page, 'swap 0.125 WETH to USDC on Base slippage 301 bps');
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 0.125 WETH');
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('WETH → USDC');
+  // This profile has no cloud runtime: the card's debounced quote read ends in a specific configuration diagnosis. Both screenshots wait for
+  // it, so neither depends on whether that read has answered yet (a slower run otherwise captured the card's loading placeholder).
+  const quoteNote = page.locator('.build-flow-surface .composer-quote-note');
+  await expect(quoteNote).toHaveText('Quote service is not configured. Contact support.');
   await readyForVisualCapture(page);
   await page.mouse.move(0, 0);
   await expect(page).toHaveScreenshot('chat-committed.png', { fullPage: true, maxDiffPixels: 0, mask: [page.locator('[data-workflow-ir]')] });
@@ -137,8 +141,6 @@ test('chat-committed and blocked review snapshots show unquoted unavailable stat
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeEnabled();
-  // This profile has no cloud runtime: wait for the specific configuration diagnosis after the debounced read.
-  const quoteNote = page.locator('.build-flow-surface .composer-quote-note');
   await expect(quoteNote).toHaveText('Quote service is not configured. Contact support.');
   await expect(quoteNote).toHaveAttribute('title', /^CLOUD_RUNTIME_NOT_CONFIGURED · [a-f0-9-]{36}$/);
   await readyForVisualCapture(page);

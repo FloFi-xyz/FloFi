@@ -20,8 +20,9 @@ import { ARBITRUM_ONE, CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkfl
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateRouterBridgeWorkflow } from '@defi-workflow-engine/reference-linter';
 import { compileRouterArtifacts, decodeErc20Approval, decodeFundsDeposited, decodeRouterApprove, EIP1967_IMPLEMENTATION_SLOT, ROUTER_SELECTORS as SEL,
   ROUTER_TOPICS as TOPIC, type FundsDeposited, type RouterArtifacts, type RouterLog } from '@defi-workflow-engine/reference-compiler';
-import { assertRouterTransition, compareRoutes, hashArtifactBytes, materialRouteChanges, providerFeeDrift, routeCommitment, ROUTER_PHASES, type CanonicalRoute, type EvidenceBundle, type RouteChange,
-  type RouterPhase, type RoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { assertRouterTransition, authorizedNetworkFee, chargedNetworkFeeWithinAuthorization, classifyRouteRevalidation, compareRoutes, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization,
+  routeCommitment, ROUTER_PHASES, type CanonicalRoute, type EvidenceBundle, type RouteChange, type RouterPhase, type RoutingProvider,
+  type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { verifyOwnerSubmission, type Rpc } from './public-testnet-service.ts';
@@ -372,7 +373,10 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const l1 = await l1FeeUpperBound((tx.data.length - 2) / 2, at);
     const reviewedCall = review.calls.find(c => c.to === tx.to && c.data === tx.data);
     const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
-    if (!reviewedCall || l1 === null || l1Bound === null || l1 > BigInt(l1Bound))
+    // BUILD-FLOFI-MAINNET-EXEC-002: the owner authorized this call's network fee as one maximum (gas × max fee + reviewed L1 bound). The request
+    // stands while its fee at the current price and L1 estimate is within it; only a fee beyond the authorized maximum needs a fresh Review.
+    if (!reviewedCall || l1 === null || l1Bound === null ||
+        !networkFeeWithinAuthorization({ gasLimit: BigInt(tx.gas), maxFeePerGas: BigInt(tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound) }, { gasPrice: price, l1Fee: l1 }))
       return invalid('ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED');
     const balance = quantity(await rpc('eth_getBalance', [tx.from, at]));
     if (balance < BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + l1) fail('ROUTER_INSUFFICIENT_GAS_ETH');
@@ -434,8 +438,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const calls: RouterCall[] = await Promise.all(plan.map(async (c, i) => {
       const gas = simulated[i]!.gasUsed;
       const gasLimit = nitroSource ? nitroGasLimit(gas + await postingGas(owner, c, at)) : gas * 13n / 10n + 25_000n;
+      // BUILD-FLOFI-MAINNET-EXEC-002: the reviewed L1 bound carries the same 2× headroom as the execution part's max fee per gas.
       const l1 = await l1FeeUpperBound((c.data.length - 2) / 2, at);
-      return { ...c, gasUsed: gas.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1?.toString() ?? null };
+      return { ...c, gasUsed: gas.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1 === null ? null : l1FeeReviewBound(l1).toString() };
     }));
     const gasLimitTotal = calls.reduce((sum, c) => sum + BigInt(c.gasLimit), 0n), execution = gasLimitTotal * maxFeePerGas;
     const l1 = calls.map(c => c.l1FeeUpperBoundWei === null ? null : BigInt(c.l1FeeUpperBoundWei!));
@@ -573,12 +578,24 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     }
     const reviewedCall = record.review.calls.find(c => c.to === attempt.tx.to && c.data === attempt.tx.data);
     const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? record.review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
+    // What the transaction itself fixes (nonce, gas limit, max fee, priority fee, hence its execution gas price) must be what was authorized:
+    // anything else is another transaction than the reviewed one (DIVERGENT, as before).
     if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > BigInt(attempt.tx.gas) ||
         quantity(tx.maxFeePerGas ?? tx.gasPrice) > BigInt(attempt.tx.maxFeePerGas) || verified.gasUsed > BigInt(attempt.tx.gas) ||
         quantity(tx.maxPriorityFeePerGas ?? '0x0') > BigInt(attempt.tx.maxPriorityFeePerGas) ||
-        verified.effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas) || verified.l1Fee > BigInt(l1Bound ?? '0')))
+        verified.effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas)))
       return save(replaceAttempt({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', authorization: null, error: 'ROUTER_TRANSACTION_FEE_BOUNDS_MISMATCH' },
         { ...attempt, state: 'RECONCILIATION_REQUIRED', note: 'ROUTER_TRANSACTION_FEE_BOUNDS_MISMATCH' }));
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): the L1 data fee is charged by the sequencer at inclusion and no transaction can cap it. A confirmed
+    // transaction whose charged total (execution + L1) ended above the authorized maximum IS the reviewed one: the overrun is recorded on the
+    // attempt (and in its receipt's gas cost), never a reason to stop tracking a deposit whose funds are in flight to their fill or refund.
+    const authorizedFee = { gasLimit: BigInt(attempt.tx.gas), maxFeePerGas: BigInt(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound ?? '0') };
+    const chargedFee = { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee };
+    const feeNote = verified.direct && !chargedNetworkFeeWithinAuthorization(authorizedFee, chargedFee)
+      ? `ROUTER_NETWORK_FEE_ABOVE_AUTHORIZED:${chargedFee.gasUsed * chargedFee.effectiveGasPrice + chargedFee.l1Fee}:${authorizedNetworkFee(authorizedFee)}` : null;
+    // BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a verified receipt keeps only the tolerated-drift fact recorded at begin. An earlier
+    // uncertainty note (ROUTER_SUBMISSION_UNKNOWN, ROUTER_REPORTED_REJECTED_UNPROVEN) no longer applies to a transaction proven on chain.
+    const confirmedNote = feeNote ?? (attempt.note?.startsWith('ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:') ? attempt.note : null);
     const receipt: RouterReceipt = { transactionHash: hash, status: verified.status, blockNumber: verified.blockNumber, blockHash: hex(raw.blockHash), from: verified.txFrom,
       gasCostWei: (verified.gasUsed * verified.effectiveGasPrice + verified.l1Fee).toString(), submissionKind: verified.delegated ? 'DELEGATED_SINGLE' : 'DIRECT', contentHash: digest(raw) };
     if (verified.status === 0) {
@@ -594,7 +611,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (approvals.length !== 1 || approvals[0]!.owner !== record.owner || approvals[0]!.spender !== spender || approvals[0]!.amount !== amount) fail('ROUTER_APPROVAL_MISMATCH');
         const effective = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(record.owner) + addrWord(spender), tag(verified.blockNumber)), 0);
         if (effective !== amount) fail('ROUTER_APPROVAL_NOT_EFFECTIVE');
-        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }));
+        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: confirmedNote }));
       }
       const { deposit, ownerDebit } = depositMatches(record.review.route, logs, record.owner);
       const block = await rpc('eth_getBlockByNumber', [tag(verified.blockNumber), false]);
@@ -605,7 +622,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         ownerDebit: ownerDebit.toString(), safe: false };
       // The authorization is consumed by the confirmed deposit; it can never authorize another one.
       return save(replaceAttempt({ ...transition(record, 'SOURCE_CONFIRMED'), authorization: null, source: settled, error: null },
-        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }));
+        { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: confirmedNote }));
     } catch (cause) {
       const code = cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : null;
       if (!code || code === 'ROUTER_RPC_INVALID') throw cause;
@@ -927,10 +944,11 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (AVAILABILITY.test(code) || !/^[A-Z][A-Z0-9_]{2,80}$/.test(code)) fail('ROUTER_ROUTE_REVALIDATION_UNAVAILABLE');
         return invalidate('ROUTE_CHANGED', ['PROTOCOL_CHANGED']);
       }
-      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the reviewed bytes are what executes; a relayer re-pricing of a few base units (within 1% of the reviewed
-      // route fee, `providerFeeDrift`) is no material change and is recorded on the attempt. Any other or larger change still needs a new Review.
-      const changes = materialRouteChanges(route, fresh), drift = changes.length ? null : providerFeeDrift(route, fresh);
-      if (changes.length) return invalidate('ROUTE_CHANGED', changes);
+      // BUILD-FLOFI-MAINNET-EXEC-002: the reviewed bytes are what executes. A relayer re-pricing within the tolerance (`providerFeeDrift`: a tenth
+      // of the reviewed fee, at most the owner's slippage) is recorded on the attempt; a re-pricing beyond it (outside the authorized bounds) or
+      // any material change (recipient, assets, amounts, contracts, calldata function, fee recipients…) still needs a new quote and Review.
+      const revalidation = classifyRouteRevalidation(route, fresh), drift = revalidation.drift;
+      if (revalidation.outcome === 'MATERIAL_CHANGE' || revalidation.outcome === 'OUTSIDE_AUTHORIZED_BOUNDS') return invalidate('ROUTE_CHANGED', revalidation.changes);
       const needsApproval = state.allowance < BigInt(route.approval.amount);
       const step: RouterStep = needsApproval ? 'APPROVAL' : 'DEPOSIT';
       const purpose = step === 'APPROVAL' ? 'APPROVAL' : 'BRIDGE_DEPOSIT';
@@ -955,15 +973,20 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       await assertRequestFees(review, tx, tag(state.block.number), invalidate);
       const attempt: RouterAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.pendingNonce.toString(), preparedAtBlock: state.block.number,
         createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null, receipt: null, reconciled: false,
-        note: drift && (drift.feeIncrease !== '0' || drift.minimumDecrease !== '0') ? `ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:${drift.feeIncrease}:${drift.minimumDecrease}:${drift.tolerance}` : null };
+        note: revalidation.outcome === 'MARKET_DRIFT_TOLERATED' ? `ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:${drift.feeIncrease}:${drift.minimumDecrease}:${drift.tolerance}` : null };
       record = await prepareAttempt(record, attempt);
       return { record, attempt, transaction: tx };
     }); },
     /** The handoff boundary: SUBMITTING is durable before the browser calls the wallet. */
     async handoff(id: string): Promise<RouterRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
-      if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment || now().getTime() >= Date.parse(record.review.expiresAt))
-        fail('ROUTER_WALLET_HANDOFF_NOT_AUTHORIZED');
+      if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment) fail('ROUTER_WALLET_HANDOFF_NOT_AUTHORIZED');
+      // Review (round 2): a Review that expired between begin and this hand-off sent nothing; the attempt is cancelled and the run is re-quotable in
+      // place (the store re-quotes it at once), exactly as an expiry found at begin.
+      if (now().getTime() >= Date.parse(record.review.expiresAt)) {
+        await save(replaceAttempt(deauthorized(record, 'ROUTER_REVIEW_EXPIRED', [], true), { ...attempt!, state: 'CANCELLED', note: 'ROUTER_REVIEW_EXPIRED' }));
+        fail('ROUTER_REVIEW_EXPIRED');
+      }
       const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
       // The reserved nonce must still be the one the wallet assigns next (the owner's other pending transactions come before it).

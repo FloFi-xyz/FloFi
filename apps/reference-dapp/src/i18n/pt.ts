@@ -50,6 +50,12 @@ import { portugueseApprovedUxPages } from './pt-approved-ux-pages';
 import { portugueseApprovedUxEditor } from './pt-approved-ux-editor';
 import { portugueseLocaleContract } from './pt-locale-contract';
 import { portugueseExecutionContinuity } from './pt-execution-continuity';
+import { portugueseMainnetExec } from './pt-mainnet-exec';
+import { portugueseRound2Requote } from './pt-round2-requote';
+import { portugueseRound2Frontend } from './pt-round2-frontend';
+import { portugueseGasCircle } from './pt-gas-circle';
+import { portugueseGasKora } from './pt-gas-kora';
+import { portugueseGasZeroEx } from './pt-gas-zerox';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseCatalogReliability,
@@ -312,4 +318,13 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseLocaleContract,
   ...portugueseExecutionContinuity,
   ...portugueseApprovedUx,
+  ...portugueseMainnetExec,
+  ...portugueseRound2Requote,
+  ...portugueseRound2Frontend,
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): the network fee paid from the owner's USDC through Circle.
+  ...portugueseGasCircle,
+  // ADR-0010 §4: Solana network fee paid in USDC/USDT through Pimlico (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003).
+  ...portugueseGasKora,
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: the 0x Gasless swap on Robinhood Chain (new keys, last).
+  ...portugueseGasZeroEx,
 };

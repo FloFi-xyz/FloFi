@@ -19,12 +19,17 @@ import { associatedTokenAddress, base58Encode, compileMessageV0, fromBase64, rea
   solanaKeyOnCurve, toBase64, u64Bytes, type SolanaInstruction } from './solana.js';
 import { assertMessageRoundTrip, readSolanaAccounts, rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapArtifactHash,
   solanaSwapHash, solanaRecord, decodeRpcAccount, verifySignedSolanaSwap, verifySolanaCluster, type RawSolanaAccount, type SignedSolanaTransaction, type SolanaRpc } from './solana-swap.js';
+import { assertKoraMessage, assertKoraQuote, koraAta, koraPaidAccountCreation, koraPaymentInstruction, unsignedTransactionBytes, KORA_MAX_COMPUTE_UNIT_PRICE, KORA_MECHANISM,
+  KORA_TOKEN_PROGRAM, type KoraBuildOptions, type KoraFeeToken, type KoraGasTerms, type KoraPort } from './kora.js';
+import { parseMessageV0 } from './solana.js';
 
 export { SOLANA_TRANSFER_PROFILES, SOLANA_MAINNET_TRANSFER, SOLANA_DEVNET_TRANSFER, solanaTransferProfile, solanaTransferAsset } from '@defi-workflow-engine/action-registry';
 export type { SolanaTransferProfile, SolanaTransferAsset } from '@defi-workflow-engine/action-registry';
 export const SOLANA_TRANSFER_CODE = 'SOLANA_TRANSFER';
 const X = SOLANA_TRANSFER_CODE;
 const fail = (code: string, cause?: unknown): never => { throw new Error(`${X}_${code}`, cause === undefined ? undefined : { cause }); };
+/** ADR-0010 Kora refusals keep their own closed `KORA_*` codes (shared by every Kora operation). */
+const koraFail = (code: string): never => { throw new Error(code); };
 const WRAPPED_SOL = 'So11111111111111111111111111111111111111112';
 
 export type SolanaTransferIntent = { nodeId: string; profile: SolanaTransferProfile; owner: string; recipient: string; amount: string; fields: SolanaTransferFields };
@@ -125,7 +130,12 @@ export type SolanaTransferReview = { format: 'gryloo.solana-transfer-review.v1';
   blockhash: string; lastValidBlockHeight: number; computeUnitLimit: number; computeUnitPrice: string; estimatedFeeLamports: string;
   accountCreationLamports: string; maximumAccountCreationLamports: string; maximumNetworkCostLamports: string; message: string; messageHash: string; unsignedTransaction: string;
   simulationResult: SolanaTransferSimulation; expiresAt: string; artifactSet: ArtifactSet; simulation: SimulationBundle; policy: AuthorizationPolicy;
-  manifest: StrategyManifest; plan: ExecutionPlan; commitment: string };
+  manifest: StrategyManifest; plan: ExecutionPlan; commitment: string;
+  /**
+   * ADR-0010 §4: Pimlico's Kora fee payer fronts the SOL fee and the recipient account's rent; the owner repays `gas.amount` of `gas.token` in this
+   * transaction (the owner then pays no SOL at all). Absent: the owner pays the fee and any deposit in SOL.
+   */
+  gas?: KoraGasTerms };
 
 const lamports = (account: RawSolanaAccount) => account?.lamports ?? 0n;
 const programOf = (profile: SolanaTransferProfile, program: 'spl-token' | 'token-2022') => program === 'token-2022' ? profile.programs.token2022 : profile.programs.token;
@@ -148,7 +158,8 @@ const allInstructions = (intent: SolanaTransferIntent, token: SolanaTransferToke
   [setComputeUnitLimit(units), ...setComputeUnitPrice(price), ...solanaTransferInstructions(intent, token)];
 
 /** Chain facts of the owner, the recipient and (SPL) the mint and both token accounts, at one confirmed slot. Refuses anything unsafe. */
-export async function readSolanaTransferFacts(rpc: SolanaRpc, intent: SolanaTransferIntent, reviewedSource?: string): Promise<{ state: SolanaTransferState; token: SolanaTransferTokenFacts | null }> {
+export async function readSolanaTransferFacts(rpc: SolanaRpc, intent: SolanaTransferIntent, reviewedSource?: string,
+  options: { readonly ownerMayBeAbsent?: boolean } = {}): Promise<{ state: SolanaTransferState; token: SolanaTransferTokenFacts | null }> {
   const { profile, owner, recipient, fields } = intent, P = profile.programs;
   const rent = await rpc('getMinimumBalanceForRentExemption', [0, { commitment: 'confirmed' }]);
   if (!Number.isSafeInteger(rent) || (rent as number) <= 0) fail('RPC_INVALID');
@@ -179,8 +190,9 @@ export async function readSolanaTransferFacts(rpc: SolanaRpc, intent: SolanaTran
   const keys = [owner, recipient, ...token ? [token.mint, source!, destination!] : []];
   const { slot, accounts } = await readSolanaAccounts(rpc, keys);
   const [ownerAccount, recipientAccount] = accounts;
-  // The signer pays the fee: it must be an ordinary System account (no data, not a program).
-  if (!ownerAccount || ownerAccount.owner !== P.system || ownerAccount.data.length) fail('OWNER_NOT_WALLET');
+  // The signer pays the fee: it must be an ordinary System account (no data, not a program). ADR-0010 Kora mode: Kora pays the fee, so a wallet
+  // holding no SOL at all (no account yet) may sign; an existing account must still be an ordinary wallet.
+  if (ownerAccount ? ownerAccount.owner !== P.system || ownerAccount.data.length > 0 : !options.ownerMayBeAbsent) fail('OWNER_NOT_WALLET');
   if (recipientAccount) {
     if (recipientAccount.owner === P.token || recipientAccount.owner === P.token2022) fail('RECIPIENT_IS_TOKEN_ACCOUNT');
     if (recipientAccount.owner !== P.system || recipientAccount.data.length) fail('RECIPIENT_NOT_WALLET');
@@ -298,7 +310,9 @@ export async function simulateSolanaTransfer(workflow: SemanticWorkflow, ownerIn
 
 /** The frozen v1 artifact chain (ArtifactSet → SimulationBundle → AuthorizationPolicy → StrategyManifest → ExecutionPlan) for one transfer. */
 function buildSolanaTransferArtifacts(input: { workflow: SemanticWorkflow; intent: SolanaTransferIntent; token: SolanaTransferTokenFacts | null; state: SolanaTransferState;
-  messageHash: string; maximumNetworkCost: bigint; lastValidBlockHeight: number; expiresAt: string; observedAt: string }) {
+  messageHash: string; maximumNetworkCost: bigint; lastValidBlockHeight: number; expiresAt: string; observedAt: string;
+  /** ADR-0010: the network fee the owner repays in a token (Kora mode): bound as the owner's gas budget, in that token (it pays no SOL). */
+  tokenFee?: { mint: string; decimals: number; amount: string } }) {
   const { workflow, intent, token, state } = input, { profile, owner, recipient } = intent, chain = profile.chain, prefix = profile.idPrefix;
   const semanticHash = solanaSwapArtifactHash('semantic-workflow', workflow);
   const adapter = { id: token ? SOLANA_TOKEN_TRANSFER_ADAPTER : SOLANA_SYSTEM_TRANSFER_ADAPTER, version: '1.0.0' };
@@ -314,7 +328,10 @@ function buildSolanaTransferArtifacts(input: { workflow: SemanticWorkflow; inten
     unsupportedAssumptions: [], freshness: { observedAt: input.observedAt, expiresAt: input.expiresAt, maximumAgeSeconds: profile.reviewTtlSeconds } };
   const simulationHash = solanaSwapArtifactHash('simulation-bundle', simulation), ownerRef = { chainId: chain, address: owner };
   const spendLimits = [{ asset: moved, maximumAmount: intent.amount, maximumPerStepAmount: intent.amount, maximumCumulativeAmount: intent.amount }];
-  const gasBudgets = [{ asset: { chainId: chain, nativeId: 'SOL', decimals: 9 }, maximumAmount: input.maximumNetworkCost.toString() }];
+  // ADR-0010: in Kora mode the owner's whole network cost is the token repayment (it pays no SOL): that is its gas budget, in the token.
+  const gasBudgets = input.tokenFee ? [{ asset: { chainId: chain, address: input.tokenFee.mint, decimals: input.tokenFee.decimals }, maximumAmount: input.tokenFee.amount }]
+    : [{ asset: { chainId: chain, nativeId: 'SOL', decimals: 9 }, maximumAmount: input.maximumNetworkCost.toString() }];
+  const feeBudgets: never[] = [];
   const recovery = { failurePolicy: 'ABORT' as const, residualAssetRecipient: ownerRef, maximumAttemptsPerStep: 1, requiresHumanReview: true as const };
   const providers = { kind: 'FIXED' as const, providerId: adapter.id };
   const policy: AuthorizationPolicy = { schemaVersion: '1.0.0', policyId: `${prefix}-policy`, semanticWorkflowHash: semanticHash, artifactSetHash: artifactHash, simulationHash,
@@ -322,12 +339,12 @@ function buildSolanaTransferArtifacts(input: { workflow: SemanticWorkflow; inten
       adapters: [adapter], protocols: [token ? token.program : 'native'], contracts: [contract],
       functions: [{ chainId: chain, contract: program, functionId: token ? 'transfer-checked' : 'system-transfer' }] },
     budgetReservation: { rule: 'RESERVE_BEFORE_SUBMISSION', concurrentConsumption: 'CUMULATIVE_ACROSS_BRANCHES', implementation: 'NOT_IMPLEMENTED' },
-    spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets: [], oracleRules: [], accountRiskRules: [], checkpointRules: [], providers,
+    spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets, oracleRules: [], accountRiskRules: [], checkpointRules: [], providers,
     nonce: String(input.lastValidBlockHeight), deadline: input.expiresAt, revocationEpoch: workflow.revision, recovery, enforcement: 'NOT_ENFORCED' };
   const policyHash = solanaSwapArtifactHash('authorization-policy', policy);
   const manifest: StrategyManifest = { schemaVersion: '1.0.0', manifestId: `${prefix}-manifest`, semanticWorkflowRevision: workflow.revision, semanticWorkflowHash: semanticHash,
     artifactSetHash: artifactHash, simulationHash, policyHash, authorizationMode: 'MODE_A', owner: ownerRef, executor: null, expiresAt: input.expiresAt,
-    nonce: String(input.lastValidBlockHeight), revocationEpoch: workflow.revision, spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets: [], providers, recovery,
+    nonce: String(input.lastValidBlockHeight), revocationEpoch: workflow.revision, spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets, providers, recovery,
     enforcement: 'NOT_ENFORCED' };
   const manifestHash = solanaSwapArtifactHash('strategy-manifest', manifest);
   const plan: ExecutionPlan = { schemaVersion: '1.0.0', executionPlanId: `${prefix}-plan`, semanticWorkflowHash: semanticHash, manifestHash,
@@ -351,9 +368,112 @@ export function assertSolanaTransferReview(review: SolanaTransferReview, workflo
       (intent.fields.token?.mint ?? null) !== review.asset.mint || (intent.fields.token?.program ?? 'native') !== review.asset.program) fail('SEMANTIC_REVISION_CHANGED');
   const step = review.plan.segments[0]?.steps[0];
   if (sha256Hex(fromBase64(review.message)) !== review.messageHash || step?.executionKind !== 'DIRECT_TRANSACTION' || step.payloadHash !== review.messageHash ||
-      toBase64(serializeTransaction(null, fromBase64(review.message))) !== review.unsignedTransaction) fail('TRANSACTION_CHANGED');
+      toBase64(unsignedTransactionBytes(fromBase64(review.message))) !== review.unsignedTransaction) fail('TRANSACTION_CHANGED');
 }
-/** The reviewed message (or it plus verified Lighthouse assertions) with a valid owner signature; anything else fails closed. */
-export function verifySignedSolanaTransfer(review: Pick<SolanaTransferReview, 'message' | 'owner'>, signedBase64: unknown): SignedSolanaTransaction {
+/**
+ * The reviewed message (or it plus verified Lighthouse assertions) with a valid owner signature; anything else fails closed. ADR-0010: a Kora
+ * Review (`gas`) needs Kora's empty slot 0 and the owner's signature in slot 1, and the returned `signature` is the owner's (the claim identity).
+ */
+export function verifySignedSolanaTransfer(review: Pick<SolanaTransferReview, 'message' | 'owner'> & { gas?: KoraGasTerms | null }, signedBase64: unknown): SignedSolanaTransaction {
   return verifySignedSolanaSwap(review, signedBase64, X);
+}
+
+/**
+ * ADR-0010 §4: the same SPL token transfer with Pimlico's hosted Kora fee payer, for an owner whose SOL cannot pay the fee, its reserve and the
+ * recipient account's deposit. Called by the gas policy only after the native build failed for lack of SOL; `KORA_NATIVE_COVERS` when the owner's
+ * SOL would have paid (native stays the default). Mainnet SPL tokens only: a SOL transfer needs SOL, and Devnet stays native
+ * (`KORA_OPERATION_UNSUPPORTED`). Kora pays the fee and the recipient account's rent (charged in the token fee); the owner's SOL account may not
+ * even exist. The message ends with the owner's repayment `TransferChecked` of exactly the quoted amount. Never signs or sends.
+ */
+export async function simulateKoraSolanaTransfer(workflow: SemanticWorkflow, ownerInput: string, rpc: SolanaRpc, kora: KoraPort, now = Date.now(),
+  options: KoraBuildOptions = {}): Promise<SolanaTransferReview> {
+  const intent = solanaTransferIntent(workflow, ownerInput), { profile, owner, recipient } = intent;
+  if (!profile.realFunds || !intent.fields.token) koraFail('KORA_OPERATION_UNSUPPORTED');
+  await verifySolanaCluster(rpc, profile.genesisHash).catch((cause: unknown) => fail('WRONG_CLUSTER', cause));
+  const [facts, tokenList] = await Promise.all([readSolanaTransferFacts(rpc, intent, undefined, { ownerMayBeAbsent: true }), kora.tokens()]);
+  const token = facts.token!, state = facts.state, amount = BigInt(intent.amount);
+  const ordered: KoraFeeToken[] = [...tokenList.filter(t => t.mint === token.mint), ...tokenList.filter(t => t.mint !== token.mint)];
+  if (!ordered.length) koraFail('KORA_FEE_TOKEN_UNSUPPORTED');
+  const feeKeys = ordered.flatMap(t => [koraAta(owner, t.mint), koraAta(kora.paymentAddress, t.mint)]);
+  const [latestRead, feeRead, depositRead] = await Promise.all([rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]), readSolanaAccounts(rpc, feeKeys),
+    rpc('getMinimumBalanceForRentExemption', [token.program === 'token-2022' ? 170 : 165, { commitment: 'confirmed' }])]);
+  const latest = rpcContextValue(latestRead), blockhash = solanaAddress(latest.blockhash), lastValidBlockHeight = latest.lastValidBlockHeight;
+  if (!Number.isSafeInteger(lastValidBlockHeight) || !Number.isSafeInteger(depositRead) || (depositRead as number) <= 0) fail('RPC_INVALID');
+  // Native first: the fee at the compute ceiling, the recipient account deposit the native message reserves and the owner's own rent-exempt
+  // reserve. An owner whose SOL covers them keeps the native message.
+  const nativeWorstCase = 5_000n + (BigInt(profile.maximumComputeUnits) * BigInt(profile.computeUnitPriceMicroLamports) + 999_999n) / 1_000_000n +
+    BigInt(depositRead as number) + BigInt(state.rentExemptMinimum);
+  if (!options.groupShortfall && BigInt(state.ownerLamports) >= nativeWorstCase) koraFail('KORA_NATIVE_COVERS');
+  const price = BigInt(profile.computeUnitPriceMicroLamports) > KORA_MAX_COMPUTE_UNIT_PRICE ? KORA_MAX_COMPUTE_UNIT_PRICE.toString() : profile.computeUnitPriceMicroLamports;
+  type Payment = Pick<KoraGasTerms, 'feeAccount' | 'paymentAccount' | 'token'>;
+  const body = solanaTransferInstructions(intent, token).map(ix => koraPaidAccountCreation(ix, owner, kora.feePayer));
+  const instructions = (units: number, payment: Payment, fee: bigint) => [setComputeUnitLimit(units), ...setComputeUnitPrice(price), ...body,
+    koraPaymentInstruction(owner, payment, fee)];
+  const compile = (units: number, payment: Payment, fee: bigint) => serializeMessageV0(compileMessageV0(kora.feePayer, instructions(units, payment, fee), blockhash, {}));
+  const watch = (payment: Payment) => [...new Set([owner, recipient, token.sourceAccount, token.destinationAccount, payment.feeAccount, payment.paymentAccount])];
+  const simulate = async (message: Uint8Array, payment: Payment) => {
+    const addresses = watch(payment), result = await simulateSolanaMessage(rpc, message, addresses, X);
+    return { ...result, at: (address: string) => result.accounts[addresses.indexOf(address)] ?? null };
+  };
+  const balanceOf = (account: RawSolanaAccount | undefined | null, wallet: string, mint: string) => {
+    if (!account || account.owner !== KORA_TOKEN_PROGRAM || account.data.length !== 165) return null;
+    const decoded = decodeSplTokenAccount(account.data, false);
+    return decoded.owner === wallet && decoded.mint === mint && decoded.state === 1 ? decoded.amount : null;
+  };
+  const unavailable: string[] = [];
+  let chosen: { terms: KoraGasTerms; units: number } | null = null;
+  for (const [index, feeToken] of ordered.entries()) {
+    const payment: Payment = { feeAccount: koraAta(owner, feeToken.mint), paymentAccount: koraAta(kora.paymentAddress, feeToken.mint), token: feeToken };
+    if (balanceOf(feeRead.accounts[index * 2 + 1], kora.paymentAddress, feeToken.mint) === null) { unavailable.push('KORA_PAYMENT_ACCOUNT_MISSING'); continue; }
+    const available = (balanceOf(feeRead.accounts[index * 2], owner, feeToken.mint) ?? 0n) - (payment.feeAccount === token.sourceAccount ? amount : 0n);
+    if (available <= 0n) { unavailable.push('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT'); continue; }
+    const probe = await simulate(compile(profile.maximumComputeUnits, payment, 0n), payment);
+    const units = Math.min(profile.maximumComputeUnits, Math.ceil(probe.unitsConsumed * 1.2) + 5_000);
+    const quote = assertKoraQuote(await kora.estimate(toBase64(unsignedTransactionBytes(compile(units, payment, 0n))), feeToken.mint), kora);
+    if (available < quote.feeInToken) { unavailable.push('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT'); continue; }
+    chosen = { units, terms: { mechanism: KORA_MECHANISM, feePayer: kora.feePayer, paymentAddress: kora.paymentAddress, ...payment,
+      token: { symbol: feeToken.symbol, mint: feeToken.mint, decimals: feeToken.decimals }, amount: quote.feeInToken.toString(),
+      quotedFeeLamports: quote.feeInLamports.toString(), quotedAt: new Date(now).toISOString(), nativeWorstCaseLamports: nativeWorstCase.toString() } };
+    break;
+  }
+  if (!chosen) return koraFail(unavailable.includes('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT') ? 'KORA_FEE_TOKEN_BALANCE_INSUFFICIENT' : unavailable[0] ?? 'KORA_FEE_TOKEN_UNSUPPORTED');
+  const { terms, units } = chosen, fee = BigInt(terms.amount), index = ordered.findIndex(t => t.mint === terms.token.mint);
+  const messageBytes = compile(units, terms, fee);
+  assertKoraMessage(parseMessageV0(messageBytes), {}, owner, terms);
+  assertMessageRoundTrip(messageBytes, instructions(units, terms, fee), owner, {}, X, kora.feePayer);
+  const unsigned = unsignedTransactionBytes(messageBytes);
+  const final = await simulate(messageBytes, terms);
+  const priced = solanaRecord(await rpc('getFeeForMessage', [toBase64(messageBytes), { commitment: 'confirmed' }]), `${X}_RPC_INVALID`);
+  if (!Number.isSafeInteger(priced.value) || (priced.value as number) <= 0) fail('FEE_UNAVAILABLE');
+  const networkFee = BigInt(priced.value as number);
+  // The owner pays no SOL (Kora pays the fee and the recipient account's rent); the recipient's SOL does not move; the tokens move exactly.
+  const ownerPost = lamports(final.at(owner)), recipientPost = lamports(final.at(recipient));
+  if (ownerPost !== BigInt(state.ownerLamports) || recipientPost !== BigInt(state.recipientLamports)) fail('SIMULATED_TRANSFER_MISMATCH');
+  const sourceAfter = tokenAmountAfter(final.at(token.sourceAccount), token, owner) ?? fail('SIMULATED_TRANSFER_MISMATCH');
+  const destinationAfter = tokenAmountAfter(final.at(token.destinationAccount), token, recipient) ?? fail('SIMULATED_TRANSFER_MISMATCH');
+  const sameAccount = terms.feeAccount === token.sourceAccount;
+  if (BigInt(token.sourceAmount) - sourceAfter !== amount + (sameAccount ? fee : 0n)) fail('SIMULATED_TRANSFER_MISMATCH');
+  if (destinationAfter - BigInt(token.destinationAmount ?? '0') !== amount) fail('SIMULATED_TRANSFER_MISMATCH');
+  const paidBefore = balanceOf(feeRead.accounts[index * 2 + 1], kora.paymentAddress, terms.token.mint) ?? 0n;
+  const paidAfter = balanceOf(final.at(terms.paymentAccount), kora.paymentAddress, terms.token.mint) ?? 0n;
+  const feeSourceDelta = sameAccount ? 0n : (balanceOf(feeRead.accounts[index * 2], owner, terms.token.mint) ?? 0n) - (balanceOf(final.at(terms.feeAccount), owner, terms.token.mint) ?? 0n);
+  if (paidAfter - paidBefore !== fee || !sameAccount && feeSourceDelta !== fee) koraFail('KORA_SIMULATED_PAYMENT_MISMATCH');
+  // `accountCreationLamports` is the OWNER's deposit: zero here, Kora advances the recipient account's rent and charges it in the token fee.
+  const created = 0n;
+  const simulationResult: SolanaTransferSimulation = { slot: state.slot, unitsConsumed: final.unitsConsumed, logs: final.logs, ownerLamportsBefore: state.ownerLamports,
+    ownerLamportsAfter: ownerPost.toString(), recipientLamportsBefore: state.recipientLamports, recipientLamportsAfter: recipientPost.toString(),
+    sourceAmountBefore: token.sourceAmount, sourceAmountAfter: sourceAfter.toString(), destinationAmountBefore: token.destinationAmount ?? '0',
+    destinationAmountAfter: destinationAfter.toString(), accountCreationLamports: created.toString(), feeLamports: networkFee.toString() };
+  const expiresAt = new Date(now + profile.reviewTtlSeconds * 1000).toISOString();
+  const message = toBase64(messageBytes), messageHash = sha256Hex(messageBytes);
+  const asset = { symbol: token.symbol ?? 'SPL token', mint: token.mint, decimals: token.decimals, program: token.program, verified: token.verified };
+  const artifacts = buildSolanaTransferArtifacts({ workflow, intent, token, state, messageHash, maximumNetworkCost: 0n, lastValidBlockHeight: lastValidBlockHeight as number, expiresAt,
+    observedAt: new Date(now).toISOString(), tokenFee: { mint: terms.token.mint, decimals: terms.token.decimals, amount: terms.amount } });
+  // The owner's SOL is never charged: no deposit and no network cost in SOL. The recipient account's rent (when created) is Kora's, inside the fee.
+  const review: Omit<SolanaTransferReview, 'commitment'> = { format: 'gryloo.solana-transfer-review.v1', workflow, chain: profile.chain, cluster: profile.cluster,
+    network: profile.network, owner, recipient, amount: intent.amount, asset, token, state, blockhash, lastValidBlockHeight: lastValidBlockHeight as number,
+    computeUnitLimit: units, computeUnitPrice: price, estimatedFeeLamports: networkFee.toString(), accountCreationLamports: '0',
+    maximumAccountCreationLamports: '0', maximumNetworkCostLamports: '0', message, messageHash, unsignedTransaction: toBase64(unsigned),
+    simulationResult, expiresAt, ...artifacts, gas: terms };
+  return { ...review, commitment: solanaSwapHash(review) };
 }

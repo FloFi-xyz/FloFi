@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { BridgeRequoteChanges } from './bridge-requote-changes';
+import { requotedMessage } from '../domain/simulation-presentation';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { checkDestinationAddress, destinationEcosystemOf, destinationLabel } from '../domain/destination-wallet';
+import { localizedProvider, useDestinationWallets } from '../state/destination-wallets';
+import type { DestinationInventory } from '../domain/destination-wallet';
+import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { bridgeFailureMessage } from '../domain/bridge-failure';
 import { useLocale } from '../i18n/locale';
@@ -58,12 +64,18 @@ const MESSAGES: Readonly<Record<string, string>> = {
   UNIVERSAL_WALLET_NONCE_MISMATCH: 'Your wallet would use a different transaction number. Let pending transactions confirm first. Nothing was sent.', UNIVERSAL_WRONG_OWNER: 'Select the wallet account shown in Review.',
   UNIVERSAL_REVIEW_REQUIRED: 'Accept the current Review first.', UNIVERSAL_REVIEW_EXPIRED: 'This Review expired. Get a fresh route and review again.',
   ROUTE_CHANGED: 'The provider no longer offers the reviewed route. Your authorization was cleared and nothing was sent. Get a fresh route, then review it.',
+  // BUILD-FLOFI-MAINNET-EXEC-002: re-quoted in place (same run, same workflow); the fresh Review needs its own authorization.
+  UNIVERSAL_REQUOTED_REVIEW_REQUIRED: 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.',
   UNIVERSAL_REQUOTE_REQUIRED: 'A fresh route and Review are required before you can authorize again.',
   UNIVERSAL_STATE_CHANGED_REVIEW_REQUIRED: 'Chain state changed materially since Review. Your authorization was cleared and nothing was sent.',
   UNIVERSAL_ROUTE_REVALIDATION_UNAVAILABLE: 'The provider could not confirm the reviewed route right now. Nothing was sent; try again shortly.',
   UNIVERSAL_NO_EXECUTABLE_ROUTE: 'No provider returned a route FloFi can verify and execute for this bridge. See the routes found for the reasons.',
   UNIVERSAL_INSUFFICIENT_TOKEN: 'Your wallet needs more of the source asset for this bridge.', UNIVERSAL_INSUFFICIENT_NATIVE: 'Your wallet needs more of the source asset for this bridge.',
   UNIVERSAL_INSUFFICIENT_GAS: 'Your wallet needs more native coin on the source network for network fees.',
+  // BUILD-FLOFI-MAINNET-EXEC-002 (review): after the owner's own unwrap, a route that no longer takes ETH for this input cannot be paid.
+  UNIVERSAL_UNWRAP_DONE_ROUTE_CHANGED: 'Your WETH is already unwrapped to ETH in your wallet, but the provider now quotes this bridge only for WETH. Nothing else was sent; your ETH stays in your wallet. Start a new bridge from ETH, or wrap it again.',
+  UNIVERSAL_UNWRAP_REVERTED: 'The unwrap of your WETH failed on chain. Nothing was bridged; your WETH stays in your wallet.',
+  UNIVERSAL_SIMULATION_UNWRAP_REVERTED: 'The simulation of the WETH unwrap failed. Nothing was signed.',
   UNIVERSAL_INSUFFICIENT_SOL_FOR_FEES: 'Your Solana wallet needs more SOL for the network fee.',
   UNIVERSAL_SIMULATION_UNAVAILABLE: 'The network provider cannot simulate this transaction right now. Nothing was signed.',
   UNIVERSAL_SIMULATION_DEPOSIT_REVERTED: 'The simulation of the bridge deposit failed. Nothing was signed.',
@@ -148,6 +160,19 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     return next;
   });
   const cross = UNIVERSAL_NETWORKS[input.source].ecosystem !== UNIVERSAL_NETWORKS[input.destination].ecosystem;
+  const destinations = useDestinationWallets(useOptionalBuild009Wallet()), destinationListId = useId();
+  const destinationEcosystem = destinationEcosystemOf(input.destination);
+  const destinationResolution = destinationEcosystem === 'evm' ? destinations.evm : destinations.solana;
+  const sessionDestination = destinations.inventory.session.find(entry => entry.ecosystem === destinationEcosystem) ?? null;
+  const autoDestination = cross ? destinationResolution.kind === 'RESOLVED' ? destinationResolution.wallet : null : sessionDestination;
+  // Review round 2: only addresses valid for the destination are suggested (a mislabelled saved entry never is).
+  const destinationChoices = [...destinations.inventory.session, ...destinations.inventory.account, ...destinations.inventory.saved]
+    .filter((entry, index, all) => entry.ecosystem === destinationEcosystem && checkDestinationAddress(input.destination, entry.address).ok && all.findIndex(other => other.ecosystem === entry.ecosystem &&
+      (entry.ecosystem === 'evm' ? other.address.toLowerCase() === entry.address.toLowerCase() : other.address === entry.address)) === index);
+  const destinationCheck = input.recipient.trim() ? checkDestinationAddress(input.destination, input.recipient) : null, destinationMessageId = useId();
+  const destinationMessage = destinationCheck && !destinationCheck.ok ? tr(destinationCheck.code === 'DESTINATION_WRONG_ECOSYSTEM' ? 'This is not a {0} address.' : 'Enter a valid {0} address.', UNIVERSAL_NETWORKS[input.destination].name)
+    : !input.recipient && cross && destinationResolution.kind === 'CHOOSE' ? tr('Choose one of your wallets or enter an address.')
+    : !input.recipient && cross && destinationResolution.kind === 'NONE' ? tr('Enter the destination address on {0}.', UNIVERSAL_NETWORKS[input.destination].name) : null;
   function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -175,8 +200,17 @@ export function UniversalBridgeForm({ nodeId, onDone, options = false }: { nodeI
     <small>{tr('Any catalog asset by symbol or name, or a contract / mint written as address@decimals (identity verified on chain at Simulate). A valid asset does not guarantee a route.')}</small>
     <label>{tr('Amount')}<TokenAmountInput aria-label={tr('Universal bridge amount')} maxLength={40} value={input.amount} onValueChange={amount => set({ amount })}/></label>
     </>}
-    <label>{tr('Recipient')}<input aria-label={tr('Universal bridge recipient')} autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
-      placeholder={tr(cross ? 'Your connected destination wallet' : 'Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
+    {/* BUILD-FLOFI-MAINNET-EXEC-002: the destination wallet, filled with the owner's own wallet of the destination ecosystem (session → account →
+        Credentials; several: a choice), editable to any public address of the destination network, checked as the server checks it. */}
+    {/* Review round 2: the field's accessible name is its visible label; the message under it is its description; with no automatic wallet
+        (several to choose from, or none) the placeholder names the kind of address, never "your connected wallet". */}
+    <label>{tr('Destination wallet')}<input autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
+      list={destinationChoices.length ? destinationListId : undefined} title={input.recipient || autoDestination?.address || undefined}
+      aria-invalid={destinationCheck && !destinationCheck.ok || undefined} aria-describedby={destinationMessage ? destinationMessageId : undefined}
+      placeholder={autoDestination ? destinationLabel(input.destination, localizedProvider(autoDestination, tr))
+        : cross ? tr(destinationEcosystem === 'solana' ? 'Solana address' : 'Address (0x…)') : tr('Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
+    {destinationChoices.length > 0 && <datalist id={destinationListId}>{destinationChoices.map(choice => <option key={choice.address} value={choice.address} label={destinationLabel(input.destination, localizedProvider(choice, tr))}/>)}</datalist>}
+    {destinationMessage && <small id={destinationMessageId} role="status">{destinationMessage}</small>}
     <label>{tr('Routing')}<select aria-label={tr('Universal bridge routing')} value={input.routing} onChange={e => set({ routing: e.target.value as UniversalBridgeRouting })}>
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Max price difference (%)')}<PriceDifferenceInput aria-label={tr('Universal bridge max price difference (%)')} maxLength={5} bps={input.slippage}
@@ -221,9 +255,21 @@ function RouteDiscovery() {
   </section>;
 }
 
+/**
+ * Review round 2: where the Review's recipient comes from, said plainly (a saved Credentials address is the device's, not proof of control; the
+ * owner checks it here before signing). EXPLICIT: a typed address, no claim.
+ */
+function recipientOrigin(kind: string, address: string, inventory: DestinationInventory): string {
+  if (kind === 'EXPLICIT') return '';
+  if (kind === 'CONNECTED_OWNER') return ' (your connected wallet)';
+  const same = (entry: { readonly address: string }) => entry.address.toLowerCase() === address.toLowerCase();
+  return inventory.session.some(same) ? ' (your connected wallet)' : inventory.account.some(same) ? ' (a wallet of your FloFi account)'
+    : inventory.saved.some(same) ? ' (saved in Credentials on this device: check it is yours)' : ' (your destination wallet)';
+}
 export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
   const router = useUniversalRouter(), record = router.record, r = record?.review, route = r?.route, d = router.details;
+  const recipientInventory = useDestinationWallets(useOptionalBuild009Wallet()).inventory;
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const fresh = r ? Math.max(0, Math.round((Date.parse(r.expiresAt) - clock) / 1000)) : 0;
@@ -249,7 +295,9 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
     {router.retired && <p role="alert">{tr('The workflow changed. Prior authorization is invalid. Simulate the current bridge again.')}</p>}
     {router.recovered && record && <p role="status">{tr('Recovered run')} {record.id}{tr('. Its state comes from the server; nothing is resent automatically.')}</p>}
     <div aria-label={tr('Wallets')}>
-      {router.owner ? <p>{tr('Source wallet:')} <code>{router.owner}</code>{router.destinationWallet && <> · {tr('destination wallet:')} <code>{router.destinationWallet}</code></>}</p>
+      {/* Review round 2: once a Review exists, the wallet it bound (never the current resolution, which may have moved on). */}
+      {router.owner ? <p>{tr('Source wallet:')} <code>{router.owner}</code>{(record?.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? record.review.recipient : record ? null : router.destinationWallet) &&
+        <> · {tr('destination wallet:')} <code>{record?.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? record.review.recipient : router.destinationWallet}</code></>}</p>
         : <button type="button" disabled={router.busy} onClick={() => void router.connect()}>{tr('Connect wallets')}</button>}
       {router.owner && !router.signedIn && <p><button type="button" disabled={router.busy} onClick={() => void router.signIn()}>{tr('Sign in with source wallet')}</button>{' '}
         <small>{tr('One signature proves this wallet is yours. It moves no funds and authorizes no transaction.')}</small></p>}
@@ -259,6 +307,8 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <button type="button" disabled={router.busy || !router.available || !d} onClick={() => void router.simulate()}>{tr('Get route and simulate')}</button>
       <PendingExecutionNote pending={pending || settling}/></>}
     {record?.error === 'ROUTE_CHANGED' && record.routeChanges.length > 0 && <p role="alert">{tr('Route changed:')} {record.routeChanges.map(c => tr(CHANGE[c])).join(', ')}.</p>}
+    {router.requoted && <p className="bridge-requote-reason" role="status">{tr(requotedMessage(router.requoted.code))}</p>}
+    {router.requoted && <BridgeRequoteChanges changes={router.requoted.changes}/>}
     {r && route && src && !router.retired && <dl className="swap-summary" aria-label={tr('Route review')}>
       <dt>{tr('Provider')}</dt><dd>{PROVIDER_LABEL[route.provider] ?? route.provider} · {route.protocol} · {tr('order')} <code>{route.order.orderId}</code></dd>
       <dt>{tr('Selection')}</dt><dd>{r.selection.considered.map(c => `${PROVIDER_LABEL[c.provider] ?? c.provider}: ${tr(c.outcome === 'SELECTED' ? 'selected' : c.outcome === 'AVAILABLE' ? 'available'
@@ -272,7 +322,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr('Estimated duration')}</dt><dd>{tr('about')} {route.quote.estimatedDurationSeconds}s {tr('after the deposit confirms (provider estimate)')}</dd>
       <dt>{tr('Signatures')}</dt><dd>{r.authorizations.sourceSignatures} {tr(r.authorizations.sourceSignatures === 1 ? 'wallet signature on the source network' : 'wallet signatures on the source network (an exact approval, then the deposit)')}{tr('; nothing to sign on the destination network.')}</dd>
       {src.ecosystem === 'EVM' && src.approvals.map((a, i) => <dd key={i}>{tr(a.required ? 'Approval: exactly the amount, never unlimited, to the Relay Depository' : 'Existing allowance is sufficient; no approval')}</dd>)}
-      <dt>{tr('Recipient')}</dt><dd><code>{r.recipient}</code> {tr('on')} {net(route.destinationChain)}{tr(r.recipientKind === 'EXPLICIT' ? '' : ' (your connected wallet)')}{tr(r.recipientHasCode ? ' · this address is a contract' : '')}</dd>
+      <dt>{tr('Recipient')}</dt><dd><code>{r.recipient}</code> {tr('on')} {net(route.destinationChain)}{tr(recipientOrigin(r.recipientKind, r.recipient, recipientInventory))}{tr(r.recipientHasCode ? ' · this address is a contract' : '')}</dd>
       <dt>{tr('Refunds')}</dt><dd>{tr('If the order is not filled, the provider refunds to')} <code>{short(route.refundAddress)}</code> {tr('on')} {net(route.sourceChain)}.</dd>
       <dt>{tr('Simulation')}</dt><dd>{src.ecosystem === 'EVM' ? `eth_simulateV1 · block ${src.simulation.block}` : `simulateTransaction · slot ${src.simulation.slot}`} · {tr('debit')} {inp(src.simulation.ownerDebit)}{tr('. Not simulated: the destination delivery and refunds.')}</dd>
       <dt>{tr('Review valid')}</dt><dd>{fresh > 0 ? `${fresh}s` : tr('no longer — get a fresh route')}</dd>
@@ -290,7 +340,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       {canExecute && <button type="button" className="primary" disabled={router.busy} onClick={() => void router.execute()}>{tr('Execute with your wallet')}</button>}
       {canRefresh && <button type="button" disabled={router.busy} onClick={() => void router.refresh()}>{tr('Get a fresh route and review')}</button>}
       {(pending || settling) && <button type="button" disabled={router.busy} onClick={() => void router.observe()}>{tr('Observe bridge')}</button>}
-      {record.attempts.length > 0 && <ol aria-label={tr('Source transactions')}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.step === 'APPROVAL' ? 'Approval' : 'Bridge deposit')}:
+      {record.attempts.length > 0 && <ol aria-label={tr('Source transactions')}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.step === 'APPROVAL' ? 'Approval' : a.step === 'UNWRAP' ? 'Unwrap' : 'Bridge deposit')}:
         {' '}{tr(a.state.toLowerCase().replaceAll('_', ' '))}{a.transactionHash && <> · <a href={explorer(record.review.route.sourceChain, a.transactionHash)} target="_blank" rel="noreferrer">{tr('view transaction')}</a></>}
         {a.note ? ` · ${tr(message(a.note) ?? a.note)}` : ''}</li>)}</ol>}
       {record.source && <p>{tr('Deposit confirmed on')} {net(record.source.chainId)}{tr(record.source.final ? ' (final)' : '')}: {inp(record.source.ownerDebit)}.</p>}

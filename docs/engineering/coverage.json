@@ -234,6 +234,10 @@
       "path": "apps/reference-dapp/src/components/canvas-panel-reveal.test.ts",
       "stage": "unit"
     },
+    "app.components.conversation-cards": {
+      "path": "apps/reference-dapp/src/components/conversation-cards.test.tsx",
+      "stage": "unit"
+    },
     "app.components.copilot-automation-proposal": {
       "path": "apps/reference-dapp/src/components/copilot-automation-proposal.test.tsx",
       "stage": "unit"
@@ -254,8 +258,16 @@
       "path": "apps/reference-dapp/src/components/flofi-wallet-continue.test.tsx",
       "stage": "unit"
     },
+    "app.components.review-summary-panel": {
+      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
+      "stage": "unit"
+    },
     "app.components.site.typing-text": {
       "path": "apps/reference-dapp/src/components/site/typing-text.test.ts",
+      "stage": "unit"
+    },
+    "app.components.user-funded-browser": {
+      "path": "apps/reference-dapp/src/components/user-funded-browser.test.ts",
       "stage": "unit"
     },
     "app.config.product": {
@@ -298,6 +310,14 @@
       "path": "apps/reference-dapp/src/developer/webhooks.pg.test.ts",
       "stage": "postgres"
     },
+    "app.domain.approved-ux": {
+      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.bridge-requote": {
+      "path": "apps/reference-dapp/src/domain/bridge-requote.test.ts",
+      "stage": "unit"
+    },
     "app.domain.build-entry": {
       "path": "apps/reference-dapp/src/domain/build-entry.test.ts",
       "stage": "unit"
@@ -318,12 +338,20 @@
       "path": "apps/reference-dapp/src/domain/copilot-mainnet-bridge.test.ts",
       "stage": "unit"
     },
+    "app.domain.destination-wallet": {
+      "path": "apps/reference-dapp/src/domain/destination-wallet.test.ts",
+      "stage": "unit"
+    },
     "app.domain.editor-overview": {
       "path": "apps/reference-dapp/src/domain/editor-overview.test.ts",
       "stage": "unit"
     },
     "app.domain.editor-run": {
       "path": "apps/reference-dapp/src/domain/editor-run.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.flight-refusal": {
+      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
       "stage": "unit"
     },
     "app.domain.intelligence": {
@@ -340,6 +368,10 @@
     },
     "app.domain.observation-schedule": {
       "path": "apps/reference-dapp/src/domain/observation-schedule.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.p0-swap-bridge-connections": {
+      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
       "stage": "unit"
     },
     "app.domain.privacy-notice": {
@@ -450,6 +482,10 @@
       "path": "apps/reference-dapp/src/flight/launch.test.ts",
       "stage": "unit"
     },
+    "app.flight.launch-1311.pg": {
+      "path": "apps/reference-dapp/src/flight/launch-1311.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.flight.launch.pg": {
       "path": "apps/reference-dapp/src/flight/launch.pg.test.ts",
       "stage": "postgres"
@@ -457,6 +493,10 @@
     "app.flight.store.pg": {
       "path": "apps/reference-dapp/src/flight/store.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.gas-sponsorship.gas-sponsorship": {
+      "path": "apps/reference-dapp/src/gas-sponsorship/gas-sponsorship.test.ts",
+      "stage": "unit"
     },
     "app.i18n.catalog": {
       "path": "apps/reference-dapp/src/i18n/catalog.test.ts",
@@ -578,6 +618,10 @@
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
     },
+    "app.server.bridge-build-estimate": {
+      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
+      "stage": "unit"
+    },
     "app.server.build-estimate-production": {
       "path": "apps/reference-dapp/src/server/build-estimate-production.test.ts",
       "stage": "unit"
@@ -614,22 +658,6 @@
       "path": "apps/reference-dapp/src/server/execution-guard.test.ts",
       "stage": "unit"
     },
-    "app.domain.approved-ux": {
-      "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
-      "stage": "unit"
-    },
-    "app.components.review-summary-panel": {
-      "path": "apps/reference-dapp/src/components/review-summary-panel.test.tsx",
-      "stage": "unit"
-    },
-    "app.domain.flight-refusal": {
-      "path": "apps/reference-dapp/src/domain/flight-refusal.test.ts",
-      "stage": "unit"
-    },
-    "app.server.bridge-build-estimate": {
-      "path": "apps/reference-dapp/src/server/bridge-build-estimate.test.ts",
-      "stage": "unit"
-    },
     "app.server.flight-access": {
       "path": "apps/reference-dapp/src/server/flight-access.test.ts",
       "stage": "unit"
@@ -664,6 +692,10 @@
     },
     "app.server.provider-boundary": {
       "path": "apps/reference-dapp/src/server/provider-boundary.test.ts",
+      "stage": "unit"
+    },
+    "app.server.router-capability": {
+      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
       "stage": "unit"
     },
     "app.server.router-providers": {
@@ -740,6 +772,10 @@
     },
     "app.user-funded.solana-nonce-codec": {
       "path": "apps/reference-dapp/src/user-funded/solana-nonce-codec.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.sponsored-batch": {
+      "path": "apps/reference-dapp/src/user-funded/sponsored-batch.test.ts",
       "stage": "unit"
     },
     "app.user-funded.universal-batch": {
@@ -1086,16 +1122,168 @@
       "path": "packages/workflow-contracts/test/native-transfer.test.ts",
       "stage": "unit"
     },
+    "workflow-contracts.network-fee": {
+      "path": "packages/workflow-contracts/test/network-fee.test.ts",
+      "stage": "unit"
+    },
     "workflow-contracts.revision-state": {
       "path": "packages/workflow-contracts/test/revision-state.test.ts",
       "stage": "unit"
     },
-    "app.domain.p0-swap-bridge-connections": {
-      "path": "apps/reference-dapp/src/domain/p0-swap-bridge-connections.test.ts",
+    "app.gas-abstraction.gas-abstraction": {
+      "path": "apps/reference-dapp/src/gas-abstraction/gas-abstraction.test.ts",
       "stage": "unit"
     },
-    "app.server.router-capability": {
-      "path": "apps/reference-dapp/src/server/router-capability.test.ts",
+    "reference-compiler.circle-paymaster": {
+      "path": "packages/reference-compiler/test/circle-paymaster.test.ts",
+      "stage": "unit"
+    },
+    "reference-compiler.eip712": {
+      "path": "packages/reference-compiler/test/eip712.test.ts",
+      "stage": "unit"
+    },
+    "reference-compiler.kora": {
+      "path": "packages/reference-compiler/test/kora.test.ts",
+      "stage": "unit"
+    },
+    "app.components.user-funded-browser-circle": {
+      "path": "apps/reference-dapp/src/components/user-funded-browser-circle.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.gas-payment": {
+      "path": "apps/reference-dapp/src/domain/gas-payment.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.kora-presentation": {
+      "path": "apps/reference-dapp/src/domain/kora-presentation.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.token-fee": {
+      "path": "apps/reference-dapp/src/domain/token-fee.test.ts",
+      "stage": "unit"
+    },
+    "app.editor.workflow-execution-circle": {
+      "path": "apps/reference-dapp/src/editor/workflow-execution-circle.test.ts",
+      "stage": "unit"
+    },
+    "app.gas-abstraction.kora-client": {
+      "path": "apps/reference-dapp/src/gas-abstraction/kora/kora-client.test.ts",
+      "stage": "unit"
+    },
+    "app.server.jupiter-kora": {
+      "path": "apps/reference-dapp/src/server/jupiter-kora.test.ts",
+      "stage": "unit"
+    },
+    "app.server.managed-signing-kora": {
+      "path": "apps/reference-dapp/src/server/managed-signing-kora.test.ts",
+      "stage": "unit"
+    },
+    "app.server.solana-transfer-kora": {
+      "path": "apps/reference-dapp/src/server/solana-transfer-kora.test.ts",
+      "stage": "unit"
+    },
+    "app.universal-router.kora-refusal": {
+      "path": "apps/reference-dapp/src/server/universal-router/kora-refusal.test.ts",
+      "stage": "unit"
+    },
+    "app.server.zeroex-gasless.provider": {
+      "path": "apps/reference-dapp/src/server/zeroex-gasless/provider.test.ts",
+      "stage": "unit"
+    },
+    "app.server.robinhood-gasless": {
+      "path": "apps/reference-dapp/src/server/zeroex-gasless/robinhood-gasless.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.circle-bundler": {
+      "path": "apps/reference-dapp/src/user-funded/circle-bundler.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.circle-gas": {
+      "path": "apps/reference-dapp/src/user-funded/circle-gas.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.gasless-groups": {
+      "path": "apps/reference-dapp/src/user-funded/gasless-groups.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.groups-kora": {
+      "path": "apps/reference-dapp/src/user-funded/groups-kora.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.flofi-solana-wallet-kora": {
+      "path": "apps/reference-dapp/src/wallet/flofi-solana-wallet-kora.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.solana-wallet-kora": {
+      "path": "apps/reference-dapp/src/wallet/solana-wallet-kora.test.ts",
+      "stage": "unit"
+    },
+    "app.wallet.zeroex-gasless-signing": {
+      "path": "apps/reference-dapp/src/wallet/zeroex-gasless-signing.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.circle-gas-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/circle-gas-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.components.editor-workflow-run-circle": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.circle.test.ts",
+      "stage": "unit"
+    },
+    "app.components.editor-workflow-run-token-fee": {
+      "path": "apps/reference-dapp/src/components/editor-workflow-run.token-fee.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.kora-fee-visible": {
+      "path": "apps/reference-dapp/src/components/kora-fee-visible.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.workflow-run-panel-circle": {
+      "path": "apps/reference-dapp/src/components/workflow-run-panel.circle.test.tsx",
+      "stage": "unit"
+    },
+    "app.editor.workflow-execution-native-later": {
+      "path": "apps/reference-dapp/src/editor/workflow-execution-native-later.test.ts",
+      "stage": "unit"
+    },
+    "app.gas-abstraction.native-later": {
+      "path": "apps/reference-dapp/src/gas-abstraction/native-later.test.ts",
+      "stage": "unit"
+    },
+    "app.server.managed-signing-circle": {
+      "path": "apps/reference-dapp/src/server/managed-signing-circle.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.circle-bridge": {
+      "path": "apps/reference-dapp/src/user-funded/circle-bridge.test.ts",
+      "stage": "unit"
+    },
+    "app.user-funded.circle-flofi-wallet": {
+      "path": "apps/reference-dapp/src/user-funded/circle-flofi-wallet.test.ts",
+      "stage": "unit"
+    },
+    "app.workflow-runs.flofi-wallet-circle-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/flofi-wallet-circle-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.workflow-runs.kora-gas-run.pg": {
+      "path": "apps/reference-dapp/src/workflow-runs/kora-gas-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "reference-compiler.eip7702-upgrade": {
+      "path": "packages/reference-compiler/test/eip7702-upgrade.test.ts",
+      "stage": "unit"
+    },
+    "app.components.circle-consent-card": {
+      "path": "apps/reference-dapp/src/components/circle-consent-card.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.flofi-wallet-circle-flow": {
+      "path": "apps/reference-dapp/src/components/flofi-wallet-circle-flow.test.ts",
+      "stage": "unit"
+    },
+    "app.components.workflow-run-panel-flofi-circle": {
+      "path": "apps/reference-dapp/src/components/workflow-run-panel.flofi-circle.test.tsx",
       "stage": "unit"
     }
   },
@@ -1166,7 +1354,43 @@
     "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
-    "reference-reconciler.evidence"
+    "reference-reconciler.evidence",
+    "app.gas-abstraction.gas-abstraction",
+    "reference-compiler.circle-paymaster",
+    "reference-compiler.eip712",
+    "reference-compiler.kora",
+    "app.components.user-funded-browser-circle",
+    "app.domain.gas-payment",
+    "app.domain.kora-presentation",
+    "app.domain.token-fee",
+    "app.editor.workflow-execution-circle",
+    "app.gas-abstraction.kora-client",
+    "app.server.jupiter-kora",
+    "app.server.managed-signing-kora",
+    "app.server.solana-transfer-kora",
+    "app.universal-router.kora-refusal",
+    "app.server.zeroex-gasless.provider",
+    "app.server.robinhood-gasless",
+    "app.user-funded.circle-bundler",
+    "app.user-funded.circle-gas",
+    "app.user-funded.gasless-groups",
+    "app.user-funded.groups-kora",
+    "app.wallet.flofi-solana-wallet-kora",
+    "app.wallet.solana-wallet-kora",
+    "app.wallet.zeroex-gasless-signing",
+    "app.components.editor-workflow-run-circle",
+    "app.components.editor-workflow-run-token-fee",
+    "app.components.kora-fee-visible",
+    "app.components.workflow-run-panel-circle",
+    "app.editor.workflow-execution-native-later",
+    "app.gas-abstraction.native-later",
+    "app.server.managed-signing-circle",
+    "app.user-funded.circle-bridge",
+    "app.user-funded.circle-flofi-wallet",
+    "reference-compiler.eip7702-upgrade",
+    "app.components.circle-consent-card",
+    "app.components.flofi-wallet-circle-flow",
+    "app.components.workflow-run-panel-flofi-circle"
   ],
   "modules": [
     {
@@ -2766,6 +2990,7 @@
       "sources": [
         "apps/reference-dapp/src/components/across-panel.tsx",
         "apps/reference-dapp/src/components/bridge-panel.tsx",
+        "apps/reference-dapp/src/components/bridge-requote-changes.tsx",
         "apps/reference-dapp/src/components/bridge-swap-panel.tsx",
         "apps/reference-dapp/src/components/router-panel.tsx",
         "apps/reference-dapp/src/components/universal-bridge-panel.tsx"
@@ -2828,6 +3053,7 @@
         "apps/reference-dapp/src/components/proposal-review.tsx"
       ],
       "suites": [
+        "app.components.conversation-cards",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.e2e.chat-assistant",
@@ -3335,7 +3561,8 @@
         "apps/reference-dapp/src/delegation/steps.ts",
         "apps/reference-dapp/src/delegation/views.ts",
         "apps/reference-dapp/src/delegation/worker.ts",
-        "apps/reference-dapp/src/delegation/harness/across-double.ts"
+        "apps/reference-dapp/src/delegation/harness/across-double.ts",
+        "apps/reference-dapp/src/delegation/harness/circle-double.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3504,10 +3731,13 @@
         "apps/reference-dapp/src/domain/bridge-failure.ts",
         "apps/reference-dapp/src/domain/bridge-review-recovery.ts",
         "apps/reference-dapp/src/domain/bridge-swap-authoring.ts",
+        "apps/reference-dapp/src/domain/destination-wallet.ts",
         "apps/reference-dapp/src/domain/router-authoring.ts",
         "apps/reference-dapp/src/domain/universal-bridge-authoring.ts"
       ],
       "suites": [
+        "app.domain.bridge-requote",
+        "app.domain.destination-wallet",
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
@@ -3568,7 +3798,8 @@
         "apps/reference-dapp/src/domain/intelligence/turn-metrics.ts",
         "apps/reference-dapp/src/domain/proposal.ts",
         "apps/reference-dapp/src/domain/privacy-notice.ts",
-        "apps/reference-dapp/src/domain/chat-message.ts"
+        "apps/reference-dapp/src/domain/chat-message.ts",
+        "apps/reference-dapp/src/domain/token-fee.ts"
       ],
       "suites": [
         "app.domain.copilot-mainnet-bridge",
@@ -3583,7 +3814,9 @@
         "app.platform.intelligence-parity",
         "app.state.flofi-conversation",
         "app.domain.privacy-notice",
-        "app.domain.approved-ux"
+        "app.domain.approved-ux",
+        "app.domain.kora-presentation",
+        "app.domain.token-fee"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -3870,7 +4103,8 @@
         "apps/reference-dapp/src/domain/sequence-restore.ts",
         "apps/reference-dapp/src/domain/editor-run.ts",
         "apps/reference-dapp/src/domain/editor-persistence.ts",
-        "apps/reference-dapp/src/domain/workflow-progress.ts"
+        "apps/reference-dapp/src/domain/workflow-progress.ts",
+        "apps/reference-dapp/src/domain/gas-payment.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -3888,7 +4122,8 @@
         "app.domain.editor-overview",
         "app.domain.editor-run",
         "app.domain.flight-refusal",
-        "app.domain.p0-swap-bridge-connections"
+        "app.domain.p0-swap-bridge-connections",
+        "app.domain.gas-payment"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4010,6 +4245,7 @@
         "apps/reference-dapp/src/flight/email/templates-v1.ts",
         "apps/reference-dapp/src/flight/email/templates-v2.ts",
         "apps/reference-dapp/src/flight/email/templates-v3.ts",
+        "apps/reference-dapp/src/flight/email/templates-v4.ts",
         "apps/reference-dapp/src/flight/email/templates.ts",
         "apps/reference-dapp/src/flight/host.ts",
         "apps/reference-dapp/src/flight/http.ts",
@@ -4026,6 +4262,7 @@
         "cloud-runtime.flight-flofi-migration.pg",
         "app.flight.launch",
         "app.flight.launch.pg",
+        "app.flight.launch-1311.pg",
         "cloud-runtime.flight-launch-migration.pg",
         "app.e2e.flight",
         "app.flight.identity-http",
@@ -4109,10 +4346,9 @@
         "apps/reference-dapp/src/i18n/locale.tsx",
         "apps/reference-dapp/src/i18n/preserved-values.ts",
         "apps/reference-dapp/src/i18n/pt-aave-expansion.ts",
-        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
         "apps/reference-dapp/src/i18n/pt-approved-ux-editor.ts",
-        "apps/reference-dapp/src/i18n/pt-execution-continuity.ts",
         "apps/reference-dapp/src/i18n/pt-approved-ux-pages.ts",
+        "apps/reference-dapp/src/i18n/pt-approved-ux.ts",
         "apps/reference-dapp/src/i18n/pt-authoring.ts",
         "apps/reference-dapp/src/i18n/pt-automations.ts",
         "apps/reference-dapp/src/i18n/pt-base.ts",
@@ -4131,12 +4367,17 @@
         "apps/reference-dapp/src/i18n/pt-domain.ts",
         "apps/reference-dapp/src/i18n/pt-e2e-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-editor-runs.ts",
+        "apps/reference-dapp/src/i18n/pt-execution-continuity.ts",
         "apps/reference-dapp/src/i18n/pt-execution-ux.ts",
         "apps/reference-dapp/src/i18n/pt-financial-execution.ts",
         "apps/reference-dapp/src/i18n/pt-learning.ts",
         "apps/reference-dapp/src/i18n/pt-lending.ts",
         "apps/reference-dapp/src/i18n/pt-lifecycle.ts",
         "apps/reference-dapp/src/i18n/pt-local-runtime.ts",
+        "apps/reference-dapp/src/i18n/pt-locale-contract.ts",
+        "apps/reference-dapp/src/i18n/pt-mainnet-exec.ts",
+        "apps/reference-dapp/src/i18n/pt-round2-requote.ts",
+        "apps/reference-dapp/src/i18n/pt-round2-frontend.ts",
         "apps/reference-dapp/src/i18n/pt-mainnet-product.ts",
         "apps/reference-dapp/src/i18n/pt-networks.ts",
         "apps/reference-dapp/src/i18n/pt-permissions.ts",
@@ -4155,9 +4396,11 @@
         "apps/reference-dapp/src/i18n/pt-workflow-execution.ts",
         "apps/reference-dapp/src/i18n/pt-workflow-runs.ts",
         "apps/reference-dapp/src/i18n/pt.ts",
-        "apps/reference-dapp/src/server/request-language.ts",
         "apps/reference-dapp/src/i18n/translate.ts",
-        "apps/reference-dapp/src/i18n/pt-locale-contract.ts"
+        "apps/reference-dapp/src/server/request-language.ts",
+        "apps/reference-dapp/src/i18n/pt-gas-circle.ts",
+        "apps/reference-dapp/src/i18n/pt-gas-kora.ts",
+        "apps/reference-dapp/src/i18n/pt-gas-zerox.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -5075,7 +5318,9 @@
         "packages/reference-compiler/src/policy.ts",
         "packages/reference-compiler/src/revocation.ts",
         "packages/reference-compiler/src/solana-nonce.ts",
-        "packages/reference-compiler/src/spl-delegation.ts"
+        "packages/reference-compiler/src/spl-delegation.ts",
+        "packages/reference-compiler/src/circle-paymaster.ts",
+        "packages/reference-compiler/src/eip712.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5085,7 +5330,10 @@
         "cloud-runtime.tenancy.pg",
         "reference-compiler.account-code",
         "reference-compiler.erc4337",
-        "reference-compiler.solana-nonce"
+        "reference-compiler.solana-nonce",
+        "reference-compiler.circle-paymaster",
+        "reference-compiler.eip712",
+        "reference-compiler.eip7702-upgrade"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
@@ -5105,7 +5353,8 @@
         "packages/reference-compiler/src/cow.ts",
         "packages/reference-compiler/src/jupiter-mock.ts",
         "packages/reference-compiler/src/jupiter.ts",
-        "packages/reference-compiler/src/solana-swap.ts"
+        "packages/reference-compiler/src/solana-swap.ts",
+        "packages/reference-compiler/src/kora.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5113,7 +5362,9 @@
         "reference-compiler.compile.fork",
         "reference-compiler.jupiter",
         "reference-compiler.native-eth",
-        "reference-compiler.orca-mainnet-liquidity"
+        "reference-compiler.orca-mainnet-liquidity",
+        "reference-compiler.kora",
+        "app.server.jupiter-kora"
       ],
       "gaps": [
         "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
@@ -5815,7 +6066,8 @@
       "sharedFinancialCore": true,
       "sources": [
         "packages/reference-reconciler/src/cow.ts",
-        "packages/reference-reconciler/src/jupiter.ts"
+        "packages/reference-reconciler/src/jupiter.ts",
+        "packages/reference-reconciler/src/kora.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -5995,14 +6247,15 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/server/across-adapter.ts",
+        "apps/reference-dapp/src/server/across-route.ts",
         "apps/reference-dapp/src/server/across-service.ts",
         "apps/reference-dapp/src/server/bridge-build-estimate.ts",
-        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/bridge-discovery.ts",
         "apps/reference-dapp/src/server/bridge-read-rpc.ts",
         "apps/reference-dapp/src/server/bridge-service.ts",
         "apps/reference-dapp/src/server/build009-lifi.ts",
         "apps/reference-dapp/src/server/lifi-adapter.ts",
+        "apps/reference-dapp/src/server/router-capability.ts",
         "apps/reference-dapp/src/server/router-mock.ts",
         "apps/reference-dapp/src/server/router-providers.ts",
         "apps/reference-dapp/src/server/router-runtime.ts",
@@ -6024,7 +6277,7 @@
         "apps/reference-dapp/src/server/universal-router/service.ts",
         "apps/reference-dapp/src/server/universal-router/solana-chain.ts",
         "apps/reference-dapp/src/server/universal-router/types.ts",
-        "apps/reference-dapp/src/server/across-route.ts"
+        "apps/reference-dapp/src/server/universal-router/wrapped-native.ts"
       ],
       "suites": [
         "app.server.router-service",
@@ -6414,6 +6667,7 @@
         "apps/reference-dapp/src/server/testdata/universal/mayan-quote-sol-base.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-arb-rh-eth.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-arb-sol.json",
+        "apps/reference-dapp/src/server/testdata/universal/relay-base-arb-weth.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-base-sol.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-eth-sol-native.json",
         "apps/reference-dapp/src/server/testdata/universal/relay-rh-sol.json",
@@ -6500,6 +6754,7 @@
         "apps/reference-dapp/src/state/across-store.tsx",
         "apps/reference-dapp/src/state/bridge-store.tsx",
         "apps/reference-dapp/src/state/bridge-swap-store.tsx",
+        "apps/reference-dapp/src/state/destination-wallets.ts",
         "apps/reference-dapp/src/state/router-store.tsx",
         "apps/reference-dapp/src/state/universal-router-store.tsx"
       ],
@@ -6784,7 +7039,11 @@
         "apps/reference-dapp/src/user-funded/planned.ts",
         "apps/reference-dapp/src/user-funded/runtime.ts",
         "apps/reference-dapp/src/user-funded/bridge-calls.ts",
-        "apps/reference-dapp/src/user-funded/bridge-delivery.ts"
+        "apps/reference-dapp/src/user-funded/bridge-delivery.ts",
+        "apps/reference-dapp/src/user-funded/circle-facts.ts",
+        "apps/reference-dapp/src/user-funded/circle-gas.ts",
+        "apps/reference-dapp/src/user-funded/gasless-groups.ts",
+        "apps/reference-dapp/src/workflow-runs/owner-step-circle.ts"
       ],
       "suites": [
         "app.user-funded.groups",
@@ -6794,10 +7053,53 @@
         "app.user-funded.universal-batch",
         "app.user-funded.arbitrum-batch",
         "app.workflow-runs.user-funded-due-refusal.pg",
-        "app.e2e.editor-wallet-batch"
+        "app.e2e.editor-wallet-batch",
+        "app.user-funded.sponsored-batch",
+        "app.components.user-funded-browser-circle",
+        "app.editor.workflow-execution-circle",
+        "app.user-funded.circle-bundler",
+        "app.user-funded.circle-gas",
+        "app.user-funded.gasless-groups",
+        "app.user-funded.groups-kora",
+        "app.workflow-runs.circle-gas-run.pg",
+        "app.components.editor-workflow-run-circle",
+        "app.components.workflow-run-panel-circle",
+        "app.user-funded.circle-bridge",
+        "app.user-funded.circle-flofi-wallet",
+        "app.workflow-runs.flofi-wallet-circle-run.pg",
+        "app.workflow-runs.kora-gas-run.pg",
+        "app.components.flofi-wallet-circle-flow",
+        "app.components.workflow-run-panel-flofi-circle"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
+      ]
+    },
+    {
+      "id": "gas-sponsorship--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/app/api/gas/paymaster/[chainId]/route.ts",
+        "apps/reference-dapp/src/gas-sponsorship/config.ts",
+        "apps/reference-dapp/src/gas-sponsorship/http.ts",
+        "apps/reference-dapp/src/gas-sponsorship/ledger.ts",
+        "apps/reference-dapp/src/gas-sponsorship/paymaster-service.ts",
+        "apps/reference-dapp/src/gas-sponsorship/runtime.ts",
+        "apps/reference-dapp/src/gas-sponsorship/solana-fee-payer.ts"
+      ],
+      "suites": [
+        "app.gas-sponsorship.gas-sponsorship",
+        "app.user-funded.sponsored-batch",
+        "app.components.user-funded-browser"
+      ],
+      "gaps": [
+        "ADR-0009: loopback doubles only (an ERC-7677 provider double, a MOCKED EVM chain double, in-memory ed25519 keys). No paymaster provider, bundler, wallet or mainnet is reached in CI; real EIP-5792 paymasterService behaviour per wallet and provider-side policies are unproven until the owner's live acceptance (docs/deploy/GAS-SPONSORSHIP.md §3.4). The Solana sponsored fee payer is a verified module not yet wired into a Solana flow."
       ]
     },
     {
@@ -6823,7 +7125,8 @@
         "apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.ts",
         "apps/reference-dapp/src/wallet/wallet-errors.ts",
         "apps/reference-dapp/src/wallet/wallet-hint.ts",
-        "apps/reference-dapp/src/wallet/wallet-registry.ts"
+        "apps/reference-dapp/src/wallet/wallet-registry.ts",
+        "apps/reference-dapp/src/wallet/zeroex-gasless-signing.ts"
       ],
       "suites": [
         "app.state.wallet-review-continuity",
@@ -6833,7 +7136,12 @@
         "app.wallet.solana-wallet",
         "reference-executor.recovery",
         "reference-executor.restart.fork",
-        "reference-reconciler.evidence"
+        "reference-reconciler.evidence",
+        "app.server.managed-signing-kora",
+        "app.wallet.flofi-solana-wallet-kora",
+        "app.wallet.solana-wallet-kora",
+        "app.wallet.zeroex-gasless-signing",
+        "app.server.managed-signing-circle"
       ],
       "gaps": [
         "Injected test wallets do not certify browser extension hardware/user ceremonies or real signatures; production delegated signing is unavailable.",
@@ -6853,6 +7161,7 @@
       "sharedFinancialCore": true,
       "sources": [
         "packages/workflow-contracts/src/bridge.ts",
+        "packages/workflow-contracts/src/network-fee.ts",
         "packages/workflow-contracts/src/router-pairs.ts",
         "packages/workflow-contracts/src/router.ts",
         "packages/workflow-contracts/src/universal-router-networks.ts",
@@ -6863,7 +7172,8 @@
         "app.server.universal-router.service",
         "reference-compiler.bridge",
         "reference-executor.bridge",
-        "reference-reconciler.bridge"
+        "reference-reconciler.bridge",
+        "workflow-contracts.network-fee"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -7263,6 +7573,78 @@
         "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",
         "Local PostgreSQL and provider stand-ins prove request/session/tenant/wallet isolation and emergency pause behavior; live Privy devices, coordinated hosted rollout and external-wallet prompts already released require owner acceptance. No public financial execution is certified."
       ]
+    },
+    {
+      "id": "gas-abstraction--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-security",
+        "flofi-workflow",
+        "flofi-swap",
+        "flofi-bridge",
+        "flofi-transfer-payments",
+        "flofi-infrastructure-ci"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/gas-abstraction/mechanism.ts",
+        "apps/reference-dapp/src/gas-abstraction/config.ts",
+        "apps/reference-dapp/src/gas-abstraction/kora/client.ts",
+        "apps/reference-dapp/src/gas-abstraction/kora/runtime.ts",
+        "apps/reference-dapp/src/server/zeroex-gasless/client.ts",
+        "apps/reference-dapp/src/server/zeroex-gasless/quote.ts",
+        "apps/reference-dapp/src/server/zeroex-gasless/swap.ts",
+        "apps/reference-dapp/src/server/zeroex-gasless/transport.ts",
+        "apps/reference-dapp/src/server/testdata/zeroex/gasless-official-examples.json",
+        "apps/reference-dapp/src/gas-abstraction/native-later.ts",
+        "apps/reference-dapp/src/components/circle-consent-card.tsx",
+        "apps/reference-dapp/src/components/flofi-wallet-circle-flow.ts"
+      ],
+      "suites": [
+        "app.gas-abstraction.gas-abstraction",
+        "app.user-funded.groups",
+        "reference-compiler.circle-paymaster",
+        "reference-compiler.eip712",
+        "reference-compiler.kora",
+        "app.components.user-funded-browser-circle",
+        "app.domain.gas-payment",
+        "app.domain.kora-presentation",
+        "app.domain.token-fee",
+        "app.editor.workflow-execution-circle",
+        "app.gas-abstraction.kora-client",
+        "app.server.jupiter-kora",
+        "app.server.managed-signing-kora",
+        "app.server.solana-transfer-kora",
+        "app.universal-router.kora-refusal",
+        "app.server.zeroex-gasless.provider",
+        "app.server.robinhood-gasless",
+        "app.user-funded.circle-bundler",
+        "app.user-funded.circle-gas",
+        "app.user-funded.gasless-groups",
+        "app.user-funded.groups-kora",
+        "app.wallet.flofi-solana-wallet-kora",
+        "app.wallet.solana-wallet-kora",
+        "app.wallet.zeroex-gasless-signing",
+        "app.workflow-runs.circle-gas-run.pg",
+        "app.components.editor-workflow-run-circle",
+        "app.components.editor-workflow-run-token-fee",
+        "app.components.kora-fee-visible",
+        "app.components.workflow-run-panel-circle",
+        "app.editor.workflow-execution-native-later",
+        "app.gas-abstraction.native-later",
+        "app.server.managed-signing-circle",
+        "app.user-funded.circle-bridge",
+        "app.user-funded.circle-flofi-wallet",
+        "app.workflow-runs.flofi-wallet-circle-run.pg",
+        "app.workflow-runs.kora-gas-run.pg",
+        "reference-compiler.eip7702-upgrade",
+        "app.components.circle-consent-card",
+        "app.components.flofi-wallet-circle-flow",
+        "app.components.workflow-run-panel-flofi-circle"
+      ],
+      "gaps": [
+        "ADR-0010: token-paid network fees (Circle Paymaster, Pimlico Kora, 0x Gasless) are proven with deterministic loopback doubles only; no provider, bundler, wallet or mainnet is reached in CI, and no real-funds token-paid transaction has been recorded."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -7288,6 +7670,7 @@
     "app.developer.sdk.pg",
     "app.developer.webhooks.pg",
     "app.flight.beta-access.pg",
+    "app.flight.launch-1311.pg",
     "app.flight.launch.pg",
     "app.flight.store.pg",
     "app.learning.automatic.pg",
@@ -7308,6 +7691,9 @@
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
-    "cloud-runtime.user-funded-groups-migration.pg"
+    "cloud-runtime.user-funded-groups-migration.pg",
+    "app.workflow-runs.circle-gas-run.pg",
+    "app.workflow-runs.flofi-wallet-circle-run.pg",
+    "app.workflow-runs.kora-gas-run.pg"
   ]
 }

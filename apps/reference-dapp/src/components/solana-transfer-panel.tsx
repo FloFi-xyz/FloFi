@@ -29,15 +29,19 @@ export function SolanaTransferPanel({ view }: { view: 'simulate' | 'execute' }) 
       <dt>{tr("Send")}</dt><dd>{amount}</dd><dt>{tr("To")}</dt><dd><code>{review.recipient}</code></dd>
       <dt>{tr("From")}</dt><dd><code>{review.owner}</code></dd><dt>{tr("Network")}</dt><dd>{tr(review.network)}</dd>
       {review.asset.mint && <><dt>{tr("Token mint")}</dt><dd><code>{review.asset.mint}</code> · {tr(review.asset.program === 'token-2022' ? 'Token-2022' : 'SPL Token')}</dd></>}
-      <dt>{tr("Estimated network fee")}</dt><dd>{sol(review.estimatedFeeLamports)}</dd>
-      {review.accountCreationLamports !== '0' && <><dt>{tr("Recipient token account deposit")}</dt><dd>{sol(review.accountCreationLamports)}</dd></>}
-      {review.token && review.accountCreationLamports === '0' && <><dt>{tr('Maximum token account deposit')}</dt><dd>{sol(review.maximumAccountCreationLamports)}<small>{tr('Only paid if the recipient token account must be recreated before this transfer lands.')}</small></dd></>}
+      {/* ADR-0010 §4: with Pimlico's Kora fee payer the owner pays the network fee (and any recipient account rent) in a token, never in SOL. */}
+      {review.gas ? <><dt>{tr("Network fee")}</dt><dd>{formatTokenAmount(review.gas.amount, review.gas.token.decimals)} {review.gas.token.symbol}
+        <small>{tr('Paid from your {0} to Pimlico.', review.gas.token.symbol)}</small></dd></> : <>
+        <dt>{tr("Estimated network fee")}</dt><dd>{sol(review.estimatedFeeLamports)}</dd>
+        {review.accountCreationLamports !== '0' && <><dt>{tr("Recipient token account deposit")}</dt><dd>{sol(review.accountCreationLamports)}</dd></>}
+        {review.token && review.accountCreationLamports === '0' && <><dt>{tr('Maximum token account deposit')}</dt><dd>{sol(review.maximumAccountCreationLamports)}<small>{tr('Only paid if the recipient token account must be recreated before this transfer lands.')}</small></dd></>}</>}
     </dl>}
     {attempt && !record?.evidence && <p>{tr("Transfer: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}
     {pending && <button type="button" disabled={transfer.busy} onClick={() => void transfer.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
     {record?.evidence && observation && <section aria-label={tr("Transfer result")} className="swap-result">
       <h3>{tr("Success")}</h3>
-      <p>{tr("Transfer independently reconciled. Sent {0}; the recipient received {1}; fee {2}.", amount, review ? `${formatTokenAmount(observation.amountReceived ?? '0', review.asset.decimals)} ${review.asset.symbol}` : '--', sol(observation.feeLamports))}</p>
+      <p>{tr("Transfer independently reconciled. Sent {0}; the recipient received {1}; fee {2}.", amount, review ? `${formatTokenAmount(observation.amountReceived ?? '0', review.asset.decimals)} ${review.asset.symbol}` : '--',
+        observation.tokenFee ? `${formatTokenAmount(observation.tokenFee.amount, observation.tokenFee.token.decimals)} ${observation.tokenFee.token.symbol}` : sol(observation.feeLamports))}</p>
       <dl className="swap-summary"><dt>{tr("Transaction")}</dt><dd><code>{observation.signature}</code></dd>
         {observation.explorer && <><dt>{tr("Explorer")}</dt><dd><a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a></dd></>}
         <dt>{tr("Slot")}</dt><dd>{observation.slot ?? '--'}</dd></dl>

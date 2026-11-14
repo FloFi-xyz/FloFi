@@ -95,6 +95,18 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     }
   });
 
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (owner screenshots): Swap 2 USDC → WETH on Arbitrum, then Bridge that WETH Arbitrum → Solana USDC: one funded sequence', () => {
+    const workflow = author('swap 2 USDC to WETH on Arbitrum slippage 100 bps', 'bridge 0.0005 WETH from Arbitrum to Solana receive USDC');
+    const sequence = workflowSequence(workflow, lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    expect(sequence.steps[0]).toMatchObject({ output: { chainId: 'eip155:42161', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 }, ownerReceives: true });
+    expect(sequence.steps[1]).toMatchObject({ input: { chainId: 'eip155:42161', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', amount: '500000000000000' },
+      output: { chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } });
+    // The bridge delivers to the owner's Solana wallet (resolved and bound at Review), never to the signing EVM wallet.
+    const bridge = workflow.nodes.find(node => node.actionType === 'asset.bridge')!;
+    expect(bridge.inputs.find(input => input.name === 'recipient')).toEqual({ name: 'recipient', kind: 'IDENTIFIER', value: 'CONNECTED_DESTINATION_WALLET' });
+    expect(() => lint(sequence.steps[1]!.projection)).not.toThrow();
+  });
   it('a bridge of the swap output is funded by the swap; a bridge of another asset is independent', () => {
     const dependent = workflowSequence(author('swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 0.001 WETH from Base to Arbitrum'), lint)!;
     expect(dependent.steps[0]).toMatchObject({ fundedBy: null, input: { chainId: 'eip155:8453', address: BASE_USDC, decimals: 6, amount: '10000000' },
@@ -207,6 +219,22 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 ETH and WETH stay distinct in chat author
     expect(() => parseLocalCommand('swap ETH to USDC on Ethereum', initialEditor().workflow, context, OWNER)).toThrow('SWAP_AMOUNT_REQUIRED');
     expect(() => parseLocalCommand('unwrap 0.01 ETH on Base', initialEditor().workflow, context, OWNER)).toThrow('INVALID_ASSET_PAIR');
     for (const sentence of ['swap 0.01 ETH to USDC on Base Sepolia slippage 50 bps', 'swap 1 USDC for eth on Ethereum Sepolia slippage 50 bps'])
+      expect(() => parseLocalCommand(sentence, initialEditor().workflow, sepolia, OWNER), sentence).toThrow('SWAP_NATIVE_ASSET_UNSUPPORTED');
+    // P0 FIX 1: a request that continues with another step is not one network name — never refused as a native swap, never authored as one
+    // swap here (the Copilot's sequence authoring reads both steps).
+    for (const sentence of ['swap 1 usdc to eth on base and then bridge to arbitrum', 'swap 1 USDC to ETH on Base, then bridge it to Arbitrum One',
+      'swap 1 usdc to eth on base then bridge to arbitrum', 'swap 0.01 ETH to USDC on Base e depois enviar pela ponte para Arbitrum']) {
+      let refusal = '';
+      try { parseLocalCommand(sentence, initialEditor().workflow, context, OWNER); } catch (cause) { refusal = (cause as Error).message; }
+      expect(refusal, sentence).not.toBe('SWAP_NATIVE_ASSET_UNSUPPORTED');
+      expect(refusal, sentence).not.toBe('');
+    }
+    // The network the swap is on is the FIRST one named (flofi-chat review): only catalog networks there are not refused; a test network or an
+    // unknown name before the next step is still refused deterministically, whatever follows.
+    for (const sentence of ['swap 0.01 eth to usdc on base with 1% slippage', 'swap 0.01 ETH to USDC on Base mainnet', 'swap 1 USDC to ETH on Base → bridge to Arbitrum'])
+      expect(() => parseLocalCommand(sentence, initialEditor().workflow, context, OWNER), sentence).not.toThrow('SWAP_NATIVE_ASSET_UNSUPPORTED');
+    for (const sentence of ['swap 1 eth to usdc on base sepolia, slippage 50 bps', 'swap 1 ETH to USDC on Ethereum Sepolia and then supply to Aave',
+      'swap 0.1 ETH to USDC on Optimism, please', 'swap 1 USDC to ETH on Base Sepolia and then bridge to Arbitrum'])
       expect(() => parseLocalCommand(sentence, initialEditor().workflow, sepolia, OWNER), sentence).toThrow('SWAP_NATIVE_ASSET_UNSUPPORTED');
     const weth = authorIn(sepolia, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
     expect(weth.nodes[0]!.inputs.find(input => input.name === 'asset-out')?.value).toMatchObject({ address: '0x4200000000000000000000000000000000000006' });

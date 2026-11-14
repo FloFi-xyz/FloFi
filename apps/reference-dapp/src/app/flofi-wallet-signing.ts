@@ -15,7 +15,9 @@ import type { AccountStore } from '../accounts/account-store';
 import { cloudFlow } from '../server/flow-runtime';
 import { localCatalogNetworkMode } from '../server/catalog-networks';
 import { createManagedWalletEvm, type ManagedEvmBroadcast, type ManagedEvmExpected, type ManagedEvmFees, type ManagedWalletEvm } from '../server/managed-wallet-evm';
-import { resolveManagedSigning, type ManagedSigningDeps, type ManagedSigningRequest, type ManagedSigningResult } from '../server/managed-signing';
+import { resolveManagedSigning, type CircleSigningRun, type ManagedSigningDeps, type ManagedSigningRequest, type ManagedSigningResult } from '../server/managed-signing';
+import { platformStateHost } from '../server/platform-state-host';
+import { createPgWorkflowRunStore } from '../workflow-runs/pg-store';
 import type { SigningContext, SigningFlow } from '../wallet/flofi-signing';
 import { jupiterStatus } from './jupiter-action';
 import { solanaTransferStatus } from './solana-transfer-action';
@@ -34,7 +36,15 @@ export async function loadSigningRun(flow: SigningFlow, runId: string): Promise<
     case 'robinhood-mainnet-transfer': case 'base-mainnet-transfer': case 'arbitrum-mainnet-transfer': case 'ethereum-mainnet-transfer':
       return unwrap(await transferStatus(runId));
     case 'robinhood-swap': case 'base-swap': case 'arbitrum-swap': case 'ethereum-swap': return unwrap(await publicStatus(runId));
+    // Owner requirement (FloFi Wallet + Circle): the user-funded workflow run and its groups, exactly as the run store holds them.
+    case 'base-circle-gas': case 'arbitrum-circle-gas': case 'ethereum-circle-gas': return loadCircleSigningRun(runId);
   }
+}
+async function loadCircleSigningRun(runId: string): Promise<CircleSigningRun> {
+  const host = await platformStateHost(process.env), store = createPgWorkflowRunStore(host.db, host.tenantId);
+  const run = await store.byId(runId);
+  if (!run) throw new Error('WORKFLOW_RUN_NOT_FOUND');
+  return { run, groups: await store.groups(runId) };
 }
 
 let local: ManagedWalletEvm | null = null;
@@ -100,7 +110,9 @@ export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: 
   return async (context: SigningContext, request: ManagedSigningRequest): Promise<ManagedSigningResult> => {
     const resolved = await resolveManagedSigning(context, request, deps);
     if (!resolved.ok || !options.claim) return resolved;
-    if (resolved.value.evm && resolved.value.expiresAtMs - (deps.now ?? Date.now)() < PRIVY_EVM_SIGNING_WINDOW_MS) return { ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' };
+    // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a typed-data signature must also reach FloFi's relay before its Review closes.
+    // Owner requirement: so must a Circle upgrade's EIP-7702 authorization.
+    if ((resolved.value.evm || resolved.value.typedData || resolved.value.authorization) && resolved.value.expiresAtMs - (deps.now ?? Date.now)() < PRIVY_EVM_SIGNING_WINDOW_MS) return { ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' };
     let claimed: boolean;
     try { claimed = await claimAttempt(store, 'signature', resolved.value.attempt, resolved.value.expiresAtMs); }
     catch { return { ok: false, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }; }

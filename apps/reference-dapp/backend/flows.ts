@@ -18,6 +18,7 @@ import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/c
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService, type SupplyRecord, type SupplyWalletDiagnostic } from '../src/server/supply-service.ts';
 import { createDurablePublicTestnetService, type PublicRun } from '../src/server/public-testnet-service.ts';
+import { gaslessNeedsObservation } from '../src/server/zeroex-gasless/swap.ts';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER,
   type AssetCatalog, type OrcaLiquidityProfile, type SolanaTransferProfile } from '@defi-workflow-engine/action-registry';
 import { CATALOG_NETWORKS, type CatalogNetworkRuntime } from '../src/server/catalog-networks.ts';
@@ -29,6 +30,8 @@ import { createSolanaRpc, solanaRpcOverride } from '../src/server/solana-rpc.ts'
 import { createJupiterHttp } from '../src/server/jupiter-http.ts';
 import { createJupiterService, createSolanaDevnetService, type JupiterRecord, type JupiterWalletDiagnostic } from '../src/server/jupiter-service.ts';
 import { createSolanaTransferService, type SolanaTransferRecord, type SolanaTransferWalletDiagnostic } from '../src/server/solana-transfer-service.ts';
+import { koraGasForFlow } from '../src/gas-abstraction/kora/runtime.ts';
+import { readKoraGasConfig } from '../src/gas-abstraction/config.ts';
 import { createOrcaLiquidityService, type OrcaLiquidityRecord, type OrcaLiquidityWalletDiagnostic } from '../src/server/orca-liquidity-service.ts';
 import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionRecord } from '../src/server/solana-composition-service.ts';
 import { createUniswapLiquidityService, uniswapNeedsObservation, type UniswapLiquidityRecord,
@@ -302,10 +305,20 @@ const supply = supplyFlow('aave-supply'), baseAave = supplyFlow('base-aave'), ar
 const SWAP_ID = /^pub-[0-9a-f]{24}$/;
 const swapNeedsObservation = (value: unknown) => {
   const run = value as PublicRun, last = run.attempts.at(-1);
+  // ADR-0010: a submitted 0x Gasless trade (or a failure not yet final) is observed by trade hash; a SIGNING attempt never is.
+  if (!run.divergence && !run.outcome && gaslessNeedsObservation(run.gasless?.at(-1))) return true;
   return !run.divergence && !run.outcome && !!last && ((!!last.txHash && (last.state === 'HASH' || last.state === 'PENDING' ||
     !!run.quote.ownerReview && last.state === 'CONFIRMED' && (last.step === 'swap' || last.nativeAfter === null))) ||
     !!run.quote.ownerReview && ['PREPARED', 'UNKNOWN'].includes(last.state));
 };
+/** ADR-0010: a 0x Gasless run's projected rows — its gasless attempts after the wallet-sent ones; the settlement hash once proven on chain. */
+const gaslessRows = (run: PublicRun) => (run.gasless ?? []).map(a => ({ attemptId: a.attemptId, step: 'SWAP', state: a.state, nonce: null, transactionHash: a.txHash,
+  preparedAtBlock: a.preBlock, reconciled: !run.divergence && a.state === 'CONFIRMED' && run.outcome !== null }));
+const GASLESS_ATTEMPT = (prefix: string) => new RegExp(`^${prefix}-[0-9a-f]{24}\\.gasless\\.[1-8]$`);
+const SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
+const gaslessSignatures = (value: unknown) => isObject(value) && typeof value.trade === 'string' && SIGNATURE.test(value.trade) &&
+  (value.approval === null || typeof value.approval === 'string' && SIGNATURE.test(value.approval)) && Object.keys(value).length === 2;
+const gaslessResult = (value: unknown) => isObject(value) && (value.kind === 'REJECTED' || value.kind === 'ABANDONED') && Object.keys(value).length === 1;
 const swapEvidence = (value: unknown) => {
   const outcome = (value as PublicRun).outcome;
   if (!outcome) return null;
@@ -363,7 +376,14 @@ const swap: FlowDefinition = {
  */
 function catalogSwapFlow(network: CatalogNetworkRuntime): FlowDefinition {
   const name = network.flows.swap, prefix = network.prefixes.swap;
-  const RUN = new RegExp(`^${prefix}-[0-9a-f]{24}$`), ATTEMPT = new RegExp(`^${prefix}-[0-9a-f]{24}\\.(approval|swap)\\.[1-8]$`);
+  const RUN = new RegExp(`^${prefix}-[0-9a-f]{24}$`), ATTEMPT = new RegExp(`^${prefix}-[0-9a-f]{24}\\.(approval|swap)\\.[1-8]$`), GASLESS = GASLESS_ATTEMPT(prefix);
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010 §5): Robinhood Chain swaps may be executed through 0x Gasless — the owner's typed-data
+  // signatures relayed to 0x once, only on the browser's explicit `submitGasless` (a worker never submits; it only observes).
+  const gasless = network.id === 'robinhood' ? {
+    beginGasless: { mutates: true, validate: shape(id(RUN), account) },
+    reportGasless: { mutates: true, validate: shape(id(RUN), v => typeof v === 'string' && GASLESS.test(v), gaslessResult) },
+    submitGasless: { mutates: true, validate: shape(id(RUN), v => typeof v === 'string' && GASLESS.test(v), gaslessSignatures) },
+  } : {};
   return {
   name, busyCode: 'EXECUTION_BUSY', runId: RUN, unavailableCode: 'PUBLIC_INTERNAL_ERROR',
   methods: {
@@ -374,6 +394,7 @@ function catalogSwapFlow(network: CatalogNetworkRuntime): FlowDefinition {
     report: { mutates: true, validate: shape(id(RUN), v => typeof v === 'string' && ATTEMPT.test(v), swapResult) },
     observe: { mutates: true, validate: shape(id(RUN)) },
     status: { mutates: false, validate: shape(id(RUN)) },
+    ...gasless,
   },
   transport: (mode, env) => ({ rpc: network.rpc(mode, env), catalog: network.catalogFor(mode) }),
   create(storage, { rpc, mode, env, catalog }) {
@@ -385,6 +406,9 @@ function catalogSwapFlow(network: CatalogNetworkRuntime): FlowDefinition {
       begin: ([i, a]) => s.begin(i as string, a as string),
       report: ([i, attempt, r]) => s.report(i as string, attempt as string, r as Parameters<typeof s.report>[2]),
       observe: ([i]) => s.observe(i as string), status: ([i]) => s.load(i as string),
+      beginGasless: ([i, a]) => s.beginGasless(i as string, a as string),
+      reportGasless: ([i, attempt, r]) => s.reportGasless(i as string, attempt as string, r as Parameters<typeof s.reportGasless>[2]),
+      submitGasless: ([i, attempt, signatures]) => s.submitGasless(i as string, attempt as string, signatures as Parameters<typeof s.submitGasless>[2]),
     };
     return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
   },
@@ -392,13 +416,17 @@ function catalogSwapFlow(network: CatalogNetworkRuntime): FlowDefinition {
   projector(logName, bytes): Projection | null {
     if (!logName.endsWith('.jsonl')) return null;
     const run = lastRecord<PublicRun>(bytes), observe = swapNeedsObservation(run), evidence = swapEvidence(run), last = run.attempts.at(-1);
+    // ADR-0010: the latest gasless attempt (when any) is the run's current state; a final 0x failure is the run's error (nothing moved).
+    const gaslessLast = run.gasless?.at(-1), gaslessFailure = gaslessLast?.state === 'FAILED' && gaslessLast.final ? gaslessLast.code : null;
     return { run: { runId: run.quote.executionId, workflowId: run.workflow.workflowId, flow: name,
-      status: run.divergence ? 'DIVERGENT' : run.outcome ? 'RECONCILED' : last ? last.state : run.reviewedManifestHash ? 'AUTHORIZED' : 'SIMULATED',
-      provenance: run.quote.provenance === 'MOCKED' ? 'MOCKED' : 'PUBLIC_MAINNET', ownerAccount: last?.account ?? run.quote.ownerReview?.account ?? null, recoveryOf: null, errorCode: run.divergence ?? null,
+      status: run.divergence ? 'DIVERGENT' : run.outcome ? 'RECONCILED' : gaslessLast ? gaslessLast.state : last ? last.state : run.reviewedManifestHash ? 'AUTHORIZED' : 'SIMULATED',
+      provenance: run.quote.provenance === 'MOCKED' ? 'MOCKED' : 'PUBLIC_MAINNET',
+      ownerAccount: last?.account ?? gaslessLast?.account ?? run.quote.ownerReview?.account ?? run.quote.gas?.owner ?? null, recoveryOf: null,
+      errorCode: run.divergence ?? gaslessFailure ?? null,
       needsObservation: observe, hasEvidence: evidence !== null,
-      attempts: run.attempts.map(a => ({ attemptId: a.attemptId, step: a.step.toUpperCase(), state: a.state, nonce: a.tx.nonce ? BigInt(a.tx.nonce).toString() : null, transactionHash: a.txHash,
+      attempts: [...run.attempts.map(a => ({ attemptId: a.attemptId, step: a.step.toUpperCase(), state: a.state, nonce: a.tx.nonce ? BigInt(a.tx.nonce).toString() : null, transactionHash: a.txHash,
         preparedAtBlock: a.preBlock, reconciled: !run.divergence && a.state === 'CONFIRMED' &&
-          (a.step === 'approval' ? !run.quote.ownerReview || a.nativeAfter !== null : run.outcome !== null) })),
+          (a.step === 'approval' ? !run.quote.ownerReview || a.nativeAfter !== null : run.outcome !== null) })), ...gaslessRows(run)],
       journal: [] },
     work: work(name, run.quote.executionId, observe, 5_000, evidence !== null) };
   },
@@ -493,8 +521,9 @@ const jupiterSwap: FlowDefinition = {
   create(storage, { rpc, http, mode, env }) {
     if (!http) throw new Error('JUPITER_CONFIGURATION_INVALID');
     // Real-funds execution stays a separate explicit owner opt-in; Simulate and Review remain read-only without it.
+    // ADR-0010 §4: Pimlico's Kora fee payer when FLOFI_KORA_TOKEN_GAS is enabled (the harness only with its loopback double); native stays the default.
     const s = createJupiterService({ storage, rpc, http, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET',
-      executionEnabled: mode === 'harness' || env.GRYLOO_JUPITER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED' });
+      executionEnabled: mode === 'harness' || env.GRYLOO_JUPITER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED', kora: koraGasForFlow(env, mode === 'harness') });
     const table = solanaSwapTable(s);
     return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
   },
@@ -513,9 +542,10 @@ const solanaTransferFlow = (name: 'solana-transfer' | 'solana-devnet-transfer', 
       : (profile.realFunds ? solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_TRANSFER_RPC_CONFIGURATION_INVALID')
         : solanaRpcOverride(env.GRYLOO_SOLANA_DEVNET_RPC_URL, 'SOLANA_TRANSFER_RPC_CONFIGURATION_INVALID')) ?? profile.rpc, mode === 'harness') }),
     create(storage, { rpc, mode, env }) {
+      // ADR-0010 §4: Kora only on mainnet-beta (Devnet stays native); the harness only with its loopback double.
       const s = createSolanaTransferService({ storage, rpc, profile, provenance: mode === 'harness' ? 'MOCKED' : profile.provenance,
         executionEnabled: profile.realFunds ? mode === 'harness' || env.GRYLOO_SOLANA_TRANSFER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED'
-          : env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED' });
+          : env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED', kora: profile.realFunds ? koraGasForFlow(env, mode === 'harness') : null });
       const table: Record<string, (args: Args) => Promise<unknown>> = {
         info: async () => ({ executionEnabled: s.executionEnabled }),
         simulate: ([w, o]) => s.simulate(w, o as string),
@@ -840,7 +870,8 @@ const crosschainUniversal: FlowDefinition = {
     const runtime = universalRouterRuntime(mode, env, universal);
     const s = createUniversalRouterService({ storage, evmRpcs: runtime.evmRpcs, solanaRpc: runtime.solanaRpc,
       providers: { relay: createRelayProvider({ http: runtime.http, ...runtime.apis.relay ? { api: runtime.apis.relay } : {}, ...runtime.keys.relay ? { apiKey: runtime.keys.relay } : {} }) },
-      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {} });
+      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {},
+      koraEnabled: readKoraGasConfig(env).enabled });
     const discovery = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys });
     const conversational = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys, window: CONVERSATIONAL_DISCOVERY_WINDOW });
     const table: Record<string, (args: Args) => Promise<unknown>> = {

@@ -21,6 +21,7 @@ import { conversationCopy } from './conversation-copy';
 import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
 import type { WorkflowProgressView } from './workflow-progress';
+import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -202,13 +203,20 @@ export function conversationPhase(view: LifecycleView, question: PendingQuestion
 // ── Review summary (existing projections only; nothing is estimated here) ───────────────────────────────────────────────────────────────
 export type ConversationReviewStep = { readonly number: number; readonly action: string; readonly input: string; readonly pair: string | null; readonly networks: string;
   readonly provider: string | null; readonly result: string | null; readonly resultLabel: string; readonly minimum: string | null; readonly slippage: string | null;
-  readonly priceImpact: string | null; readonly details: readonly SimulationLine[] };
+  readonly priceImpact: string | null; readonly details: readonly SimulationLine[];
+  /** BUILD-FLOFI-MAINNET-EXEC-002: the full destination address (bridges, transfers), or null. */ readonly destination: string | null;
+  /** Review round 2: whether that destination is one of the owner's own wallets, when the runtime knows it. */ readonly destinationOwned?: boolean };
 export type ConversationReview = {
   readonly status: string; readonly label: string; readonly message: string; readonly canConfirm: boolean; readonly steps: readonly ConversationReviewStep[];
   readonly fees: readonly SimulationLine[]; readonly limits: readonly SimulationLine[]; readonly warnings: readonly SimulationWarning[];
   readonly approvals: readonly { readonly symbol: string; readonly value: string; readonly spender: string; readonly network: string }[];
   /** The wallet requests the reviewed record plans, in order (each is a separate confirmation in the wallet). Empty: not known before execution starts. */
   readonly walletRequests: readonly string[];
+  /**
+   * ADR-0010 (review CH3): the requests are a reviewed 0x Gasless swap's typed-data signatures, read from its reviewed fee payment (the approval
+   * signature is part of the Review, never "only if needed"). Optional: absent means false.
+   */
+  readonly gaslessSignatures?: boolean;
   /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: what the provider executes after the wallet requests (a bridge's destination settlement): no signature. */
   readonly providerSteps: readonly string[];
   readonly account: string | null; readonly network: string | null; readonly expiresAt: number | null;
@@ -255,7 +263,9 @@ export function sumByAsset(values: readonly string[]): { readonly sums: readonly
  */
 export function payableCosts(fees: readonly SimulationLine[]) {
   const unknown: string[] = [];
-  if (!fees.some(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && /network|gas|execution fee/i.test(line.label))) unknown.push('Network cost');
+  // ADR-0010: a network fee 0x takes out of the swap (INCLUDED, shown as such) is a known network cost, never "not provided".
+  if (!fees.some(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && /network|gas|execution fee/i.test(line.label) || isIncludedNetworkFee(line)))
+    unknown.push('Network cost');
   const additional = sumByAsset(fees.filter(line => line.treatment === 'ADDITIONAL').map(line => line.value));
   const ceilings = sumByAsset(fees.filter(line => line.treatment === 'CEILING').map(line => line.value));
   const unclassified = fees.filter(line => !line.treatment).length + additional.unreadable + ceilings.unreadable;
@@ -268,7 +278,10 @@ export function payableCosts(fees: readonly SimulationLine[]) {
  * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: refusals at the execution boundary that mean the reviewed quote or chain state no longer stands (changed or
  * expired). Nothing was sent; the chat re-quotes and asks for a fresh Review instead of offering the dead one again.
  */
-export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
+// BUILD-FLOFI-MAINNET-EXEC-002: FEES_CHANGED (ROUTER_/UNIVERSAL_ L1 or execution fee above the authorized maximum) is re-quoted like the rest;
+// before, the chat stopped at a dead Review after ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED.
+// BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: GAS_MECHANISM_CHANGED (the owner's ETH moved: native gas or 0x Gasless is now the choice) too.
+export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|FEES_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED|GAS_MECHANISM_CHANGED/;
 /**
  * BUILD-FLOFI-E2E-RELIABILITY-001: why the next request of a run with a confirmed earlier request cannot start under its Review, in words that
  * describe that request only (the generic reasons say "nothing was sent", which is false for the run once its approval landed). Null: the
@@ -278,7 +291,7 @@ export function continuationReason(code: string): string | null {
   if (/STOCK_MULTIPLIER_CHANGED/.test(code)) return 'A corporate action changed the shares per token since your Review.';
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'The reviewed quote expired before the next request could start.';
   if (/QUOTE_CHANGED|ROUTE_CHANGED|REQUOTE/.test(code)) return 'The quote moved outside the bounds of your Review.';
-  if (/STATE_CHANGED|GAS_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
+  if (/STATE_CHANGED|GAS_CHANGED|FEES_CHANGED/.test(code)) return 'Your wallet’s on-chain state or the network fee changed since the Review (for example its next transaction number, allowance or the fee ceiling).';
   return null;
 }
 /** What a fresh Review changed against the previous one of the same workflow revision: every step figure and cost line, by label (values as shown). */
@@ -292,6 +305,8 @@ export function reviewChanges(previous: ConversationReview, next: ConversationRe
     if (!old) continue;
     compare('Expected receipt', old.result, step.result);
     compare('Minimum receipt', old.minimum, step.minimum); compare('Provider', old.provider, step.provider); compare('Max slippage', old.slippage, step.slippage);
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review): a fresh quote delivering to another wallet is always named, never "the same amounts".
+    compare('Destination', old.destination, step.destination);
   }
   const labels = [...new Set([...previous.fees, ...next.fees].map(line => line.label))];
   for (const label of labels) compare(label, previous.fees.find(line => line.label === label)?.value, next.fees.find(line => line.label === label)?.value);
@@ -304,18 +319,22 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
     // A sequence simulates its current step alone: number it as that step of the whole workflow.
     return { number: sequence ? sequence.current : step.number, action: step.action, input: step.input, pair: step.pair, networks: step.networks.join(' → ') || reviewed?.network || '—',
       provider: step.provider ?? reviewed?.provider ?? null, result: step.result, resultLabel: step.resultLabel, minimum: step.minimum,
-      slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details };
+      slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details, destination: step.destination ?? null,
+      ...step.destinationOwned !== undefined ? { destinationOwned: step.destinationOwned } : {} };
   });
   const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee } = payableCosts(fees);
   const later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];
   const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...unclassified ? [{ text: 'Cost lines FloFi cannot classify', parameters: [] }] : [],
     ...later.length ? [{ text: later.length === 1 ? 'Step {0} (simulated after the steps before it)' : 'Steps {0} (simulated after the steps before them)', parameters: [later.join(', ')] }] : []];
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: only requests the owner's wallet signs; provider settlement is observed and reconciled, never signed.
-  const planned = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.filter(operation => operation.wallet).map(operation => operation.title)) : [];
+  // ADR-0010 (review CH3): a Review bound to 0x Gasless asks the wallet for its reviewed signatures (the approval, then the trade), not one "Swap".
+  const gasless = view.source.kind === 'public' ? gaslessWalletRequests(view.source.state.run?.quote) : null;
+  const planned = view.progress && !view.progress.started ? gasless
+    ?? view.progress.steps.flatMap(step => step.operations.filter(operation => operation.wallet).map(operation => operation.title)) : [];
   const settlement = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.filter(operation => !operation.wallet).map(operation => operation.title)) : [];
   return { status: current.status, label: current.label, message: current.status === 'ready' || current.status === 'approved' ? simulation.message : current.message,
     canConfirm: current.status === 'ready' || current.bindingValid, steps, fees, limits: current.limits, warnings: [...current.warnings],
-    approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned, providerSteps: settlement,
+    approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned, gaslessSignatures: gasless !== null, providerSteps: settlement,
     account: view.wallet.account, network: view.wallet.chain ? shellChainLabel(view.wallet.chain) : null, expiresAt: current.expiresAt, unknown,
     simulationProblem: simulation.status === 'blocked' ? simulation.message : null, sequence, totals: { additional, ceilings, excludes }, flofiFee };
 }

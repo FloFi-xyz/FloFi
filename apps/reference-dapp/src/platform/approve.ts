@@ -13,6 +13,7 @@
  * A deployment's surface is assembled from per-surface CONTRIBUTIONS (each: an approval-link scheme and the profiles of the requester
  * kinds it serves); a requester kind without a profile, or a secret no registered scheme owns, is simply not found.
  */
+import { isReviewedGas } from '../workflow-runs/execution-groups.ts';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { Workflow } from '../domain/initial-workflow';
 import { semanticWorkflowHash } from '../engine/strategy-engine';
@@ -21,8 +22,9 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
-  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedPrepareSequential, userFundedReportSequential,
-  userFundedStartSequential } from './workflow-run-approvals.ts';
+  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface, userFundedAuthorizeSequential, userFundedConsentSequential, userFundedDeclineSequential,
+  userFundedPermitSequential, userFundedPrepareSequential, userFundedUpgradeSequential,
+  userFundedReportSequential, userFundedStartSequential } from './workflow-run-approvals.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
@@ -288,12 +290,49 @@ export async function workflowRunUserFundedStart(surface: ApprovalSurface, appro
   const c = await runContext(surface, approvalId, wallets);
   return userFundedStartSequential(c.runs, c.run, wallets, walletProfileOf(profile), c.base);
 }
-/** What the owner's wallet signs for one group now (exact calls / typed data / Solana transactions, the fee ceiling and its payer). */
+/**
+ * What the owner's wallet signs for one group now (exact calls / typed data / Solana transactions, the fee ceiling and its payer). `wallet`: the
+ * owner's EVM wallet kind as this browser reports it ('INJECTED' or 'FLOFI_WALLET'); anything else is unknown (review C4: no Circle permit then).
+ */
 export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
-  handout: unknown = undefined) {
+  handout: unknown = undefined, wallet: unknown = undefined, reviewedGas: unknown = undefined) {
   const c = await runContext(surface, approvalId, wallets);
   // The hand-out token this browser kept for the group's wallet batch (service.ts `handedTo`); anything else is no token.
-  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined);
+  // Final review (P3): the fee mechanism a Review showed for this group (the Editor's Authorize), when one was reviewed.
+  return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined,
+    wallet === 'INJECTED' || wallet === 'FLOFI_WALLET' ? wallet : undefined, isReviewedGas(reviewedGas) ? reviewedGas : undefined);
+}
+/**
+ * ADR-0010: the owner's USDC permit signature for a Circle-paid group (the first of its two typed-data signatures), verified against what FloFi
+ * prepared; returns the group with the operation's typed data the owner's wallet signs next. Owner-gated exactly as prepare/authorize.
+ */
+export async function workflowRunUserFundedPermit(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
+  permitSignature: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  if (typeof permitSignature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(permitSignature)) return refuse('CIRCLE_PERMIT_INVALID');
+  return userFundedPermitSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), permitSignature);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner's explicit consent, in FloFi, to upgrade this FloFi Wallet address to the pinned
+ * Simple7702Account v0.8 inside the group's Circle-paid operation (recorded before the wallet is asked; nothing is signed or sent).
+ */
+export async function workflowRunUserFundedConsent(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedConsentSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex));
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner's EIP-7702 upgrade authorization, verified against what FloFi prepared. */
+export async function workflowRunUserFundedUpgrade(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, signature: unknown) {
+  const c = await runContext(surface, approvalId, wallets);
+  if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return refuse('CIRCLE_AUTHORIZATION_INVALID');
+  return userFundedUpgradeSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), signature);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): "Not now" on FloFi's consent card — a Circle preparation planned from owner steps, nothing of which was
+ * signed, is withdrawn and the group's first step is loaded into its own flow (native gas), exactly as when the owner's ETH pays.
+ */
+export async function workflowRunUserFundedDecline(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return userFundedDeclineSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), c.base);
 }
 /** The owner's wallet answer for one prepared group, verified against what FloFi prepared. */
 export async function workflowRunUserFundedAuthorize(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown, answer: unknown): Promise<ClaimedProposal> {

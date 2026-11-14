@@ -28,7 +28,7 @@ async function person(address: string, eligible = true) {
   const accountId = `acct_${hex(16)}`, sessionId = hex(16), entryId = `fle_${hex(16)}`;
   await t.db.query(`INSERT INTO flofi_accounts (tenant_id, account_id) VALUES ('default', $1)`, [accountId]);
   await t.db.query(`INSERT INTO flofi_account_sessions (tenant_id, account_id, session_id, method, authenticated_at, expires_at)
-    VALUES ('default', $1, $2, 'EIP155', $3, $4)`, [accountId, sessionId, iso(OPEN), iso(OPEN + 86_400_000)]);
+    VALUES ('default', $1, $2, 'EIP155', $3, $4)`, [accountId, sessionId, iso(OPEN), iso(OPEN + 365 * 86_400_000)]);
   const namespace = address.startsWith('0x') ? 'eip155' as const : 'solana' as const;
   await t.db.query(`INSERT INTO flofi_account_wallets (tenant_id, account_id, ecosystem, address, origin, provider, provider_name, export, label)
     VALUES ('default', $1, $2, $3, 'EXTERNAL', 'fixture', 'Fixture', 'NONE', 'Fixture')`, [accountId, namespace === 'eip155' ? 'EVM' : 'SOLANA', address]);

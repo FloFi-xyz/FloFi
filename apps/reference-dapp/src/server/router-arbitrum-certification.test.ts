@@ -224,8 +224,11 @@ describe.each(pairs)('$id certification through shared Router', p => {
 it('binds each Base posting-fee allowance instead of spending the whole sequence allowance on one call', async () => {
   const p = CROSSCHAIN_ROUTER_BASE_ARBITRUM, f = setup(p), w = workflow(p), run = await f.s.simulate(w, f.h.owner);
   await f.s.review(run.id, run.review.commitment, w);
-  const increased = BigInt(run.review.calls[0]!.l1FeeUpperBoundWei!) * 3n / 2n;
-  expect(increased).toBeLessThan(BigInt(run.review.fees.l1FeeUpperBoundWei!));
+  // BUILD-FLOFI-MAINNET-EXEC-002: a call's authorized network fee is its gas limit × max fee + its own L1 bound. An L1 estimate just above the
+  // first call's whole maximum (still below the sequence's total) is refused: each call is bound to its own allowance.
+  const first = run.review.calls[0]!;
+  const increased = BigInt(first.gasLimit) * BigInt(run.review.fees.maxFeePerGas) + BigInt(first.l1FeeUpperBoundWei!) + 1n;
+  expect(increased).toBeLessThan(BigInt(run.review.fees.totalUpperBoundWei!));
   f.source(async (method, params) => {
     const call = params[0] as { to?: string };
     if (method === 'eth_call' && call.to === '0x420000000000000000000000000000000000000f') return '0x' + increased.toString(16).padStart(64, '0');

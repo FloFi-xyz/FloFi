@@ -16,6 +16,8 @@ import { withBetaIdentity } from '../flight/beta-context.ts';
 const FLIGHT_RECOVERY_METHODS: ReadonlySet<string> = new Set([
   'status', 'observe', 'report', 'walletFailure', 'recoverUnknown', 'recoverReview', 'recover', 'invalidate',
   'cancelPrepared', 'cancel', 'end',
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: the owner declined a 0x Gasless typed-data prompt (nothing was signed or submitted).
+  'reportGasless',
 ]);
 export const isFlightRecoveryMethod = (method: string): boolean => FLIGHT_RECOVERY_METHODS.has(method);
 

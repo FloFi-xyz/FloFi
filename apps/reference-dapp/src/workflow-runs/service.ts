@@ -32,9 +32,14 @@ import { planExecutionGroups, type UserFundedFacts, type WalletProfile } from '.
 import { requirementOf, assetKey } from '../delegation/steps.ts';
 import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
-import { authorizeGroup, EVM_PREPARED_TTL_MS, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
+import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, koraGroupNativeCovers, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
+import { circleFactsOf, circleUpgradeState, consentCircleUpgrade, finalizeCircleAuthorization, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
+import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, expireTokenGasPreparation as expireTokenGas, ownerStepsUnloaded, plannedCodeAfterCircle,
+  switchOwnerStepsToCircle } from './owner-step-circle.ts';
+import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
 import type { GroupRecord } from './pg-store.ts';
+import type { ReviewedGas } from './execution-groups.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
 import { presentedDeliveryState } from './run-step-phase.ts';
 
@@ -110,6 +115,16 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   if (fresh.state !== 'RUNNING' && fresh.state !== 'ATTENTION') return null;
   let step = (await deps.store.steps(run.runId))[fresh.currentStep];
   if (!step || !step.strategy || !step.workflowHash || !['READY', 'AWAITING_OWNER'].includes(step.state)) return null;
+  // Owner requirement (FloFi Wallet + Circle): a READY step whose group was just prepared as one Circle-paid operation is never loaded into its own
+  // flow too (the switch moves it out of READY right after; this closes the window in between).
+  if (fresh.mode === 'USER_FUNDED' && step.state === 'READY') {
+    const g = groupAt(await deps.store.groups(run.runId), step.stepIndex);
+    if (!isOwnerStepGroup(g)) return null;
+    // Final review (P3): nor, on ANY load (a reopened /approve's claim, resume or continue, not only its start), the first step of a FloFi Wallet
+    // owner-step group whose fee Circle may pay before the owner's browser asked (CIRCLE_ASK_FIRST): once loaded it could never become a
+    // Circle-paid operation, and an owner without ETH could not pay it. No step is returned, so /approve runs its check (`askCircleFirst`).
+    if (circleAskPending(g, step.stepIndex)) return null;
+  }
   // The exact step the run resolved, re-composed now: a different hash is a stale step, never silently replaced.
   const composed = composeWorkflowBound(step.strategy, step.workflowHash);
   if (!composed.ok || composed.steps.length !== 1) return refuse('WORKFLOW_STEP_STALE');
@@ -193,7 +208,8 @@ async function resumeUserFunded(deps: WorkflowRunDeps, run: RunRecord, g: GroupR
   // be batched on this deployment, …) continues through each step's own owner-signed flow — which re-checks, simulates and reviews every step
   // itself — instead of being planned as the same batch and refused again. Only when no batch was ever handed to the wallet for it: otherwise
   // that batch could still execute and the steps would run twice.
-  const ownerSteps = g.code !== null && PERMANENT_DUE_REFUSALS.has(g.code) && history.length === 0;
+  // Owner requirement (FloFi Wallet + Circle): an unsigned Circle preparation of a FloFi Wallet owner-step group goes back to its owner steps.
+  const ownerSteps = (g.code !== null && PERMANENT_DUE_REFUSALS.has(g.code) || plannedStrategyOf(g.prepared) === 'EVM_OWNER_STEP') && history.length === 0;
   const strategy = ownerSteps ? g.namespace === 'solana' ? 'SOLANA_OWNER_STEP' as const : 'EVM_OWNER_STEP' as const
     : g.strategy === 'EVM_USER_OPERATION' ? 'EVM_WALLET_BATCH' as const : g.strategy === 'SOLANA_DURABLE_NONCE' ? 'SOLANA_SIGN_ALL' as const : g.strategy;
   await deps.store.groupTransition(run.runId, g.groupIndex, ['BLOCKED'], 'PLANNED', { strategy, signing: 'WHEN_DUE',
@@ -228,7 +244,11 @@ export const PERMANENT_DUE_REFUSALS: ReadonlySet<string> = new Set(['WORKFLOW_BI
   // offer is USER_FUNDED_ACTION_NOT_BUILDABLE above), or a deployment whose pinned contracts no longer match: the Router's own flow reviews it.
   'USER_FUNDED_BRIDGE_PROVIDER_UNSUPPORTED', 'USER_FUNDED_BRIDGE_PAIR_UNSUPPORTED', 'USER_FUNDED_BRIDGE_ASSET_UNSUPPORTED', 'USER_FUNDED_BRIDGE_DESTINATION_UNREADABLE',
   'USER_FUNDED_BRIDGE_RECIPIENT_NOT_OWNER', 'USER_OPERATION_BRIDGE_SIGNED_WHEN_DUE', 'ROUTER_UNEXPECTED_CONTRACT',
-  'ROUTER_CONTRACT_CODE_MISSING']);
+  'ROUTER_CONTRACT_CODE_MISSING',
+  // ADR-0010 §5 (review Z1): a short-ETH Robinhood Chain batch of swaps 0x Gasless could carry one at a time (user-funded/gasless-groups.ts). A
+  // wallet batch can never pay its fee in tokens, so every retry refuses again; Resume runs each swap through its own owner-signed flow
+  // (`robinhood-swap`), which decides there how its fee is paid (the owner's ETH first; 0x Gasless when it is short).
+  'USER_FUNDED_GASLESS_REQUIRES_STEP_MODE']);
 /**
  * Blocks a due group after a permanent refusal and halts the run (steps already executed keep their facts), then refuses with the code. Only
  * from exactly the PLANNED group this preparation read (its row version): a concurrent preparation that succeeded — its batch possibly already
@@ -329,9 +349,26 @@ const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Obje
 /**
  * Builds what the owner's wallet signs for one group, from fresh chain facts: an UPFRONT group at any time while the run is open; a WHEN_DUE
  * group only once it is the current group (its delivery reconciled). Bound steps spend the reconciled facts (never an estimate).
+ * `wallet`: the owner's EVM wallet as the preparing browser reported it (review C4: FloFi Wallet signs no USDC permit; a wallet nobody reported
+ * is never offered Circle).
  */
 export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout?: string): Promise<PreparedGroupView> {
+  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET', reviewedGas?: ReviewedGas): Promise<PreparedGroupView> {
+  const asked = { circle: false };
+  try { return await prepareUserFundedGroupOnce(deps, run, wallets, groupIndex, handout, wallet, asked, reviewedGas); }
+  catch (cause) {
+    // Final review (P3): the owner's browser asked about a FloFi Wallet Circle candidate and the answer is final and not a Circle preparation
+    // (CIRCLE_NOT_NEEDED, or a refusal asking again cannot change): its first step may now load into its own flow, exactly as before.
+    const code = cause instanceof Error ? cause.message.split(':')[0]! : '';
+    if (asked.circle && /^[A-Z][A-Z0-9_]{2,80}$/.test(code) && !CIRCLE_ASK_AGAIN.has(code)) await circleAnswered(deps.store, run, groupIndex).catch(() => undefined);
+    throw cause;
+  }
+}
+/** The answers to the owner's browser's Circle check after which asking again may still find Circle (`components/flofi-wallet-circle-flow.ts`). */
+const CIRCLE_ASK_AGAIN: ReadonlySet<string> = new Set(['USER_FUNDED_RPC_UNAVAILABLE', 'DELEGATION_RPC_UNAVAILABLE', 'WORKFLOW_RUN_CHANGED', 'EXECUTION_PAUSED',
+  'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
+async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  handout: string | undefined, wallet: 'INJECTED' | 'FLOFI_WALLET' | undefined, asked: { circle: boolean }, reviewedGas: ReviewedGas | undefined): Promise<PreparedGroupView> {
   assertRunWallets(run, wallets);
   if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
   const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
@@ -341,7 +378,14 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   if (paused) refuse(paused);
   const groups = await deps.store.groups(run.runId), steps = await deps.store.steps(run.runId);
   let g: GroupRecord = groups[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
-  if (g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  // Owner requirement (FloFi Wallet + Circle): a FloFi Wallet owner-step group on a Circle chain may be prepared ONLY as one Circle-paid operation
+  // (when due, its ETH short and Circle eligible; `prepareGroup` answers CIRCLE_NOT_NEEDED otherwise), and only while none of its steps was loaded
+  // into its own flow. Any other owner-step group is never prepared here (its steps run through their own flows).
+  const ownerCircle = g.strategy === 'EVM_OWNER_STEP' && wallet === 'FLOFI_WALLET' && g.state === 'PLANNED' && g.prepared === null
+    && (userFunded.circle?.chains ?? []).includes(g.chain);
+  if ((g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') && !ownerCircle) refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  if (ownerCircle && !await ownerStepsUnloaded(deps.store, run.runId, g)) refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  asked.circle = ownerCircle;
   const batch = g.strategy === 'EVM_WALLET_BATCH', now = deps.now();
   // Nothing is handed out once the run's window has passed (a batch already in the owner's wallet is still answered, until its deadline).
   if (run.expiresAt <= now) refuse('WORKFLOW_RUN_EXPIRED');
@@ -367,11 +411,23 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
   // new preparation succeeds (a compare-and-set on the row version): the wallet may send the earlier batch at any time — even after its
   // validity, when its on-chain deadline reverts it — and its answer must still be accepted and reconciled, whatever this preparation's outcome.
   const rewrite = batch && g.state === 'PREPARED' ? g : null;
+  // Final review (P3): a FloFi Wallet owner-step group's expired Circle preparation is expired, its steps given back and the group planned again in
+  // ONE transaction (never a group planned as owner steps whose steps are still the operation's); its steps then run through their own flows.
+  if (!rewrite && (g.state === 'PREPARED' || g.state === 'EXPIRED') && plannedStrategyOf(g.prepared) === 'EVM_OWNER_STEP') {
+    if (!await expireTokenGas(deps.store, run.runId, g, 'USER_FUNDED_PREPARED_EXPIRED')) refuse('WORKFLOW_RUN_CHANGED');
+    return refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  }
   if (g.state === 'PREPARED' && !rewrite) g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' })
     ?? refuse('WORKFLOW_RUN_CHANGED');
   // The earlier preparations stay on the PLANNED group (history only, no artifact): a preparation that fails now must not lose them.
-  if (g.state === 'EXPIRED') g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED',
-    { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: null }) ?? refuse('WORKFLOW_RUN_CHANGED');
+  // ADR-0010: an expired Circle-paid preparation gives the group back the strategy it was planned with (native gas is decided afresh).
+  if (g.state === 'EXPIRED') {
+    // (A FloFi Wallet owner-step group's Circle preparation was given back above, atomically.)
+    g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED',
+      { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: plannedCodeAfterCircle(g.prepared, null),
+        ...plannedStrategyPatch(g) }) ?? refuse('WORKFLOW_RUN_CHANGED');
+    if (g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP') refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  }
   if (!rewrite && g.state !== 'PLANNED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
   const due = run.currentStep === g.stepFrom;
   if (g.signing === 'WHEN_DUE' && !due) refuse('WORKFLOW_RUN_GROUP_NOT_DUE');
@@ -394,11 +450,13 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
     if (!due) refuse('WORKFLOW_BINDING_RESOLVED_WHEN_DUE');
     const asset = assetKey({ chain: b.asset.chainId, address: b.asset.address }), share = `${b.amountFrom}:${asset}`;
     const available = reconciledAvailable(steps, b.amountFrom, asset, g.stepFrom);
-    if (available <= 0n) return blockable ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+    // Final review (P3): a FloFi Wallet owner-step group asked about Circle is never blocked here: its steps run through their own flows, whose
+    // confirm pass stops the step exactly as before.
+    if (available <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
     if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
     if (g.namespace === 'solana') {
       const left = available - (allocated.get(share) ?? 0n);
-      if (left <= 0n) return blockable ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+      if (left <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
       const used = left < BigInt(b.cap) ? left : BigInt(b.cap);
       allocated.set(share, (allocated.get(share) ?? 0n) + used);
       const alone = composeWorkflowBound(boundStrategy(composed.steps[b.step]!.strategy, used, b.asset.decimals, b.inputAsset), undefined);
@@ -418,20 +476,171 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
     if (!gates.handoff.allowed) return refuse(gates.handoff.reason ?? 'WORKFLOW_STEP_NOT_EXECUTABLE');
     if (handoffFindings(step).blockers.length) return refuse('REVIEW_BLOCKED');
   }
+  // ADR-0010: the group's fee may be paid in the owner's USDC through Circle when native gas falls short — only for a group no wallet batch was
+  // ever handed out for (that batch could still execute: the group keeps it), and only when due (never an operation signed upfront).
   const r = await prepareGroup(userFunded, composition, req.value, { runId: run.runId, groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
-    stepFrom: g.stepFrom, stepTo: g.stepTo }, { guaranteed, delayed: g.awaitsDelivery !== null && !due });
-  if (!r.ok) return blockable && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
+    stepFrom: g.stepFrom, stepTo: g.stepTo, tokenGas: due && !rewrite && superseded.length === 0, ...wallet ? { wallet } : {} },
+    { guaranteed, delayed: g.awaitsDelivery !== null && !due });
+  // An owner-step group is never blocked by a Circle refusal: its owner steps run exactly as before (CIRCLE_NOT_NEEDED: ETH pays).
+  if (!r.ok) return blockable && !ownerCircle && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
+  // ADR-0010: the only strategy a preparation may change is a due group's to a Circle-paid user operation (stored with it; restored on expiry).
+  const circle = circleFactsOf(r.value.prepared);
+  // Final review (P3): a Review bound who pays this group's fee (the Editor's Authorize): another mechanism now is refused BEFORE anything is stored
+  // or handed out (ADR-0010 §2: never switched silently), so the run just started can be ended at once.
+  if (reviewedGas && (reviewedGas === 'CIRCLE_USDC_PAYMASTER') !== Boolean(circle)) return refuse(GAS_ABSTRACTION_CODES.changed);
+  if (r.value.prepared.kind !== g.strategy && !(circle && r.value.prepared.kind === 'EVM_USER_OPERATION' && !rewrite)) return refuse('USER_FUNDED_GROUP_NOT_PREPARABLE');
   // The exact validity, for the same reason (the preparation's own clock moved on while it read the chain). Nothing is stored or handed out.
-  if (g.strategy !== 'EVM_USER_OPERATION' && r.value.validUntil >= run.expiresAt) return refuse('WORKFLOW_RUN_EXPIRED');
+  if ((g.strategy !== 'EVM_USER_OPERATION' || circle) && r.value.validUntil >= run.expiresAt) return refuse('WORKFLOW_RUN_EXPIRED');
   // The browser that holds the batch keeps its token across preparations; a first preparation (or one stored before the rule) gets a new one.
-  const token = batch ? rewrite && handout !== undefined && HANDOUT.test(handout) ? handout : randomBytes(32).toString('base64url') : null;
+  const preparedBatch = r.value.prepared.kind === 'EVM_WALLET_BATCH';
+  const token = preparedBatch ? rewrite && handout !== undefined && HANDOUT.test(handout) ? handout : randomBytes(32).toString('base64url') : null;
   const prepared: Prepared = { ...r.value.prepared, ...superseded.length ? { superseded } : {}, ...token ? { handoutHash: handoutHashOf(token) } : {} };
+  const patch = { prepared, validUntil: r.value.validUntil, code: null, ...r.value.prepared.kind !== g.strategy ? { strategy: r.value.prepared.kind } : {} };
+  // Owner requirement: the owner steps become the group's — final review (P3): in the SAME transaction as the group's switch, so a group is never
+  // a Circle operation while its steps are still owner steps. When one of them was loaded into its own flow meanwhile nothing is switched and
+  // nothing is asked of the wallet (the owner-step path continues alone).
   const moved = (rewrite
     ? await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }, 'GROUP_PREPARED_AGAIN', rewrite.version)
-    : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }))
+    : ownerCircle ? await switchOwnerStepsToCircle(deps.store, run.runId, groupIndex, patch)
+    : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', patch, r.value.prepared.kind !== g.strategy ? 'GROUP_TOKEN_GAS_PREPARED' : 'GROUP_STATE'))
     ?? refuse('WORKFLOW_RUN_CHANGED');
   return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(),
     prepared: publicPrepared(prepared), handout: token };
+}
+/** ADR-0010: the patch that gives a group back the strategy a Circle-paid preparation replaced (nothing for any other preparation). */
+const plannedStrategyPatch = (g: GroupRecord): { readonly strategy?: GroupRecord['strategy'] } => {
+  const planned = plannedStrategyOf(g.prepared);
+  return planned && planned !== g.strategy ? { strategy: planned } : {};
+};
+/**
+ * ADR-0010 review (C3): the phase-2 refusals that leave a Circle preparation usable — the owner's wallet may sign the permit again (a signature that
+ * did not verify, an answer that raced the operation stage), or the bundler, the chain read or the operator's pause may answer on a retry. Any
+ * other refusal is permanent for this preparation (`permitUserFundedGroup` expires it).
+ */
+const CIRCLE_PERMIT_RETRYABLE: ReadonlySet<string> = new Set(['CIRCLE_PERMIT_INVALID', 'CIRCLE_PERMIT_STAGE_INVALID', 'USER_FUNDED_RPC_UNAVAILABLE',
+  'USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'DELEGATION_RPC_UNAVAILABLE', 'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
+/**
+ * ADR-0010: a Circle-paid preparation that can no longer be used (cap exceeded, mechanism changed) is expired, its planned strategy restored — and,
+ * owner requirement, a FloFi Wallet owner-step group's steps given back to their own flows (never authorized), as a Circle candidate again
+ * (CIRCLE_ASK_FIRST) unless the owner declined. Final review (P3): one transaction (`owner-step-circle.ts`).
+ */
+async function expireTokenGasPreparation(deps: WorkflowRunDeps, runId: string, g: GroupRecord, code: string): Promise<void> {
+  await expireTokenGas(deps.store, runId, g, code);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner AGREED, in FloFi's own Review, to upgrade this FloFi Wallet address to the pinned
+ * Simple7702Account v0.8 inside the group's Circle-paid operation. Recorded on the prepared group (the signing gate refuses the authorization
+ * without it: Privy shows no confirmation screen for an EIP-7702 authorization). Nothing is signed or sent here.
+ */
+export async function consentUserFundedGroupUpgrade(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
+  assertRunWallets(run, wallets);
+  if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
+  const paused = executionRefusal();
+  if (paused) refuse(paused);
+  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
+  if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const consented = consentCircleUpgrade(g.prepared as Prepared, deps.now());
+  if (!consented.ok) return refuse(consented.code);
+  const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
+    validUntil: validUntil.toISOString(), prepared: publicPrepared(prepared), handout: null });
+  if (consented.value === g.prepared) return view(g.prepared as Prepared, g.validUntil!);
+  const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared: consented.value as Prepared }, 'GROUP_UPGRADE_CONSENTED', g.version)
+    ?? refuse('WORKFLOW_RUN_CHANGED');
+  return view(moved.prepared as Prepared, moved.validUntil ?? g.validUntil!);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner answered "Not now" on FloFi's consent card. A group's Circle preparation planned from owner
+ * steps, nothing of which FloFi recorded as signed (no upgrade authorization, no USDC permit, no operation), is withdrawn: its steps go back to
+ * their own flows exactly as before (`expireTokenGasPreparation`, code CIRCLE_FEE_DECLINED), and the run is advanced so its current step is ready
+ * for its own flow (native gas). Nothing is signed or sent here. Final review (P3): FloFi Wallet's gate may already have been asked for this
+ * preparation's authorization or permit (the owner agreed earlier, then cancelled in Privy or the answer was lost): such a signature never
+ * reached FloFi and, the preparation withdrawn, is never sent or used — /approve says exactly that (never "nothing was signed"). A preparation of
+ * any other wallet or plan, or one FloFi recorded as signed in part, is refused unchanged.
+ */
+export async function declineUserFundedGroupCircle(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<RunRecord> {
+  assertRunWallets(run, wallets);
+  if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
+  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const c = circleFactsOf(g.prepared);
+  if (g.state !== 'PREPARED') refuse(`WORKFLOW_RUN_GROUP_${g.state}`);
+  if (!c || c.plannedStrategy !== 'EVM_OWNER_STEP') refuse('CIRCLE_DECLINE_NOT_APPLICABLE');
+  if (g.authorization !== null || c!.stage === 'OPERATION' || c!.permitSignature || c!.upgrade?.signature) refuse('CIRCLE_DECLINE_ALREADY_SIGNED');
+  await expireTokenGasPreparation(deps, run.runId, g, CIRCLE_FEE_DECLINED);
+  const back = (await deps.store.groups(run.runId))[groupIndex];
+  if (!back || back.state !== 'PLANNED' || back.strategy !== 'EVM_OWNER_STEP') refuse('WORKFLOW_RUN_CHANGED');
+  deps.log('workflow_run.circle_declined', { run: run.runId, group: groupIndex, upgrade: Boolean(c!.upgrade) });
+  await advanceRun(runnerDeps(deps), run.runId);
+  return (await deps.store.byId(run.runId))!;
+}
+/** The closed code an owner's "Not now" leaves on the withdrawn Circle preparation (its group's history only). */
+export { CIRCLE_FEE_DECLINED };
+/** Refusals of an upgrade authorization that leave the preparation usable (a signature to retry, a read or relay to retry); others expire it. */
+const CIRCLE_AUTHORIZATION_RETRYABLE: ReadonlySet<string> = new Set(['CIRCLE_AUTHORIZATION_INVALID', 'CIRCLE_UPGRADE_CONSENT_REQUIRED', 'CIRCLE_AUTHORIZATION_STAGE_INVALID',
+  'USER_FUNDED_RPC_UNAVAILABLE', 'DELEGATION_RPC_UNAVAILABLE', 'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner's FloFi Wallet signed the group's EIP-7702 upgrade authorization (after consenting). Verified
+ * against the frozen artifact (signer = the group's fee payer; exactly the recorded tuple; the account's nonce unchanged and its code still empty);
+ * the group stays PREPARED at stage PERMIT. A wallet that changed meanwhile expires the preparation (CIRCLE_AUTHORIZATION_STALE: nothing can then
+ * replace a delegation). A retry with the same signature after its answer was lost returns the same artifact.
+ */
+export async function authorizeUserFundedGroupUpgrade(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  signature: string): Promise<PreparedGroupView> {
+  assertRunWallets(run, wallets);
+  if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
+  const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
+  const paused = executionRefusal();
+  if (paused) refuse(paused);
+  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const c = circleFactsOf(g.prepared);
+  if (g.state !== 'PREPARED' || !c?.upgrade) refuse(g.state !== 'PREPARED' ? `WORKFLOW_RUN_GROUP_${g.state}` : 'CIRCLE_UPGRADE_NOT_PREPARED');
+  if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
+    validUntil: validUntil.toISOString(), prepared: publicPrepared(prepared), handout: null });
+  if (c!.stage !== 'AUTHORIZATION') return c!.upgrade!.signature === String(signature).toLowerCase() ? view(g.prepared as Prepared, g.validUntil!) : refuse('CIRCLE_AUTHORIZATION_STAGE_INVALID');
+  const finalized = await finalizeCircleAuthorization(userFunded, g.prepared as Prepared, signature);
+  if (!finalized.ok) {
+    if (!CIRCLE_AUTHORIZATION_RETRYABLE.has(finalized.code.split(':')[0]!)) await expireTokenGasPreparation(deps, run.runId, g, finalized.code.split(':')[0]!);
+    return refuse(finalized.code);
+  }
+  const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared: finalized.value as Prepared }, 'GROUP_UPGRADE_AUTHORIZED', g.version)
+    ?? refuse('WORKFLOW_RUN_CHANGED');
+  return view(moved.prepared as Prepared, moved.validUntil ?? g.validUntil!);
+}
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): the owner's wallet signed the USDC permit of a Circle-paid group (phase 1 of two). The
+ * permit is verified against the frozen artifact (signer = the group's fee payer, spender = the pinned paymaster, value = the reviewed cap, the
+ * owner's current permit nonce), the bundler estimates the FINAL operation with it, and its worst case must stay within the signed cap; the
+ * group stays PREPARED with the operation's typed data, which the owner's wallet signs next (`authorizeUserFundedGroup`). A cap that no longer
+ * covers the operation expires the preparation (CIRCLE_PERMIT_CAP_EXCEEDED: the owner asks for a fresh one; nothing was relayed), as does every
+ * other refusal signing again cannot change (`CIRCLE_PERMIT_RETRYABLE`). A retry with the same permit after its answer was lost returns the same
+ * operation.
+ */
+export async function permitUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  permitSignature: string): Promise<PreparedGroupView> {
+  assertRunWallets(run, wallets);
+  if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
+  const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
+  const paused = executionRefusal();
+  if (paused) refuse(paused);
+  const g = (await deps.store.groups(run.runId))[groupIndex] ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const c = circleFactsOf(g.prepared);
+  if (g.state !== 'PREPARED' || !c) refuse(g.state !== 'PREPARED' ? `WORKFLOW_RUN_GROUP_${g.state}` : 'CIRCLE_PERMIT_STAGE_INVALID');
+  if (!g.validUntil || g.validUntil <= deps.now()) refuse('USER_FUNDED_PREPARED_EXPIRED');
+  const view = (prepared: Prepared, validUntil: Date): PreparedGroupView => ({ groupIndex, strategy: g.strategy, chain: g.chain, feePayer: g.feePayer,
+    validUntil: validUntil.toISOString(), prepared: publicPrepared(prepared), handout: null });
+  if (c!.stage === 'OPERATION') return c!.permitSignature === String(permitSignature).toLowerCase() ? view(g.prepared as Prepared, g.validUntil!) : refuse('CIRCLE_PERMIT_STAGE_INVALID');
+  const finalized = await finalizeCirclePermit(userFunded, g.prepared as Prepared, permitSignature);
+  if (!finalized.ok) {
+    // Review C3: every refusal that signing again cannot change (a cap exceeded, a permit overtaken, a bundler that does not serve the account's
+    // EntryPoint, Circle's or the account's own refusal) expires the preparation and restores the planned strategy: the next preparation decides
+    // the mechanism afresh instead of handing the owner the same dead permit again. Only a transient failure or a signature to retry keeps it.
+    if (!CIRCLE_PERMIT_RETRYABLE.has(finalized.code.split(':')[0]!)) await expireTokenGasPreparation(deps, run.runId, g, finalized.code.split(':')[0]!);
+    return refuse(finalized.code);
+  }
+  const moved = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared: finalized.value }, 'GROUP_PERMIT_SIGNED', g.version)
+    ?? refuse('WORKFLOW_RUN_CHANGED');
+  return view(moved.prepared as Prepared, moved.validUntil ?? g.validUntil!);
 }
 /**
  * The owner's wallet answered for one PREPARED group: a wallet batch id, a user-operation signature, or the signed Solana transactions. Verified
@@ -454,6 +663,38 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
   if (g.strategy !== 'EVM_WALLET_BATCH' && (!g.validUntil || g.validUntil <= deps.now())) refuse('USER_FUNDED_PREPARED_EXPIRED');
   const verified = authorizeGroup(g.prepared as Prepared, answer, g.feePayer, deps.now());
   if (!verified.ok) return refuse(verified.code);
+  // ADR-0010 §2: a Circle-paid group is authorized only while the policy would still pick Circle — ETH that arrived since the Review means native
+  // gas now covers the fee: nothing switches silently, the preparation expires and the owner reviews again (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED).
+  if (circleFactsOf(g.prepared)) {
+    const covers = await nativeNowCovers(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
+    if (covers === null) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+    try { assertReviewedMechanism('CIRCLE_USDC_PAYMASTER', selectGasMechanism({ chain: g.chain, nativeCovers: covers, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true } })); }
+    catch {
+      await expireTokenGasPreparation(deps, run.runId, g, GAS_ABSTRACTION_CODES.changed);
+      return refuse(GAS_ABSTRACTION_CODES.changed);
+    }
+    // Final review (P3): an upgrade is re-checked before the operation signature is accepted — the account's nonce moved since the permit (a
+    // transaction, another delegation) would otherwise be found only at relay (CIRCLE_AUTHORIZATION_STALE there blocks the group and halts the
+    // run). Stale here: the preparation expires and the steps are given back, nothing signed is ever relayed; the owner is asked again. An
+    // account delegated meanwhile to exactly the upgrade's delegate still applies (sent without the authorization).
+    const upgrade = await circleUpgradeState(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
+    if (upgrade === 'UNAVAILABLE') return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+    if (upgrade === 'STALE') {
+      await expireTokenGasPreparation(deps, run.runId, g, 'CIRCLE_AUTHORIZATION_STALE');
+      return refuse('CIRCLE_AUTHORIZATION_STALE');
+    }
+  }
+  // ADR-0010 §4, the same for a Kora group: SOL that arrived since the Review (the owner's SOL now covers the members' native worst case) means the
+  // policy would pick native gas — nothing switches silently and nothing reaches Kora: the preparation expires and the owner reviews again.
+  if (isKoraGroup(g.prepared)) {
+    const covers = await koraGroupNativeCovers(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
+    if (covers === null) return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+    try { assertReviewedMechanism('PIMLICO_KORA_SPL_FEE', selectGasMechanism({ chain: g.chain, nativeCovers: covers, candidate: { mechanism: 'PIMLICO_KORA_SPL_FEE', eligible: true } })); }
+    catch {
+      await expireTokenGasPreparation(deps, run.runId, g, GAS_ABSTRACTION_CODES.changed);
+      return refuse(GAS_ABSTRACTION_CODES.changed);
+    }
+  }
   // Only onto exactly the artifact the answer was verified against (the row version read above): a concurrent re-preparation is never authorized
   // with an answer checked against another artifact. A concurrent answer that won (a retry racing its first attempt) is compared as a retry.
   // A stop that landed in between (the expiry pass blocked the group, or the owner ended the run, while its batch was unanswered) never drops
@@ -593,10 +834,24 @@ export type RunGroupView = { readonly index: number; readonly chain: string; rea
   readonly state: string; readonly awaitsDelivery: number | null; readonly code: string | null; readonly validUntil: string | null;
   /** Always the run's own wallet on this network (S1). */
   readonly feePayer: string;
-  /** The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. */
-  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean } | null;
-  /** Network fees actually paid, from the chain (null until reconciled). */
-  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string } | null;
+  /**
+   * The most this group can cost its owner in network fees (native units of `unit`), from the prepared artifact; null until prepared. ADR-0010:
+   * `unit` 'token' with `token` (symbol, decimals; Circle also names the USDC address) when the owner pays it in a token — Circle: the permit's
+   * cap in USDC; Kora (§4): the quoted fee in USDC/USDT paid to Pimlico.
+   */
+  readonly maxFee: { readonly amount: string; readonly unit: string; readonly estimated: boolean; readonly sponsorship?: 'OFFERED' | 'REQUIRED';
+    readonly token?: { readonly address?: string; readonly symbol: string; readonly decimals: number } } | null;
+  /** Network fees actually paid, from the chain (null until reconciled). `paidInToken` (ADR-0010): what the owner paid back in a token. */
+  readonly gasPaid: { readonly amount: string; readonly unit: string; readonly payer: string; readonly sponsored?: true;
+    readonly paidInToken?: { readonly mechanism?: string; readonly symbol: string; readonly decimals: number; readonly amount: string } } | null;
+  /**
+   * ADR-0010 (owner only): a token-paid fee's mechanism and protocol facts for Technical details — the paymaster, its EntryPoint, the permit's
+   * allowance cap — and the wallet prompts it needs; null for a native fee.
+   */
+  readonly gasPayment?: { readonly mechanism: 'CIRCLE_USDC_PAYMASTER'; readonly stage: 'AUTHORIZATION' | 'PERMIT' | 'OPERATION'; readonly signatures: 2 | 3; readonly paymaster: string;
+    readonly entryPoint: string; readonly permitCap: string; readonly token: string; readonly symbol: string; readonly decimals: number;
+    /** Owner requirement (FloFi Wallet's first use): the address is upgraded to this pinned smart account inside the operation, after consent. */
+    readonly upgrade?: { readonly delegate: string; readonly chainId: number; readonly consented: boolean } } | null;
   /** Transactions of the group (public hashes / signatures only, never bytes): what was sent and reconciled. Named like a step's `submissions`. */
   readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
   /** A wallet batch's id (the owner's own wallet's handle, to read its receipts back after a reload); the owner's own view only, else null. */
@@ -660,8 +915,19 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
       fill: options.outcomes && b.fill ? { hash: b.fill.transactionHash, explorerUrl: executionExplorer(b.destinationChain, b.fill.transactionHash, false) } : null } : null;
   };
   const groups: RunGroupView[] = groupRecords.map(g => {
-    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean } } | null)?.fee;
-    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string } } | null)?.gasPaid ?? null;
+    const fee = (g.prepared as { fee?: { maxCost?: string; unit?: string; estimated?: boolean; sponsorship?: 'OFFERED' | 'REQUIRED' | null;
+      token?: string | { symbol?: unknown; decimals?: unknown }; symbol?: string; decimals?: number } } | null)?.fee;
+    const paid = (g.outcome as { gasPaid?: { amount: string; unit: string; payer: string; sponsored?: boolean;
+      paidInToken?: { mechanism?: unknown; symbol?: unknown; decimals?: unknown; amount?: unknown } } } | null)?.gasPaid ?? null;
+    // ADR-0010: a token-paid fee carries its token — Circle names the USDC address with symbol/decimals beside it, Kora (§4) a {symbol, decimals}
+    // object; anything malformed is never shown as a native amount.
+    const tokenFee = fee?.unit !== 'token' ? null
+      : typeof fee.token === 'string' ? typeof fee.symbol === 'string' && Number.isInteger(fee.decimals) ? { address: fee.token, symbol: fee.symbol, decimals: fee.decimals! } : null
+        : fee.token && typeof fee.token.symbol === 'string' && Number.isSafeInteger(fee.token.decimals) ? { symbol: fee.token.symbol, decimals: fee.token.decimals as number } : null;
+    const inToken = paid?.paidInToken && typeof paid.paidInToken.symbol === 'string' && typeof paid.paidInToken.amount === 'string' && Number.isSafeInteger(paid.paidInToken.decimals)
+      ? { ...typeof paid.paidInToken.mechanism === 'string' ? { mechanism: paid.paidInToken.mechanism } : {}, symbol: paid.paidInToken.symbol,
+        decimals: paid.paidInToken.decimals as number, amount: paid.paidInToken.amount } : null;
+    const circle = circleFactsOf(g.prepared);
     // Reconciled transactions first; before that, what was sent (a Solana group's signatures are known before sending: listed only once reconciled).
     // An owner-step group's outcome lists its steps' own {chain, hash} records; a relayed group lists hashes on its own chain.
     const recorded = (g.outcome as { transactions?: readonly unknown[] } | null)?.transactions
@@ -674,8 +940,15 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
     return { index: g.groupIndex, chain: g.chain, strategy: g.strategy, signing: g.signing, steps: [g.stepFrom, g.stepTo] as const, state: g.state, awaitsDelivery: g.awaitsDelivery,
       // Requesters see that the owner's wallet pays, never which wallet, its batch id or its fees; shared status adds hashes and the gas amount.
       code: g.code, validUntil: g.validUntil?.toISOString() ?? null, feePayer: owner ? g.feePayer : 'OWNER_WALLET',
-      maxFee: owner && fee?.maxCost && fee.unit ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false } : null,
-      gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : 'OWNER_WALLET' } : null,
+      maxFee: owner && fee?.maxCost && fee.unit && (fee.unit !== 'token' || tokenFee) ? { amount: fee.maxCost, unit: fee.unit, estimated: fee.estimated !== false,
+        ...fee.sponsorship ? { sponsorship: fee.sponsorship } : {}, ...tokenFee ? { token: tokenFee } : {} } : null,
+      // ADR-0009: a fee FloFi's paymaster paid is shown as such (to the owner, its paymaster address; never the owner's wallet). ADR-0010: a fee
+      // Circle or Kora fronted and the owner paid back in a token is the owner's (a requester sees OWNER_WALLET), with the token amount.
+      gasPaid: options.outcomes && paid ? { amount: paid.amount, unit: paid.unit, payer: owner ? paid.payer : paid.sponsored ? 'FLOFI_PAYMASTER' : 'OWNER_WALLET',
+        ...paid.sponsored ? { sponsored: true as const } : {}, ...inToken && !paid.sponsored ? { paidInToken: inToken } : {} } : null,
+      gasPayment: owner && circle ? { mechanism: 'CIRCLE_USDC_PAYMASTER', stage: circle.stage, signatures: circle.upgrade ? 3 : 2, paymaster: circle.paymaster,
+        entryPoint: circle.entryPoint, permitCap: circle.permitCap, token: circle.usdc, symbol: 'USDC', decimals: 6,
+        ...circle.upgrade ? { upgrade: { delegate: circle.upgrade.delegate, chainId: circle.upgrade.chainId, consented: Boolean(circle.upgrade.consentedAt) } } : {} } : null,
       submissions,
       batchId: owner && g.strategy === 'EVM_WALLET_BATCH' ? typeof g.authorization?.batchId === 'string' ? g.authorization.batchId
         : g.state === 'PREPARED' ? String((g.prepared as { request?: { id?: string } } | null)?.request?.id ?? '') || null : null : null,

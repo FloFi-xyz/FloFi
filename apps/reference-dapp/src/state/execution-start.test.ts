@@ -41,6 +41,21 @@ describe('existing initial execution capabilities', () => {
     runtime.executionEnabled = true; expect(useExecutionStart('router', wallet()).ready).toBe(true);
     runtime.sessionReady = false; expect(useExecutionStart('router', wallet()).ready).toBe(false);
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 (review round 3): a never-sent attempt superseded by the in-place re-quote does not block the fresh Review', () => {
+    const runtime = f.stores.router!; runtime.executionEnabled = true; runtime.sessionReady = true;
+    const declined = { step: 'APPROVAL', state: 'CANCELLED', reviewCommitment: 'review-1', transactionHash: null };
+    const fresh = { phase: 'AUTHORIZED', authorization: 'review-2', attempts: [declined], verdict: 'PENDING', review: { commitment: 'review-2', calls: [{ purpose: 'APPROVAL' }, { purpose: 'BRIDGE_DEPOSIT' }] } };
+    runtime.record = fresh;
+    expect(useExecutionStart('router', wallet())).toMatchObject({ ready: true, started: false });
+    // Under the current Review the same refusal still counts as this run's request (nothing starts another by itself).
+    runtime.record = { ...fresh, attempts: [{ ...declined, reviewCommitment: 'review-2' }] };
+    expect(useExecutionStart('router', wallet())).toMatchObject({ started: true });
+    // An approval confirmed under Review 1 and a deposit refused at its hand-off: Review 2 continues to the deposit.
+    runtime.record = { phase: 'AUTHORIZED', authorization: 'review-2', verdict: 'PENDING', review: { commitment: 'review-2', calls: [{ purpose: 'BRIDGE_DEPOSIT' }] },
+      attempts: [{ step: 'APPROVAL', state: 'CONFIRMED', reviewCommitment: 'review-1', transactionHash: '0x' + 'a'.repeat(64) }, { step: 'DEPOSIT', state: 'CANCELLED', reviewCommitment: 'review-1', transactionHash: null }] };
+    const next = useExecutionStart('router', wallet());
+    expect(next).toMatchObject({ started: true, next: expect.anything() });
+  });
   it('blocks unresolved Supply requests and does not start another recorded request', () => {
     const runtime = f.stores.supply!;
     runtime.record = { authorization: 'accepted', verdict: 'PENDING', attempts: [{ reconciled: false }] };

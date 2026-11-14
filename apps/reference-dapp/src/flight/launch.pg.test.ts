@@ -277,10 +277,15 @@ describe('access by link and code', () => {
       fake.provider, () => BOARDING).cycle();
     const sent = fake.sent.find(e => e.to === 'board@flofi-test.dev')!;
     emailId = sent.idempotencyKey;
-    expect(sent.subject).toBe('Your group is boarding ✈️');
-    expect(sent.html).toContain(`https://flofi.xyz/board/access?l=en#t=${linkTokenFor(SECRET, emailId)}`);
+    // An English entry still gets the Portuguese Email 3 v3 (13/11 launch copy) and a Portuguese landing link.
+    expect(sent.subject).toBe('Seu grupo está embarcando ✈️');
+    expect(sent.html).toContain(`https://flofi.xyz/board/access?l=pt#t=${linkTokenFor(SECRET, emailId)}`);
     expect(sent.text).toContain(codeFor(SECRET, emailId));
-    expect(sent.text).toContain('The code works for 72 hours, once.');
+    expect(sent.html).toContain('>Estamos começando, e queremos testar com você.</div>');
+    expect(sent.text).toContain('A FloFi está começando, e este é o primeiro voo. Atrasamos um dia para corrigir alguns erros antes de abrir.');
+    expect(sent.text).toContain('O que dá para testar hoje');
+    expect(sent.text).toContain('O código vale por 72 horas, uma vez.');
+    expect(await rows(`SELECT template_version, language FROM flight_emails WHERE email_id = $1`, [emailId])).toEqual([{ template_version: 3, language: 'PT' }]);
     expect(await rows(`SELECT extract(epoch FROM (code_expires_at - created_at))::int AS code_seconds,
       extract(epoch FROM (link_expires_at - created_at))::int AS link_seconds FROM flight_access_tokens WHERE entry_id = $1`, [entryId]))
       .toEqual([{ code_seconds: 72 * 3600, link_seconds: 72 * 3600 }]);
@@ -631,7 +636,7 @@ describe('invites, creators and cards', () => {
     const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }, { daily: 10_000, monthly: 100_000, externalDailyReserve: 0, externalMonthlyReserve: 0 });
     const fake = fakeProvider();
     await delivery(outbox, fake.provider, () => BOARDING + 60_000).cycle();
-    const cardEmail = fake.sent.find(e => /Founding Member #|boarding card/.test(e.subject) && e.to === 'board@flofi-test.dev');
+    const cardEmail = fake.sent.find(e => /Founding Member #|cartão de embarque/.test(e.subject) && e.to === 'board@flofi-test.dev');
     expect(cardEmail?.headers?.['List-Unsubscribe']).toMatch(/^<https:\/\/flofi\.xyz\/api\/board\/unsubscribe\?t=fem_[0-9a-f]{32}\.[0-9a-f]{64}\.[A-Za-z0-9_-]{22}>$/);
     expect(cardEmail?.attachments?.[0]?.path).toMatch(/^https:\/\/flofi\.xyz\/card\/[a-z2-7]{12}\/image\?download=1$/);
     expect((await emailsOf('card@flofi-test.dev')).find(e => String(e.template).startsWith('CARD_'))).toMatchObject({ state: 'CANCELLED', status_reason: 'CARD_GONE' });
@@ -679,9 +684,9 @@ describe('Google Forms provenance and launch email compatibility', () => {
     await expect(store.importGoogleForms([{ ...imported[0]!, signedUpAt: NaN }], BEFORE)).rejects.toThrow('FLIGHT_IMPORT_INVALID');
   });
 
-  it('holds legacy Email 6 v1–v3 without rewriting SENT/SENDING/UNKNOWN; only an explicit operator action supersedes unsent rows', async () => {
+  it('holds legacy Email 6 v1–v4 without rewriting SENT/SENDING/UNKNOWN; only an explicit operator action supersedes unsent rows', async () => {
     const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' });
-    for (const version of [1, 2, 3]) for (const state of ['PENDING', 'UNKNOWN', 'SENDING', 'SENT']) {
+    for (const version of [1, 2, 3, 4]) for (const state of ['PENDING', 'UNKNOWN', 'SENDING', 'SENT']) {
       const email = `version-${version}-${state.toLowerCase()}@flofi-test.dev`;
       await store.inviteCreator({ email, language: 'EN', sendAt: BEFORE, now: BEFORE });
       await t.db.query(`UPDATE flight_emails SET template_version = $2, state = $3, attempts = CASE WHEN $3 = 'PENDING' THEN 0 ELSE 1 END,
@@ -691,12 +696,12 @@ describe('Google Forms provenance and launch email compatibility', () => {
         lease_token = CASE WHEN $3 = 'SENDING' THEN $5 ELSE NULL END,
         lease_until = CASE WHEN $3 = 'SENDING' THEN $4::timestamptz ELSE NULL END WHERE recipient = $1`, [email, version, state, new Date(BEFORE), hex(16)]);
     }
-    const untouchedSql = `SELECT * FROM flight_emails WHERE recipient LIKE 'version-%' AND template_version < 4 AND state IN ('SENT', 'SENDING', 'UNKNOWN') ORDER BY email_id`;
+    const untouchedSql = `SELECT * FROM flight_emails WHERE recipient LIKE 'version-%' AND template_version < 5 AND state IN ('SENT', 'SENDING', 'UNKNOWN') ORDER BY email_id`;
     const untouched = await rows(untouchedSql);
     const invites = await rows(`SELECT * FROM flight_invites WHERE code IN (SELECT invite_code FROM flight_emails WHERE recipient LIKE 'version-%') ORDER BY code`);
     await store.inviteCreator({ email: 'version-current@flofi-test.dev', language: 'EN', sendAt: BEFORE, now: BEFORE });
     await outbox.housekeeping(BEFORE + 1000);
-    for (const version of [1, 2, 3]) {
+    for (const version of [1, 2, 3, 4]) {
       expect(await rows('SELECT template_version, state, attempts FROM flight_emails WHERE recipient = $1', [`version-${version}-pending@flofi-test.dev`]))
         .toEqual([{ template_version: version, state: 'HELD', attempts: 0 }]);
     }
@@ -704,28 +709,51 @@ describe('Google Forms provenance and launch email compatibility', () => {
     await delivery(outbox, fake.provider, () => BEFORE + 2000).cycle();
     expect(fake.sent.filter(e => e.to.startsWith('version-')).map(e => e.to)).toEqual(['version-current@flofi-test.dev']);
     const current = fake.sent.find(e => e.to === 'version-current@flofi-test.dev')!;
-    expect(current.text).toContain('Thursday from 9:00 BRT');
+    // Requested in English, enqueued in Portuguese: every 13/11 guest gets the Portuguese Email 6.
+    expect(current.text).toContain('Entra em flofi.xyz/board, toca em "I have an invite code"');
+    expect(current.text).toContain('EMBARQUE = ABERTO');
     expect(current.text).toContain('cooked-goat-9ec.notion.site');
-    expect(current.text).not.toMatch(/test flight|Wednesday|\bTEST\b/);
+    expect(current.text).not.toMatch(/test flight|Wednesday|\bTEST\b|quinta/);
     expect(await rows(untouchedSql)).toEqual(untouched);
     const beforeDryRun = await rows(`SELECT * FROM flight_emails WHERE recipient LIKE 'version-%' ORDER BY email_id`);
-    const dry = await outbox.supersedeCreatorTemplates(BEFORE + 3000, CAL.boardingOpensAt);
-    expect(dry).toMatchObject({ eligible: 3, superseded: 0, skippedUnknown: 3, skippedSent: 3 });
+    const dry = await outbox.supersedeCreatorTemplates(BEFORE + 3000);
+    expect(dry).toMatchObject({ eligible: 4, superseded: 0, skippedUnknown: 4, skippedSent: 4 });
     expect(await rows(`SELECT * FROM flight_emails WHERE recipient LIKE 'version-%' ORDER BY email_id`)).toEqual(beforeDryRun);
-    // Explicit apply exercised only in this disposable database, never invoked automatically by delivery.
-    const applied = await outbox.supersedeCreatorTemplates(BEFORE + 3000, CAL.boardingOpensAt, { apply: true });
-    expect(applied).toMatchObject({ eligible: 3, superseded: 3, skippedUnknown: 3, skippedSent: 3 });
+    // Explicit apply exercised only in this disposable database, never invoked automatically by delivery. Applied after boarding opens
+    // (the 13/11 plan sends Email 6 at opening): the replacements carry the invite's own validity, so they are not expired on arrival.
+    const opened = CAL.boardingOpensAt + 1000;
+    const applied = await outbox.supersedeCreatorTemplates(opened, { apply: true });
+    expect(applied).toMatchObject({ eligible: 4, superseded: 4, skippedUnknown: 4, skippedSent: 4 });
     expect(await rows(`SELECT template_version, state, status_reason FROM flight_emails WHERE status_reason = 'TEMPLATE_SUPERSEDED' ORDER BY recipient`))
-      .toEqual([1, 2, 3].map(version => ({ template_version: version, state: 'CANCELLED', status_reason: 'TEMPLATE_SUPERSEDED' })));
-    const replacements = await rows(`SELECT template_version, state, invite_code, recipient, email_id FROM flight_emails WHERE trigger = 'creator_template_superseded' ORDER BY recipient`);
-    expect(replacements).toHaveLength(3);
+      .toEqual([1, 2, 3, 4].map(version => ({ template_version: version, state: 'CANCELLED', status_reason: 'TEMPLATE_SUPERSEDED' })));
+    const replacements = await rows(`SELECT template_version, state, invite_code, recipient, email_id, language FROM flight_emails WHERE trigger = 'creator_template_superseded' ORDER BY recipient`);
+    expect(replacements).toHaveLength(4);
     for (const row of replacements) {
       const old = beforeDryRun.find(old => old.recipient === row.recipient)!;
-      expect(row).toMatchObject({ template_version: 4, state: 'PENDING', invite_code: old.invite_code });
+      expect(row).toMatchObject({ template_version: 5, state: 'PENDING', invite_code: old.invite_code, language: 'PT' });
       expect(row.email_id).not.toBe(old.email_id); // New content always gets a new provider idempotency key.
     }
     expect(await rows(untouchedSql)).toEqual(untouched);
     expect(await rows('SELECT * FROM flight_invites WHERE code = ANY($1::text[]) ORDER BY code', [invites.map(invite => invite.code)])).toEqual(invites);
+    const atOpening = fakeProvider();
+    await delivery(outbox, atOpening.provider, () => opened + 1000).cycle();
+    expect(atOpening.sent.filter(e => replacements.some(row => row.recipient === e.to)).map(e => e.to).sort())
+      .toEqual(replacements.map(row => row.recipient).sort());
+    for (const email of atOpening.sent.filter(e => e.to.startsWith('version-'))) expect(email.text).toContain('EMBARQUE = ABERTO');
+  });
+
+  it('sends Email 6 at boarding opening: its outbox row lives as long as the invite, not only until boarding opens', async () => {
+    const email = 'opening-guest@flofi-test.dev', queuedAt = CAL.boardingOpensAt - 60_000;
+    const invite = await store.inviteCreator({ email, language: 'EN', sendAt: CAL.boardingOpensAt, now: queuedAt });
+    expect(await rows(`SELECT e.expires_at = i.expires_at AS same, e.language FROM flight_emails e JOIN flight_invites i ON i.tenant_id = e.tenant_id
+      AND i.code = e.invite_code WHERE e.recipient = $1`, [email])).toEqual([{ same: true, language: 'PT' }]);
+    const outbox = createEmailOutbox({ db: t.db, tenantId: 'default' }), fake = fakeProvider();
+    await delivery(outbox, fake.provider, () => CAL.boardingOpensAt + 1000).cycle();
+    const sent = fake.sent.find(e => e.to === email)!;
+    expect(sent.subject).toBe('Seu convite para o beta da FloFi ✈️');
+    expect(sent.text).toContain(invite.code);
+    expect(sent.text).toContain('EMBARQUE = ABERTO');
+    expect(await emailsOf(email)).toMatchObject([{ template: 'CREATOR_INVITE', state: 'SENT' }]);
   });
 
   it('splits Email 0 into quota-sized batches so a large list can still send the portion that fits', async () => {

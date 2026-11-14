@@ -136,6 +136,11 @@ const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegE
   SOL: /\bsol\b/i, USDT: /\b(?:usdt|tether)\b/i, WBTC: /\bwbtc\b/i,
 };
 
+/** P0 hotfix (FIX 1): native ETH on a catalog network is grounded only by the user's own "ETH"/"ether" — "WETH" is a different asset and never
+ * makes a model-reported ETH native (`ASSET_MENTIONS.ETH` also accepts "weth", for the test networks' WETH-only swaps). */
+const NATIVE_ETH_NAMED = /\beth\b|\bether\b/i;
+/** WETH as people write it ("weth", "w-eth", "wrapped ether"): removed before native ETH is looked for (its catalog name "Ether" is inside it). */
+const WRAPPED_ETH_WORDS = /\bweth\b|\bw[\s-]+eth\b|\bwrapped[\s-]+eth(?:er)?\b/gi;
 /** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
 export function mentionedNetworks(text: string): Network[] {
   return copilotNetworksMentioned(text).filter(id => {
@@ -373,8 +378,10 @@ function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding
   }
   const asset = found.asset;
   if (kinds === 'ERC20' && asset.kind !== 'ERC20') return refuse(m.catalogTokenUnknown(value, label), 'ASSET_UNKNOWN', [missing]);
-  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || ((found.by === 'SYMBOL' || found.by === 'ADDRESS') && symbolNamed(g.text, value)) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) ||
-    nameNamed(g.text, asset);
+  // Native ETH is grounded only by the user's ETH/Ether, never by their WETH (FIX 1 review: ETH and WETH stay distinct).
+  const text = /^eth$/i.test(value) && !ether ? g.text.replace(WRAPPED_ETH_WORDS, ' ') : g.text;
+  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || ((found.by === 'SYMBOL' || found.by === 'ADDRESS') && symbolNamed(text, value)) || (/^eth$/i.test(value) && NATIVE_ETH_NAMED.test(text)) ||
+    nameNamed(text, asset);
   if (!grounded) return ask([missing], m.tokenNotFound(value));
   if (found.by === 'NAME' && notes) notes.push(m.catalogNameNote(value, asset.symbol, assetDisplayName(asset), label));
   return { asset, ether };

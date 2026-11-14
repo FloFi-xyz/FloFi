@@ -10,6 +10,9 @@ ERC-7710 "workflow grant" of exact calls). FloFi's executor then **sent and paid
 self-transactions. That breaks the product invariant this build makes mandatory:
 
 > **S1 — FloFi never pays, advances, sponsors or reimburses network gas for a user's workflow.**
+>
+> *Amended by [ADR-0009](./ADR-0009-network-fee-sponsorship.md) (2026-11-13): one operator-configured exception — an owner wallet batch whose
+> fee a pinned ERC-4337 paymaster pays for exactly the reviewed calls. Everything FloFi relays itself stays owner-paid.*
 
 A shared, FloFi-funded sender also couples users (one nonce space, one balance), and one user's volume could drain it.
 

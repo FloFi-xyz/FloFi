@@ -42,6 +42,13 @@
 import type { StepRequirement, WorkflowRequirement } from '../delegation/steps.ts';
 
 export type Namespace = 'eip155' | 'solana';
+/**
+ * Final review (P3): who pays a group's network fee as the owner's Review showed it — the owner's ETH, or the owner's USDC through Circle
+ * (ADR-0010). A preparation is made only with the reviewed mechanism (anything else is refused before it is stored). Here, beside the plan,
+ * so the platform and every surface share it without importing a surface module.
+ */
+export type ReviewedGas = 'NATIVE_WALLET_GAS' | 'CIRCLE_USDC_PAYMASTER';
+export const isReviewedGas = (value: unknown): value is ReviewedGas => value === 'NATIVE_WALLET_GAS' || value === 'CIRCLE_USDC_PAYMASTER';
 export const GROUP_STRATEGIES = ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'EVM_OWNER_STEP', 'SOLANA_SIGN_ALL', 'SOLANA_DURABLE_NONCE', 'SOLANA_OWNER_STEP'] as const;
 export type GroupStrategy = (typeof GROUP_STRATEGIES)[number];
 /** When the group's wallet interaction happens: before anything executes, or when the group becomes due (after its delivery reconciled). */
@@ -68,7 +75,19 @@ export type UserFundedFacts = { readonly enabled: boolean; readonly code: string
    * P0 hotfix (E1): the certified Router routes (`source>destination`, CAIP-2) a wallet batch may carry a bridge on — both chains opted in with
    * a read RPC and an Across quote provider configured. Absent or empty: every bridge runs through its own flow.
    */
-  readonly bridgeRoutes?: readonly string[] };
+  readonly bridgeRoutes?: readonly string[];
+  /**
+   * ADR-0010 review (C5): the EVM chains where a group's network fee may be paid from the owner's USDC through Circle when the owner's ETH cannot
+   * pay it (operator-enabled, with a bundler and a read RPC). Decided only when a group is prepared, so a plan made before cannot know it: a
+   * group there is "at least" one interaction (two signatures — a USDC permit, then the operation — when Circle pays). Absent or empty: native only.
+   */
+  readonly tokenGasChains?: readonly string[];
+  /**
+   * Review B1/LQ1 (ADR-0010 §4, §5): where a step's own flow may pay its fee in a token when the owner's native coin is short — Pimlico's Kora on
+   * Solana swaps and transfers (`koraTokenGas`), 0x Gasless on Robinhood Chain ERC-20 swaps (`gaslessSwapChains`). Read only to warn, before the
+   * first signature, about later steps on the same chain that still need the native coin (`gas-abstraction/native-later.ts`); never a plan input.
+   */
+  readonly koraTokenGas?: boolean; readonly gaslessSwapChains?: readonly string[] };
 /**
  * What the owner's wallets can do, as reported in the browser at `/approve` (EIP-5792 `wallet_getCapabilities`, Wallet Standard features).
  * Reports only choose the interaction; every artifact is still verified server-side (signer, account code, calls) before it is used.
@@ -103,6 +122,11 @@ export type ExecutionGroup = {
   readonly downgrades: readonly string[];
   /** The fee payer: always the run's owner wallet on this namespace (S1). */
   readonly feePayer: 'OWNER_WALLET';
+  /**
+   * ADR-0010 review (C5): the network fee of this group may be paid from the owner's USDC through Circle, decided when it is prepared (only if the
+   * owner's ETH cannot pay it): it then needs two signatures (a USDC permit, then the operation) instead of one. Absent: native gas only.
+   */
+  readonly tokenGas?: 'CIRCLE_USDC_PAYMASTER';
 };
 export type InteractionSummary = {
   readonly upfront: number; readonly whenDue: number;
@@ -110,7 +134,10 @@ export type InteractionSummary = {
   /** EVM network changes between consecutive EVM groups (a wallet may ask to confirm each). */
   readonly networkSwitches: number;
   readonly oneTimeSetup: readonly ('EVM_SMART_ACCOUNT_UPGRADE' | 'SOLANA_NONCE_ACCOUNTS')[];
-  /** True when a step runs through its own flow: its count is a minimum (a token approval or a bridge deposit may add a confirmation). */
+  /**
+   * True when a step runs through its own flow (a token approval or a bridge deposit may add a confirmation), or when a group's fee may be paid in
+   * USDC through Circle (review C5: one more signature): the count is a minimum.
+   */
   readonly atLeast: boolean;
   /** True only when exactly one wallet interaction (one wallet, one chain) authorizes everything. */
   readonly single: boolean;
@@ -252,8 +279,16 @@ export function planExecutionGroups(requirement: WorkflowRequirement, facts: Use
       if (strategy === 'EVM_USER_OPERATION') strategy = profile.eip155?.atomic[chain] === 'supported' || profile.eip155?.atomic[chain] === 'ready' ? 'EVM_WALLET_BATCH' : 'EVM_OWNER_STEP';
     }
     const interactions = ownerStep ? members.length : 1;
+    // ADR-0010 review (C5): a batch or user operation on a chain where Circle may pay the fee, for a wallet that could sign its permit (never FloFi
+    // Wallet): one confirmation if the owner's ETH pays when it is prepared, two signatures if Circle does — not knowable now.
+    // Owner requirement (FloFi Wallet + Circle): a FloFi Wallet group of buildable steps on such a chain stays owner steps (its own flows, the owner's
+    // ETH paying, exactly as before) — and, when due, ONLY if the owner's ETH cannot pay it, may run as one Circle-paid operation of the owner's own
+    // address instead (three signatures the first time, after the owner agrees to the EIP-7702 upgrade; two afterwards): decided when prepared.
+    const tokenGas = (facts.tokenGasChains ?? []).includes(chain) && ((strategy === 'EVM_WALLET_BATCH' || strategy === 'EVM_USER_OPERATION')
+      && profile.eip155?.wallet === 'INJECTED' || strategy === 'EVM_OWNER_STEP' && profile.eip155?.wallet === 'FLOFI_WALLET' && chainEnabled && allBuildable);
     groups.push({ index: groups.length, namespace, chain, steps, stepFrom: first.index, stepTo: members.at(-1)!.index, strategy, signing, awaitsDelivery,
-      interactions, setup: [...new Set(setup)], downgrades: assumed ? [...downgrades, 'WALLET_CAPABILITIES_ASSUMED'] : downgrades, feePayer: 'OWNER_WALLET' });
+      interactions, setup: [...new Set(setup)], downgrades: assumed ? [...downgrades, 'WALLET_CAPABILITIES_ASSUMED'] : downgrades, feePayer: 'OWNER_WALLET',
+      ...tokenGas ? { tokenGas: 'CIRCLE_USDC_PAYMASTER' as const } : {} });
   }
   return { ok: true, groups, interactions: summarize(groups) };
 }
@@ -267,7 +302,8 @@ export function summarize(groups: readonly ExecutionGroup[]): InteractionSummary
     if (g.namespace === 'eip155') { if (lastEvmChain && lastEvmChain !== g.chain) networkSwitches++; lastEvmChain = g.chain; }
   }
   const oneTimeSetup = [...new Set(groups.flatMap(g => g.setup))];
-  const atLeast = groups.some(g => g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP');
+  // A group whose fee Circle may pay (review C5) may ask one more signature (the USDC permit): its count is a minimum too.
+  const atLeast = groups.some(g => g.strategy === 'EVM_OWNER_STEP' || g.strategy === 'SOLANA_OWNER_STEP' || g.tokenGas !== undefined);
   // One interaction means exactly that: one group, one wallet prompt, no setup prompt of its own (an in-confirmation upgrade is not a prompt),
   // and no step whose own flow may ask more than once.
   const single = upfront + whenDue === 1 && !oneTimeSetup.includes('SOLANA_NONCE_ACCOUNTS') && !atLeast;
@@ -282,5 +318,9 @@ export function describeGroup(g: ExecutionGroup): string {
     EVM_OWNER_STEP: 'one wallet confirmation per step', SOLANA_SIGN_ALL: 'one Solana wallet prompt for every transaction',
     SOLANA_DURABLE_NONCE: 'one Solana wallet prompt now (durable nonces); FloFi submits when the delivery lands', SOLANA_OWNER_STEP: 'one Solana wallet prompt per step',
   };
-  return `${steps} on ${g.chain}: ${how[g.strategy]}${g.signing === 'WHEN_DUE' && g.strategy !== 'EVM_USER_OPERATION' && g.strategy !== 'SOLANA_DURABLE_NONCE' && g.awaitsDelivery !== null ? ', when the delivery lands' : ''}; fees paid by your own wallet.`;
+  // ADR-0010 review (C5): the fee of such a group may be paid from the owner's USDC through Circle — then two signatures, said in words.
+  const tokenGas = !g.tokenGas ? '' : g.strategy === 'EVM_OWNER_STEP'
+    ? ' (when your ETH cannot pay them, FloFi Wallet can pay them in USDC through Circle as one operation instead: three signatures the first time (a smart-account upgrade you agree to first, a USDC permit, then the operation), two afterwards)'
+    : ' (in USDC through Circle when your ETH cannot pay them: then two signatures (a USDC permit, then the operation) instead of one)';
+  return `${steps} on ${g.chain}: ${how[g.strategy]}${g.signing === 'WHEN_DUE' && g.strategy !== 'EVM_USER_OPERATION' && g.strategy !== 'SOLANA_DURABLE_NONCE' && g.awaitsDelivery !== null ? ', when the delivery lands' : ''}; fees paid by your own wallet${tokenGas}.`;
 }

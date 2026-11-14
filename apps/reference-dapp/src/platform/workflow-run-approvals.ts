@@ -13,14 +13,17 @@
  *                wallet (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001)
  *   cancel / resume   end a run that never submitted anything (or that halted), or resume a halted step that submitted nothing
  */
+import type { ReviewedGas } from '../workflow-runs/execution-groups.ts';
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import type { WorkflowComposition } from '../engine/strategy-engine';
 import type { WalletWorkflowReviewView } from '../delegation/views.ts';
 import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
-import { assertRunWallets, authorizeUserFundedGroup, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, prepareUserFundedGroup, reportUserFundedBatch,
-  resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
+import { assertRunWallets, authorizeUserFundedGroup, authorizeUserFundedGroupUpgrade, consentUserFundedGroupUpgrade, cancelRun, currentStep, declineUserFundedGroupCircle, ensureForClaim,
+  observeRun, ownerAuthorizationPlan, permitUserFundedGroup, prepareUserFundedGroup,
+  reportUserFundedBatch, resumeRun, runView, startConfirm, startUserFunded, type PreparedGroupView, type RunView, type StepProposal, type WorkflowRunDeps } from '../workflow-runs/service.ts';
+import { ownerStepCircleFirst } from '../workflow-runs/owner-step-circle.ts';
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
 import type { ApprovalView } from './approvals.ts';
@@ -126,12 +129,41 @@ export async function authorizeSequential(deps: WorkflowRunSurface, run: RunReco
 /** The owner chose user-funded execution: the groups are planned for the wallets their browser reported, then the run starts. */
 export async function userFundedStartSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], profile: WalletProfile, base: ApprovalView) {
   const started = await startUserFunded(deps, run, wallets, profile);
+  // Owner requirement (FloFi Wallet + Circle): a FloFi Wallet owner-step group whose fee Circle may pay is asked about BEFORE its first step is
+  // loaded into its own flow (once loaded, it can never become a Circle-paid operation): the step stays READY and the owner's browser asks
+  // `prepareUserFundedGroup` first — CIRCLE_NOT_NEEDED (ETH pays) and `continue` loads it exactly as before. Every other start: unchanged.
+  if (await ownerStepCircleFirst(deps.store, started, profile.eip155?.wallet, deps.userFunded?.circle?.chains ?? [])) return proposalOf(deps, started, null, base);
   return proposalOf(deps, started, await currentStep(deps, started, wallets), base);
 }
-/** What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). */
+/**
+ * What the owner's wallet signs for one group (exact calls, typed data or Solana transactions, with the fee ceiling and its payer). `wallet`: the
+ * owner's EVM wallet as the preparing browser reported it (absent: unknown, never offered a token-paid fee that needs a typed-data permit).
+ */
 export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout?: string): Promise<PreparedGroupView> {
-  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout);
+  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET', reviewedGas?: ReviewedGas): Promise<PreparedGroupView> {
+  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout, wallet, reviewedGas);
+}
+/** ADR-0010: the owner's USDC permit for a Circle-paid group; returns the operation's typed data the owner's wallet signs next. */
+export async function userFundedPermitSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  permitSignature: string): Promise<PreparedGroupView> {
+  return permitUserFundedGroup(deps, run, wallets, groupIndex, permitSignature);
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner agreed in FloFi to the group's EIP-7702 upgrade (recorded before the wallet is asked). */
+export async function userFundedConsentSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<PreparedGroupView> {
+  return consentUserFundedGroupUpgrade(deps, run, wallets, groupIndex);
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner's EIP-7702 upgrade authorization; returns the group at its permit stage. */
+export async function userFundedUpgradeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
+  signature: string): Promise<PreparedGroupView> {
+  return authorizeUserFundedGroupUpgrade(deps, run, wallets, groupIndex, signature);
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): "Not now" on FloFi's consent card — the unsigned Circle preparation is withdrawn and the group's first
+ * owner step is loaded into its own flow, exactly as when the owner's ETH pays (its own Review then shows its native fee, or its shortfall).
+ */
+export async function userFundedDeclineSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, base: ApprovalView) {
+  const moved = await declineUserFundedGroupCircle(deps, run, wallets, groupIndex);
+  return proposalOf(deps, moved, await currentStep(deps, moved, wallets), base);
 }
 export async function userFundedAuthorizeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, answer: OwnerAnswer, base: ApprovalView) {
   const moved = await authorizeUserFundedGroup(deps, run, wallets, groupIndex, answer);

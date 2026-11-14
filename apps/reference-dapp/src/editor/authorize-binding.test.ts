@@ -15,6 +15,12 @@ describe('P0: the Editor Authorize is bound to the Review', () => {
       { owner: OWNER, workflowHash: HASH, groups: [{ strategy: 'EVM_WALLET_BATCH', steps: [0] }] },
       { owner: OWNER, workflowHash: HASH, groups: [{ strategy: 'EVM_WALLET_BATCH', steps: [-1, 2] }] }]) expect(bindingOf(bad)).toBeNull();
   });
+  it('final review (P3): carries the first group\'s reviewed fee mechanism when given, and refuses any other value', () => {
+    expect(bindingOf({ owner: OWNER, workflowHash: HASH, groups, firstGroupGas: 'CIRCLE_USDC_PAYMASTER' })).toEqual({ owner: OWNER.toLowerCase(), workflowHash: HASH, groups,
+      firstGroupGas: 'CIRCLE_USDC_PAYMASTER' });
+    expect(bindingOf({ owner: OWNER, workflowHash: HASH, groups, firstGroupGas: 'NATIVE_WALLET_GAS' })?.firstGroupGas).toBe('NATIVE_WALLET_GAS');
+    for (const firstGroupGas of ['ZEROX_GASLESS_SWAP', null, 1]) expect(bindingOf({ owner: OWNER, workflowHash: HASH, groups, firstGroupGas })).toBeNull();
+  });
   it('a run matches only with the same hash and the same groups in order', () => {
     const binding = bindingOf({ owner: OWNER, workflowHash: HASH, groups })!;
     expect(runMatchesBinding({ workflowHash: HASH, groups }, binding)).toBe(true);

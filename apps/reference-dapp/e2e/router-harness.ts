@@ -71,6 +71,11 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   const counters = { sends: 0, simulate: 0, fills: 0, quotes: { lifi: 0, across: 0 }, status: { lifi: 0, across: 0 } };
   const controls = {
     lifi: 'ok' as 'ok' | 'down' | 'stargate' | 'noFeeStep', across: 'ok' as 'ok' | 'down', feeBump: 0n, hint: 'normal' as 'normal' | 'down' | 'lying',
+    /** BUILD-FLOFI-MAINNET-EXEC-002: the OP Stack GasPriceOracle `getL1FeeUpperBound` answer (wei), and base units of the Across relayer-capital
+     * line itemized as an LP line instead (same total: a zero LP line appearing in a re-quote). */
+    l1Fee: 50_000n, acrossLpShift: 0n,
+    /** The L1 data fee an OP Stack receipt reports as charged at inclusion (wei): no transaction can cap it. */
+    receiptL1Fee: 10_000n,
     autoFillSeconds: options.autoFillSeconds === undefined ? 5 : options.autoFillSeconds, fillMode: 'normal' as FillMode, receiptLost: false,
     baseSafeLag: options.baseSafeLagBlocks ?? 5, arbitrumSafeLag: options.arbitrumSafeLagBlocks ?? 40,
   };
@@ -211,7 +216,7 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   };
 
   const receipt = (m: Mined) => ({ transactionHash: m.hash, status: hx(m.status), blockNumber: hx(m.block), blockHash: blockHash(m.chain, m.block), from: m.from, to: m.to,
-    gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), ...m.chain === 'base' && !SRC.l1DataFee ? { gasUsedForL1: hx(1_234n) } : { l1Fee: hx(10_000n) }, logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
+    gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), ...m.chain === 'base' && !SRC.l1DataFee ? { gasUsedForL1: hx(1_234n) } : { l1Fee: hx(controls.receiptL1Fee) }, logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
   const txObject = (m: Mined) => ({ hash: m.hash, from: m.from, to: m.to, input: m.input, value: '0x0', nonce: hx(m.nonce), chainId: hx(m.chain === 'base' ? SRC.chainId : DST.chainId),
     gas: requests.get(m.hash)?.gas ?? hx(m.gasUsed * 2n), maxFeePerGas: requests.get(m.hash)?.maxFeePerGas ?? hx(11_000_000n),
     maxPriorityFeePerGas: requests.get(m.hash)?.maxPriorityFeePerGas ?? hx(1_000_000n), type: '0x2', blockHash: blockHash(m.chain, m.block), blockNumber: hx(m.block) });
@@ -270,7 +275,7 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
         if (to === SRC.spokePool && data === SEL.pausedDeposits) return '0x' + w(0n);
         if (to === SRC.spokePool && data === SEL.depositQuoteTimeBuffer) return '0x' + w(3600n);
         if (to === SRC.spokePool && data === SEL.fillDeadlineBuffer) return '0x' + w(21_600n);
-        if (to === '0x420000000000000000000000000000000000000f') return '0x' + w(50_000n);
+        if (to === '0x420000000000000000000000000000000000000f') return '0x' + w(controls.l1Fee);
         throw new Error('MOCK_CALL_UNSUPPORTED');
       }
       case 'eth_simulateV1': {
@@ -349,7 +354,8 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
     if (controls.across === 'down') throw new Error('ROUTER_PROVIDER_HTTP_503');
     counters.quotes.across++;
     const amount = BigInt(q.get('amount')!), depositor = q.get('depositor')!.toLowerCase(), recipient = q.get('recipient')!.toLowerCase();
-    const time = baseTime(baseHead()), capital = 1_000n + controls.feeBump, gas = 7_777n, swap = conversionFee(amount), output = amount - capital - gas - swap;
+    const time = baseTime(baseHead()), lp = controls.acrossLpShift, capital = 1_000n + controls.feeBump - lp, gas = 7_777n, swap = conversionFee(amount),
+      output = amount - capital - lp - gas - swap;
     const data = encodeAcrossDeposit({ depositor, recipient, inputToken: SRC.token, outputToken: DST.token, inputAmount: amount, outputAmount: output,
       destinationChainId: BigInt(DST.chainId), exclusiveRelayer: ZERO, quoteTimestamp: time, fillDeadline: time + 7_200, exclusivityParameter: 0, message: '0x', trailer: '0x73c0de' });
     const t = (chainId: number, address: string) => ({ decimals: side(chainId).decimals, symbol: side(chainId).symbol, address, name: side(chainId).symbol, chainId });
@@ -358,7 +364,7 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
       checks: { allowance: { token: SRC.token, spender: SRC.spokePool, actual: '0', expected: amount.toString() }, balance: { token: SRC.token, actual: '0', expected: amount.toString() } },
       approvalTxns: [{ chainId: SRC.chainId, to: SRC.token, data: SEL.approve + aw(SRC.spokePool) + 'f'.repeat(64) }],
       steps: { bridge: { inputAmount: amount.toString(), outputAmount: output.toString(), tokenIn: t(SRC.chainId, SRC.token), tokenOut: t(DST.chainId, DST.token),
-        fees: { ...amt(capital + gas + swap), details: { type: 'across', relayerCapital: amt(capital), destinationGas: amt(gas), lp: amt(0n), ...swap ? { internalizedSwap: amt(swap) } : {} } },
+        fees: { ...amt(capital + lp + gas + swap), details: { type: 'across', relayerCapital: amt(capital), destinationGas: amt(gas), lp: amt(lp), ...swap ? { internalizedSwap: amt(swap) } : {} } },
         provider: 'across' } },
       inputToken: t(SRC.chainId, SRC.token), outputToken: t(DST.chainId, DST.token), refundToken: t(SRC.chainId, SRC.token),
       fees: { total: amt(capital + gas + swap) }, inputAmount: amount.toString(), maxInputAmount: amount.toString(), expectedOutputAmount: output.toString(),

@@ -2,7 +2,7 @@
 import { solanaTransferProfile } from '@defi-workflow-engine/action-registry';
 import { solanaRpcU64, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster,
   verifySignedSolanaTransfer, type SolanaRpc, type SolanaTransferReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
-import { walletGuardLimitation } from './jupiter.js';
+import { koraFeeLimitation, relayedChainBytes, walletGuardLimitation, type KoraFeeObservation } from './jupiter.js';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 /**
@@ -19,8 +19,12 @@ export type SolanaTransferObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 
   token: { sourceBefore: string; sourceAfter: string; destinationBefore: string; destinationAfter: string } | null;
   amountSent: string | null; amountReceived: string | null; accountCreationLamports: string | null; programs: string[]; explorer: string | null;
   /** The wallet guard re-verified against the Review for this exact signed transaction (only when the wallet appended one). */
-  walletGuard?: SolanaWalletGuard };
-export type SolanaTransferChainAttempt = { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard };
+  walletGuard?: SolanaWalletGuard;
+  /** ADR-0010: the network fee was fronted by Kora and repaid by the owner in a token (only for a Kora Review, once balances were verified). */
+  tokenFee?: KoraFeeObservation };
+/** `kora` (ADR-0010 §4): the owner's signature and Kora's fully signed bytes; `transaction` is then the owner-signed bytes. */
+export type SolanaTransferChainAttempt = { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard;
+  kora?: { ownerSignature: string; signedTransaction: string | null } };
 const X = 'SOLANA_TRANSFER';
 const fail = (code: string): never => { throw new Error(code); };
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail('SOLANA_RPC_INVALID');
@@ -46,9 +50,13 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
     slot: null, blockTime: null, feeLamports: null, owner: null, recipient: null, token: null, amountSent: null, amountReceived: null, accountCreationLamports: null,
     programs: [], explorer: attempt.signature ? profile.explorerTx(attempt.signature) : null, ...attempt.walletGuard ? { walletGuard: attempt.walletGuard } : {} };
   if (!attempt.signature || !attempt.transaction) return base;
+  const gas = review.gas;
   try {
     await verifySolanaCluster(rpc, profile.genesisHash);
-    const signed = fromBase64(attempt.transaction, 2048), parsedSigned = parseTransaction(signed);
+    // Kora: the fully signed bytes Kora returned, proven to be the owner-signed bytes plus the pinned signer's slot-0 signature.
+    const relayed = relayedChainBytes(gas, attempt, `${X}_TRANSACTION_MISMATCH`);
+    if (!relayed) return base;
+    const signed = fromBase64(relayed, 2048), parsedSigned = parseTransaction(signed);
     // The reviewed message, or the recorded wallet guard re-verified against it (HOTFIX-PHANTOM-LIGHTHOUSE-001), with a valid owner signature.
     if (JSON.stringify(verifySignedSolanaTransfer(review, attempt.transaction).walletGuard) !== JSON.stringify(attempt.walletGuard)) fail(`${X}_TRANSACTION_MISMATCH`);
     if (base58Encode(parsedSigned.signatures[0]!) !== attempt.signature) fail(`${X}_SIGNATURE_MISMATCH`);
@@ -80,7 +88,9 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
     const loaded = meta.loadedAddresses === undefined || meta.loadedAddresses === null ? { writable: [], readonly: [] } : record(meta.loadedAddresses);
     if (JSON.stringify(loaded.writable ?? []) !== '[]' || JSON.stringify(loaded.readonly ?? []) !== '[]') fail(`${X}_LOOKUP_MISMATCH`);
     const keys = message.staticKeys;
-    if (keys[0] !== review.owner) fail(`${X}_OWNER_MISMATCH`);
+    // Native: the owner is the fee payer (key 0). Kora: the pinned signer is key 0 and the owner is found by key, at index 1.
+    if (gas ? keys[0] !== gas.feePayer || keys[1] !== review.owner : keys[0] !== review.owner) fail(`${X}_OWNER_MISMATCH`);
+    const o = gas ? 1 : 0;
     base.programs = [...new Set(decompileMessageV0(message, {}).map(i => i.programId))];
     const program = review.token ? review.token.programId : profile.programs.system;
     if (!base.programs.includes(program)) fail(`${X}_PROGRAM_MISMATCH`);
@@ -90,7 +100,7 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
     if (fee > BigInt(review.estimatedFeeLamports)) fail(`${X}_FEE_MISMATCH`);
     const pre = lamportList(meta.preBalances, keys.length), post = lamportList(meta.postBalances, keys.length);
     const at = (account: string) => keys.indexOf(account);
-    const ownerPre = pre[0]!, ownerPost = post[0]!, amount = BigInt(review.amount);
+    const ownerPre = pre[o]!, ownerPost = post[o]!, amount = BigInt(review.amount);
     base.owner = { lamportsBefore: ownerPre.toString(), lamportsAfter: ownerPost.toString() };
     const recipientIndex = at(review.recipient);
     if (recipientIndex >= 0) base.recipient = { lamportsBefore: pre[recipientIndex]!.toString(), lamportsAfter: post[recipientIndex]!.toString() };
@@ -116,18 +126,37 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
     const destinationBefore = entry(preTokens, destinationIndex, review.recipient) ?? (pre[destinationIndex] === 0n ? 0n : fail(`${X}_TOKEN_ACCOUNT_MISMATCH`));
     const destinationAfter = entry(postTokens, destinationIndex, review.recipient) ?? fail(`${X}_TOKEN_ACCOUNT_MISMATCH`);
     // A recipient account created by this transaction holds the rent-exempt deposit the owner paid; never more than the reviewed deposit.
+    // Kora (ADR-0010): Kora paid that deposit and the fee; the owner's SOL does not move at all, and the owner's repayment of the reviewed fee
+    // is an expected debit of its fee-token account (the transfer's own source when it is the same account).
     const created = pre[destinationIndex] === 0n ? post[destinationIndex]! : 0n;
+    const feeLeg = gas ? BigInt(gas.amount) : 0n, feeAccount = gas?.feeAccount ?? null, feeFromSource = feeAccount === token.sourceAccount ? feeLeg : 0n;
     base.token = { sourceBefore: sourceBefore.toString(), sourceAfter: sourceAfter.toString(), destinationBefore: destinationBefore.toString(), destinationAfter: destinationAfter.toString() };
-    base.amountSent = (sourceBefore - sourceAfter).toString(); base.amountReceived = (destinationAfter - destinationBefore).toString(); base.accountCreationLamports = created.toString();
-    if (sourceBefore - sourceAfter !== amount) fail(`${X}_OWNER_DELTA_MISMATCH`);
+    base.amountSent = (sourceBefore - sourceAfter - feeFromSource).toString(); base.amountReceived = (destinationAfter - destinationBefore).toString();
+    base.accountCreationLamports = gas ? '0' : created.toString();
+    if (sourceBefore - sourceAfter !== amount + feeFromSource) fail(`${X}_OWNER_DELTA_MISMATCH`);
     if (destinationAfter - destinationBefore !== amount) fail(`${X}_RECIPIENT_DELTA_MISMATCH`);
-    if (created > BigInt(review.maximumAccountCreationLamports)) fail(`${X}_ACCOUNT_DEPOSIT_MISMATCH`);
-    if (ownerPre - ownerPost !== fee + created) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
+    if (!gas && created > BigInt(review.maximumAccountCreationLamports)) fail(`${X}_ACCOUNT_DEPOSIT_MISMATCH`);
+    if (ownerPre - ownerPost !== (gas ? 0n : fee + created)) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
     if (recipientIndex >= 0 && post[recipientIndex] !== pre[recipientIndex]) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
-    // No other owner token account moves.
+    // No other owner token account moves (a separate fee account moves by exactly the repayment).
     for (const balance of [...preTokens, ...postTokens].filter(b => b.owner === review.owner && b.index !== sourceIndex)) {
       const before = preTokens.find(b => b.index === balance.index)?.amount ?? 0n, after = postTokens.find(b => b.index === balance.index)?.amount ?? 0n;
-      if (before !== after) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
+      if (before - after !== (keys[balance.index] === feeAccount ? feeLeg : 0n)) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
+    }
+    if (gas) {
+      // The repayment reached the pinned payment account, exactly the reviewed amount, owned by the pinned payment address; a separate fee
+      // account must actually be the one debited.
+      const payment = at(gas.paymentAccount), credited = (list: TokenBalance[]) => {
+        const found = list.find(b => b.index === payment);
+        if (!found) return 0n;
+        if (found.mint !== gas.token.mint || found.owner !== gas.paymentAddress || found.decimals !== gas.token.decimals) fail(`${X}_KORA_PAYMENT_MISMATCH`);
+        return found.amount;
+      };
+      const debited = (list: TokenBalance[]) => list.find(b => b.index === at(gas.feeAccount) && b.owner === review.owner && b.mint === gas.token.mint)?.amount ?? 0n;
+      if (payment < 0 || credited(postTokens) - credited(preTokens) !== feeLeg || !feeFromSource && debited(preTokens) - debited(postTokens) !== feeLeg)
+        fail(`${X}_KORA_PAYMENT_MISMATCH`);
+      base.tokenFee = { mechanism: gas.mechanism, feePayer: gas.feePayer, feeLamports: fee.toString(), token: gas.token, amount: gas.amount, payee: gas.paymentAddress,
+        paymentAccount: gas.paymentAccount };
     }
     return { ...base, verdict: 'RECONCILED', reason: `${X}_TRANSACTION_AND_BALANCES_VERIFIED` };
   } catch (cause) {
@@ -166,6 +195,7 @@ export function buildSolanaTransferEvidence(input: { id: string; review: SolanaT
   const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : profile.bundleEnvironment;
   const limitations = [walletGuardLimitation(o.walletGuard) ?? 'Balances are finalized transaction metadata for the exact owner-signed reviewed bytes.',
     ...review.token ? ['Token amounts are the token program\'s own balances; native SOL changes are the network fee and any new recipient token-account deposit.'] : [],
+    ...o.tokenFee ? [koraFeeLimitation(o.tokenFee)] : [],
     ...profile.realFunds ? [] : ['Solana Devnet with valueless test tokens (FloFi evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.']];
   const bundle: EvidenceBundle = { schemaVersion: '1.0.0', evidenceBundleId: input.id, version: 1, supersedes: null,
     semanticWorkflowHash: review.manifest.semanticWorkflowHash, artifactSetHash: review.manifest.artifactSetHash, simulationHash: review.manifest.simulationHash,
@@ -173,7 +203,8 @@ export function buildSolanaTransferEvidence(input: { id: string; review: SolanaT
     journalHeadHash: head, observedAt: new Date().toISOString(), environment, outcome: 'RECONCILED',
     receipts: [{ receiptId: `${profile.idPrefix}-transaction`, contentHash: solanaSwapHash(o) }], differences: [],
     reconciliation: { balances: [{ asset, amount: review.token ? o.token!.sourceAfter : o.owner.lamportsAfter }], allowances: [], debt: [], positions: [],
-      fees: [{ asset: { chainId: review.chain, nativeId: 'SOL', decimals: 9 }, amount: o.feeLamports ?? '0' }], residualAssets: [],
+      fees: [{ asset: { chainId: review.chain, nativeId: 'SOL', decimals: 9 }, amount: o.feeLamports ?? '0' },
+        ...o.tokenFee ? [{ asset: { chainId: review.chain, address: o.tokenFee.token.mint, decimals: o.tokenFee.token.decimals }, amount: o.tokenFee.amount }] : []], residualAssets: [],
       ownership: [{ chainId: review.chain, address: review.owner }], limitations },
     evidence: [{ evidenceId: `${profile.idPrefix}-public-observations`, kind: 'EXTERNAL_REFERENCE', contentHash: solanaSwapHash(publicExecution) }] };
   return { bundle, bundleHash: solanaSwapArtifactHash('evidence-bundle', bundle), evidenceClass, publicExecution,

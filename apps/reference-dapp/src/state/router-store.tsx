@@ -10,6 +10,7 @@ import { crossChainRouterMode, routerBegin, routerHandoff, routerInfo, routerInv
   routerSimulate, routerStatus, routerWalletFailure, type RouterRunSummary } from '../app/router-action';
 import { walletSessionStatus, walletSignIn, walletSignInChallenge, walletSignOut } from '../app/wallet-session-action';
 import { ROUTER_NETWORK_OPTIONS, routerNetworkOf, type RouterNetwork } from '../domain/router-authoring';
+import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeReviewChange } from '../domain/bridge-review-recovery';
 import type { RouterRecord, RouterWalletDiagnostic } from '../server/router-service';
 import type { WalletSession } from '../server/wallet-session';
 
@@ -42,6 +43,8 @@ type Store = { network: RouterNetwork; available: boolean; availability: Readonl
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until every network's availability answered. */ availabilityKnown: boolean; executionEnabled: boolean; record: RouterRecord | null;
   busy: boolean; signing: boolean; error: string | null; retired: boolean; recovered: boolean; session: WalletSession | null; sessionReady: boolean;
   runs: readonly RouterRunSummary[]; notice: string | null;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: the last automatic in-place re-quote (the refusal code and the material values it changed), or null. */
+  requoted: { readonly code: string; readonly runId: string; readonly changes: readonly BridgeReviewChange[] } | null;
   simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>; switchNetwork(): Promise<void>;
   signIn(): Promise<void>; signOut(): Promise<void>; open(runId: string): Promise<void>; loadRuns(): Promise<void> };
 const Context = createContext<Store | null>(null);
@@ -68,6 +71,8 @@ function readPointer(network: RouterNetwork): Pointer | null {
   } catch { return null; }
 }
 
+/** The store's own signal that a refused request was re-quoted in place (the fresh Review is valid; nothing was sent). */
+export const REQUOTED_IN_PLACE = /_REQUOTED_REVIEW_REQUIRED$/;
 export function RouterProvider({ children }: { children: ReactNode }) {
   const { t: tr } = useLocale();
   const { runtimeWorkflow } = useWorkflow(), wallet = useBuild009Wallet();
@@ -77,6 +82,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   const [availabilityKnown, setAvailabilityKnown] = useState(false);
   const [recovered, setRecovered] = useState(false), [session, setSession] = useState<WalletSession | null>(null), [sessionReady, setSessionReady] = useState(false);
   const [runs, setRuns] = useState<readonly RouterRunSummary[]>([]), [notice, setNotice] = useState<string | null>(null);
+  const [requoted, setRequoted] = useState<Store['requoted']>(null);
   const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   // The authored bridge decides the network; a recovered run keeps its own; the journey defaults to the testnet.
   const network: RouterNetwork = routerNetworkOf(workflow) ?? (record ? networkOfRecord(record) : 'testnet');
@@ -179,7 +185,10 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }, [wallet.account, session?.account]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; setError(cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
+    // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): a refusal that was re-quoted in place is not an error of the run: its fresh Review is valid and
+    // authorizable. The store keeps no error for it (an error would block that Review); `requoted` carries the original reason and the changes.
+    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; const code = cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED';
+      setError(REQUOTED_IN_PLACE.test(code) ? null : code); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function ownerSession() {
     let current = await wallet.session(); if (!current) current = await wallet.connect();
@@ -227,6 +236,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error('ROUTER_SIMULATION_REQUIRED');
     accept(unwrap(await routerReview(networkOfRecord(record), record.id, record.review.commitment, record.workflow)));
+    // The owner authorized the re-quoted Review: what changed since the earlier one is no longer news.
+    setRequoted(null);
   }); }
   async function observe() { await operation(async () => {
     if (!record) throw new Error('ROUTER_RUN_MISSING');
@@ -289,8 +300,28 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
       diagnostic.code = refused ? sendError!.code === 4001 ? 'ROUTER_REJECTED' : sendError!.code === 4100 ? 'ROUTER_WALLET_UNAUTHORIZED' : 'ROUTER_WALLET_METHOD_UNSUPPORTED' : !diagnostic.invoked ? (cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'ROUTER_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'ROUTER_SUBMISSION_UNKNOWN';
       if (refused) rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: record.owner, network: net, kind: 'REJECTED', code: diagnostic.code, rejectionCode: diagnostic.rejectionCode! });
+      // BUILD-FLOFI-MAINNET-EXEC-002: nothing was sent and the reviewed quote no longer stands (refused at begin, or at the wallet hand-off). The
+      // same run is re-quoted at once (fresh quote, simulation and Review, same workflow); only the material values that moved are shown, and the
+      // owner authorizes the new Review again.
+      // Review round 3: while it re-quotes in place, the store shows no interim record (its cancelled attempt would read "needs attention" for
+      // the seconds the fresh quote takes): only the refreshed run, or, when no re-quote happens, the latest record it read.
+      const requoteInPlace = async (code: string, interim: RouterRecord | null = null) => {
+        if (!REQUOTE_IN_PLACE.test(code)) { if (interim) acceptCurrent(interim); return; }
+        // A status or refresh call that throws (transport) still shows the latest record read, never the attempt as still being prepared.
+        const latestRun = await routerStatus(net, id).catch(cause => { if (interim) acceptCurrent(interim); throw cause; });
+        const fallback = () => { const value = latestRun.ok ? latestRun.value : interim; if (value) acceptCurrent(value); };
+        if (!latestRun.ok || !requotableInPlace(latestRun.value)) { fallback(); return; }
+        const refreshed = await routerRefresh(net, id).catch(cause => { fallback(); throw cause; });
+        if (!refreshed.ok) { fallback(); return; }
+        acceptCurrent(refreshed.value);
+        setRequoted({ code, runId: id, changes: bridgeReviewChanges(record.review, refreshed.value.review) });
+        throw new Error('ROUTER_REQUOTED_REVIEW_REQUIRED', { cause });
+      };
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) { acceptCurrent(failure.value); forgetWalletReport(walletResultStorage(), attemptId); }
+        const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) forgetWalletReport(walletResultStorage(), attemptId);
+        // Review P2: a refusal at the hand-off (the wallet was never asked) is re-quoted in place too, exactly as one at begin.
+        if (!diagnostic.invoked) await requoteInPlace(diagnostic.code, failure.ok ? failure.value : null);
+        else if (failure.ok) acceptCurrent(failure.value);
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
@@ -298,9 +329,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
         const report = await routerReport(net, id, { kind: 'UNKNOWN', code: diagnostic.code, attemptId }); if (report.ok) acceptCurrent(report.value);
         throw new Error('ROUTER_SUBMISSION_UNKNOWN_OBSERVE_EXISTING', { cause });
       }
-      if (cause instanceof Error && /ROUTE_CHANGED|STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message)) {
-        const latestRun = await routerStatus(net, id); if (latestRun.ok) acceptCurrent(latestRun.value);
-      }
+      if (cause instanceof Error) await requoteInPlace(cause.message);
       throw cause;
     }
     for (let i = 0; i < 20; i++) {
@@ -314,6 +343,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     void refreshRuns(net);
   }); }
   return <Context.Provider value={{ network, available, availability, availabilityKnown, executionEnabled, record, busy, signing, error, retired, recovered, session, sessionReady, runs, notice,
+    requoted: requoted && requoted.runId === record?.id ? requoted : null,
     simulate, refresh, review, execute, observe, switchNetwork, signIn, signOut, open, loadRuns }}>
     {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
     <div data-router-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;

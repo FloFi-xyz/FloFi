@@ -45,4 +45,19 @@ describe('board 06: what the owner is authorizing, in plain words', () => {
     expect(reviewBlockView(swapBridgeReview({ groups: base.groups.map(g => ({ ...g, calls: [{ kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', step: 0 }], approvals: 0 })) })).permissions
       .map(p => p.key)).toEqual(['No new token permission']);
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 review round 2: a REQUIRED-sponsored request is not in "Network fee, at most"; an OFFERED one is', () => {
+    const base = swapBridgeReview(), group = base.groups[0]!;
+    const sponsor = (sponsorship: 'OFFERED' | 'REQUIRED') => ({ ...group.fee!, sponsorship });
+    // The wallet may still pay an OFFERED fee (when it cannot take the sponsorship): its ceiling stays.
+    expect(reviewBlockView(swapBridgeReview({ groups: [{ ...group, fee: sponsor('OFFERED') }] })).fee).toEqual({ key: '{0}', parameters: ['0.000454 ETH'], full: null });
+    // REQUIRED: nothing is sent unless FloFi pays it, so the wallet pays none of it.
+    expect(reviewBlockView(swapBridgeReview({ groups: [{ ...group, fee: sponsor('REQUIRED') }] })).fee).toEqual({ key: 'None from your wallet: FloFi offers to pay it', parameters: [], full: null });
+    const second = { ...group, index: 1, steps: [1, 1] as const, fee: { ...group.fee!, maxWei: '1000000000000000' } };
+    expect(reviewBlockView(swapBridgeReview({ mode: 'GROUPED', groups: [{ ...group, steps: [0, 0], fee: sponsor('REQUIRED') }, second] })).fee)
+      .toEqual({ key: '{0}', parameters: ['0.001 ETH'], full: null });
+    expect(reviewBlockView(swapBridgeReview({ mode: 'GROUPED', groups: [{ ...group, steps: [0, 0], fee: sponsor('REQUIRED') }, { ...second, signing: 'WHEN_DUE', calls: null, fee: null }] })).fee)
+      .toEqual({ key: 'Later requests, quoted when due', parameters: [], full: null });
+    expect(reviewBlockView(swapBridgeReview({ mode: 'GROUPED', groups: [{ ...group, steps: [0, 0], fee: sponsor('OFFERED') }, second] })).fee)
+      .toEqual({ key: '{0}', parameters: ['0.001454 ETH'], full: null });
+  });
 });

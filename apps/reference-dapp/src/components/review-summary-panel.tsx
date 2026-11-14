@@ -14,6 +14,8 @@ import { projectSimulation, simulationStatusPresentation, type SimulationSource 
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../domain/review-presentation';
 import { flightRefusal, FLIGHT_REFUSAL_HREF } from '../domain/flight-refusal';
 import { feeShortfallView } from '../domain/approved-ux';
+import { circleUnavailableReason } from '../domain/token-fee';
+import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 
 export type ReviewSummaryPanelProps = {
@@ -61,14 +63,23 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       <dl className="review-panel-rows">
         {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
         {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
-        {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line =>
-          <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+        {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
+          // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
+          const paidTo = paidToPimlicoNote(line);
+          return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
+            ? <dd><span className="numeric">{t(line.value)}</span><small className="review-block-qualifier">{t(paidTo)}</small></dd>
+            : <dd className="numeric">{t(line.value)}</dd>}</div>;
+        })}
+        {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
+        {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+        {step?.details.filter(line => line.label === SIGNATURES_LABEL).map(line => <div key={line.label}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}
         {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.address}`}><dt>{t('Token permission')}</dt>
           <dd>{approval.unlimited ? t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')
             : t('{0} uses up to {1}', t(approval.spender), t(approval.value))}</dd></div>)}
         {typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
       </dl>
-      <p className="review-panel-note">{t('Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
+      <p className="review-panel-note">{t(sim.fees.some(isIncludedNetworkFee) ? 'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.'
+        : 'Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
     </>}
     {technical}
   </section>;
@@ -97,6 +108,8 @@ export function BlockerPanel({ title, message, error, owner, feeShortfall, techn
       <div data-emphasis="attention"><dt>{t('Missing, at least')}</dt><dd className="numeric">{fee.missing} {fee.symbol}</dd></div>
     </dl>}
     <p className="review-panel-note">{fee ? t('Send a little {0} on the {1} network to this wallet, from an exchange or another wallet. Nothing was sent.', fee.symbol, t(fee.network)) : t(message)}</p>
+    {/* ADR-0010: paying this fee in USDC through Circle was considered for this request; why it was not available, in plain words. */}
+    {fee?.alternatives?.length ? <p className="review-panel-note">{t('Paying this fee in USDC through Circle is not available: {0}.', t(circleUnavailableReason(fee.alternatives[0]!)))}</p> : null}
     <div className="review-panel-actions">
       {address && (fee || /network fee/i.test(message)) && <button type="button" className="secondary" onClick={() => void copy()}>{t('Copy address')} <span className="numeric">{`${address.slice(0, 6)}…${address.slice(-4)}`}</span></button>}
       {href && <a className="secondary" href={href}>{t(flight!.action === 'LINK_WALLET' ? 'Open Credentials' : flight!.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}

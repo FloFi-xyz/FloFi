@@ -52,6 +52,7 @@ export * from './solana.js';
 export * from './solana-swap.js';
 export * from './solana-wallet-change.js';
 export * from './solana-wallet-guard.js';
+export * from './kora.js';
 export * from './lighthouse-mock.js';
 export * from './jupiter.js';
 export * from './jupiter-mock.js';
@@ -82,5 +83,9 @@ export * from './universal-artifacts.js';
 export * as erc7710 from './erc7710.js';
 export * as splDelegation from './spl-delegation.js';
 export * as erc4337 from './erc4337.js';
+// BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): Circle's USDC paymaster (pins, permit, paymasterData, the operation check).
+export * as circlePaymaster from './circle-paymaster.js';
+// BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: strict EIP-712 hashing of provider-built typed data (0x Gasless Permit2 / EIP-2612).
+export * as eip712 from './eip712.js';
 export * as eip5792 from './eip5792.js';
 export * as solanaNonce from './solana-nonce.js';

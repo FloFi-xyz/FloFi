@@ -74,7 +74,8 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
       return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };
     // The workflow's listed tokens resolve exactly as on the Canvas (the run's own start does the same).
     await prepareCatalogs(workflow);
-    const runtime = userFundedRuntime(env), engine = deploymentEngineRuntime(env);
+    // ADR-0009: the Review's preparation is a preview (no sponsorship grant), but it says whether FloFi would sponsor the fee (shared state).
+    const runtime = userFundedRuntime(env, fetch, host), engine = deploymentEngineRuntime(env);
     // P0 hotfix: a bridge joins the batch only while its own flow executes on this deployment (code support and the deployment's live mode /
     // owner-execution switch — the policy part is the run's own, checked when it starts); otherwise the Review says why, step by step.
     const stepRefusal = async (step: Parameters<typeof evaluateGates>[0]) => {
@@ -126,12 +127,17 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
       throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
     // Exactly the reviewed workflow and plan: the same canonical workflow hash, the same groups (mechanism and steps) in the same order.
     if (!runMatchesBinding(run, binding)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
-    const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0);
+    // Review C4: the wallet kind this browser reported for the Review (FloFi Wallet, or none reported, is never handed a Circle permit).
+    // Final review (P3): and only with the fee mechanism the Review showed for it — another one is refused before the group is stored, so the run
+    // just started is ended below at once (never a fresh native batch that blocks ending it until it expires).
+    const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0, undefined, parsed.eip155?.wallet, binding.firstGroupGas);
     return { ok: true, value: { approvalId, proposal, prepared } };
   } catch (cause) {
     // Nothing was signed or sent: a started run that could not reach its wallet request is ended (it stays readable as ended).
-    if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); } catch { /* already ended or not created */ } }
-    return failure(cause);
+    let ended = false;
+    if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); ended = true; } catch { /* already ended or not created */ } }
+    const refused = failure(cause);
+    return ended && refused.code === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? { ok: false, code: 'EDITOR_MECHANISM_CHANGED_NOT_STARTED' } : refused;
   }
 
   });

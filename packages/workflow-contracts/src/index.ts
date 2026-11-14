@@ -12,6 +12,7 @@ export { BRIDGE_ACTION, BRIDGE_SOURCE, BRIDGE_DESTINATION, BRIDGE_SOURCE_USDC, B
 export type { BridgeState, BridgeEvent, BridgeJournal } from './bridge.js';
 export * from './router.js';
 export * from './universal-router.js';
+export * from './network-fee.js';
 export type { SemanticWorkflow } from './semantic-workflow.js';
 export type { QuoteStateArtifact } from './quote-state.js';
 export type { ArtifactSet } from './artifact-set.js';

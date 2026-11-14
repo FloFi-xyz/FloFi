@@ -36,4 +36,27 @@ describe('UX-002 workflow header automation control', () => {
     expect(canvas).toContain("onAutomate={onAutomate && workflow.nodes.some(node => !node.actionType.startsWith('mock-')) ? onAutomate : undefined}");
     expect(canvas.match(/Automate this workflow/g) ?? []).toHaveLength(0);
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: a New workflow icon button sits beside the rename control (keyboard-reachable, labelled) only when the shell offers it', () => {
+    const onNew = vi.fn();
+    const html = renderToStaticMarkup(createElement(WorkflowName, { name: 'Your Workflow', rename: vi.fn(), onNew }));
+    expect(html).toMatch(/<\/h2><button type="button" class="workflow-new" aria-label="New workflow" title="New workflow"><svg[^>]*aria-hidden="true">/);
+    expect(renderToStaticMarkup(createElement(WorkflowName, { name: 'Your Workflow', rename: vi.fn() }))).not.toContain('workflow-new');
+    const canvas = readFileSync(new URL('./workflow-canvas.tsx', import.meta.url), 'utf8'), shell = readFileSync(new URL('./app-shell.tsx', import.meta.url), 'utf8');
+    // Hidden while a wallet request is being authorized (the header shows editing paused); the shell's own startNewWorkflow does the reset.
+    expect(canvas).toContain('onNew={runActive ? undefined : onNewWorkflow}');
+    expect(shell).toContain('onNewWorkflow={startNewWorkflow}');
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: the name area is never narrower than its default name (no −8px clamp on the rename button)', () => {
+    const css = readFileSync(new URL('../app/approved-ux-editor.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.build-canvas-head \.canvas-name\{[^}]*flex:0 0 auto[^}]*margin-left:-8px/);
+    expect(css).toMatch(/\.build-canvas-head \.canvas-name \.workflow-rename\{[^}]*margin-left:0;/);
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002 review round 2: on any touch screen New workflow is a 44 px target and rename at least 44 px tall; desktop sizes stay', () => {
+    const css = readFileSync(new URL('../app/approved-ux-editor.css', import.meta.url), 'utf8');
+    const coarse = css.slice(css.indexOf('@media(pointer:coarse){'), css.indexOf('@media(max-width:800px){'));
+    expect(coarse).toContain('.build-canvas-head .canvas-name .workflow-new{width:44px;height:44px}');
+    expect(coarse).toContain('.build-canvas-head .canvas-name .workflow-rename{min-height:44px}');
+    expect(css).toMatch(/^\.build-canvas-head \.canvas-name \.workflow-new\{[^}]*width:32px;height:32px/m);
+    expect(css).toMatch(/^\.build-canvas-head \.canvas-name \.workflow-rename\{[^}]*height:36px/m);
+  });
 });

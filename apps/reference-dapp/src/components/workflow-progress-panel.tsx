@@ -49,7 +49,8 @@ export function SequenceContinuationPanel({ continuation, progress, action }: { 
   </section>;
   const message = c.status === 'SIMULATING' ? t('FloFi is simulating step {0} with current provider data. Nothing is signed or sent.', c.current)
     : c.status === 'READY' ? t('Step {0} is ready. Check what it spends and receives, then authorize it in your wallet. Your wallet asks you to confirm; FloFi never signs for you.', c.current)
-    : c.status === 'SIMULATE' ? t('Step {0} needs its own simulation before you authorize it. Nothing is signed or sent.', c.current)
+    // P0 hotfix (FIX 2): a next step whose simulation was refused says why (its own action stays to retry); it never reads as merely "not started".
+    : c.status === 'SIMULATE' ? c.reason ? t(c.reason) : t('Step {0} needs its own simulation before you authorize it. Nothing is signed or sent.', c.current)
     : c.reason ? t(c.reason) : t('Step {0} cannot continue right now. Nothing was sent.', c.current);
   return <section className="execution-plan panel sequence-continuation" aria-label={t('Next step of this workflow')} data-sequence-step={`${c.current}/${c.total}`} data-continuation-status={c.status}>
     <div className="execution-plan-heading"><div><p className="eyebrow">{t('Step {0} of {1}', c.current, c.total)}</p><h2>{t(c.action)} · {c.network}</h2></div></div>

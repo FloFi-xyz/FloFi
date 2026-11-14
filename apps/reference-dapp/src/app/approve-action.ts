@@ -21,7 +21,8 @@ import { developerApprovalChanged } from '../developer/dispatch';
 import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
+import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
+  workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -167,10 +168,47 @@ export async function startUserFundedWorkflowRun(approvalId: string, profile: un
 
   });
 }
-/** What the owner's wallet signs for one execution group now. */
-export async function prepareUserFundedGroup(approvalId: string, groupIndex: number, handout?: string): Promise<Result<PreparedGroupView>> {
+/** What the owner's wallet signs for one execution group now (`wallet`: this browser's EVM wallet kind, as `evmWalletKind` reports it). */
+export async function prepareUserFundedGroup(approvalId: string, groupIndex: number, handout?: string, wallet?: string | null): Promise<Result<PreparedGroupView>> {
   return withFlightAccess(async () => {
-  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex, handout));
+  return runAction((s, w) => workflowRunUserFundedPrepare(s, approvalId, w, groupIndex, handout, wallet ?? undefined));
+
+  });
+}
+/**
+ * ADR-0010: the owner's USDC permit for a group whose network fee Circle fronts and the owner pays in USDC; returns the operation the owner's wallet
+ * signs next. Gated exactly as a preparation (the permit authorizes nothing to be sent by itself).
+ */
+export async function permitUserFundedGroup(approvalId: string, groupIndex: number, permitSignature: string): Promise<Result<PreparedGroupView>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedPermit(s, approvalId, w, groupIndex, permitSignature));
+
+  });
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner agreed, in FloFi's own Review, to upgrade this FloFi Wallet address to a smart account inside
+ * the group's Circle-paid operation. Recorded before FloFi Wallet is asked anything (its signing gate refuses the authorization without it).
+ */
+export async function consentUserFundedGroupUpgrade(approvalId: string, groupIndex: number): Promise<Result<PreparedGroupView>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedConsent(s, approvalId, w, groupIndex));
+
+  });
+}
+/**
+ * Owner requirement (FloFi Wallet + Circle): the owner answered "Not now" on FloFi's consent card. The group's Circle preparation (nothing of it signed)
+ * is withdrawn and its first owner step is loaded into its own flow, which pays its network fee in ETH exactly as before. Nothing is signed or sent.
+ */
+export async function declineUserFundedGroupCircle(approvalId: string, groupIndex: number): Promise<Result<ClaimedProposal>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedDecline(s, approvalId, w, groupIndex));
+
+  });
+}
+/** Owner requirement (FloFi Wallet + Circle): the owner's EIP-7702 upgrade authorization; returns the group at its USDC permit stage. */
+export async function upgradeUserFundedGroup(approvalId: string, groupIndex: number, signature: string): Promise<Result<PreparedGroupView>> {
+  return withFlightAccess(async () => {
+  return runAction((s, w) => workflowRunUserFundedUpgrade(s, approvalId, w, groupIndex, signature));
 
   });
 }

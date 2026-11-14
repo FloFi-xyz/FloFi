@@ -14,6 +14,10 @@ import { ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_STOCK_TOKEN_REGISTRY, parseRobinhood
 import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc, readPacingFor } from './public-testnet-rpc.ts';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 import { createOfficialCatalogLoader, type RegistryFetch } from './network-catalog.ts';
+import { readZeroExGaslessConfig } from '../gas-abstraction/config.ts';
+import { createZeroExHttp } from './zeroex-gasless/transport.ts';
+import { createZeroExGaslessClient } from './zeroex-gasless/client.ts';
+import type { GaslessRuntime } from './zeroex-gasless/swap.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type RobinhoodMainnetMode = 'live' | 'harness' | 'off';
@@ -60,11 +64,24 @@ export function createRobinhoodCatalogLoader(options: { readonly mode: 'live' | 
     maximumBytes: ROBINHOOD_STOCK_TOKEN_REGISTRY.maximumBytes, userAgent: 'Flofi/BUILD-RH-002 asset registry', unavailableCode: 'STOCK_REGISTRY_UNAVAILABLE',
     parse: (text, fetchedAt) => robinhoodNetworkCatalog(parseRobinhoodStockTokenRegistry(text, fetchedAt)) }, options);
 }
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010 §5): 0x Gasless on Robinhood Chain — off unless `FLOFI_ZEROX_GASLESS=enabled` with a valid
+ * `FLOFI_ZEROX_API_KEY` (server-only). A live deployment reaches only https://api.0x.org; the MOCKED harness only a loopback double
+ * (`FLOFI_ZEROX_API_URL=http://127.0.0.1:<port>`): a mismatch disables 0x Gasless (native gas, with the closed reason), never crosses over.
+ */
+export function robinhoodGaslessRuntime(mode: 'live' | 'harness', env: Env, fetcher: typeof fetch = fetch): GaslessRuntime {
+  const config = readZeroExGaslessConfig(env);
+  if (!config.enabled) return { config, client: null };
+  if (config.loopback !== (mode === 'harness')) return { config: { enabled: false, code: 'ZEROX_CONFIGURATION_INVALID' }, client: null };
+  return { config, client: createZeroExGaslessClient(createZeroExHttp(config, fetcher)) };
+}
 /** The catalog swap runtime of the shared Uniswap swap service on Robinhood Chain. */
 export function robinhoodSwapRuntime(mode: 'live' | 'harness', env: Env, catalogFor: (chain: string) => Promise<AssetCatalog>): CatalogSwapRuntime {
   return { catalogFor, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: robinhoodOwnerExecutionEnabled(mode, env),
     // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the same deployment-fact switch as the other catalog networks.
-    ...env.GRYLOO_DEPLOYMENT_FACT_CACHE === 'off' ? { deploymentFacts: null } : {} };
+    ...env.GRYLOO_DEPLOYMENT_FACT_CACHE === 'off' ? { deploymentFacts: null } : {},
+    // ADR-0010: owner-bound quotes decide how the fee is paid (native gas first; 0x Gasless only when ETH is short and 0x is eligible).
+    gasless: robinhoodGaslessRuntime(mode, env) };
 }
 const loaders = new Map<'live' | 'harness', (chain: string) => Promise<AssetCatalog>>();
 /** The process-wide catalog loader of a mode, shared by the swap, transfer and liquidity services and the authoring catalog. */

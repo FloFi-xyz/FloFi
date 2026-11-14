@@ -33,7 +33,9 @@ const APPROVAL = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3
 // --- EVM -------------------------------------------------------------------------------------------------------------
 type Receipt = Record<string, unknown>;
 export type EvmMock = ReturnType<typeof createEvmMockChain>;
-export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: () => number; tokens: Record<string, number> }) {
+/** BUILD-FLOFI-MAINNET-EXEC-002: a wrapped-native token's `withdraw(uint256)` and how it logs the burn (WETH9 `Withdrawal`, or an aeWETH Transfer burn). */
+const WITHDRAWAL = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65';
+export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: () => number; tokens: Record<string, number>; wrapped?: Record<string, 'WETH9' | 'MINT_BURN'> }) {
   const state = { head: 5_000, safeLag: 2, hashes: new Map<number, string>(), times: new Map<number, number>(), balances: new Map<string, bigint>(), allowances: new Map<string, bigint>(),
     native: new Map<string, bigint>(), nonces: new Map<string, number>(), pending: new Map<string, number>(), code: new Map<string, string>([[d.relayDepository, MOCK_DEPOSITORY_CODE]]),
     receipts: new Map<string, Receipt>(), txs: new Map<string, Record<string, unknown>>(), blockTxs: new Map<number, string[]>(),
@@ -53,6 +55,15 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
     const logs: { address: string; topics: string[]; data: string }[] = [];
     const sel = data.slice(0, 10), arg = (i: number) => data.slice(10 + i * 64, 74 + i * 64);
     if (value > 0n && sel !== '0x49290c1c') return { ok: false, logs };
+    if (sel === '0x2e1a7d4d' && options.wrapped?.[to]) {
+      const amount = BigInt('0x' + arg(0)), balance = s.balances.get(key(to, from)) ?? 0n;
+      if (amount === 0n || balance < amount) return { ok: false, logs };
+      s.balances.set(key(to, from), balance - amount);
+      s.native.set(from, (s.native.get(from) ?? 0n) + amount);
+      logs.push(options.wrapped[to] === 'WETH9' ? { address: to, topics: [WITHDRAWAL, '0x' + addrWord(from)], data: '0x' + word(amount) }
+        : { address: to, topics: [TRANSFER, '0x' + addrWord(from), '0x' + '0'.repeat(64)], data: '0x' + word(amount) });
+      return { ok: true, logs };
+    }
     if (sel === '0x095ea7b3' && options.tokens[to] !== undefined) {
       const spender = '0x' + arg(0).slice(24), amount = BigInt('0x' + arg(1));
       s.allowances.set(`${to}:${from}:${spender}`, amount);
@@ -97,8 +108,9 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
       const full = { hash: h, from, to: tx.to.toLowerCase(), input: tx.data.toLowerCase(), value: tagN(Number(BigInt(tx.value))), nonce: tagN(nonce), chainId: tagN(d.chainId),
         gas: tagN(500_000), maxFeePerGas: tagN(Number(state.baseFee) * 2), maxPriorityFeePerGas: '0x0', type: '0x2' };
       const land = () => {
-        const result = execute(state, from, full.to, full.input, BigInt(tx.value));
+        // The block before keeps the state before this transaction (a historical read at N-1 never sees its effects).
         mine();
+        const result = execute(state, from, full.to, full.input, BigInt(tx.value));
         state.nonces.set(from, nonce + 1);
         state.native.set(from, (state.native.get(from) ?? 0n) - state.gasUsed * state.baseFee);
         const receipt: Receipt = { transactionHash: h, status: result.ok ? '0x1' : '0x0', blockNumber: tagN(state.head), blockHash: hash(state.head), from, to: full.to,
@@ -274,8 +286,12 @@ export function createSolanaMock(s: UniversalSolanaDeployment, options: { mints:
         lastValidBlockHeight: state.height + 150 } };
       case 'simulateTransaction': {
         if (state.simulateFails) throw new Error('MOCK_SIMULATION_UNAVAILABLE');
-        const bytes = fromBase64(p[0], 4096), { message } = parseTransaction(bytes), view = copy(), r = apply(view, message);
+        const bytes = fromBase64(p[0], 4096), { message } = parseTransaction(bytes), view = copy(), payer = parseMessageV0(message).staticKeys[0]!;
+        const funded = state.lamports.get(payer), r = apply(view, message);
         const addrs = ((p[1] as { accounts: { addresses: string[] } }).accounts.addresses);
+        // Like a real node: a fee payer that does not exist, or cannot pay the fee, fails the whole simulation before any instruction runs.
+        if (funded === undefined || funded < r.fee) return { context: { slot: state.slot }, value: { err: funded === undefined ? 'AccountNotFound' : 'InsufficientFundsForFee',
+          logs: [], unitsConsumed: 0, accounts: null } };
         return { context: { slot: state.slot }, value: { err: r.ok ? null : { InstructionError: [2, 'Custom'] }, logs: ['Program log: mock'], unitsConsumed: r.units,
           accounts: addrs.map(a => account(a, view as typeof state)) } };
       }
@@ -314,9 +330,13 @@ export type RelayMock = ReturnType<typeof createRelayMock>;
  * `tamper` lets a test corrupt a response before the adapter sees it.
  */
 export function createRelayMock(options: { now: () => number; feeUnits?: bigint; rate?: (input: string, output: string) => bigint; orderLifetimeSeconds?: () => number;
-  decimals: (chainId: number, currency: string) => number; symbol?: (chainId: number, currency: string) => string }) {
+  decimals: (chainId: number, currency: string) => number; symbol?: (chainId: number, currency: string) => string;
+  /** BUILD-FLOFI-MAINNET-EXEC-002: currencies Relay answers with a NATIVE-paid order (live 2026-11-13 for each network's WETH): the order's input and the
+   * payment are the native coin, and Relay's own steps go through its approval proxy and router (never used by FloFi). */
+  paidInNative?: (chainId: number, currency: string) => boolean }) {
   const status = new Map<string, Record<string, unknown>>(), quotes: Record<string, unknown>[] = [];
   let tamper: ((raw: Record<string, any>) => void) | null = null, refuse: string | null = null, expectedFactor = 10_000n; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let paidInNative = options.paidInNative;
   const network = (chainId: number) => Object.values(UNIVERSAL_NETWORKS).find(n => n.providers.relay.chainId === chainId)!;
   function quote(body: Record<string, any>): Record<string, unknown> { // eslint-disable-line @typescript-eslint/no-explicit-any
     if (refuse) return { __httpStatus: 400, __body: { message: refuse } };
@@ -326,9 +346,10 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
     const rate = options.rate?.(body.originCurrency, body.destinationCurrency) ?? 10n ** 18n;
     const expected = net * rate * 10n ** BigInt(outDec) / 10n ** BigInt(inDec) / 10n ** 18n * expectedFactor / 10_000n;
     const minimum = expected * (10_000n - slip) / 10_000n, deadline = Math.floor(options.now() / 1000) + (options.orderLifetimeSeconds?.() ?? 7 * 86_400);
+    const paidNative = paidInNative?.(body.originChainId, body.originCurrency) ?? false, payCurrency = paidNative ? NATIVE(S) : body.originCurrency;
     const orderData: RelayOrderData = { version: 'v1', solverChainId: 'base', solver: '0xf70da97812cb96acdf810712aa562db8dfa3dbef', salt: '0x' + randomBytes(32).toString('hex'),
-      inputs: [{ payment: { chainId: SLUG(S), currency: body.originCurrency, amount: body.amount, weight: '1' },
-        refunds: [{ chainId: SLUG(S), recipient: body.user, currency: body.originCurrency, minimumAmount: '0', deadline, extraData: '0x' }] }],
+      inputs: [{ payment: { chainId: SLUG(S), currency: payCurrency, amount: body.amount, weight: '1' },
+        refunds: [{ chainId: SLUG(S), recipient: body.user, currency: payCurrency, minimumAmount: '0', deadline, extraData: '0x' }] }],
       output: { chainId: SLUG(Dn), payments: [{ recipient: body.recipient, currency: body.destinationCurrency, minimumAmount: minimum.toString(), expectedAmount: expected.toString() }],
         calls: [], deadline, extraData: '0x' }, fees: [] };
     const orderId = relayOrderId(orderData, slug => slug === 'solana' ? 'solana-vm' : 'ethereum-vm');
@@ -340,7 +361,8 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
       const deposit = { id: 'deposit', kind: 'transaction', items: [{ status: 'incomplete', data: { from: user, to: RELAY_EVM_DEPOSITORY, chainId: S.evmChainId,
         data: native ? encodeRelayDepositNative(user, orderId) : encodeRelayDepositErc20(user, body.originCurrency, amount, orderId), value: native ? body.amount : '0' } }], requestId };
       steps = native ? [deposit] : [{ id: 'approve', kind: 'transaction', items: [{ status: 'incomplete', data: { from: user, to: body.originCurrency, chainId: S.evmChainId,
-        data: encodeErc20ApproveExact(RELAY_EVM_DEPOSITORY, amount), value: '0' } }], requestId }, deposit];
+        data: encodeErc20ApproveExact(paidNative ? '0x5567954cd026cebfe486062cb75848e0f1c12e58' : RELAY_EVM_DEPOSITORY, amount), value: '0' } }], requestId },
+        paidNative ? { ...deposit, items: [{ status: 'incomplete', data: { from: user, to: '0x5567954cd026cebfe486062cb75848e0f1c12e58', chainId: S.evmChainId, data: '0x1234abcd', value: '0' } }] } : deposit];
     } else {
       const ix = relaySolanaDepositInstruction({ owner: body.user, mint: native ? null : body.originCurrency, tokenProgram: native ? null : SOLANA_TOKEN_PROGRAM_ID, amount, orderId });
       steps = [{ id: 'deposit', kind: 'transaction', items: [{ status: 'incomplete', data: { instructions: [{ keys: ix.accounts, programId: ix.programId,
@@ -355,7 +377,7 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
       details: { operation: 'swap', sender: body.user, recipient: body.recipient, currencyIn: { currency: cur(body.originChainId, body.originCurrency, inDec), amount: body.amount },
         currencyOut: { currency: cur(body.destinationChainId, body.destinationCurrency, outDec), amount: expected.toString(), minimumAmount: minimum.toString() }, timeEstimate: 5 },
       protocol: { v2: { orderId, orderData, paymentDetails: { chainId: SLUG(S), depository: S.ecosystem === 'EVM' ? RELAY_EVM_DEPOSITORY : RELAY_SOLANA_DEPOSITORY_PROGRAM,
-        currency: body.originCurrency, amount: body.amount } } } };
+        currency: payCurrency, amount: body.amount } } } };
     tamper?.(raw);
     quotes.push(raw);
     status.set(requestId, { status: 'waiting' });
@@ -367,6 +389,8 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
   };
   return { http, quotes, setStatus: (requestId: string, value: Record<string, unknown>) => status.set(requestId, value),
     setTamper: (f: typeof tamper) => { tamper = f; }, setRefusal: (message: string | null) => { refuse = message; },
+    /** Whether Relay answers a currency with a native-paid order from now on (a provider changing its answer between two quotes). */
+    setPaidInNative: (f: typeof options.paidInNative) => { paidInNative = f; },
     /** Scales the next quotes' expected output (basis points of the normal rate), e.g. to make a re-quote worse than the reviewed minimum. */
     setExpectedFactor: (bps: bigint) => { expectedFactor = bps; } };
 }

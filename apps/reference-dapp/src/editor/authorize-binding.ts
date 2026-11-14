@@ -4,8 +4,16 @@
  * groups. Authorize starts nothing that differs from it (the started run must have exactly this hash and these groups). Pure, so it is tested
  * without a server action.
  */
+// The reviewed mechanism is shared with the platform and the run service (the platform never imports a surface module).
+import { isReviewedGas, type ReviewedGas } from '../workflow-runs/execution-groups.ts';
+export { isReviewedGas, type ReviewedGas };
 export type ReviewedBinding = { readonly owner: string; readonly workflowHash: string;
-  readonly groups: readonly { readonly strategy: string; readonly steps: readonly [number, number] }[] };
+  readonly groups: readonly { readonly strategy: string; readonly steps: readonly [number, number] }[];
+  /**
+   * Final review (P3): who pays the first group's network fee as the Review showed it (the owner's ETH, or the owner's USDC through Circle).
+   * Authorize prepares that group only with the same mechanism (anything else is refused before it is stored). Absent: not bound (an older page).
+   */
+  readonly firstGroupGas?: ReviewedGas };
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** The canonical workflow hash format (`0x` + SHA-256 hex), exactly as `workflow_runs.workflow_hash` stores it. */
@@ -21,7 +29,9 @@ export function bindingOf(value: unknown): ReviewedBinding | null {
     return x && typeof x.strategy === 'string' && steps && steps.length === 2 && steps.every(n => Number.isSafeInteger(n) && (n as number) >= 0)
       ? { strategy: x.strategy, steps: [steps[0] as number, steps[1] as number] as const } : null;
   });
-  return groups.every(Boolean) ? { owner: v.owner.toLowerCase(), workflowHash: v.workflowHash, groups: groups as ReviewedBinding['groups'] } : null;
+  if (v.firstGroupGas !== undefined && !isReviewedGas(v.firstGroupGas)) return null;
+  return groups.every(Boolean) ? { owner: v.owner.toLowerCase(), workflowHash: v.workflowHash, groups: groups as ReviewedBinding['groups'],
+    ...isReviewedGas(v.firstGroupGas) ? { firstGroupGas: v.firstGroupGas } : {} } : null;
 }
 
 /** Whether a started run is exactly the reviewed workflow with the reviewed groups (mechanism and steps, in order). */

@@ -15,7 +15,7 @@ vi.mock('../app/approve-action', () => {
   return { authorizeUserFundedGroup: never, cancelWorkflowRunHandoff: never, prepareUserFundedGroup: never, reportUserFundedBatch: never, resumeWorkflowRunHandoff: never,
     workflowRunStatusHandoff: never };
 });
-vi.mock('./user-funded-browser', () => ({ batchHandout: () => undefined, keepBatchHandout: () => undefined, sendWalletBatch: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn(), walletBatchHashes: vi.fn(), walletProfile: vi.fn() }));
+vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined, sendWalletBatch: vi.fn(), signSolanaGroup: vi.fn(), signUserOperation: vi.fn(), walletBatchHashes: vi.fn(), walletProfile: vi.fn() }));
 vi.mock('./wallet-proof', () => ({ useWalletProof: () => ({ proveEvm: vi.fn() }) }));
 const { EditorWorkflowRunPanel } = await import('./editor-workflow-run');
 const { LocaleProvider } = await import('../i18n/locale');
@@ -648,5 +648,18 @@ describe('round 6 C4: a user-funded step is worded by its group — never "autho
   });
   it('the new labels have their own PT translations', () => {
     for (const text of ['Signed in your wallet', 'Not signed', 'Waiting for your wallet']) expect(translate('PT', text), text).not.toBe(text);
+  });
+});
+
+describe('BUILD-FLOFI-MAINNET-EXEC-002 review round 2: a sponsored batch\'s gas after a reload', () => {
+  it('without the Review in this tab, a reconciled sponsored group says FloFi paid its gas; an owner-paid one keeps "network fees paid" (EN/PT)', () => {
+    const run = runOf({ state: 'COMPLETED', steps: [step(0, 'RECONCILED'), step(1, 'RECONCILED')], groups: [
+      group(0, { state: 'RECONCILED', signed: true, gasPaid: { amount: '2000000000000', unit: 'wei', payer: 'FLOFI_PAYMASTER', sponsored: true } }),
+      group(1, { state: 'RECONCILED', signed: true, gasPaid: { amount: '3000000000000', unit: 'wei', payer: OWNER } })] });
+    const html = render(state({ run, review: null }));
+    expect(html).toContain('Gas paid by FloFi: 0.000002 ETH');
+    expect(html).toContain('network fees paid: 0.000003 ETH');
+    expect(html).not.toContain('network fees paid: 0.000002 ETH');
+    expect(render(state({ run, review: null }), 'PT')).toContain('Gás pago pela FloFi: 0.000002 ETH');
   });
 });

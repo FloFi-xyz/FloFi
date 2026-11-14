@@ -227,8 +227,7 @@ export function compareRoutes(reviewedInput: CanonicalRoute, candidateInput: Can
   const shape = (r: CanonicalRoute) => r.steps.map(s => [s.kind, s.protocol, s.fromChain, s.toChain, s.fromToken, s.toToken]);
   if (!same(shape(a), shape(b))) changes.add('STEPS_CHANGED');
   if (BigInt(b.feeTotal) > BigInt(a.feeTotal)) changes.add('FEES_OUT_OF_BOUNDS');
-  const recipients = (r: CanonicalRoute) => [...new Set(r.fees.map(f => `${f.kind}:${f.recipient ?? ''}`))].sort();
-  if (!same(recipients(a), recipients(b))) changes.add('FEE_RECIPIENT_CHANGED');
+  if (!same(feeRecipients(a), feeRecipients(b))) changes.add('FEE_RECIPIENT_CHANGED');
   if (BigInt(b.minimumOutput) < BigInt(a.minimumOutput)) changes.add('MINIMUM_OUTPUT_DECREASED');
   if (a.slippageBps !== b.slippageBps) changes.add('SLIPPAGE_CHANGED');
   if (!same(a.approval, b.approval)) changes.add('APPROVAL_CHANGED');
@@ -245,28 +244,64 @@ export function compareRoutes(reviewedInput: CanonicalRoute, candidateInput: Can
   }
   return [...changes].sort();
 }
-/** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the provider-fee noise a revalidation tolerates — 1% of the reviewed route fee, at least one base unit. */
-export const PROVIDER_FEE_DRIFT_BPS = 100;
-export type ProviderFeeDrift = { readonly feeIncrease: string; readonly minimumDecrease: string; readonly tolerance: string; readonly withinTolerance: boolean };
 /**
- * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a relayer-priced quote (Across: output = minimum, re-priced every few seconds) moves by a few base units
- * between Review and Execute although nothing material changed. The executed bytes are still the reviewed bytes, so the owner's spend and
- * guaranteed receipt are exactly the reviewed ones; only the fresh quote — evidence that the provider still offers the route — drifted. This
- * is that drift, and whether it stays within `PROVIDER_FEE_DRIFT_BPS` of the reviewed fee. Callers accept it only when it is the sole change.
+ * The parties a route pays fees to. Only a line with a recipient (an integrator fee forwarded to an address) names one; protocol-internal
+ * lines (relayer capital, destination gas, LP) carry `null` and pay no new party. BUILD-FLOFI-MAINNET-EXEC-002: a null line that appears or
+ * disappears between quotes (Across itemizes a zero LP fee in one quote and not the next; LI.FI renames its bridge lines) is not a fee
+ * recipient change — it was reported as FEE_RECIPIENT_CHANGED / ROUTE_CHANGED although no recipient changed.
  */
+export const feeRecipients = (r: { readonly fees: readonly { readonly kind: string; readonly recipient: string | null }[] }): readonly string[] =>
+  [...new Set(r.fees.filter(f => f.recipient !== null).map(f => `${f.kind}:${f.recipient}`))].sort();
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002: the provider re-pricing a revalidation tolerates, as a share of the reviewed route fee (10%), never more than
+ * the owner's own slippage share of the input. History: BUILD-FLOFI-BRIDGE-LIVE-FIX-003 tolerated 1% of the fee; production 2026-11-13
+ * (2 USDC Base → Arbitrum One, Across, fee 0.007296 USDC, tolerance 72 base units) refused runs 10–33 seconds after their Review on a
+ * re-pricing of about 150 base units (2% of the fee), while the very next quote was 13 base units away: Across re-prices its destination-gas
+ * line with the destination gas price and ETH price every few seconds, routinely by a few percent of the fee.
+ *
+ * Why this is safe for the owner: the reviewed bytes are what executes. The owner's debit and the guaranteed output are fixed by the reviewed
+ * calldata, so a re-priced quote never changes what the owner pays or receives. The trade-off is on the fill: the reviewed deposit pays the
+ * relayer up to 10% of its fee less than the current quote asks. Across relayers fill a deposit whose fee stays within their margin; one they
+ * decline is filled late or refunded to the owner on the source chain at its fill deadline (never lost) — so the tolerance is kept to the
+ * routine re-pricing (review: tightened from 25%). A larger move, or one larger than the owner's slippage, is outside the authorized bounds:
+ * the run is re-quoted in place and the owner confirms the changed values.
+ */
+export const PROVIDER_FEE_DRIFT_BPS = 1_000;
+export type ProviderFeeDrift = { readonly feeIncrease: string; readonly minimumDecrease: string; readonly tolerance: string; readonly withinTolerance: boolean };
+/** The fee/minimum drift of a fresh quote against the reviewed route, and whether it stays within the tolerance above. */
 export function providerFeeDrift(reviewedInput: CanonicalRoute, candidateInput: CanonicalRoute): ProviderFeeDrift {
   const a = canonicalizeRoute(reviewedInput), b = canonicalizeRoute(candidateInput);
   const positive = (value: bigint) => value > 0n ? value : 0n;
   const feeIncrease = positive(BigInt(b.feeTotal) - BigInt(a.feeTotal)), minimumDecrease = positive(BigInt(a.minimumOutput) - BigInt(b.minimumOutput));
-  const share = BigInt(a.feeTotal) * BigInt(PROVIDER_FEE_DRIFT_BPS) / 10_000n, tolerance = share > 1n ? share : 1n;
+  const share = BigInt(a.feeTotal) * BigInt(PROVIDER_FEE_DRIFT_BPS) / 10_000n, feeShare = share > 1n ? share : 1n;
+  const ownerSlippage = BigInt(a.inputAmount) * BigInt(a.slippageBps) / 10_000n;
+  const tolerance = feeShare < ownerSlippage ? feeShare : ownerSlippage;
   return { feeIncrease: feeIncrease.toString(), minimumDecrease: minimumDecrease.toString(), tolerance: tolerance.toString(),
     withinTolerance: feeIncrease <= tolerance && minimumDecrease <= tolerance };
 }
+/** The economic changes of a REQUOTE comparison: what a provider re-pricing produces. Every other change is material by itself. */
+export const ECONOMIC_ROUTE_CHANGES: readonly RouteChange[] = Object.freeze(['FEES_OUT_OF_BOUNDS', 'MINIMUM_OUTPUT_DECREASED']);
+/**
+ * BUILD-FLOFI-MAINNET-EXEC-002: how a fresh quote of the reviewed route stands against it at the execution boundary.
+ *  - UNCHANGED: nothing material and no worse price;
+ *  - MARKET_DRIFT_TOLERATED: only re-pricing, within `providerFeeDrift` — the reviewed bytes execute and the drift is recorded;
+ *  - OUTSIDE_AUTHORIZED_BOUNDS: only re-pricing, beyond the tolerance — the economic conditions moved outside what was authorized;
+ *  - MATERIAL_CHANGE: identity, recipient, assets, amounts, contracts, function, value, approvals, provider, protocol, steps, fee recipients,
+ *    slippage or refund changed — never executable under the old authorization.
+ * Both of the last two require a fresh quote, simulation and Review (ROUTE_CHANGED); the route is never substituted silently.
+ */
+export type RouteRevalidation = { readonly outcome: 'UNCHANGED' | 'MARKET_DRIFT_TOLERATED' | 'OUTSIDE_AUTHORIZED_BOUNDS' | 'MATERIAL_CHANGE';
+  readonly changes: readonly RouteChange[]; readonly drift: ProviderFeeDrift };
+export function classifyRouteRevalidation(reviewed: CanonicalRoute, candidate: CanonicalRoute): RouteRevalidation {
+  const changes = compareRoutes(reviewed, candidate, 'REQUOTE'), drift = providerFeeDrift(reviewed, candidate);
+  if (changes.some(change => !ECONOMIC_ROUTE_CHANGES.includes(change))) return { outcome: 'MATERIAL_CHANGE', changes, drift };
+  if (!changes.length) return { outcome: 'UNCHANGED', changes, drift };
+  return { outcome: drift.withinTolerance ? 'MARKET_DRIFT_TOLERATED' : 'OUTSIDE_AUTHORIZED_BOUNDS', changes, drift };
+}
 /** The changes of a REQUOTE comparison that remain once a tolerated provider-fee drift is set aside (empty: the reviewed route still stands). */
 export function materialRouteChanges(reviewed: CanonicalRoute, candidate: CanonicalRoute): readonly RouteChange[] {
-  const changes = compareRoutes(reviewed, candidate, 'REQUOTE');
-  const drift = changes.filter(change => change === 'FEES_OUT_OF_BOUNDS' || change === 'MINIMUM_OUTPUT_DECREASED');
-  return drift.length && drift.length === changes.length && providerFeeDrift(reviewed, candidate).withinTolerance ? [] : changes;
+  const result = classifyRouteRevalidation(reviewed, candidate);
+  return result.outcome === 'UNCHANGED' || result.outcome === 'MARKET_DRIFT_TOLERATED' ? [] : result.changes;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

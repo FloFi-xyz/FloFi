@@ -18,7 +18,7 @@ export type MockedTransferMint = { program: 'spl-token' | 'token-2022'; decimals
 export type MockedTransferTokenAccount = { program: 'spl-token' | 'token-2022'; mint: string; owner: string; amount: bigint; state: 1 | 2; extensions: { type: number; value: Uint8Array }[] };
 type Snapshot = { lamports: Map<string, bigint>; systemData: Map<string, number>; mints: Map<string, MockedTransferMint>; tokens: Map<string, MockedTransferTokenAccount>; executables: Set<string> };
 type Landed = { signature: string; slot: number; bytes: string; err: unknown; fee: bigint; keys: string[]; pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[];
-  finalizedAt: number };
+  finalizedAt: number; /** The block height it landed at (`getBlock`). */ height: number };
 export type MockedTransferOptions = { profile?: SolanaTransferProfile; send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number;
   /** A wrong RPC cluster (genesis hash) for wrong-network tests. */ genesisHash?: string; simulateWithoutFee?: boolean };
 const cloneToken = (t: MockedTransferTokenAccount): MockedTransferTokenAccount => ({ ...t, extensions: t.extensions.map(e => ({ ...e })) });
@@ -72,10 +72,11 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
   }
   const custom = (index: number, error: unknown) => Object.assign(new Error('instruction'), { custom: { InstructionError: [index, error] } });
   /** Execute instructions against a snapshot; returns an error object instead of throwing on program failure. */
-  function execute(s: Snapshot, instructions: SolanaInstruction[], payer: string, chargeFee = true): { err: unknown; fee: bigint; units: number } {
+  function execute(s: Snapshot, instructions: SolanaInstruction[], payer: string, chargeFee = true, signers = 1): { err: unknown; fee: bigint; units: number } {
     let limit = 200_000, price = 0n;
     for (const i of instructions) if (i.programId === P.computeBudget) { if (i.data[0] === 2) limit = new DataView(i.data.buffer, i.data.byteOffset).getUint32(1, true); if (i.data[0] === 3) price = readU64(i.data, 1); }
-    const fee = 5000n + (BigInt(limit) * price + 999_999n) / 1_000_000n;
+    // 5,000 lamports per signature (a Kora transaction carries two: the fee payer's and the owner's) plus the priority fee.
+    const fee = 5000n * BigInt(signers) + (BigInt(limit) * price + 999_999n) / 1_000_000n;
     if ((s.lamports.get(payer) ?? 0n) < fee) return { err: 'InsufficientFundsForFee', fee, units: 0 };
     if (chargeFee) s.lamports.set(payer, s.lamports.get(payer)! - fee);
     const debit = (k: string, n: bigint, index: number) => { const v = s.lamports.get(k) ?? 0n; if (v < n) throw custom(index, { Custom: 1 }); s.lamports.set(k, v - n); };
@@ -141,14 +142,16 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
   function land(txBase64: string): string {
     const d = decode(txBase64), signature = base58Encode(d.signatures[0]!);
     if (state.transactions.has(signature)) return signature;
-    if (!verifyEd25519(d.signatures[0]!, d.message, d.parsed.staticKeys[0]!)) throw Object.assign(new Error('Transaction signature verification failure'), { rpc: -32003 });
+    // Every required signer's slot must hold its valid signature (a Kora transaction: the fee payer's slot 0 and the owner's slot 1).
+    if (d.signatures.length !== d.parsed.header[0] || d.signatures.some((sig, i) => !verifyEd25519(sig, d.message, d.parsed.staticKeys[i]!)))
+      throw Object.assign(new Error('Transaction signature verification failure'), { rpc: -32003 });
     const valid = issued.get(d.parsed.blockhash);
     if (valid === undefined || state.blockHeight > valid) throw Object.assign(new Error('Blockhash not found'), { rpc: -32002 });
-    const keys = d.parsed.staticKeys, before = snapshot(), working = snapshot(), result = execute(working, d.instructions, keys[0]!);
+    const keys = d.parsed.staticKeys, before = snapshot(), working = snapshot(), result = execute(working, d.instructions, keys[0]!, true, d.parsed.header[0]);
     const final = result.err ? (() => { const s = snapshot(); s.lamports.set(keys[0]!, (s.lamports.get(keys[0]!) ?? 0n) - result.fee); return s; })() : working;
     const lamportsAt = (s: Snapshot, k: string) => s.lamports.get(k) ?? 0n;
     state.current = final; state.slot += 1;
-    state.transactions.set(signature, { signature, slot: state.slot, bytes: txBase64, err: result.err, fee: result.fee, keys, pre: keys.map(k => lamportsAt(before, k)),
+    state.transactions.set(signature, { signature, slot: state.slot, height: state.blockHeight, bytes: txBase64, err: result.err, fee: result.fee, keys, pre: keys.map(k => lamportsAt(before, k)),
       post: keys.map(k => lamportsAt(final, k)), preTokens: tokenBalances(before, keys), postTokens: tokenBalances(final, keys),
       finalizedAt: state.blockHeight + (options.confirmationDelay ?? 0) });
     return signature;
@@ -163,14 +166,32 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
         .map(([pubkey]) => ({ pubkey, account: accountValue(state.current, pubkey) })));
       case 'getLatestBlockhash': { const hash = blockhash(state.blockHeight); issued.set(hash, state.blockHeight + 150); return value({ blockhash: hash, lastValidBlockHeight: state.blockHeight + 150 }); }
       case 'getBlockHeight': return state.blockHeight;
+      case 'getBlock': {
+        // Only a slot that holds a landed transaction is a block here (a skipped slot is an RPC error, as on a real node).
+        const t = [...state.transactions.values()].find(x => x.slot === Number(params[0]));
+        if (!t) throw Object.assign(new Error('Slot was skipped, or missing in long-term storage'), { rpc: -32007 });
+        return { blockHeight: t.height, blockTime: 1_790_870_000 + t.slot % 1000, parentSlot: t.slot - 1, blockhash: t.signature.slice(0, 44), previousBlockhash: t.signature.slice(0, 44) };
+      }
       case 'getSlot': return state.slot;
       case 'getFeeForMessage': {
         const message = parseMessageV0(fromBase64(params[0]));
         const instructions = decompileMessageV0(message, {});
-        return value(Number(execute(snapshot(), instructions, message.staticKeys[0]!, false).fee));
+        return value(Number(execute(snapshot(), instructions, message.staticKeys[0]!, false, message.header[0]).fee));
+      }
+      case 'getSignaturesForAddress': {
+        // Newest first, like the RPC: every landed transaction that names the address (ADR-0010 recovery of a lost Kora answer), paged like the
+        // RPC: `before` starts after that signature, `until` stops before it.
+        const config = (params[1] ?? {}) as { limit?: number; before?: string; until?: string };
+        const limit = Math.min(1_000, Number(config.limit ?? 1_000));
+        let listed = [...state.transactions.values()].filter(t => t.keys.includes(params[0] as string)).reverse();
+        if (config.before) { const at = listed.findIndex(t => t.signature === config.before); listed = at < 0 ? [] : listed.slice(at + 1); }
+        if (config.until) { const at = listed.findIndex(t => t.signature === config.until); if (at >= 0) listed = listed.slice(0, at); }
+        return listed.slice(0, limit)
+          .map(t => ({ signature: t.signature, slot: t.slot, err: t.err, memo: null, blockTime: 1_790_900_000 + t.slot % 1000,
+            confirmationStatus: state.blockHeight >= t.finalizedAt ? 'finalized' : 'confirmed' }));
       }
       case 'simulateTransaction': {
-        const d = decode(params[0]), s = snapshot(), result = execute(s, d.instructions, d.parsed.staticKeys[0]!, !options.simulateWithoutFee);
+        const d = decode(params[0]), s = snapshot(), result = execute(s, d.instructions, d.parsed.staticKeys[0]!, !options.simulateWithoutFee, d.parsed.header[0]);
         const addresses = ((params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses) ?? [];
         return value({ err: result.err, logs: ['Program log: MOCKED transfer simulation'], unitsConsumed: Math.max(1, result.units), accounts: addresses.map(k => accountValue(s, k)) });
       }

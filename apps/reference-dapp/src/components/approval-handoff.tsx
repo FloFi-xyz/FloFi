@@ -28,6 +28,8 @@ import { EDITOR_LINK_PREFIX } from '../editor/link-format';
 import type { ApprovalPreview } from '../platform/approve';
 import { APPROVAL_SECRET_FORMAT } from '../platform/approval-link-format';
 import { walletDeepLinks } from '../platform/wallet-links';
+import { CIRCLE_REFUSAL } from '../domain/token-fee';
+import { floFiWalletMessage } from '../wallet/flofi-signing';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from '../state/workflow-store';
@@ -59,6 +61,7 @@ const CLAIM_TEXT: Record<string, string> = {
   EDITOR_WALLET_NOT_IN_ACCOUNT: 'This wallet does not belong to the FloFi account that started this workflow. Connect one of that account\'s wallets.',
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: user-funded groups, in plain words (never a raw code).
   USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE: 'Your wallet does not hold enough of this network\'s native token to pay the fees of this group. Add funds to your own wallet, then try again.',
+  USER_FUNDED_GASLESS_REQUIRES_STEP_MODE: 'Your wallet does not hold enough ETH on Robinhood Chain for the network fee of this batch, so nothing was sent. Run its swaps one step at a time: each swap can then pay its network fee from the tokens it swaps.',
   WORKFLOW_RUN_GROUP_IN_FLIGHT: 'A group of this workflow may still be executing from your wallet. Wait until it is reconciled, then try again.',
   WORKFLOW_RUN_GROUP_SIGNED: 'Something you already signed for this step is never replaced: end this workflow and start a new one.',
   WORKFLOW_RUN_GROUP_NOT_DUE: 'This group can be authorized only when it becomes due, after the previous group reconciled.',
@@ -94,11 +97,14 @@ const CLAIM_TEXT: Record<string, string> = {
   USER_FUNDED_PREPARED_STILL_VALID: 'FloFi already prepared a request for this step that may still be open in your wallet. Confirm it only within 10 minutes of when it was prepared (after that its on-chain deadline refuses it and your wallet would still pay the fee: reject it), or try again once it has expired; FloFi never prepares a second one that could run alongside it.',
   WALLET_BATCH_ANSWER_MISMATCH: 'Your wallet reported a different batch for this step than the one FloFi recorded: it may have run twice. Check your wallet\'s activity; FloFi recorded only the first.',
   WALLET_BATCH_HANDED_OUT_ELSEWHERE: 'This step\'s wallet request was already handed to another browser or wallet, and FloFi gives it only to that one: if it was confirmed there, it may already have executed. Continue in that browser; once the request has expired you can end the workflow here and check your wallet\'s activity.',
+  GAS_SPONSORSHIP_WALLET_UNSUPPORTED: 'Your wallet does not support sponsored network fees on this network, and your balance there cannot pay them, so FloFi did not ask your wallet. Add native gas to this wallet, or use a wallet that supports sponsored fees, then try again.',
   WALLET_ATTEMPT_UNRECORDABLE: 'This browser could not keep a record of the request, so FloFi did not ask your wallet (that record is what stops a request from ever being sent twice). Allow site storage or use another browser, then try again.',
   WALLET_BATCH_ANSWERED_AFTER_STOP: 'Your wallet reported a batch for a step FloFi had already stopped: it may have executed. Check your wallet\'s activity; FloFi could not record it.',
   // The run's window has passed, or ends before a new wallet request could expire: nothing new is prepared, but a request prepared earlier may
   // still be in the wallet (never "nothing was sent"). The Editor's words.
   WORKFLOW_RUN_EXPIRED: 'This workflow\'s time window has ended, or ends too soon for a new wallet request, so FloFi does not prepare another one for it. If a request is still open in your wallet, check your wallet\'s activity; you can end the workflow once no request of it can still execute.',
+  // ADR-0010: a network fee paid from the owner's USDC through Circle — refusals before anything is relayed (the Editor's words).
+  ...CIRCLE_REFUSAL,
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 /**
@@ -368,7 +374,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const proofText = proof.error ? walletProofMessage(proof.error, view.walletNamespace) : secondProof.error ? walletProofMessage(secondProof.error, otherNamespace) : null;
   const errorText = shown === 'APPROVALS_NOT_ENABLED' || shown === 'MCP_OAUTH_NOT_ENABLED'
     ? fromApp ? 'Approvals are unavailable right now. Return to the app that sent this link and try again later.' : 'Approvals are unavailable right now. Return to your assistant and try again later.'
-    : shown ? CLAIM_TEXT[shown] ?? shown : proofText;
+    : shown ? CLAIM_TEXT[shown] ?? floFiWalletMessage(shown) ?? shown : proofText;
   const prove = () => void (view.walletNamespace === 'solana' ? proof.proveSolana(true) : proof.proveEvm(true));
   const facts = <dl className="approval-facts">
     <div><dt>{tr("Network")}</dt><dd>{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr([...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → '))}</dd></div>

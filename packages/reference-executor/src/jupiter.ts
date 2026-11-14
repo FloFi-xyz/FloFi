@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
-import { assertRecordedSolanaWalletGuard, fromBase64, parseTransaction, requireSolanaSwapRuntime, solanaSwapArtifactHash, solanaSwapHash, type LookupTables, type SignedSolanaTransaction,
-  type SolanaSwapReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { assertKoraRelayedAttempt, assertRecordedSolanaWalletGuard, fromBase64, parseTransaction, requireSolanaSwapRuntime, solanaSwapArtifactHash, solanaSwapHash,
+  type KoraGasTerms, type LookupTables, type SignedSolanaTransaction, type SolanaSwapReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 /**
@@ -11,9 +11,18 @@ import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/w
  */
 export type SolanaSwapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'EXPIRED' | 'NOT_FOUND' | 'RECONCILIATION_REQUIRED';
-/** `walletGuard`: the verified Lighthouse assertions the owner's wallet appended before signing (absent when it signed the reviewed bytes). */
+/**
+ * ADR-0010 §4, a Kora transaction's identity: the owner's signature (slot 1) is known and claimed first, the transaction id (Kora's slot-0
+ * signature) only once Kora signed. `signedTransaction`: the fully signed bytes Kora returned, verified (null until then). The owner-signed bytes
+ * stay in the attempt's `transaction`, durable BEFORE Kora is called; a lost answer is recovered by the owner's signature, never re-created.
+ */
+export type SolanaKoraAttempt = { ownerSignature: string; signedTransaction: string | null };
+/**
+ * `walletGuard`: the verified Lighthouse assertions the owner's wallet appended before signing (absent when it signed the reviewed bytes).
+ * `kora`: present exactly for a Kora Review (`review.gas`); `signature` is then the transaction id, null until Kora answered.
+ */
 export type SolanaSwapAttempt = { state: SolanaSwapAttemptState; preparedAtBlockHeight: number; messageHash: string;
-  signature: string | null; transaction: string | null; reconciled: boolean; walletGuard?: SolanaWalletGuard };
+  signature: string | null; transaction: string | null; reconciled: boolean; walletGuard?: SolanaWalletGuard; kora?: SolanaKoraAttempt };
 export type SolanaSwapProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
 export type SolanaSwapRun = { format: 'gryloo.jupiter-run.v1' | 'gryloo.orca-devnet-run.v1'; id: string; review: SolanaSwapReview; provenance: SolanaSwapProvenance;
   authorization: string | null; attempt: SolanaSwapAttempt | null; journal: ExecutionJournal;
@@ -63,10 +72,45 @@ export function prepareSolanaSwapAttempt(run: SolanaSwapRun, blockHeight: number
     executionAttemptId: `${run.id}.swap`, toState: 'PREPARED', recordedAt: new Date().toISOString() }).journal;
   return { ...run, journal, attempt, ownerInitiated: true };
 }
-/** The owner-signed bytes and signature become durable before any broadcast. */
+/**
+ * The owner-signed bytes and signature become durable before any broadcast. ADR-0010: for a Kora Review the verified `signature` is the owner's
+ * (slot 1): it is recorded as the Kora identity, and the transaction id stays unknown until Kora signs (`recordSolanaSwapRelay`).
+ */
 export function recordSolanaSwapSignature(run: SolanaSwapRun, signed: SignedSolanaTransaction): SolanaSwapRun {
   if (run.attempt?.state !== 'PREPARED') fail(code(run, 'ATTEMPT_NOT_PREPARED'));
-  return solanaSwapTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...signed.walletGuard ? { walletGuard: signed.walletGuard } : {} });
+  const guard = signed.walletGuard ? { walletGuard: signed.walletGuard } : {};
+  if (run.review.gas) return solanaSwapTransition(run, 'SUBMITTING', { signature: null, transaction: signed.transaction, ...guard,
+    kora: { ownerSignature: signed.signature, signedTransaction: null } });
+  return solanaSwapTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...guard });
+}
+/**
+ * ADR-0010: Kora's verified answer (or the transaction recovered from the chain by the owner's signature) becomes durable: the transaction id and
+ * the fully signed bytes. Only once, only for the owner-signed bytes already recorded; the attempt's state is unchanged.
+ */
+export function recordSolanaSwapRelay(run: SolanaSwapRun, relayed: { signature: string; transaction: string }): SolanaSwapRun {
+  const attempt = run.attempt, gas = run.review.gas;
+  if (!gas || !attempt?.kora || !attempt.transaction || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state)) return fail(code(run, 'ATTEMPT_NOT_RELAYABLE'));
+  if (attempt.signature) return attempt.signature === relayed.signature && attempt.kora.signedTransaction === relayed.transaction ? run : fail(code(run, 'SIGNATURE_DIVERGENT'));
+  assertKoraRelayedAttempt(attempt.transaction, attempt.kora.ownerSignature, relayed.transaction, relayed.signature, gas.feePayer);
+  return { ...run, attempt: { ...attempt, signature: relayed.signature, kora: { ...attempt.kora, signedTransaction: relayed.transaction } } };
+}
+/**
+ * The attempt's identity fields for its Review: a native attempt has no `kora` and `signature` is the owner's; a Kora attempt records the owner's
+ * signature with the owner-signed bytes, and its transaction id exactly when Kora's verified fully signed bytes are recorded. Shared by the swap and
+ * transfer validators.
+ */
+export function assertSolanaAttemptIdentity(gas: KoraGasTerms | undefined, attempt: { state: string; signature: string | null; transaction: string | null; kora?: SolanaKoraAttempt },
+  corrupt: string): void {
+  const signed = !['PREPARED', 'CANCELLED'].includes(attempt.state);
+  if (attempt.signature !== null && !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attempt.signature)) fail(corrupt);
+  if (!gas) { if (attempt.kora !== undefined || signed !== Boolean(attempt.signature && attempt.transaction)) fail(corrupt); return; }
+  const kora = attempt.kora;
+  if (signed !== Boolean(kora && attempt.transaction)) fail(corrupt);
+  if (!kora) { if (attempt.signature || attempt.transaction) fail(corrupt); return; }
+  if (!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(kora.ownerSignature) || Boolean(attempt.signature) !== Boolean(kora.signedTransaction)) fail(corrupt);
+  // Only these states may still wait for the transaction id (Kora's answer lost, or refused before it signed).
+  if (!attempt.signature && !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'NOT_FOUND'].includes(attempt.state)) fail(corrupt);
+  if (attempt.signature) try { assertKoraRelayedAttempt(attempt.transaction!, kora.ownerSignature, kora.signedTransaction!, attempt.signature, gas.feePayer); } catch { fail(corrupt); }
 }
 /**
  * Journaled signed bytes are the reviewed message, or a wallet guard that still verifies against it and is exactly the recorded one.
@@ -103,11 +147,10 @@ export function validateSolanaSwapRun(run: SolanaSwapRun): void {
   const attempt = run.attempt;
   if (!attempt) { if (run.verdict !== 'PENDING') fail(corrupt); return; }
   const entry = [...run.journal.entries].reverse().find(e => e.entityId === `${run.id}.swap`);
-  const signed = !['PREPARED', 'CANCELLED'].includes(attempt.state);
   if (entry?.toState !== attempt.state || attempt.messageHash !== run.review.messageHash || !Number.isSafeInteger(attempt.preparedAtBlockHeight) ||
-      signed !== Boolean(attempt.signature && attempt.transaction) || attempt.signature !== null && !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attempt.signature) ||
       typeof attempt.reconciled !== 'boolean' || attempt.reconciled !== (attempt.state === 'CONFIRMED') ||
       run.verdict === 'RECONCILED' && !attempt.reconciled) fail(corrupt);
+  assertSolanaAttemptIdentity(run.review.gas, attempt, corrupt);
   assertSignedSolanaAttempt(run.review.message, attempt, run.review.lookupTables, corrupt);
 }
 

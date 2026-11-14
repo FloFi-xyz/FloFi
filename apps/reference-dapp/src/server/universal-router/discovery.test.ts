@@ -51,6 +51,18 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 route discovery', () => {
     expect(result.recommended).toBeNull();
     expect(result.candidates.find(c => c.provider === 'relay')).toMatchObject({ status: 'NO_ROUTE', reason: 'RELAY_NO_ROUTE' });
   });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: Base WETH → Arbitrum One USDC (live Relay answer, 2026-11-13) is executable: FloFi pays the native order itself (unwrap, then deposit)', async () => {
+    const weth = fixture('relay-base-arb-weth'), order = (weth.response as { protocol: { v2: { orderData: { output: { deadline: number } } } } }).protocol.v2.orderData.output;
+    const BASE_WETH: UniversalToken = { chainId: UNIVERSAL_NETWORKS.base.chain, kind: 'TOKEN', address: '0x4200000000000000000000000000000000000006', decimals: 18, symbol: 'WETH' };
+    const discovery = createUniversalDiscovery({ now: () => new Date((order.deadline - 7 * 86_400 + 30) * 1000), http: http({ 'api.relay.link/quote': weth.response,
+      'li.quest': { routes: [] }, 'app.across.to': { __httpStatus: 400, __body: { message: 'No route' } }, 'price-api.mayan.finance': { quotes: [] } }) });
+    const result = await discovery.discover({ source: UNIVERSAL_NETWORKS.base, destination: UNIVERSAL_NETWORKS['arbitrum-one'], inputToken: BASE_WETH, outputToken: ARB_USDC,
+      amount: '900000000000000', slippageBps: 100, owner: String(weth.request!.user), recipient: String(weth.request!.recipient) });
+    // The verified native-ETH order, paid by the owner's own unwrap on the pinned WETH9 and FloFi's exact native deposit (Relay's router is not used).
+    const relay = result.candidates.find(c => c.provider === 'relay');
+    expect(relay).toMatchObject({ status: 'EXECUTABLE', executableBy: 'UNIVERSAL_ROUTER', expectedOutput: '1785466', minimumOutput: '1767612' });
+    expect(result.recommended).toBe(result.candidates.indexOf(relay!));
+  });
   it('an unreachable provider is TEMPORARILY_UNAVAILABLE; Mayan does not serve Robinhood Chain', async () => {
     const discovery = createUniversalDiscovery({ http: http({}) });
     const result = await discovery.discover({ source: UNIVERSAL_NETWORKS.solana, destination: UNIVERSAL_NETWORKS.robinhood, inputToken: SOL_USDC,

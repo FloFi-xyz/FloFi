@@ -4,7 +4,7 @@ import { withFlightAccess, withFlightOwner } from '../server/flight-access';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { isAbsolute, join } from 'node:path';
 import { createPublicTestnetService, publicRecordingEnabled,
-  type PublicTestnetService, type PublicRun, type PublicBegin } from '../server/public-testnet-service';
+  type PublicTestnetService, type PublicRun, type PublicBegin, type PublicGaslessBegin } from '../server/public-testnet-service';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../server/public-testnet-rpc';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
@@ -83,6 +83,30 @@ export async function publicReport(executionId: string, attemptId: string,
   return withFlightOwner(async () => {
   return run('report', [executionId, attemptId, result], service => service.report(id(executionId), attemptId, result));
 
+  });
+}
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010 §5): a reviewed Robinhood Chain swap whose fee 0x takes out of the trade. `begin` hands back
+ * exactly the reviewed typed data for the owner's wallet; `submit` relays the owner's two signatures to 0x once (the server verifies them first);
+ * `report` records a declined prompt. The browser never talks to 0x and never holds the 0x key.
+ */
+const gaslessAttempt = (value: unknown) => typeof value === 'string' && /^rhs-[0-9a-f]{24}\.gasless\.[1-8]$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
+const typedSignature = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]{130}$/.test(value);
+export async function publicBeginGasless(executionId: string, account: string): Promise<PublicResult<PublicGaslessBegin>> {
+  return withFlightAccess(async () => run('beginGasless', [executionId, account], service => service.beginGasless(id(executionId), account)));
+}
+export async function publicSubmitGasless(executionId: string, attemptId: string, signatures: { readonly trade: string; readonly approval: string | null }):
+  Promise<PublicResult<PublicRun>> {
+  return withFlightAccess(async () => {
+    if (!signatures || !typedSignature(signatures.trade) || !(signatures.approval === null || typedSignature(signatures.approval))) return { ok: false, code: 'INPUT_INVALID' };
+    const clean = { trade: signatures.trade, approval: signatures.approval };
+    return run('submitGasless', [executionId, attemptId, clean], service => service.submitGasless(id(executionId), gaslessAttempt(attemptId), clean));
+  });
+}
+export async function publicReportGasless(executionId: string, attemptId: string, result: { readonly kind: 'REJECTED' | 'ABANDONED' }): Promise<PublicResult<PublicRun>> {
+  return withFlightOwner(async () => {
+    const clean = { kind: result?.kind === 'ABANDONED' ? 'ABANDONED' as const : 'REJECTED' as const };
+    return run('reportGasless', [executionId, attemptId, clean], service => service.reportGasless(id(executionId), gaslessAttempt(attemptId), clean));
   });
 }
 export async function publicObserve(executionId: string): Promise<PublicResult<PublicRun>> {

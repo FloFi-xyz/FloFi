@@ -2,9 +2,13 @@
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { assertExecutionEnabled } from './execution-guard.ts';
 
-/** Read methods for simulation/reconciliation. sendTransaction is reachable only from the owner-signed submit path. */
+/**
+ * Read methods for simulation/reconciliation. sendTransaction is reachable only from the owner-signed submit path. `getSignaturesForAddress`
+ * and `getBlock` (ADR-0010 §4, read-only: one block's height, no transactions) recover a Kora transaction whose answer was lost, by the owner's
+ * recorded signature, within the window its blockhash allowed.
+ */
 const methods = new Set(['getGenesisHash', 'getSlot', 'getMultipleAccounts', 'getTokenAccountsByOwner', 'getLatestBlockhash', 'getBlockHeight', 'getFeeForMessage', 'simulateTransaction', 'getMinimumBalanceForRentExemption',
-  'getSignatureStatuses', 'getTransaction', 'sendTransaction']);
+  'getSignatureStatuses', 'getTransaction', 'getSignaturesForAddress', 'getBlock', 'sendTransaction']);
 
 /** An owner-chosen HTTPS RPC may carry its own credential in its path; it is never logged or returned. */
 export function solanaRpcOverride(value: string | undefined, code: string): string | undefined {

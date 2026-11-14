@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { relayOrderId, RELAY_EVM_DEPOSITORY, type RelayOrderData } from '@defi-workflow-engine/reference-compiler';
+import { encodeRelayDepositNative, relayOrderId, RELAY_EVM_DEPOSITORY, type RelayOrderData } from '@defi-workflow-engine/reference-compiler';
 import { UNIVERSAL_NETWORKS, universalRouteCommitment, type UniversalNetworkKey, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { normalizeRelayQuote, normalizeRelayStatus, relayQuoteBody, relayRefusal, type UniversalQuoteRequest } from './relay-provider.ts';
 
@@ -16,6 +16,7 @@ const TOKENS: Record<string, Omit<UniversalToken, 'chainId'>> = {
   '0xaf88d065e77c8cc2239327c5edb3a432268e5831': { kind: 'TOKEN', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6, symbol: 'USDC' },
   '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { kind: 'TOKEN', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6, symbol: 'USDC' },
   '0x5fc5360d0400a0fd4f2af552add042d716f1d168': { kind: 'TOKEN', address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, symbol: 'USDG' },
+  '0x4200000000000000000000000000000000000006': { kind: 'TOKEN', address: '0x4200000000000000000000000000000000000006', decimals: 18, symbol: 'WETH' },
 };
 const KEY: Record<number, UniversalNetworkKey> = { 792703809: 'solana', 8453: 'base', 42161: 'arbitrum-one', 1: 'ethereum', 4663: 'robinhood' };
 const token = (key: UniversalNetworkKey, currency: string): UniversalToken => {
@@ -98,6 +99,42 @@ describe('N — tampered or mismatched quotes are refused before Review', () => 
     refuse('sol-base', raw => { raw.fees.app.amount = '5'; }, 'RELAY_APP_FEE_UNEXPECTED');
     refuse('sol-base', raw => rehash(raw, o => { (o as unknown as { fees: unknown[] }).fees = [{ recipientChainId: 'base', recipient: '0x' + '7'.repeat(40), currencyChainId: 'base',
       currency: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', amount: '1' }]; }), 'RELAY_ORDER_FEES_UNEXPECTED');
+  });
+  it('BUILD-FLOFI-MAINNET-EXEC-002: a wrapped-native input (Base WETH → Arbitrum One USDC, live 2026-11-13) is paid by FloFi itself: the owner\'s unwrap, then the exact native deposit', () => {
+    const { raw, request } = requestOf('base-arb-weth'), payment = raw.protocol.v2.paymentDetails;
+    // The exact divergence production logged as RELAY_PAYMENT_MISMATCH: chain, Depository and amount agree; only the currency is the native asset,
+    // and the "deposit" is a multicall on Relay's approval proxy (unwrap, then depositNative through Relay's router), not FloFi's token deposit.
+    expect(request.inputToken).toMatchObject({ kind: 'TOKEN', symbol: 'WETH' });
+    expect(payment).toEqual({ chainId: 'base', depository: RELAY_EVM_DEPOSITORY, currency: '0x0000000000000000000000000000000000000000', amount: request.amount });
+    expect(raw.protocol.v2.orderData.inputs[0].payment.currency).toBe('0x0000000000000000000000000000000000000000');
+    expect(raw.steps.map((s: Raw) => [s.id, s.items[0].data.to])).toEqual([['approve', '0x4200000000000000000000000000000000000006'],
+      ['deposit', '0x5567954cd026cebfe486062cb75848e0f1c12e58']]);
+    // The verified native order is paid without Relay's proxy or router: WETH stays the owner's asset in the route; the source unwraps exactly the
+    // amount on the pinned WETH9 and deposits exactly that native value for this order id into the Depository (rebuilt by FloFi).
+    const route = normalizeRelayQuote(clone(raw), request), orderId = raw.protocol.v2.orderId.toLowerCase();
+    expect(route.inputToken).toMatchObject({ kind: 'TOKEN', address: '0x4200000000000000000000000000000000000006', symbol: 'WETH' });
+    expect(route.source).toEqual({ ecosystem: 'EVM', chainId: 'eip155:8453', approval: null, unwrap: { token: '0x4200000000000000000000000000000000000006', amount: request.amount },
+      deposit: { to: RELAY_EVM_DEPOSITORY, data: encodeRelayDepositNative(request.owner.toLowerCase(), orderId), value: request.amount } });
+    expect(route.steps.map(step => [step.kind, step.fromToken, step.toToken])).toEqual([['SOURCE_UNWRAP', '0x4200000000000000000000000000000000000006', 'native'],
+      ['BRIDGE', 'native', '0xaf88d065e77c8cc2239327c5edb3a432268e5831']]);
+    expect(route.order.orderId).toBe(orderId);
+    expect(universalRouteCommitment(route)).toMatch(/^0x[0-9a-f]{64}$/);
+    // Read as the native order it is, the router's steps are still refused: no reading of this answer becomes an executable route.
+    const native = { ...request, inputToken: { chainId: request.source.chain, kind: 'NATIVE' as const, address: null, decimals: 18, symbol: 'ETH' } };
+    expect(() => normalizeRelayQuote(clone(raw), native)).toThrow(/^RELAY_(?:INPUT_MISMATCH|STEPS_UNSUPPORTED)$/);
+    // Only that exact shape is paid so: a native payment on another chain, to another Depository or for another amount is a mismatch.
+    refuse('base-arb-weth', raw => { raw.protocol.v2.paymentDetails.amount = '899999999999999'; }, 'RELAY_PAYMENT_MISMATCH');
+    refuse('base-arb-weth', raw => { raw.protocol.v2.paymentDetails.depository = '0x' + '7'.repeat(40); }, 'RELAY_PAYMENT_MISMATCH');
+    refuse('base-arb-weth', raw => { raw.protocol.v2.paymentDetails.chainId = 'arbitrum'; }, 'RELAY_PAYMENT_MISMATCH');
+    // Only the network's pinned WETH is named so: another token (here Base USDC) answered with a native payment stays a mismatch.
+    refuse('base-sol', raw => { raw.protocol.v2.paymentDetails.currency = '0x0000000000000000000000000000000000000000'; }, 'RELAY_PAYMENT_MISMATCH');
+    // Every other payment divergence keeps the generic code: a token answered with another token, another Depository, another amount, another chain.
+    refuse('base-sol', raw => { raw.protocol.v2.paymentDetails.currency = '0x' + '7'.repeat(40); }, 'RELAY_PAYMENT_MISMATCH');
+    refuse('base-sol', raw => { raw.protocol.v2.paymentDetails.depository = '0x' + '7'.repeat(40); }, 'RELAY_PAYMENT_MISMATCH');
+    refuse('base-sol', raw => { raw.protocol.v2.paymentDetails.amount = '19999999'; }, 'RELAY_PAYMENT_MISMATCH');
+    refuse('base-sol', raw => { raw.protocol.v2.paymentDetails.chainId = 'arbitrum'; }, 'RELAY_PAYMENT_MISMATCH');
+    // A native input answered as native stays the verified native route (arb-rh-eth above); a native payment is only refused for a TOKEN request.
+    expect(normalizeRelayQuote(...Object.values(requestOf('arb-rh-eth')) as [Raw, UniversalQuoteRequest]).inputToken.kind).toBe('NATIVE');
   });
   it('maps Relay refusals to stable codes', () => {
     expect(relayRefusal('Insufficient liquidity for this route')).toBe('RELAY_INSUFFICIENT_LIQUIDITY');
