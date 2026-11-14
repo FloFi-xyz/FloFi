@@ -130,21 +130,27 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
     } finally { await t.drop(); }
   });
 
-  it('an expired Circle preparation gives the steps back to their own flows (owner steps again, nothing signed)', async () => {
+  // Changed (final review P3): after the expiry this test loaded the first step at once. The group is a Circle candidate again, so its first
+  // step is asked about before it loads (CIRCLE_ASK_FIRST): no step is loaded, and the owner's browser's check prepares Circle afresh.
+  it('an expired Circle preparation gives the steps back to their own flows (owner steps again, nothing signed), asked about again first', async () => {
     const { t, h, wallets, approval, run, prepare } = await setup();
     try {
       await ready(h, run.runId);
-      await prepare();
+      const first = await prepare();
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED']);
       h.d.advance(9 * 60_000);
       await h.drain(run.runId);
-      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null });
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: 'CIRCLE_ASK_FIRST' });
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['PENDING', 'PENDING']);
       await ready(h, run.runId);
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['READY', 'PENDING']);
-      expect(await currentStep(h.runs, await ownedRun(h.runs, approval.approvalId, wallets), wallets)).toMatchObject({ stepIndex: 0 });
-      // Once a step was loaded into its own flow, the group is never prepared as a Circle operation any more.
-      await expect(prepare()).rejects.toThrow('WORKFLOW_RUN_GROUP_OWNER_STEP');
+      expect(await currentStep(h.runs, await ownedRun(h.runs, approval.approvalId, wallets), wallets)).toBeNull();
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['READY', 'PENDING']);
+      // The owner's browser asks: Circle again, a new preparation (signable once: final review P1).
+      const again = await prepare();
+      expect(again).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { stage: 'AUTHORIZATION' } } });
+      expect(facts(again.prepared).preparationId).not.toBe(facts(first.prepared).preparationId);
+      expect(h.d.evmOwner.signatures).toBe(0);
     } finally { await t.drop(); }
   });
 
@@ -164,6 +170,45 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
       expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null });
       expect(s.circle.control.sends()).toBe(0);
       expect(s.h.d.evmOwner.signatures).toBe(0);
+    } finally { await s.t.drop(); }
+  });
+
+  // A reopened /approve's resume of an applied link (`resumeApproval`) is `continueSequential`, the same load as `workflowRunContinue`.
+  it('final review (P3): a reopened /approve (continue, claim) never loads a FloFi Wallet Circle candidate\'s first step before the browser asked', async () => {
+    const s = await approveStart(0n);
+    try {
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: 'CIRCLE_ASK_FIRST' });
+      const reopened = [() => workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets),
+        () => claimApproval(s.h.surface, s.approval.secret, s.wallets, true, s.h.d.now()), () => workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets)];
+      for (const reopen of reopened) {
+        const r = await reopen() as { view: { workflowRun?: { step: unknown; run: { nextAction: string } } } };
+        expect(r.view.workflowRun?.step).toBeNull();
+        expect(r.view.workflowRun?.run.nextAction).toBe('OWNER_SIGNS_STEP');
+        expect((await s.h.store.steps(s.runId)).map(x => x.state)).toEqual(['READY', 'PENDING']);
+      }
+      // The owner's browser's check (what the panel's Continue runs) still finds Circle: the steps were never loaded into their own flows.
+      expect(await s.prepare()).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { plannedStrategy: 'EVM_OWNER_STEP' } } });
+      expect((await s.h.store.steps(s.runId)).map(x => x.state)).toEqual(['DELEGATED', 'DELEGATED']);
+    } finally { await s.t.drop(); }
+  });
+
+  it('final review (P3): with ETH nothing loads until the browser asked; CIRCLE_NOT_NEEDED lets every later load proceed exactly as before', async () => {
+    const s = await approveStart(10n ** 17n);
+    try {
+      expect((await workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets)).view.workflowRun?.step).toBeNull();
+      await expect(s.prepare()).rejects.toThrow('CIRCLE_NOT_NEEDED');
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: null });
+      const loaded = await claimApproval(s.h.surface, s.approval.secret, s.wallets, true, s.h.d.now()) as { view: { workflowRun?: { step: unknown } } };
+      expect(loaded.view.workflowRun?.step).toMatchObject({ index: 0 });
+      expect((await s.h.store.steps(s.runId))[0]!.state).toBe('AWAITING_OWNER');
+    } finally { await s.t.drop(); }
+  });
+
+  it('final review (P3): another wallet\'s groups never carry CIRCLE_ASK_FIRST, and a reopen loads their steps as before', async () => {
+    const s = await approveStart(0n, { eip155: { wallet: 'INJECTED', atomic: {}, typedData: true } });
+    try {
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', code: null });
+      expect((await workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets)).view.workflowRun?.step).toMatchObject({ index: 0 });
     } finally { await s.t.drop(); }
   });
 

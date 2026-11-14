@@ -35,7 +35,7 @@ import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcom
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
 import { plannedStrategyOf } from '../user-funded/circle-gas.ts';
-import { groupStepsToOwner } from './owner-step-circle.ts';
+import { groupStepsToOwner, plannedCodeAfterCircle } from './owner-step-circle.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -115,8 +115,9 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
         const planned = expired ? plannedStrategyOf(expired.prepared) : null;
         // Owner requirement (FloFi Wallet + Circle): an owner-step group's steps go back to their own flows first (never authorized, never ran).
         if (expired && planned === 'EVM_OWNER_STEP') await groupStepsToOwner(deps.store, run.runId, expired);
-        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null,
-          ...planned && planned !== expired.strategy ? { strategy: planned } : {} });
+        // Final review (P3): such a group is a Circle candidate again (CIRCLE_ASK_FIRST): its first step is asked about before it loads.
+        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null,
+          code: plannedCodeAfterCircle(expired.prepared, null), ...planned && planned !== expired.strategy ? { strategy: planned } : {} });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
       }
       // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.

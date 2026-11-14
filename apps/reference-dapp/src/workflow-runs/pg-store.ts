@@ -17,6 +17,7 @@ import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platfo
 import { WALLET_BATCH_OUTCOME_UNKNOWN, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode, type RunState,
   type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
+import { plannedGroupCode } from './owner-step-circle.ts';
 import type { TokenFeePaid } from '../user-funded/gas-payer.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
@@ -275,9 +276,10 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         [tenantId, runId])).rows[0]!;
       for (const g of groups) {
         const feePayer = run.wallets[g.namespace] ?? refuse(g.namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
+        // Final review (P3): a FloFi Wallet owner-step group whose fee Circle may pay is planned CIRCLE_ASK_FIRST (owner-step-circle.ts).
         await tx.query(`INSERT INTO workflow_run_groups (tenant_id, run_id, group_index, namespace, chain, fee_payer, step_from, step_to, strategy, signing, awaits_delivery,
-            state, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PLANNED', $12, $12)`,
-        [tenantId, runId, g.index, g.namespace, g.chain, feePayer, g.stepFrom, g.stepTo, g.strategy, g.signing, g.awaitsDelivery, now]);
+            state, code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PLANNED', $13, $12, $12)`,
+        [tenantId, runId, g.index, g.namespace, g.chain, feePayer, g.stepFrom, g.stepTo, g.strategy, g.signing, g.awaitsDelivery, now, plannedGroupCode(g)]);
         if (g.strategy !== 'EVM_OWNER_STEP' && g.strategy !== 'SOLANA_OWNER_STEP')
           await tx.query(`UPDATE workflow_run_steps SET state = 'DELEGATED', version = version + 1 WHERE tenant_id = $1 AND run_id = $2 AND step_index BETWEEN $3 AND $4
             AND state = 'PENDING'`, [tenantId, runId, g.stepFrom, g.stepTo]);

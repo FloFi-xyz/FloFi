@@ -16,8 +16,16 @@
  *   asked first    /approve's user-funded start does not load such a group's first step into its own flow at once (`ownerStepCircleFirst`): the
  *                  owner's browser first asks whether Circle pays it (`prepareUserFundedGroup`); CIRCLE_NOT_NEEDED (the owner's ETH pays) or any
  *                  other answer that is not a Circle preparation, and the step is loaded exactly as before.
+ *   every load     final review (P3): the same holds for EVERY load of that step (a reopened /approve's claim, resume or continue), not only the
+ *                  start: such a group is planned with the code CIRCLE_ASK_FIRST, and the run's load path (`currentStep`) never loads its first
+ *                  step while it carries it. The owner's browser's check removes it (`circleAnswered`: CIRCLE_NOT_NEEDED or any other final
+ *                  answer that is not a Circle preparation), as does "Not now" (CIRCLE_FEE_DECLINED); an unsigned Circle preparation that
+ *                  expires or is withdrawn otherwise puts it back (the group is a candidate again). No other wallet, chain or group ever
+ *                  carries it.
  */
 import type { GroupRecord, RunRecord, WorkflowRunStore } from './pg-store.ts';
+import type { ExecutionGroup } from './execution-groups.ts';
+import { plannedStrategyOf } from '../user-funded/circle-facts.ts';
 
 export const GAS_MECHANISM_SWITCHED = 'GAS_MECHANISM_SWITCHED';
 type Store = Pick<WorkflowRunStore, 'steps' | 'stepTransition'>;
@@ -57,4 +65,30 @@ export async function groupStepsToOwner(store: Store, runId: string, g: Group): 
     if (await store.stepTransition(runId, i, ['DELEGATED'], 'BLOCKED', { code: GAS_MECHANISM_SWITCHED }, GAS_MECHANISM_SWITCHED))
       await store.stepTransition(runId, i, ['BLOCKED'], 'PENDING', { code: null }, GAS_MECHANISM_SWITCHED);
   }
+}
+
+/** Final review (P3): the code of a FloFi Wallet owner-step group on a Circle chain whose first step waits for the owner's browser to ask first. */
+export const CIRCLE_ASK_FIRST = 'CIRCLE_ASK_FIRST';
+/** Final review (P3): the closed code an owner's "Not now" leaves on the withdrawn Circle preparation (its group's history only). */
+export const CIRCLE_FEE_DECLINED = 'CIRCLE_FEE_DECLINED';
+/** At the user-funded start: the group's code — CIRCLE_ASK_FIRST only for a FloFi Wallet owner-step group whose fee Circle may pay (`tokenGas`). */
+export const plannedGroupCode = (g: Pick<ExecutionGroup, 'strategy' | 'tokenGas'>): string | null =>
+  g.strategy === 'EVM_OWNER_STEP' && g.tokenGas === 'CIRCLE_USDC_PAYMASTER' ? CIRCLE_ASK_FIRST : null;
+/** Whether `stepIndex`, the first step of an unprepared FloFi Wallet Circle candidate, must not be loaded into its own flow yet. */
+export const circleAskPending = (g: Pick<GroupRecord, 'state' | 'strategy' | 'prepared' | 'code' | 'stepFrom'> | undefined, stepIndex: number): boolean =>
+  g?.state === 'PLANNED' && g.strategy === 'EVM_OWNER_STEP' && g.prepared === null && g.code === CIRCLE_ASK_FIRST && g.stepFrom === stepIndex;
+/**
+ * The code an expired or withdrawn Circle preparation leaves on its group, planned again: a FloFi Wallet owner-step group is a Circle candidate
+ * again (CIRCLE_ASK_FIRST), unless the owner declined it ("Not now": its step then loads into its own flow); any other group: none.
+ */
+export const plannedCodeAfterCircle = (prepared: GroupRecord['prepared'], reason: string | null): string | null =>
+  plannedStrategyOf(prepared) === 'EVM_OWNER_STEP' && reason !== CIRCLE_FEE_DECLINED ? CIRCLE_ASK_FIRST : null;
+/**
+ * The owner's browser asked (`prepareUserFundedGroup` for FloFi Wallet) and the answer was final and not a Circle preparation (CIRCLE_NOT_NEEDED: the
+ * owner's ETH pays; or a refusal that asking again cannot change): the due group's first step may now be loaded into its own flow, exactly as before.
+ */
+export async function circleAnswered(store: Pick<WorkflowRunStore, 'groups' | 'groupTransition'>, run: Pick<RunRecord, 'runId' | 'currentStep'>, groupIndex: number): Promise<void> {
+  const g = (await store.groups(run.runId))[groupIndex];
+  if (!g || !circleAskPending(g, run.currentStep)) return;
+  await store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PLANNED', { code: null }, 'GROUP_CIRCLE_ANSWERED', g.version);
 }
