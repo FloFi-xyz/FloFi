@@ -159,9 +159,12 @@ export function NoteForm({ csrf, incidentId, canWrite }: { csrf: string; inciden
   return <form className="admin-form" onSubmit={submit} aria-label="Add a note">
     <div className="admin-form-row">
       <label className="admin-field" htmlFor="support-note-kind">Type<select id="support-note-kind" value={kind} onChange={event => setKind(event.target.value)}>
-        <option value="FINDING">Investigation finding</option><option value="DECISION">Recovery decision</option>
+        <option value="FINDING">Investigation finding</option><option value="ACKNOWLEDGEMENT">Acknowledged — under investigation</option>
+        <option value="DECISION">Recovery decision</option>
         <option value="ESCALATION">Escalation</option><option value="RESOLUTION">Resolution</option></select></label>
     </div>
+    <p className="admin-diff">An acknowledgement, finding, decision or escalation marks an active incident “Under investigation”. No note changes the transaction outcome,
+      the attention flag or any execution record.</p>
     <label className="admin-field" htmlFor="support-note-text">Note (plain text, 3–500 characters; no keys, passwords, wallet addresses, e-mails or other personal data)
       <textarea id="support-note-text" maxLength={500} value={text} onChange={event => setText(event.target.value)}/></label>
     <div className="admin-actions"><button className="admin-button" type="submit" disabled={busy || text.trim().length < 3}>{busy ? 'Saving…' : 'Add note'}</button></div>

@@ -15,10 +15,15 @@ import { handleAdminChallenge, handleAdminSignIn, type AdminHttpOptions } from '
 import { adminCsrfToken, readAdminSession } from '../session.ts';
 import { supportSearch } from './diagnostics.ts';
 import { discoverIncidents, LIMITS } from './incidents.ts';
+import { ATTENTION_LIMIT } from './lifecycle.ts';
 import { executeRecovery, previewRecovery, recoveryHistory } from './recovery.ts';
 import { RETRY_LIMIT } from './registry.ts';
 import { handleSupport } from './support-http.ts';
-import { incidentDetail } from './view.ts';
+import { incidentDetail, supportView, supportFilters } from './view.ts';
+import { healthReport } from '../health.ts';
+import { healthAttention } from '../attention.ts';
+import { workflowView } from '../analytics/view.ts';
+import { loadExecutionAttention } from './lifecycle.ts';
 
 const ORIGIN = 'https://admin.flofi.example', DOMAIN = 'admin.flofi.example';
 const adminEnv = { FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') };
@@ -53,7 +58,8 @@ async function call(session: Session, body: Record<string, unknown>, extra: { cs
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 type Seed = { runId: string; flow?: string; status?: string; tenant?: string; needsObservation?: boolean; attention?: boolean; hasEvidence?: boolean; owner?: string;
-  workflowId?: string; updatedAt?: Date; attempts?: { state: string; hash?: string | null }[]; work?: { kind: string; state: 'READY' | 'LEASED' | 'DONE' | 'DEAD'; lastError?: string }[] };
+  workflowId?: string; updatedAt?: Date; attempts?: { state: string; hash?: string | null; reconciled?: boolean }[];
+  work?: { kind: string; state: 'READY' | 'LEASED' | 'DONE' | 'DEAD'; lastError?: string }[]; provenance?: string; errorCode?: string | null; evidenceArchived?: boolean };
 async function seed(run: Seed) {
   const tenant = run.tenant ?? 'default', flow = run.flow ?? 'base-swap', name = `${run.runId}.jsonl`, workflowId = run.workflowId ?? `wf-${run.runId}`, bytes = Buffer.from('{}\n');
   await t.db.query(`INSERT INTO workflows (tenant_id, workflow_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [tenant, workflowId]);
@@ -61,12 +67,15 @@ async function seed(run: Seed) {
     [tenant, flow, name, bytes.length, sha('{}\n')]);
   const updated = run.updatedAt ?? new Date(Date.now() - 2 * 3_600_000);
   await t.db.query(`INSERT INTO execution_runs (tenant_id, run_id, namespace, log_name, workflow_id, flow, status, provenance, owner_account, needs_observation, attention_required,
-      has_evidence, log_version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $3, $6, 'PUBLIC_TESTNET', $7, $8, $9, $10, 1, $11, $11)`,
+      has_evidence, log_version, created_at, updated_at, error_code) VALUES ($1, $2, $3, $4, $5, $3, $6, $12, $7, $8, $9, $10, 1, $11, $11, $13)`,
   [tenant, run.runId, flow, name, workflowId, run.status ?? 'SUBMISSION_RESULT_UNKNOWN', run.owner ?? null, run.needsObservation ?? true, run.attention ?? true,
-    run.hasEvidence ?? false, updated]);
+    run.hasEvidence ?? false, updated, run.provenance ?? 'PUBLIC_TESTNET', run.errorCode ?? null]);
   for (const [i, attempt] of (run.attempts ?? [{ state: 'SUBMISSION_RESULT_UNKNOWN' }]).entries())
-    await t.db.query(`INSERT INTO execution_attempts (tenant_id, attempt_id, run_id, step, state, transaction_hash, reconciled) VALUES ($1, $2, $3, 'SWAP', $4, $5, false)`,
-      [tenant, `${run.runId}.${i}`, run.runId, attempt.state, attempt.hash ?? null]);
+    await t.db.query(`INSERT INTO execution_attempts (tenant_id, attempt_id, run_id, step, state, transaction_hash, reconciled) VALUES ($1, $2, $3, 'SWAP', $4, $5, $6)`,
+      [tenant, `${run.runId}.${i}`, run.runId, attempt.state, attempt.hash ?? null, attempt.reconciled ?? false]);
+  if (run.evidenceArchived) await t.db.query(`INSERT INTO evidence_objects (tenant_id, run_id, bundle_hash, content_sha256, byte_length, media_type, store_id, object_key, environment, outcome)
+    VALUES ($1, $2, $3, $4, 10, 'application/json', 'test-store', $5, 'TESTNET_EXECUTED', 'RECONCILED')`, [tenant, run.runId, `0x${sha(`bundle:${run.runId}`)}`, sha(run.runId),
+    `evidence/${run.runId}.json`]);
   for (const item of run.work ?? [{ kind: 'reconcile', state: 'DEAD', lastError: 'OBSERVATION_BUDGET_EXHAUSTED' }]) {
     const done = item.state === 'DONE' || item.state === 'DEAD', leased = item.state === 'LEASED';
     await t.db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, deliveries, last_error, completed_at, lease_owner, lease_token, lease_expires_at)
@@ -294,12 +303,107 @@ describe('search, notes, redaction and bounds', () => {
     const result = await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, 'wf-bounded', new Date(), key);
     expect(result).toMatchObject({ ok: true, truncated: true });
     expect(result.ok && result.hits.length).toBe(25);
-    expect(LIMITS.attention + LIMITS.observing + LIMITS.recent).toBeLessThanOrEqual(1000);
+    expect(ATTENTION_LIMIT + LIMITS.recent).toBeLessThanOrEqual(1000);
   });
   it('stores bounded plain-text notes for OPERATORs only', async () => {
     expect((await call(operator, { action: 'note', incidentId: 'run:sup-idem', kind: 'ESCALATION', text: 'Escalated: provider bug' })).body).toEqual({ ok: true });
     expect((await call(operator, { action: 'note', incidentId: 'run:sup-idem', kind: 'FINDING', text: '<img src=x onerror=alert(1)>' })).body).toEqual({ ok: false, code: 'SUPPORT_NOTE_INVALID' });
     expect((await call(operator, { action: 'note', incidentId: 'DROP TABLE', kind: 'FINDING', text: 'valid text' })).body).toEqual({ ok: false, code: 'ADMIN_REQUEST_INVALID' });
     expect((await audits('SUPPORT_NOTE')).map(a => a.detail)).toEqual([{ incidentId: 'run:sup-idem', noteKind: 'ESCALATION', text: 'Escalated: provider bug' }]);
+  });
+});
+
+describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 addendum: one attention model across the Admin', () => {
+  const hash = (seedText: string) => `0x${sha(seedText)}`;
+  const reconciled = (id: string) => [{ state: 'CONFIRMED', hash: hash(id), reconciled: true }];
+  /** The 2026-11-14 production distribution (12 flagged runs), as database rows; each run's stopped-task history is part of the fixture. */
+  async function seedProductionShape(tenant: string) {
+    for (let i = 0; i < 6; i++) await seed({ tenant, runId: `lc-tn-${i}`, flow: 'base-sepolia-swap', status: 'RECONCILED', needsObservation: false, hasEvidence: true,
+      evidenceArchived: true, attempts: reconciled(`tn${i}`) });
+    await seed({ tenant, runId: 'lc-dv-0', flow: 'solana-devnet-swap', status: 'RECONCILED', provenance: 'PUBLIC_DEVNET', needsObservation: false, hasEvidence: true,
+      evidenceArchived: true, attempts: reconciled('dv0') });
+    await seed({ tenant, runId: 'lc-dv-1', flow: 'orca-liquidity', status: 'RECONCILED', provenance: 'PUBLIC_DEVNET', needsObservation: false, hasEvidence: false,
+      attempts: reconciled('dv1') });
+    await seed({ tenant, runId: 'lc-dv-2', flow: 'solana-devnet-composition', status: 'COMPLETED', provenance: 'PUBLIC_DEVNET', needsObservation: false, hasEvidence: true,
+      attempts: reconciled('dv2'), work: [{ kind: 'evidence.archive', state: 'DEAD', lastError: 'OBSERVATION_BUDGET_EXHAUSTED' }] });
+    await seed({ tenant, runId: 'lc-jup', flow: 'jupiter-swap', status: 'RECONCILED', provenance: 'PUBLIC_MAINNET', errorCode: 'JUPITER_SEMANTIC_EDIT_REQUIRES_REVIEW',
+      needsObservation: false, hasEvidence: true, evidenceArchived: true, attempts: reconciled('jup') });
+    await seed({ tenant, runId: 'xuni-379461c2e3f1807a0dc0455342a51d21', flow: 'crosschain-universal', status: 'SUBMISSION_RESULT_UNKNOWN', provenance: 'PUBLIC_MAINNET',
+      errorCode: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION', attempts: [{ state: 'SUBMISSION_RESULT_UNKNOWN' }] });
+    await seed({ tenant, runId: 'xroute-a09617c2bb8ac5469cab1fc955a3fd32', flow: 'crosschain-router-arbitrum-to-base', status: 'SUBMISSION_RESULT_UNKNOWN',
+      provenance: 'PUBLIC_MAINNET', errorCode: 'ROUTER_TRANSACTION_NOT_OBSERVED', attempts: [{ state: 'SUBMISSION_RESULT_UNKNOWN' }] });
+  }
+  const state = async (tenant: string) => JSON.stringify(await Promise.all([
+    t.db.query(`SELECT run_id, status, error_code, needs_observation, attention_required, has_evidence, updated_at, log_version FROM execution_runs WHERE tenant_id = $1 ORDER BY run_id`, [tenant]),
+    t.db.query(`SELECT id, kind, state, deliveries, last_error, completed_at, available_at FROM work_items WHERE tenant_id = $1 ORDER BY id`, [tenant]),
+    t.db.query(`SELECT run_id, bundle_hash FROM evidence_objects WHERE tenant_id = $1 ORDER BY run_id`, [tenant]),
+    t.db.query(`SELECT attempt_id, state, transaction_hash, reconciled FROM execution_attempts WHERE tenant_id = $1 ORDER BY attempt_id`, [tenant]),
+    t.db.query(`SELECT count(*)::int AS n FROM admin_audit_events`)]).then(results => results.map(r => r.rows)));
+
+  it('9/10/11/14/15. Overview, System Health, Workflows and Support report the same counts, isolate tenants and write nothing', async () => {
+    await t.db.query(`INSERT INTO tenants (tenant_id) VALUES ('lifecycle')`);
+    await seedProductionShape('lifecycle');
+    await seed({ tenant: 'other', runId: 'lc-foreign', provenance: 'PUBLIC_MAINNET' }); // another tenant's active incident
+    const h = { db: t.db, tenantId: 'lifecycle' }, now = new Date(), before = await state('lifecycle'), foreignBefore = await state('other');
+
+    const shared = await loadExecutionAttention(t.db, 'lifecycle', now);
+    const expected = { active: 3, underInvestigation: 0, historical: 1, resolved: 8, activeRealFunds: 2, observationExhausted: 2, unknownOutcome: 2, evidence: 1, ownerReviewPending: 1 };
+    expect(shared).toMatchObject({ flaggedTotal: 12, truncated: false, notesOk: true, counts: expected });
+    const byRun = new Map(shared.entries.map(e => [e.run.runId, e.attention]));
+    expect(byRun.get('xuni-379461c2e3f1807a0dc0455342a51d21')).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['OBSERVATION_EXHAUSTED', 'OUTCOME_UNKNOWN'] });
+    expect(byRun.get('xroute-a09617c2bb8ac5469cab1fc955a3fd32')).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['OBSERVATION_EXHAUSTED', 'OUTCOME_UNKNOWN'] });
+    expect(byRun.get('lc-dv-2')).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['EVIDENCE_ARCHIVE_STOPPED'] });
+    expect(byRun.get('lc-dv-1')).toMatchObject({ lifecycle: 'HISTORICAL' });
+    expect(byRun.get('lc-jup')).toMatchObject({ lifecycle: 'VERIFIED_RESOLVED', ownerReviewPending: true });
+    expect(byRun.has('lc-foreign')).toBe(false);
+
+    // System Health and the Overview's attention list.
+    const report = await healthReport({}, h, now, fetch);
+    expect(report.runs).toMatchObject({ ok: true, value: { flagged: 12, attention: expected } });
+    expect(healthAttention(report).find(item => item.key === 'attention')).toMatchObject({ title: '3 executions with an active incident', tone: 'bad' });
+    // Workflows: the same lifecycle per run, and the range figure counts the mainnet executions with an open incident.
+    const wf = await workflowView(h, { env: 'MAINNET' }, now);
+    expect(wf.ok).toBe(true);
+    if (!wf.ok) return;
+    expect(wf.attention?.counts).toEqual(shared.counts);
+    expect(Object.fromEntries(wf.lifecycleByRun)).toEqual(Object.fromEntries(shared.entries.flatMap(e => e.attention.lifecycle ? [[e.run.runId, e.attention.lifecycle]] : [])));
+    expect(wf.analytics.attention).toBe(2);
+    // Support & Recovery: the open list holds exactly the three active executions; historical and resolved ones are kept, separately.
+    const support = await supportView({}, h, now, supportFilters({}));
+    expect(support.attention?.counts).toEqual(shared.counts);
+    const executions = support.all.filter(i => i.source === 'EXECUTION');
+    expect(executions.filter(i => i.lifecycle === 'ACTIVE').map(i => i.resource.id).sort())
+      .toEqual(['lc-dv-2', 'xroute-a09617c2bb8ac5469cab1fc955a3fd32', 'xuni-379461c2e3f1807a0dc0455342a51d21']);
+    expect(executions.filter(i => i.lifecycle === 'HISTORICAL').length).toBe(1);
+    expect(executions.filter(i => i.lifecycle === 'VERIFIED_RESOLVED').length).toBe(8);
+    expect(support.incidents.every(i => i.lifecycle === 'ACTIVE' || i.lifecycle === 'UNDER_INVESTIGATION')).toBe(true);
+    expect(executions.find(i => i.resource.id === 'lc-jup')).toMatchObject({ kind: 'ATTENTION_HISTORICAL', eligibility: 'NONE', actions: [] });
+    expect((await supportView({}, h, now, supportFilters({ lifecycle: 'HISTORICAL' }))).incidents.map(i => i.resource.id)).toEqual(['lc-dv-1']);
+
+    // Nothing was written: flags, statuses, error codes, tasks, evidence, attempts and the audit trail are exactly as before; the other tenant too.
+    expect(await state('lifecycle')).toBe(before);
+    expect(await state('other')).toBe(foreignBefore);
+  });
+
+  it('12/13. an OPERATOR acknowledgement marks an incident under investigation; a VIEWER cannot; the note never changes the execution', async () => {
+    await seed({ runId: 'lc-ack', provenance: 'PUBLIC_MAINNET', flow: 'crosschain-universal', errorCode: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+    const row = async () => (await t.db.query(`SELECT status, error_code, needs_observation, attention_required, updated_at FROM execution_runs WHERE run_id = 'lc-ack'`)).rows[0];
+    const before = await row();
+    expect((await incidentDetail({}, host(), new Date(), 'run:lc-ack'))).toMatchObject({ incident: { lifecycle: 'ACTIVE' } });
+    expect((await call(viewer, { action: 'note', incidentId: 'run:lc-ack', kind: 'ACKNOWLEDGEMENT', text: 'Checking the source chain' })).status).toBe(403);
+    expect((await incidentDetail({}, host(), new Date(), 'run:lc-ack'))).toMatchObject({ incident: { lifecycle: 'ACTIVE' } });
+    expect((await call(operator, { action: 'note', incidentId: 'run:lc-ack', kind: 'ACKNOWLEDGEMENT', text: 'Checking the source chain' })).body).toEqual({ ok: true });
+    expect((await incidentDetail({}, host(), new Date(), 'run:lc-ack'))).toMatchObject({ incident: { lifecycle: 'UNDER_INVESTIGATION', kind: 'OBSERVATION_STOPPED',
+      outcome: 'Outcome unknown' } });
+    // A later "resolution" note cannot resolve it: the durable state still shows the condition.
+    expect((await call(operator, { action: 'note', incidentId: 'run:lc-ack', kind: 'RESOLUTION', text: 'Looks fine to me' })).body).toEqual({ ok: true });
+    const detail = await incidentDetail({}, host(), new Date(), 'run:lc-ack');
+    expect(detail).toMatchObject({ incident: { lifecycle: 'ACTIVE' } });
+    expect(await row()).toEqual(before);
+    expect(await openItems('lc-ack')).toBe(0);
+    // The lifecycle audit is append-only.
+    await expect(t.db.query(`UPDATE admin_audit_events SET detail = '{}'::jsonb WHERE kind = 'SUPPORT_NOTE'`)).rejects.toThrow();
+    await expect(t.db.query(`DELETE FROM admin_audit_events WHERE kind = 'SUPPORT_NOTE'`)).rejects.toThrow();
+    expect((await audits('SUPPORT_NOTE')).filter(a => a.detail?.incidentId === 'run:lc-ack').map(a => a.detail?.noteKind)).toEqual(['ACKNOWLEDGEMENT', 'RESOLUTION']);
   });
 });

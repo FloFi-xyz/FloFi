@@ -15,9 +15,13 @@ import { attentionClearable, GUIDED_RECOVERY, RECOVERY_ACTION_IDS, RECOVERY_ACTI
 const now = new Date('2026-11-14T12:00:00.000Z'), hour = 3_600_000;
 const task = (kind: string, state: WorkFact['state'], lastError: string | null = null, id = '7'): WorkFact =>
   ({ id, kind, state, lastError, deliveries: 500, createdAt: new Date(now.getTime() - 9 * 24 * hour), completedAt: state === 'DONE' || state === 'DEAD' ? now : null });
-const facts = (over: Partial<RunRecoveryFacts> = {}): RunRecoveryFacts => ({ runId: 'bas-1', flow: 'base-swap', status: 'SUBMISSION_RESULT_UNKNOWN', needsObservation: true,
-  attentionRequired: true, hasEvidence: false, evidenceArchived: false, logVersion: 4, latest: { reconcile: task('reconcile', 'DEAD', 'OBSERVATION_BUDGET_EXHAUSTED') },
-  unresolvedDeadKinds: ['reconcile'], recentRecoveries: 0, ...over });
+/** Like the database: every kind whose newest task is DEAD has a stopped history (stopped items are never pruned). */
+const facts = (over: Partial<RunRecoveryFacts> = {}): RunRecoveryFacts => {
+  const latest = over.latest ?? { reconcile: task('reconcile', 'DEAD', 'OBSERVATION_BUDGET_EXHAUSTED') };
+  const stoppedKinds = Object.values(latest).filter(t => t.state === 'DEAD').map(t => ({ kind: t.kind, count: 1, lastError: t.lastError, lastStoppedAt: now, newestState: 'DEAD' as const }));
+  return { runId: 'bas-1', flow: 'base-swap', status: 'SUBMISSION_RESULT_UNKNOWN', needsObservation: true, attentionRequired: true, hasEvidence: false, evidenceArchived: false,
+    logVersion: 4, unresolvedDeadKinds: ['reconcile'], recentRecoveries: 0, ...over, latest, stoppedKinds: over.stoppedKinds ?? stoppedKinds };
+};
 const run = (over: Partial<ExecutionSnapshot> = {}): ExecutionSnapshot => ({ runId: 'bas-1', workflowId: 'wf-1', flow: 'base-swap', status: 'SUBMISSION_RESULT_UNKNOWN',
   provenance: 'PUBLIC_MAINNET', errorCode: null, needsObservation: true, attentionRequired: true, hasEvidence: false, createdAt: new Date(now.getTime() - 10 * 24 * hour),
   updatedAt: new Date(now.getTime() - hour), attempts: [{ step: 'SWAP', state: 'SUBMISSION_RESULT_UNKNOWN', hash: false, reconciled: false }], journalAuthorized: true,

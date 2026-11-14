@@ -30,8 +30,18 @@ export function healthAttention(report: HealthReport): AttentionItem[] {
     if (queue.value.expiredLeases) items.push({ key: 'leases', tone: 'warn', title: `${plural(queue.value.expiredLeases, 'expired lease')} in the work queue`, href: health, action: 'View queue' });
   }
   if (!runs.ok) items.push({ key: 'runs', tone: 'warn', title: 'Executions under observation could not be checked', detail: runs.code, href: health, action: 'View health' });
-  else if (runs.value.attention) items.push({ key: 'attention', tone: 'warn', title: `${plural(runs.value.attention, 'execution')} flagged for attention`,
-    detail: 'Uncertain or flagged by the worker; review them before anything else.', href: '/admin/workflows', action: 'Review executions' });
+  else {
+    const a = runs.value.attention, open = a.active + a.underInvestigation;
+    if (open) items.push({ key: 'attention', tone: a.activeRealFunds ? 'bad' : 'warn',
+      title: `${plural(open, 'execution')} with an active incident${a.underInvestigation ? ` (${a.underInvestigation} under investigation)` : ''}`,
+      detail: [a.unknownOutcome && `${a.unknownOutcome} outcome unknown`, a.observationExhausted && `${a.observationExhausted} observation exhausted`,
+        a.notScheduled && `${a.notScheduled} check not scheduled`, a.partial && `${a.partial} partial`, a.unclassified && `${a.unclassified} unclassified`,
+        a.evidence && `${a.evidence} evidence archiving stopped`, a.tasks && `${a.tasks} stopped or retrying task`, a.activeRealFunds && `${a.activeRealFunds} on mainnet or an unrecognised network`]
+        .filter(Boolean).join(' · ') || 'Review them before anything else.',
+      href: '/admin/support?lifecycle=OPEN', action: 'Open Support & Recovery' });
+    if (runs.value.truncated) items.push({ key: 'attention-partial', tone: 'warn', title: 'Execution attention was only partly classified',
+      detail: 'More candidate executions exist than one check reads; the counts shown are lower bounds.', href: '/admin/support', action: 'Open Support & Recovery' });
+  }
   if (!scheduler.ok) items.push({ key: 'scheduler', tone: 'warn', title: 'The automation scheduler could not be checked', detail: scheduler.code, href: health, action: 'View health' });
   else if (scheduler.value.installed && scheduler.value.overdueRules) items.push({ key: 'rules', tone: 'warn',
     title: `${plural(scheduler.value.overdueRules, 'active automation rule')} not evaluated on time`, detail: 'No scheduler is evaluating them (the worker needs FLOFI_AUTOMATIONS=enabled).',
@@ -66,5 +76,7 @@ export function healthStatus(report: HealthReport): { readonly tone: Tone; reado
   const items = healthAttention(report);
   if (items.some(item => item.tone === 'bad')) return { tone: 'bad', value: 'Action needed', detail: `${plural(items.length, 'issue')} found` };
   if (items.length) return { tone: 'warn', value: 'Needs a look', detail: `${plural(items.length, 'item')} to review` };
-  return { tone: 'ok', value: 'Operating normally', detail: 'Database, queue and scheduler checks passed' };
+  const historical = report.runs.ok ? report.runs.value.attention.historical : 0;
+  return { tone: 'ok', value: 'Operating normally', detail: 'Database, queue and scheduler checks passed'
+    + (historical ? ` · ${plural(historical, 'historical attention flag')} (not verified resolved)` : '') };
 }

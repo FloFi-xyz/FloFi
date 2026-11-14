@@ -7,6 +7,7 @@ import { adminPage } from '../../admin/page-context';
 import { copilotStatus, healthAttention, healthStatus } from '../../admin/attention';
 import { copilotSettingsView } from '../../admin/copilot-view';
 import { healthReport } from '../../admin/health';
+import { loadExecutionAttention } from '../../admin/support/lifecycle';
 import { AnalyticsFilters } from '../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../components/admin/admin-shell';
 import { DataNotes } from '../../components/admin/data-notes';
@@ -36,10 +37,10 @@ function donutSegments(rows: WorkflowAnalytics['networks']['rows']): { segments:
 }
 
 /** BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): status at a glance, then what needs attention, each linking to where it is handled. */
-function Glance({ health, copilot, attention }: { health: Awaited<ReturnType<typeof healthReport>> | null; copilot: Awaited<ReturnType<typeof copilotSettingsView>> | null;
-  attention: number | null }) {
+function Glance({ health, copilot }: { health: Awaited<ReturnType<typeof healthReport>> | null; copilot: Awaited<ReturnType<typeof copilotSettingsView>> | null }) {
   const system = health ? healthStatus(health) : { tone: 'warn' as const, value: 'Unknown', detail: 'The health checks could not run' };
   const ai = copilot ? copilotStatus(copilot) : { tone: 'warn' as const, value: 'Unknown', detail: 'AI settings could not be read', items: [] };
+  const runs = health?.runs ?? null, open = runs?.ok ? runs.value.attention.active + runs.value.attention.underInvestigation : null;
   const items = [...health ? healthAttention(health) : [{ key: 'health', tone: 'warn' as const, title: 'The health checks could not run', href: '/admin/health', action: 'View health' }],
     ...ai.items];
   return <section className="admin-card" aria-labelledby="admin-glance">
@@ -47,8 +48,11 @@ function Glance({ health, copilot, attention }: { health: Awaited<ReturnType<typ
     <div className="admin-tiles">
       <StatusTile label="System health" tone={system.tone} value={system.value} detail={system.detail} href="/admin/health"/>
       <StatusTile label="AI Copilot" tone={ai.tone} value={ai.value} detail={ai.detail} href="/admin/ai-settings"/>
-      <StatusTile label="Executions needing attention" tone={attention === null ? 'warn' : attention ? 'warn' : 'ok'}
-        value={attention === null ? 'Unknown' : attention ? fmt(attention) : 'None'} detail="In the selected range and environment" href="/admin/workflows"/>
+      <StatusTile label="Active execution incidents" tone={open === null ? 'warn' : open ? 'warn' : 'ok'}
+        value={open === null ? 'Unknown' : open ? fmt(open) : 'None'} href="/admin/support?lifecycle=OPEN"
+        detail={runs?.ok ? `All environments, all time${runs.value.attention.underInvestigation ? ` · ${fmt(runs.value.attention.underInvestigation)} under investigation` : ''}`
+          + (runs.value.attention.historical ? ` · ${fmt(runs.value.attention.historical)} historical flag${runs.value.attention.historical === 1 ? '' : 's'} (separate)` : '')
+          + (runs.value.truncated ? ' · at least' : '') : 'Could not be checked'}/>
     </div>
     <div style={{ marginTop: 14 }}><AttentionList items={items} allClear="Nothing needs your attention right now."/></div>
   </section>;
@@ -62,9 +66,11 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
   const params: AnalyticsParams = Object.fromEntries((['range', 'from', 'to', 'env', 'action', 'outcome'] as const).flatMap(key => {
     const value = param(search[key]); return value ? [[key, value]] : []; }));
   // BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): the same probes System Health and AI Settings show, summarized first ("is everything normal?").
-  const [view, health, copilot] = await Promise.all([workflowView(page.host, params, page.now), healthReport(process.env, page.host, page.now).catch(() => null),
+  // One read of the shared execution-attention model feeds both the glance (all time) and the range figures, so they cannot disagree.
+  const shared = loadExecutionAttention(page.host.db, page.host.tenantId, page.now).catch(() => null);
+  const [view, health, copilot] = await Promise.all([workflowView(page.host, params, page.now, shared), healthReport(process.env, page.host, page.now, fetch, shared).catch(() => null),
     copilotSettingsView(process.env, page.host).catch(() => null)]);
-  const glance = <Glance health={health} copilot={copilot} attention={view.ok ? view.analytics.attention : null}/>;
+  const glance = <Glance health={health} copilot={copilot}/>;
   if (!view.ok) return <AdminShell active="overview" context={page.context} title="Overview">{glance}<p className="admin-alert" data-tone="bad">Analytics are unavailable ({view.code}).</p></AdminShell>;
   const a = view.analytics, env = ENVIRONMENT_LABELS[view.environment];
   const { segments, named } = donutSegments(a.networks.rows);
@@ -89,7 +95,8 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
         <Kpi label="Failed (confirmed)" value={fmt(a.outcomes.FAILED)} tone={a.outcomes.FAILED ? 'bad' : undefined}/>
         <Kpi label="Partial" value={fmt(a.outcomes.PARTIAL)} tone={a.outcomes.PARTIAL ? 'warn' : undefined}/>
         <Kpi label="In progress" value={fmt(a.outcomes.IN_PROGRESS)} note={a.awaitingSignature ? `+${fmt(a.awaitingSignature)} awaiting a wallet signature` : undefined}/>
-        <Kpi label="Needs attention" value={fmt(a.attention)} tone={a.attention ? 'warn' : undefined} note={`${fmt(a.outcomes.UNCERTAIN)} uncertain`}/>
+        <Kpi label="Active incidents" value={fmt(a.attention)} tone={a.attention ? 'warn' : undefined}
+          note={`${view.attention ? 'in this range and environment' : 'classifier only — attention model unavailable'} · ${fmt(a.outcomes.UNCERTAIN)} outcome unknown`}/>
         <Kpi label="Success rate" value={pct(a.rates.success)} note={a.rates.denominator ? `of ${fmt(a.rates.denominator)} finished` : 'no finished executions'}/>
         <Kpi label="Failure rate" value={pct(a.rates.failure)} note="confirmed failures only"/>
       </div>

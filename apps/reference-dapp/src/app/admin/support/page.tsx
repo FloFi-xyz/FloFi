@@ -2,7 +2,7 @@
 import { adminPage } from '../../../admin/page-context';
 import { CATEGORIES, CATEGORY_LABELS } from '../../../admin/support/codes';
 import { incidentStatus, STATUS_LABELS, type Note } from '../../../admin/support/diagnostics';
-import { FEATURE_LABELS, SEVERITY_LABELS, type Incident } from '../../../admin/support/incidents';
+import { FEATURE_LABELS, INCIDENT_LIFECYCLE_LABELS, SEVERITY_LABELS, type Incident } from '../../../admin/support/incidents';
 import { ELIGIBILITY_LABELS, ELIGIBILITY_ORDER, RECOVERY_ACTIONS, type EligibilityState } from '../../../admin/support/registry';
 import { HISTORY_ROWS, supportFilters, supportView } from '../../../admin/support/view';
 import { AdminShell, AdminUnavailable } from '../../../components/admin/admin-shell';
@@ -21,6 +21,9 @@ const ENVIRONMENT: Record<string, string> = { MAINNET: 'Mainnet', TESTNET: 'Test
 const SOURCE_LABELS: Record<string, string> = { EXECUTION: 'Executions', BACKGROUND_TASK: 'Background tasks', WORKFLOW_RUN: 'Multi-step workflows',
   DELEGATED_EXECUTION: 'Delegated executions', PLATFORM: 'System Health', AI_COPILOT: 'AI Copilot' };
 const incidentHref = (id: string) => `/admin/support/incident?id=${encodeURIComponent(id)}`;
+const LIFECYCLE_TONE: Record<Incident['lifecycle'], Tone> = { ACTIVE: 'warn', UNDER_INVESTIGATION: 'info', HISTORICAL: 'neutral', VERIFIED_RESOLVED: 'ok', FINAL: 'neutral' };
+const LIFECYCLE_OPTIONS = [['OPEN', 'Open (active + under investigation)'], ['ACTIVE', 'Active'], ['UNDER_INVESTIGATION', 'Under investigation'],
+  ['HISTORICAL', 'Historical attention'], ['VERIFIED_RESOLVED', 'Verified resolved'], ['FINAL', 'Final failures (informational)'], ['ALL', 'All']] as const;
 
 function IncidentList({ incidents, notes }: { incidents: readonly Incident[]; notes: ReadonlyMap<string, readonly Note[]> }) {
   return <ul className="admin-incidents">{incidents.map(incident => {
@@ -39,6 +42,7 @@ function IncidentList({ incidents, notes }: { incidents: readonly Incident[]; no
           <span aria-hidden="true">·</span><span>Outcome: {incident.outcome}</span>{incident.funds !== 'NONE' ? <><span aria-hidden="true">·</span><strong>{FUNDS[incident.funds]}</strong></> : null}</div>
       </div>
       <div className="admin-incident-side">
+        <Status tone={LIFECYCLE_TONE[incident.lifecycle]}>{INCIDENT_LIFECYCLE_LABELS[incident.lifecycle]}</Status>
         <Status tone={ELIGIBILITY_TONE[incident.eligibility]}>{ELIGIBILITY_LABELS[incident.eligibility]}</Status>
         {status !== 'NEW' ? <span className="admin-diff">{STATUS_LABELS[status]}</span> : null}
         <a className="admin-button" data-size="sm" href={incidentHref(incident.id)} aria-label={`Diagnose: ${incident.title}, ${incident.component}`}>Diagnose</a>
@@ -57,8 +61,9 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
   const raw = await searchParams, params = Object.fromEntries(Object.entries(raw).flatMap(([k, v]) => typeof v === 'string' ? [[k, v]] : []));
   const filters = supportFilters(params), view = await supportView(process.env, page.host, page.now, filters);
   const { counts, historyCounts } = view, unavailable = view.sources.filter(source => !source.ok), truncated = view.sources.filter(source => source.truncated);
-  const escalations = view.all.filter(incident => incident.eligibility === 'ENGINEERING');
-  const filtered = Object.entries(filters).some(([key, value]) => value !== (key === 'range' ? 'all' : 'ALL'));
+  const escalations = view.all.filter(incident => incident.eligibility === 'ENGINEERING' && (incident.lifecycle === 'ACTIVE' || incident.lifecycle === 'UNDER_INVESTIGATION'));
+  const filtered = Object.entries(filters).some(([key, value]) => value !== (key === 'range' ? 'all' : key === 'lifecycle' ? 'OPEN' : 'ALL'));
+  const attention = view.attention;
   const select = (id: string, label: string, name: keyof typeof filters, options: readonly (readonly [string, string])[]) =>
     <label htmlFor={id}>{label}<select id={id} name={name} defaultValue={filters[name]}>{options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>;
   return <AdminShell active="support" context={page.context} title="Support & Recovery"
@@ -68,12 +73,13 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
       {unavailable.map(source => `${SOURCE_LABELS[source.source]} (${source.code})`).join(', ')}. The list below is incomplete.</p> : null}
     {truncated.length ? <p className="admin-alert" data-tone="warn">More records exist than were read: {truncated.map(source => SOURCE_LABELS[source.source]).join(', ')}
       {' '}reached their read limit, so some incidents are not listed.</p> : null}
-    {!view.notesOk ? <p className="admin-alert" data-tone="warn">Incident notes could not be read: every incident shows as New and the Status filter is not reliable.</p> : null}
+    {!view.notesOk ? <p className="admin-alert" data-tone="warn">Incident notes could not be read: every incident shows as New and the Notes filter is not reliable; nothing can show as under investigation.</p> : null}
 
     <Section id="support-overview" title="Overview" description={`Current incidents derived from FloFi’s durable state, checked ${when(view.checkedAt)}. Counts combine
       mainnet, test networks and mocked runs; each incident shows its environment, and only mainnet (or unrecognised) runs are marked as possibly involving real funds.`}>
       <div className="admin-kpis">
-        <Kpi label="Open incidents" value={fmt(counts.open)} tone={counts.open ? 'warn' : undefined}/>
+        <Kpi label="Open incidents" value={fmt(counts.open)} tone={counts.open ? 'warn' : undefined}
+          note={counts.underInvestigation ? `${fmt(counts.underInvestigation)} under investigation` : 'all sources'}/>
         <Kpi label="High severity" value={fmt(counts.high)} tone={counts.high ? 'bad' : undefined}/>
         <a className="admin-kpi-link" href="/admin/support?eligibility=RECOVERABLE_NOW#support-incidents"><Kpi label="Recoverable here" value={fmt(counts.recoverable)}
           note={counts.guided ? `+ ${fmt(counts.guided)} guided restore in AI Settings` : 'registered action applies'}/></a>
@@ -82,6 +88,20 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
         <a className="admin-kpi-link" href="/admin/support?eligibility=INVESTIGATION#support-incidents"><Kpi label="Investigation required" value={fmt(counts.investigation)}/></a>
         <Kpi label="Waiting for external system" value={fmt(counts.waiting)}/>
       </div>
+      <h3 className="admin-section-title" id="support-attention" style={{ margin: '18px 0 10px' }}>Execution attention</h3>
+      {attention ? <><div className="admin-kpis">
+        <a className="admin-kpi-link" href="/admin/support?lifecycle=ACTIVE#support-incidents"><Kpi label="Active" value={fmt(attention.counts.active)}
+          tone={attention.counts.active ? 'warn' : undefined} note={attention.counts.activeRealFunds ? `${fmt(attention.counts.activeRealFunds)} mainnet or unrecognised` : undefined}/></a>
+        <a className="admin-kpi-link" href="/admin/support?lifecycle=UNDER_INVESTIGATION#support-incidents"><Kpi label="Under investigation" value={fmt(attention.counts.underInvestigation)}/></a>
+        <a className="admin-kpi-link" href="/admin/support?lifecycle=HISTORICAL#support-incidents"><Kpi label="Historical attention" value={fmt(attention.counts.historical)}
+          note="no active condition; not verified"/></a>
+        <a className="admin-kpi-link" href="/admin/support?lifecycle=VERIFIED_RESOLVED#support-incidents"><Kpi label="Verified resolved" value={fmt(attention.counts.resolved)} note="flag kept"/></a>
+        <Kpi label="Raw flag (attention_required)" value={fmt(attention.flaggedTotal)} note="all time, never cleared to shrink counts"/>
+      </div>
+      <p className="admin-diff">Executions only, all environments, all time — the same figures as System Health, the Overview and Workflows{attention.truncated ? ' (partly classified: lower bounds)' : ''}.
+        The transaction outcome is a separate dimension shown on each incident: an incident can be active although its transaction completed, and historical although
+        resolution is not verified.</p></>
+        : <p className="admin-alert" data-tone="warn">The execution-attention model could not be read.</p>}
       <div className="admin-kpis" style={{ marginTop: 12 }}>
         {historyCounts ? <>
           <Kpi label="Recoveries with task completed (30 d)" value={fmt(historyCounts.resolved)}/>
@@ -92,8 +112,9 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
         </> : <p className="admin-alert" data-tone="warn">Recovery history could not be read.</p>}
       </div>
       <TechnicalDetails summary="What these numbers mean">
-        <p>An incident is a condition the database shows right now (for example a transaction check that stopped). It disappears when the condition does —
-          after a recovery, or when the worker finishes on its own. Recovery counts are audited attempts from the last 30 days, each verified against the current task and
+        <p>An open incident is a condition the database shows right now (for example a transaction check that stopped). It leaves the open list when the condition
+          does — after a recovery, or when the worker finishes on its own; a flagged execution then stays listed as historical or verified resolved, never deleted.
+          “Under investigation” only appears after an operator records an acknowledgement, finding, decision or escalation note (90-day window). Recovery counts are audited attempts from the last 30 days, each verified against the current task and
           execution state. Failed executions are listed for the last 30 days; stopped background tasks for 90 days.</p>
       </TechnicalDetails>
     </Section>
@@ -103,9 +124,10 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
       <p className="admin-diff" style={{ marginTop: 8 }}>Wallet lookups need the OPERATOR role. Results never show full wallet addresses, keys or transcripts.</p>
     </Section>
 
-    <Section id="support-incidents" title="Incident explorer" description={`${fmt(view.incidents.length)} of ${fmt(counts.open)} open incidents${filtered ? ' match the filters' : ''}, most severe first.`}>
+    <Section id="support-incidents" title="Incident explorer" description={`${fmt(view.incidents.length)}${filters.lifecycle === 'OPEN' ? ` of ${fmt(counts.open)} open` : ''} incident${view.incidents.length === 1 && filters.lifecycle !== 'OPEN' ? '' : 's'}${filtered ? ' match the filters' : ''}, most severe first · ${fmt(counts.historical)} historical, ${fmt(counts.resolved)} verified resolved, ${fmt(counts.final)} final failure${counts.final === 1 ? '' : 's'} kept separately.`}>
       <form className="admin-filters" method="get" action="/admin/support#support-incidents" aria-label="Incident filters" style={{ marginBottom: 14 }}>
-        {select('support-f-status', 'Status', 'status', [['ALL', 'Any'], ...Object.entries(STATUS_LABELS)])}
+        {select('support-f-lifecycle', 'Lifecycle', 'lifecycle', LIFECYCLE_OPTIONS)}
+        {select('support-f-status', 'Notes', 'status', [['ALL', 'Any'], ...Object.entries(STATUS_LABELS)])}
         {select('support-f-severity', 'Severity', 'severity', [['ALL', 'Any'], ...Object.entries(SEVERITY_LABELS)])}
         {select('support-f-category', 'Error category', 'category', [['ALL', 'Any'], ...CATEGORIES.map(c => [c, CATEGORY_LABELS[c]] as const)])}
         {select('support-f-feature', 'Affected feature', 'feature', [['ALL', 'Any'], ...Object.entries(FEATURE_LABELS)])}

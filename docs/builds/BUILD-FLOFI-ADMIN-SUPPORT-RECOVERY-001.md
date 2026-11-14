@@ -133,13 +133,17 @@ The exact commands and their output for this build are in the pull request.
   underlying cause (RPC outage, disabled network) is not visible; a resumed check that hits the same cause stops again after its budget.
 - The Admin does not read chain state itself; the worker remains the only observer. A stuck worker shows as "check not scheduled" or
   "waiting longer than 5 minutes" and needs the Railway service.
-- Incident status (New / Investigating / Escalated / Resolution noted) comes from notes only; the condition itself stays open until the
-  durable state changes.
+- Incident notes (New / Investigating / Escalated / Resolution noted) come from notes only; the condition itself stays open until the
+  durable state changes. "Under investigation" needs an explicit note within the 90-day notes window; an older acknowledgement lapses.
+- Completed background tasks are pruned after 14 days while stopped ones are kept. A stopped task whose successful re-run was pruned therefore
+  reads as unresolved again, except for the two recovery kinds, whose resolution is read from the run itself (no longer observed with a reconciled
+  verdict; evidence present in the store). No other task kind tied to an execution exists today.
 - Failed executions are listed for 30 days and stopped tasks for 90 days; very old stopped checks still appear while the run is flagged.
 - Recovery is proven against loopback PostgreSQL, the real worker handler and MOCKED chains, not against a production incident.
-- Audit text (reasons, notes) and lookup fingerprints are append-only with no retention period and are not removed by an owner's history purge;
-  identifier screening of free text is best effort. Retention and its legal basis need the owner's (and counsel's) acceptance — see ADMIN.md §5c.
-  Opening a diagnostics page is not audited (lookups are).
+- Audit text (reasons, notes) and lookup fingerprints are stored in the append-only audit table, which has no deletion path. The owner
+  approved an auditable recovery history but **not** indefinite retention of identifiable personal data; the retention periods, purposes,
+  candidate lawful bases and the structural options for enforcing them are proposed for counsel in §9 and are **not implemented** (they need a
+  reviewed migration). Identifier screening of free text is best effort. Opening a diagnostics page is not audited (lookups are).
 - No index was added (no migration): the `attention_required` and `needs_observation` candidate scans and the stopped-task supersession check
   use the same unindexed predicates as System Health, bounded by LIMIT. On a very large tenant they can read many rows per Support page load;
   partial indexes would be a future, separately reviewed migration.
@@ -148,3 +152,188 @@ The exact commands and their output for this build are in the pull request.
 - A run that the sweeper re-arms through its PREPARED / `*_SUBMISSION_EXPIRED_NOT_EXECUTED` path (`needs_observation` false) is not
   recoverable from the Admin if that check stops; it is listed as flagged for attention (investigation).
 - Network names come from indexed analytics facts; a run that was never indexed shows its environment only.
+
+## 8. Addendum — execution attention, historical incidents and reconciliation accuracy
+
+### 8.1 Problem
+
+The raw `execution_runs.attention_required` flag is written only by the queue's dead-letter (`work-queue.ts` `dead()`) and is never cleared
+except by a registered Support recovery. System Health counted it as "flagged for attention", Workflows listed every flagged run as "requiring
+attention" and the Overview counted range-scoped classifier attention, so a run whose stopped task was later superseded, or whose
+transaction completed, still looked like an active incident — and the three pages could disagree.
+
+### 8.2 One model, two dimensions
+
+`src/admin/support/lifecycle.ts` is the single classifier, used by System Health (`health.ts`), the Overview attention list
+(`attention.ts`), the Overview and Workflows range figures (`analytics/view.ts` → `summarize`), Workflows' attention sections and Support &
+Recovery (`incidents.ts`, `view.ts`). The **transaction outcome** (from `analytics/classify.ts`, unchanged) and the **incident lifecycle** are
+separate fields everywhere.
+
+| Lifecycle | Rule (durable evidence only) |
+|---|---|
+| Active | an unresolved condition exists now: outcome unknown; partial; unclassified status; observation exhausted (needs observation, newest `reconcile` DEAD); check not scheduled (needs observation, no open check, quiet > 15 min); evidence archiving stopped (bundle not in the store, newest `evidence.archive` DEAD); another task kind stopped and not superseded; a stopped task re-queued and not finished. **The flag is not required.** |
+| Under investigation | active, and the latest support note on the incident (90-day window) is an acknowledgement, finding, decision or escalation. Opening a page never counts. A later "resolution" note cannot resolve an active condition. |
+| Historical attention | flagged, no active condition now, but no incident-specific evidence of resolution (e.g. the run stopped being observed without an Evidence Bundle, or no stopped task is recorded so the cause cannot be reconstructed). **Not a resolution.** |
+| Verified resolved | flagged, no active condition, final outcome, and **every** task that ever stopped for the run has resolution evidence: a later run of the same task completed; or the stopped check was superseded by a reconciled verdict with an Evidence Bundle and every submitted attempt reconciled; or the stopped archive's bundle is now in the evidence store. A terminal status alone never qualifies. |
+
+Stopped tasks are read from `work_items` (DEAD rows are never pruned) through a new `stoppedKinds` field of the recovery facts. It is not part
+of the recovery eligibility rules or the state token, so the registry's preconditions and the recovery engine are unchanged (asserted by tests).
+An owner "review required" code (`<FLOW>_SEMANTIC_EDIT_REQUIRES_REVIEW`, `_WALLET_CHANGED_REVIEW_REQUIRED` — set by a flow's `invalidate` when the
+owner edits the workflow after review) is reported separately: it gates future execution of that workflow, is not an operational incident and is
+not evidence of resolution. Nothing writes: the flag, the error code, the execution status and the evidence are shown as recorded.
+
+### 8.3 Admin pages
+
+- **System Health** — "Execution attention": active (with under investigation), outcome unknown, observation exhausted / not scheduled,
+  awaiting reconciliation, historical attention, verified resolved; the raw flag total is in the technical details. An attention item is
+  raised only for active incidents (red when one is on mainnet or an unrecognised network); "Operating normally" mentions historical flags as
+  "not verified resolved". A truncated classification raises its own warning.
+- **Overview** — the glance tile is "Active execution incidents" (all environments, all time, from the same model; historical counted apart);
+  the range KPI "Active incidents" counts executions in the range and environment that have an open lifecycle run.
+- **Workflows** — "Requiring attention" lists active and under-investigation runs from the shared model (all environments, all time, same count
+  as System Health), with the transaction outcome, the lifecycle, the reason and a Diagnose link; "Historical attention" lists historical and
+  verified-resolved runs separately; every execution row carries its lifecycle badge. If the model cannot be read, the old classifier list is
+  shown with a warning that it mixes historical flags.
+- **Support & Recovery** — an "Execution attention" KPI row with the same figures, a Lifecycle filter (Open — default — Active, Under
+  investigation, Historical, Verified resolved, Final failures, All), the lifecycle on every incident card, and on Diagnose the lifecycle, its
+  explanation and the stopped-task history (times stopped, last reason, status now, resolution basis). Historical and verified-resolved
+  executions are incidents of kind `ATTENTION_HISTORICAL` with eligibility "No action needed" and no actions. A new note type,
+  "Acknowledged — under investigation", records explicit review.
+
+Intentional scope differences are labelled on the page: the glance tile, System Health, Workflows' attention sections and Support's KPI row are
+all-time and all-environment run counts; the Overview range KPI counts executions (recovery runs folded in) in the selected range and environment.
+
+### 8.4 Interaction with the recovery registry
+
+Unchanged: the same two actions, preconditions, state token, lock order and verification. Incident kinds map from the lifecycle conditions
+(observation exhausted → "Transaction check stopped", offering *Resume transaction check* when the registry's own check allows it). Historical and
+verified-resolved incidents offer no action. No "mark resolved" control exists; notes change only the incident lifecycle, never transaction truth.
+Nothing re-opens a stopped job automatically.
+
+### 8.5 The production snapshot (2026-11-14) — what this build can and cannot establish
+
+This session has **no access to the production database or to production logs** (and requested none). The classification below is therefore
+the rule each record falls under, given the facts reported in the request; the deciding fact for the ten terminal records — their stopped-task
+history and whether their Evidence Bundle is in the store — was not in the snapshot. The deployed Support page computes it read-only
+(`/admin/support?lifecycle=ALL`); the equivalent read-only query is in §8.6.
+
+| Records | Status · environment | Classification under this build |
+|---|---|---|
+| Execution A `xuni-379461c2…1d21`, Execution B `xroute-a09617c2…fd32` | SUBMISSION_RESULT_UNKNOWN · PUBLIC_MAINNET | **Active** — observation exhausted (500 deliveries, `OBSERVATION_BUDGET_EXHAUSTED`) and outcome unknown; high severity, funds possibly involved, submission unknown. Never failed, never resolved. |
+| 6 × RECONCILED · PUBLIC_TESTNET, 2 × RECONCILED · PUBLIC_DEVNET, 1 × COMPLETED · PUBLIC_DEVNET | terminal | Per record: **active** if a stopped task is still unresolved (typically an evidence archive whose bundle is not in the store); **verified resolved** if every stopped task has resolution evidence (re-run completed, reconciled verdict with Evidence Bundle and all attempts reconciled, or bundle archived); otherwise **historical**. The terminal status alone decides nothing. |
+| Jupiter `jupiter-swap` RECONCILED · PUBLIC_MAINNET, `JUPITER_SEMANTIC_EDIT_REQUIRES_REVIEW`, has_evidence | terminal | Same rule. The error code is the owner's "edited after review" authoring state (the swap had already reconciled), reported as *owner review pending — not an incident*; it is neither the reason for the flag (only a stopped task sets it) nor evidence of resolution. |
+
+So the active count is **at least 2** (A and B) and at most 2 + the number of terminal records with an unresolved stopped task. If every terminal
+record's stopped task was a superseded check with a reconciled verdict and evidence (or an archive whose bundle is now stored), the result is
+2 active and 10 historical/verified — but that must be read from the data, not assumed.
+
+**Execution A — `UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION`.** In `universal-router/service.ts` this verdict is recorded only when no
+receipt exists for the attempt's hash (none was reported), the deposit-log scan found nothing, and the account's nonce reserved for the reviewed
+transaction was consumed by a transaction whose target, data or value differ (`sameEvmIntent` false). The service stores that transaction's hash
+as `conflictingTransactionHash` in the run's durable log (not in `execution_attempts`, so not shown by the Admin). What this establishes: the
+reviewed transaction did **not** land at that nonce. What it does not: whether the wallet sent the same intent with another nonce. Outcome:
+**unknown** — nonce consumption is not proof of execution or non-execution.
+
+**Execution B — `ROUTER_TRANSACTION_NOT_OBSERVED`.** In `router-service.ts` this is recorded only when neither a transaction nor a replacement
+hash was reported, the nonce was not yet consumed at the last check, no matching transaction was in the node's pending pool and the deposit
+scan found no deposit — and the protocol deposit deadline had not been proven passed with a complete scan (that case is recorded as
+`ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED`, provably not executed). No transaction hash exists anywhere for B by construction. Outcome:
+**never demonstrably submitted, but not excluded** — still unknown.
+
+**Read-only next steps for the owner (not performed here).** For each, from the run's log: chain, sender, prepared nonce, prepared block and
+(for A) `conflictingTransactionHash`. Then, on at least two independent sources (RPC providers or explorers), at a finalized block:
+(1) the account's current nonce and the transaction at the prepared nonce; (2) for A, confirm the conflicting transaction and compare its
+target/data/value; (3) search the sender's later transactions for the reviewed intent (another nonce); (4) the bridge's deposit events for this
+depositor from the prepared block to the route's `depositMustLandBy`, and the destination fill; (5) for B, whether `depositMustLandBy` has passed on a
+finalized block with a complete scan, which is the only protocol-backed proof of non-execution. The registered, read-only *Resume transaction
+check* lets the service itself re-run exactly these checks (for B it can reach the provable `…_EXPIRED_NOT_EXECUTED` verdict if the scan
+completes); it is eligible for both runs, is **not** run by this build, and should be run only by an operator after reading §3 — for A it will
+conclude the same unless the deposit scan finds the deposit, and either run can stop again after its budget if the original cause persists.
+
+### 8.6 Read-only classification query
+
+Run in a read-only transaction; it returns no address, hash or key — only presence flags and codes.
+
+```sql
+BEGIN READ ONLY;
+SELECT r.run_id, r.flow, r.status, r.provenance, r.error_code, r.needs_observation, r.has_evidence,
+  EXISTS (SELECT 1 FROM evidence_objects e WHERE e.tenant_id = r.tenant_id AND e.run_id = r.run_id) AS evidence_archived,
+  (SELECT json_agg(json_build_object('step', a.step, 'state', a.state, 'hash', a.transaction_hash IS NOT NULL, 'reconciled', a.reconciled) ORDER BY a.created_at)
+     FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id) AS attempts,
+  (SELECT json_agg(json_build_object('kind', d.kind, 'stopped', d.n, 'last_error', d.last_error, 'newest_state',
+       (SELECT w.state FROM work_items w WHERE w.tenant_id = r.tenant_id AND w.run_id = r.run_id AND w.kind = d.kind ORDER BY w.id DESC LIMIT 1)))
+     FROM (SELECT kind, count(*) AS n, (array_agg(last_error ORDER BY id DESC))[1] AS last_error FROM work_items
+           WHERE tenant_id = r.tenant_id AND run_id = r.run_id AND state = 'DEAD' GROUP BY kind) d) AS stopped
+FROM execution_runs r WHERE r.tenant_id = 'default' AND r.attention_required ORDER BY r.updated_at DESC;
+ROLLBACK;
+```
+
+Map each row with §8.2: an unresolved `stopped` kind (newest state DEAD — for `reconcile` while `needs_observation`, for `evidence.archive` while
+not archived) or an unknown/partial/unclassified status → active; every stopped kind resolved and a final outcome → verified resolved; else
+historical.
+
+### 8.7 Validation (addendum)
+
+| Requirement | Test |
+|---|---|
+| 1 terminal + historical flag · 2 terminal + independent unresolved incident · 3 reconciled + unrelated owner review · 4/7 uncertain without hash or evidence · 5 two exhausted mainnet jobs with 500 deliveries · 6 nonce consumed by a different transaction · 8 inconclusive evidence after a completed check · 9 active vs historical counts (the 12-record shape) · 11 purity / no mutation · recovery eligibility and state token unchanged | `src/admin/support/lifecycle.test.ts` |
+| 10 consistency across Overview, System Health, Workflows and Support · 11/15 nothing written (runs, attempts, tasks, evidence, audit) · 14 cross-tenant isolation · 12 lifecycle audit append-only · 13 VIEWER refused / OPERATOR acknowledgement → under investigation; a resolution note cannot resolve an active condition | `src/admin/support/support-http.pg.test.ts` (database rows shaped like production) |
+| Attention items: active only, red on mainnet, historical never alerting, truncation warning | `src/admin/attention.test.ts` |
+| Browser: historical flag kept out of the open list and listed under its own lifecycle; Workflows and System Health show the same split; a note makes the incident under investigation while the outcome stays not established | `e2e/admin-console.spec.ts` |
+| 16 existing Support & Recovery suites | unchanged and passing (unit, PostgreSQL, end-to-end cloud recovery, browser) |
+
+No migration, no environment variable, no Railway or Vercel change. No production read or write was made by this build.
+
+## 9. Privacy, retention and lawful bases (proposal for counsel — not implemented)
+
+**Owner decision (2026-11-14).** Keep an auditable operational recovery history; do **not** keep identifiable personal data indefinitely;
+minimise personal data in notes and reasons; pseudonymise lookup identifiers; design for retention limits and data-subject rights; do not add a
+deletion mechanism that compromises financial audit integrity; document options before changing audit storage.
+
+**What is stored today** (all in `admin_audit_events`, append-only by trigger; nothing deletes it):
+
+| Record | Personal data | Minimisation in place |
+|---|---|---|
+| `SUPPORT_RECOVERY` | operator principal id; execution run id (pseudonymous, links to an owner wallet through the run); operator's reason | reason screened: no wallet addresses, hashes, e-mails, 8+ digit runs or @handles; ids and codes only otherwise |
+| `SUPPORT_NOTE` | operator principal id; incident id; note text | same screening; notes shown only to administrators |
+| `SUPPORT_SEARCH` | operator principal id; identifier **type**; a 64-bit keyed fingerprint (HMAC with a dedicated subkey of `FLOFI_ADMIN_SESSION_SECRET`); result count | the identifier itself is never stored, logged or put in a URL; wallet lookups need OPERATOR |
+
+The fingerprint is pseudonymous personal data (re-identifiable by whoever holds the key and the identifier); it exists so the owner can answer
+*who looked up this person, and when* — itself an input to an access request.
+
+**Proposed retention, purposes and candidate lawful bases.** LGPD art. 6 X (accountability) is a **principle** and art. 18 lists **data-subject
+rights**; neither is a lawful basis. The candidate bases are LGPD art. 7 (and art. 11 for sensitive data, which none of these records should
+contain) and GDPR art. 6(1). Each needs counsel's confirmation, and legitimate interest needs a documented balancing test (LGPD art. 10; GDPR
+recital 47 / art. 6(1)(f)).
+
+| Record | Purpose | Proposed retention | Candidate LGPD basis | Candidate GDPR basis |
+|---|---|---|---|---|
+| Recovery event skeleton (who, when, action, run id, operation id, outcome, code, verification) | accountability for administrative actions on execution infrastructure; security; defence in disputes about an execution | as long as the related execution record is kept, capped at 5 years after the execution (to be aligned with whatever retention counsel sets for the execution history itself) | art. 7 IX legitimate interest; art. 7 VI regular exercise of rights in proceedings; art. 7 II only where a specific legal or regulatory duty applies to FloFi | art. 6(1)(f); art. 6(1)(c) only for a specific Union/Member State obligation; art. 17(3)(e) for legal claims |
+| Recovery reason text, note text | explain a decision to other operators | 12 months, then redact the text and keep the skeleton and a hash | art. 7 IX | art. 6(1)(f) |
+| Lookup audit (type, fingerprint, count) | access accountability, abuse detection, answering access requests | 12 months | art. 7 IX (security and accountability of access; cf. art. 46 duty) | art. 6(1)(f) (cf. art. 32 duty) |
+| Notes window used by the UI ("under investigation") | operational state | 90 days (display only, already implemented) | — | — |
+
+Counsel should also confirm: whether any record falls under Marco Civil da Internet art. 15 (application access logs, 6 months) — these are
+operator records, not end-user access logs, so probably not; the privacy notice text covering operator access to execution records for support;
+and treatment of database backups (Neon point-in-time recovery keeps deleted or redacted data until the backup window passes).
+
+**Rights handling.** Access (LGPD art. 18 II / GDPR art. 15): records about a person are found by computing the fingerprint of their wallet and
+by their run ids; a documented, read-only owner procedure is needed (not built). Correction: notes are append-only; a correcting note is
+added. Erasure / anonymisation (LGPD art. 18 IV and VI / GDPR art. 17): not possible in place today; the options below make it possible
+without touching the event skeleton. Objection: handled by the legitimate-interest balancing test.
+
+**Structural options (each needs a reviewed migration; none was made):**
+
+1. **Separate the free text (recommended).** A new table `admin_support_texts (tenant_id, text_id, body, created_at, expires_at)`; audit rows
+   keep `text_id` and the SHA-256 of the body. A retention job (and an erasure request) deletes expired or requested bodies; the audit table stays
+   strictly append-only and still proves that a text existed and what its hash was. *Risk:* the content is gone for a later dispute; a two-table
+   write must stay atomic (one transaction, as today).
+2. **Epoch keys for fingerprints and text (crypto-shredding).** Random per-period keys in a new key table; fingerprints and encrypted bodies
+   use the period key; deleting a key after the retention period makes that period's fingerprints unlinkable and bodies unreadable without
+   touching rows. *Risk:* key-management complexity; keys in backups; losing a key early loses audit content.
+3. **Narrow, audited redaction inside `admin_audit_events`.** A SECURITY DEFINER function allowed to null only `detail.text`/`detail.reason` of
+   `SUPPORT_*` rows older than the retention period, writing a `SUPPORT_REDACTION` event. *Risk:* weakens the table's append-only guarantee and
+   needs a trigger change; hardest to defend as tamper-evident. Not recommended.
+
+Until one is approved and built, rotating `FLOFI_ADMIN_SESSION_SECRET` (which also ends every admin session) is the only available way to make
+existing fingerprints unlinkable, and reasons and notes are kept as written — so operators must keep personal data out of them.

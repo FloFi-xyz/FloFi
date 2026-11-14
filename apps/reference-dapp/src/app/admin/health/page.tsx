@@ -63,11 +63,25 @@ export default async function AdminHealthPage() {
           </TechnicalDetails></>
           : <Status ok={false}>{queue.code}</Status>}
       </section>
-      <section className="admin-card"><header><h2>Executions under observation</h2></header>
-        {runs.ok ? <table className="admin-table"><tbody>
+      <section className="admin-card"><header><h2>Execution attention</h2>
+        <p>All environments, all time — the same classification as Support &amp; Recovery, Workflows and the Overview{runs.ok && runs.value.truncated ? ' (partly classified: counts are lower bounds)' : ''}</p></header>
+        {runs.ok ? <><table className="admin-table"><tbody>
+          <tr><th scope="row">Active incidents</th><td><Status ok warn={runs.value.attention.active + runs.value.attention.underInvestigation > 0}>
+            {fmt(runs.value.attention.active + runs.value.attention.underInvestigation)}{runs.value.attention.underInvestigation ? ` (${fmt(runs.value.attention.underInvestigation)} under investigation)` : ''}</Status>
+            {runs.value.attention.active + runs.value.attention.underInvestigation ? <> · <a href="/admin/support?lifecycle=OPEN">Open in Support</a></> : null}</td></tr>
+          <tr><th scope="row">Outcome unknown</th><td><Status ok warn={runs.value.attention.unknownOutcome > 0}>{fmt(runs.value.attention.unknownOutcome)}</Status></td></tr>
+          <tr><th scope="row">Observation exhausted</th><td><Status ok warn={runs.value.attention.observationExhausted > 0}>{fmt(runs.value.attention.observationExhausted)}</Status>
+            {runs.value.attention.notScheduled ? <> · <Status ok warn>{fmt(runs.value.attention.notScheduled)} check not scheduled</Status></> : null}</td></tr>
           <tr><th scope="row">Awaiting reconciliation</th><td>{fmt(runs.value.observing)}{runs.value.oldestObservationSeconds !== null ? ` · oldest updated ${ago(runs.value.oldestObservationSeconds)} ago` : ''}</td></tr>
-          <tr><th scope="row">Flagged for attention (all time)</th><td><Status ok warn={runs.value.attention > 0}>{fmt(runs.value.attention)}</Status></td></tr>
-        </tbody></table> : <Status ok={false}>{runs.code}</Status>}
+          <tr><th scope="row">Historical attention</th><td>{fmt(runs.value.attention.historical)} · <span className="admin-diff">flagged earlier, no active condition now, resolution not verified</span>
+            {runs.value.attention.historical ? <> · <a href="/admin/support?lifecycle=HISTORICAL">Review</a></> : null}</td></tr>
+          <tr><th scope="row">Verified resolved</th><td>{fmt(runs.value.attention.resolved)} · <span className="admin-diff">flag kept; incident-specific evidence of resolution</span></td></tr>
+        </tbody></table>
+          <TechnicalDetails>
+            <p>Raw flag (<code>attention_required</code>) on {fmt(runs.value.flagged)} run{runs.value.flagged === 1 ? '' : 's'}. The flag is never cleared to make these figures smaller: each
+              flagged run is classified as active, under investigation, historical or verified resolved from its durable state. Awaiting reconciliation counts every run still
+              being observed, including active ones.{runs.value.notesOk ? '' : ' Investigation notes could not be read, so nothing is shown as under investigation.'}</p>
+          </TechnicalDetails></> : <Status ok={false}>{runs.code}</Status>}
       </section>
       <section className="admin-card"><header><h2>Automation scheduler</h2></header>
         {scheduler.ok ? !scheduler.value.installed ? <p className="admin-note">Automations are not installed on this database.</p> : <table className="admin-table"><tbody>

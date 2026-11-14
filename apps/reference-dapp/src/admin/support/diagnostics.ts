@@ -229,9 +229,9 @@ export async function runTasks(host: Host, runId: string): Promise<{ tasks: Task
     completedAt: row.completed_at?.toISOString() ?? null, availableAt: row.available_at.toISOString() })) };
 }
 
-export const NOTE_KINDS = ['FINDING', 'DECISION', 'ESCALATION', 'RESOLUTION'] as const;
+export const NOTE_KINDS = ['ACKNOWLEDGEMENT', 'FINDING', 'DECISION', 'ESCALATION', 'RESOLUTION'] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
-export const NOTE_KIND_LABELS: Readonly<Record<NoteKind, string>> = { FINDING: 'Investigation finding', DECISION: 'Recovery decision', ESCALATION: 'Escalation', RESOLUTION: 'Resolution' };
+export const NOTE_KIND_LABELS: Readonly<Record<NoteKind, string>> = { ACKNOWLEDGEMENT: 'Acknowledged — under investigation', FINDING: 'Investigation finding', DECISION: 'Recovery decision', ESCALATION: 'Escalation', RESOLUTION: 'Resolution' };
 export const NOTE_MAX = 500;
 export const isIncidentId = (value: unknown): value is string => typeof value === 'string' && INCIDENT_ID.test(value);
 /** A note's text: plain, bounded, no control characters and no markup (it is rendered as text, never as HTML). Null when invalid. */

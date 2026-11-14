@@ -7,6 +7,7 @@
  */
 import { SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import type { AdminHost } from './host.ts';
+import { loadExecutionAttention, type AttentionCounts, type ExecutionAttention } from './support/lifecycle.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Probe<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
@@ -16,7 +17,13 @@ export type HealthReport = {
   readonly api: { readonly topology: 'remote' | 'embedded-or-local'; readonly readiness: Probe<{ readonly status: number; readonly latencyMs: number }> | null };
   readonly queue: Probe<{ readonly ready: number; readonly overdue: number; readonly oldestOverdueSeconds: number | null; readonly leased: number; readonly expiredLeases: number;
     readonly done24h: number; readonly dead24h: number; readonly lastCompletedAt: string | null; readonly byKind: readonly { readonly kind: string; readonly ready: number; readonly dead24h: number }[] }>;
-  readonly runs: Probe<{ readonly observing: number; readonly oldestObservationSeconds: number | null; readonly attention: number }>;
+  /**
+   * Execution attention from the shared lifecycle model (`support/lifecycle.ts`) — the same figures Support & Recovery, Workflows and the
+   * Overview show. `flagged` is the raw `attention_required` total (historical flags included); `attention` separates active, under
+   * investigation, historical and verified-resolved runs. `truncated`: more candidates than classified, so lifecycle counts are lower bounds.
+   */
+  readonly runs: Probe<{ readonly observing: number; readonly oldestObservationSeconds: number | null; readonly flagged: number; readonly attention: AttentionCounts;
+    readonly truncated: boolean; readonly notesOk: boolean }>;
   readonly scheduler: Probe<{ readonly installed: boolean; readonly lastEvaluationAt: string | null; readonly overdueRules: number }>;
   readonly incidents: readonly { readonly kind: string; readonly code: string; readonly at: string; readonly run: string | null }[];
 };
@@ -40,7 +47,8 @@ export async function apiReadiness(env: Env, fetchImpl: typeof fetch = fetch): P
   }
 }
 
-export async function healthReport(env: Env, host: AdminHost, now: Date, fetchImpl: typeof fetch = fetch): Promise<HealthReport> {
+export async function healthReport(env: Env, host: AdminHost, now: Date, fetchImpl: typeof fetch = fetch,
+  shared?: Promise<ExecutionAttention | null>): Promise<HealthReport> {
   const { db, tenantId } = host, day = new Date(now.getTime() - 86_400_000);
   const database = (async (): Promise<HealthReport['database']> => {
     try {
@@ -74,11 +82,9 @@ export async function healthReport(env: Env, host: AdminHost, now: Date, fetchIm
   })();
   const runs = (async (): Promise<HealthReport['runs']> => {
     try {
-      const { rows } = await db.query<{ observing: number; oldest: Date | null; attention: number }>(`SELECT count(*) FILTER (WHERE needs_observation)::int AS observing,
-          min(updated_at) FILTER (WHERE needs_observation) AS oldest, count(*) FILTER (WHERE attention_required)::int AS attention
-        FROM execution_runs WHERE tenant_id = $1 AND (needs_observation OR attention_required)`, [tenantId]);
-      const row = rows[0]!;
-      return { ok: true, value: { observing: row.observing, oldestObservationSeconds: seconds(row.oldest, now), attention: row.attention } };
+      const a = (shared ? await shared : null) ?? await loadExecutionAttention(db, tenantId, now);
+      return { ok: true, value: { observing: a.observingTotal, oldestObservationSeconds: a.oldestObservationSeconds, flagged: a.flaggedTotal,
+        attention: a.counts, truncated: a.truncated, notesOk: a.notesOk } };
     } catch (error) { return failed(error); }
   })();
   const scheduler = (async (): Promise<HealthReport['scheduler']> => {

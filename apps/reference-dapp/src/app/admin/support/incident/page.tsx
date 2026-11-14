@@ -3,7 +3,8 @@ import { adminPermits } from '../../../../admin/guard';
 import { adminPage } from '../../../../admin/page-context';
 import { CATEGORY_LABELS, explainCode, type CodeExplanation } from '../../../../admin/support/codes';
 import { EVIDENCE_LABELS, incidentStatus, isIncidentId, NOTE_KIND_LABELS, STATUS_LABELS, type Note } from '../../../../admin/support/diagnostics';
-import { FEATURE_LABELS, SEVERITY_LABELS, type Incident } from '../../../../admin/support/incidents';
+import { FEATURE_LABELS, INCIDENT_LIFECYCLE_LABELS, SEVERITY_LABELS, type Incident } from '../../../../admin/support/incidents';
+import { RESOLUTION_LABELS } from '../../../../admin/support/lifecycle';
 import { ELIGIBILITY_LABELS, RECOVERY_ACTIONS } from '../../../../admin/support/registry';
 import { incidentDetail, notesByIncident, type IncidentDetail } from '../../../../admin/support/view';
 import { AdminShell, AdminUnavailable } from '../../../../components/admin/admin-shell';
@@ -24,21 +25,32 @@ const VERIFICATION_LABELS: Record<string, string> = { PENDING_VERIFICATION: 'Pen
 const ELIGIBILITY_TONE: Record<string, Tone> = { RECOVERABLE_NOW: 'ok', REQUIRES_CONFIRMATION: 'info', WAITING_EXTERNAL: 'neutral', USER_ACTION: 'info', ENGINEERING: 'bad',
   INVESTIGATION: 'warn', NONE: 'neutral' };
 
+const LIFECYCLE_TONE: Record<Incident['lifecycle'], Tone> = { ACTIVE: 'warn', UNDER_INVESTIGATION: 'info', HISTORICAL: 'neutral', VERIFIED_RESOLVED: 'ok', FINAL: 'neutral' };
+const STOPPED_STATUS: Record<string, string> = { UNRESOLVED: 'Unresolved', RETRYING: 'Queued again — not finished', RESOLVED: 'Resolved', NOT_REQUIRED: 'No longer needed — not verified' };
+
 function Summary({ incident }: { incident: Incident }) {
   return <Section id="support-incident-summary" title="Summary" tone={incident.severity === 'HIGH' ? 'bad' : incident.severity === 'MEDIUM' ? 'warn' : undefined}
     description={incident.summary}>
     <dl className="admin-dl">
+      <dt>Incident lifecycle</dt><dd><Status tone={LIFECYCLE_TONE[incident.lifecycle]}>{INCIDENT_LIFECYCLE_LABELS[incident.lifecycle]}</Status>
+        {incident.attention ? <div className="admin-diff" style={{ marginTop: 4 }}>{incident.attention.explanation}</div> : null}
+        {incident.attention?.flagged ? <div className="admin-diff">The original attention flag is kept as recorded.</div> : null}</dd>
       <dt>Recovery</dt><dd><Status tone={ELIGIBILITY_TONE[incident.eligibility] ?? 'neutral'}>{ELIGIBILITY_LABELS[incident.eligibility]}</Status></dd>
       <dt>Recommended next step</dt><dd>{incident.recommended}</dd>
       <dt>Severity</dt><dd>{SEVERITY_LABELS[incident.severity]}</dd>
       <dt>Category</dt><dd>{CATEGORY_LABELS[incident.category]} · {FEATURE_LABELS[incident.feature]}</dd>
       {incident.environment || incident.provenance ? <><dt>Environment</dt><dd>{incident.environment ? ENVIRONMENT[incident.environment] : <>Unrecognised provenance <code>{incident.provenance}</code></>}
         {incident.networks.length ? ` · ${incident.networks.join(', ')}` : ''}</dd></> : null}
-      <dt>What is known about the outcome</dt><dd>{incident.outcome}{incident.outcomeKnown ? '' : ' (not established)'}</dd>
+      <dt>Transaction outcome</dt><dd>{incident.outcome}{incident.outcomeKnown ? '' : ' (not established)'}</dd>
       <dt>Submitted</dt><dd>{SUBMITTED[incident.submitted]}</dd>
       <dt>Could funds be involved</dt><dd>{FUNDS[incident.funds]}</dd>
       <dt>Last recorded</dt><dd>{when(incident.at)}</dd>
     </dl>
+    {incident.attention?.stopped.length ? <div className="admin-table-wrap" style={{ marginTop: 12 }}><table className="admin-table" aria-label="Stopped background tasks">
+      <thead><tr><th>Task</th><th>Times stopped</th><th>Last stop (UTC)</th><th>Last reason</th><th>Now</th></tr></thead>
+      <tbody>{incident.attention.stopped.map(s => <tr key={s.kind}><td><code>{s.kind}</code></td><td className="num">{s.count}</td><td className="admin-mono">{when(s.lastStoppedAt)}</td>
+        <td>{s.code ? <code>{s.code}</code> : '—'}</td><td>{STOPPED_STATUS[s.status]}{s.basis ? <span className="admin-diff"> — {RESOLUTION_LABELS[s.basis]}</span> : null}</td></tr>)}</tbody>
+    </table></div> : null}
     {incident.guided ? <p style={{ marginTop: 10 }}><a className="admin-button" data-variant="primary" href={incident.guided.href}>{incident.guided.name}</a>
       <span className="admin-diff"> {incident.guided.description}</span></p> : null}
   </Section>;

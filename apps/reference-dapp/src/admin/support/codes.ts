@@ -56,6 +56,20 @@ const EXACT: Readonly<Record<string, Entry>> = {
 
 /** Ordered: the first matching rule explains the code. */
 const PATTERNS: readonly (readonly [RegExp, Entry])[] = [
+  // Observation verdicts that keep an outcome UNKNOWN: never "try again" (a second submission could duplicate one that landed).
+  [/_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION$/, { label: 'Nonce used by a different transaction', category: 'CONFIRMATION', remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
+    meaning: 'The account nonce reserved for the reviewed transaction was used by a transaction whose target, data or value differ. The reviewed transaction therefore did not '
+      + 'land at that nonce — but the wallet may have sent it with another nonce, so the outcome stays unknown until that is excluded.',
+    likelyCause: 'The owner’s wallet sent another (or a modified) transaction with that nonce.' }],
+  [/_TRANSACTION_NOT_OBSERVED$/, { label: 'Transaction not observed', category: 'CONFIRMATION', remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
+    meaning: 'No transaction hash was reported back, and none was found by nonce or in the pending pool at the last check. This does not prove that nothing was submitted: '
+      + 'a delayed wallet broadcast cannot be excluded, so the outcome stays unknown.', likelyCause: null }],
+  [/_TRANSACTION_PENDING$/, { label: 'Transaction pending', category: 'CONFIRMATION', remedy: 'TRANSIENT', userAction: null, deployment: 'NO',
+    meaning: 'A transaction was found but had no receipt yet at the last check.', likelyCause: null }],
+  [/_(SEMANTIC_EDIT_REQUIRES_REVIEW|WALLET_CHANGED_REVIEW_REQUIRED)$/, { label: 'Owner review required', category: 'WORKFLOW_VALIDATION', remedy: 'USER', deployment: 'NO',
+    userAction: 'The owner reviews the edited workflow again before any further execution.',
+    meaning: 'The owner edited the workflow (or changed wallet) after review, so FloFi cleared that authorization. It gates future execution only and changes nothing that '
+      + 'already executed — it is not an operational incident.', likelyCause: null }],
   [/CORRUPT/, { label: 'Stored state failed validation', category: 'BACKGROUND', remedy: 'CODE', userAction: null, deployment: 'CODE',
     meaning: 'A stored execution record failed its integrity checks. FloFi never acts on such a record.', likelyCause: null }],
   [/SUBMISSION_EXPIRED_NOT_EXECUTED$/, { label: 'Expired before execution', category: 'TRANSACTION_SUBMISSION', remedy: 'USER', deployment: 'NO',

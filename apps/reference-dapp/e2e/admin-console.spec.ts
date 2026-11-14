@@ -296,6 +296,13 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await db.query(`UPDATE execution_runs SET needs_observation = true, attention_required = true, updated_at = now() - interval '1 hour' WHERE run_id = 'e2e-stuck'`);
     await db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, deliveries, last_error, completed_at)
       VALUES ('default', 'reconcile', 'base-sepolia-swap:e2e-stuck', 'e2e-stuck', '{"namespace":"base-sepolia-swap","runId":"e2e-stuck"}', 'DEAD', 500, 'OBSERVATION_BUDGET_EXHAUSTED', now())`);
+    // A terminal execution flagged earlier (its check stopped, then it was reconciled without an Evidence Bundle): historical, not active, not verified.
+    await seedRun(db, { id: 'e2e-historical', flow: 'base-sepolia-swap', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET',
+      node: { nodeId: 's', actionType: 'asset.swap.exact-input', chainId: BASE_SEPOLIA }, attempt: { state: 'CONFIRMED', hash: '0x' + 'c'.repeat(64), reconciled: true } });
+    await db.query(`UPDATE execution_runs SET attention_required = true, has_evidence = false WHERE run_id = 'e2e-historical'`);
+    await db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, deliveries, last_error, completed_at)
+      VALUES ('default', 'reconcile', 'base-sepolia-swap:e2e-historical', 'e2e-historical', '{"namespace":"base-sepolia-swap","runId":"e2e-historical"}', 'DEAD', 500,
+        'OBSERVATION_BUDGET_EXHAUSTED', now() - interval '3 days')`);
     await runAdminCommand('grant', { wallet: operator.address, role: 'OPERATOR', label: 'Support operator' }, db, 'default');
     await runAdminCommand('grant', { wallet: viewer.address, role: 'VIEWER', label: 'Support viewer' }, db, 'default');
     await installJourneyWallet(page, [operator, viewer], { chain: '0x14a34' });
@@ -312,7 +319,27 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await expect(card).toContainText('Outcome unknown');
     await expect(card).toContainText('Test or mocked funds only'); // a testnet run never claims real funds
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Recoverable here' }).locator('strong')).not.toHaveText('0');
+    await expect(card).toContainText('Active');
+    // The historical flag is counted separately and kept out of the open list; it is listed under its own lifecycle, never as resolved.
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Historical attention' }).locator('strong')).toHaveText('1');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Raw flag' }).locator('strong')).toHaveText('2');
+    await expect(page.locator('.admin-incident').filter({ hasText: 'Earlier attention' })).toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath('support-overview.png'), fullPage: true });
+    await page.goto('/admin/support?lifecycle=HISTORICAL#support-incidents');
+    const historical = page.locator('.admin-incident').filter({ hasText: 'Earlier attention — no active condition' });
+    await expect(historical).toContainText('Historical attention');
+    await expect(historical).toContainText('No action needed');
+    await expect(historical).toContainText('Outcome: Completed');
+    // Workflows and System Health show the same split.
+    await page.goto('/admin/workflows');
+    const requiring = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Requiring attention' }) });
+    await expect(requiring.getByRole('row').filter({ hasText: 'e2e-stuck' })).toContainText('Active');
+    await expect(requiring).not.toContainText('e2e-historical');
+    await expect(page.getByRole('heading', { name: 'Historical attention' })).toBeVisible();
+    await page.goto('/admin/health');
+    await expect(page.getByRole('row').filter({ hasText: 'Historical attention' })).toContainText('1');
+    await expect(page.getByRole('row').filter({ hasText: 'Observation exhausted' })).toContainText('1');
+    await page.goto('/admin/support');
 
     // Diagnose: timeline marks the unknown submission; preview → confirm → run → verified state.
     await card.getByRole('link', { name: /^Diagnose/ }).click();
@@ -337,6 +364,12 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await page.getByRole('textbox', { name: /^Note \(plain text/ }).fill('Customer informed; watching the check.');
     await page.getByRole('button', { name: 'Add note' }).click();
     await expect(page.getByText('Note added.')).toBeVisible();
+    // An explicit note is what makes an open incident "under investigation" — never the page view. The re-queued check has not finished, so the
+    // incident stays open and the transaction outcome is still not established (a separate dimension).
+    const summary = page.locator('section[aria-labelledby="support-incident-summary"]');
+    await expect(summary).toContainText('Under investigation');
+    await expect(summary).toContainText('Queued again — not finished');
+    await expect(summary).toContainText('(not established)');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Recovery attempts for this execution' })).toBeVisible();

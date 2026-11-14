@@ -35,7 +35,14 @@ export type RunRecoveryFacts = {
   readonly unresolvedDeadKinds: readonly string[];
   /** Successful operator recoveries of this run in the retry-limit window. */
   readonly recentRecoveries: number;
+  /**
+   * Every work kind that has EVER stopped (DEAD) for this run — stopped items are never pruned, unlike completed ones — with the state of that
+   * kind's newest retained item. Read by the attention lifecycle (`lifecycle.ts`) only; eligibility and the state token do not use it.
+   */
+  readonly stoppedKinds: readonly StoppedKind[];
 };
+export type StoppedKind = { readonly kind: string; readonly count: number; readonly lastError: string | null; readonly lastStoppedAt: Date | null;
+  readonly newestState: WorkState };
 
 export type EligibilityState = 'RECOVERABLE_NOW' | 'REQUIRES_CONFIRMATION' | 'WAITING_EXTERNAL' | 'USER_ACTION' | 'ENGINEERING' | 'INVESTIGATION' | 'NONE';
 export const ELIGIBILITY_LABELS: Readonly<Record<EligibilityState, string>> = {

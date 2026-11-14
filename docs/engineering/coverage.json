@@ -110,6 +110,10 @@
       "path": "apps/reference-dapp/src/admin/support/support.test.ts",
       "stage": "unit"
     },
+    "app.admin.support-lifecycle": {
+      "path": "apps/reference-dapp/src/admin/support/lifecycle.test.ts",
+      "stage": "unit"
+    },
     "app.admin.support-http.pg": {
       "path": "apps/reference-dapp/src/admin/support/support-http.pg.test.ts",
       "stage": "postgres"
@@ -1310,6 +1314,7 @@
     "app.admin.flight",
     "app.admin.session",
     "app.admin.support",
+    "app.admin.support-lifecycle",
     "app.app.api.flofi.journey.route",
     "app.app.wallet-session-action",
     "app.automations.boundaries",
@@ -1927,7 +1932,9 @@
       "sources": [
         "apps/reference-dapp/src/admin/support/codes.ts",
         "apps/reference-dapp/src/admin/support/diagnostics.ts",
+        "apps/reference-dapp/src/admin/support/executions.ts",
         "apps/reference-dapp/src/admin/support/incidents.ts",
+        "apps/reference-dapp/src/admin/support/lifecycle.ts",
         "apps/reference-dapp/src/admin/support/recovery.ts",
         "apps/reference-dapp/src/admin/support/registry.ts",
         "apps/reference-dapp/src/admin/support/support-http.ts",
@@ -1941,6 +1948,7 @@
         "app.admin.http.pg",
         "app.admin.support",
         "app.admin.support-http.pg",
+        "app.admin.support-lifecycle",
         "app.backend.support-recovery-cloud.pg"
       ],
       "gaps": [

@@ -16,17 +16,21 @@
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { AttentionItem } from '../../components/admin/admin-ui';
-import { classifyRun, FAILED_STATUSES, PARTIAL_STATUSES, UNCERTAIN_STATUSES, type AttemptFact, type ExecutionOutcome } from '../analytics/classify.ts';
+import { classifyRun, FAILED_STATUSES, type ExecutionOutcome } from '../analytics/classify.ts';
 import { environmentOf, networkInfo, type AnalyticsEnvironment } from '../analytics/networks.ts';
 import { explainCode, type IncidentCategory } from './codes.ts';
+import { loadExecutions, type ExecutionSnapshot } from './executions.ts';
+import { LIFECYCLE_LABELS, loadExecutionAttention, runAttention, type ConditionCode, type ExecutionAttention, type Lifecycle, type RunAttention,
+  type StoppedTaskView } from './lifecycle.ts';
 import { loadRunsFacts } from './recovery.ts';
+export { EXECUTION_SELECT, loadExecutions, snapshotOf, type ExecutionSnapshot } from './executions.ts';
 import { GUIDED_RECOVERY, RECOVERY_ACTIONS, type EligibilityState, type GuidedRecovery, type RecoveryActionId, type RunRecoveryFacts } from './registry.ts';
 
 export type Severity = 'HIGH' | 'MEDIUM' | 'LOW';
 export const SEVERITY_LABELS: Readonly<Record<Severity, string>> = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
 export type IncidentSource = 'EXECUTION' | 'BACKGROUND_TASK' | 'WORKFLOW_RUN' | 'DELEGATED_EXECUTION' | 'PLATFORM' | 'AI_COPILOT';
 export type IncidentKind = 'OBSERVATION_STOPPED' | 'OBSERVATION_NOT_SCHEDULED' | 'EVIDENCE_ARCHIVE_STOPPED' | 'OUTCOME_UNCERTAIN' | 'PARTIAL_EXECUTION'
-  | 'UNCLASSIFIED_STATUS' | 'ATTENTION_FLAGGED' | 'EXECUTION_FAILED' | 'TASK_STOPPED' | 'WORKFLOW_RUN_ATTENTION' | 'DELEGATED_UNRESOLVED' | 'PLATFORM' | 'AI_COPILOT';
+  | 'UNCLASSIFIED_STATUS' | 'ATTENTION_FLAGGED' | 'ATTENTION_HISTORICAL' | 'EXECUTION_FAILED' | 'TASK_STOPPED' | 'WORKFLOW_RUN_ATTENTION' | 'DELEGATED_UNRESOLVED' | 'PLATFORM' | 'AI_COPILOT';
 /**
  * Whether funds could be involved: NONE (nothing was submitted), POSSIBLE (a transaction was or may have been submitted with real funds — a
  * mainnet run, or one whose environment is not recognised), TEST_ONLY (on a test network or a mocked chain), UNKNOWN.
@@ -39,8 +43,17 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = { swap: 'Swap',
   payment: 'Payment', composition: 'Composition', automation: 'Automations', 'workflow-run': 'Multi-step workflows', email: 'Email', platform: 'Platform', ai: 'AI Copilot',
   other: 'Other' };
 
+/**
+ * The incident's lifecycle (`lifecycle.ts`): ACTIVE, UNDER_INVESTIGATION, HISTORICAL or VERIFIED_RESOLVED, or FINAL for an execution that failed
+ * on chain with nothing left to intervene on (shown for diagnosis only). Separate from the transaction outcome (`outcome`).
+ */
+export type IncidentLifecycle = Lifecycle | 'FINAL';
+export const INCIDENT_LIFECYCLE_LABELS: Readonly<Record<IncidentLifecycle, string>> = { ...LIFECYCLE_LABELS, FINAL: 'Final outcome (informational)' };
 export type Incident = {
-  readonly id: string; readonly kind: IncidentKind; readonly source: IncidentSource; readonly category: IncidentCategory; readonly severity: Severity;
+  readonly id: string; readonly lifecycle: IncidentLifecycle;
+  /** Why the lifecycle is what it is, the active conditions and the stopped-task history (execution incidents only). */
+  readonly attention: { readonly explanation: string; readonly conditions: readonly ConditionCode[]; readonly stopped: readonly StoppedTaskView[];
+    readonly flagged: boolean; readonly ownerReviewPending: boolean } | null; readonly kind: IncidentKind; readonly source: IncidentSource; readonly category: IncidentCategory; readonly severity: Severity;
   readonly eligibility: EligibilityState; readonly title: string; readonly summary: string; readonly component: string; readonly feature: Feature;
   /** When the condition was last recorded (the resource's last update), ISO. */
   readonly at: string;
@@ -56,7 +69,6 @@ export type Incident = {
   readonly resource: { readonly type: 'run' | 'work' | 'workflow-run' | 'delegated' | 'platform' | 'copilot'; readonly id: string };
 };
 
-const MINUTE = 60_000, NOT_SCHEDULED_AFTER_MS = 15 * MINUTE;
 export const FAILED_LOOKBACK_DAYS = 30, TASK_LOOKBACK_DAYS = 90;
 const RECOVERY_KINDS = ['reconcile', 'evidence.archive'];
 
@@ -73,10 +85,6 @@ export function featureOf(name: string): Feature {
   if (/payment/.test(name)) return 'payment';
   return 'other';
 }
-
-export type ExecutionSnapshot = { readonly runId: string; readonly workflowId: string; readonly flow: string; readonly status: string; readonly provenance: string;
-  readonly errorCode: string | null; readonly needsObservation: boolean; readonly attentionRequired: boolean; readonly hasEvidence: boolean; readonly createdAt: Date;
-  readonly updatedAt: Date; readonly attempts: readonly AttemptFact[]; readonly journalAuthorized: boolean; readonly chains: readonly string[] };
 
 const OUTCOME_LABELS: Readonly<Record<ExecutionOutcome, string>> = { NOT_STARTED: 'Not started', NOT_EXECUTED: 'Not executed — nothing landed', IN_PROGRESS: 'In progress — not final',
   COMPLETED: 'Completed', FAILED: 'Failed on chain', PARTIAL: 'Partially completed', UNCERTAIN: 'Outcome unknown', UNCLASSIFIED: 'Outcome unknown (unclassified status)' };
@@ -105,27 +113,32 @@ function actionStates(facts: RunRecoveryFacts | undefined, ids: readonly Recover
   });
 }
 
-/** The incident one execution run represents right now, or null. Pure: every input is a durable fact. */
-export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFacts | undefined, now: Date): Incident | null {
+/**
+ * The incident one execution run represents right now, or null. Pure: every input is a durable fact. Its kind and lifecycle come from the shared
+ * attention model (`lifecycle.ts`), so Support, Workflows, System Health and the Overview count the same runs the same way.
+ */
+export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFacts | undefined, now: Date, attention: RunAttention = runAttention(run, facts, null, now)): Incident | null {
   const c = classifyRun(run), submitted = submissionOf(run), environment = environmentOf(run.provenance);
   const realFunds = environment === 'MAINNET' || environment === null;
   const funds: FundsExposure = submitted === 'NO' ? 'NONE' : realFunds ? 'POSSIBLE' : 'TEST_ONLY';
   const reconcile = facts?.latest.reconcile, evidence = facts?.latest['evidence.archive'];
-  const crossChain = featureOf(run.flow) === 'bridge';
+  const crossChain = featureOf(run.flow) === 'bridge', has = (code: ConditionCode) => attention.conditions.includes(code);
   let kind: IncidentKind | null = null;
-  if (run.needsObservation && reconcile?.state === 'DEAD') kind = 'OBSERVATION_STOPPED';
-  else if (run.needsObservation && !run.attentionRequired && (!reconcile || reconcile.state === 'DONE') && now.getTime() - run.updatedAt.getTime() > NOT_SCHEDULED_AFTER_MS)
-    kind = 'OBSERVATION_NOT_SCHEDULED';
-  else if (run.hasEvidence && facts && !facts.evidenceArchived && evidence?.state === 'DEAD') kind = 'EVIDENCE_ARCHIVE_STOPPED';
-  else if (c.outcome === 'UNCERTAIN') kind = 'OUTCOME_UNCERTAIN';
-  else if (c.outcome === 'PARTIAL') kind = 'PARTIAL_EXECUTION';
-  else if (c.outcome === 'UNCLASSIFIED') kind = 'UNCLASSIFIED_STATUS';
-  else if (run.attentionRequired) kind = 'ATTENTION_FLAGGED';
+  if (has('OBSERVATION_EXHAUSTED')) kind = 'OBSERVATION_STOPPED';
+  else if (has('OBSERVATION_NOT_SCHEDULED')) kind = 'OBSERVATION_NOT_SCHEDULED';
+  else if (has('EVIDENCE_ARCHIVE_STOPPED')) kind = 'EVIDENCE_ARCHIVE_STOPPED';
+  else if (has('OUTCOME_UNKNOWN')) kind = 'OUTCOME_UNCERTAIN';
+  else if (has('PARTIAL_EXECUTION')) kind = 'PARTIAL_EXECUTION';
+  else if (has('UNCLASSIFIED_STATUS')) kind = 'UNCLASSIFIED_STATUS';
+  else if (has('TASK_STOPPED') || has('RETRY_PENDING')) kind = 'ATTENTION_FLAGGED';
+  else if (attention.lifecycle === 'HISTORICAL' || attention.lifecycle === 'VERIFIED_RESOLVED') kind = 'ATTENTION_HISTORICAL';
   else if (c.outcome === 'FAILED') kind = 'EXECUTION_FAILED';
   if (!kind) return null;
+  const lifecycle: IncidentLifecycle = attention.lifecycle ?? 'FINAL';
 
   const code = explainCode(run.errorCode), stopped = kind === 'EVIDENCE_ARCHIVE_STOPPED' ? evidence : reconcile;
-  const codes = [...new Set([run.errorCode, stopped?.state === 'DEAD' ? stopped.lastError : null].filter((x): x is string => !!x))];
+  const codes = [...new Set([run.errorCode, stopped?.state === 'DEAD' ? stopped.lastError : null, ...attention.stopped.map(s => s.code)]
+    .filter((x): x is string => !!x))];
   const actionIds: RecoveryActionId[] = kind === 'OBSERVATION_STOPPED' || kind === 'OBSERVATION_NOT_SCHEDULED' ? ['execution.resume-observation']
     : kind === 'EVIDENCE_ARCHIVE_STOPPED' ? ['execution.retry-evidence-archive'] : [];
   const actions = actionStates(facts, actionIds);
@@ -170,11 +183,21 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
       summary = `The flow reported a status (${run.status}) that Admin analytics does not classify. Its outcome is shown as unknown.`;
       eligibility = 'ENGINEERING'; recommended = 'Escalate: the status must be classified in code before support can reason about it.';
       break;
-    case 'ATTENTION_FLAGGED':
-      category = facts?.unresolvedDeadKinds.length ? 'BACKGROUND' : 'UNKNOWN'; severity = 'MEDIUM'; title = 'Flagged for attention';
-      summary = facts?.unresolvedDeadKinds.length ? `A background task for this execution stopped (${facts.unresolvedDeadKinds.join(', ')}).`
-        : 'A worker flagged this execution for attention earlier; no stopped task is recorded now.';
-      eligibility = 'INVESTIGATION'; recommended = 'Review the timeline and background tasks below. No automatic recovery is registered for this condition.';
+    case 'ATTENTION_FLAGGED': {
+      const retrying = has('RETRY_PENDING') && !has('TASK_STOPPED');
+      category = 'BACKGROUND'; severity = 'MEDIUM'; title = retrying ? 'Stopped task queued again' : 'Background task stopped';
+      summary = retrying ? 'A task that had stopped for this execution was queued again and has not finished. The incident stays open until it does.'
+        : `A background task for this execution stopped (${attention.stopped.filter(s => s.status === 'UNRESOLVED').map(s => s.kind).join(', ')}).`;
+      eligibility = retrying ? 'WAITING_EXTERNAL' : 'INVESTIGATION';
+      recommended = retrying ? 'Wait for the worker to finish the task, then check this page again.' : 'Review the timeline and background tasks below. No automatic recovery is registered for this condition.';
+      break;
+    }
+    case 'ATTENTION_HISTORICAL':
+      category = 'BACKGROUND'; severity = 'LOW'; eligibility = 'NONE';
+      title = lifecycle === 'VERIFIED_RESOLVED' ? 'Earlier attention — resolution verified' : 'Earlier attention — no active condition';
+      summary = attention.explanation;
+      recommended = lifecycle === 'VERIFIED_RESOLVED' ? 'Nothing to do. The original flag and history are kept for accountability.'
+        : 'Nothing is demonstrably wrong now, but resolution is not verified. Review the history below if this execution is questioned; record findings as a note.';
       break;
     default:
       category = code?.category ?? 'TRANSACTION_SUBMISSION'; severity = 'LOW'; title = 'Failed on chain';
@@ -182,7 +205,8 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
       eligibility = code?.remedy === 'CODE' || code?.remedy === 'CONFIGURATION' ? 'ENGINEERING' : code?.remedy === 'UNKNOWN' || !code ? 'INVESTIGATION' : 'USER_ACTION';
       recommended = code?.userAction ?? 'Ask the owner to review the failed step and start again with a fresh quote if it is still wanted.';
   }
-  return { id: `run:${run.runId}`, kind, source: 'EXECUTION', category, severity, eligibility, title, summary, component: run.flow, feature: featureOf(run.flow),
+  return { id: `run:${run.runId}`, lifecycle, attention: { explanation: attention.explanation, conditions: attention.conditions, stopped: attention.stopped,
+      flagged: attention.flagged, ownerReviewPending: attention.ownerReviewPending }, kind, source: 'EXECUTION', category, severity, eligibility, title, summary, component: run.flow, feature: featureOf(run.flow),
     at: run.updatedAt.toISOString(), environment, provenance: environment ? null : run.provenance, networks: run.chains.map(chain => networkInfo(chain).name),
     outcome: OUTCOME_LABELS[c.outcome], outcomeKnown: KNOWN_OUTCOMES.has(c.outcome) && !run.needsObservation, submitted, funds, recommended,
     actions: actions.map(({ id, eligible, reason }) => ({ id, eligible, reason })), guided: null, codes, resource: { type: 'run', id: run.runId } };
@@ -194,7 +218,7 @@ export type StoppedTask = { readonly id: string; readonly kind: string; readonly
 export function taskIncident(task: StoppedTask): Incident {
   const code = explainCode(task.lastError), feature = featureOf(task.kind), delegated = /^delegation\b/.test(task.kind);
   const eligibility: EligibilityState = code?.remedy === 'CODE' || code?.remedy === 'CONFIGURATION' ? 'ENGINEERING' : 'INVESTIGATION';
-  return { id: `work:${task.id}`, kind: 'TASK_STOPPED', source: 'BACKGROUND_TASK', category: feature === 'automation' ? 'AUTOMATION' : 'BACKGROUND',
+  return { id: `work:${task.id}`, lifecycle: 'ACTIVE' as const, attention: null, kind: 'TASK_STOPPED', source: 'BACKGROUND_TASK', category: feature === 'automation' ? 'AUTOMATION' : 'BACKGROUND',
     severity: delegated ? 'HIGH' : feature === 'automation' ? 'MEDIUM' : 'LOW', eligibility, title: 'Background task stopped',
     summary: `A “${task.kind}” task stopped after ${task.deliveries} attempt${task.deliveries === 1 ? '' : 's'} and will not run again on its own.`,
     component: task.kind, feature, at: task.completedAt.toISOString(), environment: null, provenance: null, networks: [],
@@ -209,7 +233,7 @@ export type WorkflowRunRow = { readonly runId: string; readonly state: string; r
   readonly currentStep: number; readonly stepCount: number; readonly updatedAt: Date };
 export function workflowRunIncident(run: WorkflowRunRow): Incident {
   const delegated = run.mode === 'DELEGATED', code = explainCode(run.code);
-  return { id: `wfr:${run.runId}`, kind: 'WORKFLOW_RUN_ATTENTION', source: 'WORKFLOW_RUN', category: run.requesterKind === 'AUTOMATION_RULE' ? 'AUTOMATION' : code?.category ?? 'TRANSACTION_SUBMISSION',
+  return { id: `wfr:${run.runId}`, lifecycle: 'ACTIVE' as const, attention: null, kind: 'WORKFLOW_RUN_ATTENTION', source: 'WORKFLOW_RUN', category: run.requesterKind === 'AUTOMATION_RULE' ? 'AUTOMATION' : code?.category ?? 'TRANSACTION_SUBMISSION',
     severity: delegated ? 'HIGH' : 'MEDIUM', eligibility: code?.remedy === 'USER' ? 'USER_ACTION' : 'INVESTIGATION', title: 'Multi-step workflow needs attention',
     summary: `Step ${Math.min(run.currentStep + 1, run.stepCount)} of ${run.stepCount} could not continue automatically${delegated ? ' (delegated mode)' : ''}.`,
     component: 'workflow-run', feature: 'workflow-run', at: run.updatedAt.toISOString(), environment: null, provenance: null, networks: [], outcome: 'Not final', outcomeKnown: false,
@@ -221,7 +245,7 @@ export type DelegatedRow = { readonly executionId: string; readonly state: strin
   readonly stepCount: number; readonly updatedAt: Date };
 export function delegatedIncident(row: DelegatedRow): Incident {
   const uncertain = row.state === 'UNCERTAIN';
-  return { id: `dex:${row.executionId}`, kind: 'DELEGATED_UNRESOLVED', source: 'DELEGATED_EXECUTION', category: 'AUTOMATION', severity: uncertain ? 'HIGH' : 'MEDIUM',
+  return { id: `dex:${row.executionId}`, lifecycle: 'ACTIVE' as const, attention: null, kind: 'DELEGATED_UNRESOLVED', source: 'DELEGATED_EXECUTION', category: 'AUTOMATION', severity: uncertain ? 'HIGH' : 'MEDIUM',
     eligibility: 'INVESTIGATION', title: uncertain ? 'Delegated execution outcome unknown' : row.state === 'HALTED' ? 'Delegated execution halted' : 'Delegated execution flagged',
     summary: `An automation’s delegated execution is ${row.state.toLowerCase()} at step ${Math.min(row.currentStep + 1, row.stepCount)} of ${row.stepCount}.`,
     component: 'delegated-execution', feature: 'automation', at: row.updatedAt.toISOString(), environment: null, provenance: null, networks: [],
@@ -248,7 +272,7 @@ export function platformIncidents(items: readonly AttentionItem[], at: Date): In
   return items.flatMap(item => {
     const spec = PLATFORM[item.key];
     if (!spec) return [];
-    return [{ id: `platform:${item.key}`, kind: 'PLATFORM' as const, source: 'PLATFORM' as const, category: spec.category, severity: item.tone === 'bad' ? 'HIGH' as const : 'MEDIUM' as const,
+    return [{ id: `platform:${item.key}`, lifecycle: 'ACTIVE' as const, attention: null, kind: 'PLATFORM' as const, source: 'PLATFORM' as const, category: spec.category, severity: item.tone === 'bad' ? 'HIGH' as const : 'MEDIUM' as const,
       eligibility: spec.eligibility, title: item.title, summary: typeof item.detail === 'string' ? item.detail : 'Measured by System Health.', component: 'platform',
       feature: 'platform' as const, at: at.toISOString(), environment: null, provenance: null, networks: [], outcome: 'Not applicable', outcomeKnown: true, submitted: 'NOT_APPLICABLE' as const,
       funds: 'NONE' as const, recommended: spec.recommended, actions: [], guided: null, codes: [], resource: { type: 'platform' as const, id: item.key } }];
@@ -258,7 +282,7 @@ export function copilotIncidents(items: readonly AttentionItem[], at: Date): Inc
   return items.map(item => {
     const config = item.key === 'copilot-invalid' || item.key === 'copilot-unconfigured', key = /^copilot-key-/.test(item.key) || item.key === 'copilot-unavailable';
     const eligibility: EligibilityState = config ? 'REQUIRES_CONFIRMATION' : key ? 'ENGINEERING' : 'INVESTIGATION';
-    return { id: `copilot:${item.key}`, kind: 'AI_COPILOT' as const, source: 'AI_COPILOT' as const, category: 'AI_COPILOT' as const,
+    return { id: `copilot:${item.key}`, lifecycle: 'ACTIVE' as const, attention: null, kind: 'AI_COPILOT' as const, source: 'AI_COPILOT' as const, category: 'AI_COPILOT' as const,
       severity: item.tone === 'bad' ? 'HIGH' as const : 'MEDIUM' as const, eligibility, title: item.title,
       summary: typeof item.detail === 'string' ? item.detail : 'Measured by AI Settings.', component: 'ai-copilot', feature: 'ai' as const, at: at.toISOString(),
       environment: null, provenance: null, networks: [], outcome: 'Not applicable', outcomeKnown: true, submitted: 'NOT_APPLICABLE' as const, funds: 'NONE' as const,
@@ -268,49 +292,30 @@ export function copilotIncidents(items: readonly AttentionItem[], at: Date): Inc
   });
 }
 
-type RunRow = { run_id: string; workflow_id: string; flow: string; status: string; provenance: string; error_code: string | null; needs_observation: boolean;
-  attention_required: boolean; has_evidence: boolean; created_at: Date; updated_at: Date; attempts: AttemptFact[]; journal_authorized: boolean; chains: string[] | null };
-export const EXECUTION_SELECT = `SELECT r.run_id, r.workflow_id, r.flow, r.status, r.provenance, r.error_code, r.needs_observation, r.attention_required, r.has_evidence,
-    r.created_at, r.updated_at,
-    coalesce((SELECT json_agg(json_build_object('step', a.step, 'state', a.state, 'hash', a.transaction_hash IS NOT NULL, 'reconciled', a.reconciled)
-      ORDER BY a.created_at, a.attempt_id) FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id), '[]'::json) AS attempts,
-    EXISTS (SELECT 1 FROM journal_entries j WHERE j.tenant_id = r.tenant_id AND j.run_id = r.run_id AND j.to_state = 'AUTHORIZED') AS journal_authorized,
-    (SELECT array_agg(DISTINCT x.chain) FROM admin_run_facts f, jsonb_to_recordset(f.actions) AS x(chain text)
-      WHERE f.tenant_id = r.tenant_id AND f.run_id = r.run_id AND f.state = 'INDEXED' AND x.chain IS NOT NULL) AS chains
-  FROM execution_runs r`;
-export const snapshotOf = (row: RunRow): ExecutionSnapshot => ({ runId: row.run_id, workflowId: row.workflow_id, flow: row.flow, status: row.status,
-  provenance: row.provenance, errorCode: row.error_code, needsObservation: row.needs_observation, attentionRequired: row.attention_required, hasEvidence: row.has_evidence,
-  createdAt: row.created_at, updatedAt: row.updated_at, attempts: row.attempts, journalAuthorized: row.journal_authorized, chains: row.chains ?? [] });
-export async function loadExecutions(db: Database, tenantId: string, runIds: readonly string[]): Promise<ExecutionSnapshot[]> {
-  if (!runIds.length) return [];
-  const { rows } = await db.query<RunRow>(`${EXECUTION_SELECT} WHERE r.tenant_id = $1 AND r.run_id = ANY($2::text[])`, [tenantId, [...new Set(runIds)].slice(0, 1000)]);
-  return rows.map(snapshotOf);
-}
-
-export const LIMITS = Object.freeze({ attention: 200, observing: 300, recent: 300, tasks: 100, workflowRuns: 100, delegated: 100 });
+export const LIMITS = Object.freeze({ recent: 300, tasks: 100, workflowRuns: 100, delegated: 100 });
 export type SourceStatus = { readonly source: IncidentSource; readonly ok: boolean; readonly code: string | null; readonly truncated: boolean };
-export type Discovery = { readonly incidents: Incident[]; readonly sources: SourceStatus[] };
+export type Discovery = { readonly incidents: Incident[]; readonly sources: SourceStatus[];
+  /** The shared execution-attention model (null when it could not be read). The same figures System Health, the Overview and Workflows show. */
+  readonly attention: ExecutionAttention | null };
 const failure = (error: unknown) => error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}/.test(error.message) ? error.message.slice(0, 80) : 'QUERY_FAILED';
 
 /** Every current incident from the durable sources (bounded). Platform and AI conditions are added by the caller from their own probes. */
 export async function discoverIncidents(db: Database, tenantId: string, now: Date): Promise<Discovery> {
   const sources: SourceStatus[] = [], incidents: Incident[] = [];
-  const failedSince = new Date(now.getTime() - FAILED_LOOKBACK_DAYS * 86_400_000), quiet = new Date(now.getTime() - NOT_SCHEDULED_AFTER_MS);
-  const statuses = [...UNCERTAIN_STATUSES, ...PARTIAL_STATUSES, ...FAILED_STATUSES];
+  const failedSince = new Date(now.getTime() - FAILED_LOOKBACK_DAYS * 86_400_000);
+  let attention: ExecutionAttention | null = null;
   const executions = (async () => {
     try {
-      const [attention, observing, recent] = await Promise.all([
-        db.query<{ run_id: string }>(`SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND attention_required ORDER BY updated_at DESC LIMIT ${LIMITS.attention + 1}`, [tenantId]),
-        db.query<{ run_id: string }>(`SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND needs_observation AND updated_at < $2 ORDER BY updated_at LIMIT ${LIMITS.observing + 1}`,
-          [tenantId, quiet]),
-        db.query<{ run_id: string }>(`SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND updated_at >= $2 AND status = ANY($3::text[])
-          ORDER BY updated_at DESC LIMIT ${LIMITS.recent + 1}`, [tenantId, failedSince, statuses]),
-      ]);
-      const truncated = attention.rows.length > LIMITS.attention || observing.rows.length > LIMITS.observing || recent.rows.length > LIMITS.recent;
-      const ids = [...attention.rows.slice(0, LIMITS.attention), ...observing.rows.slice(0, LIMITS.observing), ...recent.rows.slice(0, LIMITS.recent)].map(row => row.run_id);
+      // Every run with an attention lifecycle (the shared model), plus executions that failed on chain in the lookback (shown for diagnosis).
+      const [shared, recent] = await Promise.all([loadExecutionAttention(db, tenantId, now),
+        db.query<{ run_id: string }>(`SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND updated_at >= $2 AND status = ANY($3::text[]) AND NOT attention_required
+          ORDER BY updated_at DESC LIMIT ${LIMITS.recent + 1}`, [tenantId, failedSince, [...FAILED_STATUSES]])]);
+      attention = shared;
+      for (const entry of shared.entries) { const incident = executionIncident(entry.run, entry.facts, now, entry.attention); if (incident) incidents.push(incident); }
+      const seen = new Set(shared.entries.map(entry => entry.run.runId)), ids = recent.rows.slice(0, LIMITS.recent).map(row => row.run_id).filter(id => !seen.has(id));
       const [runs, facts] = await Promise.all([loadExecutions(db, tenantId, ids), loadRunsFacts(db, tenantId, ids, now)]);
       for (const run of runs) { const incident = executionIncident(run, facts.get(run.runId), now); if (incident) incidents.push(incident); }
-      sources.push({ source: 'EXECUTION', ok: true, code: null, truncated });
+      sources.push({ source: 'EXECUTION', ok: true, code: null, truncated: shared.truncated || recent.rows.length > LIMITS.recent });
     } catch (error) { sources.push({ source: 'EXECUTION', ok: false, code: failure(error), truncated: false }); }
   })();
   const tasks = (async () => {
@@ -348,7 +353,7 @@ export async function discoverIncidents(db: Database, tenantId: string, now: Dat
     } catch (error) { sources.push({ source: 'DELEGATED_EXECUTION', ok: false, code: failure(error), truncated: false }); }
   })();
   await Promise.all([executions, tasks, workflowRuns, delegated]);
-  return { incidents, sources };
+  return { incidents, sources, attention };
 }
 
 const SEVERITY_ORDER: Readonly<Record<Severity, number>> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
