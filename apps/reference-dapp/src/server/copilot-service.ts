@@ -132,7 +132,7 @@ export function readCopilotResponse(response: CopilotHttpResponse): CopilotInten
   catch (cause) { return fail(cause instanceof CopilotIntentError && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID'); }
 }
 
-async function readCapped(response: Response, maxBytes: number): Promise<string> {
+export async function readCapped(response: Response, maxBytes: number): Promise<string> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) { await response.body?.cancel().catch(() => undefined); fail('COPILOT_RESPONSE_TOO_LARGE'); }
   if (!response.body) return '';
@@ -318,7 +318,8 @@ function groundAnswer(intent: CopilotIntentV2, facts: readonly string[]): { read
   return checked.ok ? { intent, grounding: 'GROUNDED' } : { intent: { ...intent, answer: null }, grounding: checked.reason };
 }
 
-export type CopilotReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+/** `minimal` exists only for OpenAI reasoning models; `xhigh` and `max` only for Anthropic (`copilot-settings.ts` refuses every other pairing). */
+export type CopilotReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 /** Owner-chosen live tuning; every value is bounded and nothing falls back to a different model. */
 export type CopilotTuning = { readonly timeoutMs: number; readonly maxOutputTokens: number; readonly reasoningEffort: CopilotReasoningEffort | null };
 export const COPILOT_TUNING_DEFAULTS: CopilotTuning = Object.freeze({ timeoutMs: COPILOT_SERVER_LIMITS.timeoutMs, maxOutputTokens: 4_096, reasoningEffort: null });
