@@ -22,7 +22,8 @@ import { createEvmDouble } from '../delegation/harness/evm-double.ts';
 import { createCircleDouble } from '../delegation/harness/circle-double.ts';
 import { circleFactsOf, circleOperationOf, circlePermitOf, circleUpgradeAuthorization, circleUserOpHash } from '../user-funded/circle-gas.ts';
 import type { Prepared } from '../user-funded/groups.ts';
-import { currentStep, runView, startUserFunded } from './service.ts';
+import { currentStep, declineUserFundedGroupCircle, prepareUserFundedGroup, runView, startUserFunded } from './service.ts';
+import type { RunScope, WorkflowRunStore } from './pg-store.ts';
 import { workflowRunHarness } from './workflow-run.test-harness.ts';
 
 const CHAIN = 'eip155:8453', USDC = BASE_MAINNET_SWAP.usdc;
@@ -74,6 +75,17 @@ async function approveStart(eth: bigint, profile: unknown = FLOFI) {
   return { t, chain, circle, h, wallets, approval, started, runId, prepare };
 }
 
+/**
+ * Final review (P3): a store whose first step move of an owner-step group's switch (kind GAS_MECHANISM_SWITCHED) fails — a connection lost
+ * mid-switch — whether the move is made on its own or inside one of the store's atomic transactions.
+ */
+function failingStepMove(store: WorkflowRunStore): WorkflowRunStore {
+  let armed = true;
+  const fail = (kind: string | undefined) => { if (armed && kind === 'GAS_MECHANISM_SWITCHED') { armed = false; throw new Error('connection terminated unexpectedly'); } };
+  const failing = (scope: RunScope): RunScope => ({ ...scope, stepTransition: async (...args) => { fail(args[5]); return scope.stepTransition(...args); } });
+  return { ...store, stepTransition: async (...args) => { fail(args[5]); return store.stepTransition(...args); },
+    atomically: (runId, work) => store.atomically(runId, scope => work(failing(scope))) };
+}
 /** One pass of the run with the confirm-mode gates (the owner's step becomes READY, nothing is loaded into its flow). */
 const ready = async (h: Awaited<ReturnType<typeof setup>>['h'], runId: string) => advanceRun(h.runs as never, runId);
 
@@ -287,6 +299,36 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
       await h.drain(run.runId);
       expect((await ownedRun(h.runs, approval.approvalId, wallets)).state).toBe('COMPLETED');
     } finally { await t.drop(); }
+  });
+
+  it('final review (P3): the switch to Circle and its steps\' moves are one transaction: a failure in between switches nothing', async () => {
+    const { t, h, wallets, approval, run, prepare } = await setup();
+    try {
+      await ready(h, run.runId);
+      const owned = await ownedRun(h.runs, approval.approvalId, wallets);
+      await expect(prepareUserFundedGroup({ ...h.runs, store: failingStepMove(h.store) }, owned, wallets, 0, undefined, 'FLOFI_WALLET'))
+        .rejects.toThrow('connection terminated unexpectedly');
+      // Never a Circle operation whose steps are still owner steps: the group and its steps are exactly as before, still a Circle candidate.
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: 'CIRCLE_ASK_FIRST' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['READY', 'PENDING']);
+      expect(await prepare()).toMatchObject({ strategy: 'EVM_USER_OPERATION' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED']);
+    } finally { await t.drop(); }
+  });
+
+  it('final review (P3): giving the steps back ("Not now", an expiry) is one transaction: a failure in between keeps the preparation whole', async () => {
+    const s = await approveStart(0n);
+    try {
+      await s.prepare();
+      const owned = await ownedRun(s.h.runs, s.approval.approvalId, s.wallets);
+      await expect(declineUserFundedGroupCircle({ ...s.h.runs, store: failingStepMove(s.h.store) }, owned, s.wallets, 0)).rejects.toThrow('connection terminated unexpectedly');
+      // Never a group planned as owner steps whose steps are still the operation's (nor an EXPIRED group nobody plans again).
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_USER_OPERATION', state: 'PREPARED' });
+      expect((await s.h.store.steps(s.runId)).map(x => x.state)).toEqual(['DELEGATED', 'DELEGATED']);
+      const declined = await workflowRunUserFundedDecline(s.h.surface, s.approval.approvalId, s.wallets, 0);
+      expect(declined.view.workflowRun?.step).toMatchObject({ index: 0 });
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: null });
+    } finally { await s.t.drop(); }
   });
 
   it('a FloFi Wallet delegated elsewhere is never upgraded: the native shortfall, the steps untouched', async () => {

@@ -35,7 +35,7 @@ import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcom
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
 import { plannedStrategyOf } from '../user-funded/circle-gas.ts';
-import { groupStepsToOwner, plannedCodeAfterCircle } from './owner-step-circle.ts';
+import { expireTokenGasPreparation } from './owner-step-circle.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -110,14 +110,16 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
       // A wallet batch may already be on its way: the wallet sends it the moment the owner confirms, whenever that is. It stays PREPARED (its
       // late answer is accepted; a new preparation keeps the same EIP-5792 id) instead of being dropped and offered again as new.
       if (g.validUntil && g.validUntil <= now && g.strategy !== 'EVM_WALLET_BATCH') {
+        // ADR-0010: an expired Circle-paid preparation gives the group back its planned strategy (native gas is decided afresh when prepared again);
+        // owner requirement (FloFi Wallet + Circle): an owner-step group's steps go back to their own flows (never authorized, never ran), as a
+        // Circle candidate again (CIRCLE_ASK_FIRST). Final review (P3): one transaction, all of it or none. An expired preparation of any other
+        // strategy is planned again as before.
+        if (plannedStrategyOf(g.prepared) !== null) {
+          const back = await expireTokenGasPreparation(deps.store, run.runId, g, 'USER_FUNDED_PREPARED_EXPIRED', null);
+          return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: back !== null };
+        }
         const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' });
-        // ADR-0010: an expired Circle-paid preparation gives the group back its planned strategy (native gas is decided afresh when prepared again).
-        const planned = expired ? plannedStrategyOf(expired.prepared) : null;
-        // Owner requirement (FloFi Wallet + Circle): an owner-step group's steps go back to their own flows first (never authorized, never ran).
-        if (expired && planned === 'EVM_OWNER_STEP') await groupStepsToOwner(deps.store, run.runId, expired);
-        // Final review (P3): such a group is a Circle candidate again (CIRCLE_ASK_FIRST): its first step is asked about before it loads.
-        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null,
-          code: plannedCodeAfterCircle(expired.prepared, null), ...planned && planned !== expired.strategy ? { strategy: planned } : {} });
+        if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
       }
       // An expired run waiting on a wallet batch is looked at again as soon as that batch's validity has passed.

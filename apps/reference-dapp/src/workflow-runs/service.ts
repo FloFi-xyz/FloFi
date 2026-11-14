@@ -35,7 +35,8 @@ import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, koraGroupNativeCovers, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { circleFactsOf, circleUpgradeState, consentCircleUpgrade, finalizeCircleAuthorization, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
-import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, groupStepsToOwner, ownerStepsToGroup, ownerStepsUnloaded, plannedCodeAfterCircle } from './owner-step-circle.ts';
+import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, expireTokenGasPreparation as expireTokenGas, ownerStepsUnloaded, plannedCodeAfterCircle,
+  switchOwnerStepsToCircle } from './owner-step-circle.ts';
 import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
 import type { GroupRecord } from './pg-store.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
@@ -358,7 +359,7 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
     // Final review (P3): the owner's browser asked about a FloFi Wallet Circle candidate and the answer is final and not a Circle preparation
     // (CIRCLE_NOT_NEEDED, or a refusal asking again cannot change): its first step may now load into its own flow, exactly as before.
     const code = cause instanceof Error ? cause.message.split(':')[0]! : '';
-    if (asked.circle && /^[A-Z][A-Z0-9_]{2,80}$/.test(code) && !CIRCLE_ASK_AGAIN.has(code)) await circleAnswered(deps.store, run, groupIndex);
+    if (asked.circle && /^[A-Z][A-Z0-9_]{2,80}$/.test(code) && !CIRCLE_ASK_AGAIN.has(code)) await circleAnswered(deps.store, run, groupIndex).catch(() => undefined);
     throw cause;
   }
 }
@@ -409,13 +410,18 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   // new preparation succeeds (a compare-and-set on the row version): the wallet may send the earlier batch at any time — even after its
   // validity, when its on-chain deadline reverts it — and its answer must still be accepted and reconciled, whatever this preparation's outcome.
   const rewrite = batch && g.state === 'PREPARED' ? g : null;
+  // Final review (P3): a FloFi Wallet owner-step group's expired Circle preparation is expired, its steps given back and the group planned again in
+  // ONE transaction (never a group planned as owner steps whose steps are still the operation's); its steps then run through their own flows.
+  if (!rewrite && (g.state === 'PREPARED' || g.state === 'EXPIRED') && plannedStrategyOf(g.prepared) === 'EVM_OWNER_STEP') {
+    if (!await expireTokenGas(deps.store, run.runId, g, 'USER_FUNDED_PREPARED_EXPIRED')) refuse('WORKFLOW_RUN_CHANGED');
+    return refuse('WORKFLOW_RUN_GROUP_OWNER_STEP');
+  }
   if (g.state === 'PREPARED' && !rewrite) g = await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' })
     ?? refuse('WORKFLOW_RUN_CHANGED');
   // The earlier preparations stay on the PLANNED group (history only, no artifact): a preparation that fails now must not lose them.
   // ADR-0010: an expired Circle-paid preparation gives the group back the strategy it was planned with (native gas is decided afresh).
   if (g.state === 'EXPIRED') {
-    // Owner requirement: an expired Circle preparation of a FloFi Wallet owner-step group gives its steps back first (they never ran).
-    if (plannedStrategyOf(g.prepared) === 'EVM_OWNER_STEP') await groupStepsToOwner(deps.store, run.runId, g);
+    // (A FloFi Wallet owner-step group's Circle preparation was given back above, atomically.)
     g = await deps.store.groupTransition(run.runId, groupIndex, ['EXPIRED'], 'PLANNED',
       { prepared: superseded.length ? { kind: 'EVM_WALLET_BATCH', superseded } : null, validUntil: null, code: plannedCodeAfterCircle(g.prepared, null),
         ...plannedStrategyPatch(g) }) ?? refuse('WORKFLOW_RUN_CHANGED');
@@ -443,11 +449,13 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
     if (!due) refuse('WORKFLOW_BINDING_RESOLVED_WHEN_DUE');
     const asset = assetKey({ chain: b.asset.chainId, address: b.asset.address }), share = `${b.amountFrom}:${asset}`;
     const available = reconciledAvailable(steps, b.amountFrom, asset, g.stepFrom);
-    if (available <= 0n) return blockable ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+    // Final review (P3): a FloFi Wallet owner-step group asked about Circle is never blocked here: its steps run through their own flows, whose
+    // confirm pass stops the step exactly as before.
+    if (available <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
     if (!guaranteed.has(b.amountFrom)) guaranteed.set(b.amountFrom, { asset, amount: available.toString() });
     if (g.namespace === 'solana') {
       const left = available - (allocated.get(share) ?? 0n);
-      if (left <= 0n) return blockable ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
+      if (left <= 0n) return blockable && !ownerCircle ? blockDueGroup(deps, run, g, 'WORKFLOW_BINDING_NOTHING_RECEIVED') : refuse('WORKFLOW_BINDING_NOTHING_RECEIVED');
       const used = left < BigInt(b.cap) ? left : BigInt(b.cap);
       allocated.set(share, (allocated.get(share) ?? 0n) + used);
       const alone = composeWorkflowBound(boundStrategy(composed.steps[b.step]!.strategy, used, b.asset.decimals, b.inputAsset), undefined);
@@ -483,17 +491,15 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   const preparedBatch = r.value.prepared.kind === 'EVM_WALLET_BATCH';
   const token = preparedBatch ? rewrite && handout !== undefined && HANDOUT.test(handout) ? handout : randomBytes(32).toString('base64url') : null;
   const prepared: Prepared = { ...r.value.prepared, ...superseded.length ? { superseded } : {}, ...token ? { handoutHash: handoutHashOf(token) } : {} };
+  const patch = { prepared, validUntil: r.value.validUntil, code: null, ...r.value.prepared.kind !== g.strategy ? { strategy: r.value.prepared.kind } : {} };
+  // Owner requirement: the owner steps become the group's — final review (P3): in the SAME transaction as the group's switch, so a group is never
+  // a Circle operation while its steps are still owner steps. When one of them was loaded into its own flow meanwhile nothing is switched and
+  // nothing is asked of the wallet (the owner-step path continues alone).
   const moved = (rewrite
     ? await deps.store.groupTransition(run.runId, groupIndex, ['PREPARED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null }, 'GROUP_PREPARED_AGAIN', rewrite.version)
-    : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', { prepared, validUntil: r.value.validUntil, code: null,
-      ...r.value.prepared.kind !== g.strategy ? { strategy: r.value.prepared.kind } : {} }, r.value.prepared.kind !== g.strategy ? 'GROUP_TOKEN_GAS_PREPARED' : 'GROUP_STATE'))
+    : ownerCircle ? await switchOwnerStepsToCircle(deps.store, run.runId, groupIndex, patch)
+    : await deps.store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PREPARED', patch, r.value.prepared.kind !== g.strategy ? 'GROUP_TOKEN_GAS_PREPARED' : 'GROUP_STATE'))
     ?? refuse('WORKFLOW_RUN_CHANGED');
-  // Owner requirement: the owner steps become the group's — or, when one of them was loaded into its own flow meanwhile, the preparation is
-  // withdrawn before anything is asked of the wallet (the owner-step path continues alone).
-  if (ownerCircle && !await ownerStepsToGroup(deps.store, run.runId, moved)) {
-    await expireTokenGasPreparation(deps, run.runId, moved, 'WORKFLOW_RUN_CHANGED');
-    return refuse('WORKFLOW_RUN_CHANGED');
-  }
   return { groupIndex, strategy: moved.strategy, chain: moved.chain, feePayer: moved.feePayer, validUntil: r.value.validUntil.toISOString(),
     prepared: publicPrepared(prepared), handout: token };
 }
@@ -509,14 +515,13 @@ const plannedStrategyPatch = (g: GroupRecord): { readonly strategy?: GroupRecord
  */
 const CIRCLE_PERMIT_RETRYABLE: ReadonlySet<string> = new Set(['CIRCLE_PERMIT_INVALID', 'CIRCLE_PERMIT_STAGE_INVALID', 'USER_FUNDED_RPC_UNAVAILABLE',
   'USER_OPERATION_BUNDLER_UNAVAILABLE', 'USER_OPERATION_FEE_TOO_LOW', 'DELEGATION_RPC_UNAVAILABLE', 'EXECUTION_PAUSED', 'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
-/** ADR-0010: a Circle-paid preparation that can no longer be used (cap exceeded, mechanism changed) is expired, its planned strategy restored. */
+/**
+ * ADR-0010: a Circle-paid preparation that can no longer be used (cap exceeded, mechanism changed) is expired, its planned strategy restored — and,
+ * owner requirement, a FloFi Wallet owner-step group's steps given back to their own flows (never authorized), as a Circle candidate again
+ * (CIRCLE_ASK_FIRST) unless the owner declined. Final review (P3): one transaction (`owner-step-circle.ts`).
+ */
 async function expireTokenGasPreparation(deps: WorkflowRunDeps, runId: string, g: GroupRecord, code: string): Promise<void> {
-  const expired = await deps.store.groupTransition(runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code }, 'GROUP_STATE', g.version);
-  // Owner requirement: a FloFi Wallet owner-step group's steps go back to their own flows first (the preparation was never authorized).
-  if (expired && plannedStrategyOf(expired.prepared) === 'EVM_OWNER_STEP') await groupStepsToOwner(deps.store, runId, expired);
-  // Final review (P3): a FloFi Wallet owner-step group is a Circle candidate again (CIRCLE_ASK_FIRST), unless the owner declined ("Not now").
-  if (expired) await deps.store.groupTransition(runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null,
-    code: plannedCodeAfterCircle(expired.prepared, code), ...plannedStrategyPatch(expired) });
+  await expireTokenGas(deps.store, runId, g, code);
 }
 /**
  * Owner requirement (FloFi Wallet + Circle): the owner AGREED, in FloFi's own Review, to upgrade this FloFi Wallet address to the pinned

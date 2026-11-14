@@ -10,6 +10,9 @@
  *                  of the wallet, and the owner-step path continues alone.
  *   back           only for a group whose Circle preparation was never authorized: DELEGATED → BLOCKED → PENDING (its owner steps then run exactly
  *                  as before; the run's confirm pass readies the current one again).
+ *   atomic         final review (P3): the group's switch and its steps' moves are ONE store transaction (`switchOwnerStepsToCircle`,
+ *                  `expireTokenGasPreparation`): a group is never PREPARED as a Circle operation while its steps are still owner steps, nor planned
+ *                  as owner steps again while its steps are still the operation's — whatever fails in between, nothing of it is kept.
  * The group's strategy itself is changed by the caller (only before authorization, as every Circle preparation does; the database freezes it once
  * the group is signed).
  *
@@ -23,12 +26,12 @@
  *                  expires or is withdrawn otherwise puts it back (the group is a candidate again). No other wallet, chain or group ever
  *                  carries it.
  */
-import type { GroupRecord, RunRecord, WorkflowRunStore } from './pg-store.ts';
+import type { GroupPatch, GroupRecord, RunRecord, RunScope, WorkflowRunStore } from './pg-store.ts';
 import type { ExecutionGroup } from './execution-groups.ts';
 import { plannedStrategyOf } from '../user-funded/circle-facts.ts';
 
 export const GAS_MECHANISM_SWITCHED = 'GAS_MECHANISM_SWITCHED';
-type Store = Pick<WorkflowRunStore, 'steps' | 'stepTransition'>;
+type Store = Pick<RunScope, 'steps' | 'stepTransition'>;
 type Group = Pick<GroupRecord, 'stepFrom' | 'stepTo'>;
 
 /** Whether every step of the group is still unloaded (PENDING or READY): only then may it become one Circle-paid operation. */
@@ -91,4 +94,33 @@ export async function circleAnswered(store: Pick<WorkflowRunStore, 'groups' | 'g
   const g = (await store.groups(run.runId))[groupIndex];
   if (!g || !circleAskPending(g, run.currentStep)) return;
   await store.groupTransition(run.runId, groupIndex, ['PLANNED'], 'PLANNED', { code: null }, 'GROUP_CIRCLE_ANSWERED', g.version);
+}
+
+/**
+ * Final review (P3): switches an unloaded FloFi Wallet owner-step group to its Circle preparation (PLANNED → PREPARED, `patch` carrying the artifact
+ * and the strategy) AND moves its steps to it, in one transaction. Null — nothing switched, nothing moved — when the group moved on or one of its
+ * steps was loaded into its own flow meanwhile.
+ */
+export async function switchOwnerStepsToCircle(store: Pick<WorkflowRunStore, 'atomically'>, runId: string, groupIndex: number, patch: GroupPatch): Promise<GroupRecord | null> {
+  return store.atomically(runId, async scope => {
+    const moved = await scope.groupTransition(runId, groupIndex, ['PLANNED'], 'PREPARED', patch, 'GROUP_TOKEN_GAS_PREPARED');
+    return moved && await ownerStepsToGroup(scope, runId, moved) ? moved : null;
+  });
+}
+/**
+ * A token-paid preparation (Circle, Kora) that can no longer be used: PREPARED → EXPIRED (`code`) — or one found EXPIRED already — gives a FloFi
+ * Wallet owner-step group's steps back to their own flows, and plans the group again with the strategy it was planned with
+ * (`plannedStrategyOf`) and, for such a group, CIRCLE_ASK_FIRST unless the owner declined. One transaction (final review P3): all of it or none.
+ * `expectVersion`: only from exactly that row version. Null when the group moved on.
+ */
+export async function expireTokenGasPreparation(store: Pick<WorkflowRunStore, 'atomically'>, runId: string, g: GroupRecord, code: string,
+  expectVersion: number | null = g.version): Promise<GroupRecord | null> {
+  return store.atomically(runId, async scope => {
+    const expired = g.state === 'EXPIRED' ? g : await scope.groupTransition(runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code }, 'GROUP_STATE', expectVersion);
+    if (!expired) return null;
+    const planned = plannedStrategyOf(expired.prepared);
+    if (planned === 'EVM_OWNER_STEP') await groupStepsToOwner(scope, runId, expired);
+    return scope.groupTransition(runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null,
+      code: plannedCodeAfterCircle(expired.prepared, g.state === 'EXPIRED' ? null : code), ...planned && planned !== expired.strategy ? { strategy: planned } : {} });
+  });
 }
