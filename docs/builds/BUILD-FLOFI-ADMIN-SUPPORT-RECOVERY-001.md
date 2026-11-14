@@ -86,7 +86,8 @@ Audit (append-only `admin_audit_events`, existing table): `SUPPORT_RECOVERY` OK 
 flow, idempotency key, queued task id, whether attention was cleared, the precondition observed (`DEAD:OBSERVATION_BUDGET_EXHAUSTED`), run
 status and the operator's reason. Refused and failed attempts are recorded with their code (bounded at 200 per 10 minutes). A replayed
 request adds no second OK record, so audit rows never look like duplicate actions. `SUPPORT_SEARCH` records the identifier type, a 16-hex
-HMAC fingerprint under the deployment's admin key (it cannot be reversed by hashing candidate addresses) and the result count — never the value. `SUPPORT_NOTE` records the note (≤ 500 characters, plain text). No address,
+HMAC fingerprint under a dedicated subkey of the admin key (it cannot be reversed by hashing candidate addresses without it) and the result
+count — never the value; the row is written in the same transaction as the lookup, so a lookup whose audit fails returns nothing. `SUPPORT_NOTE` records the note (≤ 500 characters, plain text). No address,
 key, token, transcript or payload is stored.
 
 ## 4. Support lookups and privacy
@@ -136,6 +137,9 @@ The exact commands and their output for this build are in the pull request.
   durable state changes.
 - Failed executions are listed for 30 days and stopped tasks for 90 days; very old stopped checks still appear while the run is flagged.
 - Recovery is proven against loopback PostgreSQL, the real worker handler and MOCKED chains, not against a production incident.
+- Audit text (reasons, notes) and lookup fingerprints are append-only with no retention period and are not removed by an owner's history purge;
+  identifier screening of free text is best effort. Retention and its legal basis need the owner's (and counsel's) acceptance — see ADMIN.md §5c.
+  Opening a diagnostics page is not audited (lookups are).
 - No index was added (no migration): the `attention_required` and `needs_observation` candidate scans and the stopped-task supersession check
   use the same unindexed predicates as System Health, bounded by LIMIT. On a very large tenant they can read many rows per Support page load;
   partial indexes would be a future, separately reviewed migration.

@@ -41,7 +41,7 @@ function IncidentList({ incidents, notes }: { incidents: readonly Incident[]; no
       <div className="admin-incident-side">
         <Status tone={ELIGIBILITY_TONE[incident.eligibility]}>{ELIGIBILITY_LABELS[incident.eligibility]}</Status>
         {status !== 'NEW' ? <span className="admin-diff">{STATUS_LABELS[status]}</span> : null}
-        <a className="admin-button" data-size="sm" href={incidentHref(incident.id)}>Diagnose</a>
+        <a className="admin-button" data-size="sm" href={incidentHref(incident.id)} aria-label={`Diagnose: ${incident.title}, ${incident.component}`}>Diagnose</a>
       </div>
       <p className="admin-incident-next"><strong>Recommended:</strong> {incident.recommended}</p>
     </li>; })}</ul>;

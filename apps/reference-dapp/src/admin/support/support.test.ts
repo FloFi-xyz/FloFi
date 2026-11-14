@@ -6,10 +6,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { explainCode, retryableStopReason } from './codes.ts';
-import { buildTimeline, incidentStatus, noteText, searchKind, type AttemptRow, type JournalRow, type Note } from './diagnostics.ts';
+import { buildTimeline, freeText, identifierShaped, incidentStatus, isIncidentId, noteText, searchKind, type AttemptRow, type JournalRow, type Note } from './diagnostics.ts';
 import { copilotIncidents, delegatedIncident, executionIncident, featureOf, platformIncidents, sortIncidents, submissionOf, taskIncident, workflowRunIncident,
   type ExecutionSnapshot } from './incidents.ts';
-import { verification } from './recovery.ts';
+import { RUN_ID, verification } from './recovery.ts';
 import { attentionClearable, GUIDED_RECOVERY, RECOVERY_ACTION_IDS, RECOVERY_ACTIONS, RETRY_LIMIT, stateToken, type RunRecoveryFacts, type WorkFact } from './registry.ts';
 
 const now = new Date('2026-11-14T12:00:00.000Z'), hour = 3_600_000;
@@ -184,6 +184,14 @@ describe('search, notes and timeline', () => {
     expect(searchKind('bas-0123456789abcdef')?.kind).toBe('EXECUTION_OR_WORKFLOW');
     expect(searchKind('5'.repeat(88))?.kind).toBe('TRANSACTION_HASH'); // a Solana signature
     for (const bad of ['', '   ', 'alice@example.com', "x' OR 1=1 --", 'some words here', 'a'.repeat(200)]) expect(searchKind(bad)).toBeNull();
+  });
+  it('audit free text refuses personal identifiers but keeps operational detail', () => {
+    for (const ok of ['RPC outage resolved; customer ticket 1234', 'outage on 2026-11-14', 'see rhx-0123456789abcdef0123456789abcdef', 'Provider outage resolved'])
+      expect([ok, identifierShaped(ok)]).toEqual([ok, false]);
+    for (const bad of [`wallet 0x${'ab'.repeat(20)}`, 'mail joe@example.com', 'call 11 9999 99999', '@joe asked', `sig ${'5'.repeat(88)}`, 'card 4111111111111111'])
+      expect([bad, identifierShaped(bad), freeText(bad, 3, 500)]).toEqual([bad, true, null]);
+    // Wallet- or hash-shaped ids never reach an audit target.
+    expect([RUN_ID.test(`0x${'ab'.repeat(20)}`), RUN_ID.test('bas-0123456789abcdef'), isIncidentId(`run:0x${'ab'.repeat(20)}`), isIncidentId('run:bas-1')]).toEqual([false, true, false, true]);
   });
   it('notes are bounded plain text', () => {
     expect(noteText('  RPC   outage resolved  ')).toBe('RPC outage resolved');

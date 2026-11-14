@@ -154,6 +154,16 @@ decide an unknown outcome. The Admin never signs, submits, approves, transfers o
 Audit kinds: `SUPPORT_RECOVERY` (OK with operation id `rop_…`, or REFUSED/FAILED with a code), `SUPPORT_SEARCH`, `SUPPORT_NOTE`. Limits: 30
 recoveries per 10 minutes (tenant, checked inside the serialized recovery transaction), 3 recoveries of one execution per 7 days, 120 lookups and
 60 notes per administrator per 10 minutes. Reasons and notes are visible to every administrator: never paste keys, passwords or personal data.
+They are screened (best effort) and refused when they contain wallet addresses, transaction hashes, e-mail addresses, standalone runs of 8+
+digits or @handles.
+
+**Retention (owner decision pending).** Support writes into the existing append-only `admin_audit_events` table, which nothing deletes: lookup
+rows (identifier type, a keyed fingerprint, a count), recovery rows (ids, codes, the operator's reason) and notes. The fingerprint uses a
+dedicated subkey derived from `FLOFI_ADMIN_SESSION_SECRET`; rotating that secret makes earlier fingerprints unverifiable. Before production use,
+the owner (with counsel) should accept or change this retention and its legal basis (LGPD art. 6 X / art. 18), and the privacy notice should
+mention operator access to execution records for support. Notes about a run the owner later purges are not removed by the purge. Lookups are
+audited atomically with their results (no audit row, no results); opening a diagnostics page is not audited separately. Wallet lookups also
+find runs the owner archived (archiving hides, it does not erase).
 
 Counts combine mainnet, test networks and mocked runs; each incident shows its environment, and only mainnet runs (or runs whose provenance is
 not recognised) are marked as possibly involving real funds. A VIEWER can see transaction hashes in diagnostics; a public explorer reveals the

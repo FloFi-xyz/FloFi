@@ -315,7 +315,7 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await page.screenshot({ path: test.info().outputPath('support-overview.png'), fullPage: true });
 
     // Diagnose: timeline marks the unknown submission; preview → confirm → run → verified state.
-    await card.getByRole('link', { name: 'Diagnose' }).click();
+    await card.getByRole('link', { name: /^Diagnose/ }).click();
     await expect(page.getByRole('heading', { name: 'Transaction check stopped', level: 1 })).toBeVisible();
     await expect(page.locator('.admin-timeline li').filter({ hasText: 'Transaction submitted' })).toContainText('Unknown');
     await expect(page.getByRole('heading', { name: 'Background check gave up' })).toBeVisible();
@@ -329,7 +329,7 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await page.getByLabel(/I reviewed the target/).check();
     await run.click();
     const result = page.locator('section[aria-label="Recovery result"]');
-    await expect(result).toContainText(/Accepted — pending verification|Verified: resolved|Not resolved: stopped again/);
+    await expect(result).toContainText(/Accepted — pending verification|Verified: task completed|Not resolved: stopped again|Inconclusive/);
     await expect(result).toContainText(/rop_[a-z2-7]{26}/);
     expect((await db.query(`SELECT count(*)::int AS n FROM work_items WHERE run_id = 'e2e-stuck' AND kind = 'reconcile' AND state <> 'DEAD'`)).rows).toEqual([{ n: 1 }]);
     expect((await db.query(`SELECT outcome, detail->>'reason' AS reason FROM admin_audit_events WHERE kind = 'SUPPORT_RECOVERY'`)).rows)

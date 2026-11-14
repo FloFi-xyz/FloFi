@@ -25,7 +25,7 @@ const ELIGIBILITY_TONE: Record<string, Tone> = { RECOVERABLE_NOW: 'ok', REQUIRES
   INVESTIGATION: 'warn', NONE: 'neutral' };
 
 function Summary({ incident }: { incident: Incident }) {
-  return <Section id="support-incident-summary" title={incident.title} tone={incident.severity === 'HIGH' ? 'bad' : incident.severity === 'MEDIUM' ? 'warn' : undefined}
+  return <Section id="support-incident-summary" title="Summary" tone={incident.severity === 'HIGH' ? 'bad' : incident.severity === 'MEDIUM' ? 'warn' : undefined}
     description={incident.summary}>
     <dl className="admin-dl">
       <dt>Recovery</dt><dd><Status tone={ELIGIBILITY_TONE[incident.eligibility] ?? 'neutral'}>{ELIGIBILITY_LABELS[incident.eligibility]}</Status></dd>
@@ -142,8 +142,8 @@ export default async function SupportIncidentPage({ searchParams }: { searchPara
     <Notes notes={notes} incidentId={id} csrf={csrf} canWrite={canWrite}/></>);
   const incident = detail.incident;
   return shell(incident?.title ?? 'Diagnostics', <>
-    {incident ? <Summary incident={incident}/> : <p className="admin-allclear" role="status"><span aria-hidden="true">✓</span> No open incident for <code>{id}</code> right now.
-      The diagnostics below are still shown.</p>}
+    {incident ? <Summary incident={incident}/> : <p className="admin-alert" role="status">Support’s checks found no open condition for <code>{id}</code> right now. That does not
+      establish that it is healthy; the diagnostics below are still shown.</p>}
     <Explanations codes={incident?.codes ?? (detail.type === 'run' && detail.run.errorCode ? [detail.run.errorCode] : [])}/>
     {detail.type === 'run' ? <RunDetail detail={detail} csrf={csrf} canRecover={canWrite}/> : null}
     {detail.type === 'work' ? <Section id="support-task" title="Background task">

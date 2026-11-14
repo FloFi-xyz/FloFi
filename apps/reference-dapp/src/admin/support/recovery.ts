@@ -23,7 +23,8 @@ import { attentionClearable, RECOVERY_ACTIONS, RETRY_WINDOW_DAYS, stateToken, ty
 
 export const RECOVERY_AUDIT_KIND = 'SUPPORT_RECOVERY';
 export const RECOVERY_RATE_WINDOW_MS = 600_000, RECOVERY_RATE_LIMIT = 30, REFUSAL_AUDIT_MAX = 200, IDEMPOTENCY_WINDOW_MS = 86_400_000;
-export const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,64}$/, STATE_TOKEN = /^[0-9a-f]{32}$/;
+/** A run id as stored; never a wallet- or hash-shaped `0x…` string (those would put an address into the audit trail). */
+export const RUN_ID = /^(?!0[xX])[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,64}$/, STATE_TOKEN = /^[0-9a-f]{32}$/;
 
 export class RecoveryRefusal extends Error {
   constructor(readonly code: string, readonly status: number, readonly reason: string | null = null) { super(code); }

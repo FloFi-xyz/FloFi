@@ -139,5 +139,6 @@ Every erasure path deletes 0014 rows through `ON DELETE CASCADE`, including a pl
 | Withdrawal of consent / objection | **Learn from how I use the Copilot** off (erases what it learned) | `memory off` |
 | Information on sharing | the notice: no sharing except the interpreter request in §6.4 | the notice |
 
-An operator cannot look a person up in the console (aggregates only); a support request for a wallet requires the learning secret to compute the
-digest — a documented manual procedure, never exposed in the product.
+An operator cannot look a person's **learning data** up in the console (aggregates only); a support request for a wallet's learning data requires
+the learning secret to compute the digest — a documented manual procedure, never exposed in the product. (Support & Recovery's wallet lookup,
+[ADMIN.md §5c](../deploy/ADMIN.md), finds execution records only; it never reads learning data.)

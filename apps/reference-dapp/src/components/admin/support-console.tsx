@@ -6,7 +6,8 @@
  * state fingerprint before doing anything, and audits the attempt. A VIEWER can preview but never execute. "Accepted" is never shown as
  * "resolved": the result always shows the server's verification of the postcondition.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { adminPost } from './admin-client';
 
 type Verification = { status: 'PENDING_VERIFICATION' | 'RESOLVED' | 'STOPPED_AGAIN' | 'INCONCLUSIVE'; detail: string; taskState: string; runStatus: string | null; code: string | null };
@@ -23,60 +24,85 @@ const MESSAGES: Record<string, string> = {
   SUPPORT_NOTHING_TO_RECOVER: 'There is nothing to recover any more. Nothing was changed.',
   SUPPORT_RETRY_LIMIT_REACHED: 'This execution reached its recovery limit. Escalate it to engineering.',
   SUPPORT_STOP_REASON_NOT_RETRYABLE: 'The task stopped for a permanent reason. Escalate it to engineering.',
-  SUPPORT_REASON_REQUIRED: 'Give a short reason (3–200 characters, no angle brackets).',
+  SUPPORT_REASON_REQUIRED: 'Give a short reason (3–200 characters of plain text, without angle brackets or personal identifiers such as wallets, e-mails or phone numbers).',
   SUPPORT_CONDITION_NOT_REGISTERED: 'No registered action applies to this condition. Nothing was changed.',
   SUPPORT_SEARCH_INVALID: 'Enter a transaction hash, wallet address, execution, workflow, workflow-run, delegated-execution, incident or task id. Free text is not searched.',
   SUPPORT_SEARCH_WALLET_NOT_PERMITTED: 'Looking up a wallet address needs the OPERATOR role.', SUPPORT_SEARCH_RATE_LIMITED: 'Too many lookups in 10 minutes. Try again shortly.',
   SUPPORT_SEARCH_UNAVAILABLE: 'Search is unavailable right now.',
-  SUPPORT_RECOVERY_RATE_LIMITED: 'Too many recoveries in the last 10 minutes. Try again later.',
+  SUPPORT_RECOVERY_RATE_LIMITED: 'Too many recoveries in the last 10 minutes. Nothing was changed. Try again later.',
   SUPPORT_IDEMPOTENCY_KEY_REUSED: 'That request id was already used for another recovery. Preview again.',
   SUPPORT_RUN_NOT_FOUND: 'This execution no longer exists.',
-  SUPPORT_NOTE_INVALID: 'Notes are plain text, 3–500 characters, without angle brackets.',
+  SUPPORT_NOTE_INVALID: 'Notes are plain text, 3–500 characters, without angle brackets or personal identifiers (wallets, e-mails, phone or document numbers).',
   SUPPORT_NOTE_RATE_LIMITED: 'Too many notes in the last 10 minutes. Try again later.',
   ADMIN_ROLE_INSUFFICIENT: 'Your role is read-only.', ADMIN_CSRF_INVALID: 'Your session token is stale. Reload the page.',
   ADMIN_SESSION_REQUIRED: 'Your admin session ended. Sign in again.',
 };
-const message = (code: string, reason?: string | null) => reason ?? MESSAGES[code] ?? `Refused (${code}).`;
+/** Transport failures: the request may have reached the server, so the outcome is unknown — never "refused". */
+const UNCERTAIN = new Set(['ADMIN_REQUEST_FAILED', 'ADMIN_RESPONSE_INVALID']);
+const message = (code: string, reason?: string | null) => reason ?? MESSAGES[code] ?? (UNCERTAIN.has(code)
+  ? `The request did not complete (${code}). It may or may not have been applied: check the result again before retrying.` : `Refused (${code}).`);
 const VERIFICATION: Record<Verification['status'], { label: string; tone: string; glyph: string }> = {
   PENDING_VERIFICATION: { label: 'Accepted — pending verification', tone: 'info', glyph: '…' }, RESOLVED: { label: 'Verified: task completed', tone: 'ok', glyph: '✓' },
   STOPPED_AGAIN: { label: 'Not resolved: stopped again', tone: 'bad', glyph: '✕' }, INCONCLUSIVE: { label: 'Inconclusive', tone: 'warn', glyph: '!' },
 };
 const newKey = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+const TASK_STATE: Record<string, string> = { READY: 'queued', LEASED: 'being processed', DONE: 'finished', DEAD: 'stopped' };
 
 export function RecoveryPanel({ csrf, runId, actions }: { csrf: string; runId: string; actions: { id: string; name: string; eligible: boolean; reason: string | null }[] }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [preview, setPreview] = useState<Preview | null>(null);
   const [confirming, setConfirming] = useState(false), [reason, setReason] = useState(''), [reviewed, setReviewed] = useState(false), [key, setKey] = useState(newKey);
-  const [result, setResult] = useState<Result | null>(null);
+  const [result, setResult] = useState<Result | null>(null), [announce, setAnnounce] = useState('');
+  // Focus follows each step, so keyboard and screen-reader users never land on the page body.
+  const [focus, setFocus] = useState<'preview' | 'reason' | 'continue' | 'result' | 'error' | null>(null);
+  const previewHeading = useRef<HTMLHeadingElement>(null), reasonField = useRef<HTMLTextAreaElement>(null), continueButton = useRef<HTMLButtonElement>(null);
+  const resultHeading = useRef<HTMLHeadingElement>(null), errorBox = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const target = { preview: previewHeading, reason: reasonField, continue: continueButton, result: resultHeading, error: errorBox }[focus ?? 'preview'];
+    if (focus) { target.current?.focus(); setFocus(null); }
+  }, [focus]);
   async function load(action: string) {
-    setBusy(true); setError(null); setResult(null); setConfirming(false); setReviewed(false);
+    setBusy(true); setError(null); setResult(null); setConfirming(false); setReviewed(false); setAnnounce('Loading preview…');
     const answer = await adminPost<Preview>('/admin/api/support', { action: 'preview', recovery: action, runId }, csrf);
     setBusy(false);
-    if (!answer.ok) { setError(message(answer.code)); setPreview(null); return; }
+    if (!answer.ok) { setError(message(answer.code)); setPreview(null); setAnnounce(''); setFocus('error'); return; }
     setPreview(answer); setKey(newKey());
+    setAnnounce(`Preview loaded: ${answer.preview.eligibility.eligible ? 'eligible now' : 'not eligible'}.`); setFocus('preview');
   }
   async function run() {
     if (!preview || busy) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setAnnounce('Running the recovery…');
     const answer = await adminPost<Result>('/admin/api/support', { action: 'recover', recovery: preview.preview.action, runId, stateToken: preview.preview.stateToken,
       idempotencyKey: key, reason }, csrf);
     setBusy(false); setConfirming(false);
-    if (!answer.ok) { setError(message(answer.code, (answer as { reason?: string | null }).reason)); return; }
-    setResult(answer);
+    if (!answer.ok) {
+      setError(message(answer.code, (answer as { reason?: string | null }).reason)); setAnnounce('');
+      // A stale preview must not stay confirmable: drop it and ask for a new one.
+      if (answer.code === 'SUPPORT_PREVIEW_STALE') setPreview(null);
+      setFocus('error'); return;
+    }
+    setResult(answer); setAnnounce(`Recovery result: ${VERIFICATION[answer.verification.status].label}.`); setFocus('result');
   }
   const p = preview?.preview, d = preview?.definition;
   return <div className="admin-form">
-    <div className="admin-actions">{actions.map(action => <button key={action.id} type="button" className="admin-button" data-variant={action.eligible ? 'primary' : undefined}
-      disabled={busy} onClick={() => load(action.id)}>Preview: {action.name}</button>)}</div>
-    <div role="status" aria-live="polite">{error ? <p className="admin-alert" data-tone="bad">{error}</p> : null}</div>
+    <ul className="admin-note-list" aria-label="Registered recovery actions">{actions.map(action => <li key={action.id}>
+      <div className="admin-actions">
+        <button type="button" className="admin-button" data-variant={action.eligible ? 'primary' : undefined} disabled={busy} onClick={() => load(action.id)}>Preview: {action.name}</button>
+        <span className="admin-badge" data-tone={action.eligible ? 'ok' : 'warn'}><span aria-hidden="true">{action.eligible ? '✓' : '!'}</span> {action.eligible ? 'Eligible' : 'Not eligible'}</span>
+      </div>
+      {action.reason ? <p className="admin-diff">{action.reason}</p> : null}
+    </li>)}</ul>
+    <p className="admin-sr" role="status" aria-live="polite">{announce}</p>
+    {error ? <p className="admin-alert" data-tone="bad" tabIndex={-1} ref={errorBox}>{error}</p> : null}
     {p && d ? <section className="admin-scope" aria-label="Recovery preview">
-      <header><h3>Preview — {d.name}</h3>
-        {p.eligibility.eligible ? <span className="admin-badge" data-tone="ok">✓ Eligible now</span> : <span className="admin-badge" data-tone="warn">! Not eligible</span>}</header>
+      <header><h3 tabIndex={-1} ref={previewHeading}>{result ? 'Before the recovery' : 'Preview'} — {d.name}</h3>
+        {result ? null : p.eligibility.eligible ? <span className="admin-badge" data-tone="ok">✓ Eligible now</span> : <span className="admin-badge" data-tone="warn">! Not eligible</span>}</header>
       {!p.eligibility.eligible ? <p className="admin-alert" data-tone="warn">{p.eligibility.reason} <code>{p.eligibility.code}</code></p> : null}
       <dl className="admin-dl">
         <dt>Target</dt><dd><code>{p.runId}</code> — {d.resource}</dd>
-        <dt>Current state</dt><dd>Status <code>{p.current.status}</code> · {p.current.needsObservation ? 'needs observation' : 'no observation needed'}
-          {p.current.attentionRequired ? ' · flagged for attention' : ''}{p.current.lastTask ? <> · last task <code>{p.current.lastTask.state}</code>
-            {p.current.lastTask.lastError ? <> (<code>{p.current.lastTask.lastError}</code>, {p.current.lastTask.deliveries} attempts)</> : null}</> : ' · no task retained'}</dd>
+        <dt>Current state</dt><dd>{p.current.needsObservation ? 'Still waiting for a transaction check' : 'No transaction check needed'}
+          {p.current.attentionRequired ? '; flagged for attention' : ''}{p.current.lastTask ? `; last background task ${TASK_STATE[p.current.lastTask.state] ?? p.current.lastTask.state}`
+            + (p.current.lastTask.lastError ? ` after ${p.current.lastTask.deliveries} attempts` : '') : '; no background task retained'}.
+          <span className="admin-diff"> Status <code>{p.current.status}</code>{p.current.lastTask?.lastError ? <> · <code>{p.current.lastTask.lastError}</code></> : null}</span></dd>
         <dt>Operation</dt><dd>{d.description}</dd>
         <dt>Expected effect</dt><dd>{d.postcondition}{p.current.attentionRequired ? (p.current.attentionWouldClear ? ' The attention flag will be cleared.'
           : ' The attention flag stays: another stopped task still holds it.') : ''}</dd>
@@ -91,20 +117,24 @@ export function RecoveryPanel({ csrf, runId, actions }: { csrf: string; runId: s
       </div></details>
       {!preview.canExecute ? <p className="admin-diff">Your role is read-only: an OPERATOR can run this recovery.</p>
         : p.eligibility.eligible && !result ? !confirming
-          ? <div className="admin-actions"><button type="button" className="admin-button" data-variant="primary" onClick={() => setConfirming(true)}>Continue to confirmation</button></div>
+          ? <div className="admin-actions"><button type="button" ref={continueButton} className="admin-button" data-variant="primary"
+            onClick={() => { setConfirming(true); setFocus('reason'); }}>Continue to confirmation</button></div>
           : <div className="admin-confirm" role="group" aria-label="Confirm recovery">
             <label className="admin-field" htmlFor="support-reason">Reason (recorded in the audit trail)
-              <textarea id="support-reason" maxLength={200} value={reason} onChange={event => setReason(event.target.value)} placeholder="e.g. RPC outage resolved; customer ticket 1234"/></label>
+              <textarea id="support-reason" ref={reasonField} maxLength={200} value={reason} onChange={event => setReason(event.target.value)} aria-describedby="support-reason-hint"
+                placeholder="e.g. RPC outage resolved at 14:00 UTC"/></label>
+            <p className="admin-diff" id="support-reason-hint">3–200 characters of plain text: no angle brackets, wallet addresses, e-mails, phone or document numbers. Tick the box below to enable Run.</p>
             <label><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)}/> I reviewed the target, current state and expected effect above.</label>
             <div className="admin-actions">
-              <button type="button" className="admin-button" data-variant="primary" disabled={busy || !reviewed || reason.trim().length < 3} onClick={run}>{busy ? 'Running…' : `Run: ${d.name}`}</button>
-              <button type="button" className="admin-button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+              <button type="button" className="admin-button" data-variant="primary" aria-describedby="support-reason-hint" disabled={busy || !reviewed || reason.trim().length < 3}
+                onClick={run}>{busy ? 'Running…' : `Run: ${d.name}`}</button>
+              <button type="button" className="admin-button" disabled={busy} onClick={() => { setConfirming(false); setFocus('continue'); }}>Cancel</button>
             </div>
           </div> : null}
     </section> : null}
     {result ? <section className="admin-result" data-tone={result.verification.status === 'RESOLVED' ? 'ok' : result.verification.status === 'STOPPED_AGAIN' ? 'bad' : undefined}
       aria-label="Recovery result">
-      <strong role="status"><span aria-hidden="true">{VERIFICATION[result.verification.status].glyph}</span> {VERIFICATION[result.verification.status].label}</strong>
+      <h3 tabIndex={-1} ref={resultHeading} style={{ margin: 0 }}><span aria-hidden="true">{VERIFICATION[result.verification.status].glyph}</span> {VERIFICATION[result.verification.status].label}</h3>
       <span>{result.verification.detail}</span>
       <span className="admin-diff">Operation <code>{result.operationId}</code>{result.replayed ? ' (same request already recorded — nothing was repeated)' : ''} · task <code>{result.workItemId}</code>
         {result.attentionCleared ? ' · attention flag cleared' : ''}</span>
@@ -114,6 +144,7 @@ export function RecoveryPanel({ csrf, runId, actions }: { csrf: string; runId: s
 }
 
 export function NoteForm({ csrf, incidentId, canWrite }: { csrf: string; incidentId: string; canWrite: boolean }) {
+  const router = useRouter();
   const [kind, setKind] = useState('FINDING'), [text, setText] = useState(''), [busy, setBusy] = useState(false), [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   if (!canWrite) return <p className="admin-diff">Your role is read-only: an OPERATOR can add notes.</p>;
   async function submit(event: React.FormEvent) {
@@ -123,7 +154,7 @@ export function NoteForm({ csrf, incidentId, canWrite }: { csrf: string; inciden
     const answer = await adminPost('/admin/api/support', { action: 'note', incidentId, kind, text }, csrf);
     setBusy(false);
     if (!answer.ok) { setStatus({ ok: false, text: message(answer.code) }); return; }
-    setText(''); setStatus({ ok: true, text: 'Note added. Reload to see it in the list.' });
+    setText(''); setStatus({ ok: true, text: 'Note added.' }); router.refresh();
   }
   return <form className="admin-form" onSubmit={submit} aria-label="Add a note">
     <div className="admin-form-row">
@@ -131,10 +162,10 @@ export function NoteForm({ csrf, incidentId, canWrite }: { csrf: string; inciden
         <option value="FINDING">Investigation finding</option><option value="DECISION">Recovery decision</option>
         <option value="ESCALATION">Escalation</option><option value="RESOLUTION">Resolution</option></select></label>
     </div>
-    <label className="admin-field" htmlFor="support-note-text">Note (plain text, up to 500 characters; no keys, passwords or personal data)
+    <label className="admin-field" htmlFor="support-note-text">Note (plain text, 3–500 characters; no keys, passwords, wallet addresses, e-mails or other personal data)
       <textarea id="support-note-text" maxLength={500} value={text} onChange={event => setText(event.target.value)}/></label>
     <div className="admin-actions"><button className="admin-button" type="submit" disabled={busy || text.trim().length < 3}>{busy ? 'Saving…' : 'Add note'}</button></div>
-    {status ? <p className="admin-alert" data-tone={status.ok ? 'ok' : 'bad'} role="status">{status.text}</p> : null}
+    <div role="status" aria-live="polite">{status ? <p className="admin-alert" data-tone={status.ok ? 'ok' : 'bad'}>{status.text}</p> : null}</div>
   </form>;
 }
 
@@ -171,7 +202,8 @@ export function SupportSearch({ csrf }: { csrf: string }) {
       <thead><tr><th>Record</th><th>Kind</th><th>Status</th><th>Updated (UTC)</th><th>Details</th></tr></thead>
       <tbody>{found.hits.map(hit => <tr key={`${hit.type}:${hit.id}`}><td><code>{hit.id}</code></td><td>{hit.label}</td><td><code>{hit.status}</code></td>
         <td className="admin-mono">{hit.at ? hit.at.replace('T', ' ').slice(0, 16) : '—'}</td>
-        <td><a href={`/admin/support/incident?id=${encodeURIComponent(hit.incidentId)}`}>{hit.type === 'incident' ? 'Open' : 'Diagnose'}</a></td></tr>)}</tbody>
+        <td><a href={`/admin/support/incident?id=${encodeURIComponent(hit.incidentId)}`} aria-label={`${hit.type === 'incident' ? 'Open' : 'Diagnose'} ${hit.id}`}>
+          {hit.type === 'incident' ? 'Open' : 'Diagnose'}</a></td></tr>)}</tbody>
     </table></div> : null}
   </div>;
 }

@@ -238,6 +238,7 @@
 .admin-incident[data-severity="MEDIUM"]{border-left-color:var(--a-warn)}
 .admin-incident[data-severity="LOW"]{border-left-color:var(--a-neutral)}
 .admin-incident h3{margin:0;font-size:.95rem}
+.admin-incident,.admin-incident > div,.admin-alert,.admin-allclear,.admin-note-list li{overflow-wrap:anywhere;min-width:0}
 .admin-incident p{font-size:.86rem;color:var(--a-muted)}
 .admin-incident-meta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:.8rem;color:var(--a-muted)}
 .admin-incident-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right}

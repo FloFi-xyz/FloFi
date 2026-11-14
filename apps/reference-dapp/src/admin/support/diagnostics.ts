@@ -14,7 +14,7 @@
  * record it) or NOT_REACHED. Nothing is invented and an unknown outcome is never shown as a failure.
  */
 import { createHmac } from 'node:crypto';
-import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { recordAudit, type AdminRole } from '../store.ts';
 import { classifyRun } from '../analytics/classify.ts';
 import { submissionOf, type ExecutionSnapshot } from './incidents.ts';
@@ -23,7 +23,7 @@ export const SEARCH_LIMIT = 25, SEARCH_RATE_WINDOW_MS = 600_000, SEARCH_RATE_LIM
 export type SearchKind = 'TRANSACTION_HASH' | 'WALLET' | 'WORKFLOW_RUN' | 'DELEGATED_EXECUTION' | 'INCIDENT' | 'WORK_ITEM' | 'EXECUTION_OR_WORKFLOW';
 export const SEARCH_KIND_LABELS: Readonly<Record<SearchKind, string>> = { TRANSACTION_HASH: 'Transaction hash', WALLET: 'Wallet address', WORKFLOW_RUN: 'Multi-step workflow run',
   DELEGATED_EXECUTION: 'Delegated execution', INCIDENT: 'Incident', WORK_ITEM: 'Background task', EXECUTION_OR_WORKFLOW: 'Execution or workflow id' };
-const INCIDENT_ID = /^(run|work|wfr|dex|platform|copilot):[A-Za-z0-9._-]{1,128}$/;
+const INCIDENT_ID = /^(run|work|wfr|dex|platform|copilot):(?!0[xX])[A-Za-z0-9._-]{1,128}$/;
 
 /** The identifier shape a query has, or null (rejected: support search never runs free-text queries). */
 export function searchKind(raw: string): { readonly kind: SearchKind; readonly value: string } | null {
@@ -74,20 +74,21 @@ export async function supportSearch(host: Host, actor: { readonly principalId: s
   }
   const n = SEARCH_LIMIT + 1, v = parsed.value;
   const runs = (rows: Row[]): SearchHit[] => rows.map(row => ({ type: 'run', id: row.id, incidentId: `run:${row.id}`, label: row.label, status: row.status, at: row.at?.toISOString() ?? null }));
-  let hits: SearchHit[];
-  try {
+  // The lookup and its audit row commit together: if the audit cannot be written, nothing is returned (fail closed).
+  const lookup = async (q: Queryable): Promise<SearchHit[]> => {
+    let hits: SearchHit[];
     switch (parsed.kind) {
       case 'TRANSACTION_HASH':
-        hits = runs((await db.query<Row>(`SELECT DISTINCT ON (r.run_id) r.run_id AS id, r.flow AS label, r.status, r.updated_at AS at FROM execution_attempts a
+        hits = runs((await q.query<Row>(`SELECT DISTINCT ON (r.run_id) r.run_id AS id, r.flow AS label, r.status, r.updated_at AS at FROM execution_attempts a
           JOIN execution_runs r ON r.tenant_id = a.tenant_id AND r.run_id = a.run_id WHERE a.tenant_id = $1 AND a.transaction_hash = $2 ORDER BY r.run_id LIMIT ${n}`, [tenantId, v])).rows);
         break;
       case 'WALLET': {
         const [own, flows, delegated] = await Promise.all([
-          db.query<Row>(`SELECT run_id AS id, flow AS label, status, updated_at AS at FROM execution_runs WHERE tenant_id = $1 AND owner_account = $2
+          q.query<Row>(`SELECT run_id AS id, flow AS label, status, updated_at AS at FROM execution_runs WHERE tenant_id = $1 AND owner_account = $2
             ORDER BY updated_at DESC, run_id DESC LIMIT ${n}`, [tenantId, v]),
-          db.query<Row>(`SELECT run_id AS id, 'workflow-run' AS label, state AS status, updated_at AS at FROM workflow_runs WHERE tenant_id = $1 AND owner_account = $2
+          q.query<Row>(`SELECT run_id AS id, 'workflow-run' AS label, state AS status, updated_at AS at FROM workflow_runs WHERE tenant_id = $1 AND owner_account = $2
             ORDER BY created_at DESC LIMIT ${n}`, [tenantId, v]),
-          db.query<Row>(`SELECT execution_id AS id, 'delegated-execution' AS label, state AS status, updated_at AS at FROM delegated_executions
+          q.query<Row>(`SELECT execution_id AS id, 'delegated-execution' AS label, state AS status, updated_at AS at FROM delegated_executions
             WHERE tenant_id = $1 AND owner_account = $2 ORDER BY created_at DESC LIMIT ${n}`, [tenantId, v]),
         ]);
         hits = [...runs(own.rows),
@@ -97,11 +98,11 @@ export async function supportSearch(host: Host, actor: { readonly principalId: s
         break;
       }
       case 'WORKFLOW_RUN':
-        hits = (await db.query<Row>(`SELECT run_id AS id, 'workflow-run' AS label, state AS status, updated_at AS at FROM workflow_runs WHERE tenant_id = $1 AND run_id = $2`, [tenantId, v]))
+        hits = (await q.query<Row>(`SELECT run_id AS id, 'workflow-run' AS label, state AS status, updated_at AS at FROM workflow_runs WHERE tenant_id = $1 AND run_id = $2`, [tenantId, v]))
           .rows.map(row => ({ type: 'workflow-run', id: row.id, incidentId: `wfr:${row.id}`, label: row.label, status: row.status, at: row.at?.toISOString() ?? null }));
         break;
       case 'DELEGATED_EXECUTION':
-        hits = (await db.query<Row>(`SELECT execution_id AS id, 'delegated-execution' AS label, state AS status, updated_at AS at FROM delegated_executions
+        hits = (await q.query<Row>(`SELECT execution_id AS id, 'delegated-execution' AS label, state AS status, updated_at AS at FROM delegated_executions
           WHERE tenant_id = $1 AND execution_id = $2`, [tenantId, v])).rows.map(row => ({ type: 'delegated', id: row.id, incidentId: `dex:${row.id}`, label: row.label,
           status: row.status, at: row.at?.toISOString() ?? null }));
         break;
@@ -109,24 +110,31 @@ export async function supportSearch(host: Host, actor: { readonly principalId: s
         hits = [{ type: 'incident', id: v, incidentId: v, label: 'Incident', status: '—', at: null }];
         break;
       case 'WORK_ITEM':
-        hits = (await db.query<Row>(`SELECT id::text AS id, kind AS label, state AS status, coalesce(completed_at, updated_at) AS at FROM work_items WHERE tenant_id = $1 AND id = $2::bigint`,
+        hits = (await q.query<Row>(`SELECT id::text AS id, kind AS label, state AS status, coalesce(completed_at, updated_at) AS at FROM work_items WHERE tenant_id = $1 AND id = $2::bigint`,
           [tenantId, v])).rows.map(row => ({ type: 'work', id: row.id, incidentId: `work:${row.id}`, label: row.label, status: row.status, at: row.at?.toISOString() ?? null }));
         break;
       default: {
         const [byRun, byWorkflow] = await Promise.all([
-          db.query<Row>(`SELECT run_id AS id, flow AS label, status, updated_at AS at FROM execution_runs WHERE tenant_id = $1 AND run_id = $2`, [tenantId, v]),
-          db.query<Row>(`SELECT run_id AS id, flow AS label, status, updated_at AS at FROM execution_runs WHERE tenant_id = $1 AND workflow_id = $2
+          q.query<Row>(`SELECT run_id AS id, flow AS label, status, updated_at AS at FROM execution_runs WHERE tenant_id = $1 AND run_id = $2`, [tenantId, v]),
+          q.query<Row>(`SELECT run_id AS id, flow AS label, status, updated_at AS at FROM execution_runs WHERE tenant_id = $1 AND workflow_id = $2
             ORDER BY created_at DESC LIMIT ${n}`, [tenantId, v]),
         ]);
         const seen = new Set<string>();
         hits = runs([...byRun.rows, ...byWorkflow.rows].filter(row => !seen.has(row.id) && seen.add(row.id)));
       }
     }
+    return hits;
+  };
+  let all: SearchHit[];
+  try {
+    all = await db.transaction(async tx => {
+      const found = await lookup(tx);
+      await recordAudit(tx, tenantId, { actor: actor.principalId, kind: 'SUPPORT_SEARCH', outcome: 'OK', code: null,
+        detail: { type: parsed.kind, fingerprint: fingerprint(key, parsed.value), results: Math.min(found.length, SEARCH_LIMIT) } });
+      return found;
+    });
   } catch { await audit('REFUSED', 'SUPPORT_SEARCH_UNAVAILABLE', parsed.kind, null); return { ok: false, code: 'SUPPORT_SEARCH_UNAVAILABLE' }; }
-  const truncated = hits.length > SEARCH_LIMIT;
-  hits = hits.slice(0, SEARCH_LIMIT);
-  await audit('OK', null, parsed.kind, hits.length);
-  return { ok: true, kind: parsed.kind, hits, truncated };
+  return { ok: true, kind: parsed.kind, hits: all.slice(0, SEARCH_LIMIT), truncated: all.length > SEARCH_LIMIT };
 }
 
 export type Evidence = 'OBSERVED' | 'INFERRED' | 'UNKNOWN' | 'UNAVAILABLE' | 'NOT_REACHED';
@@ -234,7 +242,17 @@ export const isIncidentId = (value: unknown): value is string => typeof value ==
 export function freeText(value: unknown, min: number, max: number): string | null {
   if (typeof value !== 'string' || !value.isWellFormed()) return null;
   const text = value.trim().replace(/\s+/g, ' ');
-  return text.length >= min && text.length <= max && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>]/u.test(text) ? text : null;
+  return text.length >= min && text.length <= max && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>]/u.test(text) && !identifierShaped(text) ? text : null;
+}
+/**
+ * Audit text is append-only and visible to every administrator, so it should not carry personal identifiers. Best-effort screening (not a
+ * guarantee): wallet addresses and transaction hashes (0x… or long base58), e-mail addresses, standalone runs of 8+ digits (phone, document or
+ * card numbers) and @handles are refused. Record ids (prefixed, hex) and dates remain allowed.
+ */
+export function identifierShaped(text: string): boolean {
+  if (/0x[0-9a-fA-F]{40,}/.test(text) || /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/.test(text) || /(^|\s)@[A-Za-z0-9_]{2,}/.test(text)
+    || /(?<![A-Za-z0-9-])\d(?:[ .]?\d){7,}(?![A-Za-z0-9-])/.test(text)) return true;
+  return (text.match(/[1-9A-HJ-NP-Za-km-z]{32,}/g) ?? []).some(run => !/^[0-9a-f]+$/.test(run));
 }
 export const noteText = (value: unknown): string | null => freeText(value, 3, NOTE_MAX);
 export type Note = { readonly eventId: string; readonly at: string; readonly actor: string; readonly incidentId: string; readonly kind: NoteKind; readonly text: string };
