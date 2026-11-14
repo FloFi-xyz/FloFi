@@ -168,7 +168,7 @@ export function SupportSearch({ csrf }: { csrf: string }) {
     </div>
     {found && found.hits.length === 0 ? <p className="admin-empty">No matching records. This does not establish that the identifier never existed.</p> : null}
     {found && found.hits.length ? <div className="admin-table-wrap"><table className="admin-table" aria-label="Search results">
-      <thead><tr><th>Record</th><th>Kind</th><th>Status</th><th>Updated (UTC)</th><th><span className="admin-sr">Open</span></th></tr></thead>
+      <thead><tr><th>Record</th><th>Kind</th><th>Status</th><th>Updated (UTC)</th><th>Details</th></tr></thead>
       <tbody>{found.hits.map(hit => <tr key={`${hit.type}:${hit.id}`}><td><code>{hit.id}</code></td><td>{hit.label}</td><td><code>{hit.status}</code></td>
         <td className="admin-mono">{hit.at ? hit.at.replace('T', ' ').slice(0, 16) : '—'}</td>
         <td><a href={`/admin/support/incident?id=${encodeURIComponent(hit.incidentId)}`}>{hit.type === 'incident' ? 'Open' : 'Diagnose'}</a></td></tr>)}</tbody>
