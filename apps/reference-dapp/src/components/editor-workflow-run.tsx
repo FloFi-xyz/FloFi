@@ -22,7 +22,8 @@ import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
-import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_ON_APPROVAL, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED, feeAmountText,
+import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_ON_APPROVAL, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED,
+  EDITOR_MECHANISM_CHANGED_NOT_STARTED, feeAmountText,
   nativeLaterMessage } from '../domain/token-fee';
 import { circleFactsOf } from '../user-funded/circle-facts';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
@@ -572,7 +573,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     setPhase('authorizing');
     const profile = await profileFor([...new Set(review.groups.map(g => g.chain))]);
     // Authorize is bound to this Review: the reviewed wallet, workflow and plan of groups (the server refuses anything else).
-    const binding = { owner: review.owner, workflowHash: review.workflowHash, groups: review.groups.map(g => ({ strategy: g.strategy, steps: g.steps })) };
+    // Final review (P3): with the first group's fee mechanism as reviewed, so a changed one is refused before anything of it is stored.
+    const binding = { owner: review.owner, workflowHash: review.workflowHash, groups: review.groups.map(g => ({ strategy: g.strategy, steps: g.steps })),
+      firstGroupGas: review.groups[0]?.gasPayment ? 'CIRCLE_USDC_PAYMASTER' : 'NATIVE_WALLET_GAS' };
     let result = await authorizeEditorWorkflow(reviewedWorkflow.current, profile, binding);
     if (!result.ok && result.code === 'EVM_WALLET_PROOF_REQUIRED') {
       // One-time sign-in of this wallet in this browser (EIP-4361 message; it authorizes no transaction), then the same Authorize continues.
@@ -867,6 +870,8 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   // Review UX1: the Editor's Review bound the mechanism, and a run cannot be reviewed again in place: end it and review again (never "review
   // again" with no way to do it).
   GAS_MECHANISM_CHANGED_REVIEW_REQUIRED: EDITOR_MECHANISM_CHANGED,
+  // Final review (P3): found at Authorize, before the first group was stored: the run was ended at once (nothing to end); review again.
+  EDITOR_MECHANISM_CHANGED_NOT_STARTED,
 };
 /** A Review refusal that names the step it is about (`refusal.step`, shown as {0}): only then is a step number written. */
 export const STEP_REFUSAL: Readonly<Record<string, string>> = {

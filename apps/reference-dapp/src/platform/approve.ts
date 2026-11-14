@@ -13,6 +13,7 @@
  * A deployment's surface is assembled from per-surface CONTRIBUTIONS (each: an approval-link scheme and the profiles of the requester
  * kinds it serves); a requester kind without a profile, or a secret no registered scheme owns, is simply not found.
  */
+import { isReviewedGas } from '../editor/authorize-binding.ts';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { Workflow } from '../domain/initial-workflow';
 import { semanticWorkflowHash } from '../engine/strategy-engine';
@@ -294,11 +295,12 @@ export async function workflowRunUserFundedStart(surface: ApprovalSurface, appro
  * owner's EVM wallet kind as this browser reports it ('INJECTED' or 'FLOFI_WALLET'); anything else is unknown (review C4: no Circle permit then).
  */
 export async function workflowRunUserFundedPrepare(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
-  handout: unknown = undefined, wallet: unknown = undefined) {
+  handout: unknown = undefined, wallet: unknown = undefined, reviewedGas: unknown = undefined) {
   const c = await runContext(surface, approvalId, wallets);
   // The hand-out token this browser kept for the group's wallet batch (service.ts `handedTo`); anything else is no token.
+  // Final review (P3): the fee mechanism a Review showed for this group (the Editor's Authorize), when one was reviewed.
   return userFundedPrepareSequential(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof handout === 'string' && handout.length <= 64 ? handout : undefined,
-    wallet === 'INJECTED' || wallet === 'FLOFI_WALLET' ? wallet : undefined);
+    wallet === 'INJECTED' || wallet === 'FLOFI_WALLET' ? wallet : undefined, isReviewedGas(reviewedGas) ? reviewedGas : undefined);
 }
 /**
  * ADR-0010: the owner's USDC permit signature for a Circle-paid group (the first of its two typed-data signatures), verified against what FloFi

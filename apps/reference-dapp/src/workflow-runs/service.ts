@@ -39,6 +39,7 @@ import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, expireTokenGasPr
   switchOwnerStepsToCircle } from './owner-step-circle.ts';
 import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
 import type { GroupRecord } from './pg-store.ts';
+import type { ReviewedGas } from '../editor/authorize-binding.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
 import { presentedDeliveryState } from './run-step-phase.ts';
 
@@ -352,9 +353,9 @@ const publicPrepared = (prepared: Prepared): Prepared => Object.fromEntries(Obje
  * is never offered Circle).
  */
 export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET'): Promise<PreparedGroupView> {
+  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET', reviewedGas?: ReviewedGas): Promise<PreparedGroupView> {
   const asked = { circle: false };
-  try { return await prepareUserFundedGroupOnce(deps, run, wallets, groupIndex, handout, wallet, asked); }
+  try { return await prepareUserFundedGroupOnce(deps, run, wallets, groupIndex, handout, wallet, asked, reviewedGas); }
   catch (cause) {
     // Final review (P3): the owner's browser asked about a FloFi Wallet Circle candidate and the answer is final and not a Circle preparation
     // (CIRCLE_NOT_NEEDED, or a refusal asking again cannot change): its first step may now load into its own flow, exactly as before.
@@ -367,7 +368,7 @@ export async function prepareUserFundedGroup(deps: WorkflowRunDeps, run: RunReco
 const CIRCLE_ASK_AGAIN: ReadonlySet<string> = new Set(['USER_FUNDED_RPC_UNAVAILABLE', 'DELEGATION_RPC_UNAVAILABLE', 'WORKFLOW_RUN_CHANGED', 'EXECUTION_PAUSED',
   'EXECUTION_PAUSE_CONFIGURATION_INVALID']);
 async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout: string | undefined, wallet: 'INJECTED' | 'FLOFI_WALLET' | undefined, asked: { circle: boolean }): Promise<PreparedGroupView> {
+  handout: string | undefined, wallet: 'INJECTED' | 'FLOFI_WALLET' | undefined, asked: { circle: boolean }, reviewedGas: ReviewedGas | undefined): Promise<PreparedGroupView> {
   assertRunWallets(run, wallets);
   if (run.mode !== 'USER_FUNDED' || !['RUNNING', 'ATTENTION'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.mode !== 'USER_FUNDED' ? 'NOT_USER_FUNDED' : run.state}`);
   const userFunded = deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED');
@@ -484,6 +485,9 @@ async function prepareUserFundedGroupOnce(deps: WorkflowRunDeps, run: RunRecord,
   if (!r.ok) return blockable && !ownerCircle && PERMANENT_DUE_REFUSALS.has(r.code.split(':')[0]!) ? blockDueGroup(deps, run, g, r.code) : refuse(r.code);
   // ADR-0010: the only strategy a preparation may change is a due group's to a Circle-paid user operation (stored with it; restored on expiry).
   const circle = circleFactsOf(r.value.prepared);
+  // Final review (P3): a Review bound who pays this group's fee (the Editor's Authorize): another mechanism now is refused BEFORE anything is stored
+  // or handed out (ADR-0010 §2: never switched silently), so the run just started can be ended at once.
+  if (reviewedGas && (reviewedGas === 'CIRCLE_USDC_PAYMASTER') !== Boolean(circle)) return refuse(GAS_ABSTRACTION_CODES.changed);
   if (r.value.prepared.kind !== g.strategy && !(circle && r.value.prepared.kind === 'EVM_USER_OPERATION' && !rewrite)) return refuse('USER_FUNDED_GROUP_NOT_PREPARABLE');
   // The exact validity, for the same reason (the preparation's own clock moved on while it read the chain). Nothing is stored or handed out.
   if ((g.strategy !== 'EVM_USER_OPERATION' || circle) && r.value.validUntil >= run.expiresAt) return refuse('WORKFLOW_RUN_EXPIRED');

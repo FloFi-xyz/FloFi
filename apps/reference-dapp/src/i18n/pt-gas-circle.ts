@@ -146,4 +146,7 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
     'A FloFi Wallet já foi solicitada a fazer esta assinatura uma vez (se você a cancelou lá, nada foi assinado), então a FloFi não a solicita de novo para este pedido. Nada foi enviado. Este pedido expira em poucos minutos; depois continue, e a FloFi prepara um novo para você assinar.',
   'FloFi Wallet may have signed, but FloFi did not receive the signature, so nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.':
     'A FloFi Wallet pode ter assinado, mas a FloFi não recebeu a assinatura, então nada foi enviado. Este pedido expira em poucos minutos; depois continue, e a FloFi prepara um novo para você assinar.',
+  // Final review (P3): the Editor's Authorize found another fee mechanism before anything was stored.
+  'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was signed or sent, and this workflow was not started. Review it again to see how the fee is paid now.':
+    'A forma de pagar a taxa de rede mudou desde a sua revisão: seu ETH nesta rede agora a cobre, ou deixou de cobrir. Nada foi assinado nem enviado, e este fluxo não foi iniciado. Revise-o de novo para ver como a taxa é paga agora.',
 };

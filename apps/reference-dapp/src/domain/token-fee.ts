@@ -82,6 +82,11 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
  */
 export const EDITOR_MECHANISM_CHANGED = 'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was sent. End this workflow and review it again to see how the fee is paid now.';
 /**
+ * Final review (P3): the same change, found by Authorize before the first group was prepared (the Review's mechanism travels with it): nothing of
+ * the run was stored or asked of the wallet, and the run was ended at once, so the way forward is only to review again.
+ */
+export const EDITOR_MECHANISM_CHANGED_NOT_STARTED = 'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was signed or sent, and this workflow was not started. Review it again to see how the fee is paid now.';
+/**
  * Review UX1: the USDC cap of a Circle-paid request rose above the one the owner accepted (both are computed from the live gas price and the
  * verified ETH/USD price, so any upward move between Review and Authorize raises it). Never a refusal and never applied silently: the new cap is
  * shown beside the reviewed one and the owner confirms it before the wallet is asked (the Editor's confirm-update step, like a lower minimum).

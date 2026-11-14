@@ -13,6 +13,7 @@
  *                wallet (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001)
  *   cancel / resume   end a run that never submitted anything (or that halted), or resume a halted step that submitted nothing
  */
+import type { ReviewedGas } from '../editor/authorize-binding.ts';
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import type { WorkflowComposition } from '../engine/strategy-engine';
@@ -139,8 +140,8 @@ export async function userFundedStartSequential(deps: WorkflowRunSurface, run: R
  * owner's EVM wallet as the preparing browser reported it (absent: unknown, never offered a token-paid fee that needs a typed-data permit).
  */
 export async function userFundedPrepareSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
-  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET'): Promise<PreparedGroupView> {
-  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout, wallet);
+  handout?: string, wallet?: 'INJECTED' | 'FLOFI_WALLET', reviewedGas?: ReviewedGas): Promise<PreparedGroupView> {
+  return prepareUserFundedGroup(deps, run, wallets, groupIndex, handout, wallet, reviewedGas);
 }
 /** ADR-0010: the owner's USDC permit for a Circle-paid group; returns the operation's typed data the owner's wallet signs next. */
 export async function userFundedPermitSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number,
