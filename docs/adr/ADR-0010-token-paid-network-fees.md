@@ -34,7 +34,8 @@ and never chosen by the policy below.
    `ZEROX_GASLESS_APPROVAL_UNAVAILABLE`), so the Review says what is missing instead of a dead end.
 4. **Bound at Review, re-checked at authorization.** The chosen mechanism and its fee are part of what the owner reviews and signs; when the
    policy would now pick another mechanism (ETH or SOL arrived or left), nothing switches silently: `GAS_MECHANISM_CHANGED_REVIEW_REQUIRED` (the
-   Editor offers *End and review again*; on `/approve` the group is planned again and simply authorized again). A Circle fee cap that rose since
+   Editor binds the reviewed mechanism of its first group and is refused before anything is stored, so the run is simply not started —
+   `EDITOR_MECHANISM_CHANGED_NOT_STARTED` — and reviewed again; on `/approve` the group is planned again and simply authorized again). A Circle fee cap that rose since
    the Review is shown next to the reviewed one and confirmed in place (`CIRCLE_FEE_CAP_ROSE_CONFIRM`) before anything is signed; a lower cap
    goes straight to the wallet.
 5. **Later steps that still need native gas are said before the first signature.** A token-paid step can be followed, on the same chain, by a
@@ -122,8 +123,12 @@ before the first step of a FloFi Wallet group on a Circle chain is loaded, FloFi
 own flow exactly as before; Circle eligible → FloFi's consent card ("Upgrade and continue" / "Not now"); *Not now* withdraws the unsigned Circle
 preparation (`CIRCLE_FEE_DECLINED`) and the step pays in ETH or shows the shortfall, with nothing signed. The Editor reviews a FloFi Wallet
 workflow step by step (FloFi Wallet has no EIP-5792 batches), pays each step in ETH and says that USDC fees are available through `/approve`.
-Not covered: *Confirm each step* mode (no groups), a page reload between the start and the browser's check (that group pays in ETH), and the
-resume of a halted owner-step group.
+Every `/approve` load (start, claim, continue, resume) asks about a Circle candidate group first, so a reload never loses the choice. Each
+preparation of a group is signable once (the single-use claims carry the preparation's identity: a cancelled or expired preparation can be
+prepared and signed again); the upgrade is re-checked before the operation signature (a stale tuple withdraws the preparation and gives the
+steps back, an account meanwhile delegated to exactly the pinned delegate still applies); the switch to a Circle operation and its give-back are
+one database transaction; an upgrade operation reconciles without archive state (the delegation is read at the latest block when the node no
+longer serves the operation's block). Not covered: *Confirm each step* mode (no groups).
 
 **MetaMask on Ethereum: native ETH (provider/wallet limit, with evidence).** MetaMask's `EIP7702StatelessDeleGator` v1.3.0 takes its EntryPoint as
 an immutable constructor argument, includes it in its user-operation typehash and accepts `validateUserOp` only from it (`EIP7702DeleGatorCore.sol`
@@ -153,7 +158,9 @@ other instruction except as `payer` of an associated-token-account creation (Kor
 
 **Refusals and identity.** A Kora answer is a definitive refusal only when it is Kora's own JSON-RPC pre-signing validation error to the
 **first** call for those bytes; HTTP errors, -32603, rate limits and any answer after a lost call are unknown and the transaction is recovered by
-the owner's signature until its blockhash is provably expired at finalized height (the recovery scans only that slot window, page by page). The
+the owner's signature until its blockhash is provably expired at finalized height (the recovery scans only that slot window, page by page; a window
+too busy to cover once the blockhash expired becomes `KORA_RECOVERY_INCOMPLETE`: the group is uncertain and needs attention — it may have
+executed — and is never resent). The
 transaction id is the fee payer's signature, unknown until Kora signs. FloFi records the owner's signature and the signed bytes
 durably first, calls `signAndSendTransaction` with `respond_after: "signed"`, verifies the answer (same message, owner signature intact, pinned
 signer), records the transaction id, and broadcasts the same fully signed bytes itself through its own RPC (the existing single-broadcaster

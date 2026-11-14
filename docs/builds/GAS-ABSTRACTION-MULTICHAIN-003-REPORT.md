@@ -72,7 +72,8 @@ wallet's typed-data prompts need the owner's live acceptance.
 ## 4. Review and its fixes
 
 Nine read-only specialists reviewed the merged build (security, wallet-execution, workflow, swap, bridge, protocol-integrations, frontend-ux,
-chat, liquidity). Every P1 was verified with a failing regression test and fixed; P2/P3 were fixed or are listed below.
+chat, liquidity); security, wallet-execution and workflow reviewed again after the FloFi Wallet path and every fix were merged. Every P1 was
+reproduced with a failing regression test and fixed; every P2/P3 below was fixed.
 
 | Finding | Severity | Resolution |
 | --- | --- | --- |
@@ -87,6 +88,8 @@ chat, liquidity). Every P1 was verified with a failing regression test and fixed
 | Chat/lifecycle: silent after an abandoned gasless attempt; non-final 0x failure shown final (double-swap risk); signature count | P2/P3 | chat reports it; non-final → uncertain and observed, simulate blocked while unsettled; count from the reviewed fee |
 | UX: Kora worded as Circle in the Editor; Circle permit not visible as a permission; signature stages; Canvas hid the 0x Permit2 approval; Pimlico not named; cancel needs ETH | P2/P3 | all fixed with tests |
 | Later native-only steps (liquidity, bridges, Relay) after a token-paid step | P2 (2 reviewers) | named before the first signature in the Editor Review and `/approve` |
+| Final review (security, wallet-execution, workflow) of the FloFi Wallet upgrade path: a cancelled or expired preparation could never be signed again (single-use claim keyed on unchanged nonces) | P1 | each preparation signable once (claim carries the preparation identity) |
+| Final review: upgrade reconciliation needing archive state; reload/claim/resume loading a Circle candidate natively; staleness checked only at relay; non-atomic owner-step switch; binding block of switched groups; Editor mechanism change stored before refusal; Kora recovery in a busy window; decline wording | P2/P3 | archive-free reconciliation, Circle-first on every `/approve` load, re-check before the operation signature, one transaction, `EDITOR_MECHANISM_CHANGED_NOT_STARTED`, `KORA_RECOVERY_INCOMPLETE` (attention, never resent), truthful wording |
 
 ## 5. Validation
 
