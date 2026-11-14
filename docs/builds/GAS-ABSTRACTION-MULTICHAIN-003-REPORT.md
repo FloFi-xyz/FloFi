@@ -93,7 +93,19 @@ reproduced with a failing regression test and fixed; every P2/P3 below was fixed
 
 ## 5. Validation
 
-Results are recorded on the final PR head in the PR description and updated here before review; intermediate runs on the merged build
-(before the round-2 fixes): unit suite with no failure, PostgreSQL 767 passed / 1 environment-only failure (`forward-compatibility.pg`: PostgreSQL
-16 locally vs 18.6 in CI, untouched by this build), nine affected browser profiles 77/77 passed, typecheck, lint, governance-lite and
-`agent_guard check` passed.
+Local runs on the final code (Node 24.21.0, pnpm 11.22.0, PostgreSQL 16 locally); CircleCI is the certification authority and its result on the
+PR head is recorded in the PR.
+
+| Gate | Result |
+| --- | --- |
+| Unit (`vitest run packages apps/reference-dapp/src apps/reference-dapp/backend`, CI's exclusions) | 7939 passed, 2 skipped (pre-existing), 0 failed (`main` before this build: 7533 passed, 2 skipped) |
+| PostgreSQL (`*.pg.test.ts`, 2 workers) | 788 passed, 3 skipped, 1 failed: `forward-compatibility.pg` asserts PostgreSQL 18 catalog behaviour (NOT NULL constraints in `pg_constraint`); CI pins 18.6 and passes it; this build adds no migration |
+| Browser (`guarded-release-browser.mjs profile …`) | 10 affected profiles, 88/88 passed: approve-workflow-run, editor-wallet-batch, auth-wallets, approve-authorize-journeys, robinhood-mainnet-authoring, jupiter-provenance, solana-transfer-ux, solana-wallet-refusal, universal-bridge, execution-continuity |
+| `pnpm typecheck`, `pnpm lint`, `governance_lite.py`, `agent_guard.py check` | pass |
+| CircleCI | full certification (governance, certification-checks, certification-browser-1/2, certification) passed on intermediate heads `59b5ec6` and `7da34d5`; the final head's run is recorded in the PR |
+
+Existing tests changed intentionally (no assertion removed): `flofi-evm-provider.test` (typed data is now a supported but bound method: 4100
+instead of 4200), `privy-bridge.test.tsx` (the Privy mock exports the two new hooks), `conversation-cards.test` (`Signatures` is a material
+detail), `gas-payment.test` (the lifecycle mapping takes `final`), `circle-gas.test` (FloFi Wallet over a DeleGator is `CIRCLE_ACCOUNT_UNSUPPORTED`),
+`flofi-signing.test` (three new signing flows), `flofi-wallet-circle-run.pg.test` (the start leaves a Circle candidate's first step for the
+browser's check), `editor-workflow-run.token-fee.test.tsx` (the step-mode refusal's current sentence).
