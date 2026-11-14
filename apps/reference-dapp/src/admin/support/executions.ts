@@ -29,4 +29,3 @@ export async function loadExecutions(db: Database, tenantId: string, runIds: rea
   const { rows } = await db.query<RunRow>(`${EXECUTION_SELECT} WHERE r.tenant_id = $1 AND r.run_id = ANY($2::text[])`, [tenantId, [...new Set(runIds)].slice(0, 1000)]);
   return rows.map(snapshotOf);
 }
-
