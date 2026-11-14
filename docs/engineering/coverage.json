@@ -106,6 +106,14 @@
       "path": "apps/reference-dapp/src/admin/settings.pg.test.ts",
       "stage": "postgres"
     },
+    "app.admin.support": {
+      "path": "apps/reference-dapp/src/admin/support/support.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.support-http.pg": {
+      "path": "apps/reference-dapp/src/admin/support/support-http.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.app.api.flofi.journey.route": {
       "path": "apps/reference-dapp/src/app/api/flofi/journey/route.test.ts",
       "stage": "unit"
@@ -161,6 +169,10 @@
     "app.backend.pix-payment-flow": {
       "path": "apps/reference-dapp/backend/pix-payment-flow.test.ts",
       "stage": "unit"
+    },
+    "app.backend.support-recovery-cloud.pg": {
+      "path": "apps/reference-dapp/backend/support-recovery-cloud.pg.test.ts",
+      "stage": "postgres"
     },
     "app.channels.beta-access": {
       "path": "apps/reference-dapp/src/channels/beta-access.test.ts",
@@ -1297,6 +1309,7 @@
     "app.accounts.wallet-relay",
     "app.admin.flight",
     "app.admin.session",
+    "app.admin.support",
     "app.app.api.flofi.journey.route",
     "app.app.wallet-session-action",
     "app.automations.boundaries",
@@ -1896,6 +1909,43 @@
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
+      ]
+    },
+    {
+      "id": "admin--support-recovery",
+      "primary": "flofi-admin-analytics",
+      "dependencies": [
+        "flofi-automations",
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/admin/support/codes.ts",
+        "apps/reference-dapp/src/admin/support/diagnostics.ts",
+        "apps/reference-dapp/src/admin/support/incidents.ts",
+        "apps/reference-dapp/src/admin/support/recovery.ts",
+        "apps/reference-dapp/src/admin/support/registry.ts",
+        "apps/reference-dapp/src/admin/support/support-http.ts",
+        "apps/reference-dapp/src/admin/support/view.ts",
+        "apps/reference-dapp/src/app/admin/api/support/route.ts",
+        "apps/reference-dapp/src/app/admin/support/incident/page.tsx",
+        "apps/reference-dapp/src/app/admin/support/page.tsx",
+        "apps/reference-dapp/src/components/admin/support-console.tsx"
+      ],
+      "suites": [
+        "app.admin.http.pg",
+        "app.admin.support",
+        "app.admin.support-http.pg",
+        "app.backend.support-recovery-cloud.pg"
+      ],
+      "gaps": [
+        "Recovery is proven against loopback PostgreSQL, the real worker reconcile handler and a MOCKED chain; no production incident or public network was exercised.",
+        "Only two recovery actions exist (re-queue reconcile and evidence.archive); every other incident is diagnostic or guided only."
       ]
     },
     {
@@ -7655,6 +7705,7 @@
     "app.admin.flight.pg",
     "app.admin.http.pg",
     "app.admin.settings.pg",
+    "app.admin.support-http.pg",
     "app.automations.beta-access.pg",
     "app.automations.remote.pg",
     "app.automations.scheduler.pg",
@@ -7662,6 +7713,7 @@
     "app.backend.beta-access.pg",
     "app.backend.flight-admin.pg",
     "app.backend.pix-payment-cloud.pg",
+    "app.backend.support-recovery-cloud.pg",
     "app.channels.beta-access.pg",
     "app.channels.telegram.learning.pg",
     "app.channels.telegram.workflow.pg",

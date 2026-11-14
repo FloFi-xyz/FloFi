@@ -44,7 +44,7 @@ node apps/reference-dapp/backend/admin-cli.ts index --tenant default            
 ```
 
 A Vercel Preview uses `--preview-branch <git branch>` instead of `--tenant`. Roles: **VIEWER** reads everything; **OPERATOR** also changes
-AI settings and runs live probes. One active grant per wallet; a role change is `revoke` + `grant`.
+AI settings, runs live probes, and runs Support recoveries, notes and wallet lookups (§5c). One active grant per wallet; a role change is `revoke` + `grant`.
 
 ## 4. Sign-in and sessions
 
@@ -117,6 +117,47 @@ with each observation, identities' choices by legal basis and evidence counts �
 3 distinct pseudonymous contributors support it. OPERATOR action **Erase automatic-learning data the current basis does not cover**
 (`purge-automatic`, audited as `ADMIN_LEARNING_AUTOMATIC_PURGED`). User-facing controls are not here: they live in the product under Settings →
 Privacy & memory (`/app/privacy`).
+
+## 5c. Support & Recovery (BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001)
+
+`/admin/support` answers: *what is broken for a user right now, what is known about it, and can I fix it here?* Design and safety boundaries:
+[BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001](../builds/BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001.md). Nothing to enable: it ships with the console.
+
+**Daily use**
+
+1. **Overview** — open incidents by what they need: recoverable here, user action, engineering, investigation, waiting for an external system,
+   plus the last 30 days of recovery attempts by verified result. "No matching incidents" means none of the checked conditions is present in the
+   readable sources — not that everything is healthy. A red banner lists any source that could not be read.
+2. **Find a user's execution** — paste one exact identifier (transaction hash or Solana signature, wallet, execution or workflow id, incident id,
+   task id). Free text is refused; wallet lookups need OPERATOR; every lookup is a POST (the value never appears in a URL or request log) and is
+   audited with its type and a keyed fingerprint only.
+3. **Incident explorer** — filter by status (from notes), severity, category, feature, network, last update and recovery eligibility, then
+   **Diagnose**.
+4. **Diagnose** — the plain-language summary, what is known about the outcome, whether anything was submitted and whether funds could be
+   involved, what the error code means, the evidence timeline (Observed / Inferred / Unknown / Not recorded), attempts, background tasks,
+   the journal, earlier recovery attempts and notes.
+5. **Recover** (OPERATOR) — *Preview* shows the target, its current state, the operation, the expected effect, preconditions, risks, funds and
+   reversibility. *Continue to confirmation*, give a reason, confirm you reviewed it, *Run*. The server re-checks everything under a lock; if
+   anything changed since the preview it refuses (`SUPPORT_PREVIEW_STALE`) — preview again. The result shows the server's **verification**:
+   *Accepted — pending verification* means the worker has not concluded yet; reload later. *Verified: task completed* (the stopped task
+   finished; the execution's own outcome is shown separately and may still be unknown), *Stopped again* and *Inconclusive* are readings of the
+   current durable state.
+6. **Escalate** — incidents marked *Engineering fix required* need a code change, a migration or a deployment configuration change. Add an
+   *Escalation* note so the hand-off stays with the incident, then open an issue with the incident id and the codes shown in its technical details.
+
+**What can be fixed without a deployment:** a transaction check that stopped (for example after a long RPC outage) or was never re-scheduled,
+and evidence archiving that stopped. A broken AI configuration is restored in AI Settings (versioned rollback). **What cannot:** anything that
+needs the owner's wallet (the owner opens the execution in FloFi), delegated executions, automation evaluations, notifications, multi-step
+workflow advances, corrupt state, unclassified statuses, a disabled feature or missing configuration on the worker, and anything that would
+decide an unknown outcome. The Admin never signs, submits, approves, transfers or changes a workflow.
+
+Audit kinds: `SUPPORT_RECOVERY` (OK with operation id `rop_…`, or REFUSED/FAILED with a code), `SUPPORT_SEARCH`, `SUPPORT_NOTE`. Limits: 30
+recoveries per 10 minutes (tenant, checked inside the serialized recovery transaction), 3 recoveries of one execution per 7 days, 120 lookups and
+60 notes per administrator per 10 minutes. Reasons and notes are visible to every administrator: never paste keys, passwords or personal data.
+
+Counts combine mainnet, test networks and mocked runs; each incident shows its environment, and only mainnet runs (or runs whose provenance is
+not recognised) are marked as possibly involving real funds. A VIEWER can see transaction hashes in diagnostics; a public explorer reveals the
+sender, so the OPERATOR-only wallet lookup limits convenience, not knowledge.
 
 ## 6. Analytics semantics
 
