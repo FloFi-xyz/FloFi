@@ -678,9 +678,14 @@ async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<
  * may already have been sent (a sent transaction stays unknown until processed): EXPIRED is returned only when provable, never for a
  * shortage of budget (that is decided before the group leaves AUTHORIZED, `solanaSendBudget`).
  */
+/**
+ * One pass of a Solana group's submission. UNCERTAIN (final review P3, a Kora group only): a transaction whose outcome can never be decided (its
+ * blockhash expired, the owner's history in its window is more than a scan reads); it may have landed, so it is surfaced, never resent.
+ */
+export type SolanaAdvance = { readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED' | 'UNCERTAIN'; readonly index: number | null; readonly code: string | null };
 export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string, runOwner?: BetaPrincipal,
   submission?: Readonly<Record<string, unknown>>, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
-  : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
+  : Promise<SolanaAdvance> {
   const rpc = deps.solana;
   if (!rpc) return { state: 'WAITING', index: null, code: 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE' };
   const txs = prepared.transactions as readonly SolanaGroupTx[], signed = authorization.transactions as readonly { signature: string; transaction: string }[];
@@ -742,7 +747,7 @@ class SolanaRpcWait extends Error {
  */
 async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: readonly SolanaGroupTx[], signed: readonly { signature: string; transaction: string }[],
   submission: Readonly<Record<string, unknown>>, owner: string, runOwner: BetaPrincipal | undefined, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
-  : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
+  : Promise<SolanaAdvance> {
   const hashes = [...submission.hashes as readonly (string | null)[]], relayed = [...submission.relayed as readonly (string | null)[]];
   const attempts = [...submission.relayAttempts as readonly number[]], ownerSignatures = submission.ownerSignatures as readonly string[];
   const record = async (patch: { hashes?: (string | null)[]; relayed?: (string | null)[]; relayAttempts?: number[] }) => persist ? persist({ ...submission, hashes, relayed,
@@ -793,6 +798,9 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
         hashes[i] = last.signature; relayed[i] = last.transaction;
         return { state: 'WAITING', index: i, code: await record({}) ? null : 'KORA_RELAY_NOT_RECORDED' };
       }
+      // Final review (P3): the blockhash expired and the owner's history in its window is more than a scan reads: it can never be decided by
+      // scanning, and it may have landed — surfaced (UNCERTAIN, KORA_RECOVERY_INCOMPLETE: the run needs attention), never waited on silently.
+      if (last.state === 'INCOMPLETE') return { state: 'UNCERTAIN', index: i, code: 'KORA_RECOVERY_INCOMPLETE' };
       return last.state === 'ABSENT' ? { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' } : { state: 'WAITING', index: i, code: null };
     }
     const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);

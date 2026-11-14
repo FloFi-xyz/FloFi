@@ -197,6 +197,9 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
       };
       const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner, live, persist);
       if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, latest !== live, step.code);
+      // Final review (P3): a Kora transaction that can never be decided (KORA_RECOVERY_INCOMPLETE) may have landed: the group and its steps are
+      // UNCERTAIN and the run needs ATTENTION (observed again, never resent), with the closed code the owner's page words.
+      if (step.state === 'UNCERTAIN') return attention(deps, run, g, stored(step.code ?? 'KORA_RECOVERY_INCOMPLETE'));
       if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...latest, hashes: (latest.hashes as (string | null)[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
       else r = await reconcileSolanaGroup(deps.userFunded, prepared, latest, g.chain, g.feePayer);

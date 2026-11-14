@@ -50,6 +50,27 @@ async function authorizedGroup(s: Setup) {
   return { p, authorized: authorized.value };
 }
 const signCalls = (s: Setup) => s.double.state.calls.filter(c => c.method === 'signAndSendTransaction').length;
+/**
+ * Final review (P3): a busy owner — `count` other transactions inside the Review's window, OLDER than the group's own (listed after them, newest
+ * first, at the Review's slot), each in a block at the blockhash's last valid height (inside the window). Everything else is the chain's.
+ */
+function busyOwner(s: Setup, count: number, sinceSlot: number, height: number): NonNullable<UserFundedDeps['solana']> {
+  const spam = Array.from({ length: count }, (_, i) => ({ signature: ('Spam' + String(i).replace(/0/g, 'o')).padEnd(88, 'x'), slot: sinceSlot, err: null,
+    confirmationStatus: 'finalized' }));
+  const spamIds = new Set(spam.map(e => e.signature));
+  return async (method, params) => {
+    if (method === 'getSignaturesForAddress' && params[0] === s.wallet.owner) {
+      const config = (params[1] ?? {}) as { limit?: number; before?: string };
+      const real = await s.chain.rpc(method, [params[0], { limit: 1_000 }]) as { signature: string; slot: number }[];
+      let all = [...real.filter(e => e.slot >= sinceSlot), ...spam, ...real.filter(e => e.slot < sinceSlot)];
+      if (config.before) { const at = all.findIndex(e => e.signature === config.before); all = at < 0 ? [] : all.slice(at + 1); }
+      return all.slice(0, Math.min(1_000, config.limit ?? 1_000));
+    }
+    if (method === 'getTransaction' && spamIds.has(params[0] as string)) return { slot: sinceSlot, transaction: ['AAAA', 'base64'], meta: { err: null } };
+    if (method === 'getBlock' && params[0] === sinceSlot) return { blockHeight: height };
+    return s.chain.rpc(method, params);
+  };
+}
 /** Passes of the group (as the run's worker makes them) until it is DONE, EXPIRED or FAILED. */
 async function drive(s: Setup, p: Prepared, authorized: Readonly<Record<string, unknown>>, current: () => Readonly<Record<string, unknown>>,
   save: (next: Readonly<Record<string, unknown>>) => void) {
@@ -150,6 +171,37 @@ describe('Solana sign-all group with Pimlico Kora (MOCKED loopback)', () => {
     expect(signCalls(s)).toBe(2);
     expect((submission.hashes as (string | null)[]).every(Boolean)).toBe(true);
     await expect(reconcileSolanaGroup(s.deps, p, submission, SOLANA, s.wallet.owner)).resolves.toMatchObject({ status: 'RECONCILED' });
+  });
+  it('final review (P3): a busy owner (120 other transactions inside the window, older than its own): a lost Kora answer is still recovered', async () => {
+    const s = await setup({ usdc: 50_000_000n });
+    const { p, authorized } = await authorizedGroup(s);
+    let submission = solanaSubmission(authorized, s.deps.now());
+    s.double.state.gatewayErrorsAfterSign = 1;
+    const tx = p.transactions[0] as Tx & { sinceSlot: number };
+    const busy: UserFundedDeps = { ...s.deps, solana: busyOwner(s, 120, tx.sinceSlot, tx.lastValidBlockHeight) };
+    const states: Awaited<ReturnType<typeof advanceSolanaSubmission>>[] = [];
+    for (let pass = 0; pass < 16 && !['DONE', 'EXPIRED', 'FAILED', 'UNCERTAIN'].includes(states.at(-1)?.state ?? ''); pass++)
+      states.push(await advanceSolanaSubmission(busy, p, authorized, s.wallet.owner, undefined, submission, async next => { submission = next; return true; }));
+    expect(states.at(-1)!.state).toBe('DONE');
+    expect(signCalls(s)).toBe(2);
+    await expect(reconcileSolanaGroup(s.deps, p, submission, SOLANA, s.wallet.owner)).resolves.toMatchObject({ status: 'RECONCILED' });
+  });
+  it('final review (P3): more history in the window than a scan reads, the blockhash provably expired: UNCERTAIN (KORA_RECOVERY_INCOMPLETE), never a silent wait', async () => {
+    const s = await setup({ usdc: 50_000_000n });
+    const { p, authorized } = await authorizedGroup(s);
+    let submission = solanaSubmission(authorized, s.deps.now());
+    // Kora signs but never broadcasts and its answer is lost: only the owner's history could decide, and it holds 300 other transactions.
+    s.double.state.broadcast = false; s.double.state.loseAnswers = 100;
+    const tx = p.transactions[0] as Tx & { sinceSlot: number };
+    const busy: UserFundedDeps = { ...s.deps, solana: busyOwner(s, 300, tx.sinceSlot, tx.lastValidBlockHeight) };
+    const persist = async (next: Readonly<Record<string, unknown>>) => { submission = next; return true; };
+    // While the blockhash may still land nothing is decided (and no second call is made while the first one's outcome is unknown).
+    for (let pass = 0; pass < 3; pass++) expect(await advanceSolanaSubmission(busy, p, authorized, s.wallet.owner, undefined, submission, persist)).toMatchObject({ state: 'WAITING', index: 0 });
+    expect(signCalls(s)).toBe(1);
+    s.chain.advance(tx.lastValidBlockHeight - s.chain.state.blockHeight + 1);
+    expect(await advanceSolanaSubmission(busy, p, authorized, s.wallet.owner, undefined, submission, persist))
+      .toEqual({ state: 'UNCERTAIN', index: 0, code: 'KORA_RECOVERY_INCOMPLETE' });
+    expect(signCalls(s)).toBe(1);
   });
   it('a lost answer whose identical retry Kora refuses (already processed) is never taken as "never signed"', async () => {
     const s = await setup({ usdc: 50_000_000n });

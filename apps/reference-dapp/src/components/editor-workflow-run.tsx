@@ -23,7 +23,7 @@ import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEdi
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
 import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_ON_APPROVAL, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED,
-  EDITOR_MECHANISM_CHANGED_NOT_STARTED, feeAmountText,
+  EDITOR_MECHANISM_CHANGED_NOT_STARTED, feeAmountText, KORA_RECOVERY_INCOMPLETE, KORA_RECOVERY_INCOMPLETE_TEXT,
   nativeLaterMessage } from '../domain/token-fee';
 import { circleFactsOf } from '../user-funded/circle-facts';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
@@ -1282,7 +1282,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     {run && run.stepCount > 1 && <p className="editor-run-progress" role="status" data-completed={progress!.completed}>{tr('{0} of {1} steps completed', String(progress!.completed), String(progress!.total))}</p>}
     {awaited && <p className="editor-run-delivery" role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
       tr(awaited.source), tr(awaited.destination))}</p>}
-    {run?.state === 'ATTENTION' && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
+    {run?.state === 'ATTENTION' && (run.groups.some(g => g.code === KORA_RECOVERY_INCOMPLETE)
+      ? <p role="status" data-attention={KORA_RECOVERY_INCOMPLETE}>{tr(KORA_RECOVERY_INCOMPLETE_TEXT)}</p>
+      : <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>)}
     {halted && <p role="status">{halted === 'NOTHING_SENT'
       ? <>{tr('Stopped before anything was sent: your funds stay in your wallet.')}{resumable && endable ? <> {tr('You can run each step through its own flow from here, or end the workflow.')}</> : null}</>
       // A batch that may have executed unseen: neither "before any step completed" nor that the reconciled steps' funds still rest in the wallet

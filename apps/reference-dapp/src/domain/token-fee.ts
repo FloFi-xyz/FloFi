@@ -114,6 +114,13 @@ export function nativeLaterMessage(warning: { readonly network: string; readonly
   const steps = warning.steps.map(step => tr(NATIVE_LATER.STEP, String(step.index + 1), action(step.action))).join(', ');
   return tr(warning.steps.length === 1 ? NATIVE_LATER.ONE : NATIVE_LATER.MANY, tr(warning.network), warning.symbol, steps);
 }
+/**
+ * Final review (P3, ADR-0010 §4): a Kora transaction whose answer was lost, whose blockhash expired, and whose window in the owner's history holds
+ * more transactions than FloFi's recovery scan reads: it can never be decided, and it may have landed (KORA_RECOVERY_INCOMPLETE; the run needs
+ * attention). Never "nothing was sent".
+ */
+export const KORA_RECOVERY_INCOMPLETE = 'KORA_RECOVERY_INCOMPLETE';
+export const KORA_RECOVERY_INCOMPLETE_TEXT = 'FloFi could not confirm whether a Solana transaction whose network fee Pimlico (Kora) paid landed: this wallet made more transactions in that short period than FloFi can check. It may have executed. Check your wallet\'s activity; FloFi never sends it again.';
 /** The Circle refusals the browser itself raises before any wallet request: nothing was sent. */
 export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH', 'CIRCLE_UPGRADE_DECLINED']);
 
