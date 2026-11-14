@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { circlePaymaster as C, erc4337 } from '@defi-workflow-engine/reference-compiler';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPermit, workflowRunUserFundedPrepare, workflowRunUserFundedStart } from '../platform/approve.ts';
+import { workflowRunCancel, workflowRunUserFundedAuthorize, workflowRunUserFundedPermit, workflowRunUserFundedPrepare, workflowRunUserFundedStart } from '../platform/approve.ts';
 import { ownedRun } from '../platform/workflow-run-approvals.ts';
 import { BASE_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
@@ -97,6 +97,30 @@ describe('ADR-0010: a user-funded run whose fee is paid in the owner\'s USDC thr
       expect(chain.control.tokenBalance(USDC, R2)).toBe(2_000_000n);
       expect(circle.control.sends()).toBe(1);
     } finally { await t.drop(); }
+  });
+
+  it('final review (P3): the Editor\'s Authorize binds the reviewed mechanism — another one is refused before anything is stored, so the run ends at once', async () => {
+    const { t, chain, h, owner, wallets, approval, run } = await setup();
+    try {
+      // A Circle Review, then ETH arrived: the native batch is never prepared, stored or handed out for an Authorize bound to Circle.
+      chain.control.fundNative(owner, 10n ** 17n);
+      await expect(workflowRunUserFundedPrepare(h.surface, approval.approvalId, wallets, 0, undefined, 'INJECTED', 'CIRCLE_USDC_PAYMASTER'))
+        .rejects.toThrow('GAS_MECHANISM_CHANGED_REVIEW_REQUIRED');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', state: 'PLANNED', prepared: null });
+      // The action's own cancel then succeeds at once (never WORKFLOW_RUN_GROUP_IN_FLIGHT for a batch nobody was handed).
+      await workflowRunCancel(h.surface, approval.approvalId, wallets);
+      expect((await ownedRun(h.runs, approval.approvalId, wallets)).state).toBe('CANCELLED');
+    } finally { await t.drop(); }
+    const other = await setup();
+    try {
+      // A native Review, then the ETH left: Circle is never prepared for an Authorize bound to native gas.
+      await expect(workflowRunUserFundedPrepare(other.h.surface, other.approval.approvalId, other.wallets, 0, undefined, 'INJECTED', 'NATIVE_WALLET_GAS'))
+        .rejects.toThrow('GAS_MECHANISM_CHANGED_REVIEW_REQUIRED');
+      expect((await other.h.store.groups(other.run.runId))[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', state: 'PLANNED', prepared: null });
+      // The same mechanism as reviewed: prepared as before.
+      expect(await workflowRunUserFundedPrepare(other.h.surface, other.approval.approvalId, other.wallets, 0, undefined, 'INJECTED', 'CIRCLE_USDC_PAYMASTER'))
+        .toMatchObject({ strategy: 'EVM_USER_OPERATION' });
+    } finally { await other.t.drop(); }
   });
 
   it('ETH that arrived since the Review: authorization never switches silently (GAS_MECHANISM_CHANGED_REVIEW_REQUIRED); the group is planned again', async () => {

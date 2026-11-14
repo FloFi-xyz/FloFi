@@ -26,7 +26,8 @@ export const CIRCLE_UNAVAILABLE_REASON: Readonly<Record<string, string>> = {
   CIRCLE_SMART_ACCOUNT_REQUIRED: 'this wallet is not a smart account on this network',
   CIRCLE_ACCOUNT_ENTRYPOINT_UNSUPPORTED: 'Circle does not support this smart-account version on this network',
   CIRCLE_ACCOUNT_UNSUPPORTED: 'this smart-account type is not supported',
-  CIRCLE_WALLET_UNSUPPORTED: 'FloFi Wallet cannot sign it',
+  // Final review (P3): FloFi Wallet pays in USDC through /approve in groups (after the upgrade); everywhere else its fee is paid in ETH.
+  CIRCLE_WALLET_UNSUPPORTED: 'FloFi Wallet pays it in USDC only in a workflow authorized in groups through a FloFi approval link (/approve)',
   CIRCLE_WALLET_UNKNOWN: 'the wallet that would sign it was not identified',
   CIRCLE_BUNDLER_ENTRY_POINT_UNSUPPORTED: 'the service that relays it does not support this smart-account version on this network',
   CIRCLE_INSUFFICIENT_USDC: 'this wallet does not hold enough USDC for the steps and the fee',
@@ -49,7 +50,7 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   CIRCLE_PERMIT_REQUIRED: 'Sign the USDC permit for the network fee first. Nothing was sent.',
   CIRCLE_PERMIT_STAGE_INVALID: 'This request already moved on. Nothing was sent; load it again.',
   CIRCLE_PERMIT_MISMATCH: 'What your wallet would sign did not match the network fee FloFi showed, so your wallet was not asked. Nothing was sent.',
-  CIRCLE_WALLET_UNSUPPORTED: 'FloFi Wallet cannot pay network fees in USDC. Add ETH on this network to this wallet, or use a wallet with a smart account. Nothing was sent.',
+  CIRCLE_WALLET_UNSUPPORTED: 'FloFi Wallet pays network fees in USDC only in a workflow authorized in groups through a FloFi approval link (/approve), after its one-time smart-account upgrade. Here, add ETH on this network to this wallet to pay the network fee. Nothing was sent.',
   CIRCLE_PAYMASTER_REFUSED: 'Circle declined to take this network fee in USDC just now. Nothing was sent; try again later, or add ETH on this network.',
   CIRCLE_INSUFFICIENT_USDC: 'This wallet does not hold enough USDC for the steps and the network fee. Nothing was sent.',
   CIRCLE_PAYMASTER_GAS_INVALID: 'The network fee of this request could not be bounded, so nothing was sent. Try again.',
@@ -70,6 +71,10 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   // "Not now" on the consent card: refused for a request already signed in part, or one that is not a FloFi Wallet group's Circle fee.
   CIRCLE_DECLINE_ALREADY_SIGNED: 'You already signed part of this request, so FloFi keeps it as it is. Nothing more was signed or sent.',
   CIRCLE_DECLINE_NOT_APPLICABLE: 'This request has no network fee in USDC to decline. Nothing was signed or sent.',
+  // Final review (P1): FloFi Wallet is asked once per signature of a prepared request (the single-use claim); a cancel there, or an answer that
+  // never arrived, spends it. A new preparation is a new request (its own claim): the way forward is to let this one expire and continue.
+  FLOFI_WALLET_ALREADY_SIGNED: 'FloFi Wallet was already asked for this signature once (if you cancelled it there, nothing was signed), so FloFi does not ask it again for this request. Nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.',
+  FLOFI_WALLET_SIGNATURE_UNKNOWN: 'FloFi Wallet may have signed, but FloFi did not receive the signature, so nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.',
 };
 /**
  * Review UX1: the Editor's whole-workflow Review bound who pays group 1's network fee (ETH, or USDC through Circle). The run prepared it with the
@@ -77,6 +82,11 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
  * place, so the way forward is to end it (nothing of it was signed) and review the workflow again.
  */
 export const EDITOR_MECHANISM_CHANGED = 'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was sent. End this workflow and review it again to see how the fee is paid now.';
+/**
+ * Final review (P3): the same change, found by Authorize before the first group was prepared (the Review's mechanism travels with it): nothing of
+ * the run was stored or asked of the wallet, and the run was ended at once, so the way forward is only to review again.
+ */
+export const EDITOR_MECHANISM_CHANGED_NOT_STARTED = 'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was signed or sent, and this workflow was not started. Review it again to see how the fee is paid now.';
 /**
  * Review UX1: the USDC cap of a Circle-paid request rose above the one the owner accepted (both are computed from the live gas price and the
  * verified ETH/USD price, so any upward move between Review and Authorize raises it). Never a refusal and never applied silently: the new cap is
@@ -105,6 +115,13 @@ export function nativeLaterMessage(warning: { readonly network: string; readonly
   const steps = warning.steps.map(step => tr(NATIVE_LATER.STEP, String(step.index + 1), action(step.action))).join(', ');
   return tr(warning.steps.length === 1 ? NATIVE_LATER.ONE : NATIVE_LATER.MANY, tr(warning.network), warning.symbol, steps);
 }
+/**
+ * Final review (P3, ADR-0010 §4): a Kora transaction whose answer was lost, whose blockhash expired, and whose window in the owner's history holds
+ * more transactions than FloFi's recovery scan reads: it can never be decided, and it may have landed (KORA_RECOVERY_INCOMPLETE; the run needs
+ * attention). Never "nothing was sent".
+ */
+export const KORA_RECOVERY_INCOMPLETE = 'KORA_RECOVERY_INCOMPLETE';
+export const KORA_RECOVERY_INCOMPLETE_TEXT = 'FloFi could not confirm whether a Solana transaction whose network fee Pimlico (Kora) paid landed: this wallet made more transactions in that short period than FloFi can check. It may have executed. Check your wallet\'s activity; FloFi never sends it again.';
 /** The Circle refusals the browser itself raises before any wallet request: nothing was sent. */
 export const CIRCLE_NOTHING_SENT: readonly string[] = Object.freeze(['CIRCLE_WALLET_UNSUPPORTED', 'CIRCLE_PERMIT_MISMATCH', 'CIRCLE_UPGRADE_DECLINED']);
 
@@ -133,9 +150,13 @@ export const CIRCLE_FEE_CONSENT: Readonly<Record<'TITLE' | 'WHAT' | 'SIGNATURES'
  * with FloFi Wallet is really available (a user-funded run approved on /approve), and that every step run here pays its network fee in ETH.
  */
 export const CIRCLE_ON_APPROVAL = 'Paying the network fee in USDC through Circle with FloFi Wallet is available when a workflow is approved through a FloFi approval link (/approve) and authorized in groups. Here each step runs on its own and pays its network fee in ETH.';
-/** Both cards' way out, what it does, and what /approve says once it was chosen (`{0}`: the step number). */
+/**
+ * Both cards' way out, what it does, and what /approve says once it was chosen (`{0}`: the step number). Final review (P3): DONE never says
+ * "nothing was signed" — the owner may have agreed earlier to this same request and FloFi Wallet may have been asked (its answer never reached
+ * FloFi); what is true either way is that FloFi withdrew it and never sends or uses anything of it.
+ */
 export const CIRCLE_CONSENT_DECLINE: Readonly<Record<'ACTION' | 'NOTE' | 'DONE', string>> = {
   ACTION: 'Not now',
   NOTE: 'Choosing Not now signs nothing: the step continues through its own review, which pays its network fee in ETH.',
-  DONE: 'Nothing was signed. Step {0} continues through its own review, which pays its network fee in ETH.',
+  DONE: 'FloFi withdrew the request to pay this network fee in USDC: nothing of it is sent or used. Step {0} continues through its own review, which pays its network fee in ETH.',
 };

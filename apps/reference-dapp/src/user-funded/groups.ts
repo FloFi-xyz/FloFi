@@ -53,7 +53,7 @@ import type { AcrossRoutes } from './bridge-calls.ts';
 import { assertUserFundedSubmission, type GasPaidFact } from './gas-payer.ts';
 import { isAaveCall, simulateWalletBatch, type BatchSimulation } from './batch-simulation.ts';
 import { selectGasMechanism, type MechanismUnavailable } from '../gas-abstraction/mechanism.ts';
-import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleDeadlinePassed, circleFactsOf, circleOperationOf, circleRelayOpen, circleSignedAuthorization,
+import { authorizeCircleOperation, checkCircleSubmission, circleAttempt, circleRelaySend, circleDeadlinePassed, circleFactsOf, circleOperationOf, circleRelayOpen,
   circleUserOpHash, type CircleDeps, type CircleFacts } from './circle-gas.ts';
 import { gaslessStepModeRefusal } from './gasless-groups.ts';
 
@@ -532,10 +532,11 @@ async function checkCircleOperation(deps: UserFundedDeps, prepared: Prepared, au
   try { op = preparedOperation(prepared, String(authorization.signature)).op; } catch (cause) { return no(codeOf(cause, 'CIRCLE_OPERATION_INVALID')); }
   const checked = await checkCircleSubmission(deps, prepared, op, owner);
   if (!checked.ok) return no(checked.code);
-  const c = checked.value;
+  const c = checked.value.facts, send = checked.value.send;
   try {
-    // Owner requirement: an upgrade is simulated with the owner's own authorization (checked to still apply by `checkCircleSubmission`).
-    const need = await bundler.estimateCircle(op, c.entryPoint, circleSignedAuthorization(c, owner.toLowerCase()) ?? undefined);
+    // Owner requirement: an upgrade is simulated with the owner's own authorization (checked to still apply by `checkCircleSubmission`) — or,
+    // final review (P3), with the marker alone when the account is already delegated to exactly its delegate.
+    const need = await bundler.estimateCircle(op, c.entryPoint, send.auth, send.upgrade);
     const [verificationGasLimit, callGasLimit] = erc4337.unpackUints(op.accountGasLimits), pm = erc4337.unpackPaymasterAndData(op.paymasterAndData)!;
     if (need.verificationGasLimit > verificationGasLimit || need.callGasLimit > callGasLimit || need.preVerificationGas > op.preVerificationGas
       || need.paymasterVerificationGasLimit > pm.verificationGasLimit || need.paymasterPostOpGasLimit > pm.postOpGasLimit) return no('USER_OPERATION_GAS_LIMIT_TOO_LOW');
@@ -558,9 +559,13 @@ export async function relayUserOperation(deps: UserFundedDeps, prepared: Prepare
     // ADR-0010: a Circle-paid operation goes to its own EntryPoint, through the bundler's Circle-only path (any other paymaster is refused there),
     // and never at or after its calls' deadline minus the margin (review C2: first relay and resend alike).
     if (circle && !circleRelayOpen(prepared, deps.now())) return no('CIRCLE_OPERATION_DEADLINE_PASSED');
-    // Owner requirement: an upgrade travels with exactly the owner's recorded authorization (the same bytes on every resend, like the operation).
-    if (circle) return bundler.sendCircle ? ok(await bundler.sendCircle(op, circle.entryPoint, circleSignedAuthorization(circle, String(prepared.owner)) ?? undefined))
-      : no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+    // Owner requirement: an upgrade travels with exactly the owner's recorded authorization (the same bytes on every resend, like the operation),
+    // or, final review (P3), without it once the account is already delegated to exactly its delegate (that delegation consumed its nonce).
+    if (circle) {
+      if (!bundler.sendCircle) return no('USER_OPERATION_BUNDLER_UNAVAILABLE');
+      const send = await circleRelaySend(deps, prepared);
+      return ok(await bundler.sendCircle(op, circle.entryPoint, send.auth, send.upgrade));
+    }
     return ok(await bundler.send(op));
   } catch (cause) { return no(codeOf(cause, 'USER_OPERATION_REJECTED')); }
 }
@@ -673,9 +678,14 @@ async function statuses(rpc: SolanaRpc, signatures: readonly string[]): Promise<
  * may already have been sent (a sent transaction stays unknown until processed): EXPIRED is returned only when provable, never for a
  * shortage of budget (that is decided before the group leaves AUTHORIZED, `solanaSendBudget`).
  */
+/**
+ * One pass of a Solana group's submission. UNCERTAIN (final review P3, a Kora group only): a transaction whose outcome can never be decided (its
+ * blockhash expired, the owner's history in its window is more than a scan reads); it may have landed, so it is surfaced, never resent.
+ */
+export type SolanaAdvance = { readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED' | 'UNCERTAIN'; readonly index: number | null; readonly code: string | null };
 export async function advanceSolanaSubmission(deps: UserFundedDeps, prepared: Prepared, authorization: Readonly<Record<string, unknown>>, owner: string, runOwner?: BetaPrincipal,
   submission?: Readonly<Record<string, unknown>>, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
-  : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
+  : Promise<SolanaAdvance> {
   const rpc = deps.solana;
   if (!rpc) return { state: 'WAITING', index: null, code: 'USER_FUNDED_SOLANA_RPC_UNAVAILABLE' };
   const txs = prepared.transactions as readonly SolanaGroupTx[], signed = authorization.transactions as readonly { signature: string; transaction: string }[];
@@ -737,7 +747,7 @@ class SolanaRpcWait extends Error {
  */
 async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: readonly SolanaGroupTx[], signed: readonly { signature: string; transaction: string }[],
   submission: Readonly<Record<string, unknown>>, owner: string, runOwner: BetaPrincipal | undefined, persist?: (submission: Readonly<Record<string, unknown>>) => Promise<boolean>)
-  : Promise<{ readonly state: 'SENT' | 'WAITING' | 'DONE' | 'EXPIRED' | 'FAILED'; readonly index: number | null; readonly code: string | null }> {
+  : Promise<SolanaAdvance> {
   const hashes = [...submission.hashes as readonly (string | null)[]], relayed = [...submission.relayed as readonly (string | null)[]];
   const attempts = [...submission.relayAttempts as readonly number[]], ownerSignatures = submission.ownerSignatures as readonly string[];
   const record = async (patch: { hashes?: (string | null)[]; relayed?: (string | null)[]; relayAttempts?: number[] }) => persist ? persist({ ...submission, hashes, relayed,
@@ -788,6 +798,9 @@ async function advanceKoraGroup(deps: UserFundedDeps, rpc: SolanaRpc, txs: reado
         hashes[i] = last.signature; relayed[i] = last.transaction;
         return { state: 'WAITING', index: i, code: await record({}) ? null : 'KORA_RELAY_NOT_RECORDED' };
       }
+      // Final review (P3): the blockhash expired and the owner's history in its window is more than a scan reads: it can never be decided by
+      // scanning, and it may have landed — surfaced (UNCERTAIN, KORA_RECOVERY_INCOMPLETE: the run needs attention), never waited on silently.
+      if (last.state === 'INCOMPLETE') return { state: 'UNCERTAIN', index: i, code: 'KORA_RECOVERY_INCOMPLETE' };
       return last.state === 'ABSENT' ? { state: 'EXPIRED', index: i, code: 'SOLANA_BLOCKHASH_EXPIRED' } : { state: 'WAITING', index: i, code: null };
     }
     const denied = await deps.submissionRefusal?.({ namespace: 'solana', address: owner }, runOwner);

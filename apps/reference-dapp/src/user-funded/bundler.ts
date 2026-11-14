@@ -82,14 +82,16 @@ export type BundlerClient = {
    * paymaster's limits; the send checks the bundler's hash against FloFi's own (`getUserOpHash` of that EntryPoint). Absent on a test double that
    * models no paymaster: the caller then refuses (USER_OPERATION_BUNDLER_UNAVAILABLE).
    */
-  readonly estimateCircle?: (op: erc4337.PackedUserOperation, entryPoint: string, eip7702Auth?: erc4337.SignedEip7702Authorization) =>
+  readonly estimateCircle?: (op: erc4337.PackedUserOperation, entryPoint: string, eip7702Auth?: erc4337.SignedEip7702Authorization, upgrade?: CircleUpgradeSend) =>
     Promise<ReturnType<typeof erc4337.bundlerPaymasterGasEstimate>>;
   /**
    * `eip7702Auth` (owner requirement: FloFi Wallet's first use): the owner's signed EIP-7702 authorization of the pinned `Simple7702Account` v0.8 on
    * this chain — sent exactly with an operation that carries the EIP-7702 initCode marker on EntryPoint v0.8 (the bundler then applies it in its own
-   * type-4 transaction before validation), and refused with any other operation (ERC4337_EIP7702_AUTH_REFUSED).
+   * type-4 transaction before validation), and refused with any other operation (ERC4337_EIP7702_AUTH_REFUSED). Final review (P3): `upgrade.delegated`
+   * — the sender is ALREADY delegated to the pinned v0.8 delegate (its authorization's nonce was consumed by that delegation): the operation with the
+   * marker travels without the authorization (EntryPoint v0.8 hashes it with that delegate, so the signed operation still validates).
    */
-  readonly sendCircle?: (op: erc4337.PackedUserOperation, entryPoint: string, eip7702Auth?: erc4337.SignedEip7702Authorization) => Promise<string>;
+  readonly sendCircle?: (op: erc4337.PackedUserOperation, entryPoint: string, eip7702Auth?: erc4337.SignedEip7702Authorization, upgrade?: CircleUpgradeSend) => Promise<string>;
   /**
    * ADR-0010 review (C3): whether the bundler serves `entryPoint` (its `eth_supportedEntryPoints`, read once per client and cached on success).
    * Throws the transport's closed code (or USER_OPERATION_ENTRY_POINT_UNSUPPORTED when it serves neither v0.7 nor v0.8). Asked before Circle is
@@ -97,6 +99,8 @@ export type BundlerClient = {
    */
   readonly servesEntryPoint?: (entryPoint: string) => Promise<boolean>;
 };
+/** How an upgrade operation's marker travels when it carries no authorization: only for a sender already delegated to the pinned delegate. */
+export type CircleUpgradeSend = { readonly delegated: true };
 export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
   let verified: ReadonlySet<string> | null = null;
   // The bundler must serve this chain and EntryPoint v0.7 (FloFi's owner-paid operations) or v0.8 (Circle with a Simple7702Account); each
@@ -127,9 +131,15 @@ export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
    * THIS chain for the EntryPoint that delegate serves (the wire format then checks it is the sender's own); anything else is refused before the
    * bundler is asked. Returns the delegate the operation is hashed with.
    */
-  const upgradeOf = (op: erc4337.PackedUserOperation, entryPoint: string, auth: erc4337.SignedEip7702Authorization | undefined): string | undefined => {
+  const upgradeOf = (op: erc4337.PackedUserOperation, entryPoint: string, auth: erc4337.SignedEip7702Authorization | undefined,
+    upgrade: CircleUpgradeSend | undefined): string | undefined => {
     const marker = op.initCode.toLowerCase() === erc4337.EIP7702_INIT_CODE_MARKER;
-    if (!marker && auth === undefined) return undefined;
+    if (!marker && auth === undefined && upgrade === undefined) return undefined;
+    // Final review (P3): a sender already delegated to the pinned v0.8 delegate sends the marker alone, on v0.8 only, never with an authorization.
+    if (upgrade?.delegated === true) {
+      if (!marker || auth !== undefined || entryPoint.toLowerCase() !== erc4337.ENTRY_POINT_V0_8) throw new BundlerError('ERC4337_EIP7702_AUTH_REFUSED');
+      return erc4337.SIMPLE_7702_ACCOUNT_V0_8;
+    }
     // The marker never travels without the owner's authorization (refused as any initCode, ERC4337_INIT_CODE_REFUSED).
     if (marker && auth === undefined) throw new BundlerError('ERC4337_INIT_CODE_REFUSED');
     if (!marker || !auth || auth.address.toLowerCase() !== erc4337.SIMPLE_7702_ACCOUNT_V0_8 || auth.chainId !== chainId
@@ -140,22 +150,22 @@ export function createBundlerClient(chainId: number, rpc: Rpc): BundlerClient {
     chainId, verify,
     async servesEntryPoint(entryPoint) { await verify(); return verified!.has(entryPoint.toLowerCase()); },
     async estimate(op) { await served(erc4337.ENTRY_POINT_V0_7); return erc4337.bundlerGasEstimate(await rpc('eth_estimateUserOperationGas', [erc4337.toBundlerUserOperation(op), erc4337.ENTRY_POINT_V0_7])); },
-    async estimateCircle(op, entryPoint, eip7702Auth) {
+    async estimateCircle(op, entryPoint, eip7702Auth, upgrade) {
       await served(entryPoint);
       circleOnly(op, entryPoint);
-      upgradeOf(op, entryPoint, eip7702Auth);
+      upgradeOf(op, entryPoint, eip7702Auth, upgrade);
       let wire: erc4337.BundlerPaymasterUserOperation;
-      try { wire = erc4337.toBundlerUserOperationWithPaymaster(op, eip7702Auth); } catch (cause) { throw new BundlerError(cause instanceof Error ? cause.message : 'ERC4337_EIP7702_AUTH_REFUSED'); }
+      try { wire = erc4337.toBundlerUserOperationWithPaymaster(op, eip7702Auth, { delegated: upgrade?.delegated === true }); } catch (cause) { throw new BundlerError(cause instanceof Error ? cause.message : 'ERC4337_EIP7702_AUTH_REFUSED'); }
       try { return erc4337.bundlerPaymasterGasEstimate(await rpc('eth_estimateUserOperationGas', [wire, entryPoint.toLowerCase()])); }
       catch (cause) { throw circleBundlerRefusal(cause); }
     },
-    async sendCircle(op, entryPoint, eip7702Auth) {
+    async sendCircle(op, entryPoint, eip7702Auth, upgrade) {
       await served(entryPoint);
       circleOnly(op, entryPoint);
-      const delegate = upgradeOf(op, entryPoint, eip7702Auth);
+      const delegate = upgradeOf(op, entryPoint, eip7702Auth, upgrade);
       if (!/^0x[0-9a-f]{130}$/.test(op.signature)) throw new BundlerError('USER_OPERATION_SIGNATURE_INVALID');
       let wire: erc4337.BundlerPaymasterUserOperation;
-      try { wire = erc4337.toBundlerUserOperationWithPaymaster(op, eip7702Auth); } catch (cause) { throw new BundlerError(cause instanceof Error ? cause.message : 'ERC4337_EIP7702_AUTH_REFUSED'); }
+      try { wire = erc4337.toBundlerUserOperationWithPaymaster(op, eip7702Auth, { delegated: upgrade?.delegated === true }); } catch (cause) { throw new BundlerError(cause instanceof Error ? cause.message : 'ERC4337_EIP7702_AUTH_REFUSED'); }
       const expected = erc4337.userOpHashFor(op, chainId, entryPoint, delegate);
       assertExecutionEnabled();
       let hash: unknown;

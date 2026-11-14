@@ -22,7 +22,8 @@ import { createEvmDouble } from '../delegation/harness/evm-double.ts';
 import { createCircleDouble } from '../delegation/harness/circle-double.ts';
 import { circleFactsOf, circleOperationOf, circlePermitOf, circleUpgradeAuthorization, circleUserOpHash } from '../user-funded/circle-gas.ts';
 import type { Prepared } from '../user-funded/groups.ts';
-import { currentStep, runView, startUserFunded } from './service.ts';
+import { currentStep, declineUserFundedGroupCircle, prepareUserFundedGroup, runView, startUserFunded } from './service.ts';
+import type { RunScope, WorkflowRunStore } from './pg-store.ts';
 import { workflowRunHarness } from './workflow-run.test-harness.ts';
 
 const CHAIN = 'eip155:8453', USDC = BASE_MAINNET_SWAP.usdc;
@@ -74,6 +75,17 @@ async function approveStart(eth: bigint, profile: unknown = FLOFI) {
   return { t, chain, circle, h, wallets, approval, started, runId, prepare };
 }
 
+/**
+ * Final review (P3): a store whose first step move of an owner-step group's switch (kind GAS_MECHANISM_SWITCHED) fails — a connection lost
+ * mid-switch — whether the move is made on its own or inside one of the store's atomic transactions.
+ */
+function failingStepMove(store: WorkflowRunStore): WorkflowRunStore {
+  let armed = true;
+  const fail = (kind: string | undefined) => { if (armed && kind === 'GAS_MECHANISM_SWITCHED') { armed = false; throw new Error('connection terminated unexpectedly'); } };
+  const failing = (scope: RunScope): RunScope => ({ ...scope, stepTransition: async (...args) => { fail(args[5]); return scope.stepTransition(...args); } });
+  return { ...store, stepTransition: async (...args) => { fail(args[5]); return store.stepTransition(...args); },
+    atomically: (runId, work) => store.atomically(runId, scope => work(failing(scope))) };
+}
 /** One pass of the run with the confirm-mode gates (the owner's step becomes READY, nothing is loaded into its flow). */
 const ready = async (h: Awaited<ReturnType<typeof setup>>['h'], runId: string) => advanceRun(h.runs as never, runId);
 
@@ -130,21 +142,27 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
     } finally { await t.drop(); }
   });
 
-  it('an expired Circle preparation gives the steps back to their own flows (owner steps again, nothing signed)', async () => {
+  // Changed (final review P3): after the expiry this test loaded the first step at once. The group is a Circle candidate again, so its first
+  // step is asked about before it loads (CIRCLE_ASK_FIRST): no step is loaded, and the owner's browser's check prepares Circle afresh.
+  it('an expired Circle preparation gives the steps back to their own flows (owner steps again, nothing signed), asked about again first', async () => {
     const { t, h, wallets, approval, run, prepare } = await setup();
     try {
       await ready(h, run.runId);
-      await prepare();
+      const first = await prepare();
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED']);
       h.d.advance(9 * 60_000);
       await h.drain(run.runId);
-      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null });
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: 'CIRCLE_ASK_FIRST' });
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['PENDING', 'PENDING']);
       await ready(h, run.runId);
       expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['READY', 'PENDING']);
-      expect(await currentStep(h.runs, await ownedRun(h.runs, approval.approvalId, wallets), wallets)).toMatchObject({ stepIndex: 0 });
-      // Once a step was loaded into its own flow, the group is never prepared as a Circle operation any more.
-      await expect(prepare()).rejects.toThrow('WORKFLOW_RUN_GROUP_OWNER_STEP');
+      expect(await currentStep(h.runs, await ownedRun(h.runs, approval.approvalId, wallets), wallets)).toBeNull();
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['READY', 'PENDING']);
+      // The owner's browser asks: Circle again, a new preparation (signable once: final review P1).
+      const again = await prepare();
+      expect(again).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { stage: 'AUTHORIZATION' } } });
+      expect(facts(again.prepared).preparationId).not.toBe(facts(first.prepared).preparationId);
+      expect(h.d.evmOwner.signatures).toBe(0);
     } finally { await t.drop(); }
   });
 
@@ -164,6 +182,45 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
       expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null });
       expect(s.circle.control.sends()).toBe(0);
       expect(s.h.d.evmOwner.signatures).toBe(0);
+    } finally { await s.t.drop(); }
+  });
+
+  // A reopened /approve's resume of an applied link (`resumeApproval`) is `continueSequential`, the same load as `workflowRunContinue`.
+  it('final review (P3): a reopened /approve (continue, claim) never loads a FloFi Wallet Circle candidate\'s first step before the browser asked', async () => {
+    const s = await approveStart(0n);
+    try {
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: 'CIRCLE_ASK_FIRST' });
+      const reopened = [() => workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets),
+        () => claimApproval(s.h.surface, s.approval.secret, s.wallets, true, s.h.d.now()), () => workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets)];
+      for (const reopen of reopened) {
+        const r = await reopen() as { view: { workflowRun?: { step: unknown; run: { nextAction: string } } } };
+        expect(r.view.workflowRun?.step).toBeNull();
+        expect(r.view.workflowRun?.run.nextAction).toBe('OWNER_SIGNS_STEP');
+        expect((await s.h.store.steps(s.runId)).map(x => x.state)).toEqual(['READY', 'PENDING']);
+      }
+      // The owner's browser's check (what the panel's Continue runs) still finds Circle: the steps were never loaded into their own flows.
+      expect(await s.prepare()).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { plannedStrategy: 'EVM_OWNER_STEP' } } });
+      expect((await s.h.store.steps(s.runId)).map(x => x.state)).toEqual(['DELEGATED', 'DELEGATED']);
+    } finally { await s.t.drop(); }
+  });
+
+  it('final review (P3): with ETH nothing loads until the browser asked; CIRCLE_NOT_NEEDED lets every later load proceed exactly as before', async () => {
+    const s = await approveStart(10n ** 17n);
+    try {
+      expect((await workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets)).view.workflowRun?.step).toBeNull();
+      await expect(s.prepare()).rejects.toThrow('CIRCLE_NOT_NEEDED');
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: null });
+      const loaded = await claimApproval(s.h.surface, s.approval.secret, s.wallets, true, s.h.d.now()) as { view: { workflowRun?: { step: unknown } } };
+      expect(loaded.view.workflowRun?.step).toMatchObject({ index: 0 });
+      expect((await s.h.store.steps(s.runId))[0]!.state).toBe('AWAITING_OWNER');
+    } finally { await s.t.drop(); }
+  });
+
+  it('final review (P3): another wallet\'s groups never carry CIRCLE_ASK_FIRST, and a reopen loads their steps as before', async () => {
+    const s = await approveStart(0n, { eip155: { wallet: 'INJECTED', atomic: {}, typedData: true } });
+    try {
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', code: null });
+      expect((await workflowRunContinue(s.h.surface, s.approval.approvalId, s.wallets)).view.workflowRun?.step).toMatchObject({ index: 0 });
     } finally { await s.t.drop(); }
   });
 
@@ -201,6 +258,77 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
       await expect(workflowRunUserFundedDecline(signed.h.surface, signed.approval.approvalId, signed.wallets, 0)).rejects.toThrow('CIRCLE_DECLINE_ALREADY_SIGNED');
       expect((await signed.h.store.groups(signed.runId))[0]).toMatchObject({ strategy: 'EVM_USER_OPERATION', state: 'PREPARED' });
     } finally { await signed.t.drop(); }
+  });
+
+  it('final review (P3): the account moved between the permit and the operation: refused before anything is accepted, the steps given back, nothing relayed', async () => {
+    const { t, chain, circle, h, owner, wallets, approval, run, prepare, sign } = await setup();
+    try {
+      await ready(h, run.runId);
+      const p1 = await prepare();
+      await workflowRunUserFundedConsent(h.surface, approval.approvalId, wallets, 0);
+      const p2 = await workflowRunUserFundedUpgrade(h.surface, approval.approvalId, wallets, 0, await sign(erc4337.eip7702AuthorizationHash(circleUpgradeAuthorization(facts(p1.prepared)))));
+      const p3 = await workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await sign(C.permitDigest(circlePermitOf(facts(p2.prepared), 8453, owner))));
+      const c3 = facts(p3.prepared);
+      // A transaction of the account (its nonce moved; its code still empty): the recorded authorization can never apply.
+      chain.control.setNonce(owner, 5n);
+      await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0,
+        { kind: 'EVM_USER_OPERATION', signature: await sign(circleUserOpHash(c3, 8453, circleOperationOf(c3, owner))) })).rejects.toThrow('CIRCLE_AUTHORIZATION_STALE');
+      expect(circle.control.sends()).toBe(0);
+      // Never halted: the preparation expired, the steps went back to their own flows, and the group is a Circle candidate again.
+      expect((await ownedRun(h.runs, approval.approvalId, wallets)).state).toBe('RUNNING');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, authorization: null, code: 'CIRCLE_ASK_FIRST' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['PENDING', 'PENDING']);
+    } finally { await t.drop(); }
+  });
+
+  it('final review (P3): delegated meanwhile to exactly Simple7702Account v0.8 (the same wallet upgraded elsewhere): authorized, relayed without the spent authorization, reconciled', async () => {
+    const { t, chain, circle, h, owner, wallets, approval, run, prepare, sign } = await setup();
+    try {
+      await ready(h, run.runId);
+      const p1 = await prepare();
+      await workflowRunUserFundedConsent(h.surface, approval.approvalId, wallets, 0);
+      const p2 = await workflowRunUserFundedUpgrade(h.surface, approval.approvalId, wallets, 0, await sign(erc4337.eip7702AuthorizationHash(circleUpgradeAuthorization(facts(p1.prepared)))));
+      const p3 = await workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await sign(C.permitDigest(circlePermitOf(facts(p2.prepared), 8453, owner))));
+      const c3 = facts(p3.prepared);
+      chain.control.setCode(owner, '0xef0100' + erc4337.SIMPLE_7702_ACCOUNT_V0_8.slice(2));
+      chain.control.setNonce(owner, 5n);
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0,
+        { kind: 'EVM_USER_OPERATION', signature: await sign(circleUserOpHash(c3, 8453, circleOperationOf(c3, owner))) });
+      expect(circle.control.sends()).toBe(1);
+      expect(circle.control.authorizationsApplied()).toBe(0);
+      await h.drain(run.runId);
+      expect((await ownedRun(h.runs, approval.approvalId, wallets)).state).toBe('COMPLETED');
+    } finally { await t.drop(); }
+  });
+
+  it('final review (P3): the switch to Circle and its steps\' moves are one transaction: a failure in between switches nothing', async () => {
+    const { t, h, wallets, approval, run, prepare } = await setup();
+    try {
+      await ready(h, run.runId);
+      const owned = await ownedRun(h.runs, approval.approvalId, wallets);
+      await expect(prepareUserFundedGroup({ ...h.runs, store: failingStepMove(h.store) }, owned, wallets, 0, undefined, 'FLOFI_WALLET'))
+        .rejects.toThrow('connection terminated unexpectedly');
+      // Never a Circle operation whose steps are still owner steps: the group and its steps are exactly as before, still a Circle candidate.
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: 'CIRCLE_ASK_FIRST' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['READY', 'PENDING']);
+      expect(await prepare()).toMatchObject({ strategy: 'EVM_USER_OPERATION' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['DELEGATED', 'DELEGATED']);
+    } finally { await t.drop(); }
+  });
+
+  it('final review (P3): giving the steps back ("Not now", an expiry) is one transaction: a failure in between keeps the preparation whole', async () => {
+    const s = await approveStart(0n);
+    try {
+      await s.prepare();
+      const owned = await ownedRun(s.h.runs, s.approval.approvalId, s.wallets);
+      await expect(declineUserFundedGroupCircle({ ...s.h.runs, store: failingStepMove(s.h.store) }, owned, s.wallets, 0)).rejects.toThrow('connection terminated unexpectedly');
+      // Never a group planned as owner steps whose steps are still the operation's (nor an EXPIRED group nobody plans again).
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_USER_OPERATION', state: 'PREPARED' });
+      expect((await s.h.store.steps(s.runId)).map(x => x.state)).toEqual(['DELEGATED', 'DELEGATED']);
+      const declined = await workflowRunUserFundedDecline(s.h.surface, s.approval.approvalId, s.wallets, 0);
+      expect(declined.view.workflowRun?.step).toMatchObject({ index: 0 });
+      expect((await s.h.store.groups(s.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, code: null });
+    } finally { await s.t.drop(); }
   });
 
   it('a FloFi Wallet delegated elsewhere is never upgraded: the native shortfall, the steps untouched', async () => {

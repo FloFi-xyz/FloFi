@@ -57,11 +57,16 @@ function utf8(value: unknown): string {
   const bytes = Uint8Array.from(value.slice(2).match(/../g)!, byte => parseInt(byte, 16));
   try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw refused('FLOFI_WALLET_MESSAGE_UNSUPPORTED'); }
 }
-/** Maps a FloFi Wallet failure to the provider's error: 4001 only for a cancel before Sign; 4100 only for proven pre-signature refusals. */
-function failure(cause: unknown, unknownCode = 'FLOFI_WALLET_SUBMISSION_UNKNOWN'): Error {
+/**
+ * Maps a FloFi Wallet failure to the provider's error: 4001 only for a cancel before Sign; 4100 only for proven pre-signature refusals. A
+ * signature request (typed data, an authorization: nothing is broadcast by it) refused because its single signature was already claimed keeps
+ * that code (`keepClaimed`), still as an unknown outcome (no refusal code), so the page can say why the wallet is not asked again.
+ */
+function failure(cause: unknown, unknownCode = 'FLOFI_WALLET_SUBMISSION_UNKNOWN', keepClaimed = false): Error {
   const code = cause instanceof Error ? cause.message : '';
   const kind = classifySigningFailure(code);
-  return kind === 'rejected' ? new FloFiProviderError(4001, code) : kind === 'refused' ? refused(code) : unknown(unknownCode);
+  return kind === 'rejected' ? new FloFiProviderError(4001, code) : kind === 'refused' ? refused(code)
+    : unknown(keepClaimed && code === 'FLOFI_WALLET_ALREADY_SIGNED' ? code : unknownCode);
 }
 
 const retirers = new WeakMap<object, () => void>();
@@ -131,7 +136,7 @@ export function createFloFiEvmProvider(address: string, deps: FloFiEvmDeps): Flo
       const signature = typeof result.signature === 'string' ? result.signature.toLowerCase().replace(/^(?:0x)?/, '0x') : '';
       if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('FLOFI_WALLET_RESPONSE_INVALID');
       return signature;
-    } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+    } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN', true); }
   }
 
   /**
@@ -154,7 +159,7 @@ export function createFloFiEvmProvider(address: string, deps: FloFiEvmDeps): Flo
       const signature = typeof result.signature === 'string' ? result.signature.toLowerCase().replace(/^(?:0x)?/, '0x') : '';
       if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('FLOFI_WALLET_RESPONSE_INVALID');
       return signature;
-    } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
+    } catch (cause) { throw failure(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN', true); }
   }
 
   const provider: FloFiEvmProvider = {

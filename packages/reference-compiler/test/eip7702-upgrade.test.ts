@@ -96,6 +96,11 @@ describe('a v0.8 Circle operation that upgrades the owner inside itself (cross-c
     expect(() => u.toBundlerUserOperationWithPaymaster({ ...op, sender: '0x' + '1'.repeat(40) }, signed)).toThrow('ERC4337_EIP7702_AUTH_REFUSED');
     // An already delegated account's operation carries neither (unchanged wire format).
     expect(u.toBundlerUserOperationWithPaymaster(firstUse('0x'))).not.toHaveProperty('eip7702Auth');
+    // Final review (P3): a sender ALREADY delegated sends the marker alone (never a consumed authorization beside it, never without the marker).
+    expect(u.toBundlerUserOperationWithPaymaster(op, undefined, { delegated: true })).toMatchObject({ factory: '0x7702', factoryData: '0x' });
+    expect(u.toBundlerUserOperationWithPaymaster(op, undefined, { delegated: true })).not.toHaveProperty('eip7702Auth');
+    expect(() => u.toBundlerUserOperationWithPaymaster(op, signed, { delegated: true })).toThrow('ERC4337_EIP7702_AUTH_REFUSED');
+    expect(() => u.toBundlerUserOperationWithPaymaster(firstUse('0x'), undefined, { delegated: true })).toThrow('ERC4337_INIT_CODE_REFUSED');
     expect(u.toBundlerUserOperationWithPaymaster(firstUse('0x'))).not.toHaveProperty('factory');
   });
   it('the Circle operation check accepts the marker only for an upgrade to Simple7702Account v0.8 and the operation without it otherwise', () => {

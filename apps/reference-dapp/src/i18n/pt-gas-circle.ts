@@ -40,7 +40,7 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'this wallet is not a smart account on this network': 'esta carteira não é uma conta inteligente nesta rede',
   'Circle does not support this smart-account version on this network': 'a Circle não aceita esta versão de conta inteligente nesta rede',
   'this smart-account type is not supported': 'este tipo de conta inteligente não é aceito',
-  'FloFi Wallet cannot sign it': 'a FloFi Wallet não consegue assiná-la',
+  'FloFi Wallet pays it in USDC only in a workflow authorized in groups through a FloFi approval link (/approve)': 'a FloFi Wallet a paga em USDC apenas em um fluxo autorizado em grupos por um link de aprovação da FloFi (/approve)',
   'the wallet that would sign it was not identified': 'a carteira que a assinaria não foi identificada',
   'the service that relays it does not support this smart-account version on this network': 'o serviço que a encaminha não aceita esta versão de conta inteligente nesta rede',
   'this wallet does not hold enough USDC for the steps and the fee': 'esta carteira não tem USDC suficiente para as etapas e a taxa',
@@ -62,8 +62,8 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'This request already moved on. Nothing was sent; load it again.': 'Este pedido já avançou. Nada foi enviado; carregue-o de novo.',
   'What your wallet would sign did not match the network fee FloFi showed, so your wallet was not asked. Nothing was sent.':
     'O que a sua carteira assinaria não correspondia à taxa de rede que a FloFi mostrou, então a carteira não foi acionada. Nada foi enviado.',
-  'FloFi Wallet cannot pay network fees in USDC. Add ETH on this network to this wallet, or use a wallet with a smart account. Nothing was sent.':
-    'A FloFi Wallet não consegue pagar taxas de rede em USDC. Adicione ETH nesta rede a esta carteira ou use uma carteira com conta inteligente. Nada foi enviado.',
+  'FloFi Wallet pays network fees in USDC only in a workflow authorized in groups through a FloFi approval link (/approve), after its one-time smart-account upgrade. Here, add ETH on this network to this wallet to pay the network fee. Nothing was sent.':
+    'A FloFi Wallet paga taxas de rede em USDC apenas em um fluxo autorizado em grupos por um link de aprovação da FloFi (/approve), depois da atualização única da conta inteligente. Aqui, adicione ETH nesta rede a esta carteira para pagar a taxa de rede. Nada foi enviado.',
   'Circle declined to take this network fee in USDC just now. Nothing was sent; try again later, or add ETH on this network.':
     'A Circle recusou cobrar esta taxa de rede em USDC agora. Nada foi enviado; tente de novo mais tarde ou adicione ETH nesta rede.',
   'This wallet does not hold enough USDC for the steps and the network fee. Nothing was sent.':
@@ -117,8 +117,8 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
   'Not now': 'Agora não',
   'Choosing Not now signs nothing: the step continues through its own review, which pays its network fee in ETH.':
     'Se escolher Agora não, nada é assinado: a etapa segue pela própria revisão, que paga a taxa de rede em ETH.',
-  'Nothing was signed. Step {0} continues through its own review, which pays its network fee in ETH.':
-    'Nada foi assinado. A etapa {0} segue pela própria revisão, que paga a taxa de rede em ETH.',
+  'FloFi withdrew the request to pay this network fee in USDC: nothing of it is sent or used. Step {0} continues through its own review, which pays its network fee in ETH.':
+    'A FloFi retirou o pedido de pagar esta taxa de rede em USDC: nada dele é enviado nem usado. A etapa {0} segue pela própria revisão, que paga a taxa de rede em ETH.',
   'Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation':
     'Três assinaturas: a atualização da conta inteligente, uma permissão de USDC para a taxa e, depois, a operação',
   // The Editor's step-by-step Review with FloFi Wallet: where the USDC fee is available, and that each step run here pays ETH.
@@ -141,4 +141,12 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
     'A FloFi Wallet assina uma atualização de conta apenas depois que você concorda com ela na FloFi. Nada foi assinado.',
   'FloFi Wallet signs an account upgrade only for the smart account and network you reviewed in FloFi. Nothing was signed.':
     'A FloFi Wallet assina uma atualização de conta apenas para a conta inteligente e a rede que você revisou na FloFi. Nada foi assinado.',
+  // Final review (P1): FloFi Wallet asked once per signature of a prepared request; a new preparation is a new request.
+  'FloFi Wallet was already asked for this signature once (if you cancelled it there, nothing was signed), so FloFi does not ask it again for this request. Nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.':
+    'A FloFi Wallet já foi solicitada a fazer esta assinatura uma vez (se você a cancelou lá, nada foi assinado), então a FloFi não a solicita de novo para este pedido. Nada foi enviado. Este pedido expira em poucos minutos; depois continue, e a FloFi prepara um novo para você assinar.',
+  'FloFi Wallet may have signed, but FloFi did not receive the signature, so nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.':
+    'A FloFi Wallet pode ter assinado, mas a FloFi não recebeu a assinatura, então nada foi enviado. Este pedido expira em poucos minutos; depois continue, e a FloFi prepara um novo para você assinar.',
+  // Final review (P3): the Editor's Authorize found another fee mechanism before anything was stored.
+  'How the network fee is paid changed since your review: your ETH on this network now covers it, or no longer does. Nothing was signed or sent, and this workflow was not started. Review it again to see how the fee is paid now.':
+    'A forma de pagar a taxa de rede mudou desde a sua revisão: seu ETH nesta rede agora a cobre, ou deixou de cobrir. Nada foi assinado nem enviado, e este fluxo não foi iniciado. Revise-o de novo para ver como a taxa é paga agora.',
 };

@@ -85,6 +85,18 @@ describe('BUILD-CHAT-E2E-001 workflow run panel', () => {
       .toContain('Todas as etapas reconciliadas.');
   });
 
+  it('final review (P3): a Kora transaction FloFi can never decide (KORA_RECOVERY_INCOMPLETE) is said in its own words, in English and Portuguese', () => {
+    type Group = WorkflowRunClaim['run']['groups'][number];
+    const group = { index: 0, chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', strategy: 'SOLANA_SIGN_ALL', signing: 'UPFRONT', steps: [0, 1], state: 'UNCERTAIN',
+      awaitsDelivery: null, code: 'KORA_RECOVERY_INCOMPLETE', validUntil: null, feePayer: 'OWNER_WALLET', maxFee: null, gasPaid: null, submissions: [], batchId: null, signed: true,
+      planned: null } as unknown as Group;
+    const c = claim({ state: 'ATTENTION', mode: 'USER_FUNDED', nextAction: 'WAITING_FOR_RECONCILIATION', steps: [step(0, 'UNCERTAIN'), step(1, 'UNCERTAIN')], groups: [group] });
+    const html = render(c);
+    expect(html).toContain('more transactions in that short period than FloFi can check. It may have executed.');
+    expect(html).not.toContain('never resubmits it');
+    expect(render(c, 'PT')).toContain('Ela pode ter sido executada.');
+  });
+
   it('a run halted before anything was sent (its first group refused for good when due) is never called partially completed', () => {
     type Group = WorkflowRunClaim['run']['groups'][number];
     const group = (patch: Partial<Group>): Group => ({ index: 0, chain: 'eip155:8453', strategy: 'EVM_WALLET_BATCH', signing: 'UPFRONT', steps: [0, 1], state: 'BLOCKED',

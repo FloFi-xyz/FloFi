@@ -20,7 +20,7 @@ import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRu
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
   signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
-import { CIRCLE_CONSENT_DECLINE, CIRCLE_NOTHING_SENT, feeAmountText, nativeLaterMessage } from '../domain/token-fee';
+import { CIRCLE_CONSENT_DECLINE, CIRCLE_NOTHING_SENT, feeAmountText, KORA_RECOVERY_INCOMPLETE, KORA_RECOVERY_INCOMPLETE_TEXT, nativeLaterMessage } from '../domain/token-fee';
 import { askCircleFirst, circlePaidGroup, floFiWalletCircleGroup, type CircleConsentOffer, type OwnerStepCircleSteps, type PreparedCircleGroup } from './flofi-wallet-circle-flow';
 import { CircleConsentCard } from './circle-consent-card';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
@@ -190,7 +190,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     catch (cause) {
       // ADR-0010: a Circle refusal (the page's own check, or the server's permit/upgrade step) keeps its closed code and its words (CIRCLE_REFUSAL).
-      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+|CIRCLE_[A-Z_]+)$/.test(cause.message)
+      // Final review (P1): so does FloFi Wallet's own answer (e.g. FLOFI_WALLET_ALREADY_SIGNED: this request's signature was already asked once).
+      const code = cause instanceof Error
+        && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+|CIRCLE_[A-Z_]+|FLOFI_WALLET_[A-Z_]+)$/.test(cause.message)
         ? cause.message : 'APPROVAL_UNAVAILABLE';
       onError(code);
     }
@@ -562,7 +564,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <p>{tr('Revoking stops FloFi from starting any further step. Submitted transactions keep being observed. The calls you signed stay valid on chain until they expire (at most one hour); to cancel them on chain at once, revoke them from your wallet in FloFi → Credentials.')}</p>
       <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('Revoke workflow authorization')}</button>
     </div>}
-    {run.state === 'ATTENTION'  && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
+    {run.state === 'ATTENTION' && ((run.groups ?? []).some(g => g.code === KORA_RECOVERY_INCOMPLETE)
+      ? <p role="status" data-attention={KORA_RECOVERY_INCOMPLETE}>{tr(KORA_RECOVERY_INCOMPLETE_TEXT)}</p>
+      : <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>)}
     {run.state === 'COMPLETED' && <p role="status"><strong>{tr('Every step reconciled.')}</strong> {tr('Your conversation can show the result.')}</p>}
     {/* The fee note describes this build's modes; a legacy delegated run was paid by FloFi's (now retired) executor. */}
     {run.mode !== 'DELEGATED' && <p className="muted workflow-run-note">{tr(plan.notes[0] ?? '')}</p>}

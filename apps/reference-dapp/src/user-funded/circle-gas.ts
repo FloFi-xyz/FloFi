@@ -51,12 +51,12 @@ import { observationFresh, type PriceSource } from '../automations/price-source.
 import { parseScaled, PRICE_SCALE } from '../automations/decimal.ts';
 import type { ChainTransport } from '../delegation/chains.ts';
 import type { BatchSimulation } from './batch-simulation.ts';
-import type { BundlerClient } from './bundler.ts';
+import type { BundlerClient, CircleUpgradeSend } from './bundler.ts';
 import type { EvmGroupCalls, UserCall } from './evm-calls.ts';
 import { assertUserFundedSubmission } from './gas-payer.ts';
 import type { GroupStrategy } from '../workflow-runs/execution-groups.ts';
 import { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleSignedAuthorization, circleUpgradeAuthorization,
-  circleUserOpHash, expectationOf, gasOf, paymasterGasOf, verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
+  circleUserOpHash, expectationOf, gasOf, newCirclePreparationId, paymasterGasOf, verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
 
 export { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleSignedAuthorization, circleUpgradeAuthorization,
   circleUserOpHash, plannedStrategyOf, verifyCircleOperationSignature, type CircleFacts, type CircleGas, type CircleUpgrade } from './circle-facts.ts';
@@ -178,15 +178,48 @@ async function floFiWalletAccount(rpc: Rpc, owner: string, chainId: number): Pro
 }
 /**
  * Whether an upgrade's authorization still applies now: the account's transaction nonce (latest and pending) is still the recorded one — then no
- * transaction and no other EIP-7702 authorization touched the account since its code was read empty — and its code is still empty.
+ * transaction and no other EIP-7702 authorization touched the account since its code was read empty — and its code is still empty (APPLIES).
+ * Final review (P3): an account delegated meanwhile to EXACTLY the delegate this upgrade designates (the pinned Simple7702Account v0.8 — e.g. the
+ * same wallet's upgrade in another run landed first) is what the upgrade would have made it: DELEGATED applies too. Its operation is then sent
+ * without the authorization (that delegation consumed its nonce); EntryPoint v0.8 still hashes it with the same delegate, so the owner's signed
+ * operation validates unchanged. Any other change is STALE (nothing can ever replace a delegation).
  */
-async function upgradeStillApplies(rpc: Rpc, owner: string, upgrade: NonNullable<CircleFacts['upgrade']>): Promise<'OK' | 'STALE' | 'UNAVAILABLE'> {
+async function upgradeStillApplies(rpc: Rpc, owner: string, upgrade: NonNullable<CircleFacts['upgrade']>): Promise<'APPLIES' | 'DELEGATED' | 'STALE' | 'UNAVAILABLE'> {
   try {
     const [code, latest, pending] = await Promise.all([rpc('eth_getCode', [owner, 'latest']), rpc('eth_getTransactionCount', [owner, 'latest']),
       rpc('eth_getTransactionCount', [owner, 'pending'])]);
-    const empty = String(code).toLowerCase() === '0x' || code === '';
-    return empty && big(latest) === BigInt(upgrade.nonce) && big(pending) === BigInt(upgrade.nonce) ? 'OK' : 'STALE';
+    const current = String(code).toLowerCase();
+    if (upgrade.delegate === erc4337.SIMPLE_7702_ACCOUNT_V0_8 && current === '0xef0100' + upgrade.delegate.slice(2)) return 'DELEGATED';
+    const empty = current === '0x' || code === '';
+    return empty && big(latest) === BigInt(upgrade.nonce) && big(pending) === BigInt(upgrade.nonce) ? 'APPLIES' : 'STALE';
   } catch { return 'UNAVAILABLE'; }
+}
+const upgradeRefusal = (state: 'STALE' | 'UNAVAILABLE') => state === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE';
+/**
+ * How an operation travels to the bundler: an upgrade that still applies with the owner's own authorization; an upgrade whose account is already
+ * delegated to its delegate with the marker alone (`upgrade.delegated`); any other operation with neither.
+ */
+export type CircleSend = { readonly auth?: erc4337.SignedEip7702Authorization | undefined; readonly upgrade?: CircleUpgradeSend | undefined };
+/**
+ * Final review (P3): whether a prepared Circle upgrade still applies now (APPLIES or DELEGATED, see `upgradeStillApplies`), read before the owner's
+ * operation signature is accepted (`authorizeUserFundedGroup`); NONE for an operation without an upgrade.
+ */
+export async function circleUpgradeState(deps: CircleRuntimeDeps, prepared: Readonly<Record<string, unknown>>): Promise<'NONE' | 'APPLIES' | 'DELEGATED' | 'STALE' | 'UNAVAILABLE'> {
+  const c = circleFactsOf(prepared);
+  if (!c?.upgrade) return 'NONE';
+  const t = deps.evm(`eip155:${String(prepared.chainId)}`);
+  return t ? upgradeStillApplies(t.rpc, String(prepared.owner).toLowerCase(), c.upgrade) : 'UNAVAILABLE';
+}
+/**
+ * How a prepared Circle operation is relayed now (`groups.ts` `relayUserOperation`): an upgrade whose account is already delegated to its delegate
+ * travels without its authorization; otherwise, as checked before the submission was recorded, with it. An unreadable account keeps the recorded
+ * authorization (the bundler and the chain decide; nothing else is ever sent).
+ */
+export async function circleRelaySend(deps: CircleRuntimeDeps, prepared: Readonly<Record<string, unknown>>): Promise<CircleSend> {
+  const c = circleFactsOf(prepared), owner = String(prepared.owner).toLowerCase();
+  if (!c?.upgrade) return {};
+  const auth = circleSignedAuthorization(c, owner) ?? undefined;
+  return await circleUpgradeState(deps, prepared) === 'DELEGATED' ? { upgrade: { delegated: true } } : { auth };
 }
 
 // ── Phase 1: eligibility, the operation's conservative limits, the cap and the permit ────────────────────────────────────────
@@ -288,7 +321,7 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
       maxFeePerGas: gas.maxFeePerGas.toString(), maxPriorityFeePerGas: gas.maxPriorityFeePerGas.toString(), paymasterVerificationGasLimit: pmGas.verificationGasLimit.toString(),
       paymasterPostOpGasLimit: pmGas.postOpGasLimit.toString() },
     nativeRequired: input.nativeRequired.toString(), usdcSpend: usdcSpend.toString(), plannedStrategy: input.strategy, deadline: String(input.deadline),
-    ...upgrade ? { upgrade } : {} };
+    ...upgrade ? { upgrade } : {}, preparationId: newCirclePreparationId() };
   const permit = circlePermitOf(facts, chainId, owner);
   return { considered: true, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true }, prepared: {
     kind: 'EVM_USER_OPERATION', chainId, owner, group, upgraded: true, simulation: input.simulation, circle: facts, gasPayment: circleGasPayment(facts),
@@ -330,7 +363,7 @@ export async function finalizeCircleAuthorization(deps: CircleRuntimeDeps, prepa
   const t = deps.evm(`eip155:${chainId}`);
   if (!t) return no('USER_FUNDED_RPC_UNAVAILABLE');
   const applies = await upgradeStillApplies(t.rpc, owner, c.upgrade);
-  if (applies !== 'OK') return no(applies === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE');
+  if (applies === 'STALE' || applies === 'UNAVAILABLE') return no(upgradeRefusal(applies));
   const facts: CircleFacts = { ...c, stage: 'PERMIT', upgrade: { ...c.upgrade, signature: signature.toLowerCase() } };
   return { ok: true, value: { ...prepared, circle: facts, gasPayment: circleGasPayment(facts) } };
 }
@@ -360,13 +393,15 @@ export async function finalizeCirclePermit(deps: CircleRuntimeDeps, prepared: Re
   // An upgrade is estimated WITH the owner's authorization (the bundler simulates the account as delegated), while it still applies.
   let auth: erc4337.SignedEip7702Authorization | null;
   try { auth = circleSignedAuthorization(c, owner); } catch { return no('CIRCLE_AUTHORIZATION_INVALID'); }
+  let send: CircleSend = {};
   if (c.upgrade) {
     const applies = await upgradeStillApplies(t.rpc, owner, c.upgrade);
-    if (applies !== 'OK') return no(applies === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE');
+    if (applies === 'STALE' || applies === 'UNAVAILABLE') return no(upgradeRefusal(applies));
+    send = applies === 'DELEGATED' ? { upgrade: { delegated: true } } : { auth: auth ?? undefined };
   }
   const signed: CircleFacts = { ...c, permitSignature: signature };
   let estimate: Awaited<ReturnType<NonNullable<typeof bundler.estimateCircle>>>;
-  try { estimate = await bundler.estimateCircle({ ...circleOperationOf(signed, owner), signature: CIRCLE_ESTIMATION_SIGNATURE }, c.entryPoint, auth ?? undefined); }
+  try { estimate = await bundler.estimateCircle({ ...circleOperationOf(signed, owner), signature: CIRCLE_ESTIMATION_SIGNATURE }, c.entryPoint, send.auth, send.upgrade); }
   catch (cause) { return no(codeOf(cause, 'CIRCLE_PAYMASTER_REFUSED')); }
   const before = gasOf(c.gas), pmBefore = paymasterGasOf(c.gas);
   const atLeast = (estimated: bigint, floor: bigint) => estimated > floor ? estimated : floor;
@@ -411,7 +446,8 @@ export function authorizeCircleOperation(prepared: Readonly<Record<string, unkno
  * the cap), the operation check again (the permit recovers to the owner over its recorded nonce), and that nonce still the owner's current one —
  * a permit overtaken by another of the owner's permits can never execute (CIRCLE_PERMIT_EXPIRED, refused before relay).
  */
-export async function checkCircleSubmission(deps: CircleRuntimeDeps, prepared: Readonly<Record<string, unknown>>, op: erc4337.PackedUserOperation, owner: string): Promise<CircleResult<CircleFacts>> {
+export async function checkCircleSubmission(deps: CircleRuntimeDeps, prepared: Readonly<Record<string, unknown>>, op: erc4337.PackedUserOperation,
+  owner: string): Promise<CircleResult<{ readonly facts: CircleFacts; readonly send: CircleSend }>> {
   const c = circleFactsOf(prepared), chainId = Number(prepared.chainId);
   if (!c || c.stage !== 'OPERATION') return no('CIRCLE_PERMIT_REQUIRED');
   try {
@@ -426,11 +462,13 @@ export async function checkCircleSubmission(deps: CircleRuntimeDeps, prepared: R
   // An upgrade is relayed only with the owner's own authorization of exactly the recorded tuple, while it still applies (never one that would
   // replace a delegation made meanwhile: the account's nonce would have moved).
   if (c.upgrade) {
-    try { circleSignedAuthorization(c, owner.toLowerCase()); } catch { return no('CIRCLE_AUTHORIZATION_INVALID'); }
+    let auth: erc4337.SignedEip7702Authorization | null;
+    try { auth = circleSignedAuthorization(c, owner.toLowerCase()); } catch { return no('CIRCLE_AUTHORIZATION_INVALID'); }
     const applies = await upgradeStillApplies(t.rpc, owner.toLowerCase(), c.upgrade);
-    if (applies !== 'OK') return no(applies === 'STALE' ? 'CIRCLE_AUTHORIZATION_STALE' : 'USER_FUNDED_RPC_UNAVAILABLE');
+    if (applies === 'STALE' || applies === 'UNAVAILABLE') return no(upgradeRefusal(applies));
+    return { ok: true, value: { facts: c, send: applies === 'DELEGATED' ? { upgrade: { delegated: true } } : { auth: auth ?? undefined } } };
   }
-  return { ok: true, value: c };
+  return { ok: true, value: { facts: c, send: {} } };
 }
 /**
  * Review C2: how long before its calls' on-chain deadline a Circle-paid operation is last handed to a bundler (first relay or resend of a lost one).

@@ -19,6 +19,7 @@ import { createCircleDouble } from '../delegation/harness/circle-double.ts';
 import { requirementOf } from '../delegation/steps.ts';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { authorizeGroup, checkUserOperation, prepareGroup, reconcileEvmGroup, relayUserOperation, type Prepared, type UserFundedDeps } from './groups.ts';
+import { createBundlerClient } from './bundler.ts';
 import { circleFactsOf, circleOperationOf, circlePermitOf, circleUpgradeAuthorization, circleUserOpHash, consentCircleUpgrade, finalizeCircleAuthorization,
   finalizeCirclePermit, forgetCircleVerifications } from './circle-gas.ts';
 
@@ -187,5 +188,83 @@ describe('FloFi Wallet + Circle: never replaces a delegation, never signs a stal
     await expect(ctx.circle.bundler.sendCircle!(op, erc4337.ENTRY_POINT_V0_7, auth)).rejects.toThrow();
     expect(ctx.circle.control.sends()).toBe(0);
     expect(ctx.evm.control.codeOf(ctx.address)).toBe('0x');
+  });
+});
+
+describe('final review (P2): an upgrade operation reconciles on a node without historical state', () => {
+  /** A node that keeps no state older than its head (a non-archive RPC ~128 blocks later): `eth_getCode` at a block number is refused. */
+  const nonArchive = (ctx: Ctx): UserFundedDeps => {
+    const chain = `eip155:${ctx.chainId}`, inner = guarded(chain, 'read', 'MOCKED', ctx.circle.rpc);
+    const rpc: ChainTransport['rpc'] = async (method, params) => {
+      if (method === 'eth_getCode' && params[1] !== 'latest') throw new Error('missing trie node');
+      return inner.rpc(method, params);
+    };
+    return { ...ctx.deps, evm: c => c === chain ? { ...inner, rpc } : null };
+  };
+  async function relayed(ctx: Ctx) {
+    const p = value(consentCircleUpgrade(value(await ctx.prepare()).prepared, NOW)) as Prepared;
+    const a = value(await finalizeCircleAuthorization(ctx.deps, p, await signAuthorization(ctx, p))) as Prepared;
+    const f = value(await finalizeCirclePermit(ctx.deps, a, await signPermit(ctx, a))) as Prepared;
+    const authorization = value(authorizeGroup(f, { kind: 'EVM_USER_OPERATION', signature: await signOperation(ctx, f) }, ctx.address, NOW));
+    const submitted = value(await checkUserOperation(ctx.deps, f, authorization, ctx.address));
+    expect(await relayUserOperation(ctx.deps, f, authorization)).toEqual({ ok: true, value: f.userOpHash });
+    return { f, authorization, submitted };
+  }
+  it('the historical read is refused: the event under the delegate-bound hash proves the upgrade (RECONCILED, never PENDING forever)', async () => {
+    const ctx = await setup({ chainId: 8453, nonce: 5n }), { f, authorization, submitted } = await relayed(ctx);
+    expect(await reconcileEvmGroup(nonArchive(ctx), f, submitted, authorization)).toMatchObject({ status: 'RECONCILED',
+      gasPaid: { paidInToken: { mechanism: 'CIRCLE_USDC_PAYMASTER' } }, steps: [{ stepIndex: 0, spent: [{ amount: '1000000' }] }] });
+    // The owner delegated elsewhere since: the latest code says nothing about the operation's block; the event still proves the upgrade.
+    ctx.evm.control.setCode(ctx.address, '0xef0100' + '12'.repeat(20));
+    expect(await reconcileEvmGroup(nonArchive(ctx), f, submitted, authorization)).toMatchObject({ status: 'RECONCILED' });
+  });
+  it('a node that serves the block still decides from it: any other code there is CIRCLE_DELEGATION_NOT_LANDED', async () => {
+    const ctx = await setup({ chainId: 8453, nonce: 5n }), { f, authorization, submitted } = await relayed(ctx);
+    // The double serves every block's code as the current one: another delegate there contradicts the operation, never reconciled.
+    ctx.evm.control.setCode(ctx.address, '0xef0100' + '12'.repeat(20));
+    expect(await reconcileEvmGroup(ctx.deps, f, submitted, authorization)).toMatchObject({ status: 'UNMATCHED', code: 'CIRCLE_DELEGATION_NOT_LANDED' });
+  });
+});
+
+describe('final review (P3): an account delegated meanwhile to exactly Simple7702Account v0.8 still runs its upgrade operation', () => {
+  /** The wire FloFi's own bundler client sends (estimate and send), recorded on the way to the bundler double. */
+  const recording = (ctx: Ctx) => {
+    const wire: { method: string; op: Record<string, unknown> }[] = [], chain = `eip155:${ctx.chainId}`;
+    const bundler = createBundlerClient(ctx.chainId, async (method, params) => {
+      if (method === 'eth_sendUserOperation' || method === 'eth_estimateUserOperationGas') wire.push({ method, op: params[0] as Record<string, unknown> });
+      return ctx.circle.bundlerRpc(method, params);
+    });
+    return { wire, deps: { ...ctx.deps, bundler: (c: string) => c === chain ? bundler : null } as UserFundedDeps };
+  };
+  it('the same wallet\'s upgrade landed elsewhere after the authorization: permit, check and relay apply; the marker travels WITHOUT the consumed authorization', async () => {
+    const ctx = await setup({ chainId: 8453, nonce: 5n }), { wire, deps } = recording(ctx);
+    const p = value(consentCircleUpgrade(value(await ctx.prepare()).prepared, NOW)) as Prepared;
+    const a = value(await finalizeCircleAuthorization(deps, p, await signAuthorization(ctx, p))) as Prepared;
+    // Another run's upgrade of this address landed first: the account is the pinned smart account and its nonce moved (the authorization's is spent).
+    ctx.evm.control.setCode(ctx.address, SIMPLE_CODE);
+    ctx.evm.control.setNonce(ctx.address, 6n);
+    const f = value(await finalizeCirclePermit(deps, a, await signPermit(ctx, a))) as Prepared;
+    expect(wire.at(-1)).toMatchObject({ method: 'eth_estimateUserOperationGas', op: { factory: '0x7702' } });
+    expect(wire.at(-1)!.op).not.toHaveProperty('eip7702Auth');
+    const authorization = value(authorizeGroup(f, { kind: 'EVM_USER_OPERATION', signature: await signOperation(ctx, f) }, ctx.address, NOW));
+    const submitted = value(await checkUserOperation(deps, f, authorization, ctx.address));
+    expect(await relayUserOperation(deps, f, authorization)).toEqual({ ok: true, value: f.userOpHash });
+    const sent = wire.filter(w => w.method === 'eth_sendUserOperation');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.op).toMatchObject({ factory: '0x7702' });
+    expect(sent[0]!.op).not.toHaveProperty('eip7702Auth');
+    expect(ctx.circle.control.authorizationsApplied()).toBe(0);
+    // The owner's signed operation validated under the same delegate-bound v0.8 hash; the USDC fee and the steps reconcile.
+    expect(await reconcileEvmGroup(deps, f, submitted, authorization)).toMatchObject({ status: 'RECONCILED', steps: [{ stepIndex: 0, spent: [{ amount: '1000000' }] }] });
+  });
+  it('any other change is still CIRCLE_AUTHORIZATION_STALE (another delegate, or a transaction with the code still empty)', async () => {
+    for (const change of ['OTHER_DELEGATE', 'TRANSACTION'] as const) {
+      const ctx = await setup({ chainId: 8453, nonce: 5n });
+      const p = value(consentCircleUpgrade(value(await ctx.prepare()).prepared, NOW)) as Prepared;
+      const a = value(await finalizeCircleAuthorization(ctx.deps, p, await signAuthorization(ctx, p))) as Prepared;
+      if (change === 'OTHER_DELEGATE') ctx.evm.control.setCode(ctx.address, '0xef0100' + '12'.repeat(20));
+      ctx.evm.control.setNonce(ctx.address, 6n);
+      expect(await finalizeCirclePermit(ctx.deps, a, await signPermit(ctx, a))).toEqual({ ok: false, code: 'CIRCLE_AUTHORIZATION_STALE' });
+    }
   });
 });

@@ -147,12 +147,41 @@ describe('owner requirement: "Continue to step 1" for a FloFi Wallet owner-step 
     expect(server.decline).not.toHaveBeenCalled();
     expect(r.onProposal).toHaveBeenCalledWith(proposalOf('authorized'));
   });
+  it('final review (P1): FloFi Wallet refusing a signature it was already asked for is said in its own words, never APPROVAL_UNAVAILABLE', async () => {
+    server.prepare.mockResolvedValue(CIRCLE);
+    for (const code of ['FLOFI_WALLET_ALREADY_SIGNED', 'FLOFI_WALLET_SIGNATURE_UNKNOWN']) {
+      browser.sign.mockRejectedValueOnce(new Error(code));
+      const r = click(claim(run()), 'Continue to step 1');
+      await answerCard(true);
+      await settled(r);
+      expect(r.onError).toHaveBeenCalledWith(code);
+      hooks.refs.length = 0; hooks.sets.length = 0;
+    }
+    expect(server.authorize).not.toHaveBeenCalled();
+    const { CIRCLE_REFUSAL } = await import('../domain/token-fee');
+    expect(CIRCLE_REFUSAL.FLOFI_WALLET_ALREADY_SIGNED).toMatch(/already asked for this signature once.*Nothing was sent.*prepares a new one/);
+  });
   it('a transient answer is shown and nothing is loaded (asking again can still find Circle)', async () => {
     server.prepare.mockResolvedValue({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE' });
     const r = click(claim(run()), 'Continue to step 1');
     await settled(r);
     expect(r.onError).toHaveBeenCalledWith('USER_FUNDED_RPC_UNAVAILABLE');
     expect(server.continue).not.toHaveBeenCalled();
+  });
+});
+
+describe('final review (P3): the words of "Not now" and of FloFi Wallet\'s USDC fee are true whatever happened before', () => {
+  it('"Not now" never claims nothing was signed (FloFi Wallet may have been asked for this request before): FloFi withdrew it, nothing of it is sent or used', async () => {
+    const { CIRCLE_CONSENT_DECLINE } = await import('../domain/token-fee');
+    expect(CIRCLE_CONSENT_DECLINE.DONE).not.toMatch(/nothing was signed/i);
+    expect(CIRCLE_CONSENT_DECLINE.DONE).toMatch(/^FloFi withdrew the request to pay this network fee in USDC: nothing of it is sent or used\. Step \{0\}/);
+  });
+  it('CIRCLE_WALLET_UNSUPPORTED says where FloFi Wallet pays in USDC (/approve, in groups) instead of saying it never can', async () => {
+    const { CIRCLE_REFUSAL, CIRCLE_UNAVAILABLE_REASON } = await import('../domain/token-fee');
+    for (const text of [CIRCLE_REFUSAL.CIRCLE_WALLET_UNSUPPORTED!, CIRCLE_UNAVAILABLE_REASON.CIRCLE_WALLET_UNSUPPORTED!]) {
+      expect(text).toContain('/approve');
+      expect(text).not.toMatch(/cannot (sign|pay)/);
+    }
   });
 });
 

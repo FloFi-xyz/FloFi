@@ -29,4 +29,7 @@ export const portugueseGasKora: Readonly<Record<string, string>> = {
     'O pagamento da taxa de rede em USDC ou USDT não está disponível agora, então nada foi enviado. Adicione SOL para a taxa de rede e simule de novo.',
   'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.':
     'Não foi possível pagar a taxa de rede em USDC ou USDT nesta etapa, então nada foi enviado. Adicione SOL para a taxa de rede e simule de novo.',
+  // Final review (P3): a Kora transaction FloFi's recovery scan can never decide (KORA_RECOVERY_INCOMPLETE).
+  'FloFi could not confirm whether a Solana transaction whose network fee Pimlico (Kora) paid landed: this wallet made more transactions in that short period than FloFi can check. It may have executed. Check your wallet\'s activity; FloFi never sends it again.':
+    'A FloFi não conseguiu confirmar se uma transação na Solana cuja taxa de rede a Pimlico (Kora) pagou foi registrada: esta carteira fez mais transações nesse curto período do que a FloFi consegue verificar. Ela pode ter sido executada. Confira a atividade da sua carteira; a FloFi nunca a envia de novo.',
 };

@@ -29,6 +29,7 @@ import type { ApprovalPreview } from '../platform/approve';
 import { APPROVAL_SECRET_FORMAT } from '../platform/approval-link-format';
 import { walletDeepLinks } from '../platform/wallet-links';
 import { CIRCLE_REFUSAL } from '../domain/token-fee';
+import { floFiWalletMessage } from '../wallet/flofi-signing';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from '../state/workflow-store';
@@ -373,7 +374,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const proofText = proof.error ? walletProofMessage(proof.error, view.walletNamespace) : secondProof.error ? walletProofMessage(secondProof.error, otherNamespace) : null;
   const errorText = shown === 'APPROVALS_NOT_ENABLED' || shown === 'MCP_OAUTH_NOT_ENABLED'
     ? fromApp ? 'Approvals are unavailable right now. Return to the app that sent this link and try again later.' : 'Approvals are unavailable right now. Return to your assistant and try again later.'
-    : shown ? CLAIM_TEXT[shown] ?? shown : proofText;
+    : shown ? CLAIM_TEXT[shown] ?? floFiWalletMessage(shown) ?? shown : proofText;
   const prove = () => void (view.walletNamespace === 'solana' ? proof.proveSolana(true) : proof.proveEvm(true));
   const facts = <dl className="approval-facts">
     <div><dt>{tr("Network")}</dt><dd>{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr([...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → '))}</dd></div>
