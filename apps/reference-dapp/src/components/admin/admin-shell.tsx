@@ -18,6 +18,7 @@ export const ADMIN_NAV_GROUPS = [
     { id: 'health', href: '/admin/health', label: 'System Health', hint: 'Services, queues and incidents' },
   ] },
   { id: 'operations', label: 'Operations', items: [
+    { id: 'support', href: '/admin/support', label: 'Support & Recovery', hint: 'Incidents, diagnostics and safe recovery' },
     { id: 'workflows', href: '/admin/workflows', label: 'Workflows', hint: 'Executions and what needs attention' },
     { id: 'automations', href: '/admin/automations', label: 'Automations', hint: 'Rules, proposals and delegated runs' },
   ] },

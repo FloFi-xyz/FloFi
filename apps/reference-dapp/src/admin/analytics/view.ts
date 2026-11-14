@@ -11,18 +11,25 @@ import { analyticsRange, defaultEnvironment, environmentOfFilter, executionsOf, 
   type OutcomeFilter, type WorkflowAnalytics } from './workflows.ts';
 import type { ActionKind } from './actions.ts';
 import type { AnalyticsEnvironment } from './networks.ts';
+import { isOpen, loadExecutionAttention, type ExecutionAttention, type Lifecycle } from '../support/lifecycle.ts';
 
 export type AnalyticsParams = { readonly range?: string; readonly from?: string; readonly to?: string; readonly env?: string; readonly action?: string; readonly outcome?: string };
 export type WorkflowView = { readonly ok: true; readonly range: AnalyticsRange; readonly environment: AnalyticsEnvironment; readonly environmentDefaulted: boolean;
   readonly action: ActionKind | 'ALL'; readonly outcome: OutcomeFilter; readonly indexing: IndexSummary | null; readonly indexingCode: string | null;
   readonly analytics: WorkflowAnalytics; readonly executions: readonly Execution[]; readonly savedInRange: number | null;
   /** Delegated (automation) executions created in the range: separate records, never in these figures. null: could not be counted. */
-  readonly delegatedInRange: number | null } | { readonly ok: false; readonly code: string };
+  readonly delegatedInRange: number | null;
+  /**
+   * The shared execution-attention model (`support/lifecycle.ts`): every run's lifecycle by run id, the same one System Health and Support use.
+   * null when it could not be read — then attention figures fall back to the outcome classifier and say so.
+   */
+  readonly attention: ExecutionAttention | null; readonly lifecycleByRun: ReadonlyMap<string, Lifecycle> } | { readonly ok: false; readonly code: string };
 
 export const INDEX_BATCH = 400, INDEX_BUDGET_MS = 2_500;
 export const param = (value: string | string[] | undefined) => typeof value === 'string' ? value : undefined;
 
-export async function workflowView(host: AdminHost, params: AnalyticsParams, now: Date): Promise<WorkflowView> {
+export async function workflowView(host: AdminHost, params: AnalyticsParams, now: Date,
+  shared: Promise<ExecutionAttention | null> = loadExecutionAttention(host.db, host.tenantId, now).catch(() => null)): Promise<WorkflowView> {
   const range = analyticsRange(params, now);
   let indexing: IndexSummary | null = null, indexingCode: string | null = null;
   try { indexing = await indexRunFacts(host.db, host.tenantId, { from: range.from, to: range.to, limit: INDEX_BATCH, budgetMs: INDEX_BUDGET_MS }); }
@@ -36,8 +43,12 @@ export async function workflowView(host: AdminHost, params: AnalyticsParams, now
     // The console only opens on the exact shipped schema, which includes delegated execution (0011).
     const delegated = await host.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM delegated_executions WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3`,
       [host.tenantId, range.from, range.to]).then(r => r.rows[0]?.n ?? 0, () => null);
+    const attention = await shared;
+    const lifecycleByRun = new Map(attention ? attention.entries.flatMap(e => e.attention.lifecycle ? [[e.run.runId, e.attention.lifecycle] as const] : []) : []);
+    const open = attention ? new Set([...lifecycleByRun].flatMap(([runId, lifecycle]) => isOpen(lifecycle) ? [runId] : [])) : null;
     return { ok: true, range, environment, environmentDefaulted: requested === null, action, outcome, indexing, indexingCode,
-      analytics: summarize(executions, range, environment, { action, outcome }, coverage, idle), executions, savedInRange: saved, delegatedInRange: delegated };
+      analytics: summarize(executions, range, environment, { action, outcome }, coverage, idle, open), executions, savedInRange: saved, delegatedInRange: delegated,
+      attention, lifecycleByRun };
   } catch { return { ok: false, code: 'ADMIN_ANALYTICS_UNAVAILABLE' }; }
 }
 

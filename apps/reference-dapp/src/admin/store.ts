@@ -7,7 +7,8 @@ import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { typedId } from '../platform/ids.ts';
 
 export type AdminRole = 'VIEWER' | 'OPERATOR';
-export type AdminPermission = 'read' | 'write';
+/** `recover`: BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 registered recovery actions and support notes (OPERATOR, like `write`; a separate name so it can be narrowed later). */
+export type AdminPermission = 'read' | 'write' | 'recover';
 export type AdminPrincipal = { readonly principalId: string; readonly account: string; readonly role: AdminRole; readonly state: 'ACTIVE' | 'REVOKED';
   readonly label: string | null; readonly createdAt: string; readonly revokedAt: string | null };
 export type AdminSessionRow = { readonly sessionId: string; readonly principal: AdminPrincipal; readonly expiresAt: Date };

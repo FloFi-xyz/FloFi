@@ -282,3 +282,127 @@ test('Flight Admin: live aggregates, OPERATOR subscriber filters/export and VIEW
     networkGuard.assertClean();
   } finally { await db.close(); }
 });
+
+test('Support & Recovery: discover a stopped check, preview, confirm, run and verify; VIEWER stays read-only; mobile layout', async ({ page, networkGuard }) => {
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(15_000);
+  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 2 });
+  const operator = createTestWallet(), viewer = createTestWallet(), errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  try {
+    // A possibly-submitted execution whose transaction check exhausted its budget and stopped (the queue flagged it for attention).
+    await seedRun(db, { id: 'e2e-stuck', flow: 'base-sepolia-swap', status: 'SUBMISSION_RESULT_UNKNOWN', provenance: 'PUBLIC_TESTNET',
+      node: { nodeId: 's', actionType: 'asset.swap.exact-input', chainId: BASE_SEPOLIA }, attempt: { state: 'SUBMISSION_RESULT_UNKNOWN', hash: null, reconciled: false } });
+    await db.query(`UPDATE execution_runs SET needs_observation = true, attention_required = true, updated_at = now() - interval '1 hour' WHERE run_id = 'e2e-stuck'`);
+    await db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, deliveries, last_error, completed_at)
+      VALUES ('default', 'reconcile', 'base-sepolia-swap:e2e-stuck', 'e2e-stuck', '{"namespace":"base-sepolia-swap","runId":"e2e-stuck"}', 'DEAD', 500, 'OBSERVATION_BUDGET_EXHAUSTED', now())`);
+    // A terminal execution flagged earlier (its check stopped, then it was reconciled without an Evidence Bundle): historical, not active, not verified.
+    await seedRun(db, { id: 'e2e-historical', flow: 'base-sepolia-swap', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET',
+      node: { nodeId: 's', actionType: 'asset.swap.exact-input', chainId: BASE_SEPOLIA }, attempt: { state: 'CONFIRMED', hash: '0x' + 'c'.repeat(64), reconciled: true } });
+    await db.query(`UPDATE execution_runs SET attention_required = true, has_evidence = false WHERE run_id = 'e2e-historical'`);
+    await db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, deliveries, last_error, completed_at)
+      VALUES ('default', 'reconcile', 'base-sepolia-swap:e2e-historical', 'e2e-historical', '{"namespace":"base-sepolia-swap","runId":"e2e-historical"}', 'DEAD', 500,
+        'OBSERVATION_BUDGET_EXHAUSTED', now() - interval '3 days')`);
+    await runAdminCommand('grant', { wallet: operator.address, role: 'OPERATOR', label: 'Support operator' }, db, 'default');
+    await runAdminCommand('grant', { wallet: viewer.address, role: 'VIEWER', label: 'Support viewer' }, db, 'default');
+    await installJourneyWallet(page, [operator, viewer], { chain: '0x14a34' });
+    await page.goto('/admin/support');
+    expect(new URL(page.url()).pathname).toBe('/admin/login');
+    await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
+    await page.waitForURL(url => url.pathname === '/admin');
+    const nav = page.getByRole('navigation', { name: 'Admin' });
+    await expect(nav.getByRole('list', { name: 'Operations' }).getByRole('link', { name: 'Support & Recovery' })).toHaveAttribute('href', '/admin/support');
+    await nav.getByRole('link', { name: 'Support & Recovery' }).click();
+    await expect(page.getByRole('heading', { name: 'Support & Recovery', level: 1 })).toBeVisible();
+    const card = page.locator('.admin-incident').filter({ hasText: 'Transaction check stopped' }).filter({ hasText: 'base-sepolia-swap' });
+    await expect(card).toContainText('Recoverable now');
+    await expect(card).toContainText('Outcome unknown');
+    await expect(card).toContainText('Test or mocked funds only'); // a testnet run never claims real funds
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Recoverable here' }).locator('strong')).not.toHaveText('0');
+    await expect(card).toContainText('Active');
+    // The historical flag is counted separately and kept out of the open list; it is listed under its own lifecycle, never as resolved.
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Historical attention' }).locator('strong')).toHaveText('1');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Raw flag' }).locator('strong')).toHaveText('2');
+    await expect(page.locator('.admin-incident').filter({ hasText: 'Earlier attention' })).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('support-overview.png'), fullPage: true });
+    await page.goto('/admin/support?lifecycle=HISTORICAL#support-incidents');
+    const historical = page.locator('.admin-incident').filter({ hasText: 'Earlier attention — no active condition' });
+    await expect(historical).toContainText('Historical attention');
+    await expect(historical).toContainText('No action needed');
+    await expect(historical).toContainText('Outcome: Completed');
+    // Workflows and System Health show the same split.
+    await page.goto('/admin/workflows');
+    const requiring = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Requiring attention' }) });
+    await expect(requiring.getByRole('row').filter({ hasText: 'e2e-stuck' })).toContainText('Active');
+    await expect(requiring).not.toContainText('e2e-historical');
+    await expect(page.getByRole('heading', { name: 'Historical attention' })).toBeVisible();
+    await page.goto('/admin/health');
+    await expect(page.getByRole('row').filter({ hasText: 'Historical attention' })).toContainText('1');
+    await expect(page.getByRole('row').filter({ hasText: 'Observation exhausted' })).toContainText('1');
+    await page.goto('/admin/support');
+
+    // Diagnose: timeline marks the unknown submission; preview → confirm → run → verified state.
+    await card.getByRole('link', { name: /^Diagnose/ }).click();
+    await expect(page.getByRole('heading', { name: 'Transaction check stopped', level: 1 })).toBeVisible();
+    await expect(page.locator('.admin-timeline li').filter({ hasText: 'Transaction submitted' })).toContainText('Unknown');
+    await expect(page.getByRole('heading', { name: 'Background check gave up' })).toBeVisible();
+    const previewButton = page.getByRole('button', { name: 'Preview: Resume transaction check' });
+    await expect(async () => { await previewButton.click(); await expect(page.getByText('✓ Eligible now')).toBeVisible({ timeout: 2_000 }); }).toPass({ timeout: 30_000 });
+    await expect(page.getByRole('region', { name: 'Recovery preview' })).toContainText('No funds move');
+    await page.getByRole('button', { name: 'Continue to confirmation' }).click();
+    const run = page.getByRole('button', { name: 'Run: Resume transaction check' });
+    await expect(run).toBeDisabled();
+    await page.getByLabel('Reason (recorded in the audit trail)').fill('E2E: provider outage resolved');
+    await page.getByLabel(/I reviewed the target/).check();
+    await run.click();
+    const result = page.locator('section[aria-label="Recovery result"]');
+    await expect(result).toContainText(/Accepted — pending verification|Verified: task completed|Not resolved: stopped again|Inconclusive/);
+    await expect(result).toContainText(/rop_[a-z2-7]{26}/);
+    expect((await db.query(`SELECT count(*)::int AS n FROM work_items WHERE run_id = 'e2e-stuck' AND kind = 'reconcile' AND state <> 'DEAD'`)).rows).toEqual([{ n: 1 }]);
+    expect((await db.query(`SELECT outcome, detail->>'reason' AS reason FROM admin_audit_events WHERE kind = 'SUPPORT_RECOVERY'`)).rows)
+      .toEqual([{ outcome: 'OK', reason: 'E2E: provider outage resolved' }]);
+    await page.getByRole('textbox', { name: /^Note \(plain text/ }).fill('Customer informed; watching the check.');
+    await page.getByRole('button', { name: 'Add note' }).click();
+    await expect(page.getByText('Note added.')).toBeVisible();
+    // An explicit note is what makes an open incident "under investigation" — never the page view. The re-queued check has not finished, so the
+    // incident stays open and the transaction outcome is still not established (a separate dimension).
+    const summary = page.locator('section[aria-labelledby="support-incident-summary"]');
+    await expect(summary).toContainText('Under investigation');
+    await expect(summary).toContainText('Queued again — not finished');
+    await expect(summary).toContainText('(not established)');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Recovery attempts for this execution' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('support-incident-mobile.png'), fullPage: true });
+
+    // An audited lookup by execution id, sent as a POST (the identifier never enters the URL); on a phone the whole console fits the width.
+    await page.goto('/admin/support');
+    await expect(async () => {
+      await page.getByLabel(/^Transaction hash, wallet/).fill('e2e-stuck');
+      await page.getByRole('button', { name: 'Look up' }).click();
+      await expect(page.getByRole('table', { name: 'Search results' })).toContainText('e2e-stuck', { timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    expect(page.url()).not.toContain('e2e-stuck');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('support-overview-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.getByRole('table', { name: 'Recovery history' })).toContainText('Resume transaction check');
+
+    // A VIEWER can read and preview, never run or write; the API refuses a token-less request.
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await page.waitForURL(url => url.pathname === '/admin/login');
+    await page.evaluate(address => (window as unknown as { flofiJourneyWallet: { switchAccount(a: string): void } }).flofiJourneyWallet.switchAccount(address), viewer.address);
+    await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
+    await page.waitForURL(url => url.pathname === '/admin');
+    await page.goto('/admin/support/incident?id=run%3Ae2e-stuck');
+    await expect(page.getByText('Your role is read-only: an OPERATOR can add notes.')).toBeVisible();
+    await expect(page.getByText('Customer informed; watching the check.')).toBeVisible();
+    const tokenless = await page.request.post('/admin/api/support', { data: { action: 'note', incidentId: 'run:e2e-stuck', kind: 'FINDING', text: 'forged' },
+      headers: { origin: new URL(page.url()).origin } });
+    expect([tokenless.status(), (await tokenless.json()).code]).toEqual([403, 'ADMIN_CSRF_INVALID']);
+    expect((await db.query(`SELECT count(*)::int AS n FROM admin_audit_events WHERE kind = 'SUPPORT_NOTE'`)).rows).toEqual([{ n: 1 }]);
+    expect(errors).toEqual([]);
+    networkGuard.assertClean();
+  } finally { await db.close(); }
+});

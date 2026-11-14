@@ -9,7 +9,8 @@ const EVENTS: Record<string, string> = {
   ADMIN_SIGN_IN: 'Sign-in', ADMIN_SIGN_OUT: 'Sign-out', ADMIN_PRINCIPAL_GRANTED: 'Access granted', ADMIN_PRINCIPAL_REVOKED: 'Access revoked',
   ADMIN_COPILOT_SETTINGS_SAVED: 'AI settings saved', ADMIN_COPILOT_SETTINGS_ROLLED_BACK: 'AI settings restored', ADMIN_COPILOT_SETTINGS_RESET: 'AI settings reset to defaults',
   ADMIN_COPILOT_PROBE: 'AI model tested', ADMIN_COPILOT_MODELS_REFRESHED: 'AI model list refreshed', ADMIN_FLIGHT_VIEWED: 'Subscriber list viewed',
-  ADMIN_FLIGHT_EXPORTED: 'Subscribers exported', ADMIN_SESSIONS_REVOKED: 'Sessions revoked', ADMIN_LEARNING_CANDIDATE_ADDED: 'Glossary candidate added',
+  ADMIN_FLIGHT_EXPORTED: 'Subscribers exported', ADMIN_SESSIONS_REVOKED: 'Sessions revoked', SUPPORT_RECOVERY: 'Support recovery', SUPPORT_SEARCH: 'Support lookup',
+  SUPPORT_NOTE: 'Support note added', ADMIN_LEARNING_CANDIDATE_ADDED: 'Glossary candidate added',
   ADMIN_LEARNING_EVALUATED: 'Glossary evaluated', ADMIN_LEARNING_PUBLISHED: 'Glossary published', ADMIN_LEARNING_ROLLED_BACK: 'Glossary restored',
   ADMIN_LEARNING_DISABLED: 'Glossary disabled', ADMIN_LEARNING_STARTER_LOADED: 'Starter glossary loaded', ADMIN_LEARNING_RETENTION: 'Learning retention applied',
   ADMIN_LEARNING_AUTOMATIC_PURGED: 'Automatic learning purged',
@@ -29,7 +30,7 @@ export default async function AdminAccessPage({ searchParams }: { searchParams: 
     <Section id="admin-session-heading" title="Your session">
       <div className="admin-table-wrap"><table className="admin-table"><tbody>
         <tr><th scope="row">Role</th><td><Status tone={operator ? 'info' : 'neutral'}>{context.principal.role}</Status>{' '}
-          {operator ? 'Operator — can read everything and change AI settings, AI learning and campaign exports.' : 'Viewer — read only; cannot change settings or export subscriber data.'}</td></tr>
+          {operator ? 'Operator — can read everything, change AI settings, AI learning and campaign exports, and run Support recoveries and notes.' : 'Viewer — read only; cannot change settings, export subscriber data, run recoveries or look up wallets.'}</td></tr>
         <tr><th scope="row">Wallet</th><td><code>{context.principal.account}</code>{context.principal.label ? ` · ${context.principal.label}` : ''}</td></tr>
         <tr><th scope="row">Session expires</th><td>{context.expiresAt.toISOString().replace('T', ' ').slice(0, 16)} UTC</td></tr>
       </tbody></table></div>
