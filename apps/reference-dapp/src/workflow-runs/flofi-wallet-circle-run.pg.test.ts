@@ -248,6 +248,47 @@ describe('owner requirement: a FloFi Wallet workflow run whose network fee is pa
     } finally { await signed.t.drop(); }
   });
 
+  it('final review (P3): the account moved between the permit and the operation: refused before anything is accepted, the steps given back, nothing relayed', async () => {
+    const { t, chain, circle, h, owner, wallets, approval, run, prepare, sign } = await setup();
+    try {
+      await ready(h, run.runId);
+      const p1 = await prepare();
+      await workflowRunUserFundedConsent(h.surface, approval.approvalId, wallets, 0);
+      const p2 = await workflowRunUserFundedUpgrade(h.surface, approval.approvalId, wallets, 0, await sign(erc4337.eip7702AuthorizationHash(circleUpgradeAuthorization(facts(p1.prepared)))));
+      const p3 = await workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await sign(C.permitDigest(circlePermitOf(facts(p2.prepared), 8453, owner))));
+      const c3 = facts(p3.prepared);
+      // A transaction of the account (its nonce moved; its code still empty): the recorded authorization can never apply.
+      chain.control.setNonce(owner, 5n);
+      await expect(workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0,
+        { kind: 'EVM_USER_OPERATION', signature: await sign(circleUserOpHash(c3, 8453, circleOperationOf(c3, owner))) })).rejects.toThrow('CIRCLE_AUTHORIZATION_STALE');
+      expect(circle.control.sends()).toBe(0);
+      // Never halted: the preparation expired, the steps went back to their own flows, and the group is a Circle candidate again.
+      expect((await ownedRun(h.runs, approval.approvalId, wallets)).state).toBe('RUNNING');
+      expect((await h.store.groups(run.runId))[0]).toMatchObject({ strategy: 'EVM_OWNER_STEP', state: 'PLANNED', prepared: null, authorization: null, code: 'CIRCLE_ASK_FIRST' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['PENDING', 'PENDING']);
+    } finally { await t.drop(); }
+  });
+
+  it('final review (P3): delegated meanwhile to exactly Simple7702Account v0.8 (the same wallet upgraded elsewhere): authorized, relayed without the spent authorization, reconciled', async () => {
+    const { t, chain, circle, h, owner, wallets, approval, run, prepare, sign } = await setup();
+    try {
+      await ready(h, run.runId);
+      const p1 = await prepare();
+      await workflowRunUserFundedConsent(h.surface, approval.approvalId, wallets, 0);
+      const p2 = await workflowRunUserFundedUpgrade(h.surface, approval.approvalId, wallets, 0, await sign(erc4337.eip7702AuthorizationHash(circleUpgradeAuthorization(facts(p1.prepared)))));
+      const p3 = await workflowRunUserFundedPermit(h.surface, approval.approvalId, wallets, 0, await sign(C.permitDigest(circlePermitOf(facts(p2.prepared), 8453, owner))));
+      const c3 = facts(p3.prepared);
+      chain.control.setCode(owner, '0xef0100' + erc4337.SIMPLE_7702_ACCOUNT_V0_8.slice(2));
+      chain.control.setNonce(owner, 5n);
+      await workflowRunUserFundedAuthorize(h.surface, approval.approvalId, wallets, 0,
+        { kind: 'EVM_USER_OPERATION', signature: await sign(circleUserOpHash(c3, 8453, circleOperationOf(c3, owner))) });
+      expect(circle.control.sends()).toBe(1);
+      expect(circle.control.authorizationsApplied()).toBe(0);
+      await h.drain(run.runId);
+      expect((await ownedRun(h.runs, approval.approvalId, wallets)).state).toBe('COMPLETED');
+    } finally { await t.drop(); }
+  });
+
   it('a FloFi Wallet delegated elsewhere is never upgraded: the native shortfall, the steps untouched', async () => {
     const { t, chain, h, owner, run, prepare } = await setup();
     try {

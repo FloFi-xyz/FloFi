@@ -540,15 +540,20 @@ export type BundlerPaymasterUserOperation = BundlerUserOperation & { readonly pa
  * The bundler wire format of an operation that names a paymaster. `eip7702Auth`: the owner's signed EIP-7702 authorization, given exactly when the
  * operation carries the EIP-7702 initCode marker (the bundler then includes the authorization in its own type-4 transaction, so the delegation is
  * applied before the EntryPoint validates the operation); refused for any other operation (ERC4337_EIP7702_AUTH_REFUSED), and the marker without it
- * is refused as any initCode (ERC4337_INIT_CODE_REFUSED).
+ * is refused as any initCode (ERC4337_INIT_CODE_REFUSED) — unless the caller states that the sender is ALREADY delegated to the delegate the
+ * operation was signed for (`delegated`): the marker then travels alone (EntryPoint v0.8 hashes it with the sender's current delegate, so the
+ * signed operation still validates), never with an authorization whose nonce the delegation already consumed.
  */
-export function toBundlerUserOperationWithPaymaster(op: PackedUserOperation, eip7702Auth?: SignedEip7702Authorization): BundlerPaymasterUserOperation {
+export function toBundlerUserOperationWithPaymaster(op: PackedUserOperation, eip7702Auth?: SignedEip7702Authorization,
+  options: { readonly delegated?: boolean } = {}): BundlerPaymasterUserOperation {
   const sender = evmAddress(op.sender), initCode = data(op.initCode, 'ERC4337_INIT_CODE_REFUSED');
   if (initCode !== '0x' && initCode !== EIP7702_INIT_CODE_MARKER) fail('ERC4337_INIT_CODE_REFUSED');
   const upgrade = initCode === EIP7702_INIT_CODE_MARKER;
-  // The marker never travels without the owner's authorization (refused as any other initCode), and an authorization never without the marker.
-  if (upgrade && eip7702Auth === undefined) fail('ERC4337_INIT_CODE_REFUSED');
-  if (!upgrade && eip7702Auth !== undefined) fail('ERC4337_EIP7702_AUTH_REFUSED');
+  // The marker never travels without the owner's authorization (refused as any other initCode) unless the sender is already delegated, and an
+  // authorization never without the marker (nor beside a delegation already made).
+  if (upgrade && eip7702Auth === undefined && options.delegated !== true) fail('ERC4337_INIT_CODE_REFUSED');
+  if ((!upgrade || options.delegated === true) && eip7702Auth !== undefined) fail('ERC4337_EIP7702_AUTH_REFUSED');
+  if (!upgrade && options.delegated === true) fail('ERC4337_INIT_CODE_REFUSED');
   // The authorization is the sender's own: an authorization of another key would delegate someone else's account (or fail on chain).
   if (eip7702Auth && recoverEip7702AuthorizationSigner(eip7702Auth) !== sender) fail('ERC4337_EIP7702_AUTH_REFUSED');
   const pm = unpackPaymasterAndData(op.paymasterAndData) ?? fail('ERC4337_PAYMASTER_INVALID');

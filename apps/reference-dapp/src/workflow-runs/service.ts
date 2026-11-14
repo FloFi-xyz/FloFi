@@ -34,7 +34,7 @@ import { evmStepBuildable, type AssetAmountFact, type EvmGroupCalls } from '../u
 import { plannedSteps, type PlannedStep } from '../user-funded/planned.ts';
 import { authorizeGroup, EVM_PREPARED_TTL_MS, isKoraGroup, koraGroupNativeCovers, prepareGroup, solanaPreparedTtlMs, supersede, walletBatchId, type OwnerAnswer, type Prepared } from '../user-funded/groups.ts';
 import { boundStrategy } from '../engine/workflow-bindings';
-import { circleFactsOf, consentCircleUpgrade, finalizeCircleAuthorization, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
+import { circleFactsOf, circleUpgradeState, consentCircleUpgrade, finalizeCircleAuthorization, finalizeCirclePermit, nativeNowCovers, plannedStrategyOf } from '../user-funded/circle-gas.ts';
 import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, groupStepsToOwner, ownerStepsToGroup, ownerStepsUnloaded, plannedCodeAfterCircle } from './owner-step-circle.ts';
 import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
 import type { GroupRecord } from './pg-store.ts';
@@ -660,6 +660,16 @@ export async function authorizeUserFundedGroup(deps: WorkflowRunDeps, run: RunRe
     catch {
       await expireTokenGasPreparation(deps, run.runId, g, GAS_ABSTRACTION_CODES.changed);
       return refuse(GAS_ABSTRACTION_CODES.changed);
+    }
+    // Final review (P3): an upgrade is re-checked before the operation signature is accepted — the account's nonce moved since the permit (a
+    // transaction, another delegation) would otherwise be found only at relay (CIRCLE_AUTHORIZATION_STALE there blocks the group and halts the
+    // run). Stale here: the preparation expires and the steps are given back, nothing signed is ever relayed; the owner is asked again. An
+    // account delegated meanwhile to exactly the upgrade's delegate still applies (sent without the authorization).
+    const upgrade = await circleUpgradeState(deps.userFunded ?? refuse('USER_FUNDED_NOT_ENABLED'), g.prepared as Prepared);
+    if (upgrade === 'UNAVAILABLE') return refuse('USER_FUNDED_RPC_UNAVAILABLE');
+    if (upgrade === 'STALE') {
+      await expireTokenGasPreparation(deps, run.runId, g, 'CIRCLE_AUTHORIZATION_STALE');
+      return refuse('CIRCLE_AUTHORIZATION_STALE');
     }
   }
   // ADR-0010 §4, the same for a Kora group: SOL that arrived since the Review (the owner's SOL now covers the members' native worst case) means the
