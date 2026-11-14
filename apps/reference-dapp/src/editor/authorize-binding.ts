@@ -4,6 +4,9 @@
  * groups. Authorize starts nothing that differs from it (the started run must have exactly this hash and these groups). Pure, so it is tested
  * without a server action.
  */
+// The reviewed mechanism is shared with the platform and the run service (the platform never imports a surface module).
+import { isReviewedGas, type ReviewedGas } from '../workflow-runs/execution-groups.ts';
+export { isReviewedGas, type ReviewedGas };
 export type ReviewedBinding = { readonly owner: string; readonly workflowHash: string;
   readonly groups: readonly { readonly strategy: string; readonly steps: readonly [number, number] }[];
   /**
@@ -11,8 +14,6 @@ export type ReviewedBinding = { readonly owner: string; readonly workflowHash: s
    * Authorize prepares that group only with the same mechanism (anything else is refused before it is stored). Absent: not bound (an older page).
    */
   readonly firstGroupGas?: ReviewedGas };
-export type ReviewedGas = 'NATIVE_WALLET_GAS' | 'CIRCLE_USDC_PAYMASTER';
-export const isReviewedGas = (value: unknown): value is ReviewedGas => value === 'NATIVE_WALLET_GAS' || value === 'CIRCLE_USDC_PAYMASTER';
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** The canonical workflow hash format (`0x` + SHA-256 hex), exactly as `workflow_runs.workflow_hash` stores it. */

@@ -13,7 +13,7 @@
  * A deployment's surface is assembled from per-surface CONTRIBUTIONS (each: an approval-link scheme and the profiles of the requester
  * kinds it serves); a requester kind without a profile, or a secret no registered scheme owns, is simply not found.
  */
-import { isReviewedGas } from '../editor/authorize-binding.ts';
+import { isReviewedGas } from '../workflow-runs/execution-groups.ts';
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { Workflow } from '../domain/initial-workflow';
 import { semanticWorkflowHash } from '../engine/strategy-engine';

@@ -13,7 +13,7 @@
  *                wallet (BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001)
  *   cancel / resume   end a run that never submitted anything (or that halted), or resume a halted step that submitted nothing
  */
-import type { ReviewedGas } from '../editor/authorize-binding.ts';
+import type { ReviewedGas } from '../workflow-runs/execution-groups.ts';
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
 import type { WorkflowComposition } from '../engine/strategy-engine';

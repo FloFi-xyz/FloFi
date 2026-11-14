@@ -42,6 +42,13 @@
 import type { StepRequirement, WorkflowRequirement } from '../delegation/steps.ts';
 
 export type Namespace = 'eip155' | 'solana';
+/**
+ * Final review (P3): who pays a group's network fee as the owner's Review showed it — the owner's ETH, or the owner's USDC through Circle
+ * (ADR-0010). A preparation is made only with the reviewed mechanism (anything else is refused before it is stored). Here, beside the plan,
+ * so the platform and every surface share it without importing a surface module.
+ */
+export type ReviewedGas = 'NATIVE_WALLET_GAS' | 'CIRCLE_USDC_PAYMASTER';
+export const isReviewedGas = (value: unknown): value is ReviewedGas => value === 'NATIVE_WALLET_GAS' || value === 'CIRCLE_USDC_PAYMASTER';
 export const GROUP_STRATEGIES = ['EVM_WALLET_BATCH', 'EVM_USER_OPERATION', 'EVM_OWNER_STEP', 'SOLANA_SIGN_ALL', 'SOLANA_DURABLE_NONCE', 'SOLANA_OWNER_STEP'] as const;
 export type GroupStrategy = (typeof GROUP_STRATEGIES)[number];
 /** When the group's wallet interaction happens: before anything executes, or when the group becomes due (after its delivery reconciled). */

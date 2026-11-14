@@ -39,7 +39,7 @@ import { CIRCLE_FEE_DECLINED, circleAnswered, circleAskPending, expireTokenGasPr
   switchOwnerStepsToCircle } from './owner-step-circle.ts';
 import { assertReviewedMechanism, GAS_ABSTRACTION_CODES, selectGasMechanism } from '../gas-abstraction/mechanism.ts';
 import type { GroupRecord } from './pg-store.ts';
-import type { ReviewedGas } from '../editor/authorize-binding.ts';
+import type { ReviewedGas } from './execution-groups.ts';
 import { bridgeProgressOf, type BridgeDeliveryState } from '../user-funded/bridge-delivery.ts';
 import { presentedDeliveryState } from './run-step-phase.ts';
 
