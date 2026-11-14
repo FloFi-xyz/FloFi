@@ -52,13 +52,13 @@ export function providerReadiness(env: Env): Readonly<Record<CopilotProvider, bo
 export const anyProviderKey = (env: Env): boolean => env.FLOFI_COPILOT === 'live' && (keyOf(env, 'OPENAI') !== null || keyOf(env, 'ANTHROPIC') !== null);
 
 /**
- * The Copilot mode this deployment is configured for: `copilotConfig(env).mode`, except that a live Copilot whose only key is Anthropic's
- * (no OpenAI key, hence no `OPENAI_COPILOT_*` bootstrap) is `live` — its model comes from the Admin's runtime settings, and every request
+ * The Copilot mode this deployment is configured for: `copilotConfig(env).mode`, except that a live Copilot with an Anthropic key whose
+ * OpenAI bootstrap is not usable (no OpenAI key or no `OPENAI_COPILOT_*` model) is `live` — its model comes from the Admin's runtime settings, and every request
  * still resolves (and may fail closed) per request. Every other configuration reads exactly as before.
  */
 export function copilotConfiguredMode(env: Env): ReturnType<typeof copilotConfig>['mode'] {
   const mode = copilotConfig(env).mode;
-  return mode === 'unavailable' && env.FLOFI_COPILOT === 'live' && keyOf(env, 'OPENAI') === null && keyOf(env, 'ANTHROPIC') !== null ? 'live' : mode;
+  return mode === 'unavailable' && env.FLOFI_COPILOT === 'live' && keyOf(env, 'ANTHROPIC') !== null ? 'live' : mode;
 }
 
 /** One live transport for `provider`. A provider is never substituted: each has its own fixed endpoint and key. */
@@ -102,9 +102,11 @@ export function anthropicRequest(body: Record<string, unknown>): Record<string, 
   // FloFi never sends sampling parameters to Anthropic (the API version refuses them); a request that has one is a configuration error.
   if (body.temperature !== undefined) return fail('COPILOT_PARAMETER_UNSUPPORTED');
   const system: Block[] = [{ type: 'text', text: body.instructions }], messages: Message[] = [];
+  const echoes = new Set<Message>();
   const push = (role: Message['role'], blocks: Block[]) => {
     const last = messages.at(-1);
-    if (last && last.role === role && !(role === 'assistant')) last.content.push(...blocks);
+    // Consecutive turns of one role are merged; an echoed tool-round turn is replayed exactly as returned and never merged into.
+    if (last && last.role === role && !echoes.has(last)) last.content.push(...blocks);
     else messages.push({ role, content: blocks });
   };
   let echoed: Set<string> | null = null;
@@ -118,7 +120,8 @@ export function anthropicRequest(body: Record<string, unknown>): Record<string, 
       try { content = encoded === null ? null : JSON.parse(encoded); } catch { content = null; }
       if (!Array.isArray(content) || !content.every(block => record(block) && typeof block.type === 'string')) return fail('COPILOT_REQUEST_INVALID');
       // The assistant turn is replayed exactly as the API returned it: thinking, text and tool calls, in order.
-      messages.push({ role: 'assistant', content: content as Block[] });
+      const echo: Message = { role: 'assistant', content: content as Block[] };
+      messages.push(echo); echoes.add(echo);
       echoed = new Set((content as Block[]).filter(block => block.type === 'tool_use').map(block => String(block.id)));
       continue;
     }
@@ -177,7 +180,8 @@ export function responsesBodyFromAnthropic(text: string): string {
       output.push({ type: 'function_call', call_id: block.id, name: block.name, arguments: JSON.stringify(block.input ?? null) });
       continue;
     }
-    output.push({ type: String(block.type).slice(0, 40) || 'unknown' });
+    // Never the provider's own type name: a block named like a shared item ('reasoning', 'message') must not be skipped as one.
+    output.push({ type: 'provider_block_unexpected' });
   }
   if (texts.length) output.splice(calls.length ? 1 : 0, 0, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: texts.join(''), annotations: [] }] });
   return JSON.stringify({ ...shared, status: 'completed', output });

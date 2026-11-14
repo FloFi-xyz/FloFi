@@ -14,17 +14,18 @@ export type CopilotAnalytics = { readonly days: number; readonly mode: CopilotMe
   readonly proposals: number; readonly browserProposals: number; readonly mismatches: number; readonly clarifications: number;
   readonly inputTokens: number; readonly outputTokens: number; readonly reasoningTokens: number; readonly tokenSamples: number;
   /** BUILD-ADMIN-AI-PROVIDERS-001: server interpretations by provider, model and surface, with an estimate where a list price exists. */
-  readonly usage: readonly ModelUsage[]; readonly estimatedCostUsd: number | null; readonly unpricedRequests: number };
+  readonly usage: readonly ModelUsage[]; readonly estimatedCostUsd: number | null; readonly unpricedRequests: number; readonly unreportedRequests: number };
 /**
  * Measured usage of one model on one surface. `estimatedCostUsd` is list price × measured tokens (null without a listed price, or when no
- * request reported usage): an estimate, never billing data. Requests count model interpretations, never proposals or executions.
+ * request reported usage): an estimate, never billing data. `requests` counts Copilot interpretations (one user turn; with tools up to four provider
+ * calls, whose tokens are summed), including turns refused before any provider call (busy, invalid input) — never proposals or executions.
  */
 export type ModelUsage = { readonly provider: CopilotProvider | 'REPLAY'; readonly model: string; readonly surface: 'WEB' | 'CHANNEL'; readonly requests: number;
   readonly failures: number; readonly inputTokens: number; readonly outputTokens: number; readonly usageSamples: number; readonly meanLatencyMs: number | null;
   readonly estimatedCostUsd: number | null };
 
 /** Folds the daily server interpretation rows into one line per provider, model and surface (no row is counted twice). */
-export function modelUsage(rows: readonly CopilotMetricRow[]): ModelUsage[] {
+export function modelUsage(rows: readonly CopilotMetricRow[], mode: CopilotMetricsMode = 'live'): ModelUsage[] {
   const groups = new Map<string, { model: string; surface: 'WEB' | 'CHANNEL'; requests: number; failures: number; input: number; output: number; samples: number; duration: number }>();
   for (const row of rows) {
     if (row.kind !== 'INTERPRETATION' || row.provenance !== 'SERVER') continue;
@@ -34,7 +35,8 @@ export function modelUsage(rows: readonly CopilotMetricRow[]): ModelUsage[] {
     groups.set(key, group);
   }
   return [...groups.values()].map((group): ModelUsage => {
-    const provider = group.model === 'replay' ? 'REPLAY' as const : providerOfModel(group.model);
+    // Replay answers come from recordings: never a provider, never a cost, whatever model id they were recorded under.
+    const provider = mode === 'replay' || group.model === 'replay' ? 'REPLAY' as const : providerOfModel(group.model);
     return { provider, model: group.model, surface: group.surface, requests: group.requests, failures: group.failures, inputTokens: group.input, outputTokens: group.output,
       usageSamples: group.samples, meanLatencyMs: group.requests ? Math.round(group.duration / group.requests) : null,
       // Only requests that reported usage can be estimated; the page shows how many did (`usageSamples` of `requests`).
@@ -59,10 +61,12 @@ export async function copilotAnalytics(host: CopilotMetricsHost, params: { reado
     proposals: sum(turns.filter(row => row.provenance === 'SERVER'), 'proposals'), browserProposals: sum(turns.filter(row => row.provenance === 'CLIENT'), 'proposals'),
     mismatches: sum(turns, 'mismatches'), clarifications: sum(turns, 'clarifications'), inputTokens: sum(interpretations, 'input_tokens'),
     outputTokens: sum(interpretations, 'output_tokens'), reasoningTokens: sum(interpretations, 'reasoning_tokens'), tokenSamples: sum(interpretations, 'input_samples'),
-    ...costOf(modelUsage(rows)) };
+    ...costOf(modelUsage(rows, mode)) };
 }
-function costOf(usage: readonly ModelUsage[]): { usage: readonly ModelUsage[]; estimatedCostUsd: number | null; unpricedRequests: number } {
+function costOf(usage: readonly ModelUsage[]): { usage: readonly ModelUsage[]; estimatedCostUsd: number | null; unpricedRequests: number; unreportedRequests: number } {
   const priced = usage.filter(line => line.estimatedCostUsd !== null);
   return { usage, estimatedCostUsd: priced.length ? priced.reduce((total, line) => total + line.estimatedCostUsd!, 0) : null,
-    unpricedRequests: usage.filter(line => line.estimatedCostUsd === null).reduce((total, line) => total + line.requests, 0) };
+    unpricedRequests: usage.filter(line => line.estimatedCostUsd === null).reduce((total, line) => total + line.requests, 0),
+    // Priced requests that reported no token usage are missing from the estimate; the page says how many.
+    unreportedRequests: priced.reduce((total, line) => total + Math.max(0, line.requests - line.usageSamples), 0) };
 }

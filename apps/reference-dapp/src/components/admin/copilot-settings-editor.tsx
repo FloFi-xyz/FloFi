@@ -307,6 +307,9 @@ export function CopilotSettingsEditor({ csrf, canWrite, activeVersion, initial, 
         <p>Active version: {activeVersion ? `v${activeVersion}` : 'none (default system settings)'}. Saving applies to the next request on every channel — no redeploy.</p></div></header>
       {changed ? changes.length ? <div className="admin-note" role="note"><strong>Saving will change:</strong><ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{changes.map(change => <li key={change}>{change}</li>)}</ul></div>
         : <p className="admin-note" role="note">Saving changes parameters only; every channel keeps its provider and model.</p> : null}
+      {changed && [document.default, ...Object.values(document.overrides)].some(settings => settings?.provider === 'ANTHROPIC')
+        ? <p className="admin-diff" style={{ marginTop: 8 }}>Note: a version that uses Anthropic is not readable by builds released before Anthropic support. If such an older build is
+          rolled back to or still serving during a deploy, its Copilot is unavailable on every channel (it never misreads the settings) until an OpenAI-only version is restored.</p> : null}
       <label className="admin-field" htmlFor="admin-settings-reason" style={{ marginTop: 12 }}>Reason (optional, stored in the version history)
         <input id="admin-settings-reason" type="text" maxLength={200} value={reason} disabled={disabled} onChange={event => setReason(event.target.value)}/>
       </label>
@@ -321,8 +324,10 @@ export function CopilotSettingsEditor({ csrf, canWrite, activeVersion, initial, 
           Return to default system settings</button>}
         {!canWrite ? <span className="admin-diff">Read-only: your role cannot change settings.</span> : null}
       </div>
-      {confirming?.kind === 'reset' ? <p className="admin-alert" data-tone="warn" style={{ marginTop: 12 }}>Every channel will use the deployment’s default system settings
-        (OpenAI, from <code>OPENAI_COPILOT_*</code>) on its next request. Channels on Anthropic switch to OpenAI.</p> : null}
+      {confirming?.kind === 'reset' ? <p className="admin-alert" data-tone="warn" style={{ marginTop: 12 }}>{starting.model && providers.find(p => p.id === 'OPENAI')?.keyConfigured
+        ? <>Every channel will use the deployment’s default system settings (OpenAI <code>{starting.model}</code>, from <code>OPENAI_COPILOT_*</code>) on its next request.
+          Channels on Anthropic switch to OpenAI.</>
+        : <>This deployment has no usable default system settings (OpenAI model or key missing): after the reset every channel is unavailable until settings are saved again.</>}</p> : null}
       {message ? <p className="admin-alert" data-tone={message.tone} role={message.tone === 'bad' ? 'alert' : 'status'} style={{ marginTop: 12 }}>{message.text}</p> : null}
       <p className="admin-diff" style={{ marginTop: 8 }}>New settings start from {starting.model ? <code>{starting.model}</code> : 'the defaults'} when none are active.</p>
     </section>

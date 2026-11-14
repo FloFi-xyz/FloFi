@@ -56,7 +56,8 @@ export async function copilotSettingsView(env: Env, host: AdminHost, options: { 
   const config = copilotConfig(env), runtimeEnabled = runtimeSettingsEnabled(env), bootstrap = environmentBootstrap(env), keys = providerReadiness(env);
   const mode = env.FLOFI_COPILOT === 'live' ? (anyProviderKey(env) ? 'live' : 'unavailable') : config.mode;
   // The models this Anthropic organization can use (cached per process); never fetched without a key or when the caller does not need it.
-  const anthropicModels = options.discover && keys.ANTHROPIC ? await discoverAnthropicModels(env.ANTHROPIC_API_KEY!.trim(), options.fetch ? { fetch: options.fetch } : {}) : null;
+  // Only a live Copilot ever contacts a provider (an off/replay deployment stays closed even when a key is present).
+  const anthropicModels = options.discover && keys.ANTHROPIC && env.FLOFI_COPILOT === 'live' ? await discoverAnthropicModels(env.ANTHROPIC_API_KEY!.trim(), options.fetch ? { fetch: options.fetch } : {}) : null;
   let active: SettingsVersion | null = null, history: SettingsVersion[] = [], storeError: string | null = null;
   try { [active, history] = await Promise.all([readActiveSettings(host.db, host.tenantId, 'copilot'), settingsHistory(host.db, host.tenantId, 'copilot', 30)]); }
   catch { storeError = 'ADMIN_STORE_UNAVAILABLE'; }
@@ -69,7 +70,9 @@ export async function copilotSettingsView(env: Env, host: AdminHost, options: { 
   return {
     mode, apiKeyConfigured: keys.OPENAI, runtimeEnabled,
     runtimeDisabledReason: runtimeEnabled ? null : env.FLOFI_COPILOT_RUNTIME_CONFIG === 'disabled' ? 'BREAK_GLASS' : 'NO_PLATFORM_STATE', storeError,
-    activeVersion: active?.version ?? 0, activeSource: current.document ? 'RUNTIME' : 'ENVIRONMENT', activeDocument: current.document, activeCode: current.code,
+    activeVersion: active?.version ?? 0, activeSource: current.document ? 'RUNTIME' : 'ENVIRONMENT', activeDocument: current.document,
+    // With stored settings switched off (break-glass) the runtime never reads the stored version, so its validity is not an outage.
+    activeCode: runtimeEnabled ? current.code : null,
     environment: bootstrap.settings, environmentCode: bootstrap.code, effective,
     history: history.map(version => { const v = validity(version.document);
       return { ...version, valid: v.code === null, code: v.code, model: v.document?.default.model ?? null,

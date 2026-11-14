@@ -64,6 +64,19 @@ describe('Anthropic request translation', () => {
     expect(native.tool_choice).toEqual({ type: 'auto' });
     expect(anthropicRequest({ ...buildCopilotRequestV2(settings, validateCopilotRequestV2(request), null, toolkit.definitions), tool_choice: 'none' }).tool_choice).toEqual({ type: 'none' });
   });
+  it('merges consecutive transcript turns of one role, but never into an echoed tool-round turn', () => {
+    const messages = validateCopilotRequestV2({ version: '2', messages: [{ role: 'user', text: 'Swap 1 USDC to ETH on Base' },
+      { role: 'assistant', text: 'Flofi proposed: swap 1 USDC to WETH on Base' }, { role: 'assistant', text: 'Flofi answered: done' }, { role: 'user', text: 'Make it 2' }] });
+    const native = anthropicRequest(buildCopilotRequestV2(settings, messages)) as { messages: { role: string; content: unknown[] }[] };
+    expect(native.messages.map(message => [message.role, message.content.length])).toEqual([['user', 1], ['assistant', 2], ['user', 1]]);
+    const turn = [{ type: 'tool_use', id: 'toolu_5', name: 'get_wallet_context', input: {} }];
+    const base = buildCopilotRequestV2(settings, validateCopilotRequestV2(request));
+    const echoed = anthropicRequest({ ...base, input: [...base.input as unknown[], { role: 'assistant', content: 'Flofi asked: which network?' },
+      { type: 'reasoning', encrypted_content: ANTHROPIC_ECHO + JSON.stringify(turn) }, { type: 'function_call', call_id: 'toolu_5', name: 'get_wallet_context', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'toolu_5', output: '{"ok":true}' }] }) as { messages: { role: string; content: unknown[] }[] };
+    expect(echoed.messages.slice(1).map(message => [message.role, message.content])).toEqual([['assistant', [{ type: 'text', text: 'Flofi asked: which network?' }]],
+      ['assistant', turn], ['user', [{ type: 'tool_result', tool_use_id: 'toolu_5', content: '{"ok":true}' }]]]);
+  });
   it('refuses unknown request items and tool calls that were not part of the echoed assistant turn', () => {
     const base = buildCopilotRequestV2(settings, validateCopilotRequestV2(request));
     expect(() => anthropicRequest({ ...base, input: [...base.input as unknown[], { type: 'function_call', call_id: 'toolu_x', name: 'get_capabilities', arguments: '{}' }] }))
@@ -107,6 +120,10 @@ describe('Anthropic answers through the shared Copilot boundary', () => {
     expect(await run(message([{ type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: {} }, { type: 'text', text: JSON.stringify({ intent: swap }) }])))
       .toEqual({ ok: false, code: 'COPILOT_RESPONSE_INVALID' });
     expect(await run(message([{ type: 'tool_use', id: 'toolu_9', name: 'sign_transaction', input: {} }], 'tool_use'))).toEqual({ ok: false, code: 'COPILOT_RESPONSE_INVALID' });
+    // Blocks named like the shared reader's own items are refused, never skipped.
+    expect(await run(message([{ type: 'reasoning' }, { type: 'text', text: JSON.stringify({ intent: swap }) }]))).toEqual({ ok: false, code: 'COPILOT_RESPONSE_INVALID' });
+    expect(await interpret(scripted([ok(message([{ type: 'message' }, { type: 'tool_use', id: 'toolu_8', name: 'get_wallet_context', input: {} }], 'tool_use'))]).fetchImpl,
+      { toolkit: copilotToolkitOf('PUBLIC_MAINNET', {}) })).toEqual({ ok: false, code: 'COPILOT_RESPONSE_INVALID' });
     expect(await run(message([{ type: 'text', text: JSON.stringify({ intent: swap }) }], 'something_new'))).toEqual({ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' });
     expect(await run({ type: 'error' })).toEqual({ ok: false, code: 'COPILOT_RESPONSE_INVALID' });
   });
@@ -122,9 +139,13 @@ describe('Anthropic answers through the shared Copilot boundary', () => {
   it('normalizes provider errors into closed codes, keeps Retry-After, and never retries on its own', async () => {
     const code = async (reply: Response | Error) => { const s = scripted([reply]); const result = await interpret(s.fetchImpl); return [result, s.calls.length] as const; };
     expect(await code(error(401, 'authentication_error'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_UNAUTHORIZED' }, 1]);
-    expect(await code(error(402, 'billing_error'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_BILLING' }, 1]);
-    expect(await code(error(400, 'invalid_request_error', 'Your credit balance is too low to access the Anthropic API.'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_BILLING' }, 1]);
-    expect(await code(error(404, 'not_found_error', 'model: claude-x'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_MODEL_UNAVAILABLE' }, 1]);
+    // Billing and model availability are told apart for the operator (telemetry), never for the person chatting (public code).
+    const traced = async (reply: Response) => { const records: CopilotTelemetry[] = [];
+      const result = await interpret(scripted([reply]).fetchImpl, { telemetry: record => records.push(record) }); return [result, records[0]!.outcome] as const; };
+    expect(await traced(error(402, 'billing_error'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' }, 'COPILOT_UPSTREAM_BILLING']);
+    expect(await traced(error(400, 'invalid_request_error', 'Your credit balance is too low to access the Anthropic API.')))
+      .toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' }, 'COPILOT_UPSTREAM_BILLING']);
+    expect(await traced(error(404, 'not_found_error', 'model: claude-x'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' }, 'COPILOT_UPSTREAM_MODEL_UNAVAILABLE']);
     expect(await code(error(400, 'invalid_request_error', 'output_config.effort: not supported'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_REJECTED' }, 1]);
     expect(await code(error(429, 'rate_limit_error', 'slow down', { 'retry-after': '17' }))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_RATE_LIMITED', retryAfterSeconds: 17 }, 1]);
     expect(await code(error(529, 'overloaded_error'))).toEqual([{ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' }, 1]);
@@ -164,6 +185,8 @@ describe('providers: keys, readiness and selection', () => {
     expect(copilotConfiguredMode({ FLOFI_COPILOT: 'live', ANTHROPIC_API_KEY: 'sk-ant-1' })).toBe('live');
     expect(copilotConfiguredMode({ FLOFI_COPILOT: 'live' })).toBe('unavailable');
     expect(copilotConfiguredMode({ FLOFI_COPILOT: 'live', OPENAI_API_KEY: 'sk-1' })).toBe('unavailable');
+    // An OpenAI key without a model does not hide an Anthropic configuration.
+    expect(copilotConfiguredMode({ FLOFI_COPILOT: 'live', OPENAI_API_KEY: 'sk-1', ANTHROPIC_API_KEY: 'ant-1' })).toBe('live');
     expect(copilotConfiguredMode({ FLOFI_COPILOT: 'live', OPENAI_API_KEY: 'sk-1', OPENAI_COPILOT_MODEL: 'gpt-4.1-mini', ANTHROPIC_API_KEY: 'sk-ant-1' })).toBe('live');
     expect(copilotConfiguredMode({ FLOFI_COPILOT: 'replay', ANTHROPIC_API_KEY: 'sk-ant-1' })).toBe('replay');
     expect(copilotConfiguredMode({ ANTHROPIC_API_KEY: 'sk-ant-1' })).toBe('off');

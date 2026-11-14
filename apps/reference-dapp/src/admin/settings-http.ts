@@ -80,23 +80,28 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
       try { return last = await live(input); }
       catch (error) { if (error instanceof CopilotProviderError) provider = error.upstream; throw error; }
     };
-    let telemetry: { durationMs: number; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; responseModel: string | null } | null = null;
+    let telemetry: { outcome: string; durationMs: number; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; responseModel: string | null } | null = null;
     const result = await interpretCopilotV2(PROBE_TRANSCRIPT, { transport, mode: 'live',
       settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
-      telemetry: record => { telemetry = { durationMs: record.durationMs, inputTokens: record.inputTokens, outputTokens: record.outputTokens,
+      telemetry: record => { telemetry = { outcome: record.outcome, durationMs: record.durationMs, inputTokens: record.inputTokens, outputTokens: record.outputTokens,
         reasoningTokens: record.reasoningTokens, responseModel: record.responseModel }; } });
     const rejected = provider as AnthropicRejection | null;
     const rejection = result.ok ? null : rejected ? { code: rejected.type, param: rejected.param, status: rejected.status } : upstreamRejection(last);
     const used = telemetry as { inputTokens: number | null; outputTokens: number | null } | null;
     const estimatedCostUsdValue = used?.inputTokens != null && used.outputTokens != null ? estimatedCostUsd(settings.model, used.inputTokens, used.outputTokens) : null;
-    const outcome = { ok: result.ok, code: result.ok ? null : result.code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection,
-      provider: settings.provider, model: settings.model, estimatedCostUsd: estimatedCostUsdValue, ...telemetry ?? {} };
-    await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', result.ok ? null : result.code, { model: settings.model, provider: settings.provider,
+    // The operator sees the precise outcome (the telemetry record's), not the provider-neutral code shown to users.
+    const recorded = telemetry as { outcome: string } | null, code = result.ok ? null : recorded && recorded.outcome !== 'OK' ? recorded.outcome : result.code;
+    const { outcome: _recorded, ...measured } = (telemetry ?? {}) as Record<string, unknown>;
+    const outcome = { ok: result.ok, code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection,
+      provider: settings.provider, model: settings.model, estimatedCostUsd: estimatedCostUsdValue, ...measured };
+    void _recorded;
+    await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', code, { model: settings.model, provider: settings.provider,
       upstreamParam: rejection?.param ?? null });
     return json(200, { ok: true, probe: outcome });
   }
   if (body.action === 'models') {
     if (body.provider !== 'ANTHROPIC') return json(400, { ok: false, code: 'ADMIN_REQUEST_INVALID' });
+    if (env.FLOFI_COPILOT !== 'live') return json(409, { ok: false, code: 'COPILOT_NOT_LIVE' });
     const apiKey = providerReadiness(env).ANTHROPIC ? env.ANTHROPIC_API_KEY!.trim() : null;
     if (!apiKey) return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: 'ANTHROPIC' });
     const recent = await base.store.countAudit('ADMIN_COPILOT_MODELS_REFRESHED', new Date(base.now.getTime() - PROBE_WINDOW_MS)).catch(() => MODELS_REFRESH_LIMIT);

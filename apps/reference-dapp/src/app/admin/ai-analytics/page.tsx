@@ -40,16 +40,17 @@ export default async function CopilotAnalyticsPage({ searchParams }: { searchPar
           tone={label === 'Model failures' && Number(value) ? 'warn' : undefined}/>)}
     </div>
 
-    <Section id="ai-provider-usage" title="Usage by provider and model" description={`Server-measured model requests, ${view.days} days, UTC days. Telegram and WhatsApp are counted together as channels.`}>
+    <Section id="ai-provider-usage" title="Usage by provider and model" description={`Server-measured Copilot interpretations, ${view.days} days (UTC). One interpretation is one user turn: with tools it can make up to four provider calls (their tokens are summed); turns refused before any provider call (busy, invalid input) are counted as errors. Telegram and WhatsApp are counted together as channels.`}>
       <div className="admin-kpis" style={{ marginBottom: 14 }}>
         <Kpi label="Input tokens (measured)" value={fmt(view.inputTokens)}/>
         <Kpi label="Output tokens (measured)" value={fmt(view.outputTokens)}/>
         <Kpi label="Estimated cost" value={view.estimatedCostUsd === null ? '—' : usd(view.estimatedCostUsd)}
-          note={view.unpricedRequests ? `${fmt(view.unpricedRequests)} requests without a listed price` : 'list prices × measured tokens'}/>
+          note={[view.unpricedRequests ? `${fmt(view.unpricedRequests)} interpretations without a listed price` : null,
+            view.unreportedRequests ? `${fmt(view.unreportedRequests)} without reported usage (not included)` : null].filter(Boolean).join(' · ') || 'list prices × measured tokens'}/>
       </div>
       {view.usage.length === 0 ? <p className="admin-empty">No model requests recorded in this period. This does not establish that none occurred.</p>
         : <div className="admin-table-wrap"><table className="admin-table" aria-label="Usage by provider and model">
-          <thead><tr><th>Provider</th><th>Model</th><th>Channel</th><th className="num">Requests</th><th className="num">Errors</th><th className="num">Input tokens</th>
+          <thead><tr><th>Provider</th><th>Model</th><th>Channel</th><th className="num">Interpretations</th><th className="num">Errors</th><th className="num">Input tokens</th>
             <th className="num">Output tokens</th><th className="num">Mean latency</th><th className="num">Estimated cost</th></tr></thead>
           <tbody>{view.usage.map(line => <tr key={`${line.model}:${line.surface}`}>
             <td>{PROVIDER[line.provider]}</td><td><code>{line.model}</code></td><td>{SURFACE[line.surface]}</td>

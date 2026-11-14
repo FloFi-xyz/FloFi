@@ -17,6 +17,9 @@ export function healthAttention(report: HealthReport): AttentionItem[] {
   else if (database.value.appliedMigrations !== database.value.shippedMigrations)
     items.push({ key: 'schema', tone: 'bad', title: 'The database schema does not match this build',
       detail: `${database.value.appliedMigrations} of ${database.value.shippedMigrations} migrations applied`, href: health, action: 'View health' });
+  else if (database.value.latencyMs > 500) items.push({ key: 'db-slow', tone: 'warn', title: 'The database is answering slowly', detail: `${database.value.latencyMs} ms`, href: health, action: 'View health' });
+  if (api.readiness && api.readiness.ok && api.readiness.value.latencyMs > 1500)
+    items.push({ key: 'api-slow', tone: 'warn', title: 'The Railway API is answering slowly', detail: `${api.readiness.value.latencyMs} ms`, href: health, action: 'View health' });
   if (api.readiness && !api.readiness.ok) items.push({ key: 'api', tone: 'bad', title: 'The Railway API is not ready', detail: api.readiness.code, href: health, action: 'View health' });
   if (!queue.ok) items.push({ key: 'queue', tone: 'warn', title: 'The work queue could not be checked', detail: queue.code, href: health, action: 'View health' });
   else {
@@ -45,11 +48,15 @@ export function copilotStatus(view: CopilotSettingsView): { readonly tone: Tone;
     if (view.activeCode) items.push({ key: 'copilot-invalid', tone: 'bad', title: 'The active AI configuration is invalid', detail: 'The Copilot is unavailable for safety until an operator saves or restores a valid version.', href, action: 'Fix AI Settings' });
     for (const provider of missing) items.push({ key: `copilot-key-${provider.id}`, tone: 'bad', title: `${provider.label} is selected but not connected`,
       detail: `${provider.usedBy.length} channel(s) use ${provider.label}, but ${provider.keyEnv} is not installed on this deployment; those channels are unavailable for safety.`, href, action: 'Open AI Settings' });
-    if (view.effective.some(row => !row.settings)) items.push({ key: 'copilot-unconfigured', tone: 'warn', title: 'Some channels have no AI model configured', href, action: 'Open AI Settings' });
+    if (!view.activeCode && view.effective.every(row => !row.settings)) items.push({ key: 'copilot-unconfigured', tone: 'bad', title: 'No channel has an AI model configured',
+      detail: 'The Copilot is unavailable on every channel: save settings here, or fix the default system settings (OPENAI_COPILOT_*).', href, action: 'Open AI Settings' });
+    else if (view.effective.some(row => !row.settings)) items.push({ key: 'copilot-unconfigured', tone: 'warn', title: 'Some channels have no AI model configured', href, action: 'Open AI Settings' });
   } else if (view.mode === 'unavailable') items.push({ key: 'copilot-unavailable', tone: 'bad', title: 'The Copilot is set to live but no AI provider is connected', href, action: 'Open AI Settings' });
   if (view.storeError) items.push({ key: 'copilot-store', tone: 'warn', title: 'AI settings history could not be read', href, action: 'Open AI Settings' });
   const tone: Tone = items.some(item => item.tone === 'bad') ? 'bad' : items.length ? 'warn' : view.mode === 'live' ? 'ok' : 'neutral';
-  const value = view.mode === 'live' ? used.length ? `Live · ${used.map(p => p === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI').join(' + ')}` : 'Live'
+  // Live only where at least one channel can actually be served.
+  const serving = view.effective.filter(row => row.settings && view.providers.find(p => p.id === row.settings!.provider)?.keyConfigured);
+  const value = view.mode === 'live' ? !view.activeCode && serving.length ? `Live · ${used.map(p => p === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI').join(' + ')}` : 'Unavailable'
     : view.mode === 'replay' ? 'Replay (recorded answers)' : view.mode === 'off' ? 'Off' : 'Unavailable';
   const detail = view.activeSource === 'RUNTIME' ? `Active configuration v${view.activeVersion}` : 'Default system settings';
   return { tone, value, detail, items };
