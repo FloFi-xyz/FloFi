@@ -9,7 +9,7 @@ import { flightGateOutcome, flightGateResponse, flightRequestKind, type FlightGa
 import { FlightGateScreen } from '../../components/flight/flight-transition';
 import { engineeringUiAllowed } from '../../server/engineering-ui';
 import { networkScope } from '../../server/network-scope';
-import { copilotConfig } from '../../server/copilot-service';
+import { copilotConfiguredMode } from '../../server/copilot-providers';
 import { ProductWorkspace } from '../../components/product-workspace';
 import { LocaleProvider } from '../../i18n/locale';
 import { requestLanguage } from '../../server/request-language';
@@ -48,7 +48,7 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   }
   const initialWorkflowId = `workflow-${randomUUID()}`;
   const jar = await cookies();
-  const configured = copilotConfig(process.env).mode;
+  const configured = copilotConfiguredMode(process.env);
   const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured,
     privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const,
     // BUILD-FLOFI-UX-FIX-003: what `learningAvailability()` returns, known with the page instead of asked when Settings first opens.

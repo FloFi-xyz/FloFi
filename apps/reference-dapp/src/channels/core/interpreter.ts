@@ -17,6 +17,8 @@ import { COPILOT_REPLAY_FORMAT_V2, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULT
   createOpenAITransport, createReplayTransport, interpretCopilotV2, parseCopilotReplay, type CopilotLimiter, type CopilotModelSettings,
   type CopilotTelemetry, type CopilotTransport } from '../../server/copilot-service.ts';
 import type { ChannelInterpreter } from './conversation.ts';
+import { createProviderTransport } from '../../server/copilot-providers.ts';
+type CopilotProvider = Parameters<typeof createProviderTransport>[0];
 import { copilotToolkitOf, copilotToolsEnabled, type CopilotToolkit } from '../../platform/copilot-tools.ts';
 import { scopeOfEnv } from '../../domain/network-scope';
 import { logCopilotTurn } from '../../server/copilot-service.ts';
@@ -24,7 +26,8 @@ import type { TurnMetrics } from '../../domain/intelligence/turn-metrics';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** One turn's live settings, or the browser-safe code to answer with. */
-export type ChannelLiveCopilot = () => Promise<{ readonly ok: true; readonly apiKey: string; readonly settings: CopilotModelSettings & { readonly timeoutMs: number } }
+export type ChannelLiveCopilot = () => Promise<{ readonly ok: true; readonly provider: CopilotProvider; readonly apiKey: string;
+  readonly settings: CopilotModelSettings & { readonly timeoutMs: number } }
   | { readonly ok: false; readonly code: string }>;
 const REPLAY_FILE_V2 = join('e2e', 'copilot', 'replay-v2.json');
 /** The process-wide admission limiter FloFi's chat uses (`copilot-action.ts` holds it under the same key). */
@@ -60,8 +63,9 @@ export function channelInterpreter(env: Env, options: { readonly enabled: boolea
     return async (request, options) => {
       const resolved = await live();
       if (!resolved.ok) return { ok: false, code: resolved.code };
-      const { apiKey, settings } = resolved;
-      return interpret(request, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
+      // BUILD-ADMIN-AI-PROVIDERS-001: the channel scope's provider, with that provider's own key; never another provider.
+      const { provider, apiKey, settings } = resolved;
+      return interpret(request, { transport: createProviderTransport(provider, apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
         mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'), glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort } });
     };

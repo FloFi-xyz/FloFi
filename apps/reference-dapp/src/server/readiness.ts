@@ -14,6 +14,7 @@ import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, CROSSCHAIN_ROUTER_BASE_
   JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ROBINHOOD_TESTNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import type { FlowName } from '../../backend/flows.ts';
 import { copilotConfig, copilotTuning } from './copilot-service.ts';
+import { copilotConfiguredMode } from './copilot-providers.ts';
 import { deploymentEnvironment, isHostedDeployment, type DeploymentEnvironment } from './deployment.ts';
 import { cloudFlowMode, embeddedRuntime, flowRuntimeKind, type FlowRuntimeKind } from './flow-runtime.ts';
 import { baseSepoliaRpcUrl } from './public-testnet-rpc.ts';
@@ -174,7 +175,9 @@ export async function readiness(options: { readonly env?: Env; readonly networks
   }
   let session = 'CONFIGURED';
   try { walletSessionKey(env); if (!env.FLOFI_SESSION_SECRET && !env.API_AUTH_TOKEN) session = 'LOCAL_PROCESS_KEY'; } catch (error) { session = code(error, 'WALLET_SESSION_NOT_CONFIGURED'); }
-  const copilot = copilotConfig(env), copilotMode = copilot.mode === 'live' && !copilotTuning(env) ? 'unavailable' : copilot.mode;
+  // BUILD-ADMIN-AI-PROVIDERS-001: an Anthropic-only live Copilot reads live (its settings are the Admin's; OPENAI_COPILOT_* tuning does not apply).
+  const configured = copilotConfiguredMode(env), anthropicOnly = configured === 'live' && copilotConfig(env).mode === 'unavailable';
+  const copilotMode = configured === 'live' && !anthropicOnly && !copilotTuning(env) ? 'unavailable' : configured;
   const flows: Partial<Record<FlowName, string>> = {};
   // A runtime that is not ready serves no flow: every flow reads `off` without probing further.
   if (kind !== 'local') await Promise.all(READINESS_FLOWS.map(async flow => {

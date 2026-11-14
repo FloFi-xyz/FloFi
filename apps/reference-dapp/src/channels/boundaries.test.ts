@@ -63,7 +63,8 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
       if (!specifier.startsWith('.')) return true;
       const to = target(file, specifier);
       if (/^src\/(?:platform|engine|domain|channels\/core)\//.test(to) || to === 'src/server/deployment.ts') return false;
-      return !(to === 'src/server/copilot-service.ts' && rel(file) === 'src/channels/core/interpreter.ts');
+      // BUILD-ADMIN-AI-PROVIDERS-001: the provider transports (OpenAI, Anthropic) are the same Copilot boundary, reached only by the interpreter.
+      return !((to === 'src/server/copilot-service.ts' || to === 'src/server/copilot-providers.ts') && rel(file) === 'src/channels/core/interpreter.ts');
     }).map(([, specifier]) => `${rel(file)} → ${specifier}`));
     expect(violations).toEqual([]);
   });
@@ -103,7 +104,7 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
     // VISUAL-PRESENTATION-001) FloFi's shared workflow renderer, (BUILD-BASE-001) the read-only authoring catalogs and (BUILD-ADMIN-001)
     // the Copilot's runtime model-settings lookup, which the wiring passes to the interpreter (a read of `admin_settings_versions`; no flow).
     const servers = [...channelFiles].flatMap(file => importsOf(join(app, file)).map(([, s]) => s.startsWith('.') ? target(join(app, file), s) : s)).filter(t => t.startsWith('src/server/'));
-    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/channel-copilot-toolkit.ts', 'src/server/copilot-metrics-store.ts', 'src/server/copilot-runtime.ts', 'src/server/copilot-service.ts',
+    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/channel-copilot-toolkit.ts', 'src/server/copilot-metrics-store.ts', 'src/server/copilot-providers.ts', 'src/server/copilot-runtime.ts', 'src/server/copilot-service.ts',
       'src/server/deployment.ts', 'src/server/platform-state-host.ts', 'src/server/workflow-visual-image.ts']);
     // Authenticated turn wiring can discover real routes without gaining a flow client, wallet principal or transaction path.
     const discovery = closure(join(app, 'src/server/channel-copilot-toolkit.ts')).files;
@@ -132,7 +133,7 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
   });
 
   it('keeps the approval-side paths model-free, transitively (contributor, status ping, its server action)', () => {
-    const MODEL = new Set(['src/server/copilot-service.ts', 'src/channels/core/interpreter.ts', 'src/channels/core/conversation.ts', 'src/app/copilot-action.ts']);
+    const MODEL = new Set(['src/server/copilot-service.ts', 'src/server/copilot-providers.ts', 'src/channels/core/interpreter.ts', 'src/channels/core/conversation.ts', 'src/app/copilot-action.ts']);
     for (const entry of ['src/channels/approval-profile.ts', 'src/channels/approval-ping.ts', 'src/app/channel-approve-action.ts', 'src/channels/core/notify.ts']) {
       const reach = closure(join(app, entry));
       expect(reach.files.length, entry).toBeGreaterThan(3);

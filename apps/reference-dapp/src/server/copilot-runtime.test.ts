@@ -7,10 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import { channelLiveCopilot, connectionDropped, environmentCopilot, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled,
   type CopilotSettingsReader } from './copilot-runtime.ts';
-import { COPILOT_SETTINGS_SCHEMA, type CopilotRuntimeSettings } from './copilot-settings.ts';
+import { COPILOT_SETTINGS_SCHEMA, type StoredRuntimeSettings } from './copilot-settings.ts';
 
 const env = { FLOFI_COPILOT: 'live', OPENAI_API_KEY: 'sk-test-key', OPENAI_COPILOT_MODEL: 'gpt-4.1-mini', DATABASE_URL: 'postgres://127.0.0.1:1/x' };
-const runtime: CopilotRuntimeSettings = { model: 'gpt-5-mini', temperature: null, reasoningEffort: 'low', maxOutputTokens: 6000, timeoutMs: 30_000, acknowledgedUnverified: false };
+const runtime: StoredRuntimeSettings = { model: 'gpt-5-mini', temperature: null, reasoningEffort: 'low', maxOutputTokens: 6000, timeoutMs: 30_000, acknowledgedUnverified: false };
 const document = { schema: COPILOT_SETTINGS_SCHEMA, default: runtime, overrides: { TELEGRAM: { ...runtime, model: 'gpt-4o-mini', temperature: 0.2, reasoningEffort: null } } };
 const version = (v: number, doc: unknown) => async () => ({ version: v, document: doc, restoredFrom: null, createdBy: 'cli', reason: null, createdAt: '2026-10-14T12:00:00.000Z' });
 
@@ -23,13 +23,14 @@ describe('BUILD-ADMIN-001 Copilot settings resolution', () => {
   });
   it('uses the latest valid runtime version, per scope, even without an environment model', async () => {
     const noModel = { ...env, OPENAI_COPILOT_MODEL: undefined };
-    expect(await resolveCopilotLive(noModel, 'WEB', version(3, document))).toEqual({ ok: true, apiKey: 'sk-test-key', source: 'RUNTIME', version: 3, settings: runtime });
+    expect(await resolveCopilotLive(noModel, 'WEB', version(3, document))).toEqual({ ok: true, provider: 'OPENAI', apiKey: 'sk-test-key', source: 'RUNTIME', version: 3,
+      settings: { ...runtime, provider: 'OPENAI' } });
     expect(await resolveCopilotLive(noModel, 'TELEGRAM', version(3, document))).toMatchObject({ ok: true, source: 'RUNTIME', settings: { model: 'gpt-4o-mini', temperature: 0.2 } });
     expect(await resolveCopilotLive(noModel, 'WHATSAPP', version(3, document))).toMatchObject({ settings: { model: 'gpt-5-mini' } });
   });
   it('falls back to the unchanged environment bootstrap only when no runtime document applies', async () => {
-    const bootstrap = { ok: true, apiKey: 'sk-test-key', source: 'ENVIRONMENT', version: null,
-      settings: { model: 'gpt-4.1-mini', temperature: 0, reasoningEffort: null, maxOutputTokens: 4096, timeoutMs: 20_000, acknowledgedUnverified: false } };
+    const bootstrap = { ok: true, provider: 'OPENAI', apiKey: 'sk-test-key', source: 'ENVIRONMENT', version: null,
+      settings: { provider: 'OPENAI', model: 'gpt-4.1-mini', temperature: 0, reasoningEffort: null, maxOutputTokens: 4096, timeoutMs: 20_000, acknowledgedUnverified: false } };
     expect(await resolveCopilotLive(env, 'WEB', async () => null)).toEqual(bootstrap);
     expect(await resolveCopilotLive(env, 'WEB', version(4, null))).toEqual({ ...bootstrap, version: 4 });
     expect(await resolveCopilotLive(env, 'WEB', null)).toEqual(bootstrap);
@@ -89,5 +90,35 @@ describe('BUILD-ADMIN-001 Copilot settings resolution', () => {
       expect(lines).toEqual([JSON.stringify({ event: 'flofi.copilot.settings', outcome: 'COPILOT_CONFIG_UNAVAILABLE', scope: 'TELEGRAM' })]);
       expect(await channelLiveCopilot({ ...env, FLOFI_COPILOT_RUNTIME_CONFIG: 'disabled' }, 'TELEGRAM', host)()).toMatchObject({ ok: true, source: 'ENVIRONMENT' });
     } finally { console.warn = warn; }
+  });
+});
+
+describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware resolution', () => {
+  const claude = { provider: 'ANTHROPIC', model: 'claude-sonnet-5-5', temperature: null, reasoningEffort: 'medium', maxOutputTokens: 4096, timeoutMs: 30_000,
+    acknowledgedUnverified: false } as const;
+  const mixed = { schema: COPILOT_SETTINGS_SCHEMA, default: runtime, overrides: { WEB: claude, WHATSAPP: { ...claude, model: 'claude-haiku-5-5', reasoningEffort: 'low' } } };
+  const both = { ...env, ANTHROPIC_API_KEY: 'sk-ant-test-key' };
+  it('routes each channel to the provider its settings name, with that provider\'s own key', async () => {
+    expect(await resolveCopilotLive(both, 'WEB', version(9, mixed))).toEqual({ ok: true, provider: 'ANTHROPIC', apiKey: 'sk-ant-test-key', source: 'RUNTIME', version: 9,
+      settings: claude });
+    expect(await resolveCopilotLive(both, 'WHATSAPP', version(9, mixed))).toMatchObject({ provider: 'ANTHROPIC', settings: { model: 'claude-haiku-5-5' } });
+    expect(await resolveCopilotLive(both, 'TELEGRAM', version(9, mixed))).toMatchObject({ provider: 'OPENAI', apiKey: 'sk-test-key', settings: { model: 'gpt-5-mini' } });
+  });
+  it('works with an Anthropic key only (no OpenAI key, no OPENAI_COPILOT_*)', async () => {
+    const anthropicOnly = { FLOFI_COPILOT: 'live', ANTHROPIC_API_KEY: 'sk-ant-test-key', DATABASE_URL: 'postgres://127.0.0.1:1/x' };
+    expect(await resolveCopilotLive(anthropicOnly, 'WEB', version(9, mixed))).toMatchObject({ ok: true, provider: 'ANTHROPIC', apiKey: 'sk-ant-test-key' });
+    // A channel still on OpenAI fails closed; it is never sent to Anthropic instead.
+    expect(await resolveCopilotLive(anthropicOnly, 'TELEGRAM', version(9, mixed))).toEqual({ ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED' });
+    // No runtime document: the environment bootstrap is OpenAI-only, so there is nothing to run.
+    expect(await resolveCopilotLive(anthropicOnly, 'WEB', async () => null)).toEqual({ ok: false, code: 'COPILOT_NOT_CONFIGURED' });
+  });
+  it('never falls back to the other provider when a key is missing, and a missing Anthropic key never affects OpenAI channels', async () => {
+    expect(await resolveCopilotLive(env, 'WEB', version(9, mixed))).toEqual({ ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED' });
+    expect(await resolveCopilotLive(env, 'TELEGRAM', version(9, mixed))).toMatchObject({ ok: true, provider: 'OPENAI' });
+    expect(await resolveCopilotLive({ ...env, ANTHROPIC_API_KEY: 'sk ant bad' }, 'WEB', version(9, mixed))).toEqual({ ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED' });
+    expect(publicCopilotCode('COPILOT_PROVIDER_NOT_CONFIGURED')).toBe('COPILOT_NOT_CONFIGURED');
+  });
+  it('keeps documents written before providers existed meaning OpenAI, exactly as before', async () => {
+    expect(await resolveCopilotLive(both, 'WEB', version(3, document))).toMatchObject({ ok: true, provider: 'OPENAI', apiKey: 'sk-test-key', settings: { model: 'gpt-5-mini' } });
   });
 });
