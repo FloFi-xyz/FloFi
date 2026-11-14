@@ -83,6 +83,12 @@ test('admin console: refusal until granted, overview with network distribution, 
     await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
     const nav = page.getByRole('navigation', { name: 'Admin' });
     for (const label of ['Overview', 'Workflows', 'Automations', 'AI Settings', 'AI Analytics', 'AI Learning', 'System Health', 'Access & audit']) await expect(nav.getByRole('link', { name: label })).toBeVisible();
+    // BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): links are grouped by task; every route and link name is unchanged.
+    for (const [group, links] of [['Monitor', ['Overview', 'System Health']], ['Operations', ['Workflows', 'Automations']], ['AI Copilot', ['AI Settings', 'AI Analytics', 'AI Learning']],
+      ['Campaigns', ['Flight FloFi']], ['Security', ['Access & audit']]] as const)
+      for (const link of links) await expect(nav.getByRole('list', { name: group }).getByRole('link', { name: link })).toHaveAttribute('href', /^\/admin/);
+    await expect(page.getByRole('heading', { name: 'Status at a glance' })).toBeVisible();
+    await expect(page.locator('.admin-tile').filter({ hasText: 'AI Copilot' })).toBeVisible();
     await expect(nav.locator('.admin-brand').getByRole('img', { name: 'FloFi', exact: true })).toHaveAttribute('src', '/brand/flofi-wordmark-light.png');
     if (process.env.FLOFI_ADMIN_EVIDENCE) for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme }); await page.waitForTimeout(150);
@@ -124,18 +130,38 @@ test('admin console: refusal until granted, overview with network distribution, 
     // AI settings: an operator versions the Copilot settings; no key is ever shown.
     await nav.getByRole('link', { name: 'AI Settings' }).click();
     await expect(page.getByRole('heading', { name: 'AI Settings', level: 1 })).toBeVisible();
-    await expect(page.getByText('Not configured', { exact: true }).first()).toBeVisible();
+    // BUILD-ADMIN-AI-PROVIDERS-001: provider connections are shown (never a key); neither provider is connected in this harness.
+    await expect(page.locator('.admin-provider').filter({ hasText: 'OpenAI' })).toContainText('Not connected');
+    await expect(page.locator('.admin-provider').filter({ hasText: 'Anthropic' })).toContainText('Not connected');
     // The editor is a client component rendered on the server first: text typed before it hydrates never reaches its state (Save stays
     // disabled). Type again until the editor registers the change, then save exactly as before.
-    const save = page.getByRole('button', { name: 'Save as version 1' });
+    const save = page.getByRole('button', { name: 'Save and activate version 1' });
     await expect(async () => {
       await page.getByLabel('Model').first().fill('');
       await page.getByLabel('Model').first().fill('gpt-4o-mini');
       await page.getByLabel('Reason (optional, stored in the version history)').fill('E2E: cheaper interpreter');
       await expect(save).toBeEnabled({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
+    await expect(page.getByRole('note').filter({ hasText: 'Saving will change' })).toContainText('FloFi chat (web): OpenAI');
     await save.click();
-    await expect(page.getByRole('button', { name: 'Save as version 2' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save and activate version 2' })).toBeVisible();
+    // Provider-aware editing: Anthropic offers Claude models with friendly names and exact ids, Anthropic efforts, and no temperature.
+    const defaults = page.getByRole('region', { name: 'Default settings' }).or(page.locator('section').filter({ has: page.getByRole('heading', { name: 'Default settings' }) }));
+    await defaults.getByRole('radio', { name: /Anthropic/ }).check();
+    const model = defaults.getByLabel('Model', { exact: false }).first();
+    await expect(model).toHaveValue('claude-sonnet-5-5');
+    await expect(model.locator('option', { hasText: 'Claude Sonnet 5.5 — claude-sonnet-5-5' })).toHaveCount(1);
+    await expect(defaults.getByLabel('Reasoning effort').locator('option', { hasText: 'Extra high' })).toHaveCount(1);
+    await expect(defaults.getByLabel('Send temperature')).toHaveCount(0);
+    await expect(defaults.getByText(/Anthropic is not connected on this deployment/)).toBeVisible();
+    await expect(defaults.getByRole('button', { name: 'Test connection and model' })).toBeDisabled();
+    await expect(page.getByRole('note').filter({ hasText: 'Saving will change' })).toContainText('OpenAI · gpt-4o-mini → Anthropic · claude-sonnet-5-5');
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(defaults.getByLabel('Model').first()).toHaveValue('gpt-4o-mini');
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath('admin-ai-settings-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await expect(page.getByRole('region', { name: 'Version history' }).or(page.locator('section').filter({ has: page.getByRole('heading', { name: 'Version history' }) })))
       .toContainText('E2E: cheaper interpreter');
     await page.screenshot({ path: test.info().outputPath('admin-ai-settings.png'), fullPage: true });
@@ -164,6 +190,10 @@ test('admin console: refusal until granted, overview with network distribution, 
       if (label === 'Automations') await expect(page.getByRole('heading', { name: 'From proposal to execution' })).toBeVisible();
     }
     await expect(page.getByRole('table').last()).toContainText('ADMIN_COPILOT_SETTINGS_SAVED');
+    await expect(page.getByRole('table').last()).toContainText('AI settings saved');
+    await page.getByRole('navigation', { name: 'Audit outcome' }).getByRole('link', { name: 'Refused' }).click();
+    await expect(page.getByRole('table').last()).toContainText('ADMIN_SIGN_IN');
+    await expect(page.getByRole('table').last()).not.toContainText('ADMIN_COPILOT_SETTINGS_SAVED');
 
     await page.getByRole('button', { name: 'Sign out' }).click();
     await page.waitForURL(url => url.pathname === '/admin/login');

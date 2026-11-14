@@ -45,10 +45,14 @@ export default async function AdminWorkflowsPage({ searchParams }: { searchParam
     .sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime());
   const listed = scoped.filter(e => view.outcome === 'ALL' || e.classification.outcome === view.outcome);
   const attention = scoped.filter(e => e.classification.attention).slice(0, 25);
-  return <AdminShell active="workflows" context={page.context} title="Workflows" description="Started executions, their outcomes and what needs attention.">
+  return <AdminShell active="workflows" context={page.context} title="Workflows" description="Every started execution, how it ended, and which ones need a person to look at them.">
     <AnalyticsFilters base="/admin/workflows" params={params} range={view.range} environment={view.environment} executedByEnvironment={a.executedByEnvironment}
       defaulted={view.environmentDefaulted}/>
     <DataNotes view={view}/>
+    <section className="admin-card" aria-labelledby="admin-attention" data-tone={attention.length ? 'warn' : undefined}>
+      <header><h2 id="admin-attention">Requiring attention</h2><p>Review these first: uncertain, partial, unclassified or flagged by the worker · newest 25</p></header>
+      {attention.length === 0 ? <p className="admin-empty">Nothing requires attention in this range.</p> : <ExecutionRows executions={attention}/>}
+    </section>
     <section className="admin-card" aria-labelledby="admin-flows">
       <header><h2 id="admin-flows">By flow</h2><p>{ENVIRONMENT_LABELS[view.environment]} · executed workflows</p></header>
       {a.flows.length === 0 ? <p className="admin-empty">No executed workflows in this range.</p> : <div className="admin-table-wrap"><table className="admin-table">
@@ -57,10 +61,6 @@ export default async function AdminWorkflowsPage({ searchParams }: { searchParam
         <tbody>{a.flows.map(f => <tr key={f.flow}><td><code>{f.flow}</code></td><td className="num">{fmt(f.executions)}</td>
           {OUTCOME_KEYS.map(key => <td key={key} className="num">{fmt(f[key])}</td>)}<td className="num">{fmt(f.UNCLASSIFIED)}</td></tr>)}</tbody>
       </table></div>}
-    </section>
-    <section className="admin-card" aria-labelledby="admin-attention">
-      <header><h2 id="admin-attention">Requiring attention</h2><p>Uncertain, partial, unclassified or flagged by the worker · newest 25</p></header>
-      {attention.length === 0 ? <p className="admin-empty">Nothing requires attention in this range.</p> : <ExecutionRows executions={attention}/>}
     </section>
     <section className="admin-card" aria-labelledby="admin-executions">
       <header><h2 id="admin-executions">Executions</h2><p>Newest {Math.min(LIMIT, listed.length)} of {fmt(listed.length)} started</p></header>

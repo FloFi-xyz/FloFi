@@ -3,10 +3,11 @@
 import { withFlightAccess } from '../server/flight-access';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createOpenAITransport, createReplayTransport, interpretCopilot,
+import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createReplayTransport, interpretCopilot,
   interpretCopilotV2, parseCopilotReplay, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, type CopilotLimiter, type CopilotMode, type CopilotResult, type CopilotResultV2,
   type CopilotTelemetry } from '../server/copilot-service';
 import { logCopilotSettingsFailure, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled } from '../server/copilot-runtime';
+import { copilotConfiguredMode, createProviderTransport } from '../server/copilot-providers';
 import { webCopilotSettingsReader } from '../server/copilot-settings-source';
 import { parseInterpretOptions, requestGlossary } from '../learning/web-actions';
 import { webLearningService, pickPrincipal } from '../server/learning-web';
@@ -111,16 +112,17 @@ export async function copilotInterpret(raw: unknown, options?: unknown): Promise
   if (process.env.FLOFI_COPILOT === 'live') {
     const resolved = await live();
     if (!resolved.ok) return { ok: false, code: publicCopilotCode(resolved.code) };
-    const { apiKey, settings } = resolved;
+    // BUILD-ADMIN-AI-PROVIDERS-001: the resolved settings' provider, with that provider's own key; never another provider.
+    const { provider, apiKey, settings } = resolved;
     if (isV2(input)) {
       const learning = await learningFor(input, options);
-      const result = await interpretWithMetrics(input, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
+      const result = await interpretWithMetrics(input, { transport: createProviderTransport(provider, apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
         mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live'), glossary: learning?.glossary ?? null, toolkit: copilotToolkit(process.env), surface: 'WEB' });
       await learning?.record(result);
       return result;
     }
-    return interpretCopilot(input, { transport: createOpenAITransport(apiKey), model: settings.model, temperature: settings.temperature, limiter: limiter() });
+    return interpretCopilot(input, { transport: createProviderTransport(provider, apiKey), model: settings.model, temperature: settings.temperature, limiter: limiter() });
   }
   if (config.mode === 'unavailable') return { ok: false, code: 'COPILOT_NOT_CONFIGURED' };
   if (isV2(input)) {
@@ -154,7 +156,8 @@ function turnLimiter(): CopilotLimiter {
  */
 export async function copilotTurnReport(input: unknown): Promise<void> {
   return withFlightAccess(async () => {
-  const config = copilotConfig(process.env), record = parseTurnMetrics(input);
+  // BUILD-ADMIN-AI-PROVIDERS-001: a live Copilot whose only key is Anthropic's is live here too (its model comes from the runtime settings).
+  const config = { mode: copilotConfiguredMode(process.env) }, record = parseTurnMetrics(input);
   if (config.mode === 'off' || config.mode === 'unavailable' || !record || record.surface !== 'WEB') return;
   const release = turnLimiter().acquire();
   if (!release) return;

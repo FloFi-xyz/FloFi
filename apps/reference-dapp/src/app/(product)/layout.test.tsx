@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const h = vi.hoisted(() => ({
   requireFlightAccess: vi.fn(), redirect: vi.fn((path: string) => { throw Object.assign(new Error('NEXT_REDIRECT'), { path }); }),
-  headers: new Headers(), cookies: vi.fn(), copilotConfig: vi.fn(() => ({ mode: 'replay' })), workspace: vi.fn(() => null),
+  headers: new Headers(), cookies: vi.fn(), copilotConfiguredMode: vi.fn(() => 'replay'), workspace: vi.fn(() => null),
 }));
 vi.mock('next/server', () => ({ connection: async () => undefined }));
 vi.mock('next/navigation', () => ({ redirect: h.redirect }));
@@ -18,7 +18,8 @@ vi.mock('next/headers', () => ({ headers: async () => h.headers, cookies: async 
 vi.mock('../../server/flight-access', () => ({ requireFlightAccess: h.requireFlightAccess }));
 vi.mock('../../server/engineering-ui', () => ({ engineeringUiAllowed: async () => false }));
 vi.mock('../../server/network-scope', () => ({ networkScope: () => 'PUBLIC_MAINNET' }));
-vi.mock('../../server/copilot-service', () => ({ copilotConfig: h.copilotConfig }));
+// BUILD-ADMIN-AI-PROVIDERS-001: the layout reads the configured mode through the provider module (an Anthropic-only live Copilot reads live).
+vi.mock('../../server/copilot-providers', () => ({ copilotConfiguredMode: h.copilotConfiguredMode }));
 vi.mock('../../learning/config', () => ({ learningConfig: () => ({ enabled: false }), sessionAdaptation: () => false }));
 vi.mock('../../accounts/privy-server', () => ({ privyBrowserConfig: () => null }));
 vi.mock('../../accounts/privy-client', () => ({ FloFiPrivyProvider: ({ children }: { children: unknown }) => children }));
@@ -80,6 +81,6 @@ describe('product layout Flight gate', () => {
     expect(h.redirect).not.toHaveBeenCalled();
     expect(h.workspace).not.toHaveBeenCalled();
     expect(h.cookies).not.toHaveBeenCalled();
-    expect(h.copilotConfig).not.toHaveBeenCalled();
+    expect(h.copilotConfiguredMode).not.toHaveBeenCalled();
   });
 });

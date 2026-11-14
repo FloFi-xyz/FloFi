@@ -132,7 +132,7 @@ export function readCopilotResponse(response: CopilotHttpResponse): CopilotInten
   catch (cause) { return fail(cause instanceof CopilotIntentError && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID'); }
 }
 
-async function readCapped(response: Response, maxBytes: number): Promise<string> {
+export async function readCapped(response: Response, maxBytes: number): Promise<string> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) { await response.body?.cancel().catch(() => undefined); fail('COPILOT_RESPONSE_TOO_LARGE'); }
   if (!response.body) return '';
@@ -318,7 +318,8 @@ function groundAnswer(intent: CopilotIntentV2, facts: readonly string[]): { read
   return checked.ok ? { intent, grounding: 'GROUNDED' } : { intent: { ...intent, answer: null }, grounding: checked.reason };
 }
 
-export type CopilotReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
+/** `minimal` exists only for OpenAI reasoning models; `xhigh` and `max` only for Anthropic (`copilot-settings.ts` refuses every other pairing). */
+export type CopilotReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 /** Owner-chosen live tuning; every value is bounded and nothing falls back to a different model. */
 export type CopilotTuning = { readonly timeoutMs: number; readonly maxOutputTokens: number; readonly reasoningEffort: CopilotReasoningEffort | null };
 export const COPILOT_TUNING_DEFAULTS: CopilotTuning = Object.freeze({ timeoutMs: COPILOT_SERVER_LIMITS.timeoutMs, maxOutputTokens: 4_096, reasoningEffort: null });
@@ -436,6 +437,9 @@ export type CopilotTelemetry = { readonly event: 'flofi.copilot.interpret'; read
   /** Whether the request carried FloFi's context card, and the engine's own content-free counters for the open request. */
   readonly contextCard?: boolean;
   /** Which surface asked (FloFi's chat or Channel Core), when the caller says. */ readonly surface?: 'WEB' | 'CHANNEL' };
+/** Provider-specific outcomes and the existing public code each is shown as. */
+export const PUBLIC_CODES: Readonly<Record<string, string>> = Object.freeze({ COPILOT_UPSTREAM_BILLING: 'COPILOT_UPSTREAM_UNAVAILABLE',
+  COPILOT_UPSTREAM_MODEL_UNAVAILABLE: 'COPILOT_UPSTREAM_UNAVAILABLE', COPILOT_REQUEST_INVALID: 'COPILOT_UPSTREAM_REJECTED', COPILOT_PARAMETER_UNSUPPORTED: 'COPILOT_UPSTREAM_REJECTED' });
 export type CopilotResultV2 = { readonly ok: true; readonly intent: CopilotIntentV2; readonly contextKey?: string; readonly groundingNumbers?: readonly string[] }
   | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
 export async function interpretCopilotV2(input: unknown, deps: { readonly transport: CopilotTransport; readonly settings: CopilotModelSettings; readonly mode: 'live' | 'replay';
@@ -503,7 +507,10 @@ export async function interpretCopilotV2(input: unknown, deps: { readonly transp
     const code = cause instanceof CopilotServiceError && /^COPILOT_[A-Z_]{2,60}$/.test(cause.message) ? cause.message : 'COPILOT_UNAVAILABLE';
     const retry = code === 'COPILOT_UPSTREAM_RATE_LIMITED' ? retryAfterSeconds(response?.retryAfter) : null;
     report(code, { ...usage, ...extra(null) });
-    return retry ? { ok: false, code, retryAfterSeconds: retry } : { ok: false, code };
+    // BUILD-ADMIN-AI-PROVIDERS-001: telemetry keeps the precise provider outcome; people (web and channels) get the provider-neutral public
+    // code, so a user can never tell the operator's billing state or which model is unavailable.
+    const shown = PUBLIC_CODES[code] ?? code;
+    return retry ? { ok: false, code: shown, retryAfterSeconds: retry } : { ok: false, code: shown };
   } finally { release(); }
 }
 /**

@@ -60,16 +60,26 @@ the wallet address.
 
 ## 5. AI Settings (Copilot runtime configuration)
 
-Settings: model id, temperature (0–1 or not sent), reasoning effort (or not sent), max output tokens (256–16,384), request timeout
+Settings: provider (OpenAI or Anthropic), model id, temperature (OpenAI only: 0–1 or not sent), reasoning effort (or not sent; OpenAI
+`minimal`–`high`, Anthropic `low`–`max`), max output tokens (256–16,384), request timeout
 (5–60 s); a default plus optional overrides for FloFi chat (web), Telegram and WhatsApp (an override replaces the default as a whole).
 
 * **Versioned and audited.** Each save appends version *n + 1* (append-only, gapless; a concurrent save of the same version loses with
-  `ADMIN_SETTINGS_VERSION_CONFLICT`). *Restore* appends a version copying an older one; *Return to environment bootstrap* appends an empty
+  `ADMIN_SETTINGS_VERSION_CONFLICT`). *Restore* appends a version copying an older one; *Return to default system settings* (formerly
+  *Return to environment bootstrap*) appends an empty
   version. Every change and every refusal is in the audit trail.
 * **Effective on the next request, everywhere.** Each live Copilot request reads the latest version (one primary-key lookup, no cache), so
   every Vercel instance applies a change on its next request. No rebuild, redeploy or environment edit.
-* **Precedence.** `FLOFI_COPILOT` (off/replay/live) and `OPENAI_API_KEY` stay environment-only. With platform state and no break-glass:
-  the latest valid version; with no version (or an empty one): the unchanged `OPENAI_COPILOT_*` bootstrap.
+* **Precedence.** `FLOFI_COPILOT` (off/replay/live), `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` stay environment-only. With platform state
+  and no break-glass: the latest valid version; with no version (or an empty one): the unchanged `OPENAI_COPILOT_*` bootstrap.
+* **Providers (BUILD-ADMIN-AI-PROVIDERS-001).** Every settings set names its provider — OpenAI (Responses API) or Anthropic (Messages API) —
+  so each channel can use a different provider and model. A set stored without `provider` is OpenAI, so every older version keeps its
+  meaning and can still be restored. OpenAI sets are stored without the field (exactly the previous form); Anthropic sets carry
+  `provider: "ANTHROPIC"`, which the previous build refuses (fail closed) rather than misreads. A request uses only the selected provider's
+  key: a missing key makes that channel unavailable (`COPILOT_PROVIDER_NOT_CONFIGURED`) and never falls back to the other provider. On a
+  live Copilot, saving or restoring a version that uses a provider without its key is refused. Anthropic models are listed from the
+  organization's Models API (cached 10 minutes; *Refresh Anthropic models* re-reads it, rate-limited with the live test). Live tests use
+  the candidate's own provider and key and report latency, tokens and an estimated cost; nothing is signed, submitted or changed.
 * **Fail closed, never silently different.** A stored document that no longer validates, or a database that cannot be read, makes the
   live Copilot unavailable (users keep the existing "not configured/unavailable" messages; the exact grammar keeps working; the precise
   code is logged as `flofi.copilot.settings`). It never falls back to another model and never serves a cached version. A read whose pooled
