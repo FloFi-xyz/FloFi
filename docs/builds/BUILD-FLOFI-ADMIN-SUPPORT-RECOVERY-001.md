@@ -144,6 +144,9 @@ The exact commands and their output for this build are in the pull request.
   approved an auditable recovery history but **not** indefinite retention of identifiable personal data; the retention periods, purposes,
   candidate lawful bases and the structural options for enforcing them are proposed for counsel in §9 and are **not implemented** (they need a
   reviewed migration). Identifier screening of free text is best effort. Opening a diagnostics page is not audited (lookups are).
+- The analytics classifier (`analytics/classify.ts`, unchanged) treats a post-broadcast attempt state without a hash (`SUBMISSION_RESULT_UNKNOWN`,
+  `NOT_FOUND`) as *submitted*, while Support's `submissionOf` reports *unknown*; the Overview's "executed" figures therefore include such runs.
+  Support labels the router's deposit-deadline verdict as *not executed*; aligning the analytics classifier is a separate, owner-reviewed change.
 - No index was added (no migration): the `attention_required` and `needs_observation` candidate scans and the stopped-task supersession check
   use the same unindexed predicates as System Health, bounded by LIMIT. On a very large tenant they can read many rows per Support page load;
   partial indexes would be a future, separately reviewed migration.
@@ -171,10 +174,10 @@ separate fields everywhere.
 
 | Lifecycle | Rule (durable evidence only) |
 |---|---|
-| Active | an unresolved condition exists now: outcome unknown; partial; unclassified status; observation exhausted (needs observation, newest `reconcile` DEAD); check not scheduled (needs observation, no open check, quiet > 15 min); evidence archiving stopped (bundle not in the store, newest `evidence.archive` DEAD); another task kind stopped and not superseded; a stopped task re-queued and not finished. **The flag is not required.** |
+| Active | an unresolved condition exists now: outcome unknown (kept while a stopped check is retried); partial; unclassified status; divergent verdict; observation exhausted (needs observation, newest `reconcile` DEAD); check not scheduled (needs observation, no open check, quiet > 15 min); evidence archiving stopped (bundle not in the store, newest `evidence.archive` DEAD); another task kind stopped and not superseded; a stopped task re-queued and not finished. **The flag is not required.** |
 | Under investigation | active, and the latest support note on the incident (90-day window) is an acknowledgement, finding, decision or escalation. Opening a page never counts. A later "resolution" note cannot resolve an active condition. |
 | Historical attention | flagged, no active condition now, but no incident-specific evidence of resolution (e.g. the run stopped being observed without an Evidence Bundle, or no stopped task is recorded so the cause cannot be reconstructed). **Not a resolution.** |
-| Verified resolved | flagged, no active condition, final outcome, and **every** task that ever stopped for the run has resolution evidence: a later run of the same task completed; or the stopped check was superseded by a reconciled verdict with an Evidence Bundle and every submitted attempt reconciled; or the stopped archive's bundle is now in the evidence store. A terminal status alone never qualifies. |
+| Verified resolved | flagged (or a task once stopped), no active condition, final outcome, recognised status, and **every** task that ever stopped for the run has resolution evidence: the stopped check was superseded by a reconciled (non-divergent) verdict with an Evidence Bundle and every submitted attempt reconciled — a completed re-run alone is not enough, since a check completes whatever the verdict; or the service proved non-execution (the router's deposit-deadline verdict); or the stopped archive's bundle is now in the evidence store (or its re-run completed). A terminal status alone never qualifies; a divergent verdict is always active. |
 
 Rules added after review: a note only counts if it is newer than the latest stop of a still-unresolved task (it was about an earlier
 occurrence otherwise); a flagged run that still needs observation is never historical (the sweeper never re-arms a flagged run, so no open check
@@ -241,27 +244,36 @@ record's stopped task was a superseded check with a reconciled verdict and evide
 2 active and 10 historical/verified — but that must be read from the data, not assumed.
 
 **Execution A — `UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION`.** In `universal-router/service.ts` this verdict is recorded only when no
-receipt exists for the attempt's hash (none was reported), the deposit-log scan found nothing, and the account's nonce reserved for the reviewed
-transaction was consumed by a transaction whose target, data or value differ (`sameEvmIntent` false). The service stores that transaction's hash
-as `conflictingTransactionHash` in the run's durable log (not in `execution_attempts`, so not shown by the Admin). What this establishes: the
-reviewed transaction did **not** land at that nonce. What it does not: whether the wallet sent the same intent with another nonce. Outcome:
-**unknown** — nonce consumption is not proof of execution or non-execution.
+receipt was found for the attempt (no hash reported, or a reported hash without a receipt — the attempt's hash flag in §8.6 says which), the
+deposit-log scan (DEPOSIT step only; it reaches the safe head and is bounded per observation) found nothing, and the account's nonce reserved for
+the reviewed transaction was consumed by a transaction that `sameEvmIntent` does not recognise as a direct send of the reviewed call. The service
+stores that transaction's hash as `conflictingTransactionHash` in the run's durable log (not in `execution_attempts`, so not shown by the Admin).
+What this establishes: the transaction at that nonce is **not a direct send** of the reviewed call. What it does not: it may still contain the
+reviewed call (the service accepts value-free reviewed calls executed through the owner's EIP-7702 delegation, whose outer transaction differs),
+`sameEvmIntent` also answers "different" when a field is missing or unreadable, and the wallet may have sent the reviewed call with another nonce.
+Outcome: **unknown** — nonce consumption is not proof of execution or non-execution.
 
-**Execution B — `ROUTER_TRANSACTION_NOT_OBSERVED`.** In `router-service.ts` this is recorded only when neither a transaction nor a replacement
-hash was reported, the nonce was not yet consumed at the last check, no matching transaction was in the node's pending pool and the deposit
+**Execution B — `ROUTER_TRANSACTION_NOT_OBSERVED`.** In `router-service.ts` this is recorded only when the open attempt had neither a transaction
+nor a replacement hash, its nonce was not yet consumed at the last check, no matching transaction was in the node's pending pool, the deposit
 scan found no deposit — and the protocol deposit deadline had not been proven passed with a complete scan (that case is recorded as
-`ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED`, provably not executed). No transaction hash exists anywhere for B by construction. Outcome:
-**never demonstrably submitted, but not excluded** — still unknown.
+`ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED`, provably not executed). The open attempt has no hash by construction; earlier attempts of the run (for
+example a confirmed approval) can carry hashes. Outcome: **never demonstrably submitted, but not excluded** — still unknown.
 
 **Read-only next steps for the owner (not performed here).** For each, from the run's log: chain, sender, prepared nonce, prepared block and
 (for A) `conflictingTransactionHash`. Then, on at least two independent sources (RPC providers or explorers), at a finalized block:
-(1) the account's current nonce and the transaction at the prepared nonce; (2) for A, confirm the conflicting transaction and compare its
-target/data/value; (3) search the sender's later transactions for the reviewed intent (another nonce); (4) the bridge's deposit events for this
+(1) the account's current nonce and the transaction at the prepared nonce; (2) for A, confirm the conflicting transaction, decode it including any
+delegated inner call, and check its receipt logs for the reviewed effects (Approval, Withdrawal, or the bridge's deposit event with the order id); (3) search the sender's later transactions for the reviewed intent (another nonce); (4) the bridge's deposit events for this
 depositor from the prepared block to the route's `depositMustLandBy`, and the destination fill; (5) for B, whether `depositMustLandBy` has passed on a
 finalized block with a complete scan, which is the only protocol-backed proof of non-execution. The registered, read-only *Resume transaction
-check* lets the service itself re-run exactly these checks (for B it can reach the provable `…_EXPIRED_NOT_EXECUTED` verdict if the scan
-completes); it is eligible for both runs, is **not** run by this build, and should be run only by an operator after reading §3 — for A it will
-conclude the same unless the deposit scan finds the deposit, and either run can stop again after its budget if the original cause persists.
+check* lets the service itself re-run exactly these checks; it is eligible for both runs (their last stop reason is the transient
+`OBSERVATION_BUDGET_EXHAUSTED`), is **not** run by this build, and should be run only by an operator after reading §3. For B it can reach the
+provable `…_EXPIRED_NOT_EXECUTED` verdict only if the open attempt is the DEPOSIT step (expiry is never evaluated for an approval), the scan
+completes, and the account's nonce is still unused when the check runs — if the owner has since sent any other transaction from that account on
+the source chain, the run moves to `ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION` and stays unknown. If B does reach the expiry verdict, the
+Admin shows *Not executed — expired before it could land (service verdict)* and, with the stopped check, *verified resolved* (basis: the
+service's proof of non-execution). For A (on a DEPOSIT step) it concludes the same unless the deposit scan finds the deposit; on an approval or
+unwrap step there is no scan. Either run can stop again after its budget if the original cause persists. While a resumed check runs, both stay
+*outcome unknown* (high severity on mainnet), never "in progress".
 
 ### 8.6 Read-only classification query
 
@@ -284,7 +296,8 @@ FROM execution_runs r WHERE r.tenant_id = 'default' AND r.attention_required ORD
 ROLLBACK;
 ```
 
-Map each row with §8.2: an unresolved `stopped` task (newest state of the same task DEAD — for `reconcile` while `needs_observation`, for
+The Admin judges a stop reason on the whole recorded `last_error` (strict); the query shows only its leading code, so a code followed by
+extra text reads as transient here but is treated as permanent by the Admin, which errs on the safe side. Map each row with §8.2: an unresolved `stopped` task (newest state of the same task DEAD — for `reconcile` while `needs_observation`, for
 `evidence.archive` while not archived), a re-queued one, or an unknown/partial/unclassified status → active; every stopped task resolved, a final
 outcome and a recognised status → verified resolved (a `reconcile` stop counts as superseded by a reconciled verdict only if its code is a
 transient one such as `OBSERVATION_BUDGET_EXHAUSTED`); else historical.

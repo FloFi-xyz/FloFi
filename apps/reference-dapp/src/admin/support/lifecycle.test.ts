@@ -122,7 +122,8 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 attention lifecycle', () => {
     const inconclusive = classify({ runId: 'r10', flow: 'base-swap', status: 'INCONCLUSIVE', provenance: 'PUBLIC_MAINNET', needsObservation: false,
       latest: { reconcile: task('reconcile', 'DONE', null, '30') }, stoppedKinds: [stopped('reconcile', 'DONE')] });
     expect(inconclusive).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['OUTCOME_UNKNOWN'] });
-    expect(inconclusive.stopped[0]).toMatchObject({ status: 'RESOLVED', basis: 'TASK_COMPLETED_AFTER_STOP' }); // the task, not the incident
+    // A completed re-run is not resolution evidence on its own (a check completes whatever the verdict).
+    expect(inconclusive.stopped[0]).toMatchObject({ status: 'NOT_REQUIRED', basis: null });
     expect(classify({ runId: 'r11', flow: 'base-swap', status: 'DIVERGENT', provenance: 'PUBLIC_MAINNET', stoppedKinds: [stopped('reconcile', 'DONE')],
       attempts: [{ step: 'SWAP', state: 'CONFIRMED', hash: true, reconciled: false }] })).toMatchObject({ outcome: 'FAILED' });
   });
@@ -205,7 +206,7 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 attention lifecycle', () => {
     // An unrecognised status is never verified resolved, even when every stop has evidence.
     const unknown: Shape = { runId: 'f5', flow: 'base-swap', status: 'SETTLING_V2', provenance: 'PUBLIC_MAINNET', hasEvidence: false, attempts: [],
       latest: { reconcile: task('reconcile', 'DONE', null, '62') }, stoppedKinds: [stopped('reconcile', 'DONE')] };
-    expect(classify(unknown)).toMatchObject({ lifecycle: 'HISTORICAL', outcome: 'NOT_STARTED' }); // never started, but not recognised: not verified
+    expect(classify(unknown)).toMatchObject({ lifecycle: 'ACTIVE', outcome: 'NOT_STARTED', conditions: ['UNCLASSIFIED_STATUS'] }); // not recognised: never final
     expect(classify({ ...recovered, runId: 'f5b', status: 'SETTLING_V2', attention: true })).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['UNCLASSIFIED_STATUS'] });
     // A check that stopped for a permanent reason is not superseded by the reconciled verdict.
     expect(classify({ runId: 'f6', flow: 'base-sepolia-swap', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET', hasEvidence: true, evidenceArchived: true,
@@ -226,5 +227,41 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 attention lifecycle', () => {
       expect([text, identifierShaped(text)]).toEqual([text, true]);
     for (const text of ['Provider outage resolved on 2026-11-14 at 14:30', 'Escalated run xuni-379461c2e3f1807a0dc0455342a51d21', 'Retry 3 of 3, step 2', 'v1.2 release'])
       expect([text, identifierShaped(text)]).toEqual([text, false]);
+  });
+
+  it('wallet-execution review: a divergent verdict is never verified resolved; proven non-execution is; an uncertain status stays unknown while retried', () => {
+    // H1: the check stopped, a later check completed, but the verdict is DIVERGENT (funds moved differently from the review).
+    const divergent: Shape = { runId: 'w1', flow: 'crosschain-universal', status: 'DIVERGENT', provenance: 'PUBLIC_MAINNET', needsObservation: false,
+      attempts: [{ step: 'DEPOSIT', state: 'RECONCILIATION_REQUIRED', hash: true, reconciled: false }],
+      latest: { reconcile: task('reconcile', 'DONE', null, '70') }, stoppedKinds: [stopped('reconcile', 'DONE')] };
+    const d = classify(divergent);
+    expect(d).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['RESULT_DIVERGED'], resolution: [] });
+    const dShape = shape(divergent), dIncident = executionIncident(dShape.run, dShape.facts, now)!;
+    expect(dIncident).toMatchObject({ kind: 'RESULT_DIVERGED', severity: 'HIGH', eligibility: 'INVESTIGATION', actions: [], lifecycle: 'ACTIVE' });
+    // M1: the router's deposit-deadline verdict (FAILED, NOT_FOUND attempt, no hash) is the service's proof that nothing landed.
+    const expired: Shape = { runId: 'w2', flow: 'crosschain-router-arbitrum-to-base', status: 'FAILED', provenance: 'PUBLIC_MAINNET', needsObservation: false,
+      errorCode: 'ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED', attempts: [{ step: 'DEPOSIT', state: 'NOT_FOUND', hash: false, reconciled: false }],
+      latest: { reconcile: task('reconcile', 'DONE', null, '71') }, stoppedKinds: [stopped('reconcile', 'DONE')] };
+    expect(classify(expired)).toMatchObject({ lifecycle: 'VERIFIED_RESOLVED', resolution: ['NOT_EXECUTED_PROVEN'] });
+    const eShape = shape(expired);
+    expect(executionIncident(eShape.run, eShape.facts, now)).toMatchObject({ outcome: 'Not executed — expired before it could land (service verdict)', actions: [] });
+    // The same code on a legacy approval whose status is still SUBMISSION_RESULT_UNKNOWN proves nothing.
+    expect(classify({ ...expired, runId: 'w3', status: 'SUBMISSION_RESULT_UNKNOWN', attempts: [{ step: 'APPROVAL', state: 'NOT_FOUND', hash: false, reconciled: false }] }))
+      .toMatchObject({ lifecycle: 'ACTIVE', conditions: ['OUTCOME_UNKNOWN'] });
+    // L2: after a Support resume clears the flag, Executions A and B stay "outcome unknown" (high on mainnet) while the re-queued check runs.
+    const resumed: Shape = { ...EXECUTION_A, attention: false, latest: { reconcile: task('reconcile', 'READY', null, '72') }, stoppedKinds: [stopped('reconcile', 'READY')] };
+    const r = shape(resumed);
+    expect(runAttention(r.run, r.facts, null, now)).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['RETRY_PENDING', 'OUTCOME_UNKNOWN'] });
+    expect(executionIncident(r.run, r.facts, now)).toMatchObject({ kind: 'OUTCOME_UNCERTAIN', severity: 'HIGH', eligibility: 'WAITING_EXTERNAL', outcome: 'Outcome unknown',
+      outcomeKnown: false });
+    // L1: an unflagged run with a stopped check whose re-run finished one pass but still needs observation is not historical.
+    const pass: Shape = { runId: 'w4', flow: 'base-swap', status: 'PENDING', provenance: 'PUBLIC_MAINNET', attention: false, needsObservation: true,
+      attempts: [{ step: 'SWAP', state: 'PENDING', hash: true, reconciled: false }], latest: { reconcile: task('reconcile', 'DONE', null, '73') }, stoppedKinds: [stopped('reconcile', 'DONE')] };
+    const p1 = shape(pass);
+    expect(runAttention({ ...p1.run, updatedAt: new Date(now.getTime() - 60_000) }, p1.facts, null, now)).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['RETRY_PENDING'] });
+    // M4: neighbouring uncertainty codes never advise starting again.
+    for (const code of ['UNIVERSAL_NONCE_COLLISION_PENDING', 'ROUTER_RECEIPT_NOT_CANONICAL', 'ROUTER_REPORTED_REJECTED_UNPROVEN'])
+      expect(explainCode(code)).toMatchObject({ remedy: 'UNKNOWN', userAction: null });
+    expect(explainCode('ROUTE_STALE')).toMatchObject({ label: 'Quote or route problem' });
   });
 });

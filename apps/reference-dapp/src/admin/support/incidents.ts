@@ -30,7 +30,7 @@ export type Severity = 'HIGH' | 'MEDIUM' | 'LOW';
 export const SEVERITY_LABELS: Readonly<Record<Severity, string>> = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
 export type IncidentSource = 'EXECUTION' | 'BACKGROUND_TASK' | 'WORKFLOW_RUN' | 'DELEGATED_EXECUTION' | 'PLATFORM' | 'AI_COPILOT';
 export type IncidentKind = 'OBSERVATION_STOPPED' | 'OBSERVATION_NOT_SCHEDULED' | 'EVIDENCE_ARCHIVE_STOPPED' | 'OUTCOME_UNCERTAIN' | 'PARTIAL_EXECUTION'
-  | 'UNCLASSIFIED_STATUS' | 'ATTENTION_FLAGGED' | 'ATTENTION_HISTORICAL' | 'EXECUTION_FAILED' | 'TASK_STOPPED' | 'WORKFLOW_RUN_ATTENTION' | 'DELEGATED_UNRESOLVED' | 'PLATFORM' | 'AI_COPILOT';
+  | 'UNCLASSIFIED_STATUS' | 'RESULT_DIVERGED' | 'ATTENTION_FLAGGED' | 'ATTENTION_HISTORICAL' | 'EXECUTION_FAILED' | 'TASK_STOPPED' | 'WORKFLOW_RUN_ATTENTION' | 'DELEGATED_UNRESOLVED' | 'PLATFORM' | 'AI_COPILOT';
 /**
  * Whether funds could be involved: NONE (nothing was submitted), POSSIBLE (a transaction was or may have been submitted with real funds — a
  * mainnet run, or one whose environment is not recognised), TEST_ONLY (on a test network or a mocked chain), UNKNOWN.
@@ -92,6 +92,8 @@ const KNOWN_OUTCOMES = new Set<ExecutionOutcome>(['COMPLETED', 'FAILED', 'NOT_EX
 const MAYBE_BROADCAST = new Set(['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'NOT_FOUND', 'UNKNOWN', 'RECONCILIATION_REQUIRED']);
 /** Attempt states that exist only after a transaction reached the network. */
 const BROADCAST = new Set(['HASH', 'PENDING', 'CONFIRMED', 'REVERTED', 'SETTLED', 'PARTIALLY_FILLED', 'REFUND_PENDING', 'REFUNDED']);
+const provenNotExecuted = (run: ExecutionSnapshot) => !run.needsObservation && (run.status === 'FAILED' || run.status === 'NOT_EXECUTED') && !!run.errorCode
+  && /_SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(run.errorCode) && !run.hasEvidence && run.attempts.every(attempt => !attempt.hash);
 const OWNER_RECOVERABLE = new Set(['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED', 'SUBMISSION_RESULT_UNKNOWN', 'NOT_FOUND']);
 
 /**
@@ -130,6 +132,7 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
   else if (has('OUTCOME_UNKNOWN')) kind = 'OUTCOME_UNCERTAIN';
   else if (has('PARTIAL_EXECUTION')) kind = 'PARTIAL_EXECUTION';
   else if (has('UNCLASSIFIED_STATUS')) kind = 'UNCLASSIFIED_STATUS';
+  else if (has('RESULT_DIVERGED')) kind = 'RESULT_DIVERGED';
   else if (has('TASK_STOPPED') || has('RETRY_PENDING') || has('FACTS_UNAVAILABLE')) kind = 'ATTENTION_FLAGGED';
   else if (attention.lifecycle === 'HISTORICAL' || attention.lifecycle === 'VERIFIED_RESOLVED') kind = 'ATTENTION_HISTORICAL';
   else if (c.outcome === 'FAILED') kind = 'EXECUTION_FAILED';
@@ -169,7 +172,10 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
     case 'OUTCOME_UNCERTAIN':
       category = crossChain ? 'CROSS_CHAIN' : 'CONFIRMATION'; severity = funds === 'POSSIBLE' ? 'HIGH' : 'MEDIUM'; title = 'Outcome unknown';
       summary = 'FloFi cannot establish whether this execution’s transaction landed. It is not treated as failed or successful.';
-      if (OWNER_RECOVERABLE.has(run.status)) {
+      if (has('RETRY_PENDING')) {
+        eligibility = 'WAITING_EXTERNAL';
+        recommended = 'A transaction check was queued again and has not finished. Wait for the worker, then check this page again; the outcome stays unknown until then.';
+      } else if (OWNER_RECOVERABLE.has(run.status)) {
         eligibility = 'USER_ACTION';
         recommended = 'Ask the owner to open this execution in FloFi: the app offers its reviewed recovery or reconciliation step, which runs with their own wallet. The Admin cannot act on their behalf.';
       } else { eligibility = 'INVESTIGATION'; recommended = 'Compare the transaction on a block explorer with the timeline below, then record your findings as a note.'; }
@@ -183,6 +189,12 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
       category = 'UNKNOWN'; severity = 'MEDIUM'; title = 'Status not recognised';
       summary = `The flow reported a status (${run.status}) that Admin analytics does not classify. Its outcome is shown as unknown.`;
       eligibility = 'ENGINEERING'; recommended = 'Escalate: the status must be classified in code before support can reason about it.';
+      break;
+    case 'RESULT_DIVERGED':
+      category = crossChain ? 'CROSS_CHAIN' : 'TRANSACTION_SUBMISSION'; severity = funds === 'POSSIBLE' ? 'HIGH' : 'MEDIUM'; title = 'Result differs from the review';
+      summary = 'The transaction was observed, but its effects do not match what the owner reviewed. Funds may have moved differently from the review.';
+      eligibility = 'INVESTIGATION';
+      recommended = 'Compare the receipt and its events with the reviewed effects in the timeline below, record findings as a note and escalate. Never retry it for the owner.';
       break;
     case 'ATTENTION_FLAGGED': {
       const retrying = has('RETRY_PENDING') && !has('TASK_STOPPED') && !has('FACTS_UNAVAILABLE');
@@ -204,14 +216,16 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
       break;
     default:
       category = code?.category ?? 'TRANSACTION_SUBMISSION'; severity = 'LOW'; title = 'Failed on chain';
-      summary = 'A transaction of this execution was submitted and the network rejected it. The result is final.';
+      summary = submitted === 'YES' ? 'A transaction of this execution was submitted and the network rejected it. The result is final.'
+        : 'The service recorded a final failure; whether a transaction reached the network is not established from the recorded attempts.';
       eligibility = code?.remedy === 'CODE' || code?.remedy === 'CONFIGURATION' ? 'ENGINEERING' : code?.remedy === 'UNKNOWN' || !code ? 'INVESTIGATION' : 'USER_ACTION';
       recommended = code?.userAction ?? 'Ask the owner to review the failed step and start again with a fresh quote if it is still wanted.';
   }
   return { id: `run:${run.runId}`, lifecycle, attention: { explanation: attention.explanation, conditions: attention.conditions, stopped: attention.stopped,
       flagged: attention.flagged, ownerReviewPending: attention.ownerReviewPending }, kind, source: 'EXECUTION', category, severity, eligibility, title, summary, component: run.flow, feature: featureOf(run.flow),
     at: run.updatedAt.toISOString(), environment, provenance: environment ? null : run.provenance, networks: run.chains.map(chain => networkInfo(chain).name),
-    outcome: OUTCOME_LABELS[c.outcome], outcomeKnown: KNOWN_OUTCOMES.has(c.outcome) && !run.needsObservation, submitted, funds, recommended,
+    outcome: has('OUTCOME_UNKNOWN') ? OUTCOME_LABELS.UNCERTAIN : provenNotExecuted(run) ? 'Not executed — expired before it could land (service verdict)'
+      : OUTCOME_LABELS[c.outcome], outcomeKnown: !has('OUTCOME_UNKNOWN') && KNOWN_OUTCOMES.has(c.outcome) && !run.needsObservation, submitted, funds, recommended,
     actions: actions.map(({ id, eligible, reason }) => ({ id, eligible, reason })), guided: null, codes, resource: { type: 'run', id: run.runId } };
 }
 

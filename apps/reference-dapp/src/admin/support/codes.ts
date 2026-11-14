@@ -60,15 +60,20 @@ const PATTERNS: readonly (readonly [RegExp, Entry])[] = [
     meaning: 'A stored execution record failed its integrity checks. FloFi never acts on such a record.', likelyCause: null }],
   // Observation verdicts that keep an outcome UNKNOWN: never "try again" (a second submission could duplicate one that landed).
   [/_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION$/, { label: 'Nonce used by a different transaction', category: 'CONFIRMATION', remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
-    meaning: 'The account nonce reserved for the reviewed transaction was used by a transaction whose target, data or value differ. The reviewed transaction therefore did not '
-      + 'land at that nonce — but the wallet may have sent it with another nonce, so the outcome stays unknown until that is excluded.',
-    likelyCause: 'The owner’s wallet sent another (or a modified) transaction with that nonce.' }],
+    meaning: 'The account nonce reserved for the reviewed transaction was used by a transaction that is not a direct send of the reviewed call (its target, data '
+      + 'or value differ, or could not be read). It may still contain the reviewed call (for example through a delegated account), or be a different transaction; '
+      + 'the wallet may also have sent the reviewed call with another nonce. The outcome stays unknown until those are excluded.',
+    likelyCause: 'The owner’s wallet sent another, modified or delegated transaction with that nonce.' }],
+  [/_(NONCE_COLLISION_PENDING|RECEIPT_NOT_CANONICAL|REJECTED_UNPROVEN|SUBMISSION_UNKNOWN)$/, { label: 'Outcome not established', category: 'CONFIRMATION',
+    remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
+    meaning: 'The service could not establish whether the transaction landed (a pending nonce collision, a non-canonical receipt or an unproven rejection). '
+      + 'The outcome stays unknown; starting again could duplicate a transaction that landed.', likelyCause: null }],
   [/_TRANSACTION_NOT_OBSERVED$/, { label: 'Transaction not observed', category: 'CONFIRMATION', remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
-    meaning: 'No transaction hash was reported back, and none was found by nonce or in the pending pool at the last check. This does not prove that nothing was submitted: '
-      + 'a delayed wallet broadcast cannot be excluded, so the outcome stays unknown.', likelyCause: null }],
+    meaning: 'At the last check no matching transaction was found for this attempt (by its reported hash or signature, by nonce, or in the pending pool). This does '
+      + 'not prove that nothing was submitted: a delayed wallet broadcast cannot be excluded, so the outcome stays unknown.', likelyCause: null }],
   // Display only: never TRANSIENT, so `retryableStopReason` (the registry's precondition) is exactly what it was before these entries.
   [/_TRANSACTION_PENDING$/, { label: 'Transaction pending', category: 'CONFIRMATION', remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
-    meaning: 'A transaction was found but had no receipt yet at the last check.', likelyCause: null }],
+    meaning: 'At the last check the attempt’s transaction had no receipt yet (or a reported hash was not found anywhere yet).', likelyCause: null }],
   [/_(SEMANTIC_EDIT_REQUIRES_REVIEW|WALLET_CHANGED_REVIEW_REQUIRED)$/, { label: 'Owner review required', category: 'WORKFLOW_VALIDATION', remedy: 'USER', deployment: 'NO',
     userAction: 'The owner reviews the edited workflow again before any further execution.',
     meaning: 'The owner edited the workflow (or changed wallet) after review, so FloFi cleared that authorization. It gates future execution only and changes nothing that '
@@ -85,7 +90,7 @@ const PATTERNS: readonly (readonly [RegExp, Entry])[] = [
     userAction: 'Change the workflow (amount, token or route) and review it again.', meaning: 'The workflow failed simulation, validation or a policy check before anything was signed.', likelyCause: null }],
   [/(BRIDGE|DESTINATION|ACROSS|RELAY|CROSSCHAIN|CROSS_CHAIN)/, { label: 'Cross-chain step', category: 'CROSS_CHAIN', remedy: 'UNKNOWN', userAction: null, deployment: 'UNKNOWN',
     meaning: 'A cross-chain route or its destination settlement reported a problem.', likelyCause: null }],
-  [/(QUOTE|ROUTE|SLIPPAGE|PRICE|LIQUIDITY)/, { label: 'Quote or route problem', category: 'QUOTE_PROVIDER', remedy: 'USER', deployment: 'NO',
+  [/(QUOTE|(?:^|_)ROUTE(?:_|$)|SLIPPAGE|PRICE|LIQUIDITY)/, { label: 'Quote or route problem', category: 'QUOTE_PROVIDER', remedy: 'USER', deployment: 'NO',
     userAction: 'Request a fresh quote.', meaning: 'A quote, route or price check failed or went stale.', likelyCause: null }],
   [/(RPC|TIMEOUT|UNREACHABLE|UPSTREAM|RATE_LIMIT|PROVIDER_UNAVAILABLE|_UNAVAILABLE$)/, { label: 'External service unavailable', category: 'QUOTE_PROVIDER', remedy: 'TRANSIENT',
     userAction: null, deployment: 'NO', meaning: 'An external service (RPC node or provider API) did not answer in time.', likelyCause: 'A temporary outage or rate limit at that provider.' }],

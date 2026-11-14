@@ -13,10 +13,12 @@
  *                          escalation note in the audit trail within the notes window). Never inferred from someone opening a page.
  *     HISTORICAL           the run was flagged, no active condition is demonstrated now, and there is NOT enough incident-specific evidence to
  *                          call it resolved. This is not a resolution.
- *     VERIFIED_RESOLVED    the run was flagged, no active condition remains, the outcome is final, and every task that ever stopped for this
- *                          run has incident-specific resolution evidence: a later run of the same task completed; the stopped observation
- *                          was superseded by a reconciled verdict with an Evidence Bundle and every submitted attempt reconciled; or the
- *                          stopped archive's evidence is now in the evidence store. A terminal status alone never qualifies.
+ *     VERIFIED_RESOLVED    the run was flagged (or a task once stopped), no active condition remains, the outcome is final and its status
+ *                          recognised, and every task that ever stopped for this run has incident-specific resolution evidence: the stopped
+ *                          observation was superseded by a reconciled, non-divergent verdict with an Evidence Bundle and every submitted
+ *                          attempt reconciled (a completed re-run alone is not enough: a check completes whatever the verdict); the service
+ *                          proved non-execution (deposit deadline); or the stopped archive's evidence is now in the evidence store. A terminal
+ *                          status alone never qualifies; a divergent verdict is always ACTIVE.
  *
  * A run that was never flagged and has no active condition has no lifecycle (null). Nothing here writes: the flag, the error code, the
  * execution status and the evidence are shown as recorded. An owner "review required" code (a workflow edited after review) is reported
@@ -38,7 +40,7 @@ export const LIFECYCLE_ORDER: readonly Lifecycle[] = ['ACTIVE', 'UNDER_INVESTIGA
 export const isOpen = (lifecycle: Lifecycle | null | undefined): boolean => lifecycle === 'ACTIVE' || lifecycle === 'UNDER_INVESTIGATION';
 
 export type ConditionCode = 'OUTCOME_UNKNOWN' | 'OBSERVATION_EXHAUSTED' | 'OBSERVATION_NOT_SCHEDULED' | 'PARTIAL_EXECUTION' | 'UNCLASSIFIED_STATUS'
-  | 'EVIDENCE_ARCHIVE_STOPPED' | 'TASK_STOPPED' | 'RETRY_PENDING' | 'FACTS_UNAVAILABLE';
+  | 'EVIDENCE_ARCHIVE_STOPPED' | 'TASK_STOPPED' | 'RETRY_PENDING' | 'FACTS_UNAVAILABLE' | 'RESULT_DIVERGED';
 export const CONDITION_LABELS: Readonly<Record<ConditionCode, string>> = {
   OUTCOME_UNKNOWN: 'Transaction outcome unknown',
   OBSERVATION_EXHAUSTED: 'Transaction check stopped (observation exhausted)',
@@ -49,12 +51,14 @@ export const CONDITION_LABELS: Readonly<Record<ConditionCode, string>> = {
   TASK_STOPPED: 'Background task stopped',
   RETRY_PENDING: 'A stopped task was queued again and has not finished',
   FACTS_UNAVAILABLE: 'Flagged, and its background-task facts could not be read (never assumed resolved)',
+  RESULT_DIVERGED: 'The observed result differs from what was reviewed (divergent verdict)',
 };
-export type ResolutionBasis = 'TASK_COMPLETED_AFTER_STOP' | 'OUTCOME_RECONCILED_AFTER_STOP' | 'EVIDENCE_ARCHIVED_AFTER_STOP';
+export type ResolutionBasis = 'TASK_COMPLETED_AFTER_STOP' | 'OUTCOME_RECONCILED_AFTER_STOP' | 'EVIDENCE_ARCHIVED_AFTER_STOP' | 'NOT_EXECUTED_PROVEN';
 export const RESOLUTION_LABELS: Readonly<Record<ResolutionBasis, string>> = {
   TASK_COMPLETED_AFTER_STOP: 'a later run of the same task completed',
   OUTCOME_RECONCILED_AFTER_STOP: 'a reconciled verdict with an Evidence Bundle superseded the stopped check, and every submitted attempt is reconciled',
   EVIDENCE_ARCHIVED_AFTER_STOP: 'the Evidence Bundle is now in the evidence store',
+  NOT_EXECUTED_PROVEN: 'the service proved non-execution: the protocol deposit deadline passed on a finalized block with a complete scan and no deposit',
 };
 /** What one stopped work kind's history shows now. */
 export type StoppedStatus = 'UNRESOLVED' | 'RETRYING' | 'RESOLVED' | 'NOT_REQUIRED';
@@ -101,15 +105,23 @@ export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | u
   if (c.outcome === 'UNCERTAIN') add('OUTCOME_UNKNOWN');
   if (c.outcome === 'PARTIAL') add('PARTIAL_EXECUTION');
   if (c.outcome === 'UNCLASSIFIED') add('UNCLASSIFIED_STATUS');
+  // A divergent verdict (funds moved differently from the review) is final but never "nothing to do".
+  if (run.status === 'DIVERGENT' || (!run.needsObservation && run.attempts.some(a => a.state === 'RECONCILIATION_REQUIRED'))) add('RESULT_DIVERGED');
 
-  const reconciledVerdict = !run.needsObservation && run.hasEvidence && FINAL_OUTCOMES.has(c.outcome)
+  const reconciledVerdict = !run.needsObservation && run.hasEvidence && FINAL_OUTCOMES.has(c.outcome) && !conditions.includes('RESULT_DIVERGED')
     && run.attempts.filter(attemptSubmitted).every(attempt => attempt.reconciled);
+  // The router's deposit-deadline verdict: the only protocol-backed proof that nothing landed (status FAILED, no transaction hash anywhere).
+  const provenNotExecuted = !run.needsObservation && (run.status === 'FAILED' || run.status === 'NOT_EXECUTED') && !!run.errorCode
+    && /_SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(run.errorCode) && !run.hasEvidence && run.attempts.every(attempt => !attempt.hash);
   const stopped: StoppedTaskView[] = (facts?.stoppedKinds ?? []).map(kind => {
     let status: StoppedStatus, basis: ResolutionBasis | null = null;
     if (kind.newestState === 'READY' || kind.newestState === 'LEASED') { status = 'RETRYING'; add('RETRY_PENDING'); }
     else if (kind.kind === 'reconcile') {
-      if (run.needsObservation) status = 'UNRESOLVED'; // OBSERVATION_EXHAUSTED or NOT_SCHEDULED above
-      else if (kind.newestState === 'DONE') { status = 'RESOLVED'; basis = 'TASK_COMPLETED_AFTER_STOP'; }
+      if (run.needsObservation) status = 'UNRESOLVED'; // observation continues: a condition is added below
+      // A check is DONE as soon as the run stops needing observation, whatever the verdict (a divergent one too), so a completed re-run alone is
+      // not resolution evidence: it also needs a reconciled verdict with an Evidence Bundle, or the service's proof of non-execution.
+      else if (kind.newestState === 'DONE' && reconciledVerdict) { status = 'RESOLVED'; basis = 'TASK_COMPLETED_AFTER_STOP'; }
+      else if (provenNotExecuted) { status = 'RESOLVED'; basis = 'NOT_EXECUTED_PROVEN'; }
       // The reconcile handler completes (never stops) a check once the run no longer needs observation, so a check that stopped while the run
       // still needed it is superseded by any later reconciled verdict — unless it stopped for a permanent reason (invalid data, integrity).
       else if (reconciledVerdict && retryableStopReason(kind.lastError)) { status = 'RESOLVED'; basis = 'OUTCOME_RECONCILED_AFTER_STOP'; }
@@ -124,8 +136,12 @@ export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | u
   });
   // Defensive: the newest archive task itself stopped, whatever the history query returned.
   if (run.hasEvidence && facts && !facts.evidenceArchived && facts.latest['evidence.archive']?.state === 'DEAD') add('EVIDENCE_ARCHIVE_STOPPED');
-  // A flagged run that is still observed (a check is queued again) is never historical or resolved.
-  if (run.attentionRequired && run.needsObservation && !conditions.length) add('RETRY_PENDING');
+  // A run that once stopped (or is flagged) and is still observed is never historical or resolved; an uncertain status stays "outcome unknown"
+  // while its check is retried (the classifier calls it in progress once the flag is cleared), and an unrecognised status is never final.
+  const tracked = run.attentionRequired || stopped.length > 0;
+  if (tracked && UNCERTAIN_STATUSES.has(run.status)) add('OUTCOME_UNKNOWN');
+  if (tracked && !KNOWN_STATUS_SET.has(run.status)) add('UNCLASSIFIED_STATUS');
+  if (tracked && run.needsObservation && !conditions.length) add('RETRY_PENDING');
   const latestStop = Math.max(0, ...stopped.filter(s => s.status === 'UNRESOLVED' || s.status === 'RETRYING').map(s => s.lastStoppedAt ? Date.parse(s.lastStoppedAt) : 0));
   const investigation: Investigation = noted && notedAt && notedAt.getTime() < latestStop ? null : noted;
   const resolution = [...new Set(stopped.flatMap(s => s.basis ? [s.basis] : []))];
@@ -139,7 +155,7 @@ export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | u
     explanation = `Active because: ${conditions.map(code => CONDITION_LABELS[code].toLowerCase()).join('; ')}.`
       + (lifecycle === 'UNDER_INVESTIGATION' ? ' An operator recorded that this incident is being reviewed.' : '')
       + (investigation === 'RESOLUTION_NOTED' ? ' A resolution note exists, but the durable state still shows the condition, so it stays active.' : '');
-  } else if (run.attentionRequired || stopped.length > 0) {
+  } else if (tracked) {
     // A run whose stop was recovered through Support has its flag cleared; its stopped-task history keeps it in the lifecycle.
     const verified = stopped.length > 0 && stopped.every(s => s.status === 'RESOLVED') && FINAL_OUTCOMES.has(c.outcome) && KNOWN_STATUS_SET.has(run.status);
     lifecycle = verified ? 'VERIFIED_RESOLVED' : 'HISTORICAL';
