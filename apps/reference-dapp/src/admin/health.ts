@@ -82,7 +82,9 @@ export async function healthReport(env: Env, host: AdminHost, now: Date, fetchIm
   })();
   const runs = (async (): Promise<HealthReport['runs']> => {
     try {
-      const a = (shared ? await shared : null) ?? await loadExecutionAttention(db, tenantId, now);
+      // With a shared read, use exactly it (never a second, possibly different snapshot); without one, read here.
+      const a = shared ? await shared : await loadExecutionAttention(db, tenantId, now);
+      if (!a) return { ok: false, code: 'EXECUTION_ATTENTION_UNAVAILABLE' };
       return { ok: true, value: { observing: a.observingTotal, oldestObservationSeconds: a.oldestObservationSeconds, flagged: a.flaggedTotal,
         attention: a.counts, truncated: a.truncated, notesOk: a.notesOk } };
     } catch (error) { return failed(error); }

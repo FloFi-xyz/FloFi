@@ -32,20 +32,20 @@ export class RecoveryRefusal extends Error {
 type Host = { readonly db: Database; readonly tenantId: string };
 type FactsRow = { run_id: string; flow: string; status: string; needs_observation: boolean; attention_required: boolean; has_evidence: boolean; log_version: string;
   evidence_archived: boolean;
-  stopped: { kind: string; n: number; last_error: string | null; last_at: string | null }[] | null; latest: { id: string; kind: string; state: WorkState; last_error: string | null; deliveries: number; created_at: string; completed_at: string | null }[] | null };
+  stopped: { kind: string; dedupe: string; n: number; last_error: string | null; last_at: string | null }[] | null; latest: { id: string; kind: string; dedupe: string; state: WorkState; last_error: string | null; deliveries: number; created_at: string; completed_at: string | null }[] | null };
 
 const workFact = (row: NonNullable<FactsRow['latest']>[number]): WorkFact => ({ id: row.id, kind: row.kind, state: row.state, lastError: row.last_error,
   deliveries: row.deliveries, createdAt: new Date(row.created_at), completedAt: row.completed_at ? new Date(row.completed_at) : null });
 
 const FACTS_SELECT = `SELECT r.run_id, r.flow, r.status, r.needs_observation, r.attention_required, r.has_evidence, r.log_version::text AS log_version,
     EXISTS (SELECT 1 FROM evidence_objects e WHERE e.tenant_id = r.tenant_id AND e.run_id = r.run_id) AS evidence_archived,
-    (SELECT json_agg(json_build_object('id', x.id::text, 'kind', x.kind, 'state', x.state, 'last_error', x.last_error, 'deliveries', x.deliveries,
+    (SELECT json_agg(json_build_object('id', x.id::text, 'kind', x.kind, 'dedupe', x.dedupe_key, 'state', x.state, 'last_error', x.last_error, 'deliveries', x.deliveries,
         'created_at', x.created_at, 'completed_at', x.completed_at))
-      FROM (SELECT DISTINCT ON (w.kind, w.dedupe_key) w.id, w.kind, w.state, w.last_error, w.deliveries, w.created_at, w.completed_at FROM work_items w
+      FROM (SELECT DISTINCT ON (w.kind, w.dedupe_key) w.id, w.kind, w.dedupe_key, w.state, w.last_error, w.deliveries, w.created_at, w.completed_at FROM work_items w
         WHERE w.tenant_id = r.tenant_id AND w.run_id = r.run_id ORDER BY w.kind, w.dedupe_key, w.id DESC) x) AS latest,
-    (SELECT json_agg(json_build_object('kind', s.kind, 'n', s.n, 'last_error', s.last_error, 'last_at', s.last_at))
-      FROM (SELECT d.kind, count(*)::int AS n, (array_agg(d.last_error ORDER BY d.id DESC))[1] AS last_error, max(d.completed_at) AS last_at FROM work_items d
-        WHERE d.tenant_id = r.tenant_id AND d.run_id = r.run_id AND d.state = 'DEAD' GROUP BY d.kind) s) AS stopped
+    (SELECT json_agg(json_build_object('kind', s.kind, 'dedupe', s.dedupe_key, 'n', s.n, 'last_error', s.last_error, 'last_at', s.last_at))
+      FROM (SELECT d.kind, d.dedupe_key, count(*)::int AS n, (array_agg(d.last_error ORDER BY d.id DESC))[1] AS last_error, max(d.completed_at) AS last_at
+        FROM work_items d WHERE d.tenant_id = r.tenant_id AND d.run_id = r.run_id AND d.state = 'DEAD' GROUP BY d.kind, d.dedupe_key) s) AS stopped
   FROM execution_runs r`;
 const RECENT_RECOVERIES = `SELECT detail->>'runId' AS run_id, count(*)::int AS n FROM admin_audit_events WHERE tenant_id = $1 AND kind = $2 AND outcome = 'OK'
     AND at >= $3::timestamptz - make_interval(days => $4) AND detail->>'runId' = ANY($5::text[]) GROUP BY 1`;
@@ -60,9 +60,11 @@ function factsOf(row: FactsRow, recentRecoveries: number): RunRecoveryFacts {
     if (!known || BigInt(item.id) > BigInt(known.id)) newestAny.set(item.kind, item);
   }
   for (const kind of ['reconcile', 'evidence.archive'] as const) { const item = newestAny.get(kind); if (item) newest.set(kind, item); }
-  // A stopped item is never pruned, so its kind always has a newest retained item (the stopped one itself, or a later one).
+  // Per (kind, dedupe key): a stopped item is superseded only by a later item of the SAME task. Stopped items are never pruned, so each stopped
+  // task always has a newest retained item (the stopped one itself, or a later one).
+  const newestState = new Map((row.latest ?? []).map(item => [`${item.kind}\u0000${item.dedupe}`, item.state] as const));
   const stoppedKinds = (row.stopped ?? []).map(s => ({ kind: s.kind, count: s.n, lastError: s.last_error, lastStoppedAt: s.last_at ? new Date(s.last_at) : null,
-    newestState: newestAny.get(s.kind)?.state ?? 'DEAD' as WorkState })).sort((a, b) => a.kind < b.kind ? -1 : 1);
+    newestState: newestState.get(`${s.kind}\u0000${s.dedupe}`) ?? 'DEAD' as WorkState })).sort((a, b) => a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0);
   return { runId: row.run_id, flow: row.flow, status: row.status, needsObservation: row.needs_observation, attentionRequired: row.attention_required,
     hasEvidence: row.has_evidence, evidenceArchived: row.evidence_archived, logVersion: Number(row.log_version), latest: Object.fromEntries(newest),
     unresolvedDeadKinds: [...new Set(latest.filter(item => item.state === 'DEAD').map(item => item.kind))], recentRecoveries, stoppedKinds };

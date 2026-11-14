@@ -360,7 +360,7 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 addendum: one attention model a
     // System Health and the Overview's attention list.
     const report = await healthReport({}, h, now, fetch);
     expect(report.runs).toMatchObject({ ok: true, value: { flagged: 12, attention: expected } });
-    expect(healthAttention(report).find(item => item.key === 'attention')).toMatchObject({ title: '3 executions with an active incident', tone: 'bad' });
+    expect(healthAttention(report).find(item => item.key === 'attention')).toMatchObject({ title: '3 execution runs with an active incident', tone: 'bad' });
     // Workflows: the same lifecycle per run, and the range figure counts the mainnet executions with an open incident.
     const wf = await workflowView(h, { env: 'MAINNET' }, now);
     expect(wf.ok).toBe(true);

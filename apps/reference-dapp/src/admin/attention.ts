@@ -33,7 +33,7 @@ export function healthAttention(report: HealthReport): AttentionItem[] {
   else {
     const a = runs.value.attention, open = a.active + a.underInvestigation;
     if (open) items.push({ key: 'attention', tone: a.activeRealFunds ? 'bad' : 'warn',
-      title: `${plural(open, 'execution')} with an active incident${a.underInvestigation ? ` (${a.underInvestigation} under investigation)` : ''}`,
+      title: `${plural(open, 'execution run')} with an active incident${a.underInvestigation ? ` (${a.underInvestigation} under investigation)` : ''}`,
       detail: [a.unknownOutcome && `${a.unknownOutcome} outcome unknown`, a.observationExhausted && `${a.observationExhausted} observation exhausted`,
         a.notScheduled && `${a.notScheduled} check not scheduled`, a.partial && `${a.partial} partial`, a.unclassified && `${a.unclassified} unclassified`,
         a.evidence && `${a.evidence} evidence archiving stopped`, a.tasks && `${a.tasks} stopped or retrying task`, a.activeRealFunds && `${a.activeRealFunds} on mainnet or an unrecognised network`]

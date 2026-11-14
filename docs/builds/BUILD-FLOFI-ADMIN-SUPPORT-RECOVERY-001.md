@@ -176,7 +176,16 @@ separate fields everywhere.
 | Historical attention | flagged, no active condition now, but no incident-specific evidence of resolution (e.g. the run stopped being observed without an Evidence Bundle, or no stopped task is recorded so the cause cannot be reconstructed). **Not a resolution.** |
 | Verified resolved | flagged, no active condition, final outcome, and **every** task that ever stopped for the run has resolution evidence: a later run of the same task completed; or the stopped check was superseded by a reconciled verdict with an Evidence Bundle and every submitted attempt reconciled; or the stopped archive's bundle is now in the evidence store. A terminal status alone never qualifies. |
 
-Stopped tasks are read from `work_items` (DEAD rows are never pruned) through a new `stoppedKinds` field of the recovery facts. It is not part
+Rules added after review: a note only counts if it is newer than the latest stop of a still-unresolved task (it was about an earlier
+occurrence otherwise); a flagged run that still needs observation is never historical (the sweeper never re-arms a flagged run, so no open check
+means "not scheduled" at once); a flagged run whose facts cannot be read is active (`FACTS_UNAVAILABLE`); a run recovered through Support (flag
+cleared) keeps its lifecycle through its stopped-task history and becomes verified resolved when the re-run completes; an unrecognised status is
+never verified resolved; a `reconcile` stop with a permanent code is not superseded by a reconciled verdict.
+
+Stopped tasks are read from `work_items` (DEAD rows are never pruned) per task (kind and dedupe key) through a new `stoppedKinds` field of the
+recovery facts. Only `reconcile` and `evidence.archive` items carry an execution run id today (workflow-run advances store none), and both are
+resolved from the run's own state (no longer observed with a reconciled verdict; bundle in the store), so the 14-day pruning of completed items
+cannot turn a resolved stop back into an active one for them. A future run-tied task kind would need a durable supersession marker. It is not part
 of the recovery eligibility rules or the state token, so the registry's preconditions and the recovery engine are unchanged (asserted by tests).
 An owner "review required" code (`<FLOW>_SEMANTIC_EDIT_REQUIRES_REVIEW`, `_WALLET_CHANGED_REVIEW_REQUIRED` — set by a flow's `invalidate` when the
 owner edits the workflow after review) is reported separately: it gates future execution of that workflow, is not an operational incident and is
@@ -201,7 +210,11 @@ not evidence of resolution. Nothing writes: the flag, the error code, the execut
   "Acknowledged — under investigation", records explicit review.
 
 Intentional scope differences are labelled on the page: the glance tile, System Health, Workflows' attention sections and Support's KPI row are
-all-time and all-environment run counts; the Overview range KPI counts executions (recovery runs folded in) in the selected range and environment.
+all-time and all-environment counts of execution **runs** (a recovery run counts on its own); the Overview range KPI counts **executions**
+(recovery runs folded in) in the selected range and environment, and says "at least" when the model is truncated. The Overview and Support each
+read the model once and pass that single snapshot to every figure on the page. The candidate scan is tenant-scoped and bounded to 500 rows
+(likely-active candidates first), but its `OR` predicate is not served by an index, so on a very large tenant it reads many rows per page load;
+partial indexes would be a separately reviewed migration.
 
 ### 8.4 Interaction with the recovery registry
 
@@ -252,7 +265,8 @@ conclude the same unless the deposit scan finds the deposit, and either run can 
 
 ### 8.6 Read-only classification query
 
-Run in a read-only transaction; it returns no address, hash or key — only presence flags and codes.
+Run in a read-only transaction. It returns presence flags and closed codes only: the free-text `last_error` of a task (which can contain any
+characters the worker recorded) is reduced to its leading code, exactly as the Admin does. Still treat the output as internal.
 
 ```sql
 BEGIN READ ONLY;
@@ -260,17 +274,20 @@ SELECT r.run_id, r.flow, r.status, r.provenance, r.error_code, r.needs_observati
   EXISTS (SELECT 1 FROM evidence_objects e WHERE e.tenant_id = r.tenant_id AND e.run_id = r.run_id) AS evidence_archived,
   (SELECT json_agg(json_build_object('step', a.step, 'state', a.state, 'hash', a.transaction_hash IS NOT NULL, 'reconciled', a.reconciled) ORDER BY a.created_at)
      FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id) AS attempts,
-  (SELECT json_agg(json_build_object('kind', d.kind, 'stopped', d.n, 'last_error', d.last_error, 'newest_state',
-       (SELECT w.state FROM work_items w WHERE w.tenant_id = r.tenant_id AND w.run_id = r.run_id AND w.kind = d.kind ORDER BY w.id DESC LIMIT 1)))
-     FROM (SELECT kind, count(*) AS n, (array_agg(last_error ORDER BY id DESC))[1] AS last_error FROM work_items
-           WHERE tenant_id = r.tenant_id AND run_id = r.run_id AND state = 'DEAD' GROUP BY kind) d) AS stopped
+  (SELECT json_agg(json_build_object('kind', d.kind, 'stopped', d.n,
+       'last_code', coalesce(substring(d.last_error from '^[A-Z][A-Z0-9_]{2,80}'), CASE WHEN d.last_error IS NULL THEN NULL ELSE 'UNCLASSIFIED_ERROR' END),
+       'newest_state', (SELECT w.state FROM work_items w WHERE w.tenant_id = r.tenant_id AND w.run_id = r.run_id AND w.kind = d.kind
+         AND w.dedupe_key = d.dedupe_key ORDER BY w.id DESC LIMIT 1)))
+     FROM (SELECT kind, dedupe_key, count(*) AS n, (array_agg(last_error ORDER BY id DESC))[1] AS last_error FROM work_items
+           WHERE tenant_id = r.tenant_id AND run_id = r.run_id AND state = 'DEAD' GROUP BY kind, dedupe_key) d) AS stopped
 FROM execution_runs r WHERE r.tenant_id = 'default' AND r.attention_required ORDER BY r.updated_at DESC;
 ROLLBACK;
 ```
 
-Map each row with §8.2: an unresolved `stopped` kind (newest state DEAD — for `reconcile` while `needs_observation`, for `evidence.archive` while
-not archived) or an unknown/partial/unclassified status → active; every stopped kind resolved and a final outcome → verified resolved; else
-historical.
+Map each row with §8.2: an unresolved `stopped` task (newest state of the same task DEAD — for `reconcile` while `needs_observation`, for
+`evidence.archive` while not archived), a re-queued one, or an unknown/partial/unclassified status → active; every stopped task resolved, a final
+outcome and a recognised status → verified resolved (a `reconcile` stop counts as superseded by a reconciled verdict only if its code is a
+transient one such as `OBSERVATION_BUDGET_EXHAUSTED`); else historical.
 
 ### 8.7 Validation (addendum)
 
@@ -279,6 +296,7 @@ historical.
 | 1 terminal + historical flag · 2 terminal + independent unresolved incident · 3 reconciled + unrelated owner review · 4/7 uncertain without hash or evidence · 5 two exhausted mainnet jobs with 500 deliveries · 6 nonce consumed by a different transaction · 8 inconclusive evidence after a completed check · 9 active vs historical counts (the 12-record shape) · 11 purity / no mutation · recovery eligibility and state token unchanged | `src/admin/support/lifecycle.test.ts` |
 | 10 consistency across Overview, System Health, Workflows and Support · 11/15 nothing written (runs, attempts, tasks, evidence, audit) · 14 cross-tenant isolation · 12 lifecycle audit append-only · 13 VIEWER refused / OPERATOR acknowledgement → under investigation; a resolution note cannot resolve an active condition | `src/admin/support/support-http.pg.test.ts` (database rows shaped like production) |
 | Attention items: active only, red on mainnet, historical never alerting, truncation warning | `src/admin/attention.test.ts` |
+| Review fixes: stale notes, flagged runs still observed, unreadable facts, recovered runs, unknown statuses, permanent stop reasons; the new code explanations never widen `retryableStopReason`; screening of CPF/CNPJ/RG/phone/IPv4 with dates and record ids still allowed | `src/admin/support/lifecycle.test.ts` |
 | Browser: historical flag kept out of the open list and listed under its own lifecycle; Workflows and System Health show the same split; a note makes the incident under investigation while the outcome stays not established | `e2e/admin-console.spec.ts` |
 | 16 existing Support & Recovery suites | unchanged and passing (unit, PostgreSQL, end-to-end cloud recovery, browser) |
 
@@ -299,7 +317,9 @@ deletion mechanism that compromises financial audit integrity; document options 
 | `SUPPORT_SEARCH` | operator principal id; identifier **type**; a 64-bit keyed fingerprint (HMAC with a dedicated subkey of `FLOFI_ADMIN_SESSION_SECRET`); result count | the identifier itself is never stored, logged or put in a URL; wallet lookups need OPERATOR |
 
 The fingerprint is pseudonymous personal data (re-identifiable by whoever holds the key and the identifier); it exists so the owner can answer
-*who looked up this person, and when* — itself an input to an access request.
+*who looked up this person, and when* for **lookups**. It does not cover everything: opening a Diagnose page, Workflows or System Health is not
+audited, a VIEWER can see transaction hashes, and incident links carry run ids in the URL (so they reach request logs). Operators are data
+subjects too: the principal id links to their wallet and label.
 
 **Proposed retention, purposes and candidate lawful bases.** LGPD art. 6 X (accountability) is a **principle** and art. 18 lists **data-subject
 rights**; neither is a lawful basis. The candidate bases are LGPD art. 7 (and art. 11 for sensitive data, which none of these records should
@@ -308,32 +328,55 @@ recital 47 / art. 6(1)(f)).
 
 | Record | Purpose | Proposed retention | Candidate LGPD basis | Candidate GDPR basis |
 |---|---|---|---|---|
-| Recovery event skeleton (who, when, action, run id, operation id, outcome, code, verification) | accountability for administrative actions on execution infrastructure; security; defence in disputes about an execution | as long as the related execution record is kept, capped at 5 years after the execution (to be aligned with whatever retention counsel sets for the execution history itself) | art. 7 IX legitimate interest; art. 7 VI regular exercise of rights in proceedings; art. 7 II only where a specific legal or regulatory duty applies to FloFi | art. 6(1)(f); art. 6(1)(c) only for a specific Union/Member State obligation; art. 17(3)(e) for legal claims |
-| Recovery reason text, note text | explain a decision to other operators | 12 months, then redact the text and keep the skeleton and a hash | art. 7 IX | art. 6(1)(f) |
-| Lookup audit (type, fingerprint, count) | access accountability, abuse detection, answering access requests | 12 months | art. 7 IX (security and accountability of access; cf. art. 46 duty) | art. 6(1)(f) (cf. art. 32 duty) |
-| Notes window used by the UI ("under investigation") | operational state | 90 days (display only, already implemented) | — | — |
+| Recovery event skeleton (who, when, action, run id, operation id, outcome, code, verification) | accountability for administrative actions on execution infrastructure; security; defence in disputes about an execution | as long as the related execution record is kept, capped at 5 years after the execution. The 5 years is a proposal for counsel to justify or change — candidate references: consumer-claim limitation (CDC art. 27) and civil limitation periods (Código Civil arts. 205–206) | art. 7 IX legitimate interest; art. 7 VI regular exercise of rights in proceedings; art. 7 II only where a specific legal or regulatory duty applies to FloFi | art. 6(1)(f); art. 6(1)(c) only for a specific Union or Member State obligation |
+| Recovery reason text, note text | explain a decision to other operators | 12 months, then delete the text (see the options) and keep the skeleton | art. 7 IX | art. 6(1)(f) |
+| Lookup audit (type, fingerprint, count) | access accountability, abuse detection, answering access requests | 12 months | art. 7 IX | art. 6(1)(f) |
+| Notes read window used by the UI ("under investigation") | operational state | **not a retention period**: the UI reads 90 days, the rows persist | — | — |
 
-Counsel should also confirm: whether any record falls under Marco Civil da Internet art. 15 (application access logs, 6 months) — these are
+Duties, not bases: LGPD art. 46 / GDPR art. 32 (security), LGPD art. 37 / GDPR art. 30 (records of processing — LGPD highlights them for
+legitimate interest), LGPD art. 10 §2 (transparency) and §3 / art. 38 (impact report, RIPD), LGPD art. 41 (encarregado). GDPR art. 17(3)(e)
+(legal claims) is an exemption from erasure, not a lawful basis; LGPD art. 16 lists when data may be kept after processing ends and does not
+expressly name defending claims, so whether keeping the skeleton rests on art. 7 VI as a continuing purpose is a question for counsel. The
+legitimate-interest balancing should follow the ANPD's 2024 guidance on legitimate interest.
+
+Counsel should also confirm: whether the GDPR applies at all (art. 3(2)); international transfer (hosting regions; LGPD art. 33 and ANPD
+Resolution 19/2024; GDPR Chapter V); whether any record falls under Marco Civil da Internet art. 15 (application access logs, 6 months) — these are
 operator records, not end-user access logs, so probably not; the privacy notice text covering operator access to execution records for support;
 and treatment of database backups (Neon point-in-time recovery keeps deleted or redacted data until the backup window passes).
 
 **Rights handling.** Access (LGPD art. 18 II / GDPR art. 15): records about a person are found by computing the fingerprint of their wallet and
-by their run ids; a documented, read-only owner procedure is needed (not built). Correction: notes are append-only; a correcting note is
-added. Erasure / anonymisation (LGPD art. 18 IV and VI / GDPR art. 17): not possible in place today; the options below make it possible
-without touching the event skeleton. Objection: handled by the legitimate-interest balancing test.
+by their run ids; a documented, read-only owner procedure is needed (not built). Correction (LGPD art. 18 III / GDPR art. 16): notes are
+append-only; a correcting note is added, which GDPR art. 16 allows as a supplementary statement. Deletion: none of the proposed bases is
+consent, so the relevant routes are LGPD art. 18 IV (unnecessary, excessive or non-compliant data), art. 18 §2 (objection) and art. 16 (end of
+processing), and GDPR art. 17; none is possible in place today — the options below make it possible without touching the event skeleton.
+Objection under GDPR art. 21(1) is a compelling-legitimate-grounds / legal-claims test, not the balancing test. An owner's run purge removes the
+run but leaves an orphaned recovery skeleton, its reason, notes and lookup fingerprints.
 
-**Structural options (each needs a reviewed migration; none was made):**
+**Structural options (each needs a reviewed migration; none was made).** Today's baseline: a row-level trigger rejects UPDATE and DELETE on
+`admin_audit_events`; it does not cover TRUNCATE or a table owner disabling triggers, and there is no hash chain — so the table is append-only by
+policy, not cryptographically tamper-evident.
 
-1. **Separate the free text (recommended).** A new table `admin_support_texts (tenant_id, text_id, body, created_at, expires_at)`; audit rows
-   keep `text_id` and the SHA-256 of the body. A retention job (and an erasure request) deletes expired or requested bodies; the audit table stays
-   strictly append-only and still proves that a text existed and what its hash was. *Risk:* the content is gone for a later dispute; a two-table
-   write must stay atomic (one transaction, as today).
-2. **Epoch keys for fingerprints and text (crypto-shredding).** Random per-period keys in a new key table; fingerprints and encrypted bodies
-   use the period key; deleting a key after the retention period makes that period's fingerprints unlinkable and bodies unreadable without
-   touching rows. *Risk:* key-management complexity; keys in backups; losing a key early loses audit content.
-3. **Narrow, audited redaction inside `admin_audit_events`.** A SECURITY DEFINER function allowed to null only `detail.text`/`detail.reason` of
+1. **Separate the free text.** A new table `admin_support_texts (tenant_id, text_id, body, salt, created_at, expires_at)`; audit rows keep
+   `text_id` and an HMAC of the body under a random per-row salt stored and deleted with the body (a plain SHA-256 of a short note could be
+   dictionary-attacked and would itself remain a derivative of the text). A retention job (and an erasure request) deletes expired or requested
+   bodies with their salts. *Risk:* the content is gone for a later dispute; the two-table write must stay one transaction (as today).
+2. **Epoch keys for lookup fingerprints.** The fingerprint is already an HMAC; derive it from a random per-period key held in a new key table and
+   delete the key when the period's retention ends, making that period's fingerprints unlinkable without touching rows. *Risk:* key management;
+   keys in backups; once a key is deleted, access requests about that period can no longer be answered (that is the intended trade-off).
+3. **Time-partitioned audit table for the skeleton.** Partition `admin_audit_events` by period; rows are never updated or deleted, but a whole
+   expired partition is archived to write-once storage (with an exported integrity digest) and dropped, under a narrow, audited privilege.
+   *Risk:* converting a live table to a partitioned one is a heavy migration; the drop path is a privileged operation that must itself be
+   audited; backups keep data until their window passes.
+4. **Narrow, audited redaction inside `admin_audit_events`.** A SECURITY DEFINER function allowed to null only `detail.text`/`detail.reason` of
    `SUPPORT_*` rows older than the retention period, writing a `SUPPORT_REDACTION` event. *Risk:* weakens the table's append-only guarantee and
-   needs a trigger change; hardest to defend as tamper-evident. Not recommended.
+   needs a trigger change. Not recommended.
 
-Until one is approved and built, rotating `FLOFI_ADMIN_SESSION_SECRET` (which also ends every admin session) is the only available way to make
-existing fingerprints unlinkable, and reasons and notes are kept as written — so operators must keep personal data out of them.
+**Recommendation:** 1 + 2 together (text and fingerprints get enforceable periods without touching the skeleton), with 3 when the skeleton's
+cap is decided; 4 last. Until one is approved and built, rotating `FLOFI_ADMIN_SESSION_SECRET` (which also ends every admin session) is the only
+available way to make existing fingerprints unlinkable — and it also prevents answering access requests about earlier lookups — and reasons and
+notes are kept as written, so operators must keep personal data out of them (screening now also refuses CPF, CNPJ, RG, Brazilian phone numbers
+and IPv4 addresses, best effort).
+
+**Needed before production use of these records:** counsel's decision on bases and periods (including the art. 16 question), a legitimate-interest
+assessment and RIPD, updated privacy-notice text, owner approval of a structural option and its reviewed migration, and a documented
+access-request procedure.

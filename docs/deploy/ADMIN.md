@@ -163,7 +163,7 @@ Audit kinds: `SUPPORT_RECOVERY` (OK with operation id `rop_…`, or REFUSED/FAIL
 recoveries per 10 minutes (tenant, checked inside the serialized recovery transaction), 3 recoveries of one execution per 7 days, 120 lookups and
 60 notes per administrator per 10 minutes. Reasons and notes are visible to every administrator: never paste keys, passwords or personal data.
 They are screened (best effort) and refused when they contain wallet addresses, transaction hashes, e-mail addresses, standalone runs of 8+
-digits or @handles.
+digits, CPF / CNPJ / RG or Brazilian phone formats, IPv4 addresses or @handles.
 
 **Retention (owner decision 2026-11-14; enforcement not yet built).** The owner approved an auditable recovery history but not indefinite
 retention of identifiable personal data. Support writes into the existing append-only `admin_audit_events` table, which nothing deletes: lookup

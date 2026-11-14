@@ -13,7 +13,7 @@ import { buildTimeline, incidentStatus, isIncidentId, listNotes, loadTimelineFac
   type TaskRow } from './diagnostics.ts';
 import { copilotIncidents, delegatedIncident, discoverIncidents, executionIncident, FEATURE_LABELS, loadExecutions, platformIncidents, sortIncidents, taskIncident,
   workflowRunIncident, type DelegatedRow, type ExecutionSnapshot, type Feature, type Incident, type Severity, type SourceStatus, type WorkflowRunRow } from './incidents.ts';
-import { investigationOf, latestNoteKinds, runAttention, type ExecutionAttention, type Lifecycle } from './lifecycle.ts';
+import { investigationOf, latestNoteKinds, loadExecutionAttention, runAttention, type ExecutionAttention, type LatestNote, type Lifecycle } from './lifecycle.ts';
 import { loadRunFacts, recoveryHistory, recoverySummary, type HistoryEntry, type HistorySummary } from './recovery.ts';
 import { ELIGIBILITY_ORDER, type EligibilityState, type RunRecoveryFacts } from './registry.ts';
 
@@ -81,20 +81,22 @@ export async function notesByIncident(host: Host, now: Date, ids: readonly strin
  * An ACTIVE non-execution incident with an explicit review note is UNDER_INVESTIGATION (execution incidents get theirs from the shared model).
  * Only a recorded note counts — opening a page never does.
  */
-export function withInvestigation(list: readonly Incident[], latestKinds: ReadonlyMap<string, string>): Incident[] {
-  return list.map(incident => incident.source !== 'EXECUTION' && incident.lifecycle === 'ACTIVE' && investigationOf(latestKinds.get(incident.id)) === 'ACKNOWLEDGED'
+export function withInvestigation(list: readonly Incident[], latest: ReadonlyMap<string, LatestNote>): Incident[] {
+  return list.map(incident => incident.source !== 'EXECUTION' && incident.lifecycle === 'ACTIVE' && investigationOf(latest.get(incident.id)?.kind) === 'ACKNOWLEDGED'
     ? { ...incident, lifecycle: 'UNDER_INVESTIGATION' } : incident);
 }
 
 export async function allIncidents(env: Env, host: Host, now: Date): Promise<{ incidents: Incident[]; sources: SourceStatus[]; platformOk: boolean;
   attention: ExecutionAttention | null }> {
-  const [discovery, report, copilot] = await Promise.all([discoverIncidents(host.db, host.tenantId, now),
-    healthReport(env, host, now).catch(() => null), copilotSettingsView(env, host).catch(() => null)]);
+  // One read of the execution-attention model feeds both the incident list and System Health, so they cannot show different snapshots.
+  const shared = loadExecutionAttention(host.db, host.tenantId, now).catch(() => null);
+  const [discovery, report, copilot] = await Promise.all([discoverIncidents(host.db, host.tenantId, now, shared),
+    healthReport(env, host, now, fetch, shared).catch(() => null), copilotSettingsView(env, host).catch(() => null)]);
   const extra = [...report ? platformIncidents(healthAttention(report), now) : [], ...copilot ? copilotIncidents(copilotStatus(copilot).items, now) : []];
   const sources: SourceStatus[] = [...discovery.sources, { source: 'PLATFORM', ok: report !== null, code: report ? null : 'HEALTH_UNAVAILABLE', truncated: false },
     { source: 'AI_COPILOT', ok: copilot !== null, code: copilot ? null : 'COPILOT_VIEW_UNAVAILABLE', truncated: false }];
   const others = [...discovery.incidents.filter(i => i.source !== 'EXECUTION'), ...extra];
-  const kinds = await latestNoteKinds(host.db, host.tenantId, others.map(i => i.id), now).catch(() => new Map<string, string>());
+  const kinds = await latestNoteKinds(host.db, host.tenantId, others.map(i => i.id), now).catch(() => new Map<string, LatestNote>());
   return { incidents: sortIncidents([...discovery.incidents.filter(i => i.source === 'EXECUTION'), ...withInvestigation(others, kinds)]), sources, platformOk: report !== null,
     attention: discovery.attention };
 }
@@ -124,13 +126,13 @@ export async function incidentDetail(env: Env, host: Host, now: Date, id: string
   const separator = id.indexOf(':'), prefix = id.slice(0, separator), key = id.slice(separator + 1);
   if (!isIncidentId(id)) return { type: 'not-found' };
   const { db, tenantId } = host;
-  const investigated = async (incident: Incident) => withInvestigation([incident], await latestNoteKinds(db, tenantId, [incident.id], now).catch(() => new Map<string, string>()))[0]!;
+  const investigated = async (incident: Incident) => withInvestigation([incident], await latestNoteKinds(db, tenantId, [incident.id], now).catch(() => new Map<string, LatestNote>()))[0]!;
   if (prefix === 'run') {
     const [run] = await loadExecutions(db, tenantId, [key]);
     if (!run) return { type: 'not-found' };
     const [facts, timeline, tasks, history, kinds] = await Promise.all([loadRunFacts(db, tenantId, key, now), loadTimelineFacts(host, key), runTasks(host, key),
-      recoveryHistory(host, now, { runId: key, days: 90, limit: 50 }), latestNoteKinds(db, tenantId, [id], now).catch(() => new Map<string, string>())]);
-    const attention = runAttention(run, facts ?? undefined, investigationOf(kinds.get(id)), now);
+      recoveryHistory(host, now, { runId: key, days: 90, limit: 50 }), latestNoteKinds(db, tenantId, [id], now).catch(() => new Map<string, LatestNote>())]);
+    const note = kinds.get(id), attention = runAttention(run, facts ?? undefined, investigationOf(note?.kind), now, note?.at ?? null);
     return { type: 'run', run, facts, incident: executionIncident(run, facts ?? undefined, now, attention), milestones: buildTimeline(run, timeline.journal, timeline.attempts),
       journal: timeline.journal, journalTruncated: timeline.journalTruncated, attempts: timeline.attempts, attemptsTruncated: timeline.attemptsTruncated,
       tasks: tasks.tasks, tasksTruncated: tasks.truncated, history };

@@ -50,7 +50,7 @@ function Glance({ health, copilot }: { health: Awaited<ReturnType<typeof healthR
       <StatusTile label="AI Copilot" tone={ai.tone} value={ai.value} detail={ai.detail} href="/admin/ai-settings"/>
       <StatusTile label="Active execution incidents" tone={open === null ? 'warn' : open ? 'warn' : 'ok'}
         value={open === null ? 'Unknown' : open ? fmt(open) : 'None'} href="/admin/support?lifecycle=OPEN"
-        detail={runs?.ok ? `All environments, all time${runs.value.attention.underInvestigation ? ` · ${fmt(runs.value.attention.underInvestigation)} under investigation` : ''}`
+        detail={runs?.ok ? `Execution runs, all environments, all time${runs.value.attention.underInvestigation ? ` · ${fmt(runs.value.attention.underInvestigation)} under investigation` : ''}`
           + (runs.value.attention.historical ? ` · ${fmt(runs.value.attention.historical)} historical flag${runs.value.attention.historical === 1 ? '' : 's'} (separate)` : '')
           + (runs.value.truncated ? ' · at least' : '') : 'Could not be checked'}/>
     </div>
@@ -96,7 +96,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
         <Kpi label="Partial" value={fmt(a.outcomes.PARTIAL)} tone={a.outcomes.PARTIAL ? 'warn' : undefined}/>
         <Kpi label="In progress" value={fmt(a.outcomes.IN_PROGRESS)} note={a.awaitingSignature ? `+${fmt(a.awaitingSignature)} awaiting a wallet signature` : undefined}/>
         <Kpi label="Active incidents" value={fmt(a.attention)} tone={a.attention ? 'warn' : undefined}
-          note={`${view.attention ? 'in this range and environment' : 'classifier only — attention model unavailable'} · ${fmt(a.outcomes.UNCERTAIN)} outcome unknown`}/>
+          note={`${view.attention ? `${view.attention.truncated ? 'at least · ' : ''}executions in this range and environment` : 'classifier only — attention model unavailable'} · ${fmt(a.outcomes.UNCERTAIN)} outcome unknown`}/>
         <Kpi label="Success rate" value={pct(a.rates.success)} note={a.rates.denominator ? `of ${fmt(a.rates.denominator)} finished` : 'no finished executions'}/>
         <Kpi label="Failure rate" value={pct(a.rates.failure)} note="confirmed failures only"/>
       </div>

@@ -5,7 +5,8 @@
  * stopped-task history is stated explicitly, because that history decides the classification — not the execution status.
  */
 import { describe, expect, it } from 'vitest';
-import { explainCode } from './codes.ts';
+import { explainCode, retryableStopReason } from './codes.ts';
+import { identifierShaped } from './diagnostics.ts';
 import type { ExecutionSnapshot } from './executions.ts';
 import { executionIncident, submissionOf } from './incidents.ts';
 import { countAttention, investigationOf, OWNER_REVIEW_CODE, runAttention } from './lifecycle.ts';
@@ -177,5 +178,53 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 attention lifecycle', () => {
       latest: { reconcile: task('reconcile', 'READY', null, '40') } });
     expect(runAttention(observing.run, observing.facts, null, now)).toMatchObject({ lifecycle: null, awaitingObservation: true });
     expect(classify({ runId: 'n', flow: 'base-swap', status: 'RECONCILED', provenance: 'PUBLIC_MAINNET', attention: false }).lifecycle).toBeNull();
+  });
+
+  it('review fixes: stale notes, flagged runs still observed, missing facts, recovered runs, unknown statuses and permanent stop reasons', () => {
+    // A note written before the latest stop was about an earlier occurrence: it does not mark the new stop under investigation.
+    const { run, facts } = shape(EXECUTION_A);
+    expect(runAttention(run, facts, 'ACKNOWLEDGED', now, new Date(now.getTime() - 3 * day)).lifecycle).toBe('ACTIVE');
+    expect(runAttention(run, facts, 'ACKNOWLEDGED', now, new Date(now.getTime() - day)).lifecycle).toBe('UNDER_INVESTIGATION');
+    // A flagged run that still needs observation is never historical: the sweeper never re-arms a flagged run, so no open check = not scheduled.
+    const observed = { runId: 'f1', flow: 'base-swap', status: 'HASH', provenance: 'PUBLIC_MAINNET', needsObservation: true,
+      latest: { reconcile: task('reconcile', 'DONE', null, '50') }, stoppedKinds: [stopped('reconcile', 'DONE')] };
+    const recent = shape(observed);
+    expect(runAttention({ ...recent.run, updatedAt: new Date(now.getTime() - 60_000) }, recent.facts, null, now)).toMatchObject({ lifecycle: 'ACTIVE',
+      conditions: ['OBSERVATION_NOT_SCHEDULED'] });
+    expect(classify({ ...observed, runId: 'f2', latest: { reconcile: task('reconcile', 'READY', null, '51') }, stoppedKinds: [stopped('reconcile', 'READY')] }))
+      .toMatchObject({ lifecycle: 'ACTIVE', conditions: ['RETRY_PENDING'] });
+    // Facts that cannot be read never make a flagged run historical or resolved.
+    expect(runAttention(shape({ runId: 'f3', flow: 'base-swap', status: 'RECONCILED', provenance: 'PUBLIC_MAINNET' }).run, undefined, null, now))
+      .toMatchObject({ lifecycle: 'ACTIVE', conditions: ['FACTS_UNAVAILABLE'] });
+    // A run recovered through Support (flag cleared) keeps its lifecycle through its stopped-task history.
+    const recovered: Shape = { runId: 'f4', flow: 'base-sepolia-swap', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET', attention: false, hasEvidence: true,
+      evidenceArchived: true, latest: { 'evidence.archive': task('evidence.archive', 'DONE', null, '60') }, stoppedKinds: [stopped('evidence.archive', 'DONE')] };
+    expect(classify(recovered)).toMatchObject({ lifecycle: 'VERIFIED_RESOLVED', flagged: false });
+    expect(classify({ ...recovered, evidenceArchived: false, latest: { 'evidence.archive': task('evidence.archive', 'READY', null, '61') },
+      stoppedKinds: [stopped('evidence.archive', 'READY')] })).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['RETRY_PENDING'] });
+    // An unrecognised status is never verified resolved, even when every stop has evidence.
+    const unknown: Shape = { runId: 'f5', flow: 'base-swap', status: 'SETTLING_V2', provenance: 'PUBLIC_MAINNET', hasEvidence: false, attempts: [],
+      latest: { reconcile: task('reconcile', 'DONE', null, '62') }, stoppedKinds: [stopped('reconcile', 'DONE')] };
+    expect(classify(unknown)).toMatchObject({ lifecycle: 'HISTORICAL', outcome: 'NOT_STARTED' }); // never started, but not recognised: not verified
+    expect(classify({ ...recovered, runId: 'f5b', status: 'SETTLING_V2', attention: true })).toMatchObject({ lifecycle: 'ACTIVE', conditions: ['UNCLASSIFIED_STATUS'] });
+    // A check that stopped for a permanent reason is not superseded by the reconciled verdict.
+    expect(classify({ runId: 'f6', flow: 'base-sepolia-swap', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET', hasEvidence: true, evidenceArchived: true,
+      latest: { reconcile: task('reconcile', 'DEAD', 'WORK_PAYLOAD_INVALID') }, stoppedKinds: [stopped('reconcile', 'DEAD', 'WORK_PAYLOAD_INVALID')] }))
+      .toMatchObject({ lifecycle: 'HISTORICAL', resolution: [] });
+  });
+
+  it('review fixes: the new code explanations never widen what the registry may retry', () => {
+    for (const code of ['SWAP_TRANSACTION_PENDING', 'ROUTER_TRANSACTION_PENDING', 'UNIVERSAL_TRANSACTION_PENDING', 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION',
+      'ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION', 'ROUTER_TRANSACTION_NOT_OBSERVED', 'UNIVERSAL_TRANSACTION_NOT_OBSERVED', 'JUPITER_SEMANTIC_EDIT_REQUIRES_REVIEW',
+      'UNIVERSAL_WALLET_CHANGED_REVIEW_REQUIRED', 'ROUTER_STATE_CORRUPT_TRANSACTION_PENDING']) expect([code, retryableStopReason(code)]).toEqual([code, false]);
+    expect(retryableStopReason('OBSERVATION_BUDGET_EXHAUSTED')).toBe(true);
+    expect(explainCode('ROUTER_STATE_CORRUPT_TRANSACTION_PENDING')).toMatchObject({ remedy: 'CODE' });
+  });
+
+  it('review fixes: free-text screening refuses Brazilian document and phone formats and IP addresses, and keeps dates and record ids', () => {
+    for (const text of ['cliente CPF 123.456.789-09', 'CNPJ 12.345.678/0001-90', 'RG 12.345.678-9', 'ligar (11) 98765-4321', 'tel 11 3456-7890', 'from 192.168.10.20'])
+      expect([text, identifierShaped(text)]).toEqual([text, true]);
+    for (const text of ['Provider outage resolved on 2026-11-14 at 14:30', 'Escalated run xuni-379461c2e3f1807a0dc0455342a51d21', 'Retry 3 of 3, step 2', 'v1.2 release'])
+      expect([text, identifierShaped(text)]).toEqual([text, false]);
   });
 });

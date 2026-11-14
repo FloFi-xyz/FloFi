@@ -38,11 +38,11 @@ describe('BUILD-ADMIN-AI-PROVIDERS-001 status at a glance', () => {
     // The confirmed production shape: 12 flagged runs, of which 2 have active unknown outcomes on mainnet and 10 are historical.
     const production = runs({ active: 2, activeRealFunds: 2, unknownOutcome: 2, observationExhausted: 2, historical: 9, resolved: 1 });
     expect(healthAttention(production)).toEqual([expect.objectContaining({ key: 'attention', tone: 'bad', href: '/admin/support?lifecycle=OPEN',
-      title: '2 executions with an active incident', detail: '2 outcome unknown · 2 observation exhausted · 2 on mainnet or an unrecognised network' })]);
+      title: '2 execution runs with an active incident', detail: '2 outcome unknown · 2 observation exhausted · 2 on mainnet or an unrecognised network' })]);
     const historicalOnly = runs({ historical: 10 }, 10);
     expect(healthAttention(historicalOnly)).toEqual([]);
     expect(healthStatus(historicalOnly)).toMatchObject({ tone: 'ok', detail: expect.stringContaining('10 historical attention flags (not verified resolved)') });
-    expect(healthAttention(runs({ active: 1, underInvestigation: 1, tasks: 2 }))[0]).toMatchObject({ tone: 'warn', title: '2 executions with an active incident (1 under investigation)' });
+    expect(healthAttention(runs({ active: 1, underInvestigation: 1, tasks: 2 }))[0]).toMatchObject({ tone: 'warn', title: '2 execution runs with an active incident (1 under investigation)' });
     expect(healthAttention(runs({}, 0, true)).map(item => item.key)).toEqual(['attention-partial']);
   });
   it('reads a live Copilot as live only when a channel can be served, and never downgrades a total outage to a warning', () => {

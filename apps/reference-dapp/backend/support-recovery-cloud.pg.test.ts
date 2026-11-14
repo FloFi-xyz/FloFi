@@ -78,7 +78,12 @@ describe('Support & Recovery: resume a stopped transaction check end to end', ()
     expect(chain.transactions).toHaveLength(1);
     expect((await db.query(`SELECT count(*)::int AS n FROM execution_attempts WHERE run_id = $1`, [record.id])).rows[0]).toEqual({ n: 1 });
     expect((await previewRecovery(host, record.id, 'execution.resume-observation', new Date()))!.eligibility).toMatchObject({ eligible: false, code: 'SUPPORT_NOTHING_TO_RECOVER' });
-    expect((await discoverIncidents(db, 'default', new Date())).incidents.find(i => i.id === `run:${record.id}`)).toBeUndefined();
+    // The incident leaves the open list and stays listed as verified resolved: its stopped check was re-run and completed (the flag was
+    // cleared by the audited recovery; the stopped-task history keeps the record). No action is offered.
+    const after = await discoverIncidents(db, 'default', new Date());
+    expect(after.incidents.find(i => i.id === `run:${record.id}`)).toMatchObject({ lifecycle: 'VERIFIED_RESOLVED', kind: 'ATTENTION_HISTORICAL', actions: [],
+      eligibility: 'NONE', outcome: 'Completed' });
+    expect(after.attention?.counts).toMatchObject({ active: 0, resolved: 1 });
     await db.close();
   });
 });

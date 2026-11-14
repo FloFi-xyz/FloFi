@@ -130,7 +130,7 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
   else if (has('OUTCOME_UNKNOWN')) kind = 'OUTCOME_UNCERTAIN';
   else if (has('PARTIAL_EXECUTION')) kind = 'PARTIAL_EXECUTION';
   else if (has('UNCLASSIFIED_STATUS')) kind = 'UNCLASSIFIED_STATUS';
-  else if (has('TASK_STOPPED') || has('RETRY_PENDING')) kind = 'ATTENTION_FLAGGED';
+  else if (has('TASK_STOPPED') || has('RETRY_PENDING') || has('FACTS_UNAVAILABLE')) kind = 'ATTENTION_FLAGGED';
   else if (attention.lifecycle === 'HISTORICAL' || attention.lifecycle === 'VERIFIED_RESOLVED') kind = 'ATTENTION_HISTORICAL';
   else if (c.outcome === 'FAILED') kind = 'EXECUTION_FAILED';
   if (!kind) return null;
@@ -151,6 +151,7 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
       title = kind === 'OBSERVATION_STOPPED' ? 'Transaction check stopped' : 'Transaction check not scheduled';
       summary = kind === 'OBSERVATION_STOPPED'
         ? 'FloFi stopped checking this execution’s transaction before reaching a final answer. Until it is checked again, its result stays unknown.'
+        : run.attentionRequired ? 'This execution still needs its transaction checked, but no check is queued, and the background sweeper never re-queues a flagged execution.'
         : 'This execution still needs its transaction checked, but no check is queued. The background sweeper normally re-queues it within a minute — the worker may not be running.';
       const action = actions[0]!;
       eligibility = action.eligible ? 'RECOVERABLE_NOW' : action.state ?? 'INVESTIGATION';
@@ -184,9 +185,11 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
       eligibility = 'ENGINEERING'; recommended = 'Escalate: the status must be classified in code before support can reason about it.';
       break;
     case 'ATTENTION_FLAGGED': {
-      const retrying = has('RETRY_PENDING') && !has('TASK_STOPPED');
-      category = 'BACKGROUND'; severity = 'MEDIUM'; title = retrying ? 'Stopped task queued again' : 'Background task stopped';
-      summary = retrying ? 'A task that had stopped for this execution was queued again and has not finished. The incident stays open until it does.'
+      const retrying = has('RETRY_PENDING') && !has('TASK_STOPPED') && !has('FACTS_UNAVAILABLE');
+      category = 'BACKGROUND'; severity = 'MEDIUM';
+      title = has('FACTS_UNAVAILABLE') ? 'Flagged — task facts unavailable' : retrying ? 'Stopped task queued again' : 'Background task stopped';
+      summary = has('FACTS_UNAVAILABLE') ? 'This execution is flagged, and its background-task facts could not be read. It is kept open rather than assumed resolved.'
+        : retrying ? 'A task that had stopped for this execution was queued again and has not finished. The incident stays open until it does.'
         : `A background task for this execution stopped (${attention.stopped.filter(s => s.status === 'UNRESOLVED').map(s => s.kind).join(', ')}).`;
       eligibility = retrying ? 'WAITING_EXTERNAL' : 'INVESTIGATION';
       recommended = retrying ? 'Wait for the worker to finish the task, then check this page again.' : 'Review the timeline and background tasks below. No automatic recovery is registered for this condition.';
@@ -300,22 +303,24 @@ export type Discovery = { readonly incidents: Incident[]; readonly sources: Sour
 const failure = (error: unknown) => error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}/.test(error.message) ? error.message.slice(0, 80) : 'QUERY_FAILED';
 
 /** Every current incident from the durable sources (bounded). Platform and AI conditions are added by the caller from their own probes. */
-export async function discoverIncidents(db: Database, tenantId: string, now: Date): Promise<Discovery> {
+export async function discoverIncidents(db: Database, tenantId: string, now: Date,
+  shared: Promise<ExecutionAttention | null> | null = null): Promise<Discovery> {
   const sources: SourceStatus[] = [], incidents: Incident[] = [];
   const failedSince = new Date(now.getTime() - FAILED_LOOKBACK_DAYS * 86_400_000);
   let attention: ExecutionAttention | null = null;
   const executions = (async () => {
     try {
       // Every run with an attention lifecycle (the shared model), plus executions that failed on chain in the lookback (shown for diagnosis).
-      const [shared, recent] = await Promise.all([loadExecutionAttention(db, tenantId, now),
+      const [model, recent] = await Promise.all([shared ? shared.then(a => { if (!a) throw new Error('EXECUTION_ATTENTION_UNAVAILABLE'); return a; })
+          : loadExecutionAttention(db, tenantId, now),
         db.query<{ run_id: string }>(`SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND updated_at >= $2 AND status = ANY($3::text[]) AND NOT attention_required
           ORDER BY updated_at DESC LIMIT ${LIMITS.recent + 1}`, [tenantId, failedSince, [...FAILED_STATUSES]])]);
-      attention = shared;
-      for (const entry of shared.entries) { const incident = executionIncident(entry.run, entry.facts, now, entry.attention); if (incident) incidents.push(incident); }
-      const seen = new Set(shared.entries.map(entry => entry.run.runId)), ids = recent.rows.slice(0, LIMITS.recent).map(row => row.run_id).filter(id => !seen.has(id));
+      attention = model;
+      for (const entry of model.entries) { const incident = executionIncident(entry.run, entry.facts, now, entry.attention); if (incident) incidents.push(incident); }
+      const seen = new Set(model.entries.map(entry => entry.run.runId)), ids = recent.rows.slice(0, LIMITS.recent).map(row => row.run_id).filter(id => !seen.has(id));
       const [runs, facts] = await Promise.all([loadExecutions(db, tenantId, ids), loadRunsFacts(db, tenantId, ids, now)]);
       for (const run of runs) { const incident = executionIncident(run, facts.get(run.runId), now); if (incident) incidents.push(incident); }
-      sources.push({ source: 'EXECUTION', ok: true, code: null, truncated: shared.truncated || recent.rows.length > LIMITS.recent });
+      sources.push({ source: 'EXECUTION', ok: true, code: null, truncated: model.truncated || recent.rows.length > LIMITS.recent });
     } catch (error) { sources.push({ source: 'EXECUTION', ok: false, code: failure(error), truncated: false }); }
   })();
   const tasks = (async () => {
@@ -324,6 +329,7 @@ export async function discoverIncidents(db: Database, tenantId: string, now: Dat
       const { rows } = await db.query<{ id: string; kind: string; run_id: string | null; last_error: string | null; deliveries: number; created_at: Date; completed_at: Date }>(
         `SELECT d.id::text AS id, d.kind, d.run_id, d.last_error, d.deliveries, d.created_at, d.completed_at FROM work_items d
           WHERE d.tenant_id = $1 AND d.state = 'DEAD' AND d.completed_at >= $3 AND NOT (d.kind = ANY($2::text[]) AND d.run_id IS NOT NULL)
+            AND NOT (d.run_id IS NOT NULL AND EXISTS (SELECT 1 FROM execution_runs e WHERE e.tenant_id = d.tenant_id AND e.run_id = d.run_id))
             AND NOT EXISTS (SELECT 1 FROM work_items n WHERE n.tenant_id = d.tenant_id AND n.kind = d.kind AND n.dedupe_key = d.dedupe_key AND n.id > d.id)
           ORDER BY d.completed_at DESC LIMIT ${LIMITS.tasks + 1}`, [tenantId, RECOVERY_KINDS, new Date(now.getTime() - TASK_LOOKBACK_DAYS * 86_400_000)]);
       for (const row of rows.slice(0, LIMITS.tasks)) incidents.push(taskIncident({ id: row.id, kind: row.kind, runId: row.run_id, lastError: row.last_error,

@@ -83,7 +83,7 @@ export default async function AdminWorkflowsPage({ searchParams }: { searchParam
     {shared ? <>
       <section className="admin-card" aria-labelledby="admin-attention" data-tone={open.length ? 'warn' : undefined}>
         <header><h2 id="admin-attention">Requiring attention</h2>
-          <p>Active and under-investigation incidents · all environments, all time — the same count as System Health and Support &amp; Recovery
+          <p>Execution runs with an active or under-investigation incident · all environments, all time — the same count as System Health and Support &amp; Recovery
             ({fmt(open.length)}{shared.truncated ? ', at least' : ''}) · newest 25</p></header>
         {open.length === 0 ? <p className="admin-empty">No execution has an active incident.</p> : <AttentionRows entries={open.slice(0, 25)}/>}
       </section>

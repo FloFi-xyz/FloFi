@@ -247,11 +247,19 @@ export function freeText(value: unknown, min: number, max: number): string | nul
 /**
  * Audit text is append-only and visible to every administrator, so it should not carry personal identifiers. Best-effort screening (not a
  * guarantee): wallet addresses and transaction hashes (0x… or long base58), e-mail addresses, standalone runs of 8+ digits (phone, document or
- * card numbers) and @handles are refused. Record ids (prefixed, hex) and dates remain allowed.
+ * card numbers), Brazilian CPF / CNPJ / RG and phone formats (with dots, dashes, slashes or parentheses), IPv4 addresses and @handles are
+ * refused. Record ids (prefixed, hex) and ISO dates (2026-11-14) remain allowed.
  */
+const PERSONAL_FORMATS: readonly RegExp[] = [
+  /(?<!\d)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/,               // CPF 123.456.789-09
+  /(?<!\d)\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?!\d)/,      // CNPJ 12.345.678/0001-90
+  /(?<!\d)\d{1,2}\.\d{3}\.\d{3}-[\dXx](?![\dA-Za-z])/,          // RG 12.345.678-9
+  /\(?\b\d{2}\)?[ .-]?9?\d{4}[ .-]\d{4}(?!\d)/,                   // phone (11) 98765-4321, 11 3456-7890
+  /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/,                    // IPv4
+];
 export function identifierShaped(text: string): boolean {
   if (/0x[0-9a-fA-F]{40,}/.test(text) || /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/.test(text) || /(^|\s)@[A-Za-z0-9_]{2,}/.test(text)
-    || /(?<![A-Za-z0-9-])\d(?:[ .]?\d){7,}(?![A-Za-z0-9-])/.test(text)) return true;
+    || /(?<![A-Za-z0-9-])\d(?:[ .]?\d){7,}(?![A-Za-z0-9-])/.test(text) || PERSONAL_FORMATS.some(pattern => pattern.test(text))) return true;
   return (text.match(/[1-9A-HJ-NP-Za-km-z]{32,}/g) ?? []).some(run => !/^[0-9a-f]+$/.test(run));
 }
 export const noteText = (value: unknown): string | null => freeText(value, 3, NOTE_MAX);

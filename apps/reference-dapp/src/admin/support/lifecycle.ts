@@ -26,6 +26,7 @@ import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { attemptSubmitted, classifyRun, COMPLETED_STATUSES, FAILED_STATUSES, IN_PROGRESS_STATUSES, NOT_EXECUTED_STATUSES, NOT_STARTED_STATUSES, PARTIAL_STATUSES,
   UNCERTAIN_STATUSES, type ExecutionOutcome } from '../analytics/classify.ts';
 import { environmentOf } from '../analytics/networks.ts';
+import { retryableStopReason } from './codes.ts';
 import { loadExecutions, type ExecutionSnapshot } from './executions.ts';
 import { loadRunsFacts } from './recovery.ts';
 import type { RunRecoveryFacts, WorkFact } from './registry.ts';
@@ -37,7 +38,7 @@ export const LIFECYCLE_ORDER: readonly Lifecycle[] = ['ACTIVE', 'UNDER_INVESTIGA
 export const isOpen = (lifecycle: Lifecycle | null | undefined): boolean => lifecycle === 'ACTIVE' || lifecycle === 'UNDER_INVESTIGATION';
 
 export type ConditionCode = 'OUTCOME_UNKNOWN' | 'OBSERVATION_EXHAUSTED' | 'OBSERVATION_NOT_SCHEDULED' | 'PARTIAL_EXECUTION' | 'UNCLASSIFIED_STATUS'
-  | 'EVIDENCE_ARCHIVE_STOPPED' | 'TASK_STOPPED' | 'RETRY_PENDING';
+  | 'EVIDENCE_ARCHIVE_STOPPED' | 'TASK_STOPPED' | 'RETRY_PENDING' | 'FACTS_UNAVAILABLE';
 export const CONDITION_LABELS: Readonly<Record<ConditionCode, string>> = {
   OUTCOME_UNKNOWN: 'Transaction outcome unknown',
   OBSERVATION_EXHAUSTED: 'Transaction check stopped (observation exhausted)',
@@ -47,6 +48,7 @@ export const CONDITION_LABELS: Readonly<Record<ConditionCode, string>> = {
   EVIDENCE_ARCHIVE_STOPPED: 'Evidence archiving stopped',
   TASK_STOPPED: 'Background task stopped',
   RETRY_PENDING: 'A stopped task was queued again and has not finished',
+  FACTS_UNAVAILABLE: 'Flagged, and its background-task facts could not be read (never assumed resolved)',
 };
 export type ResolutionBasis = 'TASK_COMPLETED_AFTER_STOP' | 'OUTCOME_RECONCILED_AFTER_STOP' | 'EVIDENCE_ARCHIVED_AFTER_STOP';
 export const RESOLUTION_LABELS: Readonly<Record<ResolutionBasis, string>> = {
@@ -58,7 +60,10 @@ export const RESOLUTION_LABELS: Readonly<Record<ResolutionBasis, string>> = {
 export type StoppedStatus = 'UNRESOLVED' | 'RETRYING' | 'RESOLVED' | 'NOT_REQUIRED';
 export type StoppedTaskView = { readonly kind: string; readonly count: number; readonly code: string | null; readonly lastStoppedAt: string | null;
   readonly status: StoppedStatus; readonly basis: ResolutionBasis | null };
-/** Explicit operator review recorded in the audit trail (support notes), latest first. */
+/**
+ * Explicit operator review recorded in the audit trail (the latest support note). With `at`, a note older than the latest stop of a task that is
+ * still unresolved does not count: it was about an earlier occurrence.
+ */
 export type Investigation = 'ACKNOWLEDGED' | 'RESOLUTION_NOTED' | null;
 
 export type RunAttention = {
@@ -85,12 +90,14 @@ const codeOf = (text: string | null) => text && CODE.test(text) ? text.match(COD
 const open = (task: WorkFact | undefined) => task?.state === 'READY' || task?.state === 'LEASED';
 
 /** The attention lifecycle of one run. Pure: every input is a durable fact, and the same inputs always give the same answer. */
-export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | undefined, investigation: Investigation, now: Date): RunAttention {
+export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | undefined, noted: Investigation, now: Date, notedAt: Date | null = null): RunAttention {
   const c = classifyRun(run), conditions: ConditionCode[] = [], add = (code: ConditionCode) => { if (!conditions.includes(code)) conditions.push(code); };
   const reconcile = facts?.latest.reconcile;
   const quiet = now.getTime() - run.updatedAt.getTime() > NOT_SCHEDULED_AFTER_MS;
   if (run.needsObservation && reconcile?.state === 'DEAD') add('OBSERVATION_EXHAUSTED');
-  else if (run.needsObservation && !open(reconcile) && quiet) add('OBSERVATION_NOT_SCHEDULED');
+  // The sweeper never re-arms a flagged run, so for one no open check means not scheduled at once.
+  else if (run.needsObservation && !open(reconcile) && (quiet || run.attentionRequired)) add('OBSERVATION_NOT_SCHEDULED');
+  if (!facts && run.attentionRequired) add('FACTS_UNAVAILABLE');
   if (c.outcome === 'UNCERTAIN') add('OUTCOME_UNKNOWN');
   if (c.outcome === 'PARTIAL') add('PARTIAL_EXECUTION');
   if (c.outcome === 'UNCLASSIFIED') add('UNCLASSIFIED_STATUS');
@@ -103,7 +110,9 @@ export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | u
     else if (kind.kind === 'reconcile') {
       if (run.needsObservation) status = 'UNRESOLVED'; // OBSERVATION_EXHAUSTED or NOT_SCHEDULED above
       else if (kind.newestState === 'DONE') { status = 'RESOLVED'; basis = 'TASK_COMPLETED_AFTER_STOP'; }
-      else if (reconciledVerdict) { status = 'RESOLVED'; basis = 'OUTCOME_RECONCILED_AFTER_STOP'; }
+      // The reconcile handler completes (never stops) a check once the run no longer needs observation, so a check that stopped while the run
+      // still needed it is superseded by any later reconciled verdict — unless it stopped for a permanent reason (invalid data, integrity).
+      else if (reconciledVerdict && retryableStopReason(kind.lastError)) { status = 'RESOLVED'; basis = 'OUTCOME_RECONCILED_AFTER_STOP'; }
       else status = 'NOT_REQUIRED'; // no longer observed, but nothing proves the verdict this check was waiting for
     } else if (kind.kind === 'evidence.archive') {
       if (facts!.evidenceArchived) { status = 'RESOLVED'; basis = kind.newestState === 'DONE' ? 'TASK_COMPLETED_AFTER_STOP' : 'EVIDENCE_ARCHIVED_AFTER_STOP'; }
@@ -115,6 +124,10 @@ export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | u
   });
   // Defensive: the newest archive task itself stopped, whatever the history query returned.
   if (run.hasEvidence && facts && !facts.evidenceArchived && facts.latest['evidence.archive']?.state === 'DEAD') add('EVIDENCE_ARCHIVE_STOPPED');
+  // A flagged run that is still observed (a check is queued again) is never historical or resolved.
+  if (run.attentionRequired && run.needsObservation && !conditions.length) add('RETRY_PENDING');
+  const latestStop = Math.max(0, ...stopped.filter(s => s.status === 'UNRESOLVED' || s.status === 'RETRYING').map(s => s.lastStoppedAt ? Date.parse(s.lastStoppedAt) : 0));
+  const investigation: Investigation = noted && notedAt && notedAt.getTime() < latestStop ? null : noted;
   const resolution = [...new Set(stopped.flatMap(s => s.basis ? [s.basis] : []))];
   const environment = environmentOf(run.provenance), realFunds = environment === 'MAINNET' || environment === null;
   const ownerReviewPending = !!run.errorCode && OWNER_REVIEW_CODE.test(run.errorCode);
@@ -126,15 +139,17 @@ export function runAttention(run: ExecutionSnapshot, facts: RunRecoveryFacts | u
     explanation = `Active because: ${conditions.map(code => CONDITION_LABELS[code].toLowerCase()).join('; ')}.`
       + (lifecycle === 'UNDER_INVESTIGATION' ? ' An operator recorded that this incident is being reviewed.' : '')
       + (investigation === 'RESOLUTION_NOTED' ? ' A resolution note exists, but the durable state still shows the condition, so it stays active.' : '');
-  } else if (run.attentionRequired) {
-    const verified = stopped.length > 0 && stopped.every(s => s.status === 'RESOLVED') && FINAL_OUTCOMES.has(c.outcome);
+  } else if (run.attentionRequired || stopped.length > 0) {
+    // A run whose stop was recovered through Support has its flag cleared; its stopped-task history keeps it in the lifecycle.
+    const verified = stopped.length > 0 && stopped.every(s => s.status === 'RESOLVED') && FINAL_OUTCOMES.has(c.outcome) && KNOWN_STATUS_SET.has(run.status);
     lifecycle = verified ? 'VERIFIED_RESOLVED' : 'HISTORICAL';
     explanation = verified
-      ? `Flagged earlier; resolved with evidence: ${resolution.map(basis => RESOLUTION_LABELS[basis]).join('; ')}. The original flag is kept.`
+      ? `${run.attentionRequired ? 'Flagged earlier' : 'A task stopped earlier'}; resolved with evidence: ${resolution.map(basis => RESOLUTION_LABELS[basis]).join('; ')}.`
+        + (run.attentionRequired ? ' The original flag is kept.' : ' The flag was cleared by a registered recovery, which is audited.')
       : stopped.length === 0
         ? 'Flagged earlier, but no stopped task is recorded for this run, so the cause cannot be reconstructed. No active condition is demonstrated now; this is not a verified resolution.'
-        : !FINAL_OUTCOMES.has(c.outcome)
-          ? 'Flagged earlier. No active condition is demonstrated now, but the outcome is not final, so the incident is not verified resolved.'
+        : !FINAL_OUTCOMES.has(c.outcome) || !KNOWN_STATUS_SET.has(run.status)
+          ? 'Flagged earlier. No active condition is demonstrated now, but the outcome is not final (or its status is not recognised), so the incident is not verified resolved.'
           : `Flagged earlier when ${stopped.filter(s => s.status !== 'RESOLVED').map(s => `“${s.kind}”`).join(', ') || 'a task'} stopped. The run no longer needs it, but no evidence specific to that stop proves it was addressed; this is not a verified resolution.`;
   } else { lifecycle = null; explanation = awaitingObservation ? 'Being observed normally; not an incident.' : 'Never flagged and no active condition.'; }
   if (ownerReviewPending) explanation += ' Separately, the owner edited the workflow after review; any further execution needs their new review (not an operational incident).';
@@ -165,8 +180,9 @@ export type ExecutionAttention = {
 };
 export const ATTENTION_LIMIT = 500;
 const UNRESOLVED_STATUSES = [...UNCERTAIN_STATUSES, ...PARTIAL_STATUSES];
-const KNOWN_STATUSES = [...new Set([...COMPLETED_STATUSES, ...FAILED_STATUSES, ...PARTIAL_STATUSES, ...UNCERTAIN_STATUSES, ...NOT_EXECUTED_STATUSES,
+const KNOWN_STATUSES: readonly string[] = [...new Set([...COMPLETED_STATUSES, ...FAILED_STATUSES, ...PARTIAL_STATUSES, ...UNCERTAIN_STATUSES, ...NOT_EXECUTED_STATUSES,
   ...NOT_STARTED_STATUSES, ...IN_PROGRESS_STATUSES])];
+const KNOWN_STATUS_SET: ReadonlySet<string> = new Set(KNOWN_STATUSES);
 
 export function countAttention(list: readonly RunAttention[]): AttentionCounts {
   const n = (test: (a: RunAttention) => boolean) => list.filter(test).length, has = (a: RunAttention, code: ConditionCode) => isOpen(a.lifecycle) && a.conditions.includes(code);
@@ -179,33 +195,38 @@ export function countAttention(list: readonly RunAttention[]): AttentionCounts {
 }
 
 /** The latest support-note kind per incident id, within the notes window (kinds only — no note text is read). */
-export async function latestNoteKinds(db: Database, tenantId: string, incidentIds: readonly string[], now: Date): Promise<Map<string, string>> {
+export type LatestNote = { readonly kind: string; readonly at: Date };
+export async function latestNoteKinds(db: Database, tenantId: string, incidentIds: readonly string[], now: Date): Promise<Map<string, LatestNote>> {
   if (!incidentIds.length) return new Map();
-  const { rows } = await db.query<{ id: string; kind: string | null }>(`SELECT DISTINCT ON (detail->>'incidentId') detail->>'incidentId' AS id, detail->>'noteKind' AS kind
-      FROM admin_audit_events WHERE tenant_id = $1 AND kind = 'SUPPORT_NOTE' AND outcome = 'OK' AND at >= $2 AND detail->>'incidentId' = ANY($3::text[])
+  const { rows } = await db.query<{ id: string; kind: string | null; at: Date }>(`SELECT DISTINCT ON (detail->>'incidentId') detail->>'incidentId' AS id,
+      detail->>'noteKind' AS kind, at FROM admin_audit_events WHERE tenant_id = $1 AND kind = 'SUPPORT_NOTE' AND outcome = 'OK' AND at >= $2 AND detail->>'incidentId' = ANY($3::text[])
       ORDER BY detail->>'incidentId', at DESC, event_id DESC`, [tenantId, new Date(now.getTime() - NOTES_WINDOW_DAYS * 86_400_000), [...new Set(incidentIds)]]);
-  return new Map(rows.flatMap(row => row.kind ? [[row.id, row.kind] as const] : []));
+  return new Map(rows.flatMap(row => row.kind ? [[row.id, { kind: row.kind, at: row.at }] as const] : []));
 }
 
 /**
- * Every run that can carry an attention lifecycle — flagged, still observed, or with an unresolved (unknown/partial) or unrecognised status —
- * classified with `runAttention`. One tenant-scoped scan, bounded to ATTENTION_LIMIT candidates (flagged and unresolved first); the exact
+ * Every run that can carry an attention lifecycle — flagged, with a stopped task, still observed, or with an unresolved (unknown/partial) or
+ * unrecognised status — classified with `runAttention`. One tenant-scoped scan, bounded to ATTENTION_LIMIT candidates (likely-active first); the exact
  * flagged/observing totals come from the projection itself. Read-only.
  */
 export async function loadExecutionAttention(db: Database, tenantId: string, now: Date): Promise<ExecutionAttention> {
   const [candidates, totals] = await Promise.all([
-    db.query<{ run_id: string }>(`SELECT run_id FROM execution_runs WHERE tenant_id = $1
-        AND (attention_required OR needs_observation OR status = ANY($2::text[]) OR status <> ALL($3::text[]))
-      ORDER BY (attention_required OR status = ANY($2::text[])) DESC, updated_at DESC, run_id LIMIT ${ATTENTION_LIMIT + 1}`, [tenantId, UNRESOLVED_STATUSES, KNOWN_STATUSES]),
+    // Likely-active candidates first (still observed, unresolved or unrecognised status), then flagged or once-stopped runs, newest first.
+    db.query<{ run_id: string }>(`SELECT r.run_id FROM execution_runs r WHERE r.tenant_id = $1
+        AND (r.attention_required OR r.needs_observation OR r.status = ANY($2::text[]) OR r.status <> ALL($3::text[])
+          OR EXISTS (SELECT 1 FROM work_items w WHERE w.tenant_id = r.tenant_id AND w.run_id = r.run_id AND w.state = 'DEAD'))
+      ORDER BY (r.needs_observation OR r.status = ANY($2::text[]) OR r.status <> ALL($3::text[])) DESC, r.updated_at DESC, r.run_id
+      LIMIT ${ATTENTION_LIMIT + 1}`, [tenantId, UNRESOLVED_STATUSES, KNOWN_STATUSES]),
     db.query<{ flagged: number; observing: number; oldest: Date | null }>(`SELECT count(*) FILTER (WHERE attention_required)::int AS flagged,
         count(*) FILTER (WHERE needs_observation)::int AS observing, min(updated_at) FILTER (WHERE needs_observation) AS oldest
       FROM execution_runs WHERE tenant_id = $1 AND (needs_observation OR attention_required)`, [tenantId]),
   ]);
   const ids = candidates.rows.slice(0, ATTENTION_LIMIT).map(row => row.run_id);
   const [runs, facts] = await Promise.all([loadExecutions(db, tenantId, ids), loadRunsFacts(db, tenantId, ids, now)]);
-  let notes = new Map<string, string>(), notesOk = true;
+  let notes = new Map<string, LatestNote>(), notesOk = true;
   try { notes = await latestNoteKinds(db, tenantId, ids.map(id => `run:${id}`), now); } catch { notesOk = false; }
-  const entries = runs.map(run => ({ run, facts: facts.get(run.runId), attention: runAttention(run, facts.get(run.runId), investigationOf(notes.get(`run:${run.runId}`)), now) }))
+  const entries = runs.map(run => { const note = notes.get(`run:${run.runId}`);
+    return { run, facts: facts.get(run.runId), attention: runAttention(run, facts.get(run.runId), investigationOf(note?.kind), now, note?.at ?? null) }; })
     .sort((a, b) => b.run.updatedAt.getTime() - a.run.updatedAt.getTime() || (a.run.runId < b.run.runId ? -1 : 1));
   const t = totals.rows[0];
   return { entries, counts: countAttention(entries.map(e => e.attention)), flaggedTotal: t?.flagged ?? 0, observingTotal: t?.observing ?? 0,

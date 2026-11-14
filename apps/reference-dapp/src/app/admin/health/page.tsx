@@ -64,7 +64,7 @@ export default async function AdminHealthPage() {
           : <Status ok={false}>{queue.code}</Status>}
       </section>
       <section className="admin-card"><header><h2>Execution attention</h2>
-        <p>All environments, all time — the same classification as Support &amp; Recovery, Workflows and the Overview{runs.ok && runs.value.truncated ? ' (partly classified: counts are lower bounds)' : ''}</p></header>
+        <p>Execution runs, all environments, all time — the same classification as Support &amp; Recovery, Workflows and the Overview{runs.ok && runs.value.truncated ? ' (partly classified: counts are lower bounds)' : ''}</p></header>
         {runs.ok ? <><table className="admin-table"><tbody>
           <tr><th scope="row">Active incidents</th><td><Status ok warn={runs.value.attention.active + runs.value.attention.underInvestigation > 0}>
             {fmt(runs.value.attention.active + runs.value.attention.underInvestigation)}{runs.value.attention.underInvestigation ? ` (${fmt(runs.value.attention.underInvestigation)} under investigation)` : ''}</Status>
@@ -75,11 +75,12 @@ export default async function AdminHealthPage() {
           <tr><th scope="row">Awaiting reconciliation</th><td>{fmt(runs.value.observing)}{runs.value.oldestObservationSeconds !== null ? ` · oldest updated ${ago(runs.value.oldestObservationSeconds)} ago` : ''}</td></tr>
           <tr><th scope="row">Historical attention</th><td>{fmt(runs.value.attention.historical)} · <span className="admin-diff">flagged earlier, no active condition now, resolution not verified</span>
             {runs.value.attention.historical ? <> · <a href="/admin/support?lifecycle=HISTORICAL">Review</a></> : null}</td></tr>
-          <tr><th scope="row">Verified resolved</th><td>{fmt(runs.value.attention.resolved)} · <span className="admin-diff">flag kept; incident-specific evidence of resolution</span></td></tr>
+          <tr><th scope="row">Verified resolved</th><td>{fmt(runs.value.attention.resolved)} · <span className="admin-diff">incident-specific evidence of resolution; history kept</span></td></tr>
         </tbody></table>
           <TechnicalDetails>
-            <p>Raw flag (<code>attention_required</code>) on {fmt(runs.value.flagged)} run{runs.value.flagged === 1 ? '' : 's'}. The flag is never cleared to make these figures smaller: each
-              flagged run is classified as active, under investigation, historical or verified resolved from its durable state. Awaiting reconciliation counts every run still
+            <p>Raw flag (<code>attention_required</code>) on {fmt(runs.value.flagged)} run{runs.value.flagged === 1 ? '' : 's'}. The flag is cleared only by an audited Support
+              recovery, never to make these figures smaller: each flagged run, and each run with a stopped task, is classified as active, under
+              investigation, historical or verified resolved from its durable state. Awaiting reconciliation counts every run still
               being observed, including active ones.{runs.value.notesOk ? '' : ' Investigation notes could not be read, so nothing is shown as under investigation.'}</p>
           </TechnicalDetails></> : <Status ok={false}>{runs.code}</Status>}
       </section>

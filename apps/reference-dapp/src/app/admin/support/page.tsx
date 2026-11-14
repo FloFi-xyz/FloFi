@@ -95,10 +95,10 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
         <a className="admin-kpi-link" href="/admin/support?lifecycle=UNDER_INVESTIGATION#support-incidents"><Kpi label="Under investigation" value={fmt(attention.counts.underInvestigation)}/></a>
         <a className="admin-kpi-link" href="/admin/support?lifecycle=HISTORICAL#support-incidents"><Kpi label="Historical attention" value={fmt(attention.counts.historical)}
           note="no active condition; not verified"/></a>
-        <a className="admin-kpi-link" href="/admin/support?lifecycle=VERIFIED_RESOLVED#support-incidents"><Kpi label="Verified resolved" value={fmt(attention.counts.resolved)} note="flag kept"/></a>
-        <Kpi label="Raw flag (attention_required)" value={fmt(attention.flaggedTotal)} note="all time, never cleared to shrink counts"/>
+        <a className="admin-kpi-link" href="/admin/support?lifecycle=VERIFIED_RESOLVED#support-incidents"><Kpi label="Verified resolved" value={fmt(attention.counts.resolved)} note="evidence-backed; history kept"/></a>
+        <Kpi label="Raw flag (attention_required)" value={fmt(attention.flaggedTotal)} note="cleared only by an audited recovery, never to shrink counts"/>
       </div>
-      <p className="admin-diff">Executions only, all environments, all time — the same figures as System Health, the Overview and Workflows{attention.truncated ? ' (partly classified: lower bounds)' : ''}.
+      <p className="admin-diff">Execution runs (a recovery run counts on its own), all environments, all time — the same figures as System Health, the Overview and Workflows{attention.truncated ? ' (partly classified: lower bounds)' : ''}.
         The transaction outcome is a separate dimension shown on each incident: an incident can be active although its transaction completed, and historical although
         resolution is not verified.</p></>
         : <p className="admin-alert" data-tone="warn">The execution-attention model could not be read.</p>}
@@ -113,7 +113,8 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
       </div>
       <TechnicalDetails summary="What these numbers mean">
         <p>An open incident is a condition the database shows right now (for example a transaction check that stopped). It leaves the open list when the condition
-          does — after a recovery, or when the worker finishes on its own; a flagged execution then stays listed as historical or verified resolved, never deleted.
+          does — after a recovery, or when the worker finishes on its own; an execution that was flagged, or whose task stopped, then stays listed as
+          historical or verified resolved, never deleted.
           “Under investigation” only appears after an operator records an acknowledgement, finding, decision or escalation note (90-day window). Recovery counts are audited attempts from the last 30 days, each verified against the current task and
           execution state. Failed executions are listed for the last 30 days; stopped background tasks for 90 days.</p>
       </TechnicalDetails>
