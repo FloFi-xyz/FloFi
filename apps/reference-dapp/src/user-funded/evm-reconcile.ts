@@ -262,6 +262,23 @@ function circleFeeOf(logs: readonly Log[], own: readonly Log[], owner: string, c
   if (charged - refunded > circle.cap) return { ok: false, code: 'CIRCLE_FEE_ABOVE_CAP' };
   return { ok: true, paid: charged - refunded, legs: own.filter(l => direction(l) === null) };
 }
+/**
+ * Final review (P2): whether an upgrade operation's EIP-7702 delegation landed to exactly `delegate`, for an operation whose UserOperationEvent was
+ * found under its delegate-bound v0.8 hash (`circleUserOpHash`). The account's code at the operation's own block decides when the node serves that
+ * state (anything else there: OTHER). A node without it (non-archive RPCs keep ~128 blocks; a group is often reconciled later) refuses that
+ * read, and the group must never wait on it forever. The latest code proves nothing about that block (the owner may have delegated elsewhere
+ * since); the event does — EntryPoint v0.8 hashes an EIP-7702 operation with the delegate the account HAD when it validated it (and refuses an
+ * account without one), so an event exists under the delegate-bound hash only if the upgrade landed exactly to `delegate`.
+ */
+async function delegationLanded(t: ChainTransport, owner: string, delegate: string, blockNumber: unknown): Promise<'LANDED' | 'OTHER'> {
+  const expected = '0xef0100' + delegate.toLowerCase().slice(2);
+  if (typeof blockNumber === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(blockNumber)) {
+    let atBlock: unknown = null;
+    try { atBlock = await t.rpc('eth_getCode', [owner, blockNumber]); } catch { /* the node no longer serves that block's state */ }
+    if (typeof atBlock === 'string') return atBlock.toLowerCase() === expected ? 'LANDED' : 'OTHER';
+  }
+  return 'LANDED';
+}
 /** Reconciles an owner user operation from its bundle transaction's receipt on the chain (`circle`: ADR-0010, a Circle-paid operation's facts). */
 export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupCalls, userOpHash: string, transactionHash: string | null,
   circle: CircleReconciliation | null = null): Promise<GroupReconciliation> {
@@ -282,13 +299,9 @@ export async function reconcileUserOperation(t: ChainTransport, group: EvmGroupC
   const fee = circle ? circleFeeOf(logs, own, group.owner.toLowerCase(), circle) : null;
   if (fee && !fee.ok) return { status: 'MISMATCH', code: fee.code, gasPaid: null, transactions: [transactionHash] };
   // Owner requirement: an upgrade landed exactly to the pinned delegate (its EntryPoint validated the operation through it, so anything else is a
-  // contradiction FloFi never reconciles). Read at the operation's own block; an unreadable answer decides nothing yet.
+  // contradiction FloFi never reconciles). Read at the operation's own block when the node still serves that state.
   if (circle?.delegate) {
-    let code: unknown;
-    try { code = await t.rpc('eth_getCode', [group.owner, typeof r.blockNumber === 'string' && /^0x[0-9a-fA-F]{1,16}$/.test(r.blockNumber) ? r.blockNumber : 'latest']); }
-    catch { return { status: 'PENDING' }; }
-    if (String(code).toLowerCase() !== '0xef0100' + circle.delegate.toLowerCase().slice(2))
-      return { status: 'MISMATCH', code: 'CIRCLE_DELEGATION_NOT_LANDED', gasPaid: null, transactions: [transactionHash] };
+    if (await delegationLanded(t, group.owner, circle.delegate, r.blockNumber) === 'OTHER') return { status: 'MISMATCH', code: 'CIRCLE_DELEGATION_NOT_LANDED', gasPaid: null, transactions: [transactionHash] };
   }
   const gasPaid: GasPaidFact = circle && fee?.ok ? { payer: circle.paymaster.toLowerCase(), amount: event.actualGasCost.toString(), unit: 'wei', source: 'USER_OPERATION_EVENT',
     paidInToken: { mechanism: 'CIRCLE_USDC_PAYMASTER', token: circle.usdc.toLowerCase(), symbol: 'USDC', decimals: 6, amount: fee.paid.toString(), payee: circle.paymaster.toLowerCase() } }
