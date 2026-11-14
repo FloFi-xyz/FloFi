@@ -551,9 +551,12 @@ export async function consentUserFundedGroupUpgrade(deps: WorkflowRunDeps, run: 
 }
 /**
  * Owner requirement (FloFi Wallet + Circle): the owner answered "Not now" on FloFi's consent card. A group's Circle preparation planned from owner
- * steps, NOTHING of which was signed yet (no upgrade authorization, no USDC permit, no operation), is withdrawn: its steps go back to their own
- * flows exactly as before (`expireTokenGasPreparation`, code CIRCLE_FEE_DECLINED), and the run is advanced so its current step is ready for its own
- * flow (native gas). Nothing is signed or sent. A preparation of any other wallet or plan, or one already signed in part, is refused unchanged.
+ * steps, nothing of which FloFi recorded as signed (no upgrade authorization, no USDC permit, no operation), is withdrawn: its steps go back to
+ * their own flows exactly as before (`expireTokenGasPreparation`, code CIRCLE_FEE_DECLINED), and the run is advanced so its current step is ready
+ * for its own flow (native gas). Nothing is signed or sent here. Final review (P3): FloFi Wallet's gate may already have been asked for this
+ * preparation's authorization or permit (the owner agreed earlier, then cancelled in Privy or the answer was lost): such a signature never
+ * reached FloFi and, the preparation withdrawn, is never sent or used — /approve says exactly that (never "nothing was signed"). A preparation of
+ * any other wallet or plan, or one FloFi recorded as signed in part, is refused unchanged.
  */
 export async function declineUserFundedGroupCircle(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number): Promise<RunRecord> {
   assertRunWallets(run, wallets);

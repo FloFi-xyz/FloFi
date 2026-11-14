@@ -170,6 +170,21 @@ describe('owner requirement: "Continue to step 1" for a FloFi Wallet owner-step 
   });
 });
 
+describe('final review (P3): the words of "Not now" and of FloFi Wallet\'s USDC fee are true whatever happened before', () => {
+  it('"Not now" never claims nothing was signed (FloFi Wallet may have been asked for this request before): FloFi withdrew it, nothing of it is sent or used', async () => {
+    const { CIRCLE_CONSENT_DECLINE } = await import('../domain/token-fee');
+    expect(CIRCLE_CONSENT_DECLINE.DONE).not.toMatch(/nothing was signed/i);
+    expect(CIRCLE_CONSENT_DECLINE.DONE).toMatch(/^FloFi withdrew the request to pay this network fee in USDC: nothing of it is sent or used\. Step \{0\}/);
+  });
+  it('CIRCLE_WALLET_UNSUPPORTED says where FloFi Wallet pays in USDC (/approve, in groups) instead of saying it never can', async () => {
+    const { CIRCLE_REFUSAL, CIRCLE_UNAVAILABLE_REASON } = await import('../domain/token-fee');
+    for (const text of [CIRCLE_REFUSAL.CIRCLE_WALLET_UNSUPPORTED!, CIRCLE_UNAVAILABLE_REASON.CIRCLE_WALLET_UNSUPPORTED!]) {
+      expect(text).toContain('/approve');
+      expect(text).not.toMatch(/cannot (sign|pay)/);
+    }
+  });
+});
+
 describe('owner requirement: "Authorize in groups" with FloFi Wallet', () => {
   const choosing = run({ state: 'PENDING', mode: null, nextAction: 'OWNER_CHOOSES_MODE', groups: [] });
   it('the started run is shown, then its first owner-step group is asked about before it loads (ETH covers: loaded as before)', async () => {
