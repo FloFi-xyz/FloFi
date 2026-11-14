@@ -80,7 +80,14 @@ export async function privySignIn(accessToken: string, returnTo = '/app'): Promi
     await setAccountCookie(outcome.session);
     // `method` is the server-verified sign-in method (public): the browser uses it only to restore the wallet it just authenticated with.
     return { ok: true, value: { next: nextPath(outcome, 'sign-in', safeReturnPath(returnTo)), method: outcome.session.method } };
-  } catch (cause) { return failure(cause, 'PRIVY_SIGN_IN_FAILED'); }
+  } catch (cause) {
+    const result = failure(cause, 'PRIVY_SIGN_IN_FAILED');
+    // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: a failure without a FloFi code reached the person as the generic message with nothing in the logs.
+    // Record its class only (never the token, the provider's text or an identity), so the failing step can be told apart.
+    if (result.code === 'PRIVY_SIGN_IN_FAILED') console.warn(JSON.stringify({ event: 'account.privy_sign_in_failed',
+      error: cause instanceof Error ? cause.name.slice(0, 40) : typeof cause }));
+    return result;
+  }
 }
 /** Saves one wallet just created or imported in Privy, after Privy's API confirms this account's own Privy user holds it. */
 export async function savePrivyWallet(accessToken: string, ecosystem: 'evm' | 'solana', address: string, label?: string): Promise<Result<AccountWallet>> {

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { AAVE_V3_ADDRESS_BOOK, AAVE_V3_ADDRESS_BOOK_COMMIT, AAVE_V3_ARBITRUM, AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM, AAVE_V3_ETHEREUM_SEPOLIA,
   AAVE_V3_LENDING_PROFILES, AAVE_V3_MARKETS, aaveLendingProfile, aaveMarketReserves, aaveReserveLabel, aaveReserveProfile, assertAaveLendingProfile,
-  isAaveExpansionReserve } from '../src/index.js';
+  isAaveExpansionReserve, AAVE_V3_POOL_UPGRADES, aavePoolImplementation } from '../src/index.js';
 
 const WETH = { 'eip155:8453': '0x4200000000000000000000000000000000000006', 'eip155:1': '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', 'eip155:42161': '0x82af49447d8a07e3bd95bd0d56f35241523fbab1' } as const;
 
@@ -75,5 +75,31 @@ describe('BUILD AAVE-V3-EXPANSION-001 market catalog', () => {
     const arbitrum = aaveMarketReserves('eip155:42161');
     expect(arbitrum.find(r => r.symbol === 'USDC')).toBe(AAVE_V3_ARBITRUM);
     expect(arbitrum.find(r => r.symbol === 'USDC.e')?.asset).toBe('0xff970a61a04b1ca14834a43f5de4533ebddb5cc8');
+  });
+});
+
+describe('HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: Aave governance Pool upgrades after the address-book snapshot', () => {
+  const current = { 'eip155:1': '0x4295fe69b3e978eb511e4558b4407ad871612fcb', 'eip155:8453': '0xf248dd0adb01e78043e8a423b8504c8129f11918',
+    'eip155:42161': '0xa6e7d235a5b2fc7811d10669bbe20fa14b658a1e' } as const;
+  it('pins every mainnet reserve to the Pool implementation and revision now deployed (revision 12)', () => {
+    expect(AAVE_V3_ARBITRUM).toMatchObject({ poolImplementation: current['eip155:42161'], poolRevision: 12 });
+    expect(AAVE_V3_ETHEREUM).toMatchObject({ poolImplementation: current['eip155:1'], poolRevision: 12 });
+    for (const market of AAVE_V3_MARKETS) for (const reserve of market.reserves) {
+      const pin = 'poolImplementation' in reserve ? reserve.poolImplementation : 'pinnedImplementation' in reserve ? reserve.pinnedImplementation : null;
+      // Base native USDC (the market's verified profile) never pinned an implementation; every other mainnet reserve does.
+      if (reserve === AAVE_V3_BASE) expect(pin).toBeNull(); else expect(pin).toBe(current[market.chain]);
+    }
+  });
+  it('accepts an upgrade only from the exact snapshot implementation, with the official executor recorded', () => {
+    for (const upgrade of AAVE_V3_POOL_UPGRADES) {
+      expect(AAVE_V3_ADDRESS_BOOK.find(book => book.chain === upgrade.chain)?.poolImplementation).toBe(upgrade.from);
+      expect(upgrade).toMatchObject({ to: current[upgrade.chain as keyof typeof current], revision: 12 });
+      expect(upgrade.executor).toMatch(/^0x[0-9a-f]{40}$/);
+      expect(aavePoolImplementation(upgrade.chain, upgrade.from)).toBe(upgrade.to);
+      // Any other snapshot implementation is never upgraded implicitly: the registry would refuse it (fails closed).
+      expect(aavePoolImplementation(upgrade.chain, '0x' + '1'.repeat(40))).toBe('0x' + '1'.repeat(40));
+    }
+    expect(AAVE_V3_POOL_UPGRADES.map(u => u.chain).sort()).toEqual(['eip155:1', 'eip155:42161', 'eip155:8453']);
+    expect(aavePoolImplementation('eip155:10', '0x' + '2'.repeat(40))).toBe('0x' + '2'.repeat(40));
   });
 });

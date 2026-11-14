@@ -5,6 +5,7 @@ import { historyPrincipals } from '../../server/history-principals';
 import { WALLET_PRINCIPAL_HEADER, normalizePrincipal } from '../../server/run-ownership';
 import { embeddedRuntime, flowRuntimeKind } from '../../server/flow-runtime';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../../domain/saved-workflow';
+import { betaIdentityHeaders, currentBetaIdentity } from '../../flight/beta-context';
 import { dashboardRunId, object, optionalText, textValue, toDashboardAttempts, toDashboardRun } from './run-mapping';
 import { attemptDependentStatus } from '../../domain/landed-attempts';
 import { settledWithEvidence } from '../../domain/canonical-execution-status';
@@ -23,7 +24,11 @@ async function connection(expectedAccount: string): Promise<{ connection: Dashbo
   } catch { return { connection: 'UNAVAILABLE', account: principal, base: null }; }
 }
 async function cloudGet(base: URL, path: string, account: string, signal?: AbortSignal): Promise<unknown> {
-  const principalHeader = /^0x/.test(account) ? { [WALLET_PRINCIPAL_HEADER]: account } : { [WORKFLOW_OWNER_HEADER]: `solana:${account}` };
+  // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: the API rechecks the signed-in account's live session and its wallet link on every `/v1/runs` read
+  // (`backend/app.ts`). The identity is the one the Flight boundary (`withFlightAccess`) resolved for this request; without it every read was
+  // HTTP 403 BETA_SESSION_REQUIRED. Nothing here creates or widens an identity: none resolved (open rollout) sends none.
+  const principalHeader = { ...betaIdentityHeaders(currentBetaIdentity()),
+    .../^0x/.test(account) ? { [WALLET_PRINCIPAL_HEADER]: account } : { [WORKFLOW_OWNER_HEADER]: `solana:${account}` } };
   if (flowRuntimeKind(process.env) === 'embedded') {
     const { backend } = await embeddedRuntime();
     const url = new URL(path, base);
