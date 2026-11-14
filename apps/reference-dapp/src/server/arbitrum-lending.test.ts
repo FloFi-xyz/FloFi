@@ -69,7 +69,8 @@ describe('Arbitrum Aave deployment, reserve, owner and network gates',()=>{
   }));
   // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: Aave governance upgraded the Arbitrum One Pool to revision 12 (2026-11-11); the stale revision-11 pin
   // refused every Supply with SUPPLY_DEPLOYMENT_MISMATCH. The current deployment simulates 5 USDC; the pre-upgrade one is now refused instead.
-  it('simulates a 5 USDC Supply against the current Pool (revision 12), without any wallet request',async()=>fixture(async({service,model})=>{
+  // MOCKED wiring only: the harness answers with the profile's own pins. Revision 12 itself was verified read-only on chain (build note).
+  it('a 5 USDC Supply simulates with the revision-12 pins (MOCKED harness), without any wallet request',async()=>fixture(async({service,model})=>{
     const run=await service.simulate(workflow('supply','5000000'),OWNER);
     expect(run.review).toMatchObject({amount:'5000000',pool:p.pool,asset:p.asset,aToken:p.aToken,chain:'eip155:42161'});
     expect(run.review.gasLimits.length).toBeGreaterThan(0);expect(model.transactions).toHaveLength(0);

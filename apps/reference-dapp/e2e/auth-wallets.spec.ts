@@ -378,7 +378,8 @@ test('HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: a /login page from an earlier deploy
   // exactly this (409, x-nextjs-action-not-found). It used to end in "Sign-in did not complete. Try again." on every retry in that tab.
   await setup(page, { email: 'skew@flofi-e2e.test' });
   let refused = 0;
-  await page.route('**/login*', async route => {
+  // Only FloFi's own /login document and its Server Action calls (never the Privy stand-in's routed /__privy-e2e/login).
+  await page.route(url => url.pathname === '/login', async route => {
     const request = route.request();
     if (request.method() === 'POST' && request.headers()['next-action'] && refused === 0) {
       refused += 1;

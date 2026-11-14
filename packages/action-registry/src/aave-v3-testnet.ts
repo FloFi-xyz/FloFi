@@ -67,8 +67,8 @@ export const AAVE_V3_BASE = Object.freeze({
   l1DataFee: true,
   environment: 'MAINNET',
 } as const);
-/** BUILD-ARB-001 Phase 5: freshly verified native USDC reserve id 12 at Arbitrum block 513958416.
- * Pool revision 11, provider/Pool/oracle and reserve token relationships verified against the Aave DAO address book.
+/** BUILD-ARB-001 Phase 5: freshly verified native USDC reserve id 12 at Arbitrum block 513958416 (then Pool revision 11; revision 12 and its
+ * implementation since Aave governance's 2026-11-11 upgrade, HOTFIX-FLOFI-PRODUCTION-RECOVERY-001, see AAVE_V3_POOL_UPGRADES). provider/Pool/oracle and reserve token relationships verified against the Aave DAO address book.
  * One owner reserve, variable debt and ordinary collateral only. Nitro posting cost is included in total gas.
  */
 export const AAVE_V3_ARBITRUM = Object.freeze({

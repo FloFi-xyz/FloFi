@@ -1483,6 +1483,7 @@
         "apps/reference-dapp/src/components/account/import-wallet.tsx",
         "apps/reference-dapp/src/components/account/session-guard.tsx",
         "apps/reference-dapp/src/components/account/sign-in.tsx",
+        "apps/reference-dapp/src/components/account/sign-in-failure.ts",
         "apps/reference-dapp/src/components/flofi-wallet-continue.tsx",
         "apps/reference-dapp/src/i18n/pt-accounts.ts",
         "apps/reference-dapp/src/i18n/pt-privy.ts",
