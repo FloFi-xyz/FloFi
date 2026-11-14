@@ -112,6 +112,14 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
         failure(attempt.step, attempt.state, attempt.txHash); detail(`${attempt.step} recorded at`, attempt.createdAt);
         detail('Network fee payer', attempt.receipt?.gasPayer);
       }
+      // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a 0x Gasless swap's settlement (sent by 0x's relayer) and the fee the owner paid in a token.
+      for (const attempt of run.gasless ?? []) {
+        identifier('swap', 'Action transaction', attempt.txHash, 'transaction', `eip155:${run.quote.chainId}`, attempt.state);
+        detail('Network fee payer', attempt.receipt?.gasPayer);
+        detail('0x trade hash', attempt.tradeHash);
+      }
+      const paid = run.outcome?.gasPaid?.paidInToken;
+      if (paid) amount('swap', 'Network fee paid from the swap', paid.amount, paid.decimals, paid.symbol);
       const actual = run.outcome;
       bundle(actual?.evidence, actual?.evidenceBundleHash);
       if (actual?.evidence.outcome === 'RECONCILED') {
@@ -251,7 +259,9 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.attempt) failure('transaction', record.attempt.state, record.attempt.signature, record.notSubmitted ? record.walletDiagnostic?.code : undefined);
       refused('transaction', record);
       const observed = record.observations?.findLast(item => item.signature === record.attempt?.signature);
-      fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
+      // ADR-0010 §4: with Pimlico's Kora fee payer the owner's network cost is its token repayment, never Kora's SOL fee.
+      if (observed?.tokenFee) fee('transaction', record.review.chain, observed.signature, observed.tokenFee.amount, observed.tokenFee.token.decimals, observed.tokenFee.token.symbol);
+      else fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
       if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED') {
         amount('transaction', 'Executed input', observed.inputSpent, record.review.input.decimals, record.review.input.symbol, record.review.amount);
         amount('transaction', 'Actual received', observed.outputReceived, record.review.output.decimals, record.review.output.symbol, record.review.quote.outAmount);
@@ -264,7 +274,8 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.attempt) failure('transaction', record.attempt.state, record.attempt.signature, record.notSubmitted ? record.walletDiagnostic?.code : undefined);
       refused('transaction', record);
       const observed = record.observations?.findLast(item => item.signature === record.attempt?.signature);
-      fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
+      if (observed?.tokenFee) fee('transaction', record.review.chain, observed.signature, observed.tokenFee.amount, observed.tokenFee.token.decimals, observed.tokenFee.token.symbol);
+      else fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
       if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED') {
         const symbol = record.review.asset.mint === null ? 'SOL' : record.review.asset.symbol;
         amount('transaction', 'Sent', observed.amountSent, record.review.asset.decimals, symbol, record.review.amount);

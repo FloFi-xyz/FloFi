@@ -13,10 +13,16 @@
  * every wallet signature and confirmation stays the owner's own, and FloFi re-verifies each of them on the server.
  */
 import { useEffect, useRef, useState } from 'react';
-import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, prepareUserFundedGroup, reportUserFundedBatch,
-  resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
+import { authorizeUserFundedGroup, authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, consentUserFundedGroupUpgrade, continueWorkflowRunHandoff,
+  declineUserFundedGroupCircle, permitUserFundedGroup, prepareUserFundedGroup, upgradeUserFundedGroup,
+  reportUserFundedBatch, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization, startUserFundedWorkflowRun, startWorkflowRunHandoff,
+  workflowRunStatusHandoff } from '../app/approve-action';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
-import { batchHandout, batchSponsorshipOf, keepBatchHandout, revokeUserOperation, sendWalletBatch, signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { batchHandout, batchSponsorshipOf, entryPointOfGroup, evmWalletKind, isCirclePaid, keepBatchHandout, revokeUserOperation, sendWalletBatch, signCirclePaidGroup,
+  signSolanaGroup, signUserOperation, walletBatchHashes, walletProfile } from './user-funded-browser';
+import { CIRCLE_CONSENT_DECLINE, CIRCLE_NOTHING_SENT, feeAmountText, KORA_RECOVERY_INCOMPLETE, KORA_RECOVERY_INCOMPLETE_TEXT, nativeLaterMessage } from '../domain/token-fee';
+import { askCircleFirst, circlePaidGroup, floFiWalletCircleGroup, type CircleConsentOffer, type OwnerStepCircleSteps, type PreparedCircleGroup } from './flofi-wallet-circle-flow';
+import { CircleConsentCard } from './circle-consent-card';
 import { chosenEvmProvider, injected } from '../wallet/evm-discovery';
 import type { WalletWorkflowReviewView } from '../delegation/views';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
@@ -60,14 +66,12 @@ const GROUP_STATE: Readonly<Record<string, string>> = { PLANNED: 'Not signed yet
   FAILED: 'Failed', UNCERTAIN: 'Outcome pending', BLOCKED: 'Stopped before submission', SKIPPED: 'Not run', EXPIRED: 'Expired' };
 const NETWORK: Readonly<Record<string, string>> = { 'eip155:1': 'Ethereum', 'eip155:8453': 'Base', 'eip155:42161': 'Arbitrum One', 'eip155:4663': 'Robinhood Chain',
   'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': 'Solana' };
-/** A native amount with at most 6 decimals: a nonzero fee never reads "0" (L2 fees are tiny), and a maximum is rounded UP, never below itself. */
-const units = (amount: string, unit: string, round: 'down' | 'up' = 'down') => {
-  const d = unit === 'lamports' ? 9 : 18, symbol = unit === 'lamports' ? 'SOL' : 'ETH', v = BigInt(amount), step = 10n ** BigInt(d - 6);
-  const shown = round === 'up' ? (v + step - 1n) / step * step : v / step * step;
-  if (v > 0n && shown === 0n) return `< 0.000001 ${symbol}`;
-  const whole = shown / 10n ** BigInt(d), frac = (shown % 10n ** BigInt(d)).toString().padStart(d, '0').slice(0, 6).replace(/0+$/, '');
-  return `${whole}${frac ? '.' + frac : ''} ${symbol}`;
-};
+/**
+ * A fee amount with at most 6 decimals: a nonzero fee never reads "0" (L2 fees are tiny), and a maximum is rounded UP, never below itself.
+ * ADR-0010: wei reads as ETH, lamports as SOL, a token fee in its own symbol and decimals — a USDC amount is never printed as ETH.
+ */
+const units = (amount: string, unit: string, round: 'down' | 'up' = 'down', token?: { readonly symbol: string; readonly decimals: number } | null) =>
+  feeAmountText(amount, unit, token ?? null, round);
 /** "Steps 2–3" or "Step 2": a single-step group is never "Steps 3–3". */
 const stepsOf = (tr: (key: string, ...args: string[]) => string, from: number, to: number) => from === to ? tr('Step {0}', String(from + 1)) : tr('Steps {0}–{1}', String(from + 1), String(to + 1));
 const short = (hash: string) => hash.length > 14 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
@@ -118,7 +122,7 @@ function anyAttempt(approvalId: string, group: number): BatchAttempt | null {
  * browser could not keep (write and read back) its attempt, so the wallet was never asked.
  */
 const NOTHING_SENT: ReadonlySet<string> = new Set(['WALLET_REQUEST_REJECTED', 'WALLET_WRONG_NETWORK', 'EVM_WALLET_NOT_FOUND', 'WALLET_BATCH_NOT_SENT',
-  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'GAS_SPONSORSHIP_WALLET_UNSUPPORTED']);
+  'WALLET_ACCOUNT_MISMATCH', 'WALLET_ATTEMPT_UNRECORDABLE', 'GAS_SPONSORSHIP_WALLET_UNSUPPORTED', ...CIRCLE_NOTHING_SENT]);
 /** Whether the owner's wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not). */
 const walletKnows = (batchId: string) => walletBatchHashes(batchId).then(() => true, () => false);
 /**
@@ -160,6 +164,12 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   // BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: a batch the wallet is still reporting, and cancellations of signed operations sent from this page.
   const [waitingBatch, setWaitingBatch] = useState(false), [revocations, setRevocations] = useState<Readonly<Record<number, string>>>({});
   const { run, plan } = claim;
+  // Owner requirement (FloFi Wallet + Circle): FloFi's consent card while it waits for the owner's answer (the action in flight awaits it), and the
+  // step a "Not now" sent to its own flow (said once, until the next action).
+  const [consentOffer, setConsentOffer] = useState<CircleConsentOffer | null>(null), [declinedStep, setDeclinedStep] = useState<number | null>(null);
+  const consentAnswer = useRef<((agreed: boolean) => void) | null>(null);
+  const askConsent = (offer: CircleConsentOffer) => new Promise<boolean>(resolve => { consentAnswer.current = resolve; setConsentOffer(offer); });
+  const answerConsent = (agreed: boolean) => { const resolve = consentAnswer.current; consentAnswer.current = null; setConsentOffer(null); resolve?.(agreed); };
   const open = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'].includes(run.state);
   // A status poll: the server observes the run (a reconciled step shows at once) but never loads or resolves a step for it.
   useEffect(() => {
@@ -172,14 +182,18 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   }, [approvalId, open, onProposal]);
 
   async function act(work: () => Promise<{ ok: true; value: ClaimedProposal } | { ok: false; code: string }>) {
-    if (acting.current) return; acting.current = true; setBusy(true);
+    if (acting.current) return; acting.current = true; setBusy(true); setDeclinedStep(null);
     try {
       const result = await work();
       if (result.ok) { unknownOutcome.current = null; setReview(null); onProposal(result.value); }
       else { unknownOutcome.current = result.code === 'DELEGATION_OUTCOME_UNKNOWN' ? lastSent.current : null; onError(result.code); }
     }
     catch (cause) {
-      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+)$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE';
+      // ADR-0010: a Circle refusal (the page's own check, or the server's permit/upgrade step) keeps its closed code and its words (CIRCLE_REFUSAL).
+      // Final review (P1): so does FloFi Wallet's own answer (e.g. FLOFI_WALLET_ALREADY_SIGNED: this request's signature was already asked once).
+      const code = cause instanceof Error
+        && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+|CIRCLE_[A-Z_]+|FLOFI_WALLET_[A-Z_]+)$/.test(cause.message)
+        ? cause.message : 'APPROVAL_UNAVAILABLE';
       onError(code);
     }
     finally { acting.current = false; setBusy(false); }
@@ -210,8 +224,42 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     const chains = [...new Set(plan.userFunded.groups.map(g => g.chain))];
     const profile = await walletProfile(plan.confirmEachStep.walletNamespaces.includes('eip155') ? await evmAddress() : null, chains,
       plan.confirmEachStep.walletNamespaces.includes('solana'));
-    return startUserFundedWorkflowRun(approvalId, profile);
+    const started = await startUserFundedWorkflowRun(approvalId, profile);
+    // Owner requirement (FloFi Wallet + Circle): the server left a FloFi Wallet owner-step group's first step unloaded so it can be asked about
+    // first: the started run is shown, then the server prepares it — ETH covers: the step loads exactly as before; Circle: FloFi's consent card.
+    const runClaim = started.ok ? started.value.view?.workflowRun ?? null : null;
+    const candidate = runClaim && !runClaim.step ? floFiWalletCircleGroup(runClaim.run, profile.eip155?.wallet) : null;
+    if (!started.ok || !runClaim || candidate === null) return started;
+    onProposal(started.value);
+    return askCircleFirst(ownerStepCircle(candidate, runClaim.run.currentStep));
   });
+  /** "Continue to step N": a FloFi Wallet owner-step group whose fee Circle may pay is asked about first; any other step loads exactly as before. */
+  const continueNext = () => act(async () => {
+    const candidate = floFiWalletCircleGroup(run, evmWalletKind());
+    return candidate === null ? continueWorkflowRunHandoff(approvalId) : askCircleFirst(ownerStepCircle(candidate, run.currentStep));
+  });
+  /**
+   * Owner requirement (FloFi Wallet + Circle): the server actions a Circle-paid group of this run is continued with (`flofi-wallet-circle-flow.ts`):
+   * FloFi's consent card, "Not now" (withdrawn, the step loaded into its own flow), or the signatures — the upgrade authorization on first use (FloFi
+   * Wallet bound to this run, after the consent was recorded), the USDC permit, then the operation, each checked by this page first.
+   */
+  const circleSteps = (index: number, step: number) => ({
+    consent: askConsent,
+    decline: async () => {
+      const declined = await declineUserFundedGroupCircle(approvalId, index);
+      if (declined.ok) setDeclinedStep(step + 1);
+      return declined;
+    },
+    authorize: async (group: PreparedCircleGroup, agreed: boolean) => {
+      const p = group.prepared as Record<string, unknown>;
+      const signature = await signCirclePaidGroup(group.feePayer, p, permit => permitUserFundedGroup(approvalId, index, permit),
+        { runId: run.workflowRunId, consent: async () => agreed, recordConsent: () => consentUserFundedGroupUpgrade(approvalId, index),
+          upgrade: signed => upgradeUserFundedGroup(approvalId, index, signed) }, { runId: run.workflowRunId });
+      return authorizeUserFundedGroup(approvalId, index, { kind: 'EVM_USER_OPERATION', signature });
+    },
+  });
+  const ownerStepCircle = (index: number, step: number): OwnerStepCircleSteps<ClaimedProposal> => ({ ...circleSteps(index, step),
+    prepare: () => prepareUserFundedGroup(approvalId, index, undefined, 'FLOFI_WALLET'), loadStep: () => continueWorkflowRunHandoff(approvalId) });
   /** Prepares one group on the server, asks the owner's wallet for exactly that, and relays the answer (verified by the server). */
   const authorizeGroup = (index: number) => act(async () => {
     const attemptKey = `${approvalId}:${index}`, view = run.groups?.find(g => g.index === index) ?? null;
@@ -229,7 +277,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     // Otherwise the group is prepared (again). A lost answer still reaches this point only when the run showed no batch id for the group: its
     // prepared id is then asked of the wallet below before anything is sent.
-    const prepared = await prepareUserFundedGroup(approvalId, index, batchHandout(approvalId, index));
+    const prepared = await prepareUserFundedGroup(approvalId, index, batchHandout(approvalId, index), evmWalletKind());
     if (!prepared.ok) return prepared;
     keepBatchHandout(approvalId, index, prepared.value.handout);
     const p = prepared.value.prepared as unknown as Record<string, unknown>;
@@ -265,6 +313,13 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         putBatchAttempt(attemptKey, { at: new Date().toISOString(), batchId, nonce });
       }
       return recordBatch(index, attemptKey, batchId);
+    }
+    if (isCirclePaid(p)) {
+      // ADR-0010: the fee is paid from the owner's USDC through Circle — the permit, then the operation, each checked by this page first.
+      // Owner requirement (FloFi Wallet + Circle): a FloFi Wallet owner-step group's preparation shows FloFi's consent card first (Privy shows no
+      // confirmation for the EIP-7702 upgrade); "Not now" withdraws it and loads the step into its own flow, nothing signed. Any other wallet's
+      // Circle-paid group goes straight to its wallet's own two prompts, as before.
+      return circlePaidGroup(circleSteps(index, view?.steps[0] ?? run.currentStep), { prepared: p, feePayer: prepared.value.feePayer });
     }
     if (p.kind === 'EVM_USER_OPERATION') {
       const signature = await signUserOperation(prepared.value.feePayer, Number(p.chainId), p.typedData);
@@ -356,6 +411,11 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>
+    {/* Review B1/LQ1: before anything of the run was signed or reconciled, a later step on a network that needs its native coin for its fee after an
+        earlier token-paid one there is said visibly (the run would stop there with the funds midway); the design stays as it is. */}
+    {open && !(run.groups ?? []).some(g => g.signed || ANSWERED_STATES.includes(g.state)) && !run.steps.some(s => ['RECONCILED', 'FAILED', 'UNCERTAIN'].includes(s.state))
+      && (plan.nativeLater ?? []).map(w => <p key={w.chain} className="workflow-run-native-later" role="note" data-native-later={w.chain}>
+        {nativeLaterMessage(w, tr, action => tr(ACTION[action] ?? action))}</p>)}
     {run.stepCount > 1 && run.mode === 'USER_FUNDED' && <p className="muted workflow-run-progress">{tr('{0} of {1} steps completed', String(progress.completed), String(progress.total))}</p>}
     {awaited && <p role="status">{tr('Your batch is confirmed on {0}. FloFi is waiting for the delivery on {1} and keeps checking even if you leave this page; nothing is sent again.',
       tr(awaited.source), tr(awaited.destination))}</p>}
@@ -378,7 +438,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
         {plan.userFunded.groups.map(g => <li key={g.index}>{tr('{0} on {1}', stepsOf(tr, g.stepFrom, g.stepTo), NETWORK[g.chain] ?? g.chain)}
           {' · '}{tr(GROUP_HOW[g.strategy] ?? g.strategy)}{' · '}{tr(g.signing === 'UPFRONT' ? 'signed now' : 'signed when it becomes due')}
           {g.awaitsDelivery !== null && <> · {tr('waits for the delivery of step {0}', String(g.awaitsDelivery + 1))}</>}
-          {g.setup.includes('EVM_SMART_ACCOUNT_UPGRADE') && <> · {tr('your wallet upgrades this account inside the same confirmation (one time)')}</>}</li>)}
+          {g.setup.includes('EVM_SMART_ACCOUNT_UPGRADE') && <> · {tr('your wallet upgrades this account inside the same confirmation (one time)')}</>}
+          {/* ADR-0010 review C5: whether ETH or USDC pays this group's fee is decided when it is prepared; Circle then needs two signatures. */}
+          {g.tokenGas && <> · {tr('if your ETH cannot pay its network fee, it can be paid from your USDC through Circle: then two signatures (a USDC permit, then the operation)')}</>}</li>)}
       </ol>}
       {plan.userFunded?.available && <p className="muted">{tr('Your wallet pays every network fee, unless FloFi offers to sponsor a step\'s fee and your wallet supports it. FloFi never advances or reimburses gas.')}
         {plan.userFunded.wallets === 'ASSUMED' && <> {tr('The grouping depends on what your wallet supports: FloFi asks your wallet before anything is signed, and a wallet that cannot batch confirms each step.')}</>}</p>}
@@ -408,21 +470,38 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     </div>}
     {run.mode === 'USER_FUNDED' && <ol className="workflow-run-groups" aria-label={tr('Execution groups')}>
       {(run.groups ?? []).map(g => <li key={g.index} data-group-state={g.state}>
-        <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(GROUP_HOW[g.strategy] ?? g.strategy)}</span>
+        <span>{tr('{0} on {1}', stepsOf(tr, g.steps[0], g.steps[1]), NETWORK[g.chain] ?? g.chain)} · {tr(g.gasPayment?.upgrade
+          ? 'Three signatures: the smart-account upgrade, a USDC permit for the fee, then the operation'
+          : g.gasPayment ? 'Two signatures: a USDC permit for the fee, then the operation' : GROUP_HOW[g.strategy] ?? g.strategy)}</span>
         <span className="workflow-run-state">{g.delivery?.state === 'AWAITING_DESTINATION' && (g.state === 'SUBMITTED' || g.state === 'UNCERTAIN') && awaited
           ? `${tr(EXECUTION_PHASE_LABEL.CONFIRMED_AT_SOURCE, tr(awaited.source))} · ${tr(EXECUTION_PHASE_LABEL.AWAITING_DESTINATION, tr(awaited.destination))}`
           : tr(stateText(GROUP_STATE, g))}</span>
         {g.gasPaid?.sponsored || g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid ? null : <span className="muted">{tr('Fees paid by {0}', short(g.feePayer))}</span>}
         {g.maxFee?.sponsorship === 'REQUIRED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}</span>}
-        {g.maxFee && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
+        {/* ADR-0010: a fee the owner pays in a token names the token and who receives it — Circle (USDC permit cap) on EVM, Pimlico's Kora fee payer on Solana. */}
+        {g.maxFee?.token && !g.gasPaid && <span className="muted">{g.chain.startsWith('solana:')
+          ? tr('Network fee, at most {0} · paid from your {1} to Pimlico', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token), g.maxFee.token.symbol)
+          : tr('Network fee, at most {0} — paid from your USDC through Circle', units(g.maxFee.amount, g.maxFee.unit, 'up', g.maxFee.token))}</span>}
+        {g.maxFee && !g.maxFee.token && g.maxFee.sponsorship !== 'REQUIRED' && !g.gasPaid && <span className="muted">{g.maxFee.estimated
           ? tr('About {0} in network fees (an estimate; your wallet shows the final fee)', units(g.maxFee.amount, g.maxFee.unit, 'up'))
           : tr('At most {0} in network fees', units(g.maxFee.amount, g.maxFee.unit, 'up'))}</span>}
         {g.maxFee?.sponsorship === 'OFFERED' && !g.gasPaid && <span className="muted">{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</span>}
         {g.gasPaid && <span className="muted">{g.gasPaid.sponsored ? tr('Gas paid by FloFi: {0}', units(g.gasPaid.amount, g.gasPaid.unit))
+          : g.gasPaid.paidInToken ? g.chain.startsWith('solana:')
+            ? tr('Network fees paid: {0} from your wallet to Pimlico', units(g.gasPaid.paidInToken.amount, 'token', 'up', g.gasPaid.paidInToken))
+            : tr('Network fee paid: {0}', units(g.gasPaid.paidInToken.amount, 'token', 'up', g.gasPaid.paidInToken))
           : tr('Network fees paid: {0}', units(g.gasPaid.amount, g.gasPaid.unit))}</span>}
+        {/* ADR-0010: Circle's protocol facts stay behind the collapsed technical details. */}
+        {g.gasPayment && <details className="review-panel-technical"><summary>{tr('Technical details')}</summary>
+          <p className="muted">{tr('Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}', g.gasPayment.paymaster, g.gasPayment.entryPoint,
+            units(g.gasPayment.permitCap, 'token', 'up', g.gasPayment))}</p>
+          <p className="muted">{tr('What is left of the permit cap stays approved to Circle\'s paymaster until your next USDC permit replaces it.')}</p></details>}
         {g.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a> : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}
     </ol>}
+    {/* Owner requirement (FloFi Wallet + Circle): FloFi's own consent card, before FloFi Wallet is asked anything for a Circle-paid group. */}
+    {consentOffer && <CircleConsentCard offer={consentOffer} network={NETWORK[`eip155:${consentOffer.chainId}`] ?? `eip155:${consentOffer.chainId}`} onAnswer={answerConsent}/>}
+    {declinedStep !== null && <p role="status">{tr(CIRCLE_CONSENT_DECLINE.DONE, String(declinedStep))}</p>}
     {run.mode === 'USER_FUNDED' && run.nextAction === 'OWNER_SIGNS_GROUP' && currentGroup && <div className="approval-actions">
       <button type="button" disabled={busy} onClick={() => void authorizeGroup(currentGroup.index)}>
         {tr('Authorize {0} now', stepsOf(tr, currentGroup.steps[0], currentGroup.steps[1]))}</button>
@@ -442,10 +521,13 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       const label = stepsOf(tr, g.steps[0], g.steps[1]), sent = revocations[g.index];
       return <div key={`revoke-${g.index}`} className="workflow-run-choice">
         <p role="note" id={`revoke-note-${g.index}`}>{tr('You signed {0} as an operation FloFi did not relay. It stays valid until you cancel it with one transaction from your own wallet.', label)}</p>
+        {/* ADR-0010 review UX8: Circle was chosen because this wallet's ETH could not pay the network fee, and the cancellation is an ordinary
+            transaction the wallet pays in ETH (never in USDC through Circle): said before the wallet is asked. */}
+        {g.gasPayment && !sent && <p role="note" id={`revoke-fee-${g.index}`}>{tr('Cancelling is an ordinary transaction from your wallet, and its network fee is paid in ETH, not in USDC through Circle: you need a small amount of ETH on {0} first.', NETWORK[g.chain] ?? g.chain)}</p>}
         {sent ? <p role="status">{tr('Cancellation sent from your wallet ({0}). Once it is confirmed, the signed operation can never execute.', short(sent))}</p>
           : <div className="approval-actions">
-            <button type="button" className="secondary" disabled={busy} aria-describedby={`revoke-note-${g.index}`} onClick={() => void act(async () => {
-              const hash = await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index);
+            <button type="button" className="secondary" disabled={busy} aria-describedby={g.gasPayment ? `revoke-note-${g.index} revoke-fee-${g.index}` : `revoke-note-${g.index}`} onClick={() => void act(async () => {
+              const hash = await revokeUserOperation(g.feePayer, Number(g.chain.slice('eip155:'.length)), run.workflowRunId, g.index, entryPointOfGroup(g.gasPayment));
               setRevocations(current => ({ ...current, [g.index]: hash }));
               return workflowRunStatusHandoff(approvalId);
             })}>{tr('Cancel the signed operation for {0} in my wallet', label)}</button>
@@ -456,7 +538,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <button type="button" className="secondary" disabled={busy} onClick={() => void recoverBatch(currentGroup.index, currentGroup.batchId!)}>{tr('Check my wallet for the batch')}</button>
     </div>}
     {nextStep !== null && <div className="approval-actions">
-      <button type="button" disabled={busy} onClick={() => void act(() => continueWorkflowRunHandoff(approvalId))}>{tr('Continue to step {0}', String(nextStep))}</button>
+      <button type="button" disabled={busy} onClick={() => void continueNext()}>{tr('Continue to step {0}', String(nextStep))}</button>
     </div>}
     {run.state === 'HALTED' && <div className="workflow-run-choice">
       <p role="status">{halted === 'NOTHING_SENT'
@@ -482,7 +564,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <p>{tr('Revoking stops FloFi from starting any further step. Submitted transactions keep being observed. The calls you signed stay valid on chain until they expire (at most one hour); to cancel them on chain at once, revoke them from your wallet in FloFi → Credentials.')}</p>
       <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('Revoke workflow authorization')}</button>
     </div>}
-    {run.state === 'ATTENTION'  && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
+    {run.state === 'ATTENTION' && ((run.groups ?? []).some(g => g.code === KORA_RECOVERY_INCOMPLETE)
+      ? <p role="status" data-attention={KORA_RECOVERY_INCOMPLETE}>{tr(KORA_RECOVERY_INCOMPLETE_TEXT)}</p>
+      : <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>)}
     {run.state === 'COMPLETED' && <p role="status"><strong>{tr('Every step reconciled.')}</strong> {tr('Your conversation can show the result.')}</p>}
     {/* The fee note describes this build's modes; a legacy delegated run was paid by FloFi's (now retired) executor. */}
     {run.mode !== 'DELEGATED' && <p className="muted workflow-run-note">{tr(plan.notes[0] ?? '')}</p>}

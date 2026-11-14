@@ -2,12 +2,14 @@
 import { JUPITER_SOLANA_MAINNET as profile, solanaTokenByMint, type SolanaToken } from '@defi-workflow-engine/action-registry';
 import { readExactInputSwap, EXACT_INPUT_SWAP_ACTION, type SemanticWorkflow,
   type ArtifactSet, type SimulationBundle, type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
-import { associatedTokenAddress, findProgramAddress, compileMessageV0, decodeLookupTable, fromBase64,
+import { associatedTokenAddress, findProgramAddress, compileMessageV0, decodeLookupTable, decodeTokenAccount, fromBase64, parseMessageV0,
   readU16, readU64, serializeMessageV0, serializeTransaction, sha256Hex, solanaAddress, toBase64,
   u32Bytes, type SolanaInstruction } from './solana.js';
 import { assertMessageRoundTrip, assertSolanaSwapReview, verifySignedSolanaSwap, type SignedSolanaTransaction, buildSolanaSwapArtifacts, estimateFee, readSolanaAccounts, readSolanaSwapBalances, requireSolanaSwapRuntime,
-  rpcContextValue, setComputeUnitLimit, simulateSolanaMessage, solanaSwapArtifactHash, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySolanaCluster,
-  type SolanaBalances, type SolanaRouteStep, type SolanaRpc, type SolanaSwapQuote, type SolanaSwapSimulation } from './solana-swap.js';
+  rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapArtifactHash, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySolanaCluster,
+  type RawSolanaAccount, type SolanaBalances, type SolanaRouteStep, type SolanaRpc, type SolanaSwapQuote, type SolanaSwapSimulation } from './solana-swap.js';
+import { assertKoraMessage, assertKoraQuote, koraAta, koraPaidAccountCreation, koraPaymentInstruction, unsignedTransactionBytes, KORA_BASE_FEE_LAMPORTS,
+  KORA_JUPITER_MAX_ACCOUNTS, KORA_MAX_COMPUTE_UNIT_PRICE, KORA_MECHANISM, KORA_TOKEN_PROGRAM, type KoraBuildOptions, type KoraFeeToken, type KoraGasTerms, type KoraPort } from './kora.js';
 export { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 export type { SolanaToken, SolanaTokenSymbol } from '@defi-workflow-engine/action-registry';
 // Shared Solana swap core, re-exported under its BUILD-014 import path.
@@ -27,7 +29,9 @@ export type JupiterReview = { format: 'gryloo.jupiter-review.v1'; workflow: Sema
   amount: string; slippageBps: number; quote: JupiterQuote; routeCommitment: string; inspection: JupiterInspection; lookupTables: Record<string, string[]>;
   blockhash: string; lastValidBlockHeight: number; computeUnitLimit: number; computeUnitPrice: string; estimatedFeeLamports: string;
   message: string; messageHash: string; unsignedTransaction: string; simulationResult: JupiterSimulation; expiresAt: string;
-  artifactSet: ArtifactSet; simulation: SimulationBundle; policy: AuthorizationPolicy; manifest: StrategyManifest; plan: ExecutionPlan; commitment: string };
+  artifactSet: ArtifactSet; simulation: SimulationBundle; policy: AuthorizationPolicy; manifest: StrategyManifest; plan: ExecutionPlan; commitment: string;
+  /** ADR-0010 §4: Pimlico's Kora fee payer fronts the SOL fee; the owner repays `gas.amount` of `gas.token` in this transaction. Absent: SOL. */
+  gas?: KoraGasTerms };
 
 const P = profile.programs;
 const LOOKUP_PROGRAM = 'AddressLookupTab1e1111111111111111111111111';
@@ -251,6 +255,127 @@ export async function simulateJupiterSwap(workflow: SemanticWorkflow, ownerInput
     lastValidBlockHeight: lastValidBlockHeight as number, computeUnitLimit: units, computeUnitPrice: inspection.computeUnitPrice,
     estimatedFeeLamports: fee.toString(), message, messageHash, unsignedTransaction: toBase64(serializeTransaction(null, messageBytes)),
     simulationResult, expiresAt, artifactSet, simulation, policy, manifest, plan };
+  return { ...review, commitment: jupiterHash(review) };
+}
+
+/** A classic SPL token account's balance for (owner, mint), or null when it does not exist or is not that owner's account of that mint. */
+function feeTokenBalance(account: RawSolanaAccount, wallet: string, mint: string): bigint | null {
+  if (!account || account.owner !== KORA_TOKEN_PROGRAM || account.data.length !== 165) return null;
+  const decoded = decodeTokenAccount(account.data);
+  return decoded.owner === wallet && decoded.mint === mint ? decoded.amount : null;
+}
+/** Kora mode fee tokens in the order a swap tries them: the swap's own input token first (the owner surely holds it), then the configured order. */
+export function koraFeeTokenOrder(tokens: readonly KoraFeeToken[], inputMint: string): KoraFeeToken[] {
+  return [...tokens.filter(t => t.mint === inputMint), ...tokens.filter(t => t.mint !== inputMint)];
+}
+/**
+ * ADR-0010 §4: the same swap with Pimlico's hosted Kora fee payer, for an owner whose SOL cannot pay the network fee. Called by the gas policy only
+ * after the native build failed for lack of SOL; refuses with `KORA_NATIVE_COVERS` when the owner's SOL covers the worst-case native cost (native
+ * stays the default and is never switched on a guess). Read-only: Jupiter `/build` (a smaller account budget, so two signatures fit), the chain,
+ * one Kora quote per fee token tried. The message names the pinned Kora signer as fee payer (static key 0, its slot left for Kora), hands Kora
+ * the rent of the owner's ATA creations (charged in the token fee), caps the priority fee, and ends with the owner's repayment `TransferChecked`
+ * of exactly the quoted amount. Never signs or sends; refusals are closed `KORA_*` codes.
+ */
+export async function simulateKoraJupiterSwap(workflow: SemanticWorkflow, ownerInput: string, http: JupiterHttp, rpc: SolanaRpc, kora: KoraPort, now = Date.now(),
+  options: KoraBuildOptions = {}): Promise<JupiterReview> {
+  const intent = jupiterIntent(workflow, ownerInput), owner = intent.owner;
+  const fetchedAt = new Date(now).toISOString();
+  const [cluster, build, tokensRead] = await Promise.allSettled([verifySolanaCluster(rpc, profile.genesisHash),
+    http({ ...jupiterBuildQuery(intent), maxAccounts: KORA_JUPITER_MAX_ACCOUNTS }), kora.tokens()]);
+  settledValue(cluster);
+  const parsed = parseJupiterBuild(settledValue(build), intent, fetchedAt);
+  const inspection = inspectJupiterInstructions(parsed, intent);
+  const tokens = koraFeeTokenOrder(settledValue(tokensRead), intent.input.mint);
+  if (!tokens.length) fail('KORA_FEE_TOKEN_UNSUPPORTED');
+  const feeKeys = tokens.flatMap(t => [koraAta(owner, t.mint), koraAta(kora.paymentAddress, t.mint)]);
+  const [tablesRead, balancesRead, latestRead, feeRead, rentRead] = await Promise.allSettled([verifyLookupTables(rpc, parsed.lookupTableAddresses),
+    readJupiterBalances(rpc, intent, inspection), rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]), readSolanaAccounts(rpc, feeKeys),
+    rpc('getMinimumBalanceForRentExemption', [165, { commitment: 'confirmed' }])]);
+  const tables = settledValue(tablesRead), pre = settledValue(balancesRead);
+  if (inspection.wrappedSolAccount && (intent.input.native ? pre.input : pre.output) !== null) fail('JUPITER_WRAPPED_SOL_ACCOUNT_PRESENT');
+  if (!intent.input.native && BigInt(pre.input ?? '0') < BigInt(intent.amount)) fail(`JUPITER_INSUFFICIENT_${intent.input.symbol}`);
+  const latest = rpcContextValue(settledValue(latestRead)), feeAccounts = settledValue(feeRead).accounts, rentValue = settledValue(rentRead);
+  const blockhash = solanaAddress(latest.blockhash), lastValidBlockHeight = latest.lastValidBlockHeight;
+  if (!Number.isSafeInteger(lastValidBlockHeight) || !Number.isSafeInteger(rentValue) || (rentValue as number) <= 0) fail('SOLANA_RPC_INVALID');
+  const rent = BigInt(rentValue as number), amount = BigInt(intent.amount);
+  // Native first: the owner's SOL that would pay the worst-case native cost (fee at the compute ceiling, the account rent it would advance, any SOL
+  // input) keeps the native message. Only a provable shortfall continues.
+  const nativeWorstCase = BigInt(estimateFee(profile.maximumComputeUnits, inspection.computeUnitPrice, profile.baseFeeLamports)) +
+    (!intent.output.native && pre.output === null ? rent : 0n) + (inspection.wrappedSolAccount ? rent : 0n) + (intent.input.native ? amount : 0n);
+  if (!options.groupShortfall && BigInt(pre.ownerLamports) >= nativeWorstCase) fail('KORA_NATIVE_COVERS');
+  const price = BigInt(inspection.computeUnitPrice) > KORA_MAX_COMPUTE_UNIT_PRICE ? KORA_MAX_COMPUTE_UNIT_PRICE : BigInt(inspection.computeUnitPrice);
+  // Kora pays the rent of the ATAs the owner would have paid (the output account, the temporary wrapped-SOL account): it charges it in the fee.
+  const body = [...setComputeUnitPrice(price.toString()), ...parsed.setup.map(ix => koraPaidAccountCreation(ix, owner, kora.feePayer)), parsed.swap,
+    ...parsed.cleanup ? [parsed.cleanup] : []];
+  type Payment = Pick<KoraGasTerms, 'feeAccount' | 'paymentAccount' | 'token'>;
+  const instructions = (units: number, payment: Payment, fee: bigint) => [setComputeUnitLimit(units), ...body, koraPaymentInstruction(owner, payment, fee)];
+  const compile = (units: number, payment: Payment, fee: bigint) => serializeMessageV0(compileMessageV0(kora.feePayer, instructions(units, payment, fee), blockhash, tables));
+  const watch = (payment: Payment) => [...new Set([owner, inspection.ownerInputAccount, inspection.ownerOutputAccount, payment.feeAccount, payment.paymentAccount])];
+  const simulate = async (message: Uint8Array, payment: Payment) => {
+    const addresses = watch(payment), result = await simulateSolanaMessage(rpc, message, addresses, 'JUPITER');
+    return { ...result, at: (address: string) => result.accounts[addresses.indexOf(address)] ?? null };
+  };
+  // One quote per fee token, in order, until the owner's balance (less what the swap itself spends of that token) covers it.
+  const unavailable: string[] = [];
+  let chosen: { terms: KoraGasTerms; units: number } | null = null;
+  for (const [index, token] of tokens.entries()) {
+    const payment: Payment = { feeAccount: koraAta(owner, token.mint), paymentAccount: koraAta(kora.paymentAddress, token.mint), token };
+    if (feeTokenBalance(feeAccounts[index * 2 + 1]!, kora.paymentAddress, token.mint) === null) { unavailable.push('KORA_PAYMENT_ACCOUNT_MISSING'); continue; }
+    const available = (feeTokenBalance(feeAccounts[index * 2]!, owner, token.mint) ?? 0n) - (token.mint === intent.input.mint ? amount : 0n);
+    if (available <= 0n) { unavailable.push('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT'); continue; }
+    // The quote is taken on the final shape: same accounts, same instructions, the payment amount a placeholder of the same size.
+    const probe = await simulate(compile(profile.maximumComputeUnits, payment, 0n), payment);
+    const units = Math.min(profile.maximumComputeUnits, Math.ceil(probe.unitsConsumed * 1.2) + 10_000);
+    const quote = assertKoraQuote(await kora.estimate(toBase64(unsignedTransactionBytes(compile(units, payment, 0n))), token.mint), kora);
+    if (available < quote.feeInToken) { unavailable.push('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT'); continue; }
+    chosen = { units, terms: { mechanism: KORA_MECHANISM, feePayer: kora.feePayer, paymentAddress: kora.paymentAddress, ...payment, token: { symbol: token.symbol, mint: token.mint,
+      decimals: token.decimals }, amount: quote.feeInToken.toString(), quotedFeeLamports: quote.feeInLamports.toString(), quotedAt: fetchedAt,
+      nativeWorstCaseLamports: nativeWorstCase.toString() } };
+    break;
+  }
+  if (!chosen) return fail(unavailable.includes('KORA_FEE_TOKEN_BALANCE_INSUFFICIENT') ? 'KORA_FEE_TOKEN_BALANCE_INSUFFICIENT' : unavailable[0] ?? 'KORA_FEE_TOKEN_UNSUPPORTED');
+  const { terms, units } = chosen, fee = BigInt(terms.amount);
+  const messageBytes = compile(units, terms, fee);
+  assertKoraMessage(parseMessageV0(messageBytes), tables, owner, terms);
+  assertMessageRoundTrip(messageBytes, instructions(units, terms, fee), owner, tables, 'JUPITER', kora.feePayer);
+  const unsigned = unsignedTransactionBytes(messageBytes);
+  const final = await simulate(messageBytes, terms);
+  const post: SolanaBalances = { slot: pre.slot, ownerLamports: final.at(owner)?.lamports.toString() ?? '0',
+    input: solanaTokenAmount(final.at(inspection.ownerInputAccount), owner, intent.input.mint), output: solanaTokenAmount(final.at(inspection.ownerOutputAccount), owner, intent.output.mint) };
+  // The owner pays no SOL: Kora pays the fee and the rent; the temporary wrapped-SOL account it funded is closed to the owner (that rent is
+  // refunded in SOL and was charged in the token fee), so it is not swap output.
+  const refund = inspection.wrappedSolAccount ? rent : 0n;
+  const lamports = BigInt(post.ownerLamports) - BigInt(pre.ownerLamports) - refund;
+  const inputSpent = intent.input.native ? -lamports : BigInt(pre.input ?? '0') - BigInt(post.input ?? '0') - (terms.token.mint === intent.input.mint ? fee : 0n);
+  const outputReceived = intent.output.native ? lamports : BigInt(post.output ?? '0') - BigInt(pre.output ?? '0') + (terms.token.mint === intent.output.mint ? fee : 0n);
+  if (inputSpent !== amount) fail('JUPITER_SIMULATED_INPUT_MISMATCH');
+  if (outputReceived < BigInt(parsed.quote.otherAmountThreshold)) fail('JUPITER_SIMULATED_OUTPUT_BELOW_MINIMUM');
+  if (!intent.input.native && !intent.output.native && lamports !== 0n) fail('JUPITER_SIMULATED_INPUT_MISMATCH');
+  // The repayment leg moves exactly the reviewed amount from the owner's fee account to the pinned payment account.
+  const index = tokens.findIndex(t => t.mint === terms.token.mint);
+  const delta = (address: string, wallet: string, before: RawSolanaAccount | undefined) =>
+    (feeTokenBalance(final.at(address), wallet, terms.token.mint) ?? 0n) - (feeTokenBalance(before ?? null, wallet, terms.token.mint) ?? 0n);
+  const swapLeg = terms.token.mint === intent.input.mint ? -amount : terms.token.mint === intent.output.mint ? outputReceived : 0n;
+  if (delta(terms.paymentAccount, kora.paymentAddress, feeAccounts[index * 2 + 1]) !== fee || delta(terms.feeAccount, owner, feeAccounts[index * 2]) !== swapLeg - fee)
+    fail('KORA_SIMULATED_PAYMENT_MISMATCH');
+  const networkFee = BigInt(estimateFee(units, price.toString(), KORA_BASE_FEE_LAMPORTS));
+  const simulationResult: JupiterSimulation = { slot: pre.slot, unitsConsumed: final.unitsConsumed, logs: final.logs, pre, post,
+    inputSpent: inputSpent.toString(), outputReceived: outputReceived.toString(), accountCreationLamports: '0', feeLamports: networkFee.toString() };
+  const expiresAt = new Date(now + profile.reviewTtlSeconds * 1000).toISOString();
+  const routeCommitment = jupiterHash({ routePlan: parsed.quote.routePlan, swapData: toBase64(parsed.swap.data), swapAccounts: parsed.swap.accounts });
+  const message = toBase64(messageBytes), messageHash = sha256Hex(messageBytes);
+  const { artifactSet, simulation, policy, manifest, plan } = buildSolanaSwapArtifacts({ runtime: requireSolanaSwapRuntime(profile.chain), workflow,
+    nodeId: intent.nodeId, intent, quote: parsed.quote, quoteArtifact: { quote: parsed.quote, routeCommitment, messageHash, tables, gas: terms },
+    messageHash, contract: { address: P.jupiter, version: 'jupiter-v6' }, functionId: 'route-v2', maximumNetworkCostLamports: 0n,
+    lastValidBlockHeight: lastValidBlockHeight as number, expiresAt, reviewTtlSeconds: profile.reviewTtlSeconds,
+    tokenFee: { mint: terms.token.mint, decimals: terms.token.decimals, amount: terms.amount } });
+  const review: Omit<JupiterReview, 'commitment'> = { format: 'gryloo.jupiter-review.v1', workflow, chain: profile.chain, cluster: 'mainnet-beta', owner,
+    input: { symbol: intent.input.symbol, mint: intent.input.mint, decimals: intent.input.decimals },
+    output: { symbol: intent.output.symbol, mint: intent.output.mint, decimals: intent.output.decimals },
+    amount: intent.amount, slippageBps: intent.slippageBps, quote: parsed.quote, routeCommitment, inspection, lookupTables: tables, blockhash,
+    lastValidBlockHeight: lastValidBlockHeight as number, computeUnitLimit: units, computeUnitPrice: price.toString(),
+    estimatedFeeLamports: networkFee.toString(), message, messageHash, unsignedTransaction: toBase64(unsigned),
+    simulationResult, expiresAt, artifactSet, simulation, policy, manifest, plan, gas: terms };
   return { ...review, commitment: jupiterHash(review) };
 }
 

@@ -127,12 +127,17 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
       throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
     // Exactly the reviewed workflow and plan: the same canonical workflow hash, the same groups (mechanism and steps) in the same order.
     if (!runMatchesBinding(run, binding)) throw new Error('EDITOR_EXECUTION_PLAN_CHANGED');
-    const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0);
+    // Review C4: the wallet kind this browser reported for the Review (FloFi Wallet, or none reported, is never handed a Circle permit).
+    // Final review (P3): and only with the fee mechanism the Review showed for it — another one is refused before the group is stored, so the run
+    // just started is ended below at once (never a fresh native batch that blocks ending it until it expires).
+    const prepared = await workflowRunUserFundedPrepare(s, approvalId, wallets, 0, undefined, parsed.eip155?.wallet, binding.firstGroupGas);
     return { ok: true, value: { approvalId, proposal, prepared } };
   } catch (cause) {
     // Nothing was signed or sent: a started run that could not reach its wallet request is ended (it stays readable as ended).
-    if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); } catch { /* already ended or not created */ } }
-    return failure(cause);
+    let ended = false;
+    if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); ended = true; } catch { /* already ended or not created */ } }
+    const refused = failure(cause);
+    return ended && refused.code === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? { ok: false, code: 'EDITOR_MECHANISM_CHANGED_NOT_STARTED' } : refused;
   }
 
   });

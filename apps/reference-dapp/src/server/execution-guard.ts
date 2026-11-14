@@ -19,6 +19,8 @@ export function assertExecutionEnabled(env: Env = process.env): void {
 /** Existing flow methods that release a new wallet request or submit signed bytes; reports/observations deliberately stay readable. */
 const NEW_EXECUTION_METHODS: ReadonlySet<string> = new Set([
   'begin', 'beginSwap', 'beginLiquidity', 'handoff', 'submit', 'submitSwap', 'submitLiquidity', 'broadcast',
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: 0x Gasless — the typed-data request to the owner's wallet, and the one relay of its signatures.
+  'beginGasless', 'submitGasless',
 ]);
 export const isNewExecutionMethod = (method: string): boolean => NEW_EXECUTION_METHODS.has(method);
 export function guardFlowExecution(method: string, env: Env = process.env): void {

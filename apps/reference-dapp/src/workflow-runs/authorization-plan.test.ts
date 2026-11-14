@@ -11,7 +11,7 @@ import { composeWorkflow, type WorkflowComposition } from '../engine/strategy-en
 import { evaluateWorkflowGates, readHandoffPolicy } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
 import { authorizationPlan, delegableByCode, EXECUTOR_FUNDED_GAS_RETIRED, userFundedPreferred, type DelegationFacts } from './authorization-plan.ts';
-import type { GroupStrategy, UserFundedFacts } from './execution-groups.ts';
+import type { GroupStrategy, UserFundedFacts, WalletProfile } from './execution-groups.ts';
 
 const ok = (input: unknown): WorkflowComposition => { const w = composeWorkflow(input); if (!w.ok) throw new Error(w.code); return w; };
 const BASE_SEPOLIA_SWAP = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' };
@@ -23,10 +23,10 @@ function runtime(sequences: boolean, delegation: DelegationFacts): McpRuntime {
   return { kind: 'embedded', mode: async flow => FLOWS.includes(flow) ? 'harness' : 'off', info: async () => ({ executionEnabled: true }), preview: never, run: never,
     journal: never, evidence: never, sequences: async () => ({ enabled: sequences, delegation }) };
 }
-async function planOf(input: unknown, sequences: boolean, delegation: DelegationFacts, userFunded?: UserFundedFacts) {
+async function planOf(input: unknown, sequences: boolean, delegation: DelegationFacts, userFunded?: UserFundedFacts, wallets?: WalletProfile) {
   const w = ok(input);
   return authorizationPlan(w, await evaluateWorkflowGates(w, runtime(sequences, delegation), readHandoffPolicy({})), delegation, undefined,
-    userFunded ? { facts: userFunded } : undefined);
+    userFunded ? { facts: userFunded, ...wallets ? { wallets } : {} } : undefined);
 }
 const USER_FUNDED: UserFundedFacts = { enabled: true, code: null, chains: ['eip155:8453'], bundlerChains: [], solanaNonceAccounts: true };
 const MOCKED: DelegationFacts = { mode: 'MOCKED_HARNESS', unavailable: null };
@@ -93,6 +93,22 @@ describe('BUILD-CHAT-E2E-001 authorization plan', () => {
       userFunded: { available: true, interactions: { upfront: 1, whenDue: 1, atLeast: true, single: false } }, recommended: 'USER_FUNDED' });
     // Never worded as fewer: the notes describe the groups, not a saving.
     expect(plan.notes.join(' ')).not.toMatch(/fewer/i);
+  });
+});
+
+describe('ADR-0010 review C5: the /approve plan never claims one interaction for a group whose fee Circle may pay', () => {
+  const swaps = { version: 2, steps: [BASE_SEPOLIA_SWAP, { ...BASE_SEPOLIA_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' }] };
+  const metamask: WalletProfile = { eip155: { wallet: 'INJECTED', atomic: { 'eip155:84532': 'supported' }, typedData: true } };
+  it('with the owner\'s reported wallet: at least one interaction (two signatures when Circle pays), and a note that says so; native-only unchanged', async () => {
+    const native = await planOf(swaps, true, MOCKED, { ...USER_FUNDED, chains: ['eip155:84532'] }, metamask);
+    expect(native.userFunded).toMatchObject({ available: true, wallets: 'REPORTED', interactions: { upfront: 1, whenDue: 0, single: true, atLeast: false } });
+    expect(native.notes.join(' ')).not.toMatch(/Circle/);
+    const circle = await planOf(swaps, true, MOCKED, { ...USER_FUNDED, chains: ['eip155:84532'], tokenGasChains: ['eip155:84532'] }, metamask);
+    expect(circle.userFunded).toMatchObject({ available: true, wallets: 'REPORTED', interactions: { upfront: 1, whenDue: 0, single: false, atLeast: true } });
+    expect(circle.userFunded.groups[0]).toMatchObject({ strategy: 'EVM_WALLET_BATCH', interactions: 1, tokenGas: 'CIRCLE_USDC_PAYMASTER' });
+    expect(circle.notes).toContain('When your ETH cannot pay a group\'s network fee, FloFi may offer to pay it from your USDC through Circle: that group then needs two '
+      + 'signatures (a USDC permit, then the operation) instead of one.');
+    expect(circle.recommended).toBe('USER_FUNDED');
   });
 });
 

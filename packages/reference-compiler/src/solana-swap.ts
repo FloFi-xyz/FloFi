@@ -2,9 +2,10 @@
 import { solanaSwapRuntime, type SolanaSwapRuntime, type SolanaSwapToken } from '@defi-workflow-engine/action-registry';
 import { hashArtifactBytes, hashSupplyValue, type SemanticWorkflow, type ArtifactSet, type SimulationBundle, type AuthorizationPolicy,
   type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
-import { base58Encode, decodeTokenAccount, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, serializeTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
+import { base58Encode, decodeTokenAccount, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
   type LookupTables, type SolanaInstruction } from './solana.js';
 import { verifySolanaWalletGuard, type SolanaWalletGuard } from './solana-wallet-guard.js';
+import { unsignedTransactionBytes, verifyKoraOwnerSigned, type KoraGasTerms } from './kora.js';
 
 /**
  * Provider-neutral Solana swap core shared by every runtime of the canonical swap (Jupiter mainnet-beta,
@@ -26,7 +27,9 @@ export type SolanaSwapReviewCore = SolanaSwapArtifacts & { workflow: SemanticWor
   amount: string; slippageBps: number; quote: SolanaSwapQuote; routeCommitment: string;
   inspection: { programs: string[]; ownerInputAccount: string; ownerOutputAccount: string; wrappedSolAccount: string | null; ensuredAccounts: string[]; swap: unknown };
   lookupTables: Record<string, string[]>; blockhash: string; lastValidBlockHeight: number; computeUnitLimit: number; computeUnitPrice: string;
-  estimatedFeeLamports: string; message: string; messageHash: string; unsignedTransaction: string; simulationResult: SolanaSwapSimulation; expiresAt: string; commitment: string };
+  estimatedFeeLamports: string; message: string; messageHash: string; unsignedTransaction: string; simulationResult: SolanaSwapSimulation; expiresAt: string; commitment: string;
+  /** ADR-0010: Pimlico's Kora fee payer fronts the SOL fee and the owner repays it in a token inside this transaction; absent: the owner pays in SOL. */
+  gas?: KoraGasTerms };
 
 export const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 export const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111';
@@ -87,13 +90,17 @@ export function solanaSwapDeltas(intent: SolanaSwapIntent, pre: SolanaBalances, 
   const received = intent.output.native ? lamports : BigInt(post.output ?? '0') - BigInt(pre.output ?? '0');
   return { inputSpent: spent, outputReceived: received };
 }
-/** The compiled bytes must resolve to exactly the inspected instructions under runtime account rules. */
-export function assertMessageRoundTrip(messageBytes: Uint8Array, instructions: SolanaInstruction[], owner: string, tables: LookupTables, prefix = 'JUPITER'): void {
-  const writable = new Set([owner, ...instructions.flatMap(i => i.accounts.filter(a => a.isWritable).map(a => a.pubkey))]);
+/**
+ * The compiled bytes must resolve to exactly the inspected instructions under runtime account rules. `payer`: the fee payer (the owner, or the
+ * pinned Kora signer in ADR-0010 token-fee mode, then the only other signer).
+ */
+export function assertMessageRoundTrip(messageBytes: Uint8Array, instructions: SolanaInstruction[], owner: string, tables: LookupTables, prefix = 'JUPITER', payer = owner): void {
+  const writable = new Set([payer, ...instructions.flatMap(i => i.accounts.filter(a => a.isWritable).map(a => a.pubkey))]);
+  const signer = (key: string) => key === owner || key === payer;
   const normalize = (list: SolanaInstruction[]) => JSON.stringify(list.map(i => ({ programId: i.programId, data: toBase64(i.data),
-    accounts: i.accounts.map(a => [a.pubkey, a.pubkey === owner, writable.has(a.pubkey)]) })));
+    accounts: i.accounts.map(a => [a.pubkey, signer(a.pubkey), writable.has(a.pubkey)]) })));
   const decoded = decompileMessageV0(parseMessageV0(messageBytes), tables);
-  if (decoded.some(i => i.accounts.some(a => a.isSigner !== (a.pubkey === owner) || a.isWritable !== writable.has(a.pubkey))) ||
+  if (decoded.some(i => i.accounts.some(a => a.isSigner !== signer(a.pubkey) || a.isWritable !== writable.has(a.pubkey))) ||
       normalize(decoded) !== normalize(instructions)) fail(`${prefix}_MESSAGE_ROUND_TRIP_MISMATCH`);
 }
 export function setComputeUnitLimit(units: number): SolanaInstruction {
@@ -107,7 +114,8 @@ export function setComputeUnitPrice(microLamports: string): SolanaInstruction[] 
 }
 /** Read-only `simulateTransaction` of the exact unsigned message; nothing is signed. Returns post-states of `addresses`. */
 export async function simulateSolanaMessage(rpc: SolanaRpc, message: Uint8Array, addresses: string[], prefix = 'JUPITER') {
-  const tx = toBase64(serializeTransaction(null, message));
+  // One empty slot per required signer: the runtime checks the signature count against the header even without verifying signatures.
+  const tx = toBase64(unsignedTransactionBytes(message));
   const value = rpcContextValue(await rpc('simulateTransaction', [tx, { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: false, commitment: 'confirmed',
     accounts: { encoding: 'base64', addresses } }]));
   const allLogs = Array.isArray(value.logs) ? (value.logs as unknown[]).filter((l): l is string => typeof l === 'string') : [];
@@ -120,7 +128,9 @@ export async function simulateSolanaMessage(rpc: SolanaRpc, message: Uint8Array,
 /** The frozen v1 artifact chain (ArtifactSet → SimulationBundle → AuthorizationPolicy → StrategyManifest → ExecutionPlan) for one swap. */
 export function buildSolanaSwapArtifacts(input: { runtime: SolanaSwapRuntime; workflow: SemanticWorkflow; nodeId: string; intent: SolanaSwapIntent;
   quote: SolanaSwapQuote; quoteArtifact: unknown; messageHash: string; contract: { address: string; version: string }; functionId: string;
-  maximumNetworkCostLamports: bigint; lastValidBlockHeight: number; expiresAt: string; reviewTtlSeconds: number }): SolanaSwapArtifacts {
+  maximumNetworkCostLamports: bigint; lastValidBlockHeight: number; expiresAt: string; reviewTtlSeconds: number;
+  /** ADR-0010: the network fee the owner repays in a token (Kora mode): bound as the owner's gas budget, in that token (it pays no SOL). */
+  tokenFee?: { mint: string; decimals: number; amount: string } }): SolanaSwapArtifacts {
   const { runtime, workflow, intent, quote } = input, prefix = runtime.idPrefix, chain = runtime.chain;
   const semanticHash = solanaSwapArtifactHash('semantic-workflow', workflow);
   const inputAsset = { chainId: chain, address: intent.input.mint, decimals: intent.input.decimals };
@@ -137,7 +147,10 @@ export function buildSolanaSwapArtifacts(input: { runtime: SolanaSwapRuntime; wo
     freshness: { observedAt: quote.fetchedAt, expiresAt: input.expiresAt, maximumAgeSeconds: input.reviewTtlSeconds } };
   const simulationHash = solanaSwapArtifactHash('simulation-bundle', simulation), owner = { chainId: chain, address: intent.owner };
   const spendLimits = [{ asset: inputAsset, maximumAmount: intent.amount, maximumPerStepAmount: intent.amount, maximumCumulativeAmount: intent.amount }];
-  const gasBudgets = [{ asset: { chainId: chain, nativeId: 'SOL', decimals: 9 }, maximumAmount: input.maximumNetworkCostLamports.toString() }];
+  // ADR-0010: in Kora mode the owner's whole network cost is the token repayment (it pays no SOL): that is its gas budget, in the token.
+  const gasBudgets = input.tokenFee ? [{ asset: { chainId: chain, address: input.tokenFee.mint, decimals: input.tokenFee.decimals }, maximumAmount: input.tokenFee.amount }]
+    : [{ asset: { chainId: chain, nativeId: 'SOL', decimals: 9 }, maximumAmount: input.maximumNetworkCostLamports.toString() }];
+  const feeBudgets: never[] = [];
   const recovery = { failurePolicy: 'ABORT' as const, residualAssetRecipient: owner, maximumAttemptsPerStep: 1, requiresHumanReview: true as const };
   const providers = { kind: 'FIXED' as const, providerId: runtime.adapterId };
   const policy: AuthorizationPolicy = { schemaVersion: '1.0.0', policyId: `${prefix}-policy`, semanticWorkflowHash: semanticHash, artifactSetHash: artifactHash, simulationHash,
@@ -145,12 +158,12 @@ export function buildSolanaSwapArtifacts(input: { runtime: SolanaSwapRuntime; wo
       adapters: [{ id: runtime.adapterId, version: '1.0.0' }], protocols: [runtime.protocol], contracts: [contract],
       functions: [{ chainId: chain, contract: input.contract.address, functionId: input.functionId }] },
     budgetReservation: { rule: 'RESERVE_BEFORE_SUBMISSION', concurrentConsumption: 'CUMULATIVE_ACROSS_BRANCHES', implementation: 'NOT_IMPLEMENTED' },
-    spendLimits, maximumSlippageBps: intent.slippageBps, gasBudgets, feeBudgets: [], oracleRules: [], accountRiskRules: [], checkpointRules: [], providers,
+    spendLimits, maximumSlippageBps: intent.slippageBps, gasBudgets, feeBudgets, oracleRules: [], accountRiskRules: [], checkpointRules: [], providers,
     nonce: String(input.lastValidBlockHeight), deadline: input.expiresAt, revocationEpoch: workflow.revision, recovery, enforcement: 'NOT_ENFORCED' };
   const policyHash = solanaSwapArtifactHash('authorization-policy', policy);
   const manifest: StrategyManifest = { schemaVersion: '1.0.0', manifestId: `${prefix}-manifest`, semanticWorkflowRevision: workflow.revision, semanticWorkflowHash: semanticHash,
     artifactSetHash: artifactHash, simulationHash, policyHash, authorizationMode: 'MODE_A', owner, executor: null, expiresAt: input.expiresAt, nonce: String(input.lastValidBlockHeight),
-    revocationEpoch: workflow.revision, spendLimits, maximumSlippageBps: intent.slippageBps, gasBudgets, feeBudgets: [], providers, recovery, enforcement: 'NOT_ENFORCED' };
+    revocationEpoch: workflow.revision, spendLimits, maximumSlippageBps: intent.slippageBps, gasBudgets, feeBudgets, providers, recovery, enforcement: 'NOT_ENFORCED' };
   const manifestHash = solanaSwapArtifactHash('strategy-manifest', manifest);
   const plan: ExecutionPlan = { schemaVersion: '1.0.0', executionPlanId: `${prefix}-plan`, semanticWorkflowHash: semanticHash, manifestHash,
     segments: [{ segmentId: `${prefix}-segment`, chainId: chain, dependencies: [], steps: [{ stepId: `${prefix}-swap`, nodeId: input.nodeId,
@@ -177,7 +190,7 @@ export function assertSolanaSwapReview(review: SolanaSwapReviewCore, workflow: S
       intent.slippageBps !== review.slippageBps) fail(`${prefix}_SEMANTIC_REVISION_CHANGED`);
   const step = review.plan.segments[0]?.steps[0];
   if (sha256Hex(fromBase64(review.message)) !== review.messageHash || step?.executionKind !== 'DIRECT_TRANSACTION' || step.payloadHash !== review.messageHash ||
-      toBase64(serializeTransaction(null, fromBase64(review.message))) !== review.unsignedTransaction) fail(`${prefix}_TRANSACTION_CHANGED`);
+      toBase64(unsignedTransactionBytes(fromBase64(review.message))) !== review.unsignedTransaction) fail(`${prefix}_TRANSACTION_CHANGED`);
 }
 
 /** What the owner signed: the exact bytes to broadcast, and the verified wallet guard when the wallet appended one. */
@@ -186,8 +199,11 @@ export type SignedSolanaTransaction = { signature: string; transaction: string; 
  * The wallet must return the reviewed message, or the reviewed message plus only verified Lighthouse assertions
  * (`verifySolanaWalletGuard`), with a valid owner signature over exactly the returned message. Anything else fails closed.
  */
-export function verifySignedSolanaSwap(review: Pick<SolanaSwapReviewCore, 'message' | 'owner'> & { lookupTables?: LookupTables }, signedBase64: unknown,
+export function verifySignedSolanaSwap(review: Pick<SolanaSwapReviewCore, 'message' | 'owner'> & { lookupTables?: LookupTables; gas?: KoraGasTerms | null }, signedBase64: unknown,
   prefix: string): SignedSolanaTransaction {
+  // ADR-0010: a Kora transaction carries Kora's empty slot 0 and the owner's signature in slot 1; `signature` is then the owner's (the claim identity).
+  if (review.gas) return verifyKoraOwnerSigned({ message: review.message, owner: review.owner, gas: review.gas, ...review.lookupTables ? { lookupTables: review.lookupTables } : {} },
+    signedBase64, prefix);
   const bytes = fromBase64(signedBase64, 2048);
   const { signatures, message } = parseTransaction(bytes);
   if (signatures.length !== 1) fail(`${prefix}_TRANSACTION_CHANGED`);

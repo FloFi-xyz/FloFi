@@ -473,6 +473,24 @@ What does **not** change: `/app`, sign-in, wallets, simulation, review and execu
 by any financial flow. Stopping campaign email without touching the product: `flight-admin.ts email-pause` (immediate, no deploy), or unset
 `FLOFI_FLIGHT_EMAIL` on the worker.
 
+## 5o. Token-paid network fees (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003, [ADR-0010](../adr/ADR-0010-token-paid-network-fees.md)) — runbook: [GAS-ABSTRACTION.md](GAS-ABSTRACTION.md)
+
+Each mechanism is off unless its switch is `enabled`; a malformed value disables only that mechanism (native gas, exactly as before). None makes
+FloFi a payer. FloFi-paid sponsorship (ADR-0009, `FLOFI_GAS_SPONSORSHIP`, `FLOFI_PAYMASTER_*`, `FLOFI_SPONSOR_*`) is documented in
+[GAS-SPONSORSHIP.md](GAS-SPONSORSHIP.md) and stays off.
+
+| Variable | Purpose | Secret | Where | Dev | CI | Preview | Prod | Default / when missing |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `FLOFI_CIRCLE_USDC_GAS` | `enabled`: workflow runs may pay an EVM group's network fee in USDC through Circle's paymaster when the owner's ETH cannot (needs `FLOFI_BUNDLER_RPC_<chainId>` and the Chainlink price source `FLOFI_AUTOMATION_*` with an `ETH=` feed) | no | Vercel + worker | — | tests set it | optional | optional | off: `CIRCLE_GAS_NOT_ENABLED` |
+| `FLOFI_CIRCLE_USDC_GAS_CHAINS` | subset of `eip155:1,eip155:8453,eip155:42161` | no | Vercel + worker | — | — | optional | optional | all three |
+| `FLOFI_KORA_TOKEN_GAS` | `enabled`: Solana fees paid in USDC/USDT to Pimlico's hosted Kora fee payer when the owner's SOL cannot | no | API + worker + Vercel | — | tests set it | optional | optional | off: `KORA_NOT_ENABLED` |
+| `FLOFI_PIMLICO_KORA_RPC_URL` | `https://solana.pimlico.io/v1/mainnet/rpc?apikey=…` (any other host or a devnet path disables Kora) | **yes** | same | — | loopback only | optional | optional | Kora off |
+| `FLOFI_KORA_SIGNER`, `FLOFI_KORA_PAYMENT_ADDRESS` | pinned `getPayerSigner` answer (fee payer, payment wallet) | no | same | — | test keys | optional | optional | Kora off |
+| `FLOFI_KORA_FEE_TOKENS` | `USDC`, `USDT` or both | no | same | — | — | optional | optional | both |
+| `FLOFI_ZEROX_GASLESS` | `enabled`: Robinhood Chain swaps through the 0x Gasless API when the owner's ETH cannot pay the network fee | no | API + worker (+ Vercel server actions) | — | tests set it | optional | optional | off: `ZEROX_GASLESS_NOT_ENABLED` |
+| `FLOFI_ZEROX_API_KEY` | 0x dashboard key with Gasless enabled (header `0x-api-key`, server-side only) | **yes** | same | — | test value | optional | optional | `ZEROX_API_KEY_NOT_CONFIGURED` |
+| `FLOFI_ZEROX_API_URL` | override of `https://api.0x.org`; only that host or the loopback harness | no | same | — | loopback only | — | — | `https://api.0x.org` |
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

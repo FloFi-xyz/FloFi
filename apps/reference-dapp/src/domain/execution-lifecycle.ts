@@ -26,6 +26,8 @@ import type { useComposition } from '../state/composition-store';
 import type { useLiquidity } from '../state/liquidity-store';
 import type { useCow } from '../state/cow-store';
 import type { useUniversalRouter } from '../state/universal-router-store';
+import { gaslessLifecycleState } from './gas-payment';
+import { quoteDecimals } from './public-testnet-swap';
 
 type ReadonlyStore<T> = Omit<T, { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never }[keyof T]>;
 export type ExecutionLifecycleSource =
@@ -165,8 +167,14 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       // runtime's refresh observes it first (read-only), and the swap needs its own fresh Review and wallet confirmation.
       if (approve) add('approval', nodeId, `Approve ${r.quote.inputSymbol}`, chain, r.divergence && last === approve ? 'DIVERGENT' : approve.state,
         approve.txHash, false, true, simulationAmount(approve.receipt?.gasCostWei, 18, 'ETH'));
+      // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a 0x Gasless swap is the owner's typed-data signatures, relayed to 0x and settled by its relayer;
+      // its fee is the token amount 0x took out of the swap (the owner paid no ETH).
+      const gasless = r.gasless?.filter(a => a.state !== 'ABANDONED').at(-1), zx = r.quote.gas?.zeroEx ?? null;
+      if (gasless) add('swap', nodeId, 'Swap', chain, r.divergence ? 'DIVERGENT' : gaslessLifecycleState(gasless.state, r.outcome !== null, gasless.final), gasless.txHash, false, false,
+        gasless.state === 'CONFIRMED' && zx ? simulationAmount(zx.gasFee.amount, zx.gasFee.token === r.quote.inputToken ? quoteDecimals(r.quote, 'input') : quoteDecimals(r.quote, 'output'),
+          zx.gasFee.token === r.quote.inputToken ? r.quote.inputSymbol : r.quote.outputSymbol) : null);
       // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a WETH9 conversion is one wallet request of its own kind, named as such.
-      add('swap', nodeId, r.quote.conversion === 'WRAP' ? 'Wrap ETH' : r.quote.conversion === 'UNWRAP' ? 'Unwrap WETH' : 'Swap', chain, r.divergence ? 'DIVERGENT' : r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome ? 'PENDING' : swap?.state ?? null,
+      else add('swap', nodeId, r.quote.conversion === 'WRAP' ? 'Wrap ETH' : r.quote.conversion === 'UNWRAP' ? 'Unwrap WETH' : 'Swap', chain, r.divergence ? 'DIVERGENT' : r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome ? 'PENDING' : swap?.state ?? null,
         swap?.txHash ?? null, false, false, simulationAmount(swap?.receipt?.gasCostWei, 18, 'ETH'));
       // A swap confirmed on its network whose outcome FloFi has not reconciled yet: still not complete (the step counts only once reconciled), and
       // worded as what it is — confirmed on that network — never "Pending confirmation".

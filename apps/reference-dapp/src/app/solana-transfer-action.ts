@@ -6,6 +6,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { createSolanaTransferService, type SolanaTransferService, type SolanaTransferWalletDiagnostic } from '../server/solana-transfer-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
 import { cloudFlow } from './cloud-flow';
+import { koraGasForFlow } from '../gas-abstraction/kora/runtime';
 
 /**
  * BUILD-SOLANA-TRANSFER-UX-001: direct transfers to another wallet on Solana mainnet-beta (`solana-transfer`, real funds) and Devnet
@@ -27,7 +28,9 @@ function current(cluster: SolanaTransferCluster): SolanaTransferService {
   const service = createSolanaTransferService({ profile, journalDir, provenance: harness ? 'MOCKED' : profile.provenance,
     // Real-funds owner execution is opt-in server configuration; Simulate and Review stay read-only without it.
     executionEnabled: mainnet ? harness || process.env.GRYLOO_SOLANA_TRANSFER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED' : process.env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED',
-    rpc: createSolanaRpc(harness ? `${HARNESS}/${mainnet ? 'transfer-rpc' : 'transfer-devnet-rpc'}` : override ?? profile.rpc, harness) });
+    rpc: createSolanaRpc(harness ? `${HARNESS}/${mainnet ? 'transfer-rpc' : 'transfer-devnet-rpc'}` : override ?? profile.rpc, harness),
+    // ADR-0010 §4: Kora only on mainnet-beta (Devnet stays native); the harness only with its loopback double.
+    kora: mainnet ? koraGasForFlow(process.env, harness) : null });
   services[cluster] = service;
   return service;
 }

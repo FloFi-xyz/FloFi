@@ -29,4 +29,14 @@ describe('provider credentials never reach the browser', () => {
     expect(source.filter(file => /PRIVY_APP_SECRET/.test(file.text)).map(file => file.path)).toEqual(['accounts/privy-server.ts']);
     expect(browser.filter(file => /appSecret|PRIVY_APP_SECRET|PRIVY_VERIFICATION_KEY/.test(file.text)).map(file => file.path)).toEqual([]);
   });
+  it('keeps the 0x API key and transport on the server (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003)', () => {
+    // Only the configuration reader names the variable; the key travels as the `0x-api-key` header of the server transport alone.
+    expect(source.filter(file => /FLOFI_ZEROX_API_KEY/.test(file.text)).map(file => file.path).sort()).toEqual(['gas-abstraction/config.ts', 'server/robinhood-mainnet.ts']);
+    expect(source.filter(file => /'0x-api-key'/.test(file.text)).map(file => file.path)).toEqual(['server/zeroex-gasless/transport.ts']);
+    expect(browser.filter(file => /api\.0x\.org|0x-api-key/.test(file.text)).map(file => file.path)).toEqual([]);
+    // Browser modules may name the gasless records' types, never import the 0x transport, client or runtime.
+    const imports = browser.flatMap(file => [...file.text.matchAll(/^import\s+(?!type\b)[^;]*?from\s+['"]([^'"]+)['"]/gm)]
+      .filter(match => /zeroex-gasless\/|robinhood-mainnet/.test(match[1]!)).map(match => `${file.path}: ${match[0]}`));
+    expect(imports).toEqual([]);
+  });
 });

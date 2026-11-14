@@ -63,6 +63,8 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
   /** Aave positions per user: supplied (collateral when enabled) and variable debt, by reserve asset. */
   const supplied = new Map<string, bigint>(), debt = new Map<string, bigint>(), collateralOn = new Set<string>();
   const balances = new Map<string, bigint>(), allowances = new Map<string, bigint>(), code = new Map<string, string>(), nonces = new Map<string, bigint>();
+  /** An account's pending transaction count when a transaction of it waits in the mempool (`eth_getTransactionCount(…, 'pending')`). */
+  const pendingNonces = new Map<string, bigint>();
   const native = new Map<string, bigint>(), disabled = new Set<string>(), callCounts = new Map<string, bigint>(), usedIds = new Set<string>();
   const receipts = new Map<string, Receipt>(), txs = new Map<string, Tx>();
   const pool = profile.pool, opStack = chainId === 8453;
@@ -324,7 +326,10 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         return code.get(lower(String(p[0]))) ?? ([...tokens(), profile.router, profile.quoter, F.delegationManager, ...Object.values(F.enforcers),
         ...aave ? [aave.pool] : [], ...canonicalPools].includes(lower(String(p[0]))) ? '0x6080' : '0x');
       case 'eth_getBalance': return '0x' + (native.get(lower(String(p[0]))) ?? 0n).toString(16);
-      case 'eth_getTransactionCount': return '0x' + (nonces.get(lower(String(p[0]))) ?? 0n).toString(16);
+      case 'eth_getTransactionCount': {
+        const account = lower(String(p[0])), latest = nonces.get(account) ?? 0n;
+        return '0x' + (p[1] === 'pending' ? pendingNonces.get(account) ?? latest : latest).toString(16);
+      }
       case 'eth_getTransactionReceipt': {
         const r = receipts.get(String(p[0])), t = txs.get(String(p[0]));
         return r && t ? { transactionHash: t.hash, status: r.status ? '0x1' : '0x0', blockNumber: '0x' + r.blockNumber.toString(16), blockHash: blockOf(r.blockNumber).hash,
@@ -473,6 +478,31 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
         catch (cause) { restoreState(snapshot); throw cause; }
       });
     },
+    /**
+     * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a bundle transaction to `op.entryPoint` (v0.7 or v0.8) carrying ONE operation of the
+     * owner's account whose fee a token paymaster fronts, in the EntryPoint's order: the paymaster's validation effects (`validation`: e.g. the
+     * owner's permit and a USDC prefund pulled from the owner; they stand even if the calls revert), the EntryPoint's `BeforeExecution`, the
+     * operation's calls as the owner's account (all or nothing: a failure reverts them and the operation is unsuccessful), the paymaster's
+     * `postOp(success)` (e.g. a refund), then the `UserOperationEvent` naming the sender, the paymaster and the actual gas cost. The paymaster's own
+     * effects are the caller's (a MODEL of Circle's paymaster, not its bytecode).
+     */
+    entryPointOperation(owner: string, calls: readonly erc7710.Call[], op: { readonly entryPoint: string; readonly userOpHash: string; readonly paymaster: string;
+      readonly bundler: string; readonly nonce: bigint; readonly actualGasCost: bigint; readonly validation: () => Receipt['logs'];
+      readonly postOp: (success: boolean) => Receipt['logs'] }): string {
+      const bundler = lower(op.bundler), n = nonces.get(bundler) ?? 0n;
+      nonces.set(bundler, n + 1n);
+      const hash = D.keccakHex(`entrypoint:${bundler}:${n}:${op.userOpHash}`);
+      return mine(hash, bundler, lower(op.entryPoint), '0x765e827f', n, () => {
+        const validation = op.validation(), before = { address: lower(op.entryPoint), topics: [erc4337.BEFORE_EXECUTION_TOPIC], data: '0x' };
+        const snapshot = snapshotState();
+        let executed: Receipt['logs'] = [], success = true;
+        try { executed = calls.flatMap(c => execute(lower(owner), c)); } catch { restoreState(snapshot); success = false; }
+        const postOp = op.postOp(success);
+        const event = { address: lower(op.entryPoint), topics: [erc4337.USER_OPERATION_EVENT_TOPIC, lower(op.userOpHash), topic(lower(owner)), topic(lower(op.paymaster))],
+          data: '0x' + [op.nonce, success ? 1n : 0n, op.actualGasCost, op.actualGasCost / 1_000_000_000n].map(v => v.toString(16).padStart(64, '0')).join('') };
+        return [...validation, before, ...executed, ...postOp, event];
+      });
+    },
     setPrice(wethPerUsdcUnits: bigint) { wethPerUsdc = wethPerUsdcUnits; },
     /** A node without `eth_simulateV1` (the product must then refuse to offer a batch that depends on Aave state). */
     disableSimulation() { simulateSupported = false; },
@@ -486,6 +516,11 @@ export function createEvmDouble(chainId: number, clock: () => number = () => Mat
     setDecimals(token: string, decimals: number) { decimalsOverride.set(lower(token), decimals); },
     /** Replaces an account's code (`'0x'`: a token address without code). */
     setCode(account: string, bytecode: string) { code.set(lower(account), bytecode); },
+    /** An account's transaction nonce (a transaction it sent elsewhere moves it), and a pending one (`null`: none waiting). */
+    setNonce(account: string, nonce: bigint) { nonces.set(lower(account), nonce); },
+    nonceOf: (account: string) => nonces.get(lower(account)) ?? 0n,
+    setPendingNonce(account: string, nonce: bigint | null) { if (nonce === null) pendingNonces.delete(lower(account)); else pendingNonces.set(lower(account), nonce); },
+    codeOf: (account: string) => code.get(lower(account)) ?? '0x',
     /** A fee-on-transfer token: each transfer of it delivers `bps` basis points less to the recipient (the fee is burned). */
     setTransferFeeBps(token: string, bps: bigint) { transferFeeBps.set(lower(token), bps); },
     accountData: (user: string) => accountData(lower(user)),

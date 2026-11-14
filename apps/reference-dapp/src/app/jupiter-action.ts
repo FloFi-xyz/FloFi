@@ -7,6 +7,7 @@ import { createJupiterService, type JupiterService, type JupiterWalletDiagnostic
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
 import { cloudFlow } from './cloud-flow';
 import { createJupiterHttp } from '../server/jupiter-http';
+import { koraGasForFlow } from '../gas-abstraction/kora/runtime';
 
 let service: JupiterService | null = null;
 const HARNESS = 'http://127.0.0.1:8551';
@@ -25,6 +26,8 @@ function current(): JupiterService {
     executionEnabled: harness || process.env.GRYLOO_JUPITER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED',
     rpc: createSolanaRpc(rpcEndpoint, harness),
     http: createJupiterHttp(buildEndpoint, apiKey),
+    // ADR-0010 §4: Pimlico's Kora fee payer when FLOFI_KORA_TOKEN_GAS is enabled (the harness only with its loopback double); native stays the default.
+    kora: koraGasForFlow(process.env, harness),
   });
   return service;
 }

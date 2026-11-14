@@ -10,7 +10,9 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { personalSignDigest } from '../src/personal-sign.ts';
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
-export type TestWallet = { readonly address: string; signMessage(message: string): string };
+export type TestWallet = { readonly address: string; signMessage(message: string): string;
+  /** BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: an `eth_signTypedData_v4` answer for a 32-byte digest (r ‖ s ‖ v, v ∈ {27, 28}). */
+  signDigest(digest: string): string };
 /** BUILD-MCP-002: `secretKey` lets a test sign as a harness's public disposable fixture account (never a real key). */
 export function createTestWallet(secretKey?: Uint8Array): TestWallet {
   const signer = secretKey ?? secp256k1.utils.randomSecretKey();
@@ -21,6 +23,11 @@ export function createTestWallet(secretKey?: Uint8Array): TestWallet {
     signMessage(message: string): string {
       const digest = personalSignDigest(message);
       const recovered = secp256k1.sign(digest, signer, { prehash: false, format: 'recovered' });
+      return '0x' + hex(recovered.subarray(1)) + (recovered[0]! + 27).toString(16).padStart(2, '0');
+    },
+    signDigest(digest: string): string {
+      if (!/^0x[0-9a-f]{64}$/.test(digest)) throw new Error('MOCK_DIGEST_INVALID');
+      const recovered = secp256k1.sign(Buffer.from(digest.slice(2), 'hex'), signer, { prehash: false, format: 'recovered' });
       return '0x' + hex(recovered.subarray(1)) + (recovered[0]! + 27).toString(16).padStart(2, '0');
     },
   });

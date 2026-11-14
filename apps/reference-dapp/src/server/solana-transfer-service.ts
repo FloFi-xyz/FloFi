@@ -12,16 +12,17 @@ import { randomBytes } from 'node:crypto';
 import { assertExecutionEnabled } from './execution-guard.ts';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { assertSolanaTransferReview, describeSolanaWalletChange, readSolanaTransferFacts, simulateSolanaTransfer, solanaAddress, solanaTransferIntent,
+import { assertSolanaTransferReview, describeSolanaWalletChange, readSolanaTransferFacts, simulateKoraSolanaTransfer, simulateSolanaTransfer, solanaAddress, solanaTransferIntent,
   verifySignedSolanaTransfer, verifySolanaCluster, type SignedSolanaTransaction, type SolanaRpc, type SolanaTransferProfile, type SolanaTransferReview,
   type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
-import { createSolanaTransferRun, prepareSolanaTransferAttempt, recordSolanaTransferSignature, solanaTransferObservationDecision,
+import { createSolanaTransferRun, prepareSolanaTransferAttempt, recordSolanaTransferRelay, recordSolanaTransferSignature, solanaTransferObservationDecision,
   solanaTransferTransition, validateSolanaTransferRun, createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaTransferProvenance,
   type SolanaTransferRun } from '@defi-workflow-engine/reference-executor';
-import { buildSolanaTransferEvidence, classifySolanaTransferEvidence, reconcileSolanaTransferAttempt, type SolanaTransferEvidenceClass,
+import { buildSolanaTransferEvidence, classifySolanaTransferEvidence, reconcileSolanaTransferAttempt, recoverKoraTransaction, type SolanaTransferEvidenceClass,
   type SolanaTransferObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { solanaTransactionClaim } from './solana-transaction-claim.ts';
+import { assertKoraStillSelected, withKoraFallback, type KoraGas, type KoraRelayOutcome } from '../gas-abstraction/kora/runtime.ts';
 
 const X = 'SOLANA_TRANSFER';
 /** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */
@@ -33,8 +34,11 @@ const code = (cause: unknown, fallback: string) => cause instanceof Error && /^[
 
 /** One coordinator per cluster profile; the profile selects the chain, cluster identity, run ids and the real-funds rule. */
 export function createSolanaTransferService(input: { profile: SolanaTransferProfile; rpc: SolanaRpc; journalDir?: string; storage?: ExecutionStorage;
-  provenance: SolanaTransferProvenance; executionEnabled: boolean; now?: () => number }) {
+  provenance: SolanaTransferProvenance; executionEnabled: boolean; now?: () => number;
+  /** ADR-0010 §4: Pimlico's Kora fee payer for an owner whose SOL cannot pay (mainnet SPL tokens only); absent: native gas only, as before. */
+  kora?: KoraGas | null }) {
   const { profile } = input;
+  const kora = profile.realFunds ? input.kora ?? null : null;
   if (input.provenance !== 'MOCKED' && input.provenance !== profile.provenance) throw new Error(`${X}_PROVENANCE_INVALID`);
   // Local mode keeps a journal directory; cloud mode supplies shared durable storage instead.
   if (!input.storage && (!input.journalDir || !isAbsolute(input.journalDir) || input.journalDir.includes('/.git/'))) throw new Error(`${X}_STORAGE_INVALID`);
@@ -62,6 +66,9 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
         if (record.id !== prior.id || record.review.commitment !== prior.review.commitment || !prefix(prior.journal.entries, record.journal.entries) ||
             !prefix(prior.observations, record.observations) || prior.attempt && !record.attempt || prior.verdict !== 'PENDING' && record.verdict !== prior.verdict ||
             prior.attempt?.signature && prior.attempt.signature !== record.attempt?.signature || prior.attempt?.transaction && prior.attempt.transaction !== record.attempt?.transaction ||
+            // ADR-0010: a Kora attempt's owner signature and Kora's verified bytes, once recorded, never change either.
+            prior.attempt?.kora && prior.attempt.kora.ownerSignature !== record.attempt?.kora?.ownerSignature ||
+            prior.attempt?.kora?.signedTransaction && prior.attempt.kora.signedTransaction !== record.attempt?.kora?.signedTransaction ||
             prior.evidence && JSON.stringify(prior.evidence) !== JSON.stringify(record.evidence)) throw new Error(`${X}_STORE_CORRUPT`);
       }
       prior = record;
@@ -100,6 +107,16 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
    * there (one created since needs no deposit — the idempotent creation is then a no-op). Nothing is signed when any of it changed.
    */
   async function assertStillExecutable(review: SolanaTransferReview): Promise<void> {
+    if (review.gas) {
+      // ADR-0010: Kora pays the fee and any deposit; the owner's SOL is not needed (its account may not exist). The token checks stay, plus the
+      // policy (no SOL arrived since Review), Kora's payment account and the fee the owner repays.
+      if (!kora) throw new Error('KORA_NOT_ENABLED');
+      const facts = await readSolanaTransferFacts(input.rpc, solanaTransferIntent(review.workflow, review.owner), review.token?.sourceAccount, { ownerMayBeAbsent: true });
+      if (!review.token || !facts.token || BigInt(facts.token.sourceAmount) < BigInt(review.amount)) throw new Error(`${X}_INSUFFICIENT_TOKEN_BALANCE`);
+      if (!review.token.createDestination && facts.token.createDestination) throw new Error(`${X}_DESTINATION_ACCOUNT_CLOSED_REVIEW_REQUIRED`);
+      await assertKoraStillSelected(input.rpc, review.owner, review.gas, { account: review.token.sourceAccount, amount: BigInt(review.amount) });
+      return;
+    }
     const facts = await readSolanaTransferFacts(input.rpc, solanaTransferIntent(review.workflow, review.owner), review.token?.sourceAccount);
     const amount = BigInt(review.amount), owner = BigInt(facts.state.ownerLamports), reserve = BigInt(facts.state.rentExemptMinimum);
     const deposit = BigInt(review.maximumAccountCreationLamports);
@@ -116,7 +133,10 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
     async simulate(workflowInput: unknown, owner: string): Promise<SolanaTransferRecord> {
       const workflow = validateAuthoringWorkflow(workflowInput, createBaseSepoliaReviewContext());
       if (workflow.nodes.find(node => node.actionType === 'asset.transfer')?.chainId !== profile.chain) throw new Error(`${X}_NETWORK_UNSUPPORTED`);
-      const review = await simulateSolanaTransfer(workflow, solanaAddress(owner), input.rpc, now());
+      // Native first, exactly as before; the Kora fee payer only for an owner whose SOL cannot pay (ADR-0010 §2, §4).
+      const signer = solanaAddress(owner), at = now();
+      const review = await withKoraFallback(() => simulateSolanaTransfer(workflow, signer, input.rpc, at),
+        kora ? () => simulateKoraSolanaTransfer(workflow, signer, input.rpc, kora.port, at) : null);
       const id = `${profile.idPrefix}-` + randomBytes(16).toString('hex');
       return save({ ...createSolanaTransferRun(id, review, input.provenance), observations: [], evidence: null, error: null, evidenceClass: 'PUBLIC_READ_ONLY' });
     },
@@ -171,11 +191,35 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
         return save({ ...record, ...solanaTransferTransition(record, 'CANCELLED'), authorization: null, notSubmitted: true, error: failure, submissionError: failure,
           walletDiagnostic: { stage: 'SIGN', code: failure, error: { message: failure }, ...change ? { change } : {} } });
       }
-      const submitting = await save({ ...record, ...recordSolanaTransferSignature(record, signed), error: null });
+      // Durable BEFORE any broadcast: the signature and bytes (Kora: the owner's signature and the owner-signed bytes, the transaction id unknown yet).
+      let submitting = await save({ ...record, ...recordSolanaTransferSignature(record, signed), error: null });
+      let broadcast = signed;
+      const gas = submitting.review.gas;
+      if (gas) {
+        // ADR-0010 K1: Kora is called only with the verified owner-signed bytes carrying the reviewed payment; its answer is verified and recorded.
+        let outcome: KoraRelayOutcome;
+        try {
+          assertExecutionEnabled();
+          outcome = kora ? await kora.relay({ review: { message: submitting.review.message, owner: submitting.review.owner, gas }, ownerSigned: signed.transaction, prefix: X })
+            : { kind: 'REFUSED', code: 'KORA_NOT_ENABLED' };
+        } catch (cause) { outcome = { kind: 'REFUSED', code: code(cause, 'KORA_TRANSACTION_REFUSED') }; }
+        if (outcome.kind === 'REFUSED') {
+          // Kora refused before signing (or FloFi never called it): the fee payer's slot is empty, so these bytes can never land. A new Review
+          // (a fresh quote, a new signature) is the only way on; nothing is ever re-created from these bytes.
+          const unknown = solanaTransferTransition(submitting, 'SUBMISSION_RESULT_UNKNOWN');
+          return save({ ...submitting, ...solanaTransferTransition(unknown, 'NOT_FOUND'), verdict: 'NOT_EXECUTED', authorization: null, error: outcome.code,
+            submissionError: outcome.code });
+        }
+        if (outcome.kind === 'UNKNOWN') return save({ ...submitting, ...solanaTransferTransition(submitting, 'SUBMISSION_RESULT_UNKNOWN'),
+          error: `${X}_SUBMISSION_UNKNOWN_OBSERVE_EXISTING`, submissionError: outcome.code });
+        submitting = await save({ ...submitting, ...recordSolanaTransferRelay(submitting, outcome) });
+        broadcast = { ...signed, signature: outcome.signature, transaction: outcome.transaction };
+      }
       try {
         assertExecutionEnabled();
-        const result = await input.rpc('sendTransaction', [signed.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
-        if (result !== signed.signature) throw new Error(`${X}_SUBMISSION_RESULT_MISMATCH`);
+        // FloFi broadcasts the exact bytes itself (Kora: the same fully signed bytes Kora returned and also sends): one transaction, at most once.
+        const result = await input.rpc('sendTransaction', [broadcast.transaction, { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 10 }]);
+        if (result !== broadcast.signature) throw new Error(`${X}_SUBMISSION_RESULT_MISMATCH`);
         return save({ ...submitting, ...solanaTransferTransition(submitting, 'PENDING') });
       } catch (cause) {
         // The signature is already durable. Observation by signature resolves this; there is never a second transfer.
@@ -194,7 +238,21 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
       if (attempt.state === 'CANCELLED') return record;
       // Height before status: if finalized height is past validity and the signature is still unknown, it can never land.
       const finalizedHeight = await blockHeight('finalized');
-      const observation = await reconcileSolanaTransferAttempt(record.review, attempt, input.rpc);
+      if (record.review.gas && attempt.kora && !attempt.signature) {
+        // ADR-0010: Kora's answer was lost. The transaction is found by the owner's recorded signature (read-only), never re-created.
+        const recovered = await recoverKoraTransaction(input.rpc, { owner: record.review.owner, ownerSignature: attempt.kora.ownerSignature, ownerSigned: attempt.transaction!,
+          feePayer: record.review.gas.feePayer, sinceSlot: record.review.simulationResult.slot, lastValidBlockHeight: record.review.lastValidBlockHeight });
+        if (recovered.state !== 'FOUND') {
+          if (recovered.state === 'ABSENT' && finalizedHeight > record.review.lastValidBlockHeight) {
+            let next: SolanaTransferRun = record;
+            if (attempt.state === 'SUBMITTING') next = solanaTransferTransition(next, 'SUBMISSION_RESULT_UNKNOWN');
+            return save({ ...record, ...solanaTransferTransition(next, 'NOT_FOUND'), verdict: 'NOT_EXECUTED', authorization: null, error: `${X}_TRANSACTION_EXPIRED_NOT_EXECUTED` });
+          }
+          return save({ ...record, error: `${X}_TRANSACTION_NOT_OBSERVED` });
+        }
+        record = await save({ ...record, ...recordSolanaTransferRelay(record, recovered) });
+      }
+      const observation = await reconcileSolanaTransferAttempt(record.review, record.attempt!, input.rpc);
       // An unavailable, malformed or wrong-cluster response proves nothing about whether a submitted transfer landed.
       if (!observation.found && !observation.absenceVerified) return save({ ...record, error: observation.reason });
       const decision = solanaTransferObservationDecision(observation.found, finalizedHeight, record.review.lastValidBlockHeight);

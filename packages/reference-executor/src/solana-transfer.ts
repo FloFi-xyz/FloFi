@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
 import { solanaSwapArtifactHash, solanaSwapHash, solanaTransferProfile, type SignedSolanaTransaction, type SolanaTransferReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
-import { assertSignedSolanaAttempt } from './jupiter.js';
+import { assertSignedSolanaAttempt, assertSolanaAttemptIdentity, type SolanaKoraAttempt } from './jupiter.js';
+import { assertKoraRelayedAttempt } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 /**
@@ -12,9 +13,12 @@ import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/w
  */
 export type SolanaTransferAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'EXPIRED' | 'NOT_FOUND' | 'RECONCILIATION_REQUIRED';
-/** `walletGuard`: the verified Lighthouse assertions the owner's wallet appended before signing (absent when it signed the reviewed bytes). */
+/**
+ * `walletGuard`: the verified Lighthouse assertions the owner's wallet appended before signing (absent when it signed the reviewed bytes).
+ * `kora` (ADR-0010 §4): present exactly for a Kora Review; `signature` is then the transaction id, null until Kora answered.
+ */
 export type SolanaTransferAttempt = { state: SolanaTransferAttemptState; preparedAtBlockHeight: number; messageHash: string;
-  signature: string | null; transaction: string | null; reconciled: boolean; walletGuard?: SolanaWalletGuard };
+  signature: string | null; transaction: string | null; reconciled: boolean; walletGuard?: SolanaWalletGuard; kora?: SolanaKoraAttempt };
 export type SolanaTransferProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
 export type SolanaTransferRun = { format: 'gryloo.solana-transfer-run.v1'; id: string; review: SolanaTransferReview; provenance: SolanaTransferProvenance;
   authorization: string | null; attempt: SolanaTransferAttempt | null; journal: ExecutionJournal;
@@ -62,10 +66,24 @@ export function prepareSolanaTransferAttempt(run: SolanaTransferRun, blockHeight
     executionAttemptId: `${run.id}.transfer`, toState: 'PREPARED', recordedAt: new Date().toISOString() }).journal;
   return { ...run, journal, attempt, ownerInitiated: true };
 }
-/** The owner-signed bytes and signature become durable before any broadcast. */
+/**
+ * The owner-signed bytes and signature become durable before any broadcast. ADR-0010: for a Kora Review the verified `signature` is the owner's
+ * (slot 1), recorded as the Kora identity; the transaction id stays unknown until Kora signs (`recordSolanaTransferRelay`).
+ */
 export function recordSolanaTransferSignature(run: SolanaTransferRun, signed: SignedSolanaTransaction): SolanaTransferRun {
   if (run.attempt?.state !== 'PREPARED') fail('ATTEMPT_NOT_PREPARED');
-  return solanaTransferTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...signed.walletGuard ? { walletGuard: signed.walletGuard } : {} });
+  const guard = signed.walletGuard ? { walletGuard: signed.walletGuard } : {};
+  if (run.review.gas) return solanaTransferTransition(run, 'SUBMITTING', { signature: null, transaction: signed.transaction, ...guard,
+    kora: { ownerSignature: signed.signature, signedTransaction: null } });
+  return solanaTransferTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...guard });
+}
+/** ADR-0010: Kora's verified answer (or the transaction recovered by the owner's signature) becomes durable, once; the state is unchanged. */
+export function recordSolanaTransferRelay(run: SolanaTransferRun, relayed: { signature: string; transaction: string }): SolanaTransferRun {
+  const attempt = run.attempt, gas = run.review.gas;
+  if (!gas || !attempt?.kora || !attempt.transaction || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state)) return fail('ATTEMPT_NOT_RELAYABLE');
+  if (attempt.signature) return attempt.signature === relayed.signature && attempt.kora.signedTransaction === relayed.transaction ? run : fail('SIGNATURE_DIVERGENT');
+  assertKoraRelayedAttempt(attempt.transaction, attempt.kora.ownerSignature, relayed.transaction, relayed.signature, gas.feePayer);
+  return { ...run, attempt: { ...attempt, signature: relayed.signature, kora: { ...attempt.kora, signedTransaction: relayed.transaction } } };
 }
 /** Absence is conclusive only after finalized block height has passed the reviewed blockhash validity. */
 export function solanaTransferObservationDecision(found: boolean, finalizedBlockHeight: number, lastValidBlockHeight: number): 'FOUND' | 'WAIT' | 'EXPIRED' {
@@ -92,10 +110,9 @@ export function validateSolanaTransferRun(run: SolanaTransferRun): void {
   const attempt = run.attempt;
   if (!attempt) { if (run.verdict !== 'PENDING') fail(corrupt); return; }
   const entry = [...run.journal.entries].reverse().find(e => e.entityId === `${run.id}.transfer`);
-  const signed = !['PREPARED', 'CANCELLED'].includes(attempt.state);
   if (entry?.toState !== attempt.state || attempt.messageHash !== run.review.messageHash || !Number.isSafeInteger(attempt.preparedAtBlockHeight) ||
-      signed !== Boolean(attempt.signature && attempt.transaction) || attempt.signature !== null && !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attempt.signature) ||
       typeof attempt.reconciled !== 'boolean' || attempt.reconciled !== (attempt.state === 'CONFIRMED') ||
       run.verdict === 'RECONCILED' && !attempt.reconciled) fail(corrupt);
+  assertSolanaAttemptIdentity(run.review.gas, attempt, `SOLANA_TRANSFER_${corrupt}`);
   assertSignedSolanaAttempt(run.review.message, attempt, {}, corrupt);
 }

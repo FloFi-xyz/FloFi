@@ -136,7 +136,7 @@ export function createBackend(options: BackendOptions) {
     if (mode === 'closed' && !recovery) return 'BETA_ACCESS_CLOSED';
     // The original flows do not all have a run-ownership policy. Bind both newly named owners and historical run owners to this same
     // account. This check also runs before an idempotent response can be replayed, even when a legacy BFF did not send a wallet header.
-    const ownerArgument = ['simulate', 'begin', 'beginSwap', 'beginLiquidity', 'prepare', 'pendingNonce'].includes(method) ? args[1]
+    const ownerArgument = ['simulate', 'begin', 'beginSwap', 'beginLiquidity', 'beginGasless', 'prepare', 'pendingNonce'].includes(method) ? args[1]
       : ['positions', 'inspect'].includes(method) ? args[0]
         : method === 'broadcast' && args[2] && typeof args[2] === 'object' ? (args[2] as { from?: unknown }).from : undefined;
     if (typeof ownerArgument === 'string' && normalizePrincipal(ownerArgument)) {

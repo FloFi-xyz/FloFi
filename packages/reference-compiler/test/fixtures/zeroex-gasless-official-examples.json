@@ -1,0 +1,329 @@
+{
+ "_source": "0x Gasless API v2 OpenAPI examples (0xProject/0x-docs fern/openapi.json at 3a7034bd66e3993dc7169f2bbe6ef1f9a76a6921): GET /gasless/quote 200 example (Ethereum, chainId 1) and POST /gasless/submit request example (Base, chainId 8453). Read-only copy; the provider was never called.",
+ "quoteTrade": {
+  "hash": "0x3ff032fa3a970a3f2b763afce093fd133ced63c0b097ab12ae1441b42de4a167",
+  "eip712": {
+   "types": {
+    "PermitWitnessTransferFrom": [
+     {
+      "name": "permitted",
+      "type": "TokenPermissions"
+     },
+     {
+      "name": "spender",
+      "type": "address"
+     },
+     {
+      "name": "nonce",
+      "type": "uint256"
+     },
+     {
+      "name": "deadline",
+      "type": "uint256"
+     },
+     {
+      "name": "slippageAndActions",
+      "type": "SlippageAndActions"
+     }
+    ],
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "TokenPermissions": [
+     {
+      "name": "token",
+      "type": "address"
+     },
+     {
+      "name": "amount",
+      "type": "uint256"
+     }
+    ],
+    "SlippageAndActions": [
+     {
+      "name": "recipient",
+      "type": "address"
+     },
+     {
+      "name": "buyToken",
+      "type": "address"
+     },
+     {
+      "name": "minAmountOut",
+      "type": "uint256"
+     },
+     {
+      "name": "actions",
+      "type": "bytes[]"
+     }
+    ]
+   },
+   "domain": {
+    "name": "Permit2",
+    "chainId": 1,
+    "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+   },
+   "message": {
+    "permitted": {
+     "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+     "amount": "300000000"
+    },
+    "spender": "0x7c39a136ea20b3483e402ea031c1f3c019bab24b",
+    "nonce": "2241959297937691820908574931991567",
+    "deadline": "1718670104",
+    "slippageAndActions": {
+     "recipient": "0x70a9f34f9b34c64957b9c401a97bfed35b95049e",
+     "buyToken": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+     "minAmountOut": "292116101",
+     "actions": [
+      "0x0dfeb4190000000000000000000000007c39a136ea20b3483e402ea031c1f3c019bab24b000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000011e1a3000000000000000000000000000000000000006e898131631616b1779bad70bc0f000000000000000000000000000000000000000000000000000000006670d318",
+      "0x38c9c147000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000027100000000000000000000000006146be494fee4c73540cb1c5f87536abf1452500000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000084c31b8d7a0000000000000000000000007c39a136ea20b3483e402ea031c1f3c019bab24b00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000011e1a30000000000000000000000000000000000000000000000000000000001000276a400000000000000000000000000000000000000000000000000000000",
+      "0x38c9c147000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000000000000000000000000000000000000000ec000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044a9059cbb00000000000000000000000038f5e5b4da37531a6e85161e337e0238bb27aa90000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+     ]
+    }
+   },
+   "primaryType": "PermitWitnessTransferFrom"
+  }
+ },
+ "quoteApproval": {
+  "hash": "0xf3849ebcd806e518f2d3457b76d31ccf41be07fe64f0a25bbe798f1b9edde872",
+  "eip712": {
+   "types": {
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "version",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "Permit": [
+     {
+      "name": "owner",
+      "type": "address"
+     },
+     {
+      "name": "spender",
+      "type": "address"
+     },
+     {
+      "name": "value",
+      "type": "uint256"
+     },
+     {
+      "name": "nonce",
+      "type": "uint256"
+     },
+     {
+      "name": "deadline",
+      "type": "uint256"
+     }
+    ]
+   },
+   "domain": {
+    "name": "USD Coin",
+    "version": "2",
+    "chainId": 1,
+    "verifyingContract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+   },
+   "message": {
+    "owner": "0x70a9f34f9b34c64957b9c401a97bfed35b95049e",
+    "spender": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+    "value": "300000000",
+    "nonce": 0,
+    "deadline": "1718667104"
+   },
+   "primaryType": "Permit"
+  }
+ },
+ "submitTrade": {
+  "hash": "0xb9d8cbda2a8edf0172631f9026da65387692a17d855f27ae6bb7154521f17659",
+  "eip712": {
+   "types": {
+    "PermitWitnessTransferFrom": [
+     {
+      "name": "permitted",
+      "type": "TokenPermissions"
+     },
+     {
+      "name": "spender",
+      "type": "address"
+     },
+     {
+      "name": "nonce",
+      "type": "uint256"
+     },
+     {
+      "name": "deadline",
+      "type": "uint256"
+     },
+     {
+      "name": "slippageAndActions",
+      "type": "SlippageAndActions"
+     }
+    ],
+    "TokenPermissions": [
+     {
+      "name": "token",
+      "type": "address"
+     },
+     {
+      "name": "amount",
+      "type": "uint256"
+     }
+    ],
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "SlippageAndActions": [
+     {
+      "name": "recipient",
+      "type": "address"
+     },
+     {
+      "name": "buyToken",
+      "type": "address"
+     },
+     {
+      "name": "minAmountOut",
+      "type": "uint256"
+     },
+     {
+      "name": "actions",
+      "type": "bytes[]"
+     }
+    ]
+   },
+   "domain": {
+    "name": "Permit2",
+    "chainId": 8453,
+    "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+   },
+   "message": {
+    "permitted": {
+     "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+     "amount": "50000000"
+    },
+    "spender": "0x5ce929ddb01804bff35b2f5c77b735bdb094aac8",
+    "nonce": "2241959297937691820908574931991585",
+    "deadline": "1718672122",
+    "slippageAndActions": {
+     "recipient": "0x70a9f34f9b34c64957b9c401a97bfed35b95049e",
+     "buyToken": "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+     "minAmountOut": "49793430139340757517",
+     "actions": [
+      "0x0dfeb4190000000000000000000000005ce929ddb01804bff35b2f5c77b735bdb094aac8000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000002faf0800000000000000000000000000000000000006e898131631616b1779bad70bc21000000000000000000000000000000000000000000000000000000006670dafa",
+      "0x38c9c147000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913000000000000000000000000000000000000000000000000000000000000271000000000000000000000000032aed3bce901da12ca8489788f3a99fce1056e1400000000000000000000000000000000000000000000000000000000000000a400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000104a5dcbcdf000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000050c5725949a6f0c72e6c4a641f24049a917db0cb0000000000000000000000001b55d94b553475e7561fab889bf88fe4f491d29c0000000000000000000000005ce929ddb01804bff35b2f5c77b735bdb094aac8ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000002faf0800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "0x38c9c14700000000000000000000000050c5725949a6f0c72e6c4a641f24049a917db0cb000000000000000000000000000000000000000000000000000000000000001000000000000000000000000050c5725949a6f0c72e6c4a641f24049a917db0cb000000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044a9059cbb0000000000000000000000009f6601854dee374b1bfaf6350ffd27a97309d431000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+     ]
+    }
+   },
+   "primaryType": "PermitWitnessTransferFrom"
+  },
+  "signature": {
+   "v": 28,
+   "r": "0xeaad7568c0d17ad9e1043a4dd41ce294ed51792a0fb8bed3a3318f7e1df3ff88",
+   "s": "0x09444d25869d91946d7c26f9e5448c7fea369ba9c90deac1d761261565c487d2",
+   "signatureType": 2
+  }
+ },
+ "submitApproval": {
+  "hash": "0xe285dfa7b911cdfe64a4c92240d9b5af795e41571163c1cb5d78d7ba5d04fda3",
+  "eip712": {
+   "types": {
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "version",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "Permit": [
+     {
+      "name": "owner",
+      "type": "address"
+     },
+     {
+      "name": "spender",
+      "type": "address"
+     },
+     {
+      "name": "value",
+      "type": "uint256"
+     },
+     {
+      "name": "nonce",
+      "type": "uint256"
+     },
+     {
+      "name": "deadline",
+      "type": "uint256"
+     }
+    ]
+   },
+   "domain": {
+    "name": "USD Coin",
+    "version": "2",
+    "chainId": 8453,
+    "verifyingContract": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+   },
+   "message": {
+    "owner": "0x70a9f34f9b34c64957b9c401a97bfed35b95049e",
+    "spender": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+    "value": "50000000",
+    "nonce": 0,
+    "deadline": "1718669123"
+   },
+   "primaryType": "Permit"
+  },
+  "signature": {
+   "v": 27,
+   "r": "0xa1be4e6177d95f7e634d7cf8f93021b96e5e4f3d4d8605e85204b97d4a4060eb",
+   "s": "0x371e85adcfa9a5d0f53cc9f467a4230305899e4a18c0174466b8da784a4f9c81",
+   "signatureType": 2
+  }
+ }
+}

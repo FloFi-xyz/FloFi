@@ -26,6 +26,7 @@ import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
+import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -128,6 +129,18 @@ export function requotedMessage(code: string): string {
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'Your Review expired before the wallet request, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
   return 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
 }
+/** ADR-0010 §4: what the owner does when the network fee cannot be paid in USDC/USDT through Pimlico's Kora fee payer (closed `KORA_*` codes). */
+function koraMessage(error: string): string | null {
+  if (error === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED') return 'How the network fee is paid changed since your Review, so nothing was sent. Review it again.';
+  if (error === 'KORA_FEE_TOKEN_BALANCE_INSUFFICIENT') return 'Your wallet has too little SOL for the network fee and too little USDC or USDT to pay it instead. Add SOL, USDC or USDT, then simulate again.';
+  if (error === 'KORA_PAYMENT_INSUFFICIENT') return 'The network fee in USDC or USDT rose before your transaction was sent, so nothing was sent. Simulate again to review the new fee.';
+  if (error === 'KORA_OPERATION_UNSUPPORTED') return 'This step cannot pay its network fee in USDC or USDT. Add SOL for the network fee, then simulate again.';
+  if (/^KORA_(PROVIDER_UNAVAILABLE|UNREACHABLE|RATE_LIMITED|ERROR_UNKNOWN|RESPONSE_INVALID)$/.test(error))
+    return 'Paying the network fee in USDC or USDT is unavailable right now, so nothing was sent. Try again later, or add SOL for the network fee.';
+  if (/^KORA_(NOT_ENABLED|CONFIGURATION_INVALID|SIGNER_MISMATCH)$/.test(error))
+    return 'Paying the network fee in USDC or USDT is not available right now, so nothing was sent. Add SOL for the network fee, then simulate again.';
+  return 'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.';
+}
 export function simulationError(error: string): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
   const flight = flightRefusalMessage(error);
@@ -135,6 +148,17 @@ export function simulationError(error: string): string {
   // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi Wallet (Privy) refusals keep their own sentence, as on the Canvas.
   const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
   if (floFiWallet) return floFiWallet;
+  // ADR-0010 §4: paying the Solana network fee in USDC/USDT through Pimlico (only offered when the wallet's SOL cannot pay it).
+  const kora = /^KORA_/.test(error) || error === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? koraMessage(error) : null;
+  if (kora) return kora;
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a 0x Gasless swap's own refusals and outcomes (a changed mechanism is worded above).
+  if (error === 'TOKEN_GAS_MECHANISM_MISMATCH') return 'How the network fee is paid changed since your Review (your ETH balance moved), so nothing was signed or sent. Review the updated swap.';
+  if (/^ZEROX_(?:SIGNER_MISMATCH|SIGNATURE_INVALID|SIGNATURE_REFUSED)$/.test(error)) return 'The signature did not match the reviewed swap, so nothing was submitted. Authorize again with the reviewed wallet.';
+  if (/^ZEROX_(?:OWNER_NOT_EOA|SMART_WALLET_NOT_SUPPORTED)$/.test(error)) return 'Paying the network fee in tokens needs a standard wallet account, and this one is a smart account. Add ETH for the network fee instead. Nothing was signed.';
+  if (/^ZEROX_(?:TRADE_REVERTED|TRADE_FAILED|TRADE_SIMULATION_FAILED|TRADE_NOT_EXECUTED|MARKET_MAKER_DECLINED|TRADE_REFUSED|APPROVAL_REFUSED|PENDING_TRADE_EXISTS)$/.test(error)) return 'The swap through 0x did not go through, and none of your tokens moved. Simulate again for a fresh quote.';
+  if (/^ZEROX_TRADE_ALREADY_CLAIMED$/.test(error)) return 'This signed swap is already handled by another FloFi execution, which keeps tracking it. Simulate again for a fresh, separate swap.';
+  if (/^ZEROX_PROVIDER_/.test(error)) return 'The 0x service did not answer, so nothing was signed or submitted. Try again shortly.';
+  if (error === 'GASLESS_SIGNATURE_NOT_RECEIVED') return 'Your wallet did not return the signatures, so nothing was submitted. Authorize again when ready.';
   // P0 (2026-11-12): a provider's liquidity and minimum answers before the balance rules (`RELAY_INSUFFICIENT_LIQUIDITY` read "your balance is too
   // low", `RELAY_AMOUNT_TOO_LOW` the generic failure), bridge provider codes only (a lending BORROW_/WITHDRAW_INSUFFICIENT_LIQUIDITY keeps its own
   // wording below). Only refusals before this step was prepared: delivery outcomes such as
@@ -267,6 +291,14 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
     const value = simulationAmount(units, decimalPlaces, symbol);
     if (value !== null) view.fees.push({ label, value, ...(note ? { note } : {}), treatment });
   };
+  /**
+   * ADR-0010 §4 (Pimlico Kora): who pays, in which token — "Network fee, at most 0.0031 USDC · Paid from your USDC to Pimlico." The fee payer and
+   * the payment address are protocol details: under Technical details (non-material step details), never a banner.
+   */
+  const koraFee = (s: SimulationStep | undefined, gas: { amount: string; feePayer: string; paymentAddress: string; token: { symbol: string; decimals: number } }) => {
+    fee('Network fee', gas.amount, gas.token.decimals, gas.token.symbol, `Paid from your ${gas.token.symbol} to Pimlico.`, 'CEILING');
+    if (s) s.details.push({ label: 'Network fee payer (Pimlico)', value: gas.feePayer }, { label: 'Network fee payment address', value: gas.paymentAddress });
+  };
   const approvals = (required: boolean) => { if (required) warn('info', 'Token approval is required before execution.'); };
   const networkFees = (f: { totalUpperBoundWei: string | null; executionFeeUpperBoundWei: string; l1FeeUpperBoundWei: string | null }) => {
     if (f.totalUpperBoundWei !== null) fee('Maximum network fee', f.totalUpperBoundWei, 18, 'ETH', 'Includes execution and L1 data fees.', 'CEILING');
@@ -368,6 +400,34 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       // BUILD-RH-002: a catalog quote carries its own provenance (PUBLIC_MAINNET, or MOCKED for the loopback harness) and decimals.
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), q.provenance ?? 'PUBLIC_TESTNET', iso(q.expiresAt))) break;
       const s = step(q.nodeId), din = quoteDecimals(q, 'input'), dout = quoteDecimals(q, 'output');
+      // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a Review that binds 0x Gasless shows 0x's amounts (net of every fee), who pays the
+      // network fee and in which token, and the signatures; 0x's Settler, route, trade hash and approval go under Technical details.
+      const zx = q.gas?.mechanism === 'ZEROX_GASLESS_SWAP' ? q.gas.zeroEx : null;
+      if (zx) {
+        result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), '0x', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
+        const side = (token: string) => token === q.inputToken ? { decimals: din, symbol: q.inputSymbol } : { decimals: dout, symbol: q.outputSymbol };
+        const gasSide = side(zx.gasFee.token);
+        fee(INCLUDED_NETWORK_FEE_LABEL, zx.gasFee.amount, gasSide.decimals, gasSide.symbol, `Paid from your ${gasSide.symbol}: 0x takes it out of the swap, so no ETH is needed. The amounts you receive are after this fee.`, 'INCLUDED');
+        if (zx.zeroExFee) { const feeSide = side(zx.zeroExFee.token); fee(ZEROX_FEE_LABEL, zx.zeroExFee.amount, feeSide.decimals, feeSide.symbol, 'The provider\'s own fee, taken out of the swap.', 'INCLUDED'); }
+        if (s) {
+          s.resultLabel = 'Quoted output';
+          if (zx.approval) s.details.push({ label: SIGNATURES_LABEL, value: '2 (token approval, then the trade)' });
+          s.details.push({ label: 'Executed by', value: `0x Settler ${zx.settler}` }, { label: 'Route sources', value: zx.sources.join(', ') || '0x' },
+            { label: 'Trade hash', value: zx.trade.hash }, { label: 'Signed trade valid until', value: new Date(zx.trade.deadline * 1000).toISOString() });
+          if (zx.approval) s.details.push({ label: 'Token approval by signature', value: zx.approval.unlimited ? `Permit2 ${zx.permit2} may spend any amount of ${q.inputSymbol}`
+            : `Permit2 ${zx.permit2} may spend at most ${simulationAmount(zx.approval.value, din, q.inputSymbol)}` });
+          // ADR-0010 §5 (review Z3): 0x's quote beside FloFi's own on-chain Uniswap v3 quote of the same swap, and the least 0x's minimum could be.
+          const out = (units: string) => simulationAmount(units, dout, q.outputSymbol) ?? '—', reference = zx.reference as typeof zx.reference | undefined;
+          s.details.push({ label: '0x quote', value: `Expected ${out(zx.buyAmount)}, at least ${out(zx.minBuyAmount)}` });
+          if (reference) s.details.push({ label: 'FloFi reference (Uniswap v3)', value: `Expected ${out(reference.expectedOut)}, at least ${out(reference.minimumOut)}` },
+            { label: 'Lowest 0x minimum FloFi accepts', value: `${out(reference.floor)} (FloFi's minimum less 0x's fees)` });
+        }
+        for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
+        if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
+        if (zx.approval?.unlimited) warn('attention', `This approval lets Permit2 spend any amount of ${q.inputSymbol} from this wallet until you change or revoke it.`);
+        warn('info', 'This swap is executed by 0x\'s settlement contract along 0x\'s quoted route, not the Uniswap pool. You sign; 0x\'s relayer sends it and takes the network fee from the swap.', true);
+        break;
+      }
       result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), q.conversion ? 'WETH9' : 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
@@ -382,7 +442,14 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (Number.isSafeInteger(q.fee) && q.fee > 0) view.fees.push({ label: 'Pool fee', value: `${(q.fee / 10_000).toFixed(2)}%`, note: 'Uniswap v3 fee tier, already reflected in the quoted output.', treatment: 'INCLUDED' });
       if (q.ownerReview) fee('Maximum network fee', q.ownerReview.feeBudgetWei, 18, 'ETH', q.ownerReview.step === 'approval'
         ? 'Ceiling for the token approval request; the swap\'s own network fee is checked after the approval confirms.' : 'Ceiling for this wallet request, separate from the swap output.', 'CEILING');
-      if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
+      // ADR-0010: a quote made for the owner on Robinhood Chain knows the native path's worst-case fee, and says before anything is signed when the
+      // wallet's ETH does not cover it and why paying it in tokens is not available.
+      else if (q.gas?.native.worstCaseWei) fee('Maximum network fee', q.gas.native.worstCaseWei, 18, 'ETH', 'Paid in ETH by your wallet, separate from the swap output.', 'CEILING');
+      if (q.gas?.nativeShort) {
+        warn('attention', 'This wallet does not have enough ETH for the network fee of this swap. Add ETH on this network before you authorize.');
+        for (const reason of q.gas.unavailable) warn('attention', gaslessUnavailableReason(reason.code));
+      }
+      if (!q.ownerReview && !q.gas) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
     case 'solana-swap': {
@@ -395,8 +462,13 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         const providers = [...new Set(q.quote.routePlan.map(p => simulationProvider(p.label)).filter(Boolean))];
         if (providers.length) s.details.push({ label: 'Route pools', value: providers.join(' → ') });
       }
-      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
-      if (BigInt(q.simulationResult.accountCreationLamports) > 0n) fee('Account deposits', q.simulationResult.accountCreationLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
+      // ADR-0010 §4: with Pimlico's Kora fee payer the owner pays no SOL; the network fee is the exact token amount it repays (its ceiling).
+      const kora = q.format === 'gryloo.jupiter-review.v1' ? q.gas : undefined;
+      if (kora) koraFee(s, kora);
+      else {
+        fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+        if (BigInt(q.simulationResult.accountCreationLamports) > 0n) fee('Account deposits', q.simulationResult.accountCreationLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
+      }
       if (q.format === 'gryloo.orca-devnet-review.v1') {
         const trade = q.simulatedTrade;
         for (const [label, amount] of [['Liquidity provider fee', trade.lpFee], ['Protocol fee', trade.protocolFee], ['Input transfer fee', trade.inputTransferFee]] as const) {
@@ -479,9 +551,13 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const amount = simulationAmount(q.amount, q.asset.decimals, symbol), s = step();
       result(s, amount, amount ? `Send ${amount} to ${q.recipient}` : null, 'Wallet send');
       if (s) { s.resultLabel = 'Expected action'; s.destination = q.recipient; if (q.asset.mint) s.details.push({ label: 'Token mint', value: q.asset.mint }); }
-      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
-      if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.', 'ADDITIONAL');
-      else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.', 'CEILING');
+      // ADR-0010 §4: with Pimlico's Kora fee payer the owner pays no SOL (Kora also advances any recipient account rent, inside the token fee).
+      if (q.gas) koraFee(s, q.gas);
+      else {
+        fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+        if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.', 'ADDITIONAL');
+        else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.', 'CEILING');
+      }
       if (!q.asset.verified) warn('attention', 'This token is not on FloFi\'s verified list. Its mint, decimals and token program were checked on chain; confirm it is the token you intend to send.');
       if (q.token?.program === 'token-2022') warn('info', 'Token-2022 token: only extensions FloFi can verify were found, and the recipient receives exactly the amount sent.');
       warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');

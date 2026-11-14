@@ -17,6 +17,8 @@ import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platfo
 import { WALLET_BATCH_OUTCOME_UNKNOWN, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode, type RunState,
   type StepState } from './state-machine.ts';
 import type { ExecutionGroup, GroupStrategy, SigningTime } from './execution-groups.ts';
+import { plannedGroupCode } from './owner-step-circle.ts';
+import type { TokenFeePaid } from '../user-funded/gas-payer.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
 /** How a bound step's amount was resolved (native units of `asset`). */
@@ -32,7 +34,9 @@ export type StepOutcome = {
   readonly spent: readonly { readonly asset: string; readonly amount: string }[]; readonly received: readonly { readonly asset: string; readonly amount: string }[];
   readonly observedAt: string;
   /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: network fees actually paid for the group this step ran in, and by whom (always the owner's wallet). */
-  readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number } };
+  readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number;
+    /** ADR-0010: the payer fronted the native fee and the OWNER paid it back in a token (proven from the same receipt). */
+    readonly paidInToken?: TokenFeePaid } };
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: one execution group of a USER_FUNDED run (migration 0023). */
 export const GROUP_STATES = ['PLANNED', 'PREPARED', 'AUTHORIZED', 'SUBMITTED', 'RECONCILED', 'FAILED', 'UNCERTAIN', 'BLOCKED', 'SKIPPED', 'EXPIRED'] as const;
 export type GroupState = (typeof GROUP_STATES)[number];
@@ -94,6 +98,36 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
   const lockRun = async (tx: Queryable, runId: string) => {
     const row = (await tx.query('SELECT * FROM workflow_runs WHERE tenant_id = $1 AND run_id = $2 FOR UPDATE', [tenantId, runId])).rows[0];
     return row ? runOf(row) : null;
+  };
+  /** One step's compare-and-set inside a transaction that already holds the run lock. */
+  const stepUpdate = async (tx: Queryable, runId: string, stepIndex: number, from: readonly StepState[], to: StepState, patch: StepPatch, kind: string)
+    : Promise<RunStepRecord | null> => {
+    const row = (await tx.query(`UPDATE workflow_run_steps SET state = $5, version = version + 1, flow = COALESCE($6, flow), strategy = COALESCE($7::jsonb, strategy),
+        workflow_hash = COALESCE($8, workflow_hash), bound = COALESCE($9::jsonb, bound), claimed_at = COALESCE($10, claimed_at), outcome = COALESCE($11::jsonb, outcome),
+        code = CASE WHEN $12::boolean THEN $13 ELSE code END
+      WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3 AND state = ANY($4::text[]) RETURNING *`,
+    [tenantId, runId, stepIndex, [...from], to, patch.flow ?? null, json(patch.strategy), patch.workflowHash ?? null, json(patch.bound), patch.claimedAt ?? null,
+      json(patch.outcome), patch.code !== undefined, patch.code ?? null])).rows[0];
+    if (!row) return null;
+    await event(tx, runId, stepIndex, kind, patch.code ?? null, { state: to, ...patch.workflowHash ? { workflowHash: patch.workflowHash } : {},
+      ...patch.outcome ? { transactions: patch.outcome.transactions.map(t => t.hash) } : {} });
+    return stepOf(row);
+  };
+  /** One group's compare-and-set inside a transaction that already holds the run lock. */
+  const groupUpdate = async (tx: Queryable, runId: string, groupIndex: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, kind: string,
+    expectVersion: number | null): Promise<GroupRecord | null> => {
+    const has = (k: keyof GroupPatch) => Object.prototype.hasOwnProperty.call(patch, k);
+    const row = (await tx.query(`UPDATE workflow_run_groups SET state = $5, version = version + 1, strategy = COALESCE($6, strategy), signing = COALESCE($7, signing),
+        prepared = CASE WHEN $8::boolean THEN $9::jsonb ELSE prepared END, owner_authorization = CASE WHEN $10::boolean THEN $11::jsonb ELSE owner_authorization END,
+        submission = COALESCE($12::jsonb, submission), outcome = COALESCE($13::jsonb, outcome), code = CASE WHEN $14::boolean THEN $15 ELSE code END,
+        valid_until = CASE WHEN $16::boolean THEN $17::timestamptz ELSE valid_until END
+      WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 AND state = ANY($4::text[]) AND ($18::bigint IS NULL OR version = $18::bigint) RETURNING *`,
+    [tenantId, runId, groupIndex, [...from], to, patch.strategy ?? null, patch.signing ?? null, has('prepared'), json(patch.prepared), has('authorization'), json(patch.authorization),
+      json(patch.submission), json(patch.outcome), has('code'), patch.code ?? null, has('validUntil'), patch.validUntil ?? null, expectVersion])).rows[0];
+    if (!row) return null;
+    await event(tx, runId, null, kind, patch.code ?? null, { group: groupIndex, state: to,
+      ...patch.submission ? { hashes: (patch.submission as { hashes?: unknown }).hashes ?? null } : {} });
+    return groupOf(row);
   };
 
   return {
@@ -159,16 +193,7 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         // Serialize step loading with cancellation. A stale continue/worker cannot load a cancelled run.
         const run = await lockRun(tx, runId);
         if (!run || run.state === 'CANCELLED') return null;
-        const row = (await tx.query(`UPDATE workflow_run_steps SET state = $5, version = version + 1, flow = COALESCE($6, flow), strategy = COALESCE($7::jsonb, strategy),
-            workflow_hash = COALESCE($8, workflow_hash), bound = COALESCE($9::jsonb, bound), claimed_at = COALESCE($10, claimed_at), outcome = COALESCE($11::jsonb, outcome),
-            code = CASE WHEN $12::boolean THEN $13 ELSE code END
-          WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3 AND state = ANY($4::text[]) RETURNING *`,
-        [tenantId, runId, stepIndex, [...from], to, patch.flow ?? null, json(patch.strategy), patch.workflowHash ?? null, json(patch.bound), patch.claimedAt ?? null,
-          json(patch.outcome), patch.code !== undefined, patch.code ?? null])).rows[0];
-        if (!row) return null;
-        await event(tx, runId, stepIndex, kind, patch.code ?? null, { state: to, ...patch.workflowHash ? { workflowHash: patch.workflowHash } : {},
-          ...patch.outcome ? { transactions: patch.outcome.transactions.map(t => t.hash) } : {} });
-        return stepOf(row);
+        return stepUpdate(tx, runId, stepIndex, from, to, patch, kind);
       });
     },
     /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */
@@ -272,9 +297,10 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         [tenantId, runId])).rows[0]!;
       for (const g of groups) {
         const feePayer = run.wallets[g.namespace] ?? refuse(g.namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
+        // Final review (P3): a FloFi Wallet owner-step group whose fee Circle may pay is planned CIRCLE_ASK_FIRST (owner-step-circle.ts).
         await tx.query(`INSERT INTO workflow_run_groups (tenant_id, run_id, group_index, namespace, chain, fee_payer, step_from, step_to, strategy, signing, awaits_delivery,
-            state, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PLANNED', $12, $12)`,
-        [tenantId, runId, g.index, g.namespace, g.chain, feePayer, g.stepFrom, g.stepTo, g.strategy, g.signing, g.awaitsDelivery, now]);
+            state, code, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PLANNED', $13, $12, $12)`,
+        [tenantId, runId, g.index, g.namespace, g.chain, feePayer, g.stepFrom, g.stepTo, g.strategy, g.signing, g.awaitsDelivery, now, plannedGroupCode(g)]);
         if (g.strategy !== 'EVM_OWNER_STEP' && g.strategy !== 'SOLANA_OWNER_STEP')
           await tx.query(`UPDATE workflow_run_steps SET state = 'DELEGATED', version = version + 1 WHERE tenant_id = $1 AND run_id = $2 AND step_index BETWEEN $3 AND $4
             AND state = 'PENDING'`, [tenantId, runId, g.stepFrom, g.stepTo]);
@@ -297,19 +323,35 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       return db.transaction(async tx => {
         const run = await lockRun(tx, runId);
         if (!run || run.state === 'CANCELLED') return null;
-        const has = (k: keyof GroupPatch) => Object.prototype.hasOwnProperty.call(patch, k);
-        const row = (await tx.query(`UPDATE workflow_run_groups SET state = $5, version = version + 1, strategy = COALESCE($6, strategy), signing = COALESCE($7, signing),
-            prepared = CASE WHEN $8::boolean THEN $9::jsonb ELSE prepared END, owner_authorization = CASE WHEN $10::boolean THEN $11::jsonb ELSE owner_authorization END,
-            submission = COALESCE($12::jsonb, submission), outcome = COALESCE($13::jsonb, outcome), code = CASE WHEN $14::boolean THEN $15 ELSE code END,
-            valid_until = CASE WHEN $16::boolean THEN $17::timestamptz ELSE valid_until END
-          WHERE tenant_id = $1 AND run_id = $2 AND group_index = $3 AND state = ANY($4::text[]) AND ($18::bigint IS NULL OR version = $18::bigint) RETURNING *`,
-        [tenantId, runId, groupIndex, [...from], to, patch.strategy ?? null, patch.signing ?? null, has('prepared'), json(patch.prepared), has('authorization'), json(patch.authorization),
-          json(patch.submission), json(patch.outcome), has('code'), patch.code ?? null, has('validUntil'), patch.validUntil ?? null, expectVersion])).rows[0];
-        if (!row) return null;
-        await event(tx, runId, null, kind, patch.code ?? null, { group: groupIndex, state: to,
-          ...patch.submission ? { hashes: (patch.submission as { hashes?: unknown }).hashes ?? null } : {} });
-        return groupOf(row);
+        return groupUpdate(tx, runId, groupIndex, from, to, patch, kind, expectVersion);
       });
+    },
+    /**
+     * Final review (P3): several group and step transitions of ONE run as one unit, under the run lock — all of them, or none. `work` sees the
+     * run's steps and groups and makes its transitions through `scope` (each a compare-and-set, exactly as `stepTransition`/`groupTransition`);
+     * returning null rolls every one of them back. Null too when the run is gone or cancelled. Used where a group and its steps must never be
+     * seen apart (a FloFi Wallet owner-step group switched to one Circle-paid operation, and given back).
+     */
+    async atomically<T>(runId: string, work: (scope: RunScope) => Promise<T | null>): Promise<T | null> {
+      try {
+        return await db.transaction(async tx => {
+          const run = await lockRun(tx, runId);
+          if (!run || run.state === 'CANCELLED') return null;
+          const scope: RunScope = {
+            steps: async id => (await tx.query('SELECT * FROM workflow_run_steps WHERE tenant_id = $1 AND run_id = $2 ORDER BY step_index', [tenantId, id])).rows.map(stepOf),
+            groups: async id => (await tx.query('SELECT * FROM workflow_run_groups WHERE tenant_id = $1 AND run_id = $2 ORDER BY group_index', [tenantId, id])).rows.map(groupOf),
+            stepTransition: (id, stepIndex, from, to, patch, kind = 'STEP_STATE') => id === runId ? stepUpdate(tx, id, stepIndex, from, to, patch, kind) : Promise.resolve(null),
+            groupTransition: (id, groupIndex, from, to, patch, kind = 'GROUP_STATE', expectVersion = null) =>
+              id === runId ? groupUpdate(tx, id, groupIndex, from, to, patch, kind, expectVersion) : Promise.resolve(null),
+          };
+          const result = await work(scope);
+          if (result === null) throw ROLLED_BACK;
+          return result;
+        });
+      } catch (cause) {
+        if (cause === ROLLED_BACK) return null;
+        throw cause;
+      }
     },
     /** Schedules (or keeps) the run's advance work item. */
     advanceLater: (runId: string, delayMs = 0) => enqueue(db, runId, delayMs),
@@ -322,3 +364,13 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
   };
 }
 export type WorkflowRunStore = ReturnType<typeof createPgWorkflowRunStore>;
+/** What `WorkflowRunStore.atomically` hands its work: one run's reads and compare-and-sets, all inside one transaction under the run lock. */
+export type RunScope = {
+  readonly steps: (runId: string) => Promise<readonly RunStepRecord[]>;
+  readonly groups: (runId: string) => Promise<readonly GroupRecord[]>;
+  readonly stepTransition: (runId: string, stepIndex: number, from: readonly StepState[], to: StepState, patch: StepPatch, kind?: string) => Promise<RunStepRecord | null>;
+  readonly groupTransition: (runId: string, groupIndex: number, from: readonly GroupState[], to: GroupState, patch: GroupPatch, kind?: string,
+    expectVersion?: number | null) => Promise<GroupRecord | null>;
+};
+/** The sentinel that rolls an `atomically` transaction back (never escapes the store). */
+const ROLLED_BACK = Symbol('ROLLED_BACK');

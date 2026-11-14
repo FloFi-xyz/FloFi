@@ -24,6 +24,19 @@ export type EvmTransaction = { readonly from: string; readonly to: string; reado
  * The shape and its validation are the shared contract in `src/wallet/flofi-signing.ts`.
  */
 export type SigningBinding = SigningContext;
+/**
+ * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: EIP-712 typed data exactly as `eth_signTypedData_v4` carries it (its `types` declare
+ * `EIP712Domain`). FloFi Wallet signs it only for a reviewed attempt whose server gate re-derives this exact payload (a 0x Gasless trade or
+ * its gasless approval); the shape is checked here, the content by the gate.
+ */
+export type EvmTypedData = { readonly types: Readonly<Record<string, readonly { readonly name: string; readonly type: string }[]>>;
+  readonly domain: Readonly<Record<string, unknown>>; readonly primaryType: string; readonly message: Readonly<Record<string, unknown>> };
+/**
+ * Owner requirement (FloFi Wallet + Circle): an EIP-7702 authorization tuple FloFi asks the person's Privy wallet to sign — a SPECIFIC chain (never
+ * 0) of FloFi Wallet's four, the contract the address designates, and the account's transaction nonce (decimal, uint64). The server gate allows it
+ * only for the pinned Simple7702Account v0.8 of a reviewed Circle-paid group, after the person's consent in FloFi.
+ */
+export type EvmAuthorization = { readonly chainId: number; readonly contractAddress: string; readonly nonce: string };
 export type WalletOperation =
   | { readonly op: 'connect' }
   | { readonly op: 'manage' }
@@ -32,6 +45,8 @@ export type WalletOperation =
   | { readonly op: 'export'; readonly walletId: string; readonly kind: 'recovery-phrase' | 'private-key' }
   | { readonly op: 'evm_sign_transaction'; readonly address: string; readonly tx: EvmTransaction; readonly signing?: SigningBinding }
   | { readonly op: 'evm_sign_message'; readonly address: string; readonly message: string }
+  | { readonly op: 'evm_sign_typed_data'; readonly address: string; readonly typedData: EvmTypedData; readonly signing?: SigningBinding }
+  | { readonly op: 'evm_sign_authorization'; readonly address: string; readonly authorization: EvmAuthorization; readonly signing?: SigningBinding }
   | { readonly op: 'solana_sign_transaction'; readonly address: string; readonly chain: SolanaWalletChain; readonly transaction: string;
     readonly signing?: SigningBinding }
   | { readonly op: 'solana_sign_message'; readonly address: string; readonly message: string };
@@ -80,6 +95,33 @@ export function parseEvmTransaction(value: unknown): EvmTransaction | null {
   if (BigInt(lower.maxPriorityFeePerGas!) > BigInt(lower.maxFeePerGas!) || BigInt(lower.gas!) === 0n || BigInt(lower.chainId!) === 0n) return null;
   return lower as EvmTransaction;
 }
+const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/, TYPE = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}(\[[0-9]{0,3}\])*$/;
+const DOMAIN_KEYS = ['name', 'version', 'chainId', 'verifyingContract', 'salt'];
+/** `eth_signTypedData_v4` typed data, strictly shaped and bounded (64 KiB); the values themselves are the signing gate's to check. */
+export function parseEvmTypedData(value: unknown): EvmTypedData | null {
+  const r = record(value);
+  if (!r || !exactKeys(r, ['types', 'domain', 'primaryType', 'message']) || typeof r.primaryType !== 'string' || !IDENTIFIER.test(r.primaryType)) return null;
+  const types = record(r.types), domain = record(r.domain), message = record(r.message);
+  if (!types || !domain || !message || !Array.isArray(types.EIP712Domain) || Object.keys(types).length > 32 || !(r.primaryType in types)) return null;
+  for (const [name, fields] of Object.entries(types)) {
+    if (!IDENTIFIER.test(name) || !Array.isArray(fields) || fields.length > 32) return null;
+    if (!fields.every(field => { const f = record(field); return f && exactKeys(f, ['name', 'type']) && typeof f.name === 'string' && IDENTIFIER.test(f.name)
+      && typeof f.type === 'string' && TYPE.test(f.type); })) return null;
+  }
+  if (Object.keys(domain).some(key => !DOMAIN_KEYS.includes(key))) return null;
+  let size: number;
+  try { size = JSON.stringify(r).length; } catch { return null; }
+  return size <= 65_536 ? { types: types as EvmTypedData['types'], domain, primaryType: r.primaryType, message } : null;
+}
+const AUTHORIZATION_CHAINS: ReadonlySet<number> = new Set([1, 8453, 42161, 4663]);
+/** A strictly shaped authorization tuple (exact keys; one of FloFi Wallet's mainnets, never chain 0; an address; a uint64 decimal nonce). */
+export function parseEvmAuthorization(value: unknown): EvmAuthorization | null {
+  const r = record(value);
+  if (!r || !exactKeys(r, ['chainId', 'contractAddress', 'nonce']) || typeof r.chainId !== 'number' || !AUTHORIZATION_CHAINS.has(r.chainId)) return null;
+  const contract = typeof r.contractAddress === 'string' ? r.contractAddress.toLowerCase() : '';
+  if (!EVM_ADDRESS.test(contract) || typeof r.nonce !== 'string' || !/^(0|[1-9][0-9]{0,19})$/.test(r.nonce) || BigInt(r.nonce) >= 1n << 64n) return null;
+  return { chainId: r.chainId, contractAddress: contract, nonce: r.nonce };
+}
 function parseOperation(value: unknown): WalletOperation | null {
   const r = record(value);
   if (!r) return null;
@@ -97,6 +139,15 @@ function parseOperation(value: unknown): WalletOperation | null {
     case 'evm_sign_message': {
       const address = typeof r.address === 'string' ? r.address.toLowerCase() : '';
       return exactKeys(r, ['op', 'address', 'message']) && EVM_ADDRESS.test(address) && message ? { op: r.op, address, message } : null;
+    }
+    case 'evm_sign_typed_data': {
+      const typedData = parseEvmTypedData(r.typedData), address = typeof r.address === 'string' ? r.address.toLowerCase() : '', keys = withBinding(r, ['op', 'address', 'typedData']);
+      return keys.ok && typedData && EVM_ADDRESS.test(address) ? { op: r.op, address, typedData, ...keys.signing ? { signing: keys.signing } : {} } : null;
+    }
+    case 'evm_sign_authorization': {
+      const authorization = parseEvmAuthorization(r.authorization), address = typeof r.address === 'string' ? r.address.toLowerCase() : '';
+      const keys = withBinding(r, ['op', 'address', 'authorization']);
+      return keys.ok && authorization && EVM_ADDRESS.test(address) ? { op: r.op, address, authorization, ...keys.signing ? { signing: keys.signing } : {} } : null;
     }
     case 'solana_sign_transaction': {
       const keys = withBinding(r, ['op', 'address', 'chain', 'transaction']);

@@ -172,6 +172,13 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     /** Review round 3: the runtime's in-place re-quote this follow-up already accounted for (present when it began, or already presented). */
     inPlace?: unknown;
     /**
+     * ADR-0010 (review CH1): the live run this follow-up last saw, before anything of it was submitted (every request still in the wallet), with
+     * the runtime error then. A 0x Gasless swap's run is visible while the owner signs (its attempt is recorded first), so the start tracker is
+     * gone by then; if the attempt is then abandoned (the server re-quoted at submit, the signatures never came back), the run vanishes from the
+     * lifecycle again and the new error is this start's refusal.
+     */
+    unsent?: { readonly runKey: string | null; readonly error: string | null } | undefined;
+    /**
      * Whether FloFi may prepare the next request's fresh Review by itself: only for a continuation the owner started in this conversation
      * (Execute or Continue). A run restored after a reload stays observation-only until the owner asks (“Review workflow”).
      */
@@ -542,7 +549,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       const landed = Boolean(currentExecution(view.progress)?.steps.some(step => step.operations.some(operation => operation.state === 'confirmed')));
       say(scope, language, (language, c) => [landed ? c.workflowConfirmedContinuing(revision, account) : c.workflowConfirmed(revision, account), {
         notes: [review.walletRequests.length ? c.walletRequests(review.walletRequests.map(item => translate(language, item)).join(', ')) : c.walletRequestsUnknown,
-          ...review.approvals.length || review.walletRequests.some(item => /^Approve\b/.test(item)) ? [c.approvalIfNeeded] : [],
+          // A 0x Gasless approval is one of the reviewed signatures listed above (never requested "only if" the allowance is short at execution).
+          ...!review.gaslessSignatures && (review.approvals.length || review.walletRequests.some(item => /^Approve\b/.test(item))) ? [c.approvalIfNeeded] : [],
           ...review.providerSteps.length ? [c.providerSettles(review.providerSteps.map(item => translate(language, item).toLowerCase()).join(', '))] : []],
         question: sequence ? c.executeStepQuestion(sequence.current, sequence.total) : c.executeQuestion, options: [c.executeYes, c.executeNo] }]);
       return true;
@@ -647,9 +655,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // BUILD-FLOFI-CHAT-E2E-FIX-002: a start that ends with no execution record — a refused request (some runtimes keep the failure as their own
       // error, e.g. a balance too low) or an authorization that could not begin — is reported with the runtime's classified reason, never left
       // as "opening the wallet request". Nothing was sent: there is no execution record.
-      const error = bridge.source.state.error, newError = Boolean(error) && error !== start?.error;
+      // ADR-0010 (review CH1): the same for a run this conversation started and saw live with nothing submitted, which vanished from the
+      // lifecycle (its only attempt abandoned) together with a new runtime error: that error is the start's refusal.
+      const unsent = !start && followed.auto ? followed.unsent : undefined;
+      const error = bridge.source.state.error, newError = Boolean(error) && error !== (start ?? unsent)?.error;
       const ended = !active && (bridge.controls.requestFailed || newError || Boolean(start && start.active) || Boolean(start && ++start.idle > 1));
-      if (ended && (start || bridge.controls.requestFailed)) {
+      if (ended && (start || bridge.controls.requestFailed || Boolean(unsent) && newError)) {
         watch.current = null;
         // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): the runtime already re-quoted this run in place (nothing was sent): FloFi says why once and
         // presents that fresh Review with what changed — it never simulates again over it, and the owner confirms it again.
@@ -674,6 +685,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       return;
     }
     if (followed.start) followed.start = undefined;
+    // Review CH1: remembered only while nothing of this run left the wallet (no request submitted, confirmed, failed or uncertain yet).
+    followed.unsent = live.steps.every(step => step.operations.every(operation => ['waiting', 'preparing', 'wallet'].includes(operation.state)))
+      ? { runKey: live.runKey, error: bridge.source.state.error } : undefined;
     // BUILD-FLOFI-E2E-RELIABILITY-001: a continuation that ends without a new wallet request (the record's operations did not move) is reported
     // with its reason; a quote that moved or expired is re-quoted at once for the next request only. Nothing is resent, and the earlier
     // confirmed request is never described as "nothing was sent".

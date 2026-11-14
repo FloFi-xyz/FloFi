@@ -32,13 +32,21 @@ export const SIGNING_FLOWS = Object.freeze({
   'base-swap': { ecosystem: 'evm', run: /^bas-[0-9a-f]{24}$/ },
   'arbitrum-swap': { ecosystem: 'evm', run: /^ars-[0-9a-f]{24}$/ },
   'ethereum-swap': { ecosystem: 'evm', run: /^ets-[0-9a-f]{24}$/ },
+  /**
+   * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (owner requirement: FloFi Wallet + Circle): the due Circle-paid group of a user-funded workflow run
+   * (`wfr_…`) on that network — its EIP-7702 upgrade authorization (after the owner's consent), its USDC permit and its v0.8 operation, each
+   * re-derived by the server from the prepared group, never from the page.
+   */
+  'base-circle-gas': { ecosystem: 'evm', run: /^wfr_[a-z2-7]{26}$/ },
+  'arbitrum-circle-gas': { ecosystem: 'evm', run: /^wfr_[a-z2-7]{26}$/ },
+  'ethereum-circle-gas': { ecosystem: 'evm', run: /^wfr_[a-z2-7]{26}$/ },
 } satisfies Readonly<Record<string, { readonly ecosystem: WalletEcosystem; readonly run: RegExp }>>);
 export type SigningFlow = keyof typeof SIGNING_FLOWS;
 export const isSigningFlow = (flow: unknown): flow is SigningFlow => typeof flow === 'string' && Object.hasOwn(SIGNING_FLOWS, flow);
 
 /** Which reviewed FloFi run a signing request belongs to. Carries no authority: the server resolves and checks it. */
 export type SigningContext = { readonly flow: string; readonly runId: string };
-const FLOW = /^[a-z][a-z0-9-]{2,63}$/, RUN = /^[a-z]{2,8}-[0-9a-f]{24,32}$/;
+const FLOW = /^[a-z][a-z0-9-]{2,63}$/, RUN = /^(?:[a-z]{2,8}-[0-9a-f]{24,32}|wfr_[a-z2-7]{26})$/;
 export function parseSigningContext(value: unknown): SigningContext | null {
   const r = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
   return r && Object.keys(r).length === 2 && typeof r.flow === 'string' && FLOW.test(r.flow) && typeof r.runId === 'string' && RUN.test(r.runId)
@@ -49,8 +57,14 @@ export function parseSigningContext(value: unknown): SigningContext | null {
  * Wallet then refuses by name as not supported yet).
  */
 export function signingContextOf(runId: string, fallback: string): SigningContext {
-  const flow = (Object.keys(SIGNING_FLOWS) as SigningFlow[]).find(name => SIGNING_FLOWS[name].run.test(runId));
+  // A workflow run's Circle flows name their network: never guessed from the run id (`circleSigningContext`).
+  const flow = (Object.keys(SIGNING_FLOWS) as SigningFlow[]).find(name => !name.endsWith('-circle-gas') && SIGNING_FLOWS[name].run.test(runId));
   return { flow: flow ?? fallback, runId };
+}
+/** The binding of a user-funded workflow run's due Circle-paid group on `chainId` (Base, Arbitrum One, Ethereum), or null elsewhere. */
+export function circleSigningContext(runId: string, chainId: number): SigningContext | null {
+  const flow = chainId === 8453 ? 'base-circle-gas' : chainId === 42161 ? 'arbitrum-circle-gas' : chainId === 1 ? 'ethereum-circle-gas' : null;
+  return flow && SIGNING_FLOWS[flow].run.test(runId) ? { flow, runId } : null;
 }
 /** The relay header value: `<flow>:<runId>`. */
 export const SIGNING_HEADER = 'x-flofi-signing';
@@ -114,6 +128,11 @@ export const FLOFI_WALLET_MESSAGES = Object.freeze({
   FLOFI_WALLET_ACCOUNT_MISMATCH: 'This address is not a FloFi Wallet of the FloFi account you are signed in to.',
   FLOFI_WALLET_SIGN_IN_REQUIRED: 'Sign in to FloFi again in this browser to use your FloFi wallet. Nothing was signed.',
   FLOFI_WALLET_NOT_READY: 'Your FloFi wallet is still loading in this page. Wait a moment, then choose Authorize again. Nothing was signed.',
+  // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: typed-data signing (a 0x Gasless swap on Robinhood Chain).
+  FLOFI_WALLET_TYPED_DATA_UNSUPPORTED: 'FloFi Wallet signs typed data only for a swap you reviewed in FloFi. Nothing was signed.',
+  // Owner requirement (FloFi Wallet + Circle): the EIP-7702 upgrade of a FloFi Wallet address, inside its first Circle-paid operation.
+  FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED: 'FloFi Wallet signs an account upgrade only after you agree to it in FloFi. Nothing was signed.',
+  FLOFI_WALLET_AUTHORIZATION_UNSUPPORTED: 'FloFi Wallet signs an account upgrade only for the smart account and network you reviewed in FloFi. Nothing was signed.',
 } as const);
 export type FloFiWalletCode = keyof typeof FLOFI_WALLET_MESSAGES;
 export const floFiWalletMessage = (code: string): string | null => Object.hasOwn(FLOFI_WALLET_MESSAGES, code) ? FLOFI_WALLET_MESSAGES[code as FloFiWalletCode] : null;
@@ -134,7 +153,7 @@ export const PRE_SIGNATURE_CODES: ReadonlySet<string> = new Set([
   // outcome is unknown and must be reconciled, never retried as if nothing had been signed.
   'FLOFI_WALLET_NONCE_MISMATCH', 'FLOFI_WALLET_FEE_TOO_HIGH', 'FLOFI_WALLET_NETWORK_READ_FAILED',
   'FLOFI_WALLET_ACCOUNT_REQUIRED', 'FLOFI_WALLET_REQUEST_INVALID', 'FLOFI_WALLET_ACCOUNT_MISMATCH', 'FLOFI_WALLET_SIGN_IN_REQUIRED',
-  'FLOFI_WALLET_NOT_READY',
+  'FLOFI_WALLET_NOT_READY', 'FLOFI_WALLET_TYPED_DATA_UNSUPPORTED', 'FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED', 'FLOFI_WALLET_AUTHORIZATION_UNSUPPORTED',
   // FloFi Wallet's own session and relay refusals (src/accounts/wallet-relay.ts): nothing was forwarded to the provider.
   'WALLET_SESSION_REQUIRED', 'WALLET_UNLOCK_REQUIRED', 'WALLET_HANDOFF_INVALID', 'ACCOUNT_SESSION_REQUIRED', 'MANAGED_WALLETS_NOT_CONFIGURED',
   'SIGNER_NOT_MANAGED', 'SIGN_REQUEST_INVALID', 'MANAGED_ORGANIZATION_MISSING', 'PROVIDER_ORGANIZATION_MISMATCH', 'PROVIDER_REQUEST_NOT_CANONICAL',

@@ -8,7 +8,8 @@
  *   already holds; nothing is signed.
  * - `solana:signTransaction` needs the reviewed run the store bound right before its single sign call (`bindFloFiSigning`). FloFi Wallet
  *   signs the exact v0 message after its server matched it to that run's PREPARED attempt; the result must be the same message with the
- *   owner's signature in slot 0, or it is refused here. FloFi's own `submit` stays the only broadcaster and verifies it again.
+ *   owner's signature in the owner's own slot (slot 0, or slot 1 behind Pimlico's Kora fee payer, ADR-0010) and every other slot unchanged,
+ *   or it is refused here. FloFi's own `submit` stays the only broadcaster and verifies it again.
  * - `solana:signMessage`: FloFi's own Sign-In With Solana text only (FloFi Wallet and its relay refuse anything else).
  * - Errors: a cancel before Sign carries code 4001; a failure once FloFi Wallet may have signed never reads as a rejection.
  */
@@ -47,13 +48,46 @@ function slots(wire: Uint8Array): number | null {
   const count = wire[0];
   return count !== undefined && count >= 1 && count <= 0x7f && wire.length > 1 + 64 * count ? count : null;
 }
-/** Whether `signed` is `unsigned` with a non-zero signature in slot 0 and every other byte unchanged. */
-export function signedSameTransaction(unsigned: Uint8Array, signed: Uint8Array): boolean {
+/**
+ * Whether `signed` is `unsigned` with a non-zero signature in the owner's slot (`slot`: 0 when the owner pays the fee, 1 behind a foreign fee
+ * payer such as Pimlico's Kora, ADR-0010) and every other byte unchanged — every other slot stays exactly as it was (empty), the message too.
+ */
+export function signedSameTransaction(unsigned: Uint8Array, signed: Uint8Array, slot = 0): boolean {
   const count = slots(unsigned);
-  if (count === null || signed.length !== unsigned.length || signed[0] !== unsigned[0]) return false;
-  if (signed.subarray(1, 65).every(byte => byte === 0)) return false;
-  for (let i = 65; i < signed.length; i++) if (signed[i] !== unsigned[i]) return false;
+  if (count === null || !Number.isInteger(slot) || slot < 0 || slot >= count || signed.length !== unsigned.length || signed[0] !== unsigned[0]) return false;
+  const start = 1 + 64 * slot;
+  if (signed.subarray(start, start + 64).every(byte => byte === 0)) return false;
+  for (let i = 1; i < signed.length; i++) if ((i < start || i >= start + 64) && signed[i] !== unsigned[i]) return false;
   return true;
+}
+const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+/** A base58 public key's 32 bytes, or null (browser-safe: no Buffer). */
+function keyBytes(address: string): Uint8Array | null {
+  let n = 0n;
+  for (const char of address) { const digit = ALPHABET.indexOf(char); if (digit < 0) return null; n = n * 58n + BigInt(digit); }
+  const out = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--) { out[i] = Number(n & 0xffn); n >>= 8n; }
+  return n === 0n ? out : null;
+}
+/**
+ * The owner's signature slot in an unsigned v0 wire transaction: its index among the message's required signers (static keys come first in
+ * signer order), or null when the owner is not a required signer of this message.
+ */
+export function ownerSignerSlot(unsigned: Uint8Array, owner: string): number | null {
+  const count = slots(unsigned), key = keyBytes(owner);
+  if (count === null || !key) return null;
+  let at = 1 + 64 * count;
+  if (unsigned[at] !== 0x80) return null;
+  const required = unsigned[at + 1] ?? 0;
+  at += 4;
+  let keys = 0;
+  for (let shift = 0; shift < 21; shift += 7) { const byte = unsigned[at++]; if (byte === undefined) return null; keys |= (byte & 0x7f) << shift; if (!(byte & 0x80)) break; }
+  for (let i = 0; i < Math.min(required, keys, count); i++) {
+    const offset = at + 32 * i;
+    if (offset + 32 > unsigned.length) return null;
+    if (key.every((byte, k) => unsigned[offset + k] === byte)) return i;
+  }
+  return null;
 }
 
 export function createFloFiSolanaWallet(address: string, name: string, deps: FloFiSolanaDeps): FloFiSolanaWallet {
@@ -94,13 +128,16 @@ export function createFloFiSolanaWallet(address: string, name: string, deps: Flo
           // Solana mainnet only: a Devnet or Testnet transaction is refused before FloFi Wallet is asked anything.
           if (chain !== FLOFI_WALLET_SOLANA_CHAIN) throw new FloFiWalletStandardError('FLOFI_WALLET_NETWORK_UNSUPPORTED');
           if (!unsigned || unsigned.length > 1_232 || slots(unsigned) === null) throw new FloFiWalletStandardError('FLOFI_WALLET_REQUEST_INVALID');
+          // The owner's own slot: the second behind Pimlico's Kora fee payer (ADR-0010), otherwise the first (the owner pays the fee), as before.
+          // FloFi Wallet's server already matched these exact bytes to the run's reviewed message for this owner.
+          const slot = ownerSignerSlot(unsigned, address) ?? 0;
           let result: { signedTransaction?: unknown };
           try {
             result = await deps.request({ op: 'solana_sign_transaction', address, chain: FLOFI_WALLET_SOLANA_CHAIN, transaction: toBase64(unsigned), signing }) as typeof result;
           } catch (cause) { throw failure(cause); }
           const signed = fromBase64(result.signedTransaction);
           // Anything but the same transaction with the owner's signature is dropped (FloFi's submit would refuse it anyway).
-          if (!signed || !signedSameTransaction(unsigned, signed)) throw new FloFiWalletStandardError('FLOFI_WALLET_SIGNATURE_UNKNOWN');
+          if (!signed || !signedSameTransaction(unsigned, signed, slot)) throw new FloFiWalletStandardError('FLOFI_WALLET_SIGNATURE_UNKNOWN');
           return [{ signedTransaction: signed }];
         } },
       'solana:signMessage': { version: '1.0.0',

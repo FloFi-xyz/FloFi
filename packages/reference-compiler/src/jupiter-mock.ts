@@ -17,12 +17,13 @@ const PRICE: Record<string, bigint> = { SOL: 117_600_000n, USDC: 1_000_000n, USD
 const key = (label: string) => base58Encode(sha256(new TextEncoder().encode('gryloo-mock:' + label)));
 export type MockedTokenAccount = { mint: string; owner: string; amount: bigint };
 export type MockedTransaction = { signature: string; slot: number; bytes: string; err: unknown; fee: bigint; keys: string[]; loaded: { writable: string[]; readonly: string[] };
-  pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[]; inner: unknown[]; finalizedAt: number };
+  pre: bigint[]; post: bigint[]; preTokens: unknown[]; postTokens: unknown[]; inner: unknown[]; finalizedAt: number;
+  /** The block height it landed at (`getBlock`). */ height?: number };
 export type MockedJupiterOptions = { actualOutput?: (quoted: bigint) => bigint; failSwap?: boolean; extraInputDebit?: bigint;
   send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number; cluster?: string; tamperBuild?: (build: Record<string, unknown>) => void };
 export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
   const state = { slot: 300_000_000, blockHeight: 280_000_000, lamports: new Map<string, bigint>(), tokens: new Map<string, MockedTokenAccount>(),
-    lamportsOf: new Map<string, bigint>(), transactions: new Map<string, MockedTransaction>(), sent: [] as string[], builds: 0 };
+    lamportsOf: new Map<string, bigint>(), transactions: new Map<string, MockedTransaction>(), sent: [] as string[], builds: 0, queries: [] as Record<string, string>[] };
   const tableAddress = key('lookup-table'), pool = key('pool'), vaultA = key('vault-a'), vaultB = key('vault-b');
   const table = [P.token, P.system, pool, vaultA, vaultB, key('oracle'), P.jupiterEventAuthority];
   const ata = (owner: string, mint: string) => associatedTokenAddress(owner, mint, P.token, P.associatedToken);
@@ -38,7 +39,7 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
   const ix = (programId: string, accounts: [string, boolean, boolean][], data: number[]) => ({ programId, data: toBase64(Uint8Array.from(data)),
     accounts: accounts.map(([pubkey, isSigner, isWritable]) => ({ pubkey, isSigner, isWritable })) });
   function build(query: Record<string, string>): unknown {
-    state.builds++;
+    state.builds++; state.queries.push({ ...query });
     const input = solanaTokenByMint(query.inputMint ?? ''), output = solanaTokenByMint(query.outputMint ?? ''), owner = query.taker ?? '';
     if (!input || !output) return { error: 'No routes found' };
     const amount = BigInt(query.amount ?? '0'), slippage = Number(query.slippageBps ?? '50');
@@ -67,10 +68,11 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
   const snapshot = (): Snapshot => ({ lamports: new Map(state.lamports), tokens: new Map([...state.tokens].map(([k, v]) => [k, { ...v }])), lamportsOf: new Map(state.lamportsOf) });
   const lamportsAt = (s: Snapshot, k: string) => s.lamports.get(k) ?? s.lamportsOf.get(k) ?? 0n;
   /** Execute instructions against a snapshot; returns an error object instead of throwing on program failure. */
-  function execute(s: Snapshot, instructions: SolanaInstruction[], payer: string): { err: unknown; fee: bigint; units: number } {
+  function execute(s: Snapshot, instructions: SolanaInstruction[], payer: string, signers = 1): { err: unknown; fee: bigint; units: number } {
     let limit = 200_000, price = 0n;
     for (const i of instructions) if (i.programId === P.computeBudget) { if (i.data[0] === 2) limit = new DataView(i.data.buffer, i.data.byteOffset).getUint32(1, true); if (i.data[0] === 3) price = readU64(i.data, 1); }
-    const fee = 5000n + (BigInt(limit) * price + 999_999n) / 1_000_000n;
+    // 5,000 lamports per signature (a Kora transaction carries two: the fee payer's and the owner's) plus the priority fee.
+    const fee = 5000n * BigInt(signers) + (BigInt(limit) * price + 999_999n) / 1_000_000n;
     if ((s.lamports.get(payer) ?? 0n) < fee) return { err: 'InsufficientFundsForFee', fee, units: 0 };
     s.lamports.set(payer, s.lamports.get(payer)! - fee);
     const debit = (k: string, n: bigint) => { const v = s.lamports.get(k) ?? 0n; if (v < n) throw new Error('insufficient lamports'); s.lamports.set(k, v - n); };
@@ -81,6 +83,15 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
         if (i.programId === P.associatedToken) { if (!s.tokens.has(a(1))) { debit(a(0), RENT); s.tokens.set(a(1), { mint: a(3), owner: a(2), amount: 0n }); s.lamportsOf.set(a(1), RENT); } return; }
         if (i.programId === P.system) { const n = readU64(i.data, 4); debit(a(0), n); s.lamportsOf.set(a(1), (s.lamportsOf.get(a(1)) ?? 0n) + n); s.tokens.get(a(1))!.amount += n; return; }
         if (i.programId === P.token && i.data[0] === 17) return;
+        if (i.programId === P.token && i.data[0] === 12) {
+          // TransferChecked (ADR-0010 Kora repayment): mint, decimals, owner authority and balance are checked like the token program does.
+          const source = s.tokens.get(a(0)), target = s.tokens.get(a(2)), amount = readU64(i.data, 1);
+          if (!source || !target || source.mint !== a(1) || target.mint !== a(1)) throw Object.assign(new Error('mint'), { custom: { InstructionError: [index, { Custom: 3 }] } });
+          if (i.data[9] !== solanaTokenByMint(a(1))?.decimals) throw Object.assign(new Error('decimals'), { custom: { InstructionError: [index, { Custom: 18 }] } });
+          if (source.owner !== a(3) || !i.accounts[3]!.isSigner) throw Object.assign(new Error('owner'), { custom: { InstructionError: [index, { Custom: 4 }] } });
+          if (source.amount < amount) throw Object.assign(new Error('funds'), { custom: { InstructionError: [index, { Custom: 1 }] } });
+          source.amount -= amount; target.amount += amount; return;
+        }
         if (i.programId === P.token && i.data[0] === 9) { const lam = s.lamportsOf.get(a(0)) ?? 0n; s.tokens.delete(a(0)); s.lamportsOf.delete(a(0)); s.lamports.set(a(1), (s.lamports.get(a(1)) ?? 0n) + lam); return; }
         if (i.programId === P.jupiter) {
           const args = decodeJupiterSwap(i.data), source = s.tokens.get(a(1)), target = s.tokens.get(a(2));
@@ -132,16 +143,18 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
   function land(txBase64: string): string {
     const d = decode(txBase64), signature = base58Encode(d.signatures[0]!);
     if (state.transactions.has(signature)) return signature;
-    if (!verifyEd25519(d.signatures[0]!, d.message, d.parsed.staticKeys[0]!)) throw Object.assign(new Error('Transaction signature verification failure'), { rpc: -32003 });
+    // Every required signer's slot must hold its valid signature (a Kora transaction: the fee payer's slot 0 and the owner's slot 1).
+    if (d.signatures.length !== d.parsed.header[0] || d.signatures.some((sig, i) => !verifyEd25519(sig, d.message, d.parsed.staticKeys[i]!)))
+      throw Object.assign(new Error('Transaction signature verification failure'), { rpc: -32003 });
     const valid = issued.get(d.parsed.blockhash);
     if (valid === undefined || state.blockHeight > valid) throw Object.assign(new Error('Blockhash not found'), { rpc: -32002 });
     const keys = [...d.parsed.staticKeys, ...d.parsed.lookups.flatMap(l => l.writable.map(i => table[i]!)), ...d.parsed.lookups.flatMap(l => l.readonly.map(i => table[i]!))];
-    const before = snapshot(), working = snapshot(), result = execute(working, d.instructions, keys[0]!);
+    const before = snapshot(), working = snapshot(), result = execute(working, d.instructions, keys[0]!, d.parsed.header[0]);
     const final = result.err ? (() => { const s = snapshot(); s.lamports.set(keys[0]!, (s.lamports.get(keys[0]!) ?? 0n) - result.fee); return s; })() : working;
     const pre = balances(before, keys), post = balances(final, keys);
     state.lamports = final.lamports; state.tokens = final.tokens; state.lamportsOf = final.lamportsOf;
     state.slot += 1;
-    state.transactions.set(signature, { signature, slot: state.slot, bytes: txBase64, err: result.err, fee: result.fee, keys,
+    state.transactions.set(signature, { signature, slot: state.slot, height: state.blockHeight, bytes: txBase64, err: result.err, fee: result.fee, keys,
       loaded: { writable: keys.slice(d.parsed.staticKeys.length, d.parsed.staticKeys.length + d.parsed.lookups.reduce((n, l) => n + l.writable.length, 0)),
         readonly: keys.slice(d.parsed.staticKeys.length + d.parsed.lookups.reduce((n, l) => n + l.writable.length, 0)) },
       pre: pre.lamports, post: post.lamports, preTokens: pre.tokens, postTokens: post.tokens,
@@ -155,8 +168,27 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
       case 'getMultipleAccounts': return value((params[0] as string[]).map(k => accountValue(snapshot(), k)));
       case 'getLatestBlockhash': { const hash = blockhash(state.blockHeight); issued.set(hash, state.blockHeight + 150); return value({ blockhash: hash, lastValidBlockHeight: state.blockHeight + 150 }); }
       case 'getBlockHeight': return state.blockHeight;
+      case 'getBlock': {
+        // Only a slot that holds a landed transaction is a block here (a skipped slot is an RPC error, as on a real node).
+        const t = [...state.transactions.values()].find(x => x.slot === Number(params[0]));
+        if (!t) throw Object.assign(new Error('Slot was skipped, or missing in long-term storage'), { rpc: -32007 });
+        return { blockHeight: t.height, blockTime: 1_790_870_000 + t.slot % 1000, parentSlot: t.slot - 1, blockhash: t.signature.slice(0, 44), previousBlockhash: t.signature.slice(0, 44) };
+      }
+      case 'getMinimumBalanceForRentExemption': return Number(params[0]) === 165 ? Number(RENT) : (128 + Number(params[0])) * 6_960;
+      case 'getSignaturesForAddress': {
+        // Newest first, like the RPC: every landed transaction that names the address (ADR-0010 recovery of a lost Kora answer), paged like the
+        // RPC: `before` starts after that signature, `until` stops before it.
+        const config = (params[1] ?? {}) as { limit?: number; before?: string; until?: string };
+        const limit = Math.min(1_000, Number(config.limit ?? 1_000));
+        let listed = [...state.transactions.values()].filter(t => t.keys.includes(params[0] as string)).reverse();
+        if (config.before) { const at = listed.findIndex(t => t.signature === config.before); listed = at < 0 ? [] : listed.slice(at + 1); }
+        if (config.until) { const at = listed.findIndex(t => t.signature === config.until); if (at >= 0) listed = listed.slice(0, at); }
+        return listed.slice(0, limit)
+          .map(t => ({ signature: t.signature, slot: t.slot, err: t.err, memo: null, blockTime: 1_790_870_000 + t.slot % 1000,
+            confirmationStatus: state.blockHeight >= t.finalizedAt ? 'finalized' : 'confirmed' }));
+      }
       case 'simulateTransaction': {
-        const d = decode(params[0]), s = snapshot(), result = execute(s, d.instructions, d.parsed.staticKeys[0]!);
+        const d = decode(params[0]), s = snapshot(), result = execute(s, d.instructions, d.parsed.staticKeys[0]!, d.parsed.header[0]);
         const addresses = ((params[1] as { accounts?: { addresses?: string[] } })?.accounts?.addresses) ?? [];
         return value({ err: result.err, logs: ['Program log: MOCKED simulation'], unitsConsumed: result.units || 1, accounts: addresses.map(k => accountValue(s, k)) });
       }
@@ -187,8 +219,11 @@ export function createMockedSolanaWallet(secretKey: Uint8Array = ed25519.utils.r
   return { owner, sign(unsignedBase64: string): string {
     const { signatures, message } = parseTransaction(fromBase64(unsignedBase64, 2048));
     const signature = ed25519.sign(message, secretKey);
-    // Like a Wallet Standard wallet: the owner fills its own (first) slot and preserves any other signer slots.
-    return toBase64(signatures.length === 1 ? serializeTransaction(signature, message) : serializeSignedTransaction([signature, ...signatures.slice(1)], message));
+    // Like a Wallet Standard wallet: the owner fills its own slot (its index among the signers: the first, or the second behind a foreign fee
+    // payer such as Kora) and preserves every other signer slot. Bytes that do not parse (adversarial tests) are signed in the first slot.
+    let own = 0;
+    try { const parsed = parseMessageV0(message), slot = parsed.staticKeys.indexOf(owner); if (slot >= 0 && slot < parsed.header[0]) own = slot; } catch { own = 0; }
+    return toBase64(signatures.length === 1 ? serializeTransaction(signature, message) : serializeSignedTransaction(signatures.map((s, i) => i === own ? signature : s), message));
   },
   /** BUILD-MCP-002: Wallet Standard `solana:signMessage` (Sign-In With Solana): an Ed25519 signature over the exact bytes, never a transaction. */
   signMessage(message: Uint8Array): Uint8Array { return ed25519.sign(message, secretKey); } };

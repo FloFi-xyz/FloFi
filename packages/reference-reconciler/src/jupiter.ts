@@ -1,10 +1,39 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { solanaRpcU64, ORCA_WHIRLPOOLS_DEVNET, assertRecordedSolanaWalletGuard, decompileMessageV0, fromBase64, parseMessageV0, parseOrcaTradedEvents, parseTransaction, requireSolanaSwapRuntime,
-  solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, base58Encode, type OrcaTradedEvent, type SolanaSwapReview, type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { solanaRpcU64, ORCA_WHIRLPOOLS_DEVNET, assertKoraRelayedAttempt, assertRecordedSolanaWalletGuard, decompileMessageV0, fromBase64, koraCreatedAccounts, parseMessageV0,
+  parseOrcaTradedEvents, parseTransaction, requireSolanaSwapRuntime, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, base58Encode, type KoraGasTerms, type OrcaTradedEvent,
+  type SolanaSwapReview, type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
-/** `walletGuard`: the verified Lighthouse assertions the owner's wallet appended (HOTFIX-PHANTOM-LIGHTHOUSE-001); absent for the reviewed bytes. */
-export type JupiterChainAttempt = { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard };
+/**
+ * `walletGuard`: the verified Lighthouse assertions the owner's wallet appended (HOTFIX-PHANTOM-LIGHTHOUSE-001); absent for the reviewed bytes.
+ * `kora` (ADR-0010 §4): the owner's signature and the fully signed bytes Kora returned; `transaction` is then the owner-signed bytes.
+ */
+export type JupiterChainAttempt = { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard;
+  kora?: { ownerSignature: string; signedTransaction: string | null } };
+/**
+ * ADR-0010: what the owner paid for the network fee in a token, proven from the transaction's own balances: Kora's fee payer (`feePayer`) fronted
+ * `feeLamports` (the network fee plus any rent it advanced is its own outflow), and the owner's repayment of `amount` reached `payee`'s account.
+ */
+export type KoraFeeObservation = { mechanism: KoraGasTerms['mechanism']; feePayer: string; feeLamports: string; token: KoraGasTerms['token']; amount: string;
+  payee: string; paymentAccount: string };
+/** The bytes a chain attempt broadcast: the owner-signed bytes (native), or Kora's fully signed bytes after verifying they complete them (Kora). */
+export function relayedChainBytes(gas: KoraGasTerms | undefined, attempt: JupiterChainAttempt, mismatch: string): string | null {
+  if (!gas) return attempt.transaction;
+  const relayed = attempt.kora?.signedTransaction ?? null;
+  if (!relayed || !attempt.signature || !attempt.transaction) return null;
+  try { assertKoraRelayedAttempt(attempt.transaction, attempt.kora!.ownerSignature, relayed, attempt.signature, gas.feePayer); } catch { return fail(mismatch); }
+  return relayed;
+}
+/**
+ * ADR-0010: Kora's share of a finalized transaction's lamport movements. The fee payer (key 0) pays the fee and the rent of the ATAs it creates;
+ * a created ATA that is closed again in the same transaction (the temporary wrapped-SOL account) returns that rent to the owner: `refund`.
+ */
+export function koraLamportRefund(keys: readonly string[], pre: readonly bigint[], post: readonly bigint[], fee: bigint, created: readonly string[], code: string): bigint {
+  const outflow = pre[0]! - post[0]! - fee;
+  const kept = created.reduce((sum, account) => { const i = keys.indexOf(account); return i >= 0 && pre[i] === 0n ? sum + post[i]! : sum; }, 0n);
+  const refund = outflow - kept;
+  return refund < 0n ? fail(code) : refund;
+}
 export type SolanaSwapChainAttempt = JupiterChainAttempt;
 export type JupiterObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE'; reason: string; found: boolean; signature: string | null;
   confirmation: string | null; slot: number | null; blockTime: number | null; feeLamports: string | null;
@@ -14,7 +43,9 @@ export type JupiterObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 'INCONC
   /** Devnet runtime only: Orca's own on-chain Traded event for the swap. */
   trade?: OrcaTradedEvent | null;
   /** The wallet guard re-verified against the Review for this exact signed transaction (only when the wallet appended one). */
-  walletGuard?: SolanaWalletGuard };
+  walletGuard?: SolanaWalletGuard;
+  /** ADR-0010: the network fee was fronted by Kora and repaid by the owner in a token (only for a Kora Review, once balances were verified). */
+  tokenFee?: KoraFeeObservation };
 export type SolanaSwapObservation = JupiterObservation;
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const fail = (code: string): never => { throw new Error(code); };
@@ -44,9 +75,13 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
     minimumOutput: review.quote.otherAmountThreshold, programs: [], innerPrograms: [], explorer: attempt.signature ? runtime.explorerTx(attempt.signature) : null,
     ...review.format === 'gryloo.orca-devnet-review.v1' ? { trade: null } : {}, ...attempt.walletGuard ? { walletGuard: attempt.walletGuard } : {} };
   if (!attempt.signature || !attempt.transaction) return base;
+  const gas = review.gas;
   try {
     await verifySolanaCluster(rpc, runtime.genesisHash);
-    const signed = fromBase64(attempt.transaction, 2048), parsedSigned = parseTransaction(signed);
+    // Kora: the fully signed bytes Kora returned, proven to be the owner-signed bytes plus the pinned signer's slot-0 signature.
+    const relayed = relayedChainBytes(gas, attempt, `${X}_TRANSACTION_MISMATCH`);
+    if (!relayed) return base;
+    const signed = fromBase64(relayed, 2048), parsedSigned = parseTransaction(signed);
     if (base58Encode(parsedSigned.signatures[0]!) !== attempt.signature) fail(`${X}_SIGNATURE_MISMATCH`);
     const statuses = record(await rpc('getSignatureStatuses', [[attempt.signature], { searchTransactionHistory: true }]));
     const status = Array.isArray(statuses.value) ? statuses.value[0] : fail('SOLANA_RPC_INVALID');
@@ -71,7 +106,9 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
     // On-chain lookup resolution must equal the reviewed resolution.
     if (JSON.stringify(loaded.writable) !== JSON.stringify(keys.slice(message.staticKeys.length, message.staticKeys.length + message.lookups.reduce((n, l) => n + l.writable.length, 0))) ||
         JSON.stringify(loaded.readonly) !== JSON.stringify(keys.slice(message.staticKeys.length + message.lookups.reduce((n, l) => n + l.writable.length, 0)))) fail(`${X}_LOOKUP_MISMATCH`);
-    if (keys[0] !== review.owner) fail(`${X}_OWNER_MISMATCH`);
+    // Native: the owner is the fee payer (key 0). Kora: the pinned signer is key 0 and the owner is found by key, at index 1.
+    if (gas ? keys[0] !== gas.feePayer || keys[1] !== review.owner : keys[0] !== review.owner) fail(`${X}_OWNER_MISMATCH`);
+    const o = gas ? 1 : 0;
     base.programs = [...new Set(instructions.map(i => i.programId))];
     base.innerPrograms = Array.isArray(meta.innerInstructions) ? [...new Set((meta.innerInstructions as unknown[]).flatMap(group =>
       Array.isArray(record(group).instructions) ? (record(group).instructions as unknown[]).map(i => keys[record(i).programIdIndex as number] ?? fail('SOLANA_RPC_INVALID')) : []))] : [];
@@ -90,28 +127,45 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
       if (entry.mint !== mint || entry.owner !== review.owner || entry.decimals !== decimals) fail(`${X}_TOKEN_ACCOUNT_MISMATCH`);
       return entry.amount;
     };
-    // No unrelated owner asset movement: every other owner token account is unchanged.
+    // ADR-0010: the owner's repayment of the reviewed fee is an expected debit of its fee-token account and an exact credit of the pinned
+    // payment account; every other owner movement is still checked exactly.
+    const feeLeg = gas ? BigInt(gas.amount) : 0n, feeAccount = gas?.feeAccount ?? null;
+    // No unrelated owner asset movement: every other owner token account is unchanged (a separate fee account moves by exactly the repayment).
     for (const entry of [...preTokens, ...postTokens].filter(b => b.owner === review.owner)) {
       const account = keys[entry.index];
       if (account === ownerInputAccount || account === ownerOutputAccount || account === wrappedSolAccount) continue;
       const before = preTokens.find(b => b.index === entry.index)?.amount ?? 0n, after = postTokens.find(b => b.index === entry.index)?.amount ?? 0n;
-      if (before !== after) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
+      if (before - after !== (account === feeAccount ? feeLeg : 0n)) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
     }
     if (wrappedSolAccount && (at(wrappedSolAccount) < 0 || post[at(wrappedSolAccount)] !== 0n || pre[at(wrappedSolAccount)] !== 0n)) fail(`${X}_WRAPPED_SOL_NOT_CLOSED`);
     const native = (mint: string) => mint === 'So11111111111111111111111111111111111111112';
     const outputIndex = at(ownerOutputAccount);
-    // A newly created owner output token account holds a refundable rent deposit paid from owner SOL.
-    const created = !native(review.output.mint) && outputIndex >= 0 && pre[outputIndex] === 0n ? post[outputIndex]! : 0n;
-    const lamports = post[0]! - pre[0]! + fee + created;
-    const inputBefore = native(review.input.mint) ? pre[0]! : amountOf(preTokens, ownerInputAccount, review.input.mint, review.input.decimals);
-    const inputAfter = native(review.input.mint) ? post[0]! : amountOf(postTokens, ownerInputAccount, review.input.mint, review.input.decimals);
-    const outputBefore = native(review.output.mint) ? pre[0]! : amountOf(preTokens, ownerOutputAccount, review.output.mint, review.output.decimals);
-    const outputAfter = native(review.output.mint) ? post[0]! : amountOf(postTokens, ownerOutputAccount, review.output.mint, review.output.decimals);
-    const inputSpent = native(review.input.mint) ? -lamports : inputBefore - inputAfter;
-    const outputReceived = native(review.output.mint) ? lamports : outputAfter - outputBefore;
-    // With no native leg, the owner's SOL may change only by the fee and a new token-account deposit.
+    // A newly created owner output token account holds a refundable rent deposit paid from owner SOL. Kora: Kora paid every deposit and the
+    // fee; the rent of a Kora-funded account closed to the owner (the temporary wrapped-SOL account) is a refund, not swap output.
+    const created = !gas && !native(review.output.mint) && outputIndex >= 0 && pre[outputIndex] === 0n ? post[outputIndex]! : 0n;
+    const refund = gas ? koraLamportRefund(keys, pre, post, fee, koraCreatedAccounts(instructions, gas.feePayer), `${X}_UNRELATED_ASSET_MOVEMENT`) : 0n;
+    const lamports = gas ? post[o]! - pre[o]! - refund : post[0]! - pre[0]! + fee + created;
+    const inputBefore = native(review.input.mint) ? pre[o]! : amountOf(preTokens, ownerInputAccount, review.input.mint, review.input.decimals);
+    const inputAfter = native(review.input.mint) ? post[o]! : amountOf(postTokens, ownerInputAccount, review.input.mint, review.input.decimals);
+    const outputBefore = native(review.output.mint) ? pre[o]! : amountOf(preTokens, ownerOutputAccount, review.output.mint, review.output.decimals);
+    const outputAfter = native(review.output.mint) ? post[o]! : amountOf(postTokens, ownerOutputAccount, review.output.mint, review.output.decimals);
+    const inputSpent = native(review.input.mint) ? -lamports : inputBefore - inputAfter - (feeAccount === ownerInputAccount ? feeLeg : 0n);
+    const outputReceived = native(review.output.mint) ? lamports : outputAfter - outputBefore + (feeAccount === ownerOutputAccount ? feeLeg : 0n);
+    // With no native leg, the owner's SOL may change only by the fee and a new token-account deposit (Kora: not at all).
     if (!native(review.input.mint) && !native(review.output.mint) && lamports !== 0n) fail(`${X}_UNRELATED_ASSET_MOVEMENT`);
-    base.owner = { lamportsBefore: pre[0]!.toString(), lamportsAfter: post[0]!.toString(), inputBefore: inputBefore.toString(), inputAfter: inputAfter.toString(),
+    if (gas) {
+      // The repayment reached the pinned payment account, exactly the reviewed amount, owned by the pinned payment address.
+      const payment = at(gas.paymentAccount), credited = (list: TokenBalance[]) => {
+        const entry = list.find(b => b.index === payment);
+        if (!entry) return 0n;
+        if (entry.mint !== gas.token.mint || entry.owner !== gas.paymentAddress || entry.decimals !== gas.token.decimals) fail(`${X}_KORA_PAYMENT_MISMATCH`);
+        return entry.amount;
+      };
+      if (payment < 0 || credited(postTokens) - credited(preTokens) !== feeLeg) fail(`${X}_KORA_PAYMENT_MISMATCH`);
+      base.tokenFee = { mechanism: gas.mechanism, feePayer: gas.feePayer, feeLamports: fee.toString(), token: gas.token, amount: gas.amount,
+        payee: gas.paymentAddress, paymentAccount: gas.paymentAccount };
+    }
+    base.owner = { lamportsBefore: pre[o]!.toString(), lamportsAfter: post[o]!.toString(), inputBefore: inputBefore.toString(), inputAfter: inputAfter.toString(),
       outputBefore: outputBefore.toString(), outputAfter: outputAfter.toString() };
     base.inputSpent = inputSpent.toString(); base.outputReceived = outputReceived.toString(); base.accountCreationLamports = created.toString();
     if (inputSpent !== BigInt(review.amount)) fail(`${X}_INPUT_DELTA_MISMATCH`);
@@ -138,6 +192,11 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
 export function walletGuardLimitation(guard: SolanaWalletGuard | undefined): string | null {
   return guard ? `Balances are finalized transaction metadata for the owner-signed transaction: every reviewed instruction byte for byte, plus ${guard.instructions.length} ` +
     `Lighthouse assertion instruction(s) the owner's wallet appended before signing (verified read-only post-state checks; signed message ${guard.signedMessageHash}).` : null;
+}
+/** ADR-0010: the evidence's statement of who fronted the network fee and what the owner paid back for it. */
+export function koraFeeLimitation(fee: KoraFeeObservation): string {
+  return `The network fee (${fee.feeLamports} lamports) was paid by Pimlico's Kora fee payer ${fee.feePayer}; the owner repaid it in the same transaction: ` +
+    `${fee.amount} base units of ${fee.token.symbol} (${fee.token.mint}) to ${fee.payee}.`;
 }
 export type SolanaSwapEvidenceClass = 'MOCKED' | 'PUBLIC_READ_ONLY' | 'PUBLIC_EXECUTED' | 'DEVNET_EXECUTED';
 export type JupiterEvidenceClass = SolanaSwapEvidenceClass;
@@ -176,6 +235,7 @@ export function buildSolanaSwapEvidence(input: { id: string; review: SolanaSwapR
   const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : runtime.bundleEnvironment;
   const limitations = [walletGuardLimitation(o.walletGuard) ?? 'Balances are finalized transaction metadata for the exact owner-signed reviewed bytes.',
     'Native SOL deltas exclude the network fee and any new token-account deposit.',
+    ...o.tokenFee ? [koraFeeLimitation(o.tokenFee)] : [],
     ...orca ? ['Solana Devnet with valueless test tokens (Gryloo evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.'] : []];
   const bundle: EvidenceBundle = { schemaVersion: '1.0.0', evidenceBundleId: input.id, version: 1, supersedes: null,
     semanticWorkflowHash: review.manifest.semanticWorkflowHash, artifactSetHash: review.manifest.artifactSetHash, simulationHash: review.manifest.simulationHash,
@@ -183,7 +243,8 @@ export function buildSolanaSwapEvidence(input: { id: string; review: SolanaSwapR
     journalHeadHash: head, observedAt: new Date().toISOString(), environment, outcome: 'RECONCILED',
     receipts: [{ receiptId: `${prefix}-transaction`, contentHash: solanaSwapHash(o) }], differences: [],
     reconciliation: { balances: [{ asset: asset(review.input), amount: balances.inputAfter }, { asset: asset(review.output), amount: balances.outputAfter }],
-      allowances: [], debt: [], positions: [], fees: [{ asset: { chainId: review.chain, nativeId: 'SOL', decimals: 9 }, amount: o.feeLamports ?? '0' }], residualAssets: [],
+      allowances: [], debt: [], positions: [], fees: [{ asset: { chainId: review.chain, nativeId: 'SOL', decimals: 9 }, amount: o.feeLamports ?? '0' },
+        ...o.tokenFee ? [{ asset: { chainId: review.chain, address: o.tokenFee.token.mint, decimals: o.tokenFee.token.decimals }, amount: o.tokenFee.amount }] : []], residualAssets: [],
       ownership: [{ chainId: review.chain, address: review.owner }], limitations },
     evidence: [{ evidenceId: `${prefix}-public-observations`, kind: 'EXTERNAL_REFERENCE', contentHash: solanaSwapHash(publicExecution) }] };
   return { bundle, bundleHash: solanaSwapArtifactHash('evidence-bundle', bundle), evidenceClass, publicExecution,

@@ -16,7 +16,11 @@ import { CROSSCHAIN_ROUTER_ARBITRUM_BASE as P } from '@defi-workflow-engine/acti
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { claimApproval } from '../platform/index.ts';
 import { workflowRunStatus } from '../platform/index.ts';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve.ts';
+import { workflowRunUserFundedAuthorize, workflowRunUserFundedPermit, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve.ts';
+import { circlePaymaster as C, erc4337 } from '@defi-workflow-engine/reference-compiler';
+import { createCircleDouble } from '../delegation/harness/circle-double.ts';
+import { circleFactsOf, circleOperationOf, circlePermitOf, forgetCircleVerifications } from '../user-funded/circle-gas.ts';
+import type { Prepared } from '../user-funded/groups.ts';
 import { ownedRun } from '../platform/workflow-run-approvals.ts';
 import { ARBITRUM_MAINNET_SWAP, BASE_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
@@ -34,23 +38,32 @@ const WORKFLOW = { version: 2, steps: [
   { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5' }], bindings: [{ step: 1, amountFrom: 0 }] };
 type Batch = { group: EvmGroupCalls; request: { calls: { to: string; data: string }[]; atomicRequired: boolean; from: string; id: string } };
 
-async function start(db: Awaited<ReturnType<typeof createTestDatabase>>['db']) {
+/**
+ * `circle` (ADR-0010 review C1): the owner holds USDC but no ETH on Arbitrum One, whose account is MetaMask's EIP-7702 DeleGator; Circle's paymaster
+ * model and a bundler serve the chain, so the group runs as a Circle-paid user operation FloFi relays.
+ */
+async function start(db: Awaited<ReturnType<typeof createTestDatabase>>['db'], options: { readonly circle?: boolean } = {}) {
   let clock: () => Date = () => new Date();
   const now = () => Math.floor(clock().getTime() / 1000);
   const arb = createEvmDouble(42161, now, { profile: ARBITRUM_MAINNET_SWAP, across: { spokePool: P.source.spokePool, token: P.source.token, code: ACROSS_DOUBLE_SPOKE_CODE, role: 'origin' } });
   const base = createEvmDouble(8453, now, { profile: BASE_MAINNET_SWAP, across: { spokePool: P.destination.spokePool, token: P.destination.token, code: ACROSS_DOUBLE_SPOKE_CODE,
     role: 'destination' } });
   const across = acrossDouble(P, now);
+  const circle = options.circle ? createCircleDouble(arb, { chainId: 42161 }) : null;
+  if (circle) forgetCircleVerifications();
   const h = await workflowRunHarness(db, { flows: ['arbitrum-swap', 'crosschain-router-arbitrum-to-base'] as never, policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one,base' },
-    userFundedChains: [ARB, BASE], userFundedRpc: c => c === ARB ? arb.rpc : c === BASE ? base.rpc : null,
-    across: { routes: [ROUTE], route: (s, d) => s === ARB && d === BASE ? across.route : null } });
+    userFundedChains: [ARB, BASE], userFundedRpc: c => c === ARB ? circle?.rpc ?? arb.rpc : c === BASE ? base.rpc : null,
+    across: { routes: [ROUTE], route: (s, d) => s === ARB && d === BASE ? across.route : null },
+    ...circle ? { bundler: (c: string) => c === ARB ? circle.bundler : null,
+      circle: { chains: [ARB], price: async () => ({ ethUsd: 3_000n * 10n ** 8n, usdcUsd: null, observedAt: clock().toISOString() }) } } : {} });
   clock = h.d.now;
   const owner = h.d.evmOwner.address.toLowerCase(), wallets = [h.evm, h.sol];
-  arb.control.fundToken(owner, A_WETH, 10n ** 16n); arb.control.fundNative(owner, 10n ** 17n);
+  arb.control.fundToken(owner, A_WETH, 10n ** 16n);
+  if (circle) { arb.control.upgrade(owner); arb.control.fundToken(owner, A_USDC, 50_000_000n); } else arb.control.fundNative(owner, 10n ** 17n);
   const approval = await h.request(WORKFLOW);
   const claimed = await claimApproval(h.surface, approval.secret, wallets, true, h.d.now());
   const started = await workflowRunUserFundedStart(h.surface, approval.approvalId, wallets, METAMASK);
-  return { h, arb, base, across, owner, wallets, approval, claimed, started };
+  return { h, arb, base, across, circle, owner, wallets, approval, claimed, started };
 }
 type Started = Awaited<ReturnType<typeof start>>;
 /** The owner's wallet answers the prepared batch: ONE `wallet_sendCalls` executed as one transaction from its own account; the browser reports it. */
@@ -146,6 +159,48 @@ describe('P0 hotfix E1: Swap → Bridge (Arbitrum One → Base) as ONE persisten
       await s.h.drain(runId);
       expect(await s.h.store.byId(runId)).toMatchObject({ state: 'COMPLETED' });
       expect((await s.h.store.steps(runId)).map(st => st.state)).toEqual(['RECONCILED', 'RECONCILED']);
+      expect(s.arb.control.sends() + s.base.control.sends()).toBe(0);
+    } finally { await t.drop(); }
+  });
+});
+
+describe('ADR-0010 review C1: Swap → Bridge paid in the owner\'s USDC through Circle, as ONE persistent run (PostgreSQL, MOCKED chains)', () => {
+  it('the Circle-paid operation reconciles its source side, waits for the verified fill on Base, records the bridge step and completes', async () => {
+    const t = await createTestDatabase();
+    try {
+      const s = await start(t.db, { circle: true });
+      const circle = s.circle!;
+      // No ETH: the due batch is prepared as a Circle-paid user operation of the owner's account (the browser reports an injected wallet).
+      const p1 = await workflowRunUserFundedPrepare(s.h.surface, s.approval.approvalId, s.wallets, 0, undefined, 'INJECTED');
+      expect(p1).toMatchObject({ strategy: 'EVM_USER_OPERATION', prepared: { circle: { stage: 'PERMIT' } } });
+      const facts = circleFactsOf(p1.prepared)!;
+      const p2 = await workflowRunUserFundedPermit(s.h.surface, s.approval.approvalId, s.wallets, 0,
+        await s.h.d.evmOwner.signDigest(C.permitDigest(circlePermitOf(facts, 42161, s.owner))));
+      const final = p2.prepared as Prepared, group = final.group as EvmGroupCalls;
+      expect(group.calls.map(c => c.kind)).toEqual(['ERC20_APPROVE', 'UNISWAP_V3_EXACT_INPUT_SINGLE', 'ERC20_APPROVE', 'ACROSS_DEPOSIT']);
+      const deposit = group.calls.find(c => c.kind === 'ACROSS_DEPOSIT') as AcrossDepositUserCall;
+      await workflowRunUserFundedAuthorize(s.h.surface, s.approval.approvalId, s.wallets, 0, { kind: 'EVM_USER_OPERATION',
+        signature: await s.h.d.evmOwner.signDigest(erc4337.delegatorUserOpDigest(42161, circleOperationOf(circleFactsOf(final)!, s.owner))) });
+      expect(circle.control.sends()).toBe(1);
+      const runId = (await ownedRun(s.h.runs, s.approval.approvalId, s.wallets)).runId;
+      // The source side reconciled from THIS operation's own logs: the swap step at once; the bridge step waits for its delivery (never
+      // BRIDGE_DEPOSIT_EVENT_MISMATCH, never ATTENTION).
+      await s.h.drain(runId);
+      expect(await s.h.store.byId(runId)).toMatchObject({ state: 'RUNNING', currentStep: 0 });
+      expect((await s.h.store.steps(runId)).map(st => st.state)).toEqual(['RECONCILED', 'DELEGATED']);
+      expect((await s.h.store.groups(runId))[0]).toMatchObject({ state: 'SUBMITTED', outcome: { status: 'AWAITING_DESTINATION', bridge: { state: 'AWAITING_DESTINATION', step: 1 } } });
+      // The relayer fills THIS deposit on Base: the bridge step is RECONCILED with the fill's output and the run completes.
+      const fillHash = fill(s, deposit);
+      await s.h.drain(runId);
+      expect(await s.h.store.byId(runId)).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
+      const steps = await s.h.store.steps(runId);
+      expect(steps.map(st => st.state)).toEqual(['RECONCILED', 'RECONCILED']);
+      expect(steps[1]!.outcome).toMatchObject({ spent: [{ asset: `${ARB}/erc20:${A_USDC}`, amount: deposit.inputAmount }],
+        received: [{ asset: `${BASE}/erc20:${B_USDC}`, amount: deposit.outputAmount }], gasPaid: { payer: C.CIRCLE_PAYMASTER_V07, paidInToken: { symbol: 'USDC' } } });
+      expect(steps[1]!.outcome!.transactions).toContainEqual({ chain: BASE, hash: fillHash });
+      expect(s.base.control.tokenBalance(B_USDC, s.owner)).toBe(BigInt(deposit.outputAmount));
+      // Relayed once; FloFi sent nothing itself on either chain.
+      expect(circle.control.sends()).toBe(1);
       expect(s.arb.control.sends() + s.base.control.sends()).toBe(0);
     } finally { await t.drop(); }
   });

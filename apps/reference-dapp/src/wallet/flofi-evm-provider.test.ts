@@ -57,8 +57,11 @@ describe('accounts and networks', () => {
     expect(await provider.request({ method: 'eth_getTransactionCount', params: [OWNER, 'pending'] })).toBe('0x7');
     expect(deps.pendingNonce).toHaveBeenCalledWith('0x2105', OWNER);
     expect((await failure(provider.request({ method: 'eth_getTransactionCount', params: [RECIPIENT, 'pending'] }))).code).toBe(4100);
-    for (const method of ['eth_signTypedData_v4', 'eth_sign', 'eth_signTransaction', 'wallet_sendCalls', 'eth_sendRawTransaction'])
+    for (const method of ['eth_sign', 'eth_signTransaction', 'wallet_sendCalls', 'eth_sendRawTransaction'])
       expect((await failure(provider.request({ method }))).code).toBe(4200);
+    // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: typed data is now signable, but only for a bound reviewed run of a connected account (else 4100).
+    expect((await failure(provider.request({ method: 'eth_signTypedData_v4' }))).code).toBe(4100);
+    expect(deps.request).not.toHaveBeenCalled();
   });
   it('disconnects its sessions when retired', async () => {
     const { provider, deps } = await connected(), accounts = vi.fn(), disconnect = vi.fn();
@@ -147,5 +150,46 @@ describe('personal_sign', () => {
     expect(deps.request).toHaveBeenCalledWith({ op: 'evm_sign_message', address: OWNER, message: text });
     expect((await failure(provider.request({ method: 'personal_sign', params: [hex, RECIPIENT] }))).code).toBe(4100);
     expect((await failure(provider.request({ method: 'personal_sign', params: ['0xff', OWNER] }))).message).toBe('FLOFI_WALLET_MESSAGE_UNSUPPORTED');
+  });
+});
+
+describe('eth_signTypedData_v4 (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a reviewed 0x Gasless trade or approval)', () => {
+  const TYPED = { types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+    TokenPermissions: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint256' }] },
+    domain: { name: 'Permit2', chainId: 4663, verifyingContract: '0x000000000022d473030f116ddee9f6b43ac78ba3' }, primaryType: 'TokenPermissions',
+    message: { token: RECIPIENT, amount: '1' } };
+  const SIGNATURE = '0x' + '1b'.repeat(65);
+  const sign = (provider: ReturnType<typeof setup>['provider'], typed: unknown = TYPED, bind = true, address = OWNER) => {
+    if (bind) bindFloFiSigning(provider, SIGNING);
+    return provider.request({ method: 'eth_signTypedData_v4', params: [address, typeof typed === 'string' ? typed : JSON.stringify(typed)] });
+  };
+  it('asks FloFi Wallet to sign exactly the typed data for the bound reviewed run and returns the signature', async () => {
+    const { provider, deps } = await connected({ request: vi.fn(async () => ({ signature: SIGNATURE.slice(2).toUpperCase() })) });
+    expect(await sign(provider)).toBe(SIGNATURE);
+    expect(deps.request).toHaveBeenCalledWith({ op: 'evm_sign_typed_data', address: OWNER, typedData: TYPED, signing: SIGNING });
+    expect(deps.broadcast).not.toHaveBeenCalled();
+  });
+  it('refuses before anything is asked: no bound run, another account, another chain, malformed typed data', async () => {
+    const { provider, deps } = await connected();
+    expect(await failure(sign(provider, TYPED, false))).toMatchObject({ code: 4100, message: 'FLOFI_WALLET_FLOW_NOT_SUPPORTED' });
+    expect(await failure(sign(provider, TYPED, true, RECIPIENT))).toMatchObject({ code: 4100, message: 'FLOFI_WALLET_ACCOUNT_MISMATCH' });
+    expect(await failure(sign(provider, { ...TYPED, domain: { ...TYPED.domain, chainId: 8453 } }))).toMatchObject({ code: 4100, message: 'FLOFI_WALLET_NETWORK_UNSUPPORTED' });
+    expect(await failure(sign(provider, { ...TYPED, extra: 1 }))).toMatchObject({ code: 4100, message: 'FLOFI_WALLET_TYPED_DATA_UNSUPPORTED' });
+    expect(await failure(sign(provider, '{not json'))).toMatchObject({ code: 4100, message: 'FLOFI_WALLET_REQUEST_INVALID' });
+    expect(deps.request).not.toHaveBeenCalled();
+  });
+  it('maps a cancel to 4001 and any doubt after the request to an unknown signature (nothing was submitted)', async () => {
+    const cancelled = await connected({ request: vi.fn(async () => { throw new Error('FLOFI_WALLET_REJECTED'); }) });
+    expect((await failure(sign(cancelled.provider))).code).toBe(4001);
+    const garbled = await connected({ request: vi.fn(async () => ({ signature: '0x1234' })) });
+    expect(await failure(sign(garbled.provider))).toMatchObject({ message: 'FLOFI_WALLET_SIGNATURE_UNKNOWN' });
+    expect((await failure(sign(garbled.provider))).code).toBeUndefined();
+  });
+  it('final review (P1): a signature already claimed keeps its own code, still as an unknown outcome (never a refusal or a cancel)', async () => {
+    const claimed = await connected({ request: vi.fn(async () => { throw new Error('FLOFI_WALLET_ALREADY_SIGNED'); }) });
+    const error = await failure(sign(claimed.provider));
+    expect(error).toMatchObject({ message: 'FLOFI_WALLET_ALREADY_SIGNED' });
+    expect(error.code).toBeUndefined();
+    expect(claimed.deps.broadcast).not.toHaveBeenCalled();
   });
 });

@@ -286,8 +286,12 @@ export function createSolanaMock(s: UniversalSolanaDeployment, options: { mints:
         lastValidBlockHeight: state.height + 150 } };
       case 'simulateTransaction': {
         if (state.simulateFails) throw new Error('MOCK_SIMULATION_UNAVAILABLE');
-        const bytes = fromBase64(p[0], 4096), { message } = parseTransaction(bytes), view = copy(), r = apply(view, message);
+        const bytes = fromBase64(p[0], 4096), { message } = parseTransaction(bytes), view = copy(), payer = parseMessageV0(message).staticKeys[0]!;
+        const funded = state.lamports.get(payer), r = apply(view, message);
         const addrs = ((p[1] as { accounts: { addresses: string[] } }).accounts.addresses);
+        // Like a real node: a fee payer that does not exist, or cannot pay the fee, fails the whole simulation before any instruction runs.
+        if (funded === undefined || funded < r.fee) return { context: { slot: state.slot }, value: { err: funded === undefined ? 'AccountNotFound' : 'InsufficientFundsForFee',
+          logs: [], unitsConsumed: 0, accounts: null } };
         return { context: { slot: state.slot }, value: { err: r.ok ? null : { InstructionError: [2, 'Custom'] }, logs: ['Program log: mock'], unitsConsumed: r.units,
           accounts: addrs.map(a => account(a, view as typeof state)) } };
       }

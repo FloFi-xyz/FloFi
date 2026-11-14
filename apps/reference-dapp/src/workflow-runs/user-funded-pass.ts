@@ -27,13 +27,15 @@
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { boundStrategy } from '../engine/workflow-bindings';
 import { assetKey } from '../delegation/steps.ts';
-import { advanceSolanaSubmission, checkUserOperation, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget, solanaSubmission, type Prepared,
-  type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
+import { advanceSolanaSubmission, checkUserOperation, koraGroupProgress, koraGroupSubmission, reconcileEvmGroup, reconcileSolanaGroup, relayUserOperation, solanaSendBudget,
+  solanaSubmission, type Prepared, type Reconciled, type UserFundedDeps } from '../user-funded/groups.ts';
 import type { EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { bridgeOf, bridgeProgressOf, observeBridgeDelivery, type BridgeDelivery } from '../user-funded/bridge-delivery.ts';
 import type { BoundResolution, GroupRecord, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, groupInFlight, walletBatchUnanswered, type RunState } from './state-machine.ts';
 import { executionRefusal } from '../server/execution-guard.ts';
+import { plannedStrategyOf } from '../user-funded/circle-gas.ts';
+import { expireTokenGasPreparation } from './owner-step-circle.ts';
 
 export type Pass = { readonly state: RunState; readonly code: string | null; readonly retryMs: number | null; readonly progressed: boolean };
 export type UserFundedPassDeps = {
@@ -108,6 +110,14 @@ export async function userFundedPass(deps: UserFundedPassDeps, run: RunRecord): 
       // A wallet batch may already be on its way: the wallet sends it the moment the owner confirms, whenever that is. It stays PREPARED (its
       // late answer is accepted; a new preparation keeps the same EIP-5792 id) instead of being dropped and offered again as new.
       if (g.validUntil && g.validUntil <= now && g.strategy !== 'EVM_WALLET_BATCH') {
+        // ADR-0010: an expired Circle-paid preparation gives the group back its planned strategy (native gas is decided afresh when prepared again);
+        // owner requirement (FloFi Wallet + Circle): an owner-step group's steps go back to their own flows (never authorized, never ran), as a
+        // Circle candidate again (CIRCLE_ASK_FIRST). Final review (P3): one transaction, all of it or none. An expired preparation of any other
+        // strategy is planned again as before.
+        if (plannedStrategyOf(g.prepared) !== null) {
+          const back = await expireTokenGasPreparation(deps.store, run.runId, g, 'USER_FUNDED_PREPARED_EXPIRED', null);
+          return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: back !== null };
+        }
         const expired = await deps.store.groupTransition(run.runId, g.groupIndex, ['PREPARED'], 'EXPIRED', { code: 'USER_FUNDED_PREPARED_EXPIRED' });
         if (expired) await deps.store.groupTransition(run.runId, g.groupIndex, ['EXPIRED'], 'PLANNED', { prepared: null, validUntil: null, code: null });
         return { ...settled(run, OWNER_WAIT_MS, false, 'OWNER_SIGNS_GROUP'), progressed: expired !== null };
@@ -171,11 +181,28 @@ async function submittedGroup(deps: UserFundedPassDeps, run: RunRecord, g: Group
   let r: Reconciled;
   try {
     if (g.strategy === 'SOLANA_SIGN_ALL') {
-      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner);
-      if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, false, step.code);
-      if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...submission, hashes: (submission.hashes as string[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
+      // ADR-0010 §4: a Kora group records each Kora call before it is made and each verified answer (the transaction id) as it arrives. The
+      // submission was written once (0023 never lets it change): the progress is kept on the group's outcome while it is in flight, from the
+      // group's current state (SUBMITTED, or UNCERTAIN after a failed pass) and by compare-and-set on its version — a concurrent pass never
+      // overwrites what it did not see, and only a monotonic step is ever written (attempts never fall, a recorded id never changes).
+      const live = koraGroupSubmission(submission, g.outcome);
+      let latest = live, version = g.version;
+      const persist = async (next: Readonly<Record<string, unknown>>) => {
+        const progress = koraGroupProgress(latest, next);
+        if (!progress) return false;
+        const written = await deps.store.groupTransition(run.runId, g.groupIndex, [g.state], g.state, { outcome: progress }, 'GROUP_KORA_RELAY', version);
+        if (!written) return false;
+        latest = next; version = written.version;
+        return true;
+      };
+      const step = await advanceSolanaSubmission(deps.userFunded, prepared, g.authorization!, g.feePayer, run.owner, live, persist);
+      if (step.state === 'SENT' || step.state === 'WAITING') return settled(run, 2_000, latest !== live, step.code);
+      // Final review (P3): a Kora transaction that can never be decided (KORA_RECOVERY_INCOMPLETE) may have landed: the group and its steps are
+      // UNCERTAIN and the run needs ATTENTION (observed again, never resent), with the closed code the owner's page words.
+      if (step.state === 'UNCERTAIN') return attention(deps, run, g, stored(step.code ?? 'KORA_RECOVERY_INCOMPLETE'));
+      if (step.state === 'EXPIRED' || step.state === 'FAILED') r = await reconcileSolanaGroup(deps.userFunded, prepared, { ...latest, hashes: (latest.hashes as (string | null)[]).slice(0, step.index! + (step.state === 'FAILED' ? 1 : 0)) },
         g.chain, g.feePayer).then(x => x.status === 'RECONCILED' ? { status: 'FAILED' as const, code: step.code!, gasPaid: x.gasPaid, transactions: x.transactions, steps: x.steps } : x);
-      else r = await reconcileSolanaGroup(deps.userFunded, prepared, submission, g.chain, g.feePayer);
+      else r = await reconcileSolanaGroup(deps.userFunded, prepared, latest, g.chain, g.feePayer);
     } else r = await reconcileEvmGroup(deps.userFunded, prepared, submission, g.authorization, run.owner);
   } catch (cause) {
     const code = cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'RECONCILIATION_FAILED';

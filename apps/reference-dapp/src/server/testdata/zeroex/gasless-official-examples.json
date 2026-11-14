@@ -1,0 +1,245 @@
+{
+ "_source": "0x Gasless API v2 OpenAPI examples (0xProject/0x-docs fern/openapi.json at 3a7034bd66e3993dc7169f2bbe6ef1f9a76a6921): GET /gasless/quote 200 (Ethereum, chainId 1), POST /gasless/submit 200 and GET /gasless/status/{tradeHash} 200 examples. Read-only copy; the provider was never called.",
+ "quote": {
+  "allowanceTarget": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+  "approval": {
+   "type": "permit",
+   "hash": "0xf3849ebcd806e518f2d3457b76d31ccf41be07fe64f0a25bbe798f1b9edde872",
+   "eip712": {
+    "types": {
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "version",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "Permit": [
+      {
+       "name": "owner",
+       "type": "address"
+      },
+      {
+       "name": "spender",
+       "type": "address"
+      },
+      {
+       "name": "value",
+       "type": "uint256"
+      },
+      {
+       "name": "nonce",
+       "type": "uint256"
+      },
+      {
+       "name": "deadline",
+       "type": "uint256"
+      }
+     ]
+    },
+    "domain": {
+     "name": "USD Coin",
+     "version": "2",
+     "chainId": 1,
+     "verifyingContract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    "message": {
+     "owner": "0x70a9f34f9b34c64957b9c401a97bfed35b95049e",
+     "spender": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+     "value": "300000000",
+     "nonce": 0,
+     "deadline": "1718667104"
+    },
+    "primaryType": "Permit"
+   }
+  },
+  "blockNumber": "20114747",
+  "buyAmount": "292995086",
+  "buyToken": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+  "fees": {
+   "integratorFee": null,
+   "zeroExFee": {
+    "amount": "150053",
+    "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "type": "volume"
+   },
+   "gasFee": {
+    "amount": "6962116",
+    "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "type": "gas"
+   }
+  },
+  "issues": {
+   "allowance": {
+    "actual": "0",
+    "spender": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+   },
+   "balance": {
+    "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "actual": "0",
+    "expected": "300000000"
+   },
+   "simulationIncomplete": false,
+   "invalidSourcesPassed": []
+  },
+  "liquidityAvailable": true,
+  "minBuyAmount": "292116101",
+  "route": {
+   "fills": [
+    {
+     "from": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+     "to": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+     "source": "SolidlyV3",
+     "proportionBps": "10000"
+    }
+   ],
+   "tokens": [
+    {
+     "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+     "symbol": "USDC"
+    },
+    {
+     "address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+     "symbol": "USDT"
+    }
+   ]
+  },
+  "sellAmount": "300000000",
+  "sellToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "target": "0x7c39a136ea20b3483e402ea031c1f3c019bab24b",
+  "tokenMetadata": {
+   "buyToken": {
+    "buyTaxBps": "0",
+    "sellTaxBps": "0"
+   },
+   "sellToken": {
+    "buyTaxBps": "0",
+    "sellTaxBps": "0"
+   }
+  },
+  "trade": {
+   "type": "settler_metatransaction",
+   "hash": "0x3ff032fa3a970a3f2b763afce093fd133ced63c0b097ab12ae1441b42de4a167",
+   "eip712": {
+    "types": {
+     "PermitWitnessTransferFrom": [
+      {
+       "name": "permitted",
+       "type": "TokenPermissions"
+      },
+      {
+       "name": "spender",
+       "type": "address"
+      },
+      {
+       "name": "nonce",
+       "type": "uint256"
+      },
+      {
+       "name": "deadline",
+       "type": "uint256"
+      },
+      {
+       "name": "slippageAndActions",
+       "type": "SlippageAndActions"
+      }
+     ],
+     "EIP712Domain": [
+      {
+       "name": "name",
+       "type": "string"
+      },
+      {
+       "name": "chainId",
+       "type": "uint256"
+      },
+      {
+       "name": "verifyingContract",
+       "type": "address"
+      }
+     ],
+     "TokenPermissions": [
+      {
+       "name": "token",
+       "type": "address"
+      },
+      {
+       "name": "amount",
+       "type": "uint256"
+      }
+     ],
+     "SlippageAndActions": [
+      {
+       "name": "recipient",
+       "type": "address"
+      },
+      {
+       "name": "buyToken",
+       "type": "address"
+      },
+      {
+       "name": "minAmountOut",
+       "type": "uint256"
+      },
+      {
+       "name": "actions",
+       "type": "bytes[]"
+      }
+     ]
+    },
+    "domain": {
+     "name": "Permit2",
+     "chainId": 1,
+     "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3"
+    },
+    "message": {
+     "permitted": {
+      "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "amount": "300000000"
+     },
+     "spender": "0x7c39a136ea20b3483e402ea031c1f3c019bab24b",
+     "nonce": "2241959297937691820908574931991567",
+     "deadline": "1718670104",
+     "slippageAndActions": {
+      "recipient": "0x70a9f34f9b34c64957b9c401a97bfed35b95049e",
+      "buyToken": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "minAmountOut": "292116101",
+      "actions": [
+       "0x0dfeb4190000000000000000000000007c39a136ea20b3483e402ea031c1f3c019bab24b000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000011e1a3000000000000000000000000000000000000006e898131631616b1779bad70bc0f000000000000000000000000000000000000000000000000000000006670d318",
+       "0x38c9c147000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000027100000000000000000000000006146be494fee4c73540cb1c5f87536abf1452500000000000000000000000000000000000000000000000000000000000000004400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000084c31b8d7a0000000000000000000000007c39a136ea20b3483e402ea031c1f3c019bab24b00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000011e1a30000000000000000000000000000000000000000000000000000000001000276a400000000000000000000000000000000000000000000000000000000",
+       "0x38c9c147000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000000000000000000000000000000000000000ec000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044a9059cbb00000000000000000000000038f5e5b4da37531a6e85161e337e0238bb27aa90000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      ]
+     }
+    },
+    "primaryType": "PermitWitnessTransferFrom"
+   }
+  },
+  "zid": "0x111111111111111111111111"
+ },
+ "submitResponse": {
+  "tradeHash": "0xcb3285b35c024fca76037bea9ea4cb68645fed3bdd84030956577de2f1592aa9",
+  "type": "settler_metatransaction",
+  "zid": "0x111111111111111111111111"
+ },
+ "status": {
+  "status": "confirmed",
+  "transactions": [
+   {
+    "hash": "0x36b42bc0ec313cfb9bf5122fbda933cbcce5f557bc3b7197b52223b05d7e596f",
+    "timestamp": 1718662626073
+   }
+  ],
+  "zid": "0x111111111111111111111111"
+ }
+}
