@@ -68,7 +68,7 @@ afterAll(async () => {
 describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware settings (PostgreSQL)', () => {
   const claude = { provider: 'ANTHROPIC', model: 'claude-sonnet-5-5', temperature: null, reasoningEffort: 'medium', maxOutputTokens: 4096, timeoutMs: 30_000,
     acknowledgedUnverified: false } as const;
-  const both = { ...adminEnv, ...copilotEnv, ANTHROPIC_API_KEY: 'sk-ant-test-not-a-real-key' };
+  const both = { ...adminEnv, ...copilotEnv, ANTHROPIC_API_KEY: 'test-ant-key' };
   const anthropicReply = () => new Response(JSON.stringify({ id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', stop_reason: 'end_turn',
     content: [{ type: 'text', text: JSON.stringify(RECORDED.answer.output) }], usage: { input_tokens: 1500, output_tokens: 90 } }), { status: 200 });
   // Versions and the audit trail are append-only: each test works from the head it finds and reads only the events written after it started.
@@ -113,7 +113,7 @@ describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware settings (PostgreSQL)', ()
     expect((probed.body.probe as { estimatedCostUsd: number }).estimatedCostUsd).toBeCloseTo((1500 * 2 + 90 * 10) / 1e6, 9);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('https://api.anthropic.com/v1/messages');
-    expect(calls[0]!.headers['x-api-key']).toBe('sk-ant-test-not-a-real-key');
+    expect(calls[0]!.headers['x-api-key']).toBe('test-ant-key');
     expect(calls[0]!.body).not.toHaveProperty('tools');
     // Provider readiness is checked before anything is sent; an Anthropic error keeps only allow-listed diagnostics.
     expect(await settings(operator, { action: 'probe', settings: claude }, { fetch: async () => { throw new Error('must not be called'); }, ...later }))

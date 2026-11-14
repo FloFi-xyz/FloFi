@@ -1845,6 +1845,7 @@
         "apps/reference-dapp/src/admin/analytics/networks.ts",
         "apps/reference-dapp/src/admin/analytics/view.ts",
         "apps/reference-dapp/src/admin/analytics/workflows.ts",
+        "apps/reference-dapp/src/admin/attention.ts",
         "apps/reference-dapp/src/admin/cli-commands.ts",
         "apps/reference-dapp/src/admin/config.ts",
         "apps/reference-dapp/src/admin/copilot-view.ts",
@@ -2925,6 +2926,7 @@
         "apps/reference-dapp/src/components/admin/admin-shell.tsx",
         "apps/reference-dapp/src/components/admin/admin-sign-in.tsx",
         "apps/reference-dapp/src/components/admin/admin-sign-out.tsx",
+        "apps/reference-dapp/src/components/admin/admin-ui.tsx",
         "apps/reference-dapp/src/components/admin/analytics-filters.tsx",
         "apps/reference-dapp/src/components/admin/charts.tsx",
         "apps/reference-dapp/src/components/admin/copilot-settings-editor.tsx",
@@ -6327,6 +6329,7 @@
       "sources": [
         "apps/reference-dapp/src/server/copilot-capabilities.ts",
         "apps/reference-dapp/src/server/copilot-glossary.ts",
+        "apps/reference-dapp/src/server/copilot-providers.ts",
         "apps/reference-dapp/src/server/copilot-runtime.ts",
         "apps/reference-dapp/src/server/copilot-service.ts",
         "apps/reference-dapp/src/server/copilot-toolkit.ts"

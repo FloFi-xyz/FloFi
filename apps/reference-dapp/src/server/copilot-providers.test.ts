@@ -182,22 +182,22 @@ describe('Anthropic model discovery and cost estimates', () => {
   it('lists the organization\'s models with friendly names and exact ids, and caches the answer', async () => {
     let clock = 1_000_000;
     const { fetchImpl, calls } = scripted([ok(models), ok(models)]);
-    const first = await discoverAnthropicModels('sk-ant-discovery-1', { fetch: fetchImpl, now: () => clock });
+    const first = await discoverAnthropicModels('ant-disc-1', { fetch: fetchImpl, now: () => clock });
     expect(first).toMatchObject({ ok: true, models: [{ id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', structuredOutputs: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
       { id: 'claude-haiku-4-5-20251001', displayName: 'Claude Haiku 4.5', efforts: [] }] });
     expect(calls[0]!.url).toBe('https://api.anthropic.com/v1/models?limit=100');
-    expect(calls[0]!.init.headers).toEqual({ 'x-api-key': 'sk-ant-discovery-1', 'anthropic-version': ANTHROPIC_VERSION });
+    expect(calls[0]!.init.headers).toEqual({ 'x-api-key': 'ant-disc-1', 'anthropic-version': ANTHROPIC_VERSION });
     clock += 60_000;
-    expect(await discoverAnthropicModels('sk-ant-discovery-1', { fetch: fetchImpl, now: () => clock })).toBe(first);
+    expect(await discoverAnthropicModels('ant-disc-1', { fetch: fetchImpl, now: () => clock })).toBe(first);
     expect(calls).toHaveLength(1);
     clock += 11 * 60_000;
-    await discoverAnthropicModels('sk-ant-discovery-1', { fetch: fetchImpl, now: () => clock });
+    await discoverAnthropicModels('ant-disc-1', { fetch: fetchImpl, now: () => clock });
     expect(calls).toHaveLength(2);
   });
   it('reports a closed code when discovery fails', async () => {
-    expect(await discoverAnthropicModels('sk-ant-discovery-2', { fetch: scripted([error(401, 'authentication_error')]).fetchImpl }))
+    expect(await discoverAnthropicModels('ant-disc-2', { fetch: scripted([error(401, 'authentication_error')]).fetchImpl }))
       .toMatchObject({ ok: false, code: 'COPILOT_UPSTREAM_UNAUTHORIZED' });
-    expect(await discoverAnthropicModels('sk-ant-discovery-3', { fetch: scripted([new TypeError('offline')]).fetchImpl })).toMatchObject({ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' });
+    expect(await discoverAnthropicModels('ant-disc-3', { fetch: scripted([new TypeError('offline')]).fetchImpl })).toMatchObject({ ok: false, code: 'COPILOT_UPSTREAM_UNAVAILABLE' });
   });
   it('estimates cost only for listed prices, from measured tokens', () => {
     expect(estimatedCostUsd('claude-sonnet-5-5', 1_000_000, 100_000)).toBeCloseTo(3, 6);
