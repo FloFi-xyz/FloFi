@@ -373,6 +373,41 @@ test('email code sign-in through Privy reaches the existing FloFi account of tha
   expect(await query('SELECT method FROM flofi_account_sessions WHERE account_id=$1 AND revoked_at IS NULL', [accountId])).toEqual([{ method: 'EMAIL' }]);
 });
 
+test('HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: a /login page from an earlier deployment says so, signs nobody in and the next attempt completes', async ({ page, context }) => {
+  // Production (2026-11-14): a page loaded before a deploy calls the previous deployment's Server Action id; the new deployment answers
+  // exactly this (409, x-nextjs-action-not-found). It used to end in "Sign-in did not complete. Try again." on every retry in that tab.
+  await setup(page, { email: 'skew@flofi-e2e.test' });
+  let refused = 0;
+  await page.route('**/login*', async route => {
+    const request = route.request();
+    if (request.method() === 'POST' && request.headers()['next-action'] && refused === 0) {
+      refused += 1;
+      return route.fulfill({ status: 409, headers: { 'x-nextjs-action-not-found': '1', 'content-type': 'text/plain' }, body: 'Server Action unavailable.' });
+    }
+    return route.continue();
+  });
+  await page.goto('/login?returnTo=%2Fapp');
+  await page.getByRole('button', { name: 'Email', exact: true }).click();
+  await page.getByLabel('Email address').fill('skew@flofi-e2e.test');
+  await Promise.all([page.waitForResponse(/__privy-e2e\/send-code/), page.getByRole('button', { name: 'Email me a code' }).click()]);
+  await page.getByLabel(/Enter the 6-digit code/).fill('135790');
+  await page.getByRole('button', { name: 'Verify and continue' }).click();
+  // The current deployment's page, saying why; no FloFi session and no Privy session are left behind.
+  await expect(page).toHaveURL(/\/login\?error=SIGN_IN_PAGE_OUTDATED&returnTo=%2Fapp$/);
+  await expect(page.locator('p[role="alert"]')).toHaveText('FloFi was updated while you were signing in. Nothing was signed in. Sign in again.');
+  expect(refused).toBe(1);
+  expect(await accountCookie(context)).toBeUndefined();
+  expect(await privyAccepts(await privyToken(page))).toBe(false);
+  // Signing in again on the reloaded page completes.
+  await page.getByRole('button', { name: 'Email', exact: true }).click();
+  await page.getByLabel('Email address').fill('skew@flofi-e2e.test');
+  await Promise.all([page.waitForResponse(/__privy-e2e\/send-code/), page.getByRole('button', { name: 'Email me a code' }).click()]);
+  await page.getByLabel(/Enter the 6-digit code/).fill('135790');
+  await page.getByRole('button', { name: 'Verify and continue' }).click();
+  await expect(page).not.toHaveURL(/\/login/);
+  expect(await accountCookie(context)).toBeDefined();
+});
+
 test('Web3 Wallet sign-in through Privy: the proven wallet is the account’s sign-in identity, never a FloFi-managed wallet; FloFi opens directly (T05)', async ({ page }) => {
   const address = `0x${randomBytes(20).toString('hex')}`;
   await setup(page, { wallet: { address } });

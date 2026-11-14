@@ -49,7 +49,7 @@ async function approveIfNeeded(service:ReturnType<typeof createSupplyService>,mo
 
 describe('Arbitrum Aave deployment, reserve, owner and network gates',()=>{
   it('binds the verified deployment to 42161, with native USDC only',()=>{
-    expect(aaveLendingProfile(p.chain)).toBe(p);expect(p).toMatchObject({pool:'0x794a61358d6845594f94dc1db02a252b5b4814ad',reserveId:12,decimals:6,l1DataFee:false,poolRevision:11});
+    expect(aaveLendingProfile(p.chain)).toBe(p);expect(p).toMatchObject({pool:'0x794a61358d6845594f94dc1db02a252b5b4814ad',reserveId:12,decimals:6,l1DataFee:false,poolRevision:12});
     expect(()=>assertAaveLendingProfile({...p,chain:AAVE_V3_BASE.chain})).toThrow('AAVE_PROFILE_UNSUPPORTED');
     expect(CATALOG_NETWORKS['arbitrum-one'].prefixes.lending).toBe('araave');expect(catalogNetworkOfRun('araave-'+'a'.repeat(32),'lending')?.chain).toBe(p.chain);
     expect(flowMode('arbitrum-aave',{})).toBe('off');expect(CATALOG_NETWORKS['arbitrum-one'].ownerExecutionEnabled('live',{})).toBe(false);
@@ -66,6 +66,20 @@ describe('Arbitrum Aave deployment, reserve, owner and network gates',()=>{
       if(calls[kind]?.[0]===tx.to&&calls[kind]?.[1]===tx.data)return supplyHex(1);
       if(kind==='reserveId'&&tx.to===p.pool&&tx.data===supplyCall('getReserveData(address)',p.asset)){const raw=await rpc(method,params) as string;return raw.slice(0,2+7*64)+'0'.repeat(64)+raw.slice(2+8*64);}
     }return rpc(method,params);
+  }));
+  // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: Aave governance upgraded the Arbitrum One Pool to revision 12 (2026-11-11); the stale revision-11 pin
+  // refused every Supply with SUPPLY_DEPLOYMENT_MISMATCH. The current deployment simulates 5 USDC; the pre-upgrade one is now refused instead.
+  it('simulates a 5 USDC Supply against the current Pool (revision 12), without any wallet request',async()=>fixture(async({service,model})=>{
+    const run=await service.simulate(workflow('supply','5000000'),OWNER);
+    expect(run.review).toMatchObject({amount:'5000000',pool:p.pool,asset:p.asset,aToken:p.aToken,chain:'eip155:42161'});
+    expect(run.review.gasLimits.length).toBeGreaterThan(0);expect(model.transactions).toHaveLength(0);
+  }));
+  it.each([['revision',11n],['implementation',0xf05fd3cc911b4c5e36e53c00354f645e22922c9an]] as const)('refuses the pre-upgrade Pool %s',async(kind,value)=>fixture(async({service,model})=>{
+    await expect(service.simulate(workflow('supply','5000000'),OWNER)).rejects.toThrow('SUPPLY_DEPLOYMENT_MISMATCH');expect(model.transactions).toHaveLength(0);
+  },true,rpc=>async(method,params)=>{
+    if(kind==='implementation'&&method==='eth_getStorageAt')return supplyHex(value);
+    if(kind==='revision'&&method==='eth_call'&&(params[0] as {to:string;data:string}).to===p.pool&&(params[0] as {data:string}).data===supplyCall('POOL_REVISION()'))return '0x'+value.toString(16).padStart(64,'0');
+    return rpc(method,params);
   }));
   it.each(actions)('%s refuses unscoped USDC.e and foreign decimals',async action=>fixture(async({service})=>{
     for(const [address,decimals] of [['0xff970a61a04b1ca14834a43f5de4533ebddb5cc8',6],[p.asset,18]] as const){const w=workflow(action);for(const input of w.nodes[0]!.inputs)if(input.kind==='QUANTITY')Object.assign(input.value.asset,{address,decimals});await expect(service.simulate(w,OWNER)).rejects.toThrow();}

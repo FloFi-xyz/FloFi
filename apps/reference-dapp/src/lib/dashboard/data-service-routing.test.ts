@@ -4,6 +4,7 @@ import { embeddedRuntime } from '../../server/flow-runtime';
 import { callCloudFlow } from '../../server/cloud-api-client';
 import { currentWalletPrincipal, currentWalletPrincipals } from '../../server/session-principal';
 import { loadDashboardRunDetail, loadDashboardSnapshot } from './data-service';
+import { withBetaIdentity } from '../../flight/beta-context';
 vi.mock('../../server/session-principal', () => ({ currentWalletPrincipal: vi.fn(), currentWalletPrincipals: vi.fn() }));
 vi.mock('../../server/flow-runtime', async original => ({ ...await original<typeof import('../../server/flow-runtime')>(), embeddedRuntime: vi.fn() }));
 vi.mock('../../server/cloud-api-client', async original => ({ ...await original<typeof import('../../server/cloud-api-client')>(), callCloudFlow: vi.fn() }));
@@ -45,6 +46,28 @@ describe.each(['embedded', 'cloud'] as const)('Dashboard %s routing', mode => {
       const paths = mode === 'embedded' ? handler.mock.calls.map(([r]) => r.path) : transport.mock.calls.map(([u]) => u.pathname);
       expect(paths.some(path => path.endsWith('/record'))).toBe(true);
     } else expect(callCloudFlow).toHaveBeenCalledExactlyOnceWith('aave-supply', 'status', ['owned-run'], { principal: evm });
+  });
+});
+// HOTFIX-FLOFI-PRODUCTION-RECOVERY-001 (FIX 1): `/v1/runs` refuses a call without the signed-in account's session (HTTP 403
+// BETA_SESSION_REQUIRED), so "Your workflows" showed "Execution history temporarily unavailable" for every signed-in owner.
+describe.each(['embedded', 'cloud'] as const)('Dashboard %s history carries the signed-in account session', mode => {
+  const identity = { accountId: 'acct_owner', sessionId: 'session_owner' };
+  const beta = { 'x-flofi-beta-account': 'acct_owner', 'x-flofi-beta-session': 'session_owner' };
+  const sent = () => mode === 'embedded' ? handler.mock.calls.map(([r]) => r.headers as Record<string, string>)
+    : transport.mock.calls.map(([, init]) => init.headers as Record<string, string>);
+  it.each([evm, solana])('index, attempt and detail reads of %s send the session the Flight boundary resolved', async account => {
+    setup(mode, account);
+    await withBetaIdentity(identity, async () => {
+      expect(await loadDashboardSnapshot(account)).toMatchObject({ connection: 'CONNECTED', runs: [{ runId: 'owned-run' }] });
+      expect(await loadDashboardRunDetail(account, 'owned-run')).toMatchObject({ connection: 'CONNECTED' });
+    });
+    expect(sent().length).toBeGreaterThan(1);
+    for (const headers of sent()) expect(headers).toMatchObject(beta);
+  });
+  it('sends no session header when none was resolved (open rollout), so it never invents one', async () => {
+    setup(mode, evm);
+    expect(await loadDashboardSnapshot(evm)).toMatchObject({ connection: 'CONNECTED' });
+    for (const headers of sent()) { expect(headers).not.toHaveProperty('x-flofi-beta-account'); expect(headers).not.toHaveProperty('x-flofi-beta-session'); }
   });
 });
 it('requires a matching Solana principal before reading any runtime', async () => {

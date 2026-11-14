@@ -74,7 +74,8 @@ export const AAVE_V3_BASE = Object.freeze({
 export const AAVE_V3_ARBITRUM = Object.freeze({
   network: 'Arbitrum One', chainId: 42161, chain: 'eip155:42161', chainHex: '0xa4b1', protocol: 'aave-v3',
   pool: '0x794a61358d6845594f94dc1db02a252b5b4814ad',
-  poolImplementation: '0xf05fd3cc911b4c5e36e53c00354f645e22922c9a',
+  // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: Aave governance upgraded this Pool to revision 12 (see AAVE_V3_POOL_UPGRADES).
+  poolImplementation: '0xa6e7d235a5b2fc7811d10669bbe20fa14b658a1e',
   provider: '0xa97684ead0e402dc232d5a977953df7ecbab3cdb',
   asset: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6, symbol: 'USDC', reserveId: 12,
   aToken: '0x724dc807b04555b71ed48a6896b6f41593b8c637',
@@ -82,20 +83,20 @@ export const AAVE_V3_ARBITRUM = Object.freeze({
   oracle: '0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7',
   faucet: null, explorer: 'https://arbiscan.io', rpc: 'https://arb1.arbitrum.io/rpc',
   officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Arbitrum.sol',
-  l1DataFee: false, environment: 'MAINNET', poolRevision: 11, ownerBeneficiary: true,
+  l1DataFee: false, environment: 'MAINNET', poolRevision: 12, ownerBeneficiary: true,
 } as const);
 /** Ethereum Aave V3 USDC reserve, verified PUBLIC_READ_ONLY against the DAO address book and block 26208660.
  * Current one-reserve engine: ordinary owner collateral, variable-rate debt, partial Repay/Withdraw. No native gateway.
  */
 export const AAVE_V3_ETHEREUM = Object.freeze({
   network: 'Ethereum', chainId: 1, chain: 'eip155:1', chainHex: '0x1', protocol: 'aave-v3',
-  pool: '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2', poolImplementation: '0x728a138a4823392c2efa55e028d434f526fe03cf', provider: '0x2f39d218133afab8f2b819b1066c7e434ad94e9e',
+  pool: '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2', poolImplementation: '0x4295fe69b3e978eb511e4558b4407ad871612fcb', provider: '0x2f39d218133afab8f2b819b1066c7e434ad94e9e',
   asset: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6, symbol: 'USDC', reserveId: 3,
   aToken: '0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c', variableDebtToken: '0x72e95b8931767c79ba4eee721354d6e99a61d004',
   oracle: '0x54586be62e3c3580375ae3723c145253060ca0c2', faucet: null,
   explorer: 'https://etherscan.io', rpc: 'https://ethereum-rpc.publicnode.com',
   officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Ethereum.sol',
-  l1DataFee: false, environment: 'MAINNET', poolRevision: 11, ownerBeneficiary: true, validateSupplyCap: true,
+  l1DataFee: false, environment: 'MAINNET', poolRevision: 12, ownerBeneficiary: true, validateSupplyCap: true,
 } as const);
 /**
  * BUILD AAVE-V3-EXPANSION-001: every reserve of the Ethereum, Base and Arbitrum One Aave V3 Core markets.
@@ -108,6 +109,32 @@ export const AAVE_V3_ETHEREUM = Object.freeze({
  * Listing here is not availability: active/frozen/paused, caps, liquidity, collateral and oracle state are read on chain at Simulate and
  * again immediately before every wallet request, and any mismatch with this identity fails closed.
  */
+/**
+ * HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: Pool implementation upgrades Aave governance executed after the pinned address-book snapshot
+ * (`AAVE_V3_ADDRESS_BOOK_COMMIT`), which still names the previous implementation. Each entry was verified read-only on chain on 2026-11-14:
+ * the official Pool proxy's ERC-1967 implementation slot holds `to`; `to` has code, reports `POOL_REVISION()` 12 and `ADDRESSES_PROVIDER()` the
+ * market's official PoolAddressesProvider; and that provider's `owner()` is the market's official Aave Governance V3 `EXECUTOR_LVL_1` (the only
+ * account able to change the Pool implementation). Arbitrum One also has the executing transaction (provider `PoolUpdated(from, to)` and the
+ * Pool proxy `Upgraded(to)` in one PayloadsController execution). An upgrade is accepted only from the exact snapshot implementation `from`:
+ * any other snapshot or on-chain implementation still fails closed (AAVE_ADDRESS_BOOK_MARKET_MISMATCH at load, SUPPLY_DEPLOYMENT_MISMATCH at
+ * every state read). Remove an entry once the address book snapshot is regenerated with the new implementation.
+ */
+export type AavePoolUpgrade = { readonly chain: string; readonly from: string; readonly to: string; readonly revision: number; readonly executor: string;
+  readonly verifiedAtBlock: number; readonly transaction: string | null };
+export const AAVE_V3_POOL_UPGRADES: readonly AavePoolUpgrade[] = Object.freeze([
+  Object.freeze({ chain: 'eip155:1', from: '0x728a138a4823392c2efa55e028d434f526fe03cf', to: '0x4295fe69b3e978eb511e4558b4407ad871612fcb', revision: 12,
+    executor: '0x5300a1a15135ea4dc7ad5a167152c01efc9b192a', verifiedAtBlock: 26410281, transaction: null }),
+  Object.freeze({ chain: 'eip155:8453', from: '0xa4abc5fcba6d0d7e3d144d6dbf6cb6128599dfdb', to: '0xf248dd0adb01e78043e8a423b8504c8129f11918', revision: 12,
+    executor: '0x9390b1735def18560c509e2d0bc090e9d6ba257a', verifiedAtBlock: 57167478, transaction: null }),
+  Object.freeze({ chain: 'eip155:42161', from: '0xf05fd3cc911b4c5e36e53c00354f645e22922c9a', to: '0xa6e7d235a5b2fc7811d10669bbe20fa14b658a1e', revision: 12,
+    executor: '0xff1137243698caa18ee364cc966cf0e02a4e6327', verifiedAtBlock: 524037413,
+    transaction: '0x6f9dce2a81c9b8609b5927cb4b27144700c0ba05181f80ec39a955e081ce6936' }),
+]);
+/** The market's current Pool implementation: the snapshot's, or the recorded governance upgrade of exactly that snapshot implementation. */
+export function aavePoolImplementation(chain: string, snapshotImplementation: string): string {
+  const upgrade = AAVE_V3_POOL_UPGRADES.find(item => item.chain === chain);
+  return upgrade && upgrade.from === snapshotImplementation ? upgrade.to : snapshotImplementation;
+}
 type MainnetMarketProfile = typeof AAVE_V3_BASE | typeof AAVE_V3_ARBITRUM | typeof AAVE_V3_ETHEREUM;
 type ReserveIdentity = { readonly asset: string; readonly decimals: number; readonly symbol: string; readonly reserveId: number; readonly aToken: string;
   readonly variableDebtToken: string; readonly officialSource: string };
@@ -126,7 +153,7 @@ function reserveProfiles(market: MainnetMarketProfile): readonly (MainnetMarketP
   const book = AAVE_V3_ADDRESS_BOOK.find(item => item.chain === market.chain);
   // The snapshot must describe exactly the verified market (same Pool, provider and oracle) or the registry refuses to load.
   if (!book || book.pool !== market.pool || book.provider !== market.provider || book.oracle !== market.oracle ||
-      ('poolImplementation' in market && book.poolImplementation !== market.poolImplementation)) throw new Error('AAVE_ADDRESS_BOOK_MARKET_MISMATCH');
+      ('poolImplementation' in market && aavePoolImplementation(book.chain, book.poolImplementation) !== market.poolImplementation)) throw new Error('AAVE_ADDRESS_BOOK_MARKET_MISMATCH');
   const verified = book.reserves.find(reserve => reserve.underlying === market.asset);
   if (!verified || verified.id !== market.reserveId || verified.decimals !== market.decimals || verified.aToken !== market.aToken ||
       verified.variableDebtToken !== market.variableDebtToken) throw new Error('AAVE_ADDRESS_BOOK_RESERVE_MISMATCH');
@@ -136,7 +163,7 @@ function reserveProfiles(market: MainnetMarketProfile): readonly (MainnetMarketP
   return Object.freeze(book.reserves.map((reserve: AaveAddressBookReserve) => reserve.underlying === market.asset ? market : Object.freeze({
     ...market, asset: reserve.underlying, decimals: reserve.decimals, symbol: aaveReserveLabel(reserve.key), reserveId: reserve.id, aToken: reserve.aToken,
     variableDebtToken: reserve.variableDebtToken, addressBookKey: reserve.key, priceSource: reserve.oracle,
-    ...'poolImplementation' in market ? {} : { pinnedImplementation: book.poolImplementation },
+    ...'poolImplementation' in market ? {} : { pinnedImplementation: aavePoolImplementation(book.chain, book.poolImplementation) },
     officialSource: `https://github.com/aave-dao/aave-address-book/blob/${AAVE_V3_ADDRESS_BOOK_COMMIT}/src/ts/${book.library}.ts`,
     ownerBeneficiary: true as const, validateSupplyCap: true as const,
   }) as AaveReserveProfile));
