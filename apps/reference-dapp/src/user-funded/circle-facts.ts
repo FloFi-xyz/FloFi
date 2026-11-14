@@ -47,8 +47,19 @@ export type CircleFacts = {
   readonly deadline?: string;
   /** Owner requirement: the EIP-7702 upgrade inside this operation (FloFi Wallet's first use only); absent: the account is already a smart account. */
   readonly upgrade?: CircleUpgrade;
+  /**
+   * Final review (P1): this preparation's own identity (128 random bits, lowercase hex), kept through its stages. FloFi Wallet's single-use
+   * signing claims name it: the account nonce and the USDC permit nonce do not change when a group is prepared again (a cancel in the wallet, a
+   * retryable refusal, an expiry), so a claim bound to them alone would refuse every later preparation's signature. Absent only on a
+   * preparation stored before it.
+   */
+  readonly preparationId?: string;
 };
 const DECIMAL = /^(0|[1-9][0-9]{0,77})$/;
+/** A preparation's identity (`CircleFacts.preparationId`). */
+export const CIRCLE_PREPARATION_ID = /^[0-9a-f]{32}$/;
+/** A fresh preparation identity (Web Crypto: the same in the server and the owner's browser). */
+export const newCirclePreparationId = (): string => Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
 /** The Circle facts of a prepared artifact (strictly read back), or null for any artifact that is not Circle-paid. */
 export function circleFactsOf(prepared: Readonly<Record<string, unknown>> | null | undefined): CircleFacts | null {
   const c = prepared && typeof prepared === 'object' && prepared.circle && typeof prepared.circle === 'object' ? prepared.circle as Record<string, unknown> : null;
@@ -58,6 +69,7 @@ export function circleFactsOf(prepared: Readonly<Record<string, unknown>> | null
   if (strings.some(k => typeof c[k] !== 'string') || !c.gas || typeof c.gas !== 'object' || !c.price || typeof c.price !== 'object') return null;
   if (![c.permitCap, c.permitNonce, c.nonce, c.nativeRequired, c.usdcSpend].every(v => DECIMAL.test(String(v)))) return null;
   if (c.deadline !== undefined && (typeof c.deadline !== 'string' || !/^[1-9][0-9]{0,15}$/.test(c.deadline))) return null;
+  if (c.preparationId !== undefined && (typeof c.preparationId !== 'string' || !CIRCLE_PREPARATION_ID.test(c.preparationId))) return null;
   // An upgrade only ever designates the pinned Simple7702Account v0.8, on a specific chain, for that account kind; its stage order is enforced.
   const u = c.upgrade === undefined ? null : c.upgrade && typeof c.upgrade === 'object' ? c.upgrade as Record<string, unknown> : 'invalid';
   if (u === 'invalid' || (u && (u.delegate !== erc4337.SIMPLE_7702_ACCOUNT_V0_8 || c.accountKind !== 'SIMPLE_7702_V0_8' || typeof u.chainId !== 'number'

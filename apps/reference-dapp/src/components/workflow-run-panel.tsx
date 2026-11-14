@@ -190,7 +190,9 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
     }
     catch (cause) {
       // ADR-0010: a Circle refusal (the page's own check, or the server's permit/upgrade step) keeps its closed code and its words (CIRCLE_REFUSAL).
-      const code = cause instanceof Error && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+|CIRCLE_[A-Z_]+)$/.test(cause.message)
+      // Final review (P1): so does FloFi Wallet's own answer (e.g. FLOFI_WALLET_ALREADY_SIGNED: this request's signature was already asked once).
+      const code = cause instanceof Error
+        && /^(WALLET_[A-Z_]+|EVM_WALLET_NOT_FOUND|SOLANA_WALLET_[A-Z_]+|EIP5792_[A-Z_]+|GAS_SPONSORSHIP_[A-Z_]+|CIRCLE_[A-Z_]+|FLOFI_WALLET_[A-Z_]+)$/.test(cause.message)
         ? cause.message : 'APPROVAL_UNAVAILABLE';
       onError(code);
     }

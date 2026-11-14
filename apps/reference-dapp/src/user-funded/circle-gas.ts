@@ -56,7 +56,7 @@ import type { EvmGroupCalls, UserCall } from './evm-calls.ts';
 import { assertUserFundedSubmission } from './gas-payer.ts';
 import type { GroupStrategy } from '../workflow-runs/execution-groups.ts';
 import { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleSignedAuthorization, circleUpgradeAuthorization,
-  circleUserOpHash, expectationOf, gasOf, paymasterGasOf, verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
+  circleUserOpHash, expectationOf, gasOf, newCirclePreparationId, paymasterGasOf, verifyCircleOperationSignature, type CircleFacts } from './circle-facts.ts';
 
 export { circleFactsOf, circleGasPayment, circleOperationOf, circleOperationTypedData, circlePermitOf, circleSignedAuthorization, circleUpgradeAuthorization,
   circleUserOpHash, plannedStrategyOf, verifyCircleOperationSignature, type CircleFacts, type CircleGas, type CircleUpgrade } from './circle-facts.ts';
@@ -288,7 +288,7 @@ export async function circleAttempt(deps: CircleRuntimeDeps, input: CircleAttemp
       maxFeePerGas: gas.maxFeePerGas.toString(), maxPriorityFeePerGas: gas.maxPriorityFeePerGas.toString(), paymasterVerificationGasLimit: pmGas.verificationGasLimit.toString(),
       paymasterPostOpGasLimit: pmGas.postOpGasLimit.toString() },
     nativeRequired: input.nativeRequired.toString(), usdcSpend: usdcSpend.toString(), plannedStrategy: input.strategy, deadline: String(input.deadline),
-    ...upgrade ? { upgrade } : {} };
+    ...upgrade ? { upgrade } : {}, preparationId: newCirclePreparationId() };
   const permit = circlePermitOf(facts, chainId, owner);
   return { considered: true, candidate: { mechanism: 'CIRCLE_USDC_PAYMASTER', eligible: true }, prepared: {
     kind: 'EVM_USER_OPERATION', chainId, owner, group, upgraded: true, simulation: input.simulation, circle: facts, gasPayment: circleGasPayment(facts),

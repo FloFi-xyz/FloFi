@@ -141,4 +141,9 @@ export const portugueseGasCircle: Readonly<Record<string, string>> = {
     'A FloFi Wallet assina uma atualização de conta apenas depois que você concorda com ela na FloFi. Nada foi assinado.',
   'FloFi Wallet signs an account upgrade only for the smart account and network you reviewed in FloFi. Nothing was signed.':
     'A FloFi Wallet assina uma atualização de conta apenas para a conta inteligente e a rede que você revisou na FloFi. Nada foi assinado.',
+  // Final review (P1): FloFi Wallet asked once per signature of a prepared request; a new preparation is a new request.
+  'FloFi Wallet was already asked for this signature once (if you cancelled it there, nothing was signed), so FloFi does not ask it again for this request. Nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.':
+    'A FloFi Wallet já foi solicitada a fazer esta assinatura uma vez (se você a cancelou lá, nada foi assinado), então a FloFi não a solicita de novo para este pedido. Nada foi enviado. Este pedido expira em poucos minutos; depois continue, e a FloFi prepara um novo para você assinar.',
+  'FloFi Wallet may have signed, but FloFi did not receive the signature, so nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.':
+    'A FloFi Wallet pode ter assinado, mas a FloFi não recebeu a assinatura, então nada foi enviado. Este pedido expira em poucos minutos; depois continue, e a FloFi prepara um novo para você assinar.',
 };

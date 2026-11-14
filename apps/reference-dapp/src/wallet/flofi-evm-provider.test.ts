@@ -185,4 +185,11 @@ describe('eth_signTypedData_v4 (BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: a re
     expect(await failure(sign(garbled.provider))).toMatchObject({ message: 'FLOFI_WALLET_SIGNATURE_UNKNOWN' });
     expect((await failure(sign(garbled.provider))).code).toBeUndefined();
   });
+  it('final review (P1): a signature already claimed keeps its own code, still as an unknown outcome (never a refusal or a cancel)', async () => {
+    const claimed = await connected({ request: vi.fn(async () => { throw new Error('FLOFI_WALLET_ALREADY_SIGNED'); }) });
+    const error = await failure(sign(claimed.provider));
+    expect(error).toMatchObject({ message: 'FLOFI_WALLET_ALREADY_SIGNED' });
+    expect(error.code).toBeUndefined();
+    expect(claimed.deps.broadcast).not.toHaveBeenCalled();
+  });
 });

@@ -5,7 +5,7 @@
  * Simple7702Account v0.8, the account's current nonce), the USDC permit and the v0.8 operation, each re-derived from the prepared group and never
  * from the page. MOCKED loopback doubles; nothing is signed by Privy here (the gate decides whether Privy may be asked).
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { circlePaymaster as C, erc4337 } from '@defi-workflow-engine/reference-compiler';
 import { BASE_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { guarded, type ChainTransport } from '../delegation/chains.ts';
@@ -20,6 +20,12 @@ import { circleFactsOf, circleOperationOf, circleOperationTypedData, circlePermi
 import { parseSigningRequest, resolveManagedSigning, type CircleSigningRun, type ManagedSigningDeps } from './managed-signing.ts';
 import { circleSigningContext, parseSigningContext } from '../wallet/flofi-signing.ts';
 import { parseWalletRequest } from '../wallet-app/protocol.ts';
+// The real signing gate (`floFiSigningGate`'s): its flows' status actions are never read here (the run comes from `gateDeps.load`).
+vi.mock('../app/jupiter-action', () => ({ jupiterStatus: vi.fn() }));
+vi.mock('../app/solana-transfer-action', () => ({ solanaTransferStatus: vi.fn() }));
+vi.mock('../app/robinhood-transfer-action', () => ({ transferStatus: vi.fn() }));
+vi.mock('../app/public-testnet-action', () => ({ publicStatus: vi.fn() }));
+const { signingGate } = await import('../app/flofi-wallet-signing');
 
 const NOW = new Date('2026-11-13T12:00:00Z'), RUN = 'wfr_' + 'a'.repeat(26), CHAIN = 'eip155:8453';
 const value = <T,>(r: { ok: true; value: T } | { ok: false; code: string }): T => { if (!r.ok) throw new Error(r.code); return r.value; };
@@ -37,8 +43,9 @@ async function setup() {
   if (!c.ok) throw new Error(c.code);
   const req = requirementOf(c);
   if (!req.ok) throw new Error(req.code);
-  const prepared = value(await prepareGroup(deps, c, req.value, { runId: RUN, groupIndex: 0, strategy: 'EVM_OWNER_STEP', chain: CHAIN, feePayer: address, stepFrom: 0, stepTo: 0,
-    tokenGas: true, wallet: 'FLOFI_WALLET' })).prepared;
+  const prepare = async () => value(await prepareGroup(deps, c, req.value, { runId: RUN, groupIndex: 0, strategy: 'EVM_OWNER_STEP', chain: CHAIN, feePayer: address, stepFrom: 0,
+    stepTo: 0, tokenGas: true, wallet: 'FLOFI_WALLET' })).prepared;
+  const prepared = await prepare();
   let stored: Prepared = prepared;
   const loaded = (): CircleSigningRun => ({ run: { runId: RUN, mode: 'USER_FUNDED', state: 'RUNNING', currentStep: 0 },
     groups: [{ groupIndex: 0, chain: CHAIN, feePayer: address, strategy: 'EVM_USER_OPERATION', state: 'PREPARED', stepFrom: 0, stepTo: 0,
@@ -47,7 +54,7 @@ async function setup() {
     pendingNonce: async (_chain, a) => BigInt(String(await circle.rpc('eth_getTransactionCount', [a, 'pending']))), now: () => NOW.getTime() };
   const context = circleSigningContext(RUN, 8453)!;
   const set = (p: Prepared) => { stored = p; };
-  return { evm, circle, owner, address, deps, gateDeps, context, set, get stored() { return stored; } };
+  return { evm, circle, owner, address, deps, gateDeps, context, set, prepare, get stored() { return stored; } };
 }
 type Ctx = Awaited<ReturnType<typeof setup>>;
 const facts = (p: Prepared) => circleFactsOf(p)!;
@@ -86,7 +93,7 @@ describe('FloFi Wallet + Circle: the gate re-derives every signature from the pr
     expect(await resolve(ctx, authorizationRequest(ctx, tuple(ctx)))).toEqual({ ok: false, code: 'FLOFI_WALLET_UPGRADE_CONSENT_REQUIRED' });
     ctx.set(value(consentCircleUpgrade(ctx.stored, NOW)) as Prepared);
     const ok = value(await resolve(ctx, authorizationRequest(ctx, tuple(ctx))));
-    expect(ok.attempt).toBe(`base-circle-gas:${RUN}:g0:authorization:9`);
+    expect(ok.attempt).toBe(`base-circle-gas:${RUN}:g0:${facts(ctx.stored).preparationId}:authorization:9`);
     expect(ok.authorization?.digest).toBe(erc4337.eip7702AuthorizationHash(circleUpgradeAuthorization(facts(ctx.stored))));
     expect(ok.summary.lines.map(l => l.label)).toEqual(['Upgrade', 'Why', 'What stays the same', 'Smart account', 'Network fee']);
     expect(ok.summary.lines[0]!.value).toBe('This FloFi Wallet address on Base to a smart account (EIP-7702)');
@@ -116,7 +123,7 @@ describe('FloFi Wallet + Circle: the gate re-derives every signature from the pr
     const t = circleUpgradeAuthorization(facts(ctx.stored));
     ctx.set(value(await finalizeCircleAuthorization(ctx.deps, ctx.stored, await ctx.owner.signDigest(erc4337.eip7702AuthorizationHash(t)))) as Prepared);
     const permit = value(await resolve(ctx, { op: 'evm_sign_typed_data', address: ctx.address, typedData: permitTyped(ctx.stored), signing: ctx.context }));
-    expect(permit).toMatchObject({ attempt: `base-circle-gas:${RUN}:g0:permit:0`, typedData: { kind: 'permit' } });
+    expect(permit).toMatchObject({ attempt: `base-circle-gas:${RUN}:g0:${facts(ctx.stored).preparationId}:permit:0`, typedData: { kind: 'permit' } });
     // A permit with a larger value or another spender is never what the group's facts say.
     const forged = permitTyped(ctx.stored);
     for (const message of [{ ...forged.message, value: (BigInt(forged.message.value) + 1n).toString() }, { ...forged.message, spender: '0x' + '9'.repeat(40) }])
@@ -128,7 +135,7 @@ describe('FloFi Wallet + Circle: the gate re-derives every signature from the pr
     const c = facts(ctx.stored), typed = circleOperationTypedData(c, 8453, circleOperationOf(c, ctx.address));
     const operation = value(await resolve(ctx, { op: 'evm_sign_typed_data', address: ctx.address, typedData: typed, signing: ctx.context }));
     expect(operation).toMatchObject({ typedData: { kind: 'operation' } });
-    expect(operation.attempt).toBe(`base-circle-gas:${RUN}:g0:operation:${String(ctx.stored.userOpHash)}`);
+    expect(operation.attempt).toBe(`base-circle-gas:${RUN}:g0:${facts(ctx.stored).preparationId}:operation:${String(ctx.stored.userOpHash)}`);
     // The operation typed WITHOUT the upgrade's delegate (the bare marker, or no initCode) is another operation.
     expect(await resolve(ctx, { op: 'evm_sign_typed_data', address: ctx.address, typedData: { ...typed, message: { ...typed.message, initCode: '0x' } }, signing: ctx.context }))
       .toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
@@ -145,5 +152,54 @@ describe('FloFi Wallet + Circle: the gate re-derives every signature from the pr
       .toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
     expect(await resolveManagedSigning(req.context, req.request, with_(r => ({ ...r, run: { ...r.run, currentStep: 1 } }))))
       .toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
+  });
+});
+
+describe('final review (P1): every preparation of a group is signable once, whatever nonces it shares with an earlier one', () => {
+  /** The account store's single-use proof table (one row per claim digest), as `consumeProof` keeps it. */
+  const claims = () => { const taken = new Set<string>(); return { consumeProof: async (digest: string) => taken.has(digest) ? false : (taken.add(digest), true) }; };
+  /** FloFi Wallet's real gate with `claim: true` (what runs right before Privy is asked), answering only the refusal code or the attempt id. */
+  const gate = (ctx: Ctx, store: ReturnType<typeof claims>) => async (body: unknown) => {
+    const parsed = parseSigningRequest(body)!;
+    const r = await signingGate(store, [], { claim: true }, ctx.gateDeps)(parsed.context, parsed.request);
+    return r.ok ? r.value.attempt : r.code;
+  };
+  it('a claimed authorization and permit (a cancel in Privy, a retryable refusal, an expiry) do not block the group prepared again with the same nonces', async () => {
+    const ctx = await setup(), sign = gate(ctx, claims());
+    ctx.set(value(consentCircleUpgrade(ctx.stored, NOW)) as Prepared);
+    const first = facts(ctx.stored);
+    expect(first.preparationId).toMatch(/^[0-9a-f]{32}$/);
+    const authorization = await sign(authorizationRequest(ctx, tuple(ctx)));
+    expect(authorization).toBe(`base-circle-gas:${RUN}:g0:${first.preparationId}:authorization:9`);
+    // The same preparation stays single-use: its authorization is never handed to Privy twice.
+    expect(await sign(authorizationRequest(ctx, tuple(ctx)))).toBe('FLOFI_WALLET_ALREADY_SIGNED');
+    // The owner cancelled in Privy; the group is prepared again. The account nonce (9) and the USDC permit nonce (0) did not move.
+    ctx.set(value(consentCircleUpgrade(await ctx.prepare(), NOW)) as Prepared);
+    const again = facts(ctx.stored);
+    expect([again.upgrade?.nonce, again.permitNonce]).toEqual([first.upgrade?.nonce, first.permitNonce]);
+    expect(again.preparationId).not.toBe(first.preparationId);
+    expect(await sign(authorizationRequest(ctx, tuple(ctx)))).toBe(`base-circle-gas:${RUN}:g0:${again.preparationId}:authorization:9`);
+    expect(await sign(authorizationRequest(ctx, tuple(ctx)))).toBe('FLOFI_WALLET_ALREADY_SIGNED');
+    // The permit: claimed in one preparation, signable again in the next one (same permit nonce), once each.
+    const t = circleUpgradeAuthorization(facts(ctx.stored));
+    ctx.set(value(await finalizeCircleAuthorization(ctx.deps, ctx.stored, await ctx.owner.signDigest(erc4337.eip7702AuthorizationHash(t)))) as Prepared);
+    const permit = () => ({ op: 'evm_sign_typed_data', address: ctx.address, typedData: C.permitTypedData(circlePermitOf(facts(ctx.stored), 8453, ctx.address)), signing: ctx.context });
+    expect(await sign(permit())).toBe(`base-circle-gas:${RUN}:g0:${again.preparationId}:permit:0`);
+    expect(await sign(permit())).toBe('FLOFI_WALLET_ALREADY_SIGNED');
+    // CIRCLE_PERMIT_CAP_EXCEEDED, GAS_MECHANISM_CHANGED, a cancel: the group is prepared again with the same permit nonce.
+    const next = value(consentCircleUpgrade(await ctx.prepare(), NOW)) as Prepared;
+    ctx.set(value(await finalizeCircleAuthorization(ctx.deps, next, await ctx.owner.signDigest(erc4337.eip7702AuthorizationHash(circleUpgradeAuthorization(facts(next)))))) as Prepared);
+    expect(facts(ctx.stored).permitNonce).toBe(first.permitNonce);
+    expect(await sign(permit())).toBe(`base-circle-gas:${RUN}:g0:${facts(next).preparationId}:permit:0`);
+    expect(await sign(permit())).toBe('FLOFI_WALLET_ALREADY_SIGNED');
+  });
+  it('a preparation stored before the identity existed is still claimed per preparation (by its validity), and a malformed identity is no preparation', async () => {
+    const ctx = await setup();
+    const legacy: Record<string, unknown> = { ...facts(value(consentCircleUpgrade(ctx.stored, NOW)) as Prepared) };
+    delete legacy.preparationId;
+    ctx.set({ ...ctx.stored, circle: legacy } as Prepared);
+    const resolved = value(await resolve(ctx, authorizationRequest(ctx, tuple(ctx))));
+    expect(resolved.attempt).toBe(`base-circle-gas:${RUN}:g0:v${NOW.getTime() + 300_000}:authorization:9`);
+    expect(circleFactsOf({ ...ctx.stored, circle: { ...legacy, preparationId: 'not-an-id' } } as Prepared)).toBeNull();
   });
 });

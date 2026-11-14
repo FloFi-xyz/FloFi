@@ -147,6 +147,20 @@ describe('owner requirement: "Continue to step 1" for a FloFi Wallet owner-step 
     expect(server.decline).not.toHaveBeenCalled();
     expect(r.onProposal).toHaveBeenCalledWith(proposalOf('authorized'));
   });
+  it('final review (P1): FloFi Wallet refusing a signature it was already asked for is said in its own words, never APPROVAL_UNAVAILABLE', async () => {
+    server.prepare.mockResolvedValue(CIRCLE);
+    for (const code of ['FLOFI_WALLET_ALREADY_SIGNED', 'FLOFI_WALLET_SIGNATURE_UNKNOWN']) {
+      browser.sign.mockRejectedValueOnce(new Error(code));
+      const r = click(claim(run()), 'Continue to step 1');
+      await answerCard(true);
+      await settled(r);
+      expect(r.onError).toHaveBeenCalledWith(code);
+      hooks.refs.length = 0; hooks.sets.length = 0;
+    }
+    expect(server.authorize).not.toHaveBeenCalled();
+    const { CIRCLE_REFUSAL } = await import('../domain/token-fee');
+    expect(CIRCLE_REFUSAL.FLOFI_WALLET_ALREADY_SIGNED).toMatch(/already asked for this signature once.*Nothing was sent.*prepares a new one/);
+  });
   it('a transient answer is shown and nothing is loaded (asking again can still find Circle)', async () => {
     server.prepare.mockResolvedValue({ ok: false, code: 'USER_FUNDED_RPC_UNAVAILABLE' });
     const r = click(claim(run()), 'Continue to step 1');

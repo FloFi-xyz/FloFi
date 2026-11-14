@@ -336,7 +336,10 @@ const isCircleFlow = (flow: SigningFlow) => Object.hasOwn(CIRCLE_NETWORKS, flow)
  *                  the recorded nonce), and that nonce still the account's pending one (FLOFI_WALLET_NONCE_MISMATCH otherwise: the account moved)
  *   permit         stage PERMIT: exactly the USDC permit of the facts (spender = Circle's pinned paymaster, value = the reviewed cap)
  *   operation      stage OPERATION: exactly the operation's typed data rebuilt from the facts
- * Each is claimed once (its attempt id names the run, the group, the kind and what it binds). The summary is the Review's own words.
+ * Each is claimed once (its attempt id names the run, the group, the PREPARATION, the kind and what it binds): the account nonce and the USDC
+ * permit nonce stay the same when the group is prepared again (a cancel in Privy, a retryable refusal, an expiry), so only the preparation's own
+ * identity (`preparationId`; a preparation stored before it: its validity) lets a later preparation be signed, while each one is signed once.
+ * The summary is the Review's own words.
  */
 async function circleGroupSigning(flow: SigningFlow, runId: string, loaded: CircleSigningRun, request: ManagedSigningRequest, deps: ManagedSigningDeps,
   now: number): Promise<ManagedSigningResult> {
@@ -391,7 +394,8 @@ async function circleGroupSigning(flow: SigningFlow, runId: string, loaded: Circ
     : lines(['Operation', `FloFi workflow steps on ${network.network}`], ['Network fee', fee === null ? null : `At most ${fee}, paid from your USDC through Circle`],
       ['Account', c.upgrade ? 'Upgraded to a smart account in this operation' : 'Your smart account']);
   if (!summaryLines) return refuse(NO_MATCH);
-  return { ok: true, value: { attempt: `${flow}:${runId}:g${g.groupIndex}:${kind}:${bound}`, owner: address, expiresAtMs: expires,
+  const preparation = c.preparationId ?? `v${expires}`;
+  return { ok: true, value: { attempt: `${flow}:${runId}:g${g.groupIndex}:${preparation}:${kind}:${bound}`, owner: address, expiresAtMs: expires,
     ...kind === 'authorization' ? { authorization: { digest } } : { typedData: { digest, kind } },
     summary: { flow: flow as SigningSummary['flow'], runId, network: network.network, chain, realFunds: true,
       action: kind === 'authorization' ? 'Smart account upgrade (signature)' : kind === 'permit' ? 'USDC permit for the network fee (signature)' : 'Workflow operation (signature)',

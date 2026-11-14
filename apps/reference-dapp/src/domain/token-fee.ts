@@ -70,6 +70,10 @@ export const CIRCLE_REFUSAL: Readonly<Record<string, string>> = {
   // "Not now" on the consent card: refused for a request already signed in part, or one that is not a FloFi Wallet group's Circle fee.
   CIRCLE_DECLINE_ALREADY_SIGNED: 'You already signed part of this request, so FloFi keeps it as it is. Nothing more was signed or sent.',
   CIRCLE_DECLINE_NOT_APPLICABLE: 'This request has no network fee in USDC to decline. Nothing was signed or sent.',
+  // Final review (P1): FloFi Wallet is asked once per signature of a prepared request (the single-use claim); a cancel there, or an answer that
+  // never arrived, spends it. A new preparation is a new request (its own claim): the way forward is to let this one expire and continue.
+  FLOFI_WALLET_ALREADY_SIGNED: 'FloFi Wallet was already asked for this signature once (if you cancelled it there, nothing was signed), so FloFi does not ask it again for this request. Nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.',
+  FLOFI_WALLET_SIGNATURE_UNKNOWN: 'FloFi Wallet may have signed, but FloFi did not receive the signature, so nothing was sent. This request expires within a few minutes; then continue, and FloFi prepares a new one for you to sign.',
 };
 /**
  * Review UX1: the Editor's whole-workflow Review bound who pays group 1's network fee (ETH, or USDC through Circle). The run prepared it with the

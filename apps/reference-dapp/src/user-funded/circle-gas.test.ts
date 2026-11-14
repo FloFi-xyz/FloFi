@@ -430,7 +430,7 @@ describe('ADR-0010 Circle facts are read back strictly', () => {
     expect(circleFactsOf({ circle: { stage: 'OTHER' } })).toBeNull();
     const facts = { stage: 'PERMIT', accountKind: 'METAMASK_DELEGATOR_V1_3', entryPoint: erc4337.ENTRY_POINT_V0_7, paymaster: C.CIRCLE_PAYMASTER_V07, usdc: BASE_MAINNET_SWAP.usdc,
       permitCap: '1', permitNonce: '0', surchargeBps: '1000', marginBps: '2000', nonce: '0', callData: '0x', nativeRequired: '1', usdcSpend: '0',
-      plannedStrategy: 'EVM_WALLET_BATCH', gas: {}, price: {} } satisfies Record<keyof Omit<CircleFacts, 'permitSignature' | 'deadline' | 'upgrade'>, unknown>;
+      plannedStrategy: 'EVM_WALLET_BATCH', gas: {}, price: {} } satisfies Record<keyof Omit<CircleFacts, 'permitSignature' | 'deadline' | 'upgrade' | 'preparationId'>, unknown>;
     expect(circleFactsOf({ circle: facts })?.stage).toBe('PERMIT');
     // Review C2: the calls' deadline, when recorded, is a unix second (a preparation stored before it carries none and reads its calls').
     expect(circleFactsOf({ circle: { ...facts, deadline: '1791789000' } })?.deadline).toBe('1791789000');
@@ -438,6 +438,9 @@ describe('ADR-0010 Circle facts are read back strictly', () => {
     expect(circleFactsOf({ circle: { ...facts, deadline: 1791789000 } })).toBeNull();
     expect(circleFactsOf({ circle: { ...facts, permitCap: '-1' } })).toBeNull();
     expect(circleFactsOf({ circle: { ...facts, accountKind: 'COINBASE' } })).toBeNull();
+    // Final review (P1): the preparation's identity, when recorded, is 128 bits of lowercase hex.
+    expect(circleFactsOf({ circle: { ...facts, preparationId: 'ab'.repeat(16) } })?.preparationId).toBe('ab'.repeat(16));
+    for (const preparationId of ['AB'.repeat(16), 'ab'.repeat(15), 7]) expect(circleFactsOf({ circle: { ...facts, preparationId } })).toBeNull();
     expect(erc7710.evmAddress(C.CIRCLE_PAYMASTER_V08)).toBe(C.CIRCLE_PAYMASTER_V08);
   });
 });
