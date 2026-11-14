@@ -213,4 +213,3 @@ describe('BUILD-ADMIN-001 Copilot settings API (PostgreSQL)', () => {
     expect(probes[1]).toEqual({ outcome: 'FAILED', detail: { model: 'my-model', provider: 'OPENAI', upstreamParam: 'temperature' } });
   });
 });
-
