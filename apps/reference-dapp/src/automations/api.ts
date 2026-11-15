@@ -6,7 +6,9 @@
  *
  *   POST /v1/automations/:method   the owner operations of `operations.ts` (and `availability`, which names nobody). The owner is the
  *                                  server-to-server `x-flofi-workflow-owner` header the BFF sets from the verified wallet session; every
- *                                  query is scoped to it, so another owner's id answers NOT FOUND. `create` needs an idempotency key.
+ *                                  query is scoped to it, so another owner's id answers NOT FOUND. `create` and `replace` (a schedule
+ *                                  change: the replacing rule is created and the old one archived in one transaction) need an
+ *                                  idempotency key (`IDEMPOTENT_OPERATIONS`).
  *   POST /v1/approvals/:method     `/approve` for automation links (view, claim, apply, share — and resume, PR #72's recovery of an
  *                                  APPLIED proposal by its id for its proven claimant, which reissues nothing): the shared platform
  *                                  functions with the automation contributor only, the shared handoff store and this API's own engine

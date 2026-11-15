@@ -10,6 +10,7 @@ import type { FlofiConversation } from '../state/flofi-conversation';
 import { shownMessage } from '../domain/chat-message';
 import { ConversationReviewCard, NetworkChoices, networkChoiceOptions } from './conversation-cards';
 import { CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
+import { CopilotAutomationManager } from './copilot-automation-manager';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
 
 /**
@@ -55,12 +56,12 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
       return row(message.role === 'you', message.id, <div className={`message ${message.role === 'flofi' ? 'system flofi' : message.role}`}>
         {(message.role === 'you' || showLabels) && <small className="sr-only">{tr(message.role === 'you' ? 'YOU' : message.role === 'flofi' || message.role === 'system' && !copilot.enabled ? 'FLOFI' : copilotLabel(message.role, copilot.mode))}</small>}
         {message.role === 'ai' || message.role === 'flofi' ? <>
-          <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} disabled={busy} onPick={send}/>
+          <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} link={message.link} verbatim={message.verbatim} disabled={busy} onPick={send}/>
           {message.review && !reviewInPanel && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
           {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(tr(option))}>{tr(option)}</button>)}</div>}
+            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(message.verbatim ? option : tr(option))}>{message.verbatim ? option : tr(option)}</button>)}</div>}
           {networks && <NetworkChoices options={networks} disabled={busy} onPick={send}/>}
         </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text, ...message.params ?? [])}</p>}
       </div>);
@@ -68,7 +69,10 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
       {/* BUILD0-UX-001: no execution report card in the chat. FloFi's own short messages announce each phase (wallet request, uncertainty, the
           result and what to do next); the Execute stage and the Dashboard keep the steps, transactions and evidence. */}
       {busy && row(false, 'busy', <div className="message ai" role="status"><small className="sr-only">{tr(copilotLabel('ai', copilot.mode))}</small><p>{tr("Interpreting your message…")}</p></div>)}
-      {conversation.automation && <CopilotAutomationProposal input={conversation.automation} owner={owner} {...(proof ? { proof } : {})} dismiss={conversation.dismissAutomation}/>}
+      {conversation.automation && <CopilotAutomationProposal input={conversation.automation} owner={owner} {...(proof ? { proof } : {})} dismiss={conversation.dismissAutomation}
+        onCreated={() => conversation.copilot.automationCreated?.()}/>}
+      {conversation.manage && <CopilotAutomationManager operation={conversation.manage.operation} request={conversation.manage.request} owner={owner} {...(proof ? { proof } : {})}
+        dismiss={conversation.dismissManage}/>}
     </div>
     {/* P0 approved UX (board 04): the label stays for assistive technology (visually hidden); Send is an icon inside the field, neutral until
         there is text, and shows a spinner while FloFi is answering. Submitting is unchanged. */}

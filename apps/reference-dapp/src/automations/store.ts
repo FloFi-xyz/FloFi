@@ -39,7 +39,9 @@ export type RuleRecord = {
 export type NewRule = Pick<RuleRecord, 'ruleId' | 'owner' | 'name' | 'kind' | 'definition' | 'binding' | 'timezone' | 'expiresAt'> & {
   readonly nextEvaluationAt: Date; readonly scheduleCursor: Date | null;
   /** Delegated rules only: created PAUSED, bound to their authorization lineage; they become ACTIVE when the owner signs it. */
-  readonly delegated?: { readonly authorizationId: string } };
+  readonly delegated?: { readonly authorizationId: string };
+  /** A replacement of a PAUSED rule (schedule change) is created PAUSED too: changing a schedule never resumes anything. */
+  readonly paused?: boolean };
 
 export type OccurrenceState = 'PENDING_OWNER' | 'APPROVAL_CREATED' | 'COMPLETED' | 'DISMISSED' | 'EXPIRED' | 'DELEGATED';
 export type OccurrenceKind = 'SCHEDULE' | 'PRICE' | 'WATCH';
@@ -59,7 +61,10 @@ export type NotificationRecord = { readonly occurrenceId: string; readonly chann
 
 /** Reads the evaluator may make inside its locked transaction. */
 export type EvaluationReads = {
-  /** The rule's counted occurrences in the current periods of its limits (`since` per period), excluding `except`. */
+  /**
+   * The rule's counted occurrences in the current periods of its limits (`since` per period), excluding `except` — over the rule's lineage: the
+   * rule and every rule it replaced (a schedule change keeps the same limits, so moving a schedule never resets a period or a cooldown).
+   */
   readonly usage: (periodStarts: { readonly amount: Date | null; readonly count: Date | null }, except?: string) => Promise<Usage>;
   /** The owner's saved workflow the binding came from: its current hash and version, or null when gone. */
   readonly source: (owner: Owner, source: WorkflowSource) => Promise<{ readonly workflowHash: string; readonly version: number } | null>;
@@ -86,6 +91,14 @@ export interface AutomationStore {
    */
   readonly setState: (owner: Owner, ruleId: string, expectedVersion: number, next: 'ACTIVE' | 'PAUSED' | 'ARCHIVED', now: Date,
     resume?: { readonly nextEvaluationAt: Date; readonly scheduleCursor: Date | null }) => Promise<RuleRecord>;
+  /**
+   * A schedule change by replacement (the definition itself is immutable, AUTOMATION_RULE_IMMUTABLE). Runs inside `createRule`'s transaction
+   * (`within`), after `replacement` was inserted: locks the owner's rule `ruleId`, compare-and-sets its `expectedVersion`, requires it
+   * CONFIRM_EACH_TIME, ACTIVE or PAUSED and not waiting for a rebind (`attention`), archives it (its open occurrences end
+   * `AUTOMATION_REPLACED`), records the link in both histories (the lineage `usage` follows), and re-counts the owner's live rules against `maxRules` (the caller admits one extra rule into `createRule` because this one leaves).
+   * Any refusal rolls the whole replacement back. Returns the archived rule.
+   */
+  readonly archiveReplaced: (tx: Queryable, owner: Owner, ruleId: string, expectedVersion: number, replacement: RuleRecord, now: Date, maxRules: number) => Promise<RuleRecord>;
   /** Replaces the bound action (owner's explicit rebind) and clears `attention`. */
   readonly rebind: (owner: Owner, ruleId: string, expectedVersion: number, binding: Binding, now: Date) => Promise<RuleRecord>;
   readonly listOccurrences: (owner: Owner, filter: { readonly ruleId?: string; readonly open?: boolean; readonly limit: number }, now: Date) => Promise<readonly OccurrenceRecord[]>;

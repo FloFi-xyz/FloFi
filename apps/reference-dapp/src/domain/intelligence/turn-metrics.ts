@@ -13,7 +13,7 @@ export type TurnMetrics = { readonly event: 'flofi.copilot.turn'; readonly versi
   readonly code: string | null; readonly interpreted: string | null; readonly mismatch: boolean; readonly clarifications: number; readonly repeatedQuestions: number;
   readonly corrections: number; readonly turnsInRequest: number; readonly proposalSteps: number };
 const ACTIONABLE = new Set(['ACTION', 'COMPOSITION', 'GOAL', 'EDIT', 'REPEAT', 'REMOVE', 'INSERT', 'POSITION', 'AUTOMATION']);
-const OUTCOMES = new Set(['PROPOSAL', 'AUTOMATION_PROPOSAL', 'ANSWER', 'CLARIFICATION', 'UNSUPPORTED', 'FAILED', 'MEMORY']);
+const OUTCOMES = new Set(['PROPOSAL', 'AUTOMATION_PROPOSAL', 'AUTOMATION_MANAGE', 'ANSWER', 'CLARIFICATION', 'UNSUPPORTED', 'FAILED', 'MEMORY']);
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 /** `interpreted`: the model intent's kind, `LOCAL` for a turn FloFi answered itself, null when the model failed. */
 export function turnMetrics(before: CopilotConversation, reply: CopilotReply, next: CopilotConversation, interpreted: string | null, surface: CopilotSurface): TurnMetrics {

@@ -7,6 +7,22 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-UNIFIED-COPILOT-001 — Anthropic fix, conversational Copilot, automations, saved recipients, MCP
+
+**Status: PR FOR OWNER REVIEW on `claude/eloquent-carson-ioqmgc` (from main `f54eb5f`). Evidence: unit, disposable-PostgreSQL and CI. The
+Anthropic fix has offline evidence only: no live key was available, and the live probe is SKIPPED, not passed. Nothing was signed, sent,
+migrated or deployed, and no production setting was changed.**
+- Anthropic `400`: the V2 output contract had 160 union-typed parameters, against Anthropic's limit of 16. Requests over the limit now send the
+  contract as a cached prompt, still under FloFi's full validation. The Admin probe now has the production shape and is tested per channel.
+- Copilot: typo-tolerant network and coin names, always echoed before a proposal. Also local DeFi explanations with follow-ups, resuming an
+  open request, a platform guide, and automation FAQ and management (the owner confirms every change). The same behaviour runs on Web,
+  Telegram and WhatsApp.
+- Saved recipients in Credentials: account-scoped public addresses with exact-name resolution, never sent to a model. Migration 0028 is
+  certified here and applied later by the owner (Release B).
+- MCP: five read-only tools for concepts, strategy explanation, platform help, automation types and automation status.
+
+See the [build note](builds/BUILD-FLOFI-UNIFIED-COPILOT-001.md) and the [0028 release](deploy/RELEASE-SAVED-RECIPIENTS-0028.md).
+
 ## HOTFIX-FLOFI-PRODUCTION-RECOVERY-001 — history, Aave Supply on Arbitrum One, sign-in
 
 **Status: PR on `claude/peaceful-galileo-7r9j2j` (from main `8a92f1f`) — unit, disposable-PostgreSQL, MOCKED loopback-browser and read-only

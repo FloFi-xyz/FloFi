@@ -61,6 +61,20 @@ describe('BUILD-AUTOMATION-001 Automations BFF on the remote runtime', () => {
     expect(JSON.parse(String(create.body))).toEqual({ args: [{ name: 'x' }] });
   });
 
+  it('forwards a schedule replacement for the verified owner only, idempotency-keyed like a creation', async () => {
+    const transport = reply({ ok: true, value: { created: { ruleId: 'aut_new' }, archived: { ruleId: 'aut_old' } } });
+    const args = ['aut_old', 2, { schedule: { frequency: 'WEEKLY', weekday: 5, time: '09:30' } }];
+    expect(await automationOperation('replace', args, evm, { principals: async () => [evm], env: REMOTE, transport }))
+      .toEqual({ ok: true, value: { created: { ruleId: 'aut_new' }, archived: { ruleId: 'aut_old' } } });
+    const [url, init] = transport.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.href).toBe('https://api.flofi.example/v1/automations/replace');
+    expect(init.headers).toMatchObject({ 'x-flofi-workflow-owner': `eip155:${evm.address}`, 'idempotency-key': expect.any(String) });
+    expect(JSON.parse(String(init.body))).toEqual({ args });
+    // Another wallet, or none, is never forwarded.
+    expect(await automationOperation('replace', args, evm, { principals: async () => [solana], env: REMOTE, transport })).toEqual({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
   it('fails closed: an API without automations, a malformed answer, a transport failure, no runtime', async () => {
     const as = (transport: typeof fetch, env: Record<string, string> = REMOTE) => automationOperation('overview', [], evm, { principals: async () => [evm], env, transport });
     expect(await as(reply({ ok: false, code: 'FLOW_NOT_FOUND' }, 404))).toEqual({ ok: false, code: 'AUTOMATIONS_NOT_ENABLED' });

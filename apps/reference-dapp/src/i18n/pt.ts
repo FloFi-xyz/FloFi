@@ -56,8 +56,13 @@ import { portugueseRound2Frontend } from './pt-round2-frontend';
 import { portugueseGasCircle } from './pt-gas-circle';
 import { portugueseGasKora } from './pt-gas-kora';
 import { portugueseGasZeroEx } from './pt-gas-zerox';
+import { portugueseSavedRecipients } from './pt-saved-recipients';
+import { portugueseCopilotAssist } from './pt-copilot-assist';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
+  ...portugueseSavedRecipients,
+  ...portugueseCopilotAssist,
   ...portugueseCatalogReliability,
   ...portugueseWorkflowExecution,
   // BUILD-FLOFI-BUILDER-UX-002: new keys only, first so every existing translation of a shared word still wins.

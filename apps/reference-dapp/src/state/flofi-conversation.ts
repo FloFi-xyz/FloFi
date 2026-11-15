@@ -2,6 +2,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import type { AutomationInput } from '../automations/definition';
+import type { CopilotReply } from '../domain/copilot-conversation';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { parseLocalCommand, summarize, type Command } from '../domain/commands';
 import { editorReducer } from '../domain/editor';
@@ -143,6 +144,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const [messages, setMessages] = useState<ChatMessage[]>(() => [intro()]);
   const [input, setInput] = useState('');
   const [automation, setAutomation] = useState<AutomationInput | null>(null);
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: an automation-management request the chat shows as the owner's own automations (read, then confirm). */
+  const [manage, setManage] = useState<NonNullable<CopilotReply['manage']> | null>(null);
   // UX-001: an exact Send waiting for its destination ("Which wallet should I send it to?").
   const [destination, setDestination] = useState<{ request: string; network: string } | null>(null);
   const [question, setQuestionState] = useState<Question | null>(null);
@@ -222,7 +225,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null, lastOwner = useRef(ownerKey), lastEpoch = useRef(epoch), lastWorkflow = useRef(state.workflow.workflowId);
   function reset() {
     session.current += 1; ids.current = 1;
-    setMessages([intro()]); setQuestion(null); setAutomation(null); setDestination(null); setInput('');
+    // BUILD-FLOFI-UNIFIED-COPILOT-001: the automation manager card belongs to the previous owner's conversation too.
+    setMessages([intro()]); setQuestion(null); setAutomation(null); setManage(null); setDestination(null); setInput('');
     copilot.clear(); pendingCommit.current = null; lastCommit.current = null; reviewLock.current = null; watch.current = null; restored.current = null;
     resume.current = null; handover.current = null; lastReview.current = null; requote.current = null; declined.current = new Set(); finished.current = null;
   }
@@ -851,7 +855,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // P0 approved UX (board 07): while a blocker is active, "explain / why? / não entendi" explains THAT blocker, with the same facts as the panel.
       // It changes nothing else: an open question keeps its answer buttons, a promised auto-continue stays promised, and a clarification the model
       // is drafting still receives the message. A run whose request already landed is never told "nothing was sent": only this request was not.
-      if (bridge.blocker && isExplainRequest(text) && !copilot.drafting()) {
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: right after a DeFi concept explanation, "não entendi" asks about that concept instead.
+      if (bridge.blocker && isExplainRequest(text) && !copilot.drafting() && !copilot.explaining?.()) {
         const blocker = bridge.blocker, facts = blockerExplanation(blocker), started = Boolean(blocker.started || currentExecution(latest.current.bridge.progress)?.started);
         // The blocker's title and sentence are catalog keys, each translated and joined as `{0}: {1}` (never an English piece in Portuguese).
         const said = (language: ConversationLanguage) => facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
@@ -883,7 +888,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           bare === 'NO' ? {} : { options: [asked.addAnother, asked.review] }]);
         return;
       }
-      const request = lifecycleRequest(text);
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: while FloFi's own question is open, "continuar" resumes that request (the Copilot re-asks it); it is
+      // never read as "review the workflow".
+      const request = copilot.drafting() ? null : lifecycleRequest(text);
       if (request) { lifecycle(scope, request, language); return; }
       if (bridge.networkAction && offeredNetwork(text)) { bridge.networkAction.request(); return; }
       // Offered options are matched in either language (the interface language may have changed since they were offered).
@@ -900,7 +907,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     }
     await Promise.all(catalogNetworksNamed(text).map(network => ensureNetworkCatalog(false, network.chain)));
     if (scope !== session.current) return;
-    setAutomation(null);
+    setAutomation(null); setManage(null);
     const now = latest.current;
     if (text.toLowerCase() === 'explain') {
       dismissProposal();
@@ -952,6 +959,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         const reply = await copilot.respond(text);
         if (scope !== session.current) return;
         if (reply?.automation) setAutomation(reply.automation);
+        if (reply?.manage) setManage(reply.manage);
         if (!reply) { append(scope, { role: 'system', text: guidance }); return; }
         if (direct && reply.command) {
           const spoken: ConversationLanguage = copilot.language() === 'PT' ? 'PT' : 'EN';
@@ -959,9 +967,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
             : reply.sentence ? spoken === 'PT' ? `Interpretado como “${reply.sentence}”.` : `Interpreted as “${reply.sentence}”.` : null;
           commit(scope, reply.command, { exact: false, role: 'ai', language: spoken, ...reply.command.type === 'MANAGE_SOLANA_POSITION' && read
             ? { summary: read.replace(/\.$/, ''), notes: reply.notes } : { notes: [...read ? [read] : [], ...reply.notes] } });
+          // BUILD-FLOFI-UNIFIED-COPILOT-001: the optional offer to save the typed address, after the proposal and independent of it.
+          if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
           return;
         }
-        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options });
+        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options, ...reply.link ? { link: reply.link } : {}, ...reply.verbatimOptions ? { verbatim: true } : {} });
+        if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
         return;
       }
       dismissProposal();
@@ -971,6 +982,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const phase = direct ? conversationPhase(bridge, question?.open ?? null, Boolean(destination) || copilot.drafting() || question?.open.kind === 'RESOLVE_EDIT') : null;
   // BUILD0-UX-001: `submit` is the same `send`, awaitable, for Build 0 (the request and FloFi's answer stay in this conversation).
   return { messages, input, setInput, send: (text: string) => void send(text), submit: send, busy: copilot.busy || sending, copilot, automation, dismissAutomation: () => setAutomation(null),
+    manage, dismissManage: () => setManage(null),
     phase, question: question?.open.kind ?? null, direct };
 }
 export type FlofiConversation = ReturnType<typeof useFlofiConversation>;

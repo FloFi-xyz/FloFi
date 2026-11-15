@@ -210,6 +210,6 @@ describe('BUILD-ADMIN-001 Copilot settings API (PostgreSQL)', () => {
       .toEqual({ status: 429, body: { ok: false, code: 'ADMIN_PROBE_RATE_LIMITED' } });
     const probes = (await t.db.query<{ outcome: string; detail: Record<string, unknown> }>(`SELECT outcome, detail FROM admin_audit_events WHERE kind = 'ADMIN_COPILOT_PROBE' ORDER BY event_id`)).rows;
     expect(probes.length).toBe(PROBE_LIMIT);
-    expect(probes[1]).toEqual({ outcome: 'FAILED', detail: { model: 'my-model', provider: 'OPENAI', upstreamParam: 'temperature' } });
+    expect(probes[1]).toEqual({ outcome: 'FAILED', detail: { model: 'my-model', provider: 'OPENAI', scope: 'WEB', upstreamParam: 'temperature', upstreamStatus: 400 } });
   });
 });

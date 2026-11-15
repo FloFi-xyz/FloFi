@@ -62,6 +62,10 @@
       "path": "apps/reference-dapp/src/accounts/privy-zod.test.ts",
       "stage": "unit"
     },
+    "app.accounts.recipient-store.pg": {
+      "path": "apps/reference-dapp/src/accounts/recipient-store.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.accounts.turnkey-server": {
       "path": "apps/reference-dapp/src/accounts/turnkey-server.test.ts",
       "stage": "unit"
@@ -142,8 +146,20 @@
       "path": "apps/reference-dapp/src/automations/domain.test.ts",
       "stage": "unit"
     },
+    "app.automations.explain": {
+      "path": "apps/reference-dapp/src/automations/explain.test.ts",
+      "stage": "unit"
+    },
+    "app.automations.operations": {
+      "path": "apps/reference-dapp/src/automations/operations.test.ts",
+      "stage": "unit"
+    },
     "app.automations.remote.pg": {
       "path": "apps/reference-dapp/src/automations/remote.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.automations.replace.pg": {
+      "path": "apps/reference-dapp/src/automations/replace.pg.test.ts",
       "stage": "postgres"
     },
     "app.automations.schedule": {
@@ -196,6 +212,10 @@
     },
     "app.channels.core.conversation-mainnet": {
       "path": "apps/reference-dapp/src/channels/core/conversation-mainnet.test.ts",
+      "stage": "unit"
+    },
+    "app.channels.core.copilot-assist": {
+      "path": "apps/reference-dapp/src/channels/core/copilot-assist.test.ts",
       "stage": "unit"
     },
     "app.channels.core.delivery": {
@@ -252,6 +272,10 @@
     },
     "app.components.conversation-cards": {
       "path": "apps/reference-dapp/src/components/conversation-cards.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.copilot-automation-manager": {
+      "path": "apps/reference-dapp/src/components/copilot-automation-manager.test.tsx",
       "stage": "unit"
     },
     "app.components.copilot-automation-proposal": {
@@ -342,6 +366,10 @@
       "path": "apps/reference-dapp/src/domain/canonical-execution-status.test.ts",
       "stage": "unit"
     },
+    "app.domain.copilot-assist": {
+      "path": "apps/reference-dapp/src/domain/copilot-assist.test.ts",
+      "stage": "unit"
+    },
     "app.domain.copilot-context": {
       "path": "apps/reference-dapp/src/domain/copilot-context.test.ts",
       "stage": "unit"
@@ -374,8 +402,20 @@
       "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
       "stage": "unit"
     },
+    "app.domain.intelligence.concepts": {
+      "path": "apps/reference-dapp/src/domain/intelligence/concepts.test.ts",
+      "stage": "unit"
+    },
     "app.domain.intelligence.conversation-regression": {
       "path": "apps/reference-dapp/src/domain/intelligence/conversation-regression.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.intelligence.platform-guide": {
+      "path": "apps/reference-dapp/src/domain/intelligence/platform-guide.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.intelligence.unified-copilot": {
+      "path": "apps/reference-dapp/src/domain/intelligence/unified-copilot.test.ts",
       "stage": "unit"
     },
     "app.domain.journey-metrics": {
@@ -392,6 +432,10 @@
     },
     "app.domain.privacy-notice": {
       "path": "apps/reference-dapp/src/domain/privacy-notice.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.saved-recipients": {
+      "path": "apps/reference-dapp/src/domain/saved-recipients.test.ts",
       "stage": "unit"
     },
     "app.domain.wallet-inventory": {
@@ -558,6 +602,10 @@
       "path": "apps/reference-dapp/src/lib/dashboard/run-mapping.test.ts",
       "stage": "unit"
     },
+    "app.mcp.automation-status": {
+      "path": "apps/reference-dapp/src/mcp/automation-status.test.ts",
+      "stage": "unit"
+    },
     "app.mcp.beta-access.pg": {
       "path": "apps/reference-dapp/src/mcp/beta-access.pg.test.ts",
       "stage": "postgres"
@@ -569,6 +617,10 @@
     "app.mcp.deadline.pg": {
       "path": "apps/reference-dapp/src/mcp/deadline.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.mcp.education": {
+      "path": "apps/reference-dapp/src/mcp/education.test.ts",
+      "stage": "unit"
     },
     "app.mcp.gateway": {
       "path": "apps/reference-dapp/src/mcp/gateway.test.ts",
@@ -594,6 +646,10 @@
       "path": "apps/reference-dapp/src/mcp/oauth/foundation.test.ts",
       "stage": "unit"
     },
+    "app.mcp.oauth.no-model": {
+      "path": "apps/reference-dapp/src/mcp/oauth/no-model.test.ts",
+      "stage": "unit"
+    },
     "app.mcp.oauth.server.pg": {
       "path": "apps/reference-dapp/src/mcp/oauth/server.pg.test.ts",
       "stage": "postgres"
@@ -616,6 +672,10 @@
     },
     "app.platform.engineering-skills": {
       "path": "apps/reference-dapp/src/platform/engineering-skills.test.ts",
+      "stage": "unit"
+    },
+    "app.platform.explain": {
+      "path": "apps/reference-dapp/src/platform/explain.test.ts",
       "stage": "unit"
     },
     "app.platform.intelligence-parity": {
@@ -764,6 +824,10 @@
     },
     "app.state.review-authorization": {
       "path": "apps/reference-dapp/src/state/review-authorization.test.ts",
+      "stage": "unit"
+    },
+    "app.state.saved-recipients-store": {
+      "path": "apps/reference-dapp/src/state/saved-recipients-store.test.ts",
       "stage": "unit"
     },
     "app.state.wallet-review-continuity": {
@@ -920,6 +984,10 @@
     },
     "cloud-runtime.certificate-0027.pg": {
       "path": "packages/cloud-runtime/test/certificate-0027.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.certificate-0028.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0028.pg.test.ts",
       "stage": "postgres"
     },
     "cloud-runtime.copilot-metrics-migration.pg": {
@@ -1355,6 +1423,7 @@
     "app.app.wallet-session-action",
     "app.automations.boundaries",
     "app.channels.beta-access",
+    "app.channels.core.copilot-assist",
     "app.channels.core.delivery",
     "app.channels.core.workflow",
     "app.components.automations-workspace",
@@ -1365,7 +1434,9 @@
     "app.domain.copilot-context",
     "app.domain.intelligence",
     "app.domain.intelligence.conversation-regression",
+    "app.domain.intelligence.unified-copilot",
     "app.domain.journey-metrics",
+    "app.domain.saved-recipients",
     "app.editor.chat-canvas-parity",
     "app.flight.beta-access",
     "app.flight.campaign",
@@ -1374,11 +1445,14 @@
     "app.flight.launch",
     "app.i18n.catalog",
     "app.legal.privacy",
+    "app.mcp.automation-status",
+    "app.mcp.education",
     "app.mcp.gateway-deadline",
     "app.mcp.oauth.foundation",
     "app.platform.copilot-tools",
     "app.platform.engineering-continuity",
     "app.platform.engineering-skills",
+    "app.platform.explain",
     "app.platform.intelligence-parity",
     "app.server.base-swap",
     "app.server.channel-copilot-toolkit",
@@ -1494,6 +1568,7 @@
       "sources": [
         "apps/reference-dapp/playwright.auth-wallets.config.ts",
         "apps/reference-dapp/src/accounts/account-csp.ts",
+        "apps/reference-dapp/src/accounts/recipient-store.ts",
         "apps/reference-dapp/src/accounts/signer-pages.ts",
         "apps/reference-dapp/src/accounts/account-host.ts",
         "apps/reference-dapp/src/accounts/account-model.ts",
@@ -1532,6 +1607,7 @@
         "apps/reference-dapp/src/app/api/wallet/wallets/route.ts",
         "apps/reference-dapp/src/app/flofi-wallet-action.ts",
         "apps/reference-dapp/src/app/flofi-wallet-signing.ts",
+        "apps/reference-dapp/src/app/recipient-action.ts",
         "apps/reference-dapp/src/components/account/account-icons.tsx",
         "apps/reference-dapp/src/components/account/account-messages.ts",
         "apps/reference-dapp/src/components/account/account-shell.tsx",
@@ -1543,11 +1619,13 @@
         "apps/reference-dapp/src/components/account/sign-in.tsx",
         "apps/reference-dapp/src/components/account/sign-in-failure.ts",
         "apps/reference-dapp/src/components/flofi-wallet-continue.tsx",
+        "apps/reference-dapp/src/domain/saved-recipients.ts",
         "apps/reference-dapp/src/i18n/pt-accounts.ts",
         "apps/reference-dapp/src/i18n/pt-privy.ts",
         "apps/reference-dapp/src/i18n/pt-wallet.ts",
         "apps/reference-dapp/src/server/managed-signing.ts",
         "apps/reference-dapp/src/server/managed-wallet-evm.ts",
+        "apps/reference-dapp/src/state/saved-recipients-store.ts",
         "apps/reference-dapp/src/vendor/privy-removed-dependency.ts",
         "apps/reference-dapp/src/wallet-app/arming.ts",
         "apps/reference-dapp/src/wallet-app/channel.ts",
@@ -1588,6 +1666,7 @@
         "app.accounts.privy-client",
         "app.accounts.privy-server",
         "app.accounts.privy-zod",
+        "app.accounts.recipient-store.pg",
         "app.accounts.turnkey-server",
         "app.accounts.wallet-origin",
         "app.accounts.wallet-relay",
@@ -1599,9 +1678,11 @@
         "app.components.account.import-wallet",
         "app.components.account.sign-in",
         "app.components.flofi-wallet-continue",
+        "app.domain.saved-recipients",
         "app.e2e.auth-wallets",
         "app.server.managed-signing",
         "app.server.managed-wallet-evm",
+        "app.state.saved-recipients-store",
         "app.wallet-app.arming",
         "app.wallet-app.boundaries",
         "app.wallet-app.channel",
@@ -2595,6 +2676,7 @@
         "apps/reference-dapp/src/automations/definition.ts",
         "apps/reference-dapp/src/automations/dispatch.ts",
         "apps/reference-dapp/src/automations/evaluator.ts",
+        "apps/reference-dapp/src/automations/explain.ts",
         "apps/reference-dapp/src/automations/http.ts",
         "apps/reference-dapp/src/automations/labels.ts",
         "apps/reference-dapp/src/automations/limits.ts",
@@ -2617,10 +2699,15 @@
       "suites": [
         "app.automations.boundaries",
         "app.automations.domain",
+        "app.automations.explain",
+        "app.automations.operations",
         "app.automations.remote.pg",
+        "app.automations.replace.pg",
         "app.automations.schedule",
         "app.automations.scheduler.pg",
-        "app.backend.automation-production.pg"
+        "app.backend.automation-production.pg",
+        "app.components.copilot-automation-manager",
+        "app.mcp.automation-status"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -2870,6 +2957,7 @@
         "app.channels.core.conversation-mainnet",
         "app.channels.core.approval",
         "app.channels.core.conversation",
+        "app.channels.core.copilot-assist",
         "app.channels.core.delivery",
         "app.channels.core.workflow",
         "app.channels.route-discovery",
@@ -2927,6 +3015,7 @@
         "app.learning.automatic.pg",
         "app.learning.learning.pg",
         "cloud-runtime.certificate-0027.pg",
+        "cloud-runtime.certificate-0028.pg",
         "cloud-runtime.copilot-metrics-migration.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
@@ -3161,6 +3250,7 @@
       "sources": [
         "apps/reference-dapp/src/components/conversation-cards.tsx",
         "apps/reference-dapp/src/components/copilot-ai.tsx",
+        "apps/reference-dapp/src/components/copilot-automation-manager.tsx",
         "apps/reference-dapp/src/components/copilot-panel.tsx",
         "apps/reference-dapp/src/components/flofi-avatar.tsx",
         "apps/reference-dapp/src/components/proposal-review-position.ts",
@@ -3168,8 +3258,10 @@
       ],
       "suites": [
         "app.components.conversation-cards",
+        "app.components.copilot-automation-manager",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
+        "app.domain.intelligence.unified-copilot",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.state.flofi-conversation"
@@ -3881,6 +3973,9 @@
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
         "apps/reference-dapp/src/domain/build-entry.ts",
         "apps/reference-dapp/src/domain/approved-ux.ts",
+        "apps/reference-dapp/src/domain/copilot-assist.ts",
+        "apps/reference-dapp/src/domain/intelligence/concepts.ts",
+        "apps/reference-dapp/src/domain/intelligence/platform-guide.ts",
         "apps/reference-dapp/src/domain/review-block.ts",
         "apps/reference-dapp/src/domain/review-block-test-harness.ts",
         "apps/reference-dapp/src/domain/commands.ts",
@@ -3916,12 +4011,17 @@
         "apps/reference-dapp/src/domain/token-fee.ts"
       ],
       "suites": [
+        "app.domain.copilot-assist",
         "app.domain.copilot-mainnet-bridge",
         "app.domain.build-entry",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.domain.intelligence",
+        "app.domain.intelligence.concepts",
         "app.domain.intelligence.conversation-regression",
+        "app.domain.intelligence.platform-guide",
+        "app.domain.intelligence.unified-copilot",
+        "app.domain.saved-recipients",
         "app.e2e.build-entry",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
@@ -4476,6 +4576,7 @@
         "apps/reference-dapp/src/i18n/pt-chat-editor.ts",
         "apps/reference-dapp/src/i18n/pt-concurrency.ts",
         "apps/reference-dapp/src/i18n/pt-conversation.ts",
+        "apps/reference-dapp/src/i18n/pt-copilot-assist.ts",
         "apps/reference-dapp/src/i18n/pt-cross-chain.ts",
         "apps/reference-dapp/src/i18n/pt-delegation.ts",
         "apps/reference-dapp/src/i18n/pt-domain.ts",
@@ -4500,6 +4601,7 @@
         "apps/reference-dapp/src/i18n/pt-product.ts",
         "apps/reference-dapp/src/i18n/pt-review.ts",
         "apps/reference-dapp/src/i18n/pt-robinhood.ts",
+        "apps/reference-dapp/src/i18n/pt-saved-recipients.ts",
         "apps/reference-dapp/src/i18n/pt-simulation.ts",
         "apps/reference-dapp/src/i18n/pt-solana-composition.ts",
         "apps/reference-dapp/src/i18n/pt-solana-mainnet.ts",
@@ -4650,6 +4752,7 @@
       "sources": [
         "apps/reference-dapp/src/mcp/app/panel.ts",
         "apps/reference-dapp/src/mcp/approval-profile.ts",
+        "apps/reference-dapp/src/mcp/automations.ts",
         "apps/reference-dapp/src/mcp/beta-access.ts",
         "apps/reference-dapp/src/mcp/config.ts",
         "apps/reference-dapp/src/mcp/deadline.ts",
@@ -4676,13 +4779,16 @@
         "apps/reference-dapp/src/mcp/tools.ts"
       ],
       "suites": [
+        "app.mcp.automation-status",
         "app.mcp.deadline",
         "app.mcp.deadline.pg",
+        "app.mcp.education",
         "app.mcp.gateway",
         "app.mcp.handoff.workflow.pg",
         "app.mcp.link-integrity.pg",
         "app.mcp.mainnet-only",
         "app.mcp.oauth.foundation",
+        "app.mcp.oauth.no-model",
         "app.mcp.oauth.server.pg",
         "app.mcp.pix-approval-status",
         "app.platform.engineering-continuity",
@@ -4825,6 +4931,7 @@
         "apps/reference-dapp/src/platform/capabilities.ts",
         "apps/reference-dapp/src/platform/catalogs.ts",
         "apps/reference-dapp/src/platform/executions.ts",
+        "apps/reference-dapp/src/platform/explain.ts",
         "apps/reference-dapp/src/platform/fixed-window.ts",
         "apps/reference-dapp/src/platform/handoff-store.ts",
         "apps/reference-dapp/src/platform/ids.ts",
@@ -4841,6 +4948,7 @@
       "suites": [
         "action-registry.engineering-regression",
         "app.platform.engineering-continuity",
+        "app.platform.explain",
         "app.platform.parity",
         "reference-compiler.review",
         "reference-compiler.simulation",
@@ -7816,12 +7924,14 @@
   ],
   "requiredPostgresSuites": [
     "app.accounts.account-store-schema19.pg",
+    "app.accounts.recipient-store.pg",
     "app.admin.flight.pg",
     "app.admin.http.pg",
     "app.admin.settings.pg",
     "app.admin.support-http.pg",
     "app.automations.beta-access.pg",
     "app.automations.remote.pg",
+    "app.automations.replace.pg",
     "app.automations.scheduler.pg",
     "app.backend.automation-production.pg",
     "app.backend.beta-access.pg",
@@ -7853,6 +7963,7 @@
     "app.workflow-runs.confirm-run.pg",
     "app.workflow-runs.user-funded-run.pg",
     "cloud-runtime.certificate-0027.pg",
+    "cloud-runtime.certificate-0028.pg",
     "cloud-runtime.copilot-metrics-migration.pg",
     "cloud-runtime.dispatch.pg",
     "cloud-runtime.flight-flofi-migration.pg",

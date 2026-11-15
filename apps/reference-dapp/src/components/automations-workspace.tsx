@@ -24,6 +24,8 @@ import { automationCapabilityIssue } from '../domain/copilot-automation';
 import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS, bpsToPercent, percentToBps } from '../domain/slippage-policy';
 export { bpsToPercent, percentToBps } from '../domain/slippage-policy';
 import { StatusTag } from './dashboard/dashboard-status';
+// The label maps and the schedule / condition / action text are shared with the Copilot, Telegram and MCP (`automations/explain.ts`).
+import { actionText, conditionText, ERROR_TEXT, KIND_LABEL, OCCURRENCE_LABEL, OUTCOME_LABEL, scheduleText, STATE_LABEL, usd, WEEKDAYS } from '../automations/explain';
 
 export type AutomationNavigation = { readonly owner: WorkflowOwner | null; readonly proof: ReturnType<typeof useWalletProof>; readonly onPropose: (command: Command) => void;
   /** BUILD-AUTOMATION-002: "Automate this workflow" — the exact Canvas workflow, when the owner came from the Canvas. */
@@ -31,48 +33,9 @@ export type AutomationNavigation = { readonly owner: WorkflowOwner | null; reado
 type Kind = RuleView['kind'];
 type Asset = 'ETH' | 'BTC' | 'SOL';
 
-const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
-const STATE_LABEL: Readonly<Record<string, string>> = { ACTIVE: 'Active', PAUSED: 'Paused', EXPIRED: 'Expired', ARCHIVED: 'Archived' };
-// P0 approved UX (board 12): plain names for the three routines.
-const KIND_LABEL: Readonly<Record<Kind, string>> = { SCHEDULED_DCA: 'Recurring buy', PRICE_TRIGGER: 'Price trigger', DAILY_WATCH: 'Daily watch' };
-const OCCURRENCE_LABEL: Readonly<Record<string, string>> = { PENDING_OWNER: 'Awaiting you', APPROVAL_CREATED: 'Opened for review', COMPLETED: 'Loaded into your workflow',
-  DISMISSED: 'Dismissed', EXPIRED: 'Expired' };
-const OUTCOME_LABEL: Readonly<Record<string, string>> = {
-  AUTOMATION_CREATED: 'Automation created', AUTOMATION_PAUSED: 'Paused', AUTOMATION_RESUMED: 'Resumed', AUTOMATION_ARCHIVED: 'Archived', AUTOMATION_EXPIRED: 'Automation expired',
-  AUTOMATION_REBOUND: 'Rebound to the current workflow', TRIGGERED: 'Triggered — proposal created', WATCH_REPORTED: 'Market round reported',
-  ARMED: 'Evaluated — condition not met (watching)', CONDITION_NOT_MET: 'Evaluated — condition not met', CONDITION_ALREADY_MET: 'Condition already met — waiting for a new crossing',
-  CONDITION_STILL_MET: 'Condition still met — no new proposal', REARMED: 'Condition cleared — watching again', COOLDOWN: 'Crossing during the cooldown — no proposal',
-  LIMIT_BLOCKED: 'Blocked by a limit — no proposal', MISSED: 'Missed while FloFi was unavailable', WORKFLOW_CHANGED: 'Saved workflow changed — rebind required',
-  STRATEGY_STALE: 'No longer reproducible — rebind required', APPROVAL_REQUESTED: 'Opened for review', APPROVAL_APPLIED: 'Loaded into your workflow',
-  OWNER_DISMISSED: 'Dismissed', OWNER_PREPARED_BUY: 'You started your own buy in the Editor', OWNER_PREPARED_SELL: 'You started your own sell in the Editor', DUPLICATE_TRIGGER: 'Duplicate trigger ignored',
-  PRICE_STALE: 'Price observation too old — ignored', PRICE_SOURCE_OFF: 'No price source on this deployment', PRICE_SOURCE_TIMEOUT: 'Price source timed out — ignored',
-  PRICE_SOURCE_UNREACHABLE: 'Price source unreachable — ignored', PRICE_SOURCE_ERROR: 'Price source error — ignored', PRICE_FEED_MISMATCH: 'Price feed failed verification — ignored',
-  OCCURRENCE_EXPIRED: 'Expired', AUTOMATION_REBOUND_WITHDRAWN: 'Withdrawn by a rebind' };
-const ERROR_TEXT: Readonly<Record<string, string>> = {
-  WALLET_SESSION_REQUIRED: 'Verify wallet ownership to use automations.', AUTOMATIONS_NOT_ENABLED: 'Automations are not enabled on this deployment.',
-  AUTOMATION_STORE_UNAVAILABLE: 'Automations are unavailable on this deployment right now.', AUTOMATION_SCHEMA_NOT_INSTALLED: 'Automations are unavailable on this deployment right now.',
-  AUTOMATION_VERSION_CONFLICT: 'This automation changed in another session. Refresh and try again.', AUTOMATION_RULE_LIMIT: 'You have reached the maximum number of automations.',
-  BTC_EXECUTION_ROUTE_UNAVAILABLE: 'FloFi has no BTC swap route yet. You can watch BTC and get alerts, but FloFi cannot prepare a BTC purchase.',
-  OWNER_EXECUTION_NOT_IMPLEMENTED: 'FloFi cannot execute this action with your wallet yet.', MAINNET_HANDOFF_DISABLED_BY_POLICY: 'Real-funds automations are disabled on this deployment.',
-  FLOW_NOT_ENABLED_IN_DEPLOYMENT: 'This action is not enabled on this deployment.', PUBLIC_RECORDING_OFF: 'This action is not enabled on this deployment.',
-  LIMIT_AMOUNT_PER_EXECUTION: 'The amount is above your maximum per execution.', LIMIT_SLIPPAGE: 'The max price difference is above your limit.',
-  LIMIT_PERIOD_AMOUNT: 'This would exceed your maximum amount for the period.', LIMIT_PERIOD_COUNT: 'This would exceed your maximum number of proposals for the period.',
-  PRICE_ASSET_NOT_OBSERVABLE: 'FloFi cannot observe this asset’s price on this deployment.', AUTOMATION_INPUT_INVALID: 'Check the fields and try again.',
-  AUTOMATION_SCHEDULE_INVALID: 'Check the schedule and the time zone.', AUTOMATION_CONDITION_INVALID: 'Check the price condition.', AUTOMATION_AMOUNT_INVALID: 'Enter an amount above zero.',
-  AUTOMATION_EXPIRY_INVALID: 'The expiry must be in the future (at most two years).', AUTOMATION_NAME_INVALID: 'Use 1–80 characters for the name.',
-  AUTOMATION_WORKFLOW_NOT_REPRESENTABLE: 'Choose a saved workflow with exactly one supported EVM swap to automate.',
-  AUTOMATION_WORKFLOW_CHANGED: 'The saved workflow changed. Rebind the automation before reviewing.', AUTOMATION_PAUSED: 'Resume the automation first.',
-  AUTOMATION_OCCURRENCE_EXPIRED: 'This proposal has expired.', AUTOMATION_OCCURRENCE_DISMISSED: 'This proposal was dismissed.', STRATEGY_STALE: 'This proposal is no longer reproducible.',
-  AUTOMATION_OCCURRENCE_COMPLETED: 'You already added this proposal to your workflow.', AUTOMATION_OCCURRENCE_CHANGED: 'This proposal changed. Refresh and try again.',
-  AUTOMATION_ACTION_ASSET_MISMATCH: 'The action must trade the asset the condition watches.', HANDOFF_RATE_LIMITED: 'Too many reviews opened recently. Try again later.',
-  HANDOFF_PENDING_LIMIT: 'Too many open reviews for this automation. Finish or dismiss one first.', AUTOMATION_LINK_RATE_LIMITED: 'Too many codes requested. Try again later.',
-  AUTOMATION_CHAT_NOTIFICATIONS_UNAVAILABLE: 'Telegram notifications are not available on this deployment.',
-  AUTOMATION_WALLET_NAMESPACE_MISMATCH: 'This network needs a wallet of another kind than the one you proved. Only your own wallet can approve its proposals.' };
-
 /** P0 approved UX (board 12): slippage is presented as "Max price difference" in percent; the draft and every submission stay in basis points. */
 const INVALID_PERCENT = 'invalid';
 const percentLabel = (bps: string) => `${bpsToPercent(bps)}%`;
-const usd = (value: string) => { const [whole, fraction = ''] = value.split('.'); return `$${whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction ? `.${fraction.slice(0, 2).padEnd(2, '0')}` : ''}`; };
 function changeOf(o: ObservationView): string | null {
   if (!('priceUsd' in o) || !o.previousPriceUsd) return null;
   const a = Number(o.priceUsd), b = Number(o.previousPriceUsd);
@@ -100,15 +63,11 @@ function Observation({ o }: { o: ObservationView }) {
 }
 
 function useAutomationText() {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   return useMemo(() => ({
-    schedule: (r: Pick<RuleView, 'schedule' | 'timezone'>) => !r.schedule ? '' : r.schedule.frequency === 'DAILY' ? t('Every day at {0} ({1})', r.schedule.time, r.timezone)
-      : t('Every {0} at {1} ({2})', t(WEEKDAYS[(r.schedule.weekday ?? 1) - 1]!), r.schedule.time, r.timezone),
-    condition: (c: NonNullable<RuleView['condition']>) => c.type === 'PRICE_BELOW' ? t('If {0} falls below {1}', c.asset, usd(c.threshold!))
-      : c.type === 'PRICE_ABOVE' ? t('If {0} rises above {1}', c.asset, usd(c.threshold!))
-        : c.type === 'PERCENT_DROP' ? t('If {0} falls {1}% from {2} (at or below {3})', c.asset, c.percent!, usd(c.reference!), usd(c.effectiveThreshold))
-          : t('If {0} rises {1}% from {2} (at or above {3})', c.asset, c.percent!, usd(c.reference!), usd(c.effectiveThreshold)),
-    action: (a: RuleView['action']) => a ? t('Prepare {0} {1} → {2} on {3}', a.amount, a.inputAsset, a.outputAsset, t(a.networkLabel)) : t('Notify me only'),
+    schedule: (r: Pick<RuleView, 'schedule' | 'timezone'>) => scheduleText(r, language),
+    condition: (c: NonNullable<RuleView['condition']>) => conditionText(c, language),
+    action: (a: RuleView['action']) => actionText(a, language),
     limits: (l: RuleView['limits']) => [
       l.maxAmountPerExecution ? t('Max {0} per execution', l.maxAmountPerExecution) : null,
       l.maxAmountPerPeriod ? t('Max {0} per {1}', l.maxAmountPerPeriod.amount, t(l.maxAmountPerPeriod.period.toLowerCase())) : null,
@@ -117,7 +76,7 @@ function useAutomationText() {
       l.maxSlippageBps !== null ? t('Max price difference {0}', percentLabel(String(l.maxSlippageBps))) : null,
     ].filter((v): v is string => Boolean(v)),
     error: (code: string) => ERROR_TEXT[code] ? t(ERROR_TEXT[code]) : DELEGATION_ERROR_TEXT[code] ? t(DELEGATION_ERROR_TEXT[code]) : t('FloFi could not complete this ({0}).', code),
-  }), [t]);
+  }), [t, language]);
 }
 
 // ── Pending decisions ────────────────────────────────────────────────────────────────────────────────────────────────────────

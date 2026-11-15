@@ -4,6 +4,7 @@
  * (2025-11-25 stateless Streamable HTTP by default; the 2026-07-28 envelope on request). No network, no model.
  */
 import type { McpBetaHost } from './beta-access';
+import type { AutomationReadPort } from './automations';
 import { createHash, randomBytes } from 'node:crypto';
 import { handleMcpRequest, type GatewayLogger } from './gateway';
 import type { McpState } from './oauth/state';
@@ -30,13 +31,13 @@ export type Session = {
 };
 /** One client of one gateway configuration. `token: null` sends no Authorization header. */
 export function session(options: { env: Record<string, string>; token: string | null; runtime?: McpRuntime; logger?: GatewayLogger; state?: McpState;
-  now?: () => Date; budgetMs?: number; marginMs?: number; signal?: AbortSignal; betaHost?: McpBetaHost }): Session {
+  now?: () => Date; budgetMs?: number; marginMs?: number; signal?: AbortSignal; betaHost?: McpBetaHost; automations?: AutomationReadPort }): Session {
   let id = 0;
   const post: Session['post'] = async (body, headers = {}) => {
     const response = await handleMcpRequest(new Request('https://flofi.test/api/mcp', { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body),
       ...options.signal ? { signal: options.signal } : {}, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...options.token === null ? {} : { authorization: `Bearer ${options.token}` }, ...headers } }),
     { env: options.env, ...options.betaHost ? { betaHost: options.betaHost } : {}, ...options.runtime ? { runtime: options.runtime } : {}, ...options.logger ? { logger: options.logger } : {},
-      ...options.state ? { state: options.state } : {}, ...options.now ? { now: options.now } : {},
+      ...options.state ? { state: options.state } : {}, ...options.now ? { now: options.now } : {}, ...options.automations ? { automations: options.automations } : {},
       ...options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }, ...options.marginMs === undefined ? {} : { marginMs: options.marginMs } });
     const text = await response.text();
     // Legacy stateless serving answers with one SSE `message` event; modern serving answers with a JSON body.

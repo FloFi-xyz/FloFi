@@ -911,3 +911,58 @@ which touches only the certificate, its fixture, its test and this section (the 
 the fixture's bytes and this anchor), so it can be merged and deployed on its own. Release B (this build) then
 migrates from the Railway API pre-deploy; Release B adds the step-by-step release document `RELEASE-RECONCILIATION-PRIVACY-0027.md`. Without
 Release A there is no application rollback once 0027 is applied. No production migration or release was performed during engineering.
+
+## 20. Certificate 0028_saved_recipients
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0027 `reconciliation_privacy` (`6edd545c…c069`) | 0028 `saved_recipients` | `ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f` |
+
+Migration 0028 (BUILD-FLOFI-UNIFIED-COPILOT-001, Saved Recipients) is additive and changes no row. It creates one empty table,
+`flofi_account_recipients` — an account's saved recipients: a name and a PUBLIC address, nothing else — with only the indexes of its own keys:
+
+- columns `tenant_id`, `account_id`, `recipient_id` (`^rcp_[a-z2-7]{26}$`), `ecosystem` (`EVM` | `SOLANA`), `address` (EVM lower-case `0x` + 40
+  hex, never the zero address; Solana base58 of 32–44 characters, never the System Program), `label` (1–40 characters, no C0/C1 control
+  character), `label_key` (the application's folded comparison key, 1–160 characters), `created_at`, `updated_at`;
+- primary key `(tenant_id, account_id, recipient_id)`; `UNIQUE (tenant_id, account_id, ecosystem, address)` (one record per address and account —
+  per account, not per tenant, because saving an address is not ownership) and `UNIQUE (tenant_id, account_id, label_key)` (a name is never
+  ambiguous: "Maria" and "María" are the same name);
+- foreign key `(tenant_id, account_id) REFERENCES flofi_accounts ON DELETE CASCADE`, so account deletion removes every saved recipient.
+- No function, trigger, CHECK, column or index of any pre-existing relation changes.
+
+A build without 0028 (v27) runs unchanged on schema 28:
+- a v27 build before Release A never reads or writes the new table. The Release A build (still v27) carries the saved-recipient code, which
+  first checks `schema_migrations` for the exact certified 0028 identity (answer cached for at most 30 s per process) and, until 0028 is
+  applied, answers RECIPIENTS_UNAVAILABLE without touching any other table; it never creates the table at runtime;
+- its only interaction is through `flofi_accounts`: deleting an account (`DELETE FROM flofi_accounts`, account self-deletion) now also deletes
+  that account's saved recipients through the cascade — the documented and intended behavior. Nothing in a v27 build truncates
+  `flofi_accounts` (only test suites, with `CASCADE`), so the new reference blocks nothing;
+- a v27 sign-in that locks its account row (`SELECT … FOR UPDATE`, Privy sign-in) and a recipient write that holds the same row
+  `FOR NO KEY UPDATE` wait for each other for the length of one short transaction; foreign-key checks (`FOR KEY SHARE`) never wait for either.
+
+**Locks.** `SET LOCAL lock_timeout = '5s'`. Creating the foreign key takes a SHARE ROW EXCLUSIVE lock on `flofi_accounts` for the remainder of
+the migration's (short) transaction: concurrent writes to `flofi_accounts` (a first sign-in, onboarding, account deletion) wait for it —
+milliseconds, because the new table is empty and nothing is scanned. Reads are never blocked. A write transaction already open on
+`flofi_accounts` makes 0028 wait for its lock; if it cannot be taken within 5 s, the migration fails and rolls back completely, and the
+previous deployment keeps serving (proven: `certificate-0028.pg.test.ts`). Retry it in a quieter moment.
+
+Release A's `packages/cloud-runtime/test/certificate-0028.pg.test.ts` applies the certified bytes (kept as
+`packages/cloud-runtime/test/fixtures/0028_saved_recipients.sql`) under the v27 build and checks: schema 27 served unchanged; schema 28 served
+only through the certificate (the strict check refuses it); the catalog diff (nothing pre-existing removed, redefined or added to — the
+only new objects are the table, its constraints and their indexes); every earlier row surviving; v27 account writes and account deletion (with
+the cascade) still working; the v27 runner never changing a database ahead of it; the lock-timeout rollback; and the documented emergency
+reversal restoring the exact v27 catalog. `apps/reference-dapp/src/accounts/recipient-store.pg.test.ts` runs the store against the same
+bytes. `apps/reference-dapp/backend/schema-compatibility.pg.test.ts` runs the v27 API, worker, `main.ts`/CLI cold starts and Vercel paths
+across the new certificate.
+
+**Rollback.** Application rollback after Release B: redeploy Release A (it serves schema 28 by certificate and keeps saved recipients
+working, because Release A already contains the saved-recipient code). Never roll back to a build older than Release A once 0028 is
+applied: it refuses schema 28 (`MIGRATION_HISTORY_MISMATCH`). The emergency reversal of 0028 (owner decision, after every consumer runs
+Release A) deletes every saved recipient; it is in [RELEASE-SAVED-RECIPIENTS-0028.md](./RELEASE-SAVED-RECIPIENTS-0028.md).
+
+**Release order.** Release A is the certificate `{ base: 0027 reconciliation_privacy, migrations: [0028 saved_recipients] }` with the exact
+bytes, deployed from a build whose newest shipped migration is 0027 to **every** database consumer (Vercel Production, Railway API, Railway
+worker) before any build that ships 0028 migrates. Release B then ships `packages/cloud-runtime/migrations/0028_saved_recipients.sql` (the
+fixture's bytes, unchanged) and its `SHIPPED_MIGRATIONS` entry and migrates from the Railway API pre-deploy. Until Release B, saved recipients
+are unavailable in production (RECIPIENTS_UNAVAILABLE; the Credentials section says so). See
+[RELEASE-SAVED-RECIPIENTS-0028.md](./RELEASE-SAVED-RECIPIENTS-0028.md). No production migration or release was performed during engineering.

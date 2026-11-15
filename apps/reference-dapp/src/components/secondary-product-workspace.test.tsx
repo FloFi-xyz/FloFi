@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { DangerZone, SecondaryProductWorkspace } from './secondary-product-workspace';
+import { DangerZone, SavedRecipientsSection, SecondaryProductWorkspace } from './secondary-product-workspace';
 import type { AccountState } from '../app/account-action';
 import type { SolanaSession } from '../wallet/solana-wallet';
 
@@ -18,11 +18,16 @@ vi.mock('../state/wallet-connection', async importOriginal => ({ ...await import
   useWalletConnection: () => ({ connect: fixture.connect, error: null, solanaChain: 'solana:devnet' }) }));
 vi.mock('../state/credentials-store', () => ({ useCredentials: () => fixture.credentials, saveWalletReference: vi.fn(), renameSavedCredential: vi.fn(), removeSavedCredential: vi.fn() }));
 vi.mock('../app/card-action', () => ({ cardProviderStatus: vi.fn() }));
+// BUILD-FLOFI-UNIFIED-COPILOT-001: the account's saved recipients come only from the (mocked) in-memory store, never from Web Storage.
+const recipientsFixture = vi.hoisted(() => ({ state: { status: 'IDLE', recipients: [] as unknown[], code: null as string | null } }));
+vi.mock('../state/saved-recipients-store', () => ({ useSavedRecipients: () => recipientsFixture.state, loadSavedRecipients: vi.fn(async () => recipientsFixture.state),
+  invalidateSavedRecipients: vi.fn(), saveRecipientReference: vi.fn(), renameRecipientReference: vi.fn(), removeRecipientReference: vi.fn() }));
 
 const EVM = '0x1234567890123456789012345678901234567890', SOLANA = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgA91';
 const saved = (ecosystem: 'evm' | 'solana', providerKey: string, providerName: string, address: string, label = providerName, lastNetwork: string | null = null) =>
   ({ id: `${ecosystem}:${providerKey}:${address}`, ecosystem, address, providerKey, providerName, label, lastNetwork, addedAt: '2026-10-07T12:00:00.000Z' });
-beforeEach(() => { Object.assign(fixture, { account: null, chainId: null, provider: null, busy: false, session: null, credentials: { wallets: [], cards: [] } }); fixture.connect.mockClear(); });
+beforeEach(() => { Object.assign(fixture, { account: null, chainId: null, provider: null, busy: false, session: null, credentials: { wallets: [], cards: [] } }); fixture.connect.mockClear();
+  recipientsFixture.state = { status: 'IDLE', recipients: [], code: null }; });
 const markup = (workspace: 'credentials' | 'agents' | 'passkeys') => renderToStaticMarkup(createElement(SecondaryProductWorkspace, { workspace }));
 const wallets = (html: string) => html.match(/class="ux-wallet-row"/g)?.length ?? 0;
 
@@ -143,5 +148,73 @@ describe('secondary product workspaces', () => {
     expect(html).toMatch(/^<details class="ux-details ux-danger-zone"><summary>Danger zone · delete FloFi account<\/summary>/); expect(html).not.toContain('open=""');
     // Opening the zone only offers the first step; the irreversible "Delete account" exists only after DeleteAccount's own confirmation.
     expect(html).toContain('>Delete FloFi account</button>'); expect(html).not.toContain('>Delete account</button>'); expect(html).not.toContain('Delete your FloFi account?');
+  });
+});
+
+describe('BUILD-FLOFI-UNIFIED-COPILOT-001 Credentials → Saved recipients', () => {
+  const RCP_EVM = '0x52908400098527886e0f7030069857d2e4169ee7', RCP_SOL = 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq';
+  const at = '2026-11-15T12:00:00.000Z';
+  const recipient = (id: string, label: string, address: string, ecosystem: 'EVM' | 'SOLANA', status: 'EXTERNAL' | 'ACCOUNT_WALLET' | 'CONNECTED') =>
+    ({ id: `rcp_${id.padEnd(26, 'a')}`, label, address, ecosystem, createdAt: at, updatedAt: at, status });
+  const state = (accounts: boolean, signedIn: boolean) => ({ availability: { accounts, managedWallets: accounts }, account: signedIn ? { wallets: [], identities: [] } : null,
+    privy: null }) as unknown as AccountState;
+  const section = (account: AccountState | null) => renderToStaticMarkup(createElement(SavedRecipientsSection, { account }));
+
+  it('sits between Wallets and Cards; before the account is read it only says it is loading (no list, count or form)', () => {
+    const html = markup('credentials');
+    const wallets = html.indexOf('id="credentials-wallets"'), saved = html.indexOf('id="credentials-recipients"'), cards = html.indexOf('id="credentials-cards"');
+    expect(wallets).toBeGreaterThan(0); expect(saved).toBeGreaterThan(wallets); expect(cards).toBeGreaterThan(saved);
+    expect(section(null)).toContain('Loading saved recipients…');
+    expect(section(null)).not.toMatch(/<input|ux-count|Add recipient|<li/);
+  });
+
+  it('signed out: only the sign-in prompt, nothing stored or shown; a deployment without accounts says recipients are not available', () => {
+    recipientsFixture.state = { status: 'READY', recipients: [recipient('a', 'Should not show', RCP_EVM, 'EVM', 'EXTERNAL')], code: null };
+    const signedOut = section(state(true, false));
+    expect(signedOut).toContain('Sign in to save the addresses you send to in your FloFi account. Nothing is saved on this device.');
+    expect(signedOut).toContain('href="/login?returnTo=%2Fapp%2Fcredentials"');
+    expect(signedOut).not.toMatch(/Should not show|<input|ux-count|Add recipient/);
+    const none = section(state(false, false));
+    expect(none).toContain('Saved recipients are not available on this deployment yet.');
+    expect(none).not.toMatch(/Sign in|<input|ux-count|Should not show/);
+  });
+
+  it('signed in on a deployment without 0028: a neutral note, no fake data and no controls', () => {
+    recipientsFixture.state = { status: 'UNAVAILABLE', recipients: [], code: 'RECIPIENTS_UNAVAILABLE' };
+    const html = section(state(true, true));
+    expect(html).toContain('data-recipients="unavailable">Saved recipients are not available on this deployment yet.</p>');
+    expect(html).not.toMatch(/<button|<input|ux-count|<li/);
+    recipientsFixture.state = { status: 'SIGNED_OUT', recipients: [], code: 'ACCOUNT_SESSION_REQUIRED' };
+    expect(section(state(true, true))).toContain('Sign in to save the addresses you send to');
+  });
+
+  it('lists each recipient with its name, ecosystem, FULL address and derived status, says a name is not proof of ownership, and offers Add, rename and remove', () => {
+    recipientsFixture.state = { status: 'READY', code: null, recipients: [recipient('a', 'Carteira da empresa', RCP_EVM, 'EVM', 'ACCOUNT_WALLET'),
+      recipient('b', 'Maria', RCP_SOL, 'SOLANA', 'EXTERNAL')] };
+    const html = section(state(true, true));
+    expect(html).toContain('<span class="ux-count">2</span>');
+    expect(html).toContain('It is not proof of who owns the address and it authorizes nothing');
+    expect(html).toMatch(/<button type="button" class="ux-button">[\s\S]*?Add recipient<\/button>/);
+    expect(html).toContain(`<code class="ux-mono" data-recipient-address="">${RCP_EVM}</code>`);
+    expect(html).toContain(`<code class="ux-mono" data-recipient-address="">${RCP_SOL}</code>`);
+    expect(html).toContain('aria-label="Carteira da empresa, EVM" data-recipient-status="ACCOUNT_WALLET"');
+    expect(html).toContain('aria-label="Maria, Solana" data-recipient-status="EXTERNAL"');
+    expect(html).toContain('<span class="ux-tag" data-tone="soon">Your account wallet</span>');
+    expect(html).toContain('<span class="ux-tag" data-tone="neutral">External</span>');
+    for (const label of ['Copy Maria address', 'Rename Maria', 'Remove Maria', 'More actions for Carteira da empresa']) expect(html).toContain(`aria-label="${label}"`);
+    // No shortened address, no secret affordance, no inline editing until asked.
+    expect(html).not.toMatch(/0x5290…|private key|seed phrase|type="password"|<input/i);
+  });
+
+  it('an empty list explains what saving does; a refused read keeps a retry, not an empty list', () => {
+    recipientsFixture.state = { status: 'READY', recipients: [], code: null };
+    const empty = section(state(true, true));
+    expect(empty).toContain('<span class="ux-count">0</span>');
+    expect(empty).toContain('Save the addresses you send to under a name you recognize. Review still shows the full address.');
+    recipientsFixture.state = { status: 'ERROR', recipients: [], code: 'RECIPIENTS_REQUEST_FAILED' };
+    const failed = section(state(true, true));
+    expect(failed).toContain('role="alert">Saved recipients could not be reached. Nothing changed. Try again.');
+    expect(failed).toContain('>Try again</button>');
+    expect(failed).not.toMatch(/ux-count|Add recipient/);
   });
 });

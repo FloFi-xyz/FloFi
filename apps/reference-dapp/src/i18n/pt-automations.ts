@@ -84,6 +84,11 @@ export const portugueseAutomations: Readonly<Record<string, string>> = {
   'No price source on this deployment': 'Sem fonte de preços neste ambiente', 'Price source timed out — ignored': 'A fonte de preços excedeu o tempo — ignorada',
   'Price source unreachable — ignored': 'Fonte de preços inacessível — ignorada', 'Price source error — ignored': 'Erro da fonte de preços — ignorado',
   'Price feed failed verification — ignored': 'O feed de preços falhou a verificação — ignorado', 'Withdrawn by a rebind': 'Retirada por uma nova associação',
+  // Schedule change by replacement (`automations/explain.ts`)
+  'Replaced by a new automation with a changed schedule': 'Substituída por uma nova automação com o agendamento alterado',
+  'Created to replace an earlier automation (schedule changed)': 'Criada para substituir uma automação anterior (agendamento alterado)',
+  'This automation already runs on that schedule.': 'Esta automação já roda nesse agendamento.',
+  'FloFi cannot change the schedule of this automation. Create a new one instead.': 'O FloFi não consegue mudar o agendamento desta automação. Crie uma nova.',
   // Notices and errors
   'Automation created. FloFi will ask you before every execution.': 'Automação criada. O FloFi pergunta-lhe antes de cada execução.', 'Automation paused.': 'Automação em pausa.',
   'Automation resumed.': 'Automação retomada.', 'Automation archived.': 'Automação arquivada.', 'Automation rebound.': 'Automação associada de novo.', 'Proposal dismissed.': 'Proposta recusada.',

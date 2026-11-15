@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { groundAutomationDraft, parseAutomationDraft, type AutomationDraft } from './copilot-automation';
+import { groundAutomationDraft, parseAutomationDraft, rescheduleDraft, type AutomationDraft } from './copilot-automation';
 import { parseCopilotIntentV2 } from './copilot-intent-v2';
 import { validateAutomationInput } from '../automations/definition';
 import { CopilotSession } from './copilot-session.test-harness';
@@ -149,5 +149,30 @@ describe('Copilot Automation interpretation and grounding', () => {
     expect(session.say('Base Sepolia.', { version: '2', language: 'EN', kind: 'AUTOMATION', draft: draft() })).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: { action: { network: 'base-sepolia' } } });
     expect(session.workflow).toBe(workflow); expect(session.pending).toBeNull();
     expect(session.say('Buy ETH every day.', { version: '2', language: 'EN', kind: 'AUTOMATION', draft: draft() })).toMatchObject({ kind: 'CLARIFICATION' });
+  });
+  it('re-schedules an unsaved proposal only from schedule words, never from a new request (BUILD-FLOFI-UNIFIED-COPILOT-001)', () => {
+    const now = Date.parse('2026-11-15T12:00:00Z');
+    const grounded = groundAutomationDraft(draft(), 'Buy 10 USDC of ETH every day at 9:00 on Base Sepolia.', 'UTC', now);
+    expect(grounded.kind).toBe('PROPOSAL');
+    const input = (grounded as { input: Parameters<typeof rescheduleDraft>[0] }).input;
+    expect(rescheduleDraft(input, 'muda para segunda', now)).toMatchObject({ schedule: { frequency: 'WEEKLY', weekday: 1, time: '09:00' }, action: { amount: '10' } });
+    expect(rescheduleDraft(input, 'change it to 10:30', now)).toMatchObject({ schedule: { frequency: 'DAILY', time: '10:30' } });
+    // A new request with its own asset or verb is never folded into the shown proposal; the model reads it and its amount comes from the user.
+    expect(rescheduleDraft(input, 'Buy ETH every day.', now)).toBeNull();
+    expect(rescheduleDraft(input, 'compra SOL toda segunda', now)).toBeNull();
+    expect(rescheduleDraft(input, 'todo dia 5', now)).toBeNull();
+  });
+  it('an open automation question is answered by that request, and an earlier unsaved proposal stops being "this automation" once another request is resolved', () => {
+    const session = new CopilotSession();
+    const automation = (patch: Partial<AutomationDraft>) => ({ version: '2', language: 'EN', kind: 'AUTOMATION', draft: draft(patch) });
+    expect(session.say('Buy 10 USDC of ETH every day at 9:00 on Base Sepolia.', automation({}))).toMatchObject({ kind: 'AUTOMATION_PROPOSAL' });
+    expect(session.say('Also buy ETH with 5 USDC on Base Sepolia.', automation({ amount: '5', time: null }))).toMatchObject({ kind: 'CLARIFICATION' });
+    // "every Monday at 9am" answers the open question (the model reads it with the request); it never reschedules the first proposal locally.
+    const answered = session.say('every day at 10:00', automation({ amount: '5', time: '10:00' }))!;
+    expect(answered).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: { action: { amount: '5' } } });
+    expect(session.turns.at(-1)!.request).not.toBeNull();
+    // A question about an unsaved proposal is answered, never applied as a new schedule.
+    const asked = session.say('is 11:00 ok?', { version: '2', language: 'EN', kind: 'QUESTION', topic: 'AUTOMATIONS', target: null })!;
+    expect(asked.kind).not.toBe('AUTOMATION_PROPOSAL');
   });
 });

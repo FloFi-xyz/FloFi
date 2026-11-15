@@ -240,7 +240,7 @@ export function createChannelService(ctx: ChannelContext) {
     const privateAccess = ctx.authorizePrivate ? await ctx.authorizePrivate(conversationId, now) : { ok: true as const };
     const interpretForTurn = privateAccess.ok ? interpret : null;
     let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret: interpretForTurn, support: core.supportContact, privacy: core.privacyUrl,
-      catalogs: privateAccess.ok ? ctx.catalogs ?? null : null,
+      catalogs: privateAccess.ok ? ctx.catalogs ?? null : null, surface: ctx.adapter.channel === 'WHATSAPP' ? 'WHATSAPP' : 'TELEGRAM',
       ...session && privateAccess.ok && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
     if (session && privateAccess.ok) decision = await learn(decision, principal!, session, conversationId);
     // BUILD-FLOFI-INTELLIGENCE-001: the turn's content-free record, under the Copilot's own telemetry switch.

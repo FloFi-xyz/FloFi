@@ -85,6 +85,16 @@ const MESSAGES: Readonly<Record<string, string>> = {
   WALLET_UNLOCK_IDENTITY_MISMATCH: 'That is not the Google or Apple account linked to this FloFi account. Nothing was unlocked.',
   TURNKEY_CLIENT_SIGNATURE_INVALID: 'FloFi Wallet could not confirm this request with its key. Nothing was changed. Try again.',
   SIGNER_NOT_MANAGED: 'That wallet is not one of your FloFi Wallet wallets.',
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (src/app/recipient-action.ts).
+  RECIPIENTS_UNAVAILABLE: 'Saved recipients are not available on this deployment yet.',
+  RECIPIENTS_RATE_LIMITED: 'Too many changes to saved recipients in a short time. Nothing changed. Wait a few minutes, then try again.',
+  RECIPIENTS_REQUEST_FAILED: 'Saved recipients could not be reached. Nothing changed. Try again.',
+  RECIPIENT_LABEL_INVALID: 'Use a name of 1–40 characters with letters or numbers. It cannot look like an address, a key or a card number, and it cannot be a network, a token or “my wallet”.',
+  RECIPIENT_ADDRESS_INVALID: 'Enter a valid EVM (0x…) or Solana wallet address. Nothing was saved.',
+  RECIPIENT_LABEL_TAKEN: 'You already use this name for another recipient. Choose a different name.',
+  RECIPIENT_EXISTS: 'This address is already saved. Nothing was changed.',
+  RECIPIENT_LIMIT: 'You have reached the limit of saved recipients. Remove one to add another.',
+  RECIPIENT_NOT_FOUND: 'That recipient is no longer saved in your account.',
 };
 export function accountMessage(code: string): string {
   if (MESSAGES[code]) return MESSAGES[code]!;

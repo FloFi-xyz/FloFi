@@ -292,6 +292,15 @@ export function answerQuestion(topic: CopilotQuestionTopic, step: WorkflowStep |
     case 'MARKET_DATA': return answer(pt ? 'O Flofi não tem preços ao vivo, APY, saldos, preço de gas, tempo de bridge nem health factor neste espaço de trabalho, e o Copilot nunca estima esses valores.'
       : 'Flofi has no live prices, APY, balances, gas prices, bridge times or health factors in this workspace, and the Copilot never estimates them.',
       [pt ? 'Cotações e resultados simulados aparecem apenas na simulação e na Review, vindos dos provedores do próprio fluxo.' : 'Quotes and simulated outcomes appear only in the simulation and Review, from the flow\'s own providers.']);
+    // BUILD-FLOFI-UNIFIED-COPILOT-001: the engine answers a named concept, automation behaviour or FloFi screen itself; these are the general answers
+    // when the question names none of them.
+    case 'CONCEPT': return answer(pt ? 'Posso explicar conceitos de DeFi como pools de liquidez, colateral, health factor, slippage, perda impermanente, bridges e approvals. Qual deles?'
+      : 'I can explain DeFi concepts such as liquidity pools, collateral, health factor, slippage, impermanent loss, bridges and approvals. Which one?',
+      [pt ? 'Conhecimento geral, não dados ao vivo.' : 'General knowledge, not live data.']);
+    case 'AUTOMATIONS': return answer(pt ? 'Uma automação repete uma ação em um horário ou quando um preço é atingido. Salvar ou ativar uma automação nunca autoriza gastos: cada ocorrência pede a confirmação da sua carteira. Você gerencia as suas em Automações.'
+      : 'An automation repeats an action on a schedule or when a price is reached. Saving or activating one never authorizes spending: each occurrence asks for your wallet confirmation. You manage yours in Automations.');
+    case 'PLATFORM': return answer(pt ? 'Carteiras e destinatários salvos ficam em Credentials, automações em Automações, fluxos salvos e execuções anteriores em Seus fluxos e no Dashboard, e idioma, tema e privacidade no menu de configurações.'
+      : 'Wallets and saved recipients are in Credentials, automations in Automations, saved workflows and past runs in Your workflows and the Dashboard, and language, theme and privacy in the settings menu.');
     case 'OTHER': return answer(pt ? 'O Copilot responde perguntas sobre os passos deste fluxo, protocolos, redes, approvals, Manifest, status da simulação, bloqueios e falhas.'
       : 'The Copilot answers questions about this workflow\'s steps, protocols, networks, approvals, Manifest, simulation status, blockers and failure handling.');
   }

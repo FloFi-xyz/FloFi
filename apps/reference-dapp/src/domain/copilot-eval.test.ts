@@ -11,6 +11,8 @@ import { COPILOT_V2_LIMITS } from './copilot-intent-v2';
 import { COPILOT_EVAL_CASES, type Category, type EvalCase, type Expect, type Turn } from './copilot-eval.corpus';
 import { CopilotSession, type TurnRecord } from './copilot-session.test-harness';
 import { TEST_WALLET } from './copilot-test-fixtures';
+import { CONCEPT_IDS, conceptNumbers } from './intelligence/concepts';
+import { AUTOMATION_FAQ } from '../automations/explain';
 
 /**
  * BUILD-COPILOT-002 deterministic eval. Every corpus case runs through the real engine, exact grammar and editor with a
@@ -80,7 +82,12 @@ function checkInvariants(c: EvalCase, turn: Turn, record: TurnRecord, session: C
   if (reply.kind === 'ANSWER') {
     expect(reply.command, where).toBeUndefined();
     const facts = session.currentFacts();
-    const allowed = new Set([...readingsOf(JSON.stringify(facts)), '2.0', '0.05', String(facts.steps.length), String(facts.findings.length), String(facts.revision)]);
+    // BUILD-FLOFI-UNIFIED-COPILOT-001: a concept or automation-behaviour answer is FloFi's own catalog copy; only the illustrative numbers that copy
+    // itself declares are allowed (never a live value: those questions are MARKET_DATA, see E08).
+    const catalog = reply.topic === 'CONCEPT' ? CONCEPT_IDS.flatMap(id => conceptNumbers(id))
+      : reply.topic === 'AUTOMATIONS' ? Object.values(AUTOMATION_FAQ).flatMap(answer => [answer.EN, answer.PT]).flatMap(text => numberTokens(text)) : [];
+    const allowed = new Set([...readingsOf(JSON.stringify(facts)), '2.0', '0.05', String(facts.steps.length), String(facts.findings.length), String(facts.revision),
+      ...catalog.flatMap(token => [token, ...readingsOf(token)])]);
     const invented = numberTokens(replyText(reply)).filter(token => !allowed.has(canonicalDecimal(token)) && !allowed.has(token));
     if (invented.length) { metrics.inventedRuntimeFacts += 1; throw new Error(`${where}: answer states numbers Flofi does not hold: ${invented.join(', ')}`); }
   }

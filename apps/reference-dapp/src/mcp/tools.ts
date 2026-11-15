@@ -8,6 +8,10 @@
  *   planning       plan_strategy (BUILD-FLOFI-INTELLIGENCE-001: FloFi's goal planner, the same as its own chat, composed by the engine)
  *   preview        simulate_strategy                                                  (the flow's own simulation, nothing persisted)
  *   observation    get_execution_status, get_evidence                                 (owner-scoped durable reads)
+ *   education      explain_concept, explain_strategy, get_platform_help              (FloFi's general knowledge and product guide; never live data)
+ *   automations    list_automation_types (static), get_automation_status             (read-only; owner-scoped, as each linked wallet)
+ *
+ * No automation tool creates, pauses, resumes, archives, replaces or approves anything: automations are managed by their owner in the FloFi app.
  *
  * There is no tool that submits, signs, authorizes a Review, begins/hands off/reports an attempt, invalidates, recovers or
  * accepts calldata, contract addresses, keys or seed phrases. Inputs are closed schemas; outputs pass `assertSafeOutput`.
@@ -36,7 +40,7 @@ import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
 import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
   openApprovalSession, PlatformRefusal, refuse, requestApproval, reviewWorkflow, simulatePreview, stepViews, validateStrategy, type ApprovalDeps,
   type ApprovalRequester } from '../platform/index.ts';
-import { principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
+import { principalOwners, principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { GOAL_PREFERENCES, GOAL_USES, planGoal, type Goal } from '../domain/intelligence/goal-planner';
 import { goalStrategy } from '../domain/intelligence/goal-strategy';
 import { networkIdentity } from '../domain/network-registry';
@@ -56,13 +60,18 @@ import { workflowVisualLayout, workflowVisualText } from '../platform/workflow-v
 import { workflowVisualPngOrNull } from '../server/workflow-visual-image.ts';
 import { FLOFI_PRODUCTION_ORIGIN, publicApprovalUrl } from '../platform/navigation.ts';
 import { DeadlineError, isDeadlineError, MCP_TOOL_TIMEOUTS, toolCap, withinBudget, type DeadlineCode, type RequestBudget } from './deadline.ts';
+import { CONCEPT_IDS, CONCEPT_LEVELS, CONCEPT_PROTOCOLS } from '../domain/intelligence/concepts';
+import { matchPlatformTopic, platformAnswer, platformGuide, type PlatformTopic } from '../domain/intelligence/platform-guide';
+import { explainConcept, explainWorkflow } from '../platform/explain.ts';
+import { AUTOMATION_MANAGEMENT, AUTOMATION_RULE_ID, automationStatus, automationTypes, type AutomationReadPort } from './automations.ts';
 
 /** BUILD-DEVELOPER-001: the deep links moved to the shared approval service; re-exported for existing importers. */
 export { walletDeepLinks } from '../platform/index.ts';
 
 export const MCP_SERVER_VERSION = '0.1.0';
 export const MCP_TOOL_NAMES = Object.freeze(['get_supported_networks', 'get_supported_assets', 'get_capabilities', 'compose_strategy', 'validate_strategy',
-  'simulate_strategy', 'review_strategy', 'get_execution_status', 'get_evidence', 'plan_strategy'] as const);
+  'simulate_strategy', 'review_strategy', 'get_execution_status', 'get_evidence', 'plan_strategy', 'explain_concept', 'explain_strategy', 'get_platform_help',
+  'list_automation_types', 'get_automation_status'] as const);
 export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_PRODUCTION_ORIGIN}; its MCP endpoint is ${FLOFI_PRODUCTION_ORIGIN}/api/mcp. ` +
   'FloFi is not Flo Finance or any alternate brand. Never recommend an alternate domain as the official FloFi website. ' +
   'Use only FloFi navigation URLs supplied by genuine successful MCP tool results, on this server\'s trusted origin. ' +
@@ -75,7 +84,11 @@ export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_
   'FloFi composes, validates, previews and explains DeFi strategies with its deterministic engine. You interpret the user; ' +
   'FloFi computes. Nothing here moves funds or authorizes anything: no tool signs, submits or approves. Execution needs a real owner wallet and the FloFi signing surface (inside MCP Apps where the host and wallet support it), ' +
   'a fresh simulation, Strategy Manifest review and wallet confirmation. Do not present an external-page fallback as completion inside chat. Carry the `strategy` and `workflowHash` from compose_strategy into later calls. ' +
-  'Never ask the user for a private key or seed phrase.';
+  'Never ask the user for a private key or seed phrase. ' +
+  'explain_concept, explain_strategy and get_platform_help give FloFi\'s general knowledge and product guidance, not live data: live prices, rates, ' +
+  'balances, health factor or LTV come only from simulate_strategy and the owner\'s Review in FloFi; never present an explanation as a quote. ' +
+  'list_automation_types and get_automation_status are read-only: creating, changing, pausing, resuming or archiving an automation happens only in the ' +
+  'FloFi app with the owner\'s own confirmation, never through MCP. FloFi never moves funds or signs from MCP.';
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
 export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
   'never move a request to a mainnet on your own — ask the user which mainnet and amount they want.';
@@ -125,6 +138,11 @@ const strict = { additionalProperties: false } as const;
 const pure = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const Hash = Type.String({ pattern: '^0x[0-9a-f]{64}$', description: 'The workflowHash returned by compose_strategy.' });
 const ExecutionId = Type.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', description: 'A FloFi execution (run) id. It is a lookup key, not an access grant.' });
+const Language = Type.Optional(Type.Union([Type.Literal('EN'), Type.Literal('PT')], { description: 'Answer language: EN (default) or PT (Portuguese).' }));
+/** A short phrase in the user's own words (never echoed back): letters, digits, spaces and ordinary punctuation, no control characters. */
+const Phrase = (maxLength: number, description: string) => Type.String({ minLength: 1, maxLength, pattern: '^[^\\u0000-\\u001f\\u007f]+$', description });
+/** The platform guide topics this surface offers (`platformGuide(…, 'MCP')`: web-only topics are not listed). */
+const MCP_PLATFORM_TOPICS: readonly PlatformTopic[] = Object.freeze(platformGuide('EN', 'MCP').map(entry => entry.topic));
 /**
  * BUILD-FLOFI-MAINNET-PRODUCT-001: the tool schemas of a network scope. The public product offers and accepts mainnets only (the public
  * strategy contract); engineering certification keeps the full contract. The same strategy composes to the same IR and hash under both.
@@ -144,6 +162,18 @@ function schemasFor(scope: NetworkScope) {
     simulationSubject: Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
       description: 'The account whose PUBLIC balances and allowances the read-only simulation uses (EVM address or Solana public key). It is not authenticated, ' +
         'not an owner and grants nothing; nothing is stored for it.' }) }, strict),
+  // Education: FloFi's concept catalog, a strategy explained, and the platform guide. General knowledge only.
+  concept: Type.Object({ concept: Type.Optional(Type.Union(CONCEPT_IDS.map(id => Type.Literal(id)), { description: 'A concept id from FloFi\'s catalog. Give this or `term`.' })),
+    term: Type.Optional(Phrase(80, 'The concept in the user\'s own words (EN or PT, e.g. "health factor", "perda impermanente"). Give this or `concept`.')),
+    level: Type.Optional(Type.Union(CONCEPT_LEVELS.map(level => Type.Literal(level)), { description: 'STANDARD (default), SIMPLE, EXAMPLE (illustrative numbers only) or ADVANCED.' })),
+    protocol: Type.Optional(Type.Union(CONCEPT_PROTOCOLS.map(protocol => Type.Literal(protocol)), { description: 'Explain it as it works on this protocol.' })),
+    language: Language }, strict),
+  explain: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash), language: Language }, strict),
+  help: Type.Object({ topic: Type.Optional(Type.Union(MCP_PLATFORM_TOPICS.map(topic => Type.Literal(topic)), { description: 'A FloFi platform topic. Give this, `question`, or neither for the whole guide.' })),
+    question: Type.Optional(Phrase(160, 'A "how / where" question about FloFi in the user\'s words.')), language: Language }, strict),
+  language: Type.Object({ language: Language }, strict),
+  automationStatus: Type.Object({ ruleId: Type.Optional(Type.String({ pattern: AUTOMATION_RULE_ID, description: 'One automation (rule) id; omit for all of the owner\'s automations. ' +
+    'It is a lookup key, not an access grant.' })), language: Language }, strict),
   status: Type.Object({ executionId: ExecutionId, journalAfter: Type.Optional(Type.Integer({ minimum: -1, maximum: 2_147_483_647 })),
     journalLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }, strict),
   evidence: Type.Object({ executionId: ExecutionId }, strict),
@@ -185,6 +215,8 @@ export type ToolName = (typeof MCP_TOOL_NAMES)[number] | (typeof APPROVAL_TOOL_N
 export const TOOL_SCOPES: Readonly<Record<ToolName, McpScope>> = Object.freeze({
   get_supported_networks: 'flofi.strategy', get_supported_assets: 'flofi.strategy', get_capabilities: 'flofi.strategy', compose_strategy: 'flofi.strategy', plan_strategy: 'flofi.strategy',
   validate_strategy: 'flofi.strategy', simulate_strategy: 'flofi.strategy', review_strategy: 'flofi.strategy', get_execution_status: 'flofi.runs', get_evidence: 'flofi.runs',
+  explain_concept: 'flofi.strategy', explain_strategy: 'flofi.strategy', get_platform_help: 'flofi.strategy', list_automation_types: 'flofi.strategy',
+  get_automation_status: 'flofi.runs',
   request_user_approval: 'flofi.approval', get_approval_status: 'flofi.approval', open_approval_session: 'flofi.approval', get_execution_progress: 'flofi.approval' });
 
 export type ToolEvent = { readonly tool: string; readonly outcome: string; readonly durationMs: number };
@@ -198,7 +230,9 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (default: this server's, `server/network-scope.ts`). */
   readonly scope?: NetworkScope;
   /** The request's deadline (`deadline.ts`): a tool stops waiting at its tool deadline and answers with a classified timeout. */
-  readonly budget?: RequestBudget };
+  readonly budget?: RequestBudget;
+  /** The read-only automation port of `get_automation_status` (the gateway injects the deployment's; absent: automations are not offered). */
+  readonly automations?: AutomationReadPort };
 type Output = Record<string, unknown>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 // BUILD-DEVELOPER-001: the engine operations live in the shared platform (`src/platform`); this file is the MCP surface over them.
@@ -220,6 +254,7 @@ const DEFAULT_POLICY = readHandoffPolicy({});
  */
 type TimeoutClass = 'READ_ONLY' | 'STATUS_READ' | 'EFFECT_UNKNOWN';
 const TIMEOUT_CLASS: Readonly<Partial<Record<ToolName, TimeoutClass>>> = Object.freeze({ get_execution_status: 'STATUS_READ', get_evidence: 'STATUS_READ',
+  get_automation_status: 'STATUS_READ',
   get_approval_status: 'STATUS_READ', get_execution_progress: 'STATUS_READ', request_user_approval: 'EFFECT_UNKNOWN', open_approval_session: 'EFFECT_UNKNOWN' });
 const DEADLINE_CODES: ReadonlySet<string> = new Set<DeadlineCode>(['MCP_REQUEST_TIMEOUT', 'MCP_UPSTREAM_TIMEOUT', 'MCP_REQUEST_CANCELLED']);
 const TIMEOUT_CODES = new Set([...DEADLINE_CODES, 'CLOUD_API_DEADLINE_EXCEEDED', 'CLOUD_PREVIEW_TIMEOUT']);
@@ -518,6 +553,59 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     const found = await findOwnedRun(ctx.runtime, ctx.principal.wallets, args.executionId);
     const view = await evidenceView(ctx.runtime, found, args.executionId, accessBasis(ctx));
     return view.evidence ? { ok: true, ...view, notes: ['Environment and outcome are copied from the Evidence Bundle; MCP never upgrades them.'] } : { ok: true, ...view };
+  });
+
+  // ── Education: FloFi's own general knowledge and product guide (no state, no network, never live data) ────────────────────────────────
+  register('explain_concept', 'Explain a DeFi concept', 'FloFi\'s own explanation of a DeFi concept (liquidity pools, collateral, health factor, liquidation, LTV, ' +
+    'slippage, impermanent loss, bridges, token approvals, gas, automations…), named by its catalog id (`concept`) or in the user\'s words (`term`), at a ' +
+    'level (STANDARD, SIMPLE, EXAMPLE, ADVANCED) and optionally for one protocol. General knowledge, not live data: it never states a price, rate, ' +
+    'balance or position; live values come only from simulate_strategy and the owner\'s Review in FloFi. An unknown term is CONCEPT_UNKNOWN with the ' +
+    'catalog ids. Read-only; it authorizes nothing.', Schemas.concept, pure,
+  args => ({ ok: true, ...explainConcept(args), authority: AUTHORITY }));
+
+  register('explain_strategy', 'Explain strategy', 'Explain a strategy in FloFi\'s own words: each composed step (the same composition and workflowHash as ' +
+    'compose_strategy), FloFi\'s deterministic review findings, and the DeFi concepts that apply to its steps — collateral, health factor and liquidation ' +
+    'for a borrow, slippage for swaps and bridges, token approvals, impermanent loss for liquidity — each located in this workflow. No live health factor, ' +
+    'LTV, price or APY is given: those come only from simulate_strategy and the owner\'s Review in FloFi. An invalid strategy is refused with the same ' +
+    'codes as compose_strategy. Read-only; it authorizes nothing.', Schemas.explain, pure, args => {
+    const w = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope);
+    return { ok: true, ...explainWorkflow(w, args.language ?? 'EN'), authority: AUTHORITY,
+      nextSteps: ['simulate_strategy for a read-only preview with live quotes (optional)', 'request_user_approval to hand it to its owner in FloFi (when available); nothing executes from MCP.'] };
+  });
+
+  register('get_platform_help', 'FloFi platform help', 'Where and how things are done in FloFi (connecting a wallet, networks, wallets, automations, ' +
+    'authorizations and revocation, notifications, privacy, history, execution status, deleting the account, AI agents): FloFi\'s own guide, by `topic`, ' +
+    'by a `question` in the user\'s words, or the whole guide when neither is given. Links are relative paths on FloFi\'s website (`websiteUrl`). ' +
+    'Guidance only: changes are made by the owner in the FloFi app; this server never changes a setting. Read-only.', Schemas.help, pure, args => {
+    const language = args.language ?? 'EN', websiteUrl = ctx.oauth?.origin ?? FLOFI_PRODUCTION_ORIGIN;
+    const common = { websiteUrl, changes: 'Only the owner changes settings, wallets, automations or authorizations, in the FloFi app; this MCP server never applies or prepares a change.',
+      authority: AUTHORITY };
+    if (args.topic !== undefined && args.question !== undefined) failWith('PLATFORM_HELP_INPUT_INVALID', { issues: [{ path: '/', rule: 'atMostOne(topic, question)' }] });
+    if (args.topic === undefined && args.question === undefined) return { ok: true, language, topics: platformGuide(language, 'MCP'), ...common };
+    const topic = args.topic ?? matchPlatformTopic(args.question ?? '');
+    if (!topic || !MCP_PLATFORM_TOPICS.includes(topic)) return failWith('PLATFORM_TOPIC_UNKNOWN', { topics: [...MCP_PLATFORM_TOPICS] });
+    return { ok: true, language, ...platformAnswer(topic, language, 'MCP'), resolvedFrom: args.topic === undefined ? 'QUESTION' : 'TOPIC', ...common };
+  });
+
+  // ── Automations: read-only. Managing an automation (create, pause, resume, archive, change) is the owner's, in the FloFi app ───────────────
+  register('list_automation_types', 'Automation types', 'The kinds of FloFi automation (SCHEDULED_DCA recurring buy, PRICE_TRIGGER, DAILY_WATCH) in FloFi\'s ' +
+    'words, how each occurrence is authorized (CONFIRM_EACH_TIME: the owner confirms every execution in their own wallet), that delegated execution is ' +
+    'retired, and FloFi\'s answers to common questions. Static and read-only: creating, activating or changing an automation is done by the owner in the ' +
+    'FloFi app; MCP cannot create, pause, resume, archive or approve one.', Schemas.language, pure,
+  args => ({ ok: true, language: args.language ?? 'EN', ...automationTypes(args.language ?? 'EN'), authority: AUTHORITY }));
+
+  register('get_automation_status', 'Automation status', 'Read-only status of the owner\'s own automations — every rule, or one `ruleId` with its recorded ' +
+    'history: FloFi\'s summary, state, next evaluation, last outcome and why it ran or did not run, as FloFi recorded it. Read as each wallet the account ' +
+    'linked on FloFi (`/connections`; a developer credential: its granted wallets); another owner\'s rule and an unknown id are both AUTOMATION_NOT_FOUND. ' +
+    'If a wallet cannot be read the result is INCOMPLETE, never an empty list. It never returns balances or approval links, and it cannot create, pause, ' +
+    'resume, archive, change or approve an automation: those happen only in the FloFi app with the owner\'s confirmation.', Schemas.automationStatus,
+  { ...pure, idempotentHint: false }, async args => {
+    const owners = principalOwners(ctx.principal), language = args.language ?? 'EN';
+    if (!owners.length) return failWith('MCP_WALLET_LINK_REQUIRED', { accessBasis: accessBasis(ctx), ...ctx.principal.kind === 'mcp-oauth'
+      ? { next: 'The owner links a wallet to this account on FloFi\'s Connections page (/connections); automation status is read only for linked wallets.' } : {} });
+    if (!ctx.automations) return failWith('AUTOMATIONS_NOT_ENABLED');
+    const status = await automationStatus(ctx.automations, owners, args.ruleId, language, ctx.budget);
+    return { ok: true, language, ...status, accessBasis: accessBasis(ctx), readOnly: true, management: AUTOMATION_MANAGEMENT[language], authority: AUTHORITY };
   });
   if (ctx.principal.kind === 'mcp-oauth' && ctx.state && ctx.oauth) {
     registerApprovalTools(ctx, register);

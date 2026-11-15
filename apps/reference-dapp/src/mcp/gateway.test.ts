@@ -72,7 +72,7 @@ describe('BUILD-MCP-001 gateway: enablement and authentication fail closed', () 
 describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
   const client = () => session({ env, token: alice.token });
 
-  it('completes the 2025-era stateless handshake and lists exactly the nine read-only tools', async () => {
+  it('completes the 2025-era stateless handshake and lists exactly the read-only tools (fifteen)', async () => {
     for (const protocolVersion of ['2025-11-25', '2025-06-18']) {
       const init = await client().request('initialize', { protocolVersion, capabilities: {}, clientInfo: { name: 'test', version: '1' } });
       expect(init.result).toMatchObject({ protocolVersion, serverInfo: { name: 'flofi' }, capabilities: { tools: {} } });
@@ -80,18 +80,25 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
     }
     const tools = ((await client().request('tools/list')).result as { tools: { name: string; inputSchema: Record<string, unknown>; annotations: Record<string, unknown> }[] }).tools;
     expect(tools.map(t => t.name).sort()).toEqual([...MCP_TOOL_NAMES].sort());
+    // The static credential's surface, pinned: a new tool is a deliberate change of this list. The education and automation tools are read-only.
+    expect([...MCP_TOOL_NAMES].sort()).toEqual(['compose_strategy', 'explain_concept', 'explain_strategy', 'get_automation_status', 'get_capabilities', 'get_evidence',
+      'get_execution_status', 'get_platform_help', 'get_supported_assets', 'get_supported_networks', 'list_automation_types', 'plan_strategy', 'review_strategy',
+      'simulate_strategy', 'validate_strategy']);
     for (const tool of tools) {
       expect(tool.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
       expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
       expect(tool.name).not.toMatch(/send|sign|submit|execute|approve|authorize|transfer|withdraw_funds|key|seed/i);
+      // No automation (or any other) management verb: automations are created, paused, resumed, archived and changed only in the FloFi app.
+      expect(tool.name).not.toMatch(/create|pause|resume|archive|replace|delete|remove|rebind|dismiss|update|set_|save|activate|open_/i);
     }
   });
 
   it('serves the 2026-07-28 revision too (server/discover, tools/list, tools/call)', async () => {
     const discover = await client().request('server/discover', {}, { modern: true });
     expect((discover.result as { supportedVersions: string[] }).supportedVersions).toContain('2026-07-28');
-    // BUILD-FLOFI-INTELLIGENCE-001 adds plan_strategy (the shared goal planner) to the static credential's strategy tools.
-    expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(10);
+    // BUILD-FLOFI-INTELLIGENCE-001 adds plan_strategy (the shared goal planner) to the static credential's strategy tools; the education tools
+    // (explain_concept, explain_strategy, get_platform_help) and the read-only automation tools (list_automation_types, get_automation_status) follow.
+    expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(15);
     const call = await client().request('tools/call', { name: 'get_supported_networks', arguments: {} }, { modern: true });
     // BUILD-RH-002 adds Robinhood Chain mainnet (`robinhood`); BUILD-SOLANA-TRANSFER-UX-001 its testnet (`robinhood-testnet`, native self-transfer).
     expect((call.result as { structuredContent: { networks: { id: string }[] } }).structuredContent.networks.map(network => network.id)).toContain('robinhood-testnet');
@@ -109,7 +116,9 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
       Object.values(record).forEach(walk);
     };
     tools.forEach(t => walk(t.inputSchema));
-    for (const forbidden of ['data', 'calldata', 'to', 'target', 'contract', 'chainId', 'privateKey', 'mnemonic', 'seed', 'signature', 'transaction', 'rawTransaction', 'nonce', 'from', 'value', 'gas'])
+    for (const forbidden of ['data', 'calldata', 'to', 'target', 'contract', 'chainId', 'privateKey', 'mnemonic', 'seed', 'signature', 'transaction', 'rawTransaction', 'nonce', 'from', 'value', 'gas',
+      // No secret, and no way to name the wallet an owner-scoped read is made as (it comes from the credential or the account's links only).
+      'secret', 'apiKey', 'accessToken', 'password', 'principals', 'wallet', 'wallets', 'ownerAddress', 'walletAddress', 'executionMode', 'approvalUrl'])
       expect(names.has(forbidden), forbidden).toBe(false);
   });
 
@@ -194,8 +203,13 @@ describe('BUILD-MCP-001 gateway: no FloFi-owned model is ever called', () => {
     const client = session({ env: { ...env, OPENAI_API_KEY: 'sk-test-not-used', FLOFI_COPILOT: 'live', OPENAI_COPILOT_MODEL: 'gpt-test' }, token: alice.token });
     await client.request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     for (const [tool, args] of [['get_supported_networks', {}], ['get_supported_assets', {}], ['get_capabilities', {}], ['compose_strategy', { strategy: BRIDGE }],
-      ['validate_strategy', { strategy: BRIDGE }], ['review_strategy', { strategy: BRIDGE }], ['simulate_strategy', { strategy: BRIDGE, workflowHash: '0x' + '0'.repeat(64), simulationSubject: OWNER }]] as const)
-      await client.callTool(tool, args);
+      ['validate_strategy', { strategy: BRIDGE }], ['review_strategy', { strategy: BRIDGE }], ['simulate_strategy', { strategy: BRIDGE, workflowHash: '0x' + '0'.repeat(64), simulationSubject: OWNER }],
+      // The education and static automation tools are FloFi's own copy: no network, no model, whatever keys are set.
+      ['explain_concept', { term: 'health factor' }], ['explain_concept', { concept: 'SLIPPAGE', level: 'EXAMPLE', language: 'PT' }], ['explain_strategy', { strategy: BRIDGE }],
+      ['get_platform_help', {}], ['get_platform_help', { question: 'how do I connect my wallet?' }], ['list_automation_types', {}]] as const) {
+      const result = await client.callTool(tool, args);
+      if (tool !== 'simulate_strategy') expect(result.isError, `${tool}: ${result.text.slice(0, 200)}`).toBe(false);
+    }
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

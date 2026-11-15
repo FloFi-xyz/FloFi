@@ -177,7 +177,7 @@
 .conversation-review .conversation-review-extra [data-permission] dd{white-space:normal}
 /* Review round 2: the full destination address and material step details wrap instead of being cut. */
 .conversation-review .conversation-review-compact [data-wrap] dd{white-space:normal;overflow-wrap:anywhere}
-.conversation-review .conversation-review-owned{color:var(--muted)}
+.conversation-review .conversation-review-owned,.conversation-review .conversation-review-saved{color:var(--muted)}
 .conversation-review .conversation-review-warnings{margin-top:6px;font-size:12.5px}
 .conversation-review .conversation-review-technical{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
 .conversation-review .conversation-review-technical>summary{cursor:pointer;color:var(--muted);font-size:12.5px}

@@ -202,9 +202,10 @@ describe('what a timed-out tool may say about its effects', () => {
     expect(String(body.message)).toMatch(/Do not tell the user that nothing was created/);
     expect(String(body.message)).not.toMatch(/\bno approval (request )?was created\b|\bnothing was (submitted|sent)\b/i);
     expect(timeoutResult('open_approval_session', 'MCP_REQUEST_TIMEOUT', null)).toMatchObject({ outcome: 'UNKNOWN', retryable: false });
-    for (const tool of ['get_execution_status', 'get_evidence', 'get_approval_status', 'get_execution_progress'] as const)
+    // get_automation_status reads the owner's automations: a timeout leaves their status UNKNOWN (never "no automations").
+    for (const tool of ['get_execution_status', 'get_evidence', 'get_approval_status', 'get_execution_progress', 'get_automation_status'] as const)
       expect(timeoutResult(tool, 'MCP_REQUEST_TIMEOUT', null)).toMatchObject({ outcome: 'STATUS_UNKNOWN', next: [tool] });
-    for (const tool of ['compose_strategy', 'simulate_strategy', 'get_capabilities'] as const)
+    for (const tool of ['compose_strategy', 'simulate_strategy', 'get_capabilities', 'explain_concept', 'explain_strategy', 'get_platform_help', 'list_automation_types'] as const)
       expect(timeoutResult(tool, 'MCP_REQUEST_TIMEOUT', null)).toMatchObject({ outcome: 'NOT_COMPLETED', retryable: true });
   });
 });

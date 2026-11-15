@@ -13,7 +13,7 @@ import { withFlightAccess } from '../server/flight-access';
  */
 import type { Side } from '../automations/assets';
 import type { ObservedAsset } from '../automations/trigger';
-import type { LinkCodeView, OccurrenceView, OpenedView, OverviewView, RuleHistoryView, RuleView } from '../automations/views';
+import type { LinkCodeView, OccurrenceView, OpenedView, OverviewView, ReplacedView, RuleHistoryView, RuleView, SchedulePatchView } from '../automations/views';
 import type { Command } from '../domain/commands';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { automationAvailability, automationOperation } from '../server/automation-operation';
@@ -66,6 +66,19 @@ export async function rebindAutomation(owner: WorkflowOwner, ruleId: string, ver
   return withFlightAccess(async () => {
   if (typeof ruleId !== 'string' || !Number.isSafeInteger(version)) return { ok: false, code: 'AUTOMATION_INPUT_INVALID' };
   return automationOperation('rebind', [ruleId, version], owner);
+
+  });
+}
+/**
+ * The owner's explicit schedule change. A rule's definition never changes (AUTOMATION_RULE_IMMUTABLE), so FloFi replaces it: a new rule with
+ * this schedule and the same action, limits, expiry and CONFIRM_EACH_TIME mode, and the old rule archived — one transaction, compare-and-set on
+ * `version`. The time zone stays the rule's. Authorizes nothing: every proposal still needs the owner's review and wallet signature.
+ */
+export async function replaceAutomationSchedule(owner: WorkflowOwner, ruleId: string, version: number, schedule: SchedulePatchView): Promise<Result<ReplacedView>> {
+  return withFlightAccess(async () => {
+  if (typeof ruleId !== 'string' || !Number.isSafeInteger(version) || !schedule || typeof schedule !== 'object' || (schedule.frequency !== 'DAILY' && schedule.frequency !== 'WEEKLY')
+    || !(schedule.weekday === null || Number.isInteger(schedule.weekday)) || typeof schedule.time !== 'string') return { ok: false, code: 'AUTOMATION_INPUT_INVALID' };
+  return automationOperation('replace', [ruleId, version, { schedule: { frequency: schedule.frequency, weekday: schedule.weekday, time: schedule.time } }], owner);
 
   });
 }

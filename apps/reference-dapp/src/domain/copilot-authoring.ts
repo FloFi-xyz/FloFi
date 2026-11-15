@@ -102,7 +102,12 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
    * BUILD-FLOFI-UX-FIX-003: the request is a new action (not an edit or repeat of a step), so an amount written after "to"/"receive" ("bridge ETH to
    * 1 USDC") is what the user wants to receive. Absent: no destination-amount reading (edits, V1, goal steps).
    */
-  readonly receiving?: boolean };
+  readonly receiving?: boolean;
+  /**
+   * BUILD-FLOFI-UNIFIED-COPILOT-001: public addresses FloFi itself resolved from a Saved Recipient the user named exactly in this request
+   * (`saved-recipients.ts`). They ground a destination like a typed address (and are re-checked for the network like one); nothing else.
+   */
+  readonly saved?: readonly string[] };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
@@ -138,11 +143,25 @@ const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegE
 
 /** P0 hotfix (FIX 1): native ETH on a catalog network is grounded only by the user's own "ETH"/"ether" — "WETH" is a different asset and never
  * makes a model-reported ETH native (`ASSET_MENTIONS.ETH` also accepts "weth", for the test networks' WETH-only swaps). */
-const NATIVE_ETH_NAMED = /\beth\b|\bether\b/i;
+const NATIVE_ETH_WORDS = /\beth\b|\bether\b/i;
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: people also name the coin by its network's name ("trocar ethereum por usdc na arbitrum", "swap ethereum to
+ * usdc on arbitrum one"). "Ethereum" is the coin only in a coin position: after an amount ("1 ethereum"), after a trade verb ("swap/trocar
+ * (o) ethereum"), or before "por/for/to/into <token>". Anywhere else it is the network. A coin-position "ethereum" never names the Ethereum
+ * network (`mentionedNetworks` removes it), so "trocar 1 ethereum por usdc" still asks which network: one word never grounds both.
+ */
+const COIN_VERBS = String.raw`(?:swap|trade|buy|sell|convert|exchange|troca|trocar|troque|compra|comprar|compre|vende|vender|venda|converte|converter|converta)`;
+const ETHEREUM_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_VERBS}\s+(?:(?:o|a|os|as|my|meu|meus|minha|the|all|todo|tudo|some|um|uma)\s+)?))ethereum\b`
+  + String.raw`|(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)`
+  + String.raw`\bethereum(?=\s+(?:por|for|to|into|em|pra|para)\s+(?:usdc(?:\.e)?|usdt|weth|wbtc|btc|sol|dai|arb|eth|ether)\b)`;
+const ETHEREUM_AS_COIN = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'i');
+const ETHEREUM_AS_COIN_ALL = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'gi');
+const NATIVE_ETH_NAMED = { test: (text: string) => NATIVE_ETH_WORDS.test(text) || ETHEREUM_AS_COIN.test(text) };
 /** WETH as people write it ("weth", "w-eth", "wrapped ether"): removed before native ETH is looked for (its catalog name "Ether" is inside it). */
 const WRAPPED_ETH_WORDS = /\bweth\b|\bw[\s-]+eth\b|\bwrapped[\s-]+eth(?:er)?\b/gi;
 /** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
-export function mentionedNetworks(text: string): Network[] {
+export function mentionedNetworks(raw: string): Network[] {
+  const text = raw.replace(ETHEREUM_AS_COIN_ALL, ' ');
   return copilotNetworksMentioned(text).filter(id => {
     const identity = networkOfCopilot(id);
     // Catalog names can equal a chain alias (ARB is named Arbitrum). Asset context alone cannot choose a mainnet.
@@ -335,6 +354,7 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   return value;
 }
 function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+  if (value !== null && field === 'recipient' && g.saved?.includes(value)) return value;
   if (value !== null && !g.carried.has(field)) {
     const assetAddresses = [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
     const mentions = [...g.text.matchAll(/0x[0-9a-fA-F]{40}/g)].filter(match => match[0].toLowerCase() === value.toLowerCase());
@@ -572,6 +592,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const destinationEcosystem = UNIVERSAL_NETWORKS[dst].ecosystem === 'SOLANA' ? 'Solana' : 'EVM';
   const solanaRecipient = () => {
     if (a.recipient !== null && /^0x/i.test(a.recipient)) return refuse(m.universalRecipientFormat(dstName, destinationEcosystem));
+    if (a.recipient !== null && g.saved?.includes(a.recipient) && isSolanaPublicKey(a.recipient)) return a.recipient;
     const outputIdentity = resolveUniversalAsset(dst, outputAsset).asset;
     // Explicit token references and the selected token mint are asset identities, never implicit recipient wallets.
     const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9@])/g)].map(match => match[0])
@@ -653,7 +674,8 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
  * The network must be named; the sentence is the exact grammar's (`transfer 0.01 ETH on Base to 0x…`).
  */
 /** UX-001: the user names the connected owner as the destination, in the request or as the answer to "Which wallet should I send it to?". */
-const SELF_RECIPIENT = /\b(?:to|into)\s+(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)\b|\b(?:para|pra)\s+(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira)(?![\p{L}\p{N}])/iu;
+/** "To me" / "para minha carteira": the connected owner wallet (also read by the conversation: a saved name never replaces it). */
+export const SELF_RECIPIENT = /\b(?:to|into)\s+(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)\b|\b(?:para|pra)\s+(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira)(?![\p{L}\p{N}])/iu;
 const SELF_ANSWER = /^(?:(?:to\s+)?(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)|(?:para\s+)?(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira))[.!]?$/iu;
 function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];

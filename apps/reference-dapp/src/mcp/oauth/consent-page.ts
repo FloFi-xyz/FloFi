@@ -13,9 +13,10 @@ const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;'
 export const escapeHtml = (value: string) => value.replace(/[&<>"'`]/g, c => ESCAPES[c]!);
 
 export const SCOPE_TEXT: Readonly<Record<McpScope, string>> = Object.freeze({
-  'flofi.strategy': 'Compose, check, review and preview (simulate) strategies with FloFi\'s engine.',
+  'flofi.strategy': 'Compose, check, review, explain and preview (simulate) strategies with FloFi\'s engine, and read FloFi\'s general guides (no account data).',
   'flofi.approval': 'Prepare approval requests that you open, review and sign yourself in FloFi.',
-  'flofi.runs': 'Read the status and evidence of runs made by wallets you link to this account on FloFi.',
+  'flofi.runs': 'Read the status and evidence of runs, and the read-only status of automations, of wallets you link to this account on FloFi. ' +
+    'It cannot create, change, pause or approve anything.',
 });
 
 const STYLE = `body{font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f6f7f9;color:#14171a}

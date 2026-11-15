@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { activeNetworkScope, introducedTestNetworks, publicText, testNetworkMessage } from './network-scope';
-import { groundAutomationDraft } from './copilot-automation';
+import { automationFaq, groundAutomationDraft, matchAutomationFaq, rescheduleDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { commandIsValid, SEQUENCE_STEP_COMMANDS, type Command } from './commands';
@@ -10,7 +10,7 @@ import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
 import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, groundedSigned, mentionedNetworks,
-  planCopilotActions, proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
+  planCopilotActions, proposalFromPlan, SELF_RECIPIENT, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
@@ -24,10 +24,16 @@ import { networkIdentity, networkOfCopilot } from './network-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { defaultUniversalOutput } from './universal-bridge-authoring';
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
-import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotChanges, type CopilotGoal, type CopilotIntentV2, type CopilotOrdinal,
-  type CopilotQuestionTopic, type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
+import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotAutomationOperation, type CopilotChanges, type CopilotGoal,
+  type CopilotIntentV2, type CopilotOrdinal, type CopilotQuestionTopic, type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
 import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage } from './copilot-messages';
-import { answerQuestion, stepSummary, type CopilotFacts } from './copilot-answers';
+import { answerQuestion, stepSentence, stepSummary, type CopilotFacts } from './copilot-answers';
+import { answerConcept, conceptCatalog, conceptFollowUp, conceptInWorkflow, conceptName, conceptQuestion, foldText, matchConcept, type ConceptId, type ConceptLevel,
+  type ConceptProtocol, type ConceptState } from './intelligence/concepts';
+import { ASSIST_COPY, correctTypos, questionLanguage, recipientOfferAnswer, requestLikeName, resumeRequest } from './copilot-assist';
+import { matchPlatformTopic, platformAnswer, type PlatformSurface, type PlatformTopic } from './intelligence/platform-guide';
+import { ecosystemOfAddress, maskSavedRecipients, matchSavedRecipients, recipientLabelKey, savedRecipientAddress, savedRecipientLabel, SAVED_RECIPIENT_LIMITS, SAVED_RECIPIENT_MARKER,
+  type SavedRecipient, type SavedRecipientEcosystem } from './saved-recipients';
 import { copilotNetworksMentioned, type CopilotNetworkId } from './network-registry';
 import type { PendingAgentCapability } from './agent-rollout';
 import { lexiconAssets, lexiconNetworks, lexiconSuggestions, LEXICON_LIMITS, mergeLexicon, parseLexicon, parseMemoryStatement, statedSource, type LexiconEntry,
@@ -84,7 +90,10 @@ type Draft = { readonly expected?: readonly DraftField[]; readonly validated?: r
   readonly suggestion?: CopilotNetworkId };
 /** Values Flofi settled itself while resolving one request: values it carried, the swap whose output funds a position, a position and its portion. */
 type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: SwapSource; readonly position?: string; readonly portion?: string;
-  /** BUILD-FLOFI-INTELLIGENCE-001: the action is a goal plan's step (its assets were grounded per goal field, see `Grounding.explicitAssets`). */ readonly planned?: true };
+  /** BUILD-FLOFI-INTELLIGENCE-001: the action is a goal plan's step (its assets were grounded per goal field, see `Grounding.explicitAssets`). */ readonly planned?: true;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: misspelled words whose reading FloFi already showed the user ("arbriturm" as Arbitrum One). */ readonly typos?: readonly string[];
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the step an edit or repeat already resolved (a later answer never asks "which step?" again). */ readonly target?: Resolved;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient (id) the user picked from FloFi's "which one?" buttons. */ readonly savedRecipient?: string };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -103,7 +112,23 @@ export type CopilotConversation = {
   readonly askedAt?: number; readonly languageObserved?: boolean;
   /** BUILD-FLOFI-INTELLIGENCE-001: the open request's ledger (reset with the request). */
   readonly ledger?: ConversationLedger;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the DeFi concept FloFi last explained, so "não entendi" or "e na Aave?" has a grounded subject. */
+  readonly concept?: ConceptState | null;
+  /** FloFi's open, optional offer to save a typed public address in Credentials (never required; anything else drops it). */
+  readonly recipientOffer?: RecipientOffer | null;
+  /** Addresses whose save offer the user declined in this conversation: never offered again. */
+  readonly recipientDeclined?: readonly string[];
+  /**
+   * BUILD-FLOFI-UNIFIED-COPILOT-001: the automation this conversation is about — the proposal FloFi last showed (and whether the owner created it),
+   * or null input after a management turn — so "e se o preço cair?" or "muda para segunda" refers to it.
+   */
+  readonly automation?: { readonly input: AutomationInput | null; readonly created: boolean } | null;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: every saved recipient this conversation has mentioned. Masking keeps using them even if the list is later
+   * unavailable, renamed or removed, so a name once masked is never sent to a model in a later turn (local state only, never sent anywhere). */
+  readonly recipientMasks?: readonly SavedRecipient[];
 };
+export type RecipientOffer = { readonly address: string; readonly ecosystem: SavedRecipientEcosystem; readonly suggestion: string | null;
+  /** True once the user accepted and FloFi asked for the name. */ readonly naming: boolean };
 /**
  * BUILD-CHAT-LEARNING-001: what the caller knows about this user's learning. It never decides grounding by itself: the engine validates every
  * entry again and applies the source rules of `copilot-lexicon.ts`. Absent = learning is not enabled: the engine behaves exactly as before.
@@ -140,6 +165,16 @@ export type CopilotEnvironment = {
    * (sent as the turn's reply language) — whatever language the person typed in; their words are still understood in either language.
    */
   readonly interfaceLanguage?: CopilotLanguage;
+  /**
+   * BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients (public addresses with names), read by the surface from its verified
+   * session. Absent: none are available here (signed out, unlinked channel, not migrated). A name selects an address only through the exact-name
+   * rules of `saved-recipients.ts`; names and addresses are masked before anything is sent to a model.
+   */
+  readonly recipients?: readonly SavedRecipient[];
+  /** The surface can save a recipient for this user (the web app, signed in): FloFi may offer to save a typed address. */
+  readonly recipientWrites?: boolean;
+  /** Where the conversation happens (default WEB): a chat channel never applies a change, it links to the owner's FloFi screen. */
+  readonly surface?: PlatformSurface;
 };
 /** One FloFi-registered Orca position of the connected Solana Devnet wallet, as the position registry and the chain report it. */
 export type CopilotPosition = { readonly positionMint: string; readonly status: string; readonly tickLower: number | null; readonly tickUpper: number | null;
@@ -153,8 +188,21 @@ export type CopilotVerified = {
   readonly remaining: readonly { readonly token: 'SOL' | 'devUSDC'; readonly amount: string }[];
 };
 export type CopilotReply = {
-  readonly code?: string; readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY'; readonly text: string; readonly notes: readonly string[];
+  readonly code?: string; readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'AUTOMATION_MANAGE' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY';
+  readonly text: string; readonly notes: readonly string[];
+  /**
+   * BUILD-FLOFI-UNIFIED-COPILOT-001: a public address the user explicitly asked to save under a name; the caller performs the save on the verified
+   * account and reports the result. It authorizes nothing and is independent of any transaction.
+   */
+  readonly recipientSave?: { readonly label: string; readonly address: string; readonly ecosystem: SavedRecipientEcosystem };
+  /** An automation-management request: the caller reads the owner's own automations and shows FloFi's view; a change needs the owner's confirmation. */
+  readonly manage?: { readonly operation: CopilotAutomationOperation; readonly request: string };
+  /** A FloFi page that answers a "where/how do I" question (relative path from the platform guide). */
+  readonly link?: { readonly path: string; readonly label: string };
+  /** FloFi's optional offer after a proposal (save the typed address): shown as its own message with its two answers; never required. */
+  readonly offer?: { readonly text: string; readonly options: readonly string[] };
   readonly options: readonly string[]; readonly automation?: AutomationInput; readonly command?: Command; readonly sentence?: string; readonly topic?: CopilotQuestionTopic;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the options are the user's own saved names, shown and sent exactly as saved (never translated). */ readonly verbatimOptions?: true;
   /** BUILD-CHAT-LEARNING-001: a memory change for the caller to perform (only after the user's own click or explicit statement). */
   readonly memory?: MemoryAction;
   /** Learned entries FloFi used to read this request (each also shown as a note) and content-free feedback signals. BUILD-CHAT-LEARNING-002:
@@ -208,8 +256,9 @@ const REPEAT_CUE = /\b(?:same|again|repeat|once more|as before|like before|mesm[
 
 const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 const segmentText = (state: CopilotConversation) => state.segment.join('\n');
-/** Flofi's own transcript entries never carry an address (a carried beneficiary, a connected wallet): the model needs none. */
-const redact = (text: string) => text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
+/** Flofi's own transcript entries never carry an address (a carried beneficiary, a connected wallet, EVM or Solana): the model needs none. */
+const redact = (text: string) => text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]')
+  .slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
 function bounded(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
   let out = entries.map(entry => entry.role === 'assistant' ? { role: entry.role, text: redact(entry.text) } : entry)
     .slice(-COPILOT_V2_LIMITS.maxTranscriptMessages);
@@ -399,6 +448,9 @@ function changedSteps(env: CopilotEnvironment, command: Command): WorkflowStep[]
 }
 const pendingSteps = (env: CopilotEnvironment): WorkflowStep[] => env.pending && env.pending.command.type !== 'REMOVE' ? changedSteps(env, env.pending.command) : [];
 /** Records a proposal the user can now see, whoever made it (the Copilot or the exact grammar). */
+/** BUILD-FLOFI-UNIFIED-COPILOT-001: the owner created the automation FloFi proposed (its later changes are a confirmed replacement of the saved rule). */
+export const automationCreated = (state: CopilotConversation): CopilotConversation =>
+  state.automation ? { ...state, automation: { ...state.automation, created: true } } : state;
 export function recordProposal(state: CopilotConversation, env: CopilotEnvironment, command: Command, sentence?: string,
   learned: { readonly readings: readonly ProposalReading[]; readonly request: string } | null = null): CopilotConversation {
   if (state.referents[0]?.command === command) return state;
@@ -867,6 +919,125 @@ function answeredDraft(state: CopilotConversation, intent: CopilotIntentV2, text
   return progress ? { ...next, clarifications: 0 } : next;
 }
 
+// ── BUILD-FLOFI-UNIFIED-COPILOT-001: conversational aids ─────────────────────────────────────────────────────────────────
+/** A turn beside the open request: the draft, its question, the segment and the clarification budget stay exactly as they were. */
+const aside = (state: CopilotConversation, text: string, summary: string, patch: Partial<CopilotConversation> = {}): CopilotConversation =>
+  ({ ...state, ...patch, transcript: bounded([...state.transcript, { role: 'user', text }, { role: 'assistant', text: summary }]) });
+/** An answer given while FloFi's question is open reminds the user of it and offers to continue (nothing is cancelled or approved). */
+function withDraftReminder(value: CopilotReply, state: CopilotConversation, language: CopilotLanguage): CopilotReply {
+  const question = state.draft?.question;
+  if (!question) return value;
+  const a = ASSIST_COPY[language];
+  return { ...value, notes: [...value.notes, a.stillOpen(question)], options: [...value.options.filter(option => option !== a.resumeOption).slice(0, 3), a.resumeOption] };
+}
+/** FloFi's explanation of a concept (or of the concept in the user's workflow), from its own copy only. */
+function conceptReply(env: CopilotEnvironment, language: CopilotLanguage, id: ConceptId, level: ConceptLevel, protocol: ConceptProtocol | null, workflow: boolean):
+  { readonly reply: CopilotReply; readonly concept: ConceptState } {
+  if (workflow) {
+    const view = conceptInWorkflow(id, env.facts.steps, language, step => stepSentence(step, language));
+    return { reply: reply('ANSWER', view.text, { notes: view.notes, topic: 'CONCEPT' }), concept: { id, level, protocol } };
+  }
+  const answer = answerConcept(id, { level, protocol, language, workflowSteps: env.facts.steps });
+  return { reply: reply('ANSWER', answer.text, { notes: answer.notes, options: answer.options, topic: 'CONCEPT' }), concept: answer.state };
+}
+/** FloFi's guide to one of its own screens or settings, with the page to open when the surface can link to it. */
+function platformReply(topic: PlatformTopic, language: CopilotLanguage, env: CopilotEnvironment): CopilotReply {
+  const answer = platformAnswer(topic, language, env.surface ?? 'WEB');
+  return reply('ANSWER', answer.text, { topic: 'PLATFORM', ...answer.link ? { link: answer.link } : {} });
+}
+const AUTOMATION_WORD = /(?:^|\s)(?:automac\w*|automation\w*|automatiz\w*|dca|recorrente|recurring|compra recorrente)(?:\s|$)/;
+const QUESTIONISH = /\?\s*$|(?:^|\s)(?:o que acontece|what happens|e se|what if|and if|como|how|por que|porque|why|pode|can it|will it|vai|sera que|e quando|when)(?:\s|$)/;
+const MANAGE_VERBS: readonly (readonly [CopilotAutomationOperation, RegExp])[] = [
+  ['PAUSE', /(?:^|\s)(?:pausa|pausar|pause|suspende|suspender)(?:\s|$)/], ['RESUME', /(?:^|\s)(?:retoma|retomar|resume|reativa|reativar|reactivate|despausa)(?:\s|$)/],
+  ['ARCHIVE', /(?:^|\s)(?:exclui|excluir|apaga|apagar|deleta|deletar|delete|remove|remover|cancela|cancelar|arquiva|arquivar|archive)(?:\s|$)/],
+  ['LIST', /(?:^|\s)(?:quais|which|what|lista|list|mostra|mostrar|show|ver|see)(?:\s|$)/]];
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the automation this conversation is about. A question about how automations behave is FloFi's own answer; "muda
+ * para segunda" re-proposes an automation the owner has not created yet (a saved one is changed only through FloFi's confirmed replacement); a
+ * pause/resume/delete/list request opens the owner's own automations for an explicit confirmation. Nothing here changes a saved automation.
+ */
+function automationTurn(state: CopilotConversation, text: string, env: CopilotEnvironment, language: CopilotLanguage): TurnStart | null {
+  // An open automation question is answered by the draft path ("toda segunda às 9h" is that request's schedule, never an earlier proposal's).
+  if (state.draft?.intent.kind === 'AUTOMATION') return null;
+  const folded = foldText(text), about = Boolean(state.automation) || AUTOMATION_WORD.test(folded);
+  if (!about || folded.length > 160 || /0x[0-9a-f]{6}/i.test(text)) return null;
+  // The folded text has no punctuation: a trailing "?" is read from the raw message.
+  const a = ASSIST_COPY[language], current = state.automation?.input ?? null, question = /\?\s*$/.test(text) || QUESTIONISH.test(folded);
+  // A schedule change of the proposal FloFi just showed and the owner has not created: the same proposal, with the new schedule. Only a plain
+  // instruction with no other request open: a question ("is 9am ok?") is answered, never applied.
+  const patched = current && !state.automation?.created && !state.draft && !question ? rescheduleDraft(current, text) : null;
+  if (patched) {
+    const value = reply('AUTOMATION_PROPOSAL', a.automationUpdated, { automation: patched });
+    return { kind: 'LOCAL', reply: value, next: aside(state, text, COPILOT_TRANSCRIPT.proposed + patched.name, { automation: { input: patched, created: false } }) };
+  }
+  const manage = (operation: CopilotAutomationOperation): TurnStart => ({ kind: 'LOCAL', reply: withDraftReminder(reply('AUTOMATION_MANAGE', a.manage[operation],
+    { manage: { operation, request: text } }), state, language), next: aside(state, text, `Flofi opened the user's saved automations (${operation}).`, { automation: { input: null, created: true } }) });
+  const faq = matchAutomationFaq(text);
+  // A saved automation's schedule changes only by a confirmed replacement, which the owner's own automation view prepares.
+  if (state.automation?.created && faq === 'SCHEDULE_CHANGE' && !question) return manage('RESCHEDULE');
+  if (faq === 'WHY_NOT_RUN' && (state.automation?.created || AUTOMATION_WORD.test(folded))) return manage('WHY_NOT_RUN');
+  if (question && faq && (faq !== 'SCHEDULE_CHANGE' || !/\d/.test(folded))) return { kind: 'LOCAL', reply: withDraftReminder(reply('ANSWER', automationFaq(faq, language), { topic: 'AUTOMATIONS' }), state, language),
+    next: aside(state, text, `Flofi explained how automations behave (${faq}).`) };
+  if (!AUTOMATION_WORD.test(folded)) return null;
+  const verb = MANAGE_VERBS.find(([operation, pattern]) => pattern.test(folded) && (operation === 'LIST' || !question));
+  return verb ? manage(verb[0]) : null;
+}
+/** "What can you explain?": the catalog's names, with a few of them as options. */
+const conceptMenu = (language: CopilotLanguage): { readonly text: string; readonly notes: readonly string[]; readonly options: readonly string[] } => {
+  const names = conceptCatalog(language).map(entry => entry.name);
+  return { text: ASSIST_COPY[language].conceptMenu(names.slice(0, 8)), notes: [], options: [] };
+};
+function assistTurn(state: CopilotConversation, text: string, env: CopilotEnvironment, language: CopilotLanguage): TurnStart | null {
+  const a = ASSIST_COPY[language], draft = state.draft;
+  // "Ok, vamos continuar": FloFi's own open question again, with its buttons. It answers nothing and is not counted as a new question.
+  if (draft?.question && resumeRequest(text) && !contextChange(draft.snapshot, snapshotOf(env)))
+    return { kind: 'LOCAL', reply: reply('CLARIFICATION', a.resumed(draft.question), { options: draft.shown ?? draft.options.map(option => option.label) }),
+      next: aside(state, text, COPILOT_TRANSCRIPT.asked + draft.question, { concept: null }) };
+  // An answer to FloFi's open question always wins over an explanation (a slot value is never read as a concept): a value it reads, one of its own
+  // buttons ("Across", a saved name, "Arbitrum One"), or a bare amount for an amount question.
+  if (draft && (answerDraftField(draft.intent, draft.expected ?? [], text) || [...draft.shown ?? [], ...draft.options.map(option => option.label)].some(label => normalize(label) === normalize(text))
+    || ((draft.amountFill || draft.depositFill) && bareAmount(text)))) return null;
+  const followUp = state.concept ? conceptFollowUp(text) : null, asked = followUp ? null : conceptQuestion(text);
+  if (!followUp && !asked) {
+    const automated = automationTurn(state, text, env, language);
+    if (automated) return automated;
+    // "Como conecto minha Phantom?", "onde vejo minhas automações?": FloFi's own guide to its screens, never a change.
+    const topic = matchPlatformTopic(text);
+    if (!topic) return null;
+    return { kind: 'LOCAL', reply: withDraftReminder(platformReply(topic, language, env), state, language), next: aside(state, text, `Flofi answered how to use FloFi (${topic}).`) };
+  }
+  let id: ConceptId, level: ConceptLevel = 'STANDARD', protocol: ConceptProtocol | null = null, workflow = false;
+  if (followUp && state.concept) {
+    id = state.concept.id;
+    if (followUp.kind === 'LEVEL') level = followUp.level === 'SIMPLE' && state.concept.level === 'SIMPLE' ? 'EXAMPLE' : followUp.level;
+    else if (followUp.kind === 'PROTOCOL') protocol = followUp.protocol;
+    else { level = state.concept.level; protocol = state.concept.protocol; workflow = true; }
+  } else id = asked!;
+  const answer = conceptReply(env, language, id, level, protocol, workflow);
+  return { kind: 'LOCAL', reply: withDraftReminder(answer.reply, state, language),
+    next: aside(state, text, a.explained(conceptName(id, 'EN'), workflow ? 'WORKFLOW' : protocol ?? level), { concept: answer.concept }) };
+}
+/** The user's answer to FloFi's optional offer to save a typed address; null when the message is about something else (the offer is dropped). */
+function answerRecipientOffer(state: CopilotConversation, offer: RecipientOffer, text: string, language: CopilotLanguage, env: CopilotEnvironment): TurnStart | null {
+  const a = ASSIST_COPY[language], answer = recipientOfferAnswer(text);
+  const local = (value: CopilotReply, next: CopilotConversation): TurnStart => ({ kind: 'LOCAL', reply: value, next });
+  if (answer?.kind === 'DECLINE')
+    return local(reply('ANSWER', a.recipientDeclined), aside({ ...state, recipientOffer: null, recipientDeclined: [...state.recipientDeclined ?? [], offer.address].slice(-16) },
+      text, 'Flofi did not save the address.'));
+  // While FloFi waits for a name, a new request or an address is read as itself (the offer is dropped), never saved as the name.
+  if (!answer && (!offer.naming || requestLikeName(text))) return null;
+  const written = answer?.kind === 'ACCEPT' ? answer.label : offer.naming ? text.trim() : null;
+  if (written === null) return local(reply('CLARIFICATION', a.recipientName(offer.suggestion), { options: offer.suggestion ? [offer.suggestion] : [] }),
+    aside({ ...state, recipientOffer: { ...offer, naming: true } }, text, 'Flofi asked for a name for the address.'));
+  const label = savedRecipientLabel(written);
+  if (!label) return local(reply('CLARIFICATION', a.recipientLabelInvalid, { options: offer.suggestion ? [offer.suggestion] : [] }),
+    aside({ ...state, recipientOffer: { ...offer, naming: true } }, text, 'Flofi asked for another name.'));
+  if ((env.recipients ?? []).some(recipient => recipientLabelKey(recipient.label) === recipientLabelKey(label)))
+    return local(reply('CLARIFICATION', a.recipientLabelTaken(label), { options: [] }), aside({ ...state, recipientOffer: { ...offer, naming: true } }, text, 'Flofi asked for another name.'));
+  return local(reply('ANSWER', a.recipientSaving(label), { recipientSave: { label, address: offer.address, ecosystem: offer.ecosystem } }),
+    aside({ ...state, recipientOffer: null }, text, 'Flofi saved the address under a name the user chose.'));
+}
+
 // ── Turns ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** Starts a user turn: a local answer (input refused, secret, or a reply to Flofi's own question) or a request for the model. */
 export function startTurn(current: CopilotConversation, raw: string, env: CopilotEnvironment): TurnStart {
@@ -899,8 +1070,22 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     if (statement) return { kind: 'LOCAL', ...memoryTurn(state, statement, env.learning, statement.kind === 'LANGUAGE' ? statement.language
       : preferredLanguage(state, env) ?? statement.said) };
   }
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi's optional offer to save a typed address is answered by its buttons or words; anything else drops it.
+  const assistLanguage = env.interfaceLanguage ?? preferredLanguage(state, env) ?? messageLanguage(text) ?? questionLanguage(text) ?? state.language;
+  if (state.recipientOffer) {
+    const offered = answerRecipientOffer(state, state.recipientOffer, text, assistLanguage, env);
+    if (offered) return offered;
+    state = { ...state, recipientOffer: null };
+  }
   const answered = yesOrNo(state, text, env, m);
   if (answered && !('pick' in answered)) return answered;
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: going back to the open request, a DeFi concept and its follow-ups are answered locally (no model, no change).
+  if (!answered) {
+    const assisted = assistTurn(state, text, env, assistLanguage);
+    // The conversation continues in the language FloFi just answered in ("mais detalhes" after a Portuguese explanation stays Portuguese).
+    if (assisted) return assisted.kind === 'LOCAL' && !state.languageSet ? { ...assisted, next: { ...assisted.next, language: assistLanguage } } : assisted;
+    if (state.concept) state = { ...state, concept: null };
+  }
   const draft = state.draft, picked = answered ? answered.pick : text;
   if (draft) {
     if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
@@ -927,10 +1112,18 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
   }
-  const next = withUser(state, text);
+  let next = withUser(state, text);
   // BUILD-FLOFI-INTELLIGENCE-001: FloFi's sanitized context card travels with the request; the model reads it only through a read-only tool.
   const card = contextCard(operationalState(next, env)), key = contextKey(card);
-  return { kind: 'REMOTE', request: { version: '2', messages: next.transcript, context: card, contextKey: key, ...env.interfaceLanguage ? { replyLanguage: env.interfaceLanguage } : {} },
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: a saved recipient's name and address never leave for a model provider, in the user's words or in FloFi's own
+  // (a "which one?" question lists names; a proposal summary carries the address); FloFi resolves them itself.
+  const live = env.recipients ?? [], all = next.transcript.map(entry => entry.text).join('\n');
+  const masks = [...state.recipientMasks ?? [], ...live.filter(recipient => !(state.recipientMasks ?? []).some(other => other.id === recipient.id)
+    && maskSavedRecipients(all, [recipient]) !== all)].slice(-SAVED_RECIPIENT_LIMITS.maxPerAccount);
+  const maskWith = [...live, ...masks.filter(mask => !live.some(recipient => recipient.id === mask.id))];
+  const messages = maskWith.length ? next.transcript.map(entry => ({ ...entry, text: maskSavedRecipients(entry.text, maskWith) })) : next.transcript;
+  if (masks.length) next = { ...next, recipientMasks: masks };
+  return { kind: 'REMOTE', request: { version: '2', messages, context: card, contextKey: key, ...env.interfaceLanguage ? { replyLanguage: env.interfaceLanguage } : {} },
     turn: { before: state, state: next, snapshot: snapshotOf(env), contextKey: key } };
 }
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
@@ -944,7 +1137,7 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   if (turn.contextKey && result.contextKey !== undefined && result.contextKey !== turn.contextKey)
     return { reply: reply('FAILED', m.workflowChanged), next: closeSegment(turn.before) };
   let intent: CopilotIntentV2;
-  try { intent = parseCopilotIntentV2(result.intent); }
+  try { intent = parseCopilotIntentV2(withoutRecipientMarker(result.intent)); }
   catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
   // P0 approved UX: FloFi composes its reply in the interface language, not the language the model detected.
@@ -965,11 +1158,41 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
     read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
-  const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language }, env, null, turn.before.draft?.extras ?? {}), env);
+  const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language }, env, null, carriedOver(turn.before.draft, intent)), env);
   if (!said || said !== read) return resolved;
   return withAdaptation({ ...resolved, next: { ...resolved.next, languageObserved: true } }, env, { ...NO_ADAPTATION, observations: [{ kind: 'LANGUAGE', language: said }] });
 }
 
+/** "Para mim" / "to my wallet", or a saved name, in the user's latest words: a new destination that replaces a carried one. */
+function releasesRecipient(state: CopilotConversation, env: CopilotEnvironment, extras: Extras): boolean {
+  const latest = state.segment.at(-1) ?? '', recipients = env.recipients ?? [];
+  return SELF_RECIPIENT.test(latest) || (recipients.length > 0 && (Boolean(extras.savedRecipient) || matchSavedRecipients(latest, recipients).kind !== 'NONE'));
+}
+/** The operation(s) an intent is about, to tell a continuation of the open request from a new one. */
+const operationsOf = (intent: CopilotIntentV2): string => intent.kind === 'ACTION' ? intent.action.type : intent.kind === 'COMPOSITION' ? intent.actions.map(action => action.type).join('+')
+  : intent.kind;
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: what a model answer inherits from FloFi's open question. The step an edit pinned stays pinned only for the same
+ * edit or repeat that names no step of its own ("remove step 2" after an edit question of step 1 targets step 2); the saved recipient the user
+ * named stays chosen only while the request is the same operation (a new bridge never inherits the send's "Ana"). Other extras behave as before.
+ */
+function carriedOver(draft: Draft | null, intent: CopilotIntentV2): Extras {
+  if (!draft?.extras) return {};
+  const { target, savedRecipient, ...rest } = draft.extras;
+  const unnamed = (intent.kind === 'EDIT' || intent.kind === 'REPEAT') && intent.target.step === null && intent.target.ordinal === null;
+  return { ...rest, ...target && unnamed && draft.intent.kind === intent.kind ? { target } : {},
+    ...savedRecipient && operationsOf(draft.intent) === operationsOf(intent) ? { savedRecipient } : {} };
+}
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: a model that copied FloFi's masked saved-recipient marker into an address field wrote no address: that field is
+ * empty (FloFi resolves the saved name itself). Nothing else is touched; the intent is still validated in full.
+ */
+function withoutRecipientMarker(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutRecipientMarker);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, (key === 'recipient' || key === 'beneficiary') && typeof item === 'string'
+    && item.trim().toLowerCase() === SAVED_RECIPIENT_MARKER ? null : withoutRecipientMarker(item)]));
+}
 /** The intent without the model's own sentences (question, reason, explanation): used when they are not in the person's language. */
 function withoutForeignProse(intent: CopilotIntentV2): CopilotIntentV2 {
   if (intent.kind === 'CLARIFICATION_REQUIRED') return { ...intent, question: '' };
@@ -977,18 +1200,41 @@ function withoutForeignProse(intent: CopilotIntentV2): CopilotIntentV2 {
   if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) return { ...intent, answer: null };
   return intent;
 }
-/** One validated intent → reply and next state. `forced` is a step the user picked from Flofi's own buttons. */
+/**
+ * One validated intent → reply and next state. BUILD-FLOFI-UNIFIED-COPILOT-001: an automation stays "the automation this conversation is about"
+ * only until another request is resolved, so a later "is 9am ok?" or "preciso assinar?" about a swap is never read as being about it.
+ */
 function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, forced: Resolved | null, extras: Extras): Result {
+  const result = resolveIntentCore(intent, state, env, forced, extras);
+  const about = intent.kind === 'AUTOMATION' || intent.kind === 'AUTOMATION_MANAGE' || (intent.kind === 'QUESTION' && intent.topic === 'AUTOMATIONS');
+  return about || !result.next.automation ? result : { ...result, next: { ...result.next, automation: null } };
+}
+/** One validated intent → reply and next state. `forced` is a step the user picked from Flofi's own buttons. */
+function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, forced: Resolved | null, extras: Extras): Result {
   const language = intent.language, m = copilotCopy(language);
-  const target = (value: CopilotTarget, purpose: Purpose): Resolution => forced ? { ok: true, resolved: forced } : resolveTarget(value, purpose, intent, state, env);
+  const pinned = forced ?? (intent.kind === 'EDIT' || intent.kind === 'REPEAT' ? extras.target ?? null : null);
+  const target = (value: CopilotTarget, purpose: Purpose): Resolution => pinned ? { ok: true, resolved: pinned } : resolveTarget(value, purpose, intent, state, env);
   switch (intent.kind) {
     case 'AUTOMATION': {
       const automation = groundAutomationDraft(intent.draft, segmentText(state), env.timezone ?? 'UTC', Date.now(), language);
-      if (automation.kind === 'PROPOSAL') return terminal(state, reply('AUTOMATION_PROPOSAL', 'Review this automation proposal. Nothing is created until you choose Create automation.', { automation: automation.input }), COPILOT_TRANSCRIPT.proposed + automation.input.name);
+      if (automation.kind === 'PROPOSAL') {
+        const done = terminal(state, reply('AUTOMATION_PROPOSAL', ASSIST_COPY[language].automationProposal, { automation: automation.input }), COPILOT_TRANSCRIPT.proposed + automation.input.name);
+        return { ...done, next: { ...done.next, automation: { input: automation.input, created: false } } };
+      }
       if (automation.kind === 'CLARIFICATION') return question(state, m, automation.message, [], { intent, expected: automation.missing, options: [], amountFill: false, snapshot: snapshotOf(env) });
       return refused(state, m, automation.message);
     }
 
+    // BUILD-FLOFI-UNIFIED-COPILOT-001: managing SAVED automations. FloFi reads the owner's own records on the surface that holds the verified owner
+    // (the web card, a linked channel); a change is only prepared and needs the owner's explicit confirmation there. The open request stays open.
+    case 'AUTOMATION_MANAGE': {
+      const value = withDraftReminder(reply('AUTOMATION_MANAGE', ASSIST_COPY[language].manage[intent.operation], { manage: { operation: intent.operation, request: state.segment.at(-1) ?? '' } }),
+        state, language);
+      const summary = `Flofi opened the user's saved automations (${intent.operation}).`;
+      if (state.draft) return { reply: value, next: { ...state, automation: { input: null, created: true }, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+      const done = terminal(state, value, summary);
+      return { ...done, next: { ...done.next, automation: { input: null, created: true } } };
+    }
     // PR B: a short, contextual reason; the full capability list is only the answer to a CAPABILITIES question.
     case 'UNSUPPORTED': return refused(state, m, publicText(safeCopilotProse(intent.reason)) || m.cannotAuthor);
     case 'GOAL': return resolveGoal(intent, state, env, extras);
@@ -1006,12 +1252,36 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
         if (!resolution.ok) return resolution.result;
         step = resolution.resolved.step;
       }
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: a DeFi concept is explained from FloFi's own catalog (the model only classified it; its prose is not shown,
+      // since a concept answer is general knowledge and never "verified data"). The open request stays open and is recalled.
+      const latest = state.segment.at(-1) ?? '';
+      const concept = intent.topic === 'CONCEPT' || intent.topic === 'OTHER' ? matchConcept(latest) : null;
+      if (concept) {
+        const explained = conceptReply(env, language, concept, 'STANDARD', null, false), value = withDraftReminder(explained.reply, state, language);
+        const summary = ASSIST_COPY[language].explained(conceptName(concept, 'EN'), 'STANDARD');
+        if (state.draft) return { reply: value, next: { ...state, concept: explained.concept, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+        return { reply: value, next: { ...closeSegment(state), concept: explained.concept, transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+      }
       // BUILD-FLOFI-INTELLIGENCE-001: a capability question about a named network is answered from that network's Capability API profile; the model's
       // explanation (grounded by the server in the tool facts it read) is shown apart from FloFi's own answer, labelled as such.
-      const answer = (intent.topic === 'CAPABILITIES' || intent.topic === 'NETWORKS' ? scopedCapabilities(state.segment.at(-1) ?? '', language) : null)
+      const faq = intent.topic === 'AUTOMATIONS' ? matchAutomationFaq(latest) : null;
+      if (faq) {
+        const value = withDraftReminder(reply('ANSWER', automationFaq(faq, language), { topic: 'AUTOMATIONS' }), state, language), summary = `Flofi explained how automations behave (${faq}).`;
+        if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+        return terminal(state, value, summary);
+      }
+      const platform = intent.topic === 'PLATFORM' ? matchPlatformTopic(latest) : null;
+      if (platform) {
+        const value = withDraftReminder(platformReply(platform, language, env), state, language), summary = `Flofi answered how to use FloFi (${platform}).`;
+        if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+        return terminal(state, value, summary);
+      }
+      const answer = (intent.topic === 'CAPABILITIES' || intent.topic === 'NETWORKS' ? scopedCapabilities(latest, language) : null)
+        ?? (intent.topic === 'CONCEPT' ? conceptMenu(language) : null)
         ?? answerQuestion(intent.topic, step, env.facts, language);
-      const prose = intent.answer ? publicText(safeCopilotProse(intent.answer)) : null;
-      const value = reply('ANSWER', answer.text, { notes: [...prose ? [intelligenceCopy(language).explanation(prose)] : [], ...answer.notes], topic: intent.topic });
+      const prose = intent.answer && intent.topic !== 'CONCEPT' ? publicText(safeCopilotProse(intent.answer)) : null;
+      const value = withDraftReminder(reply('ANSWER', answer.text, { notes: [...prose ? [intelligenceCopy(language).explanation(prose)] : [], ...answer.notes],
+        options: 'options' in answer ? [...(answer as { options: readonly string[] }).options] : [], topic: intent.topic }), state, language);
       if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: m.answered(intent.topic) }]) } };
       return terminal(state, value, m.answered(intent.topic));
     }
@@ -1021,7 +1291,7 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       if (intent.kind === 'COMPOSITION' && actions.length > 1 && actions.some(action => {
         const network = action.type === 'BRIDGE' ? action.sourceNetwork : action.network;
         return network && network !== 'OTHER' && networkOfCopilot(network).environment === 'MAINNET';
-      })) return authorSequence(intent, null, actions, state, env, []);
+      })) return authorSequence(intent, null, actions, state, env, [], extras);
       const carried = new Set<CarriedField>(extras.carried ?? []);
       let notes: string[] = [];
       if (intent.kind === 'ACTION' && intent.reuse && REUSE_CUE.test(segmentText(state))) {
@@ -1070,16 +1340,23 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       const resolved = resolution.resolved, label = resolved.source === 'PENDING' ? m.sourcePending : stepLabel(m, resolved.step, language);
       const base = stepAction(resolved.step);
       if (!base) return refused(state, m, m.refusal.STEP_NOT_EDITABLE(label));
-      const applied = applyChanges(base, intent.changes);
-      if (!applied.ok) return refused(state, m, applied.field === 'deposit' ? m.compositionSwapAmount
-        : m.changeNotApplicable(m.carriedLabel[CARRIED_LABEL[applied.field] ?? (applied.field === 'deposits' ? 'maxima' : 'range')], label));
+      const changed = applyChanges(base, intent.changes);
+      if (!changed.ok) return refused(state, m, changed.field === 'deposit' ? m.compositionSwapAmount
+        : m.changeNotApplicable(m.carriedLabel[CARRIED_LABEL[changed.field] ?? (changed.field === 'deposits' ? 'maxima' : 'range')], label));
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: "para mim" or a saved name in the latest words is a new destination, never the carried one (and the
+      // carried note does not claim it).
+      const applied = changed.carried.has('recipient') && releasesRecipient(state, env, extras) ? { ...changed,
+        carried: new Set([...changed.carried].filter(field => field !== 'recipient')),
+        base: { ...changed.base, actions: changed.base.actions.map(action => (action.type === 'TRANSFER' || action.type === 'BRIDGE') && action.recipient
+          ? { ...action, recipient: null } as CopilotAction : action) } } : changed;
       // BUILD-FLOFI-INTELLIGENCE-001: a restated settled value ("keep the same source") stays carried, so it is never asked again; what changed is a correction.
       if (intent.kind === 'EDIT') state = { ...state, ledger: correctedLedger(state.ledger, applied.changed) };
       const notes = applied.carried.size ? [m.carried(sourceLabel(m, resolved, language), carriedLabels(m, applied.carried))] : [];
-      if (intent.kind === 'REPEAT') return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes, sentence => m.interpreted(sentence), label);
+      if (intent.kind === 'REPEAT') return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes, sentence => m.interpreted(sentence), label,
+        null, null, { ...extras, target: resolved });
       const revising = resolved.source === 'PENDING' && (resolved.command.type.startsWith('ADD_') || resolved.command.type === 'AUTHOR_LENDING');
       const edited = author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes,
-        sentence => revising ? m.interpretedRevision(sentence) : m.interpretedEdit(label, sentence), label, revising ? null : resolved.step.nodeId, null, extras);
+        sentence => revising ? m.interpretedRevision(sentence) : m.interpretedEdit(label, sentence), label, revising ? null : resolved.step.nodeId, null, { ...extras, target: resolved });
       // BUILD-CHAT-LEARNING-002: a change of a proposal FloFi showed (pending, or applied and unchanged since) may correct how FloFi read it.
       const referent = resolved.source === 'PENDING' ? state.referents.find(item => item.command === resolved.command)
         : resolved.source === 'NODE' ? state.referents.find(item => item.applied && item.watched && item.step.nodeId === resolved.step.nodeId) : undefined;
@@ -1209,7 +1486,7 @@ function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: 
       const notes = [...explained, ...goalNotes(plan, language)];
       if (actions.length === 1) return author({ version: '2', language, kind: 'ACTION', action: actions[0]!, reuse: null }, actions, false, new Set(), state, env, notes,
         sentence => `${c.goalIntro(1)} ${m.interpreted(sentence)}`, m.subject.request, null, null, { ...extras, planned: true });
-      return authorSequence(grounded, plan, actions, state, env, notes);
+      return authorSequence(grounded, plan, actions, state, env, notes, extras);
     }
   }
 }
@@ -1217,11 +1494,21 @@ function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: 
  * Several plan steps → one `ADD_SEQUENCE` proposal: each step planned and grounded exactly like a typed request at the revision the steps before it
  * produce, then the whole workflow must be FloFi's reviewed sequence with the funding the plan expects (a later step spends the earlier step's output).
  */
-function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind: 'PLAN' }> | null, actions: readonly CopilotAction[], state: CopilotConversation,
-  env: CopilotEnvironment, notes: readonly string[]): Result {
+function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind: 'PLAN' }> | null, sequenceActions: readonly CopilotAction[], state: CopilotConversation,
+  env: CopilotEnvironment, notesIn: readonly string[], extras: Extras = {}): Result {
   const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language);
-  const grounding: Grounding = { text: segmentText(state), carried: new Set(), policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
-    latest: state.segment.at(-1) ?? '', solana: { price: env.verified?.orcaPrice?.price ?? null, swap: null }, explicitAssets: false };
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: a saved recipient named for a plan fills its send or bridge destination exactly as for a single step (or asks,
+  // or refuses a wrong ecosystem); it never silently falls back to the owner's wallet. Saved names never ground a network or token.
+  const recipients = env.recipients ?? [], masked = (text: string) => recipients.length ? maskSavedRecipients(text, recipients) : text;
+  const saved = savedRecipientFor(sequenceActions, state, env, language, intent, extras, segmentText(state), new Set(), masked(segmentText(state)));
+  if ('result' in saved) return saved.result;
+  const actions = saved.actions, notes = [...notesIn, ...saved.notes];
+  const final = [...actions].reverse().find(action => action.type === 'TRANSFER' || action.type === 'BRIDGE');
+  if (saved.id && final && final.recipient === null)
+    return refused(state, m, ASSIST_COPY[language].recipientNotUsed(recipients.find(recipient => recipient.id === saved.id)?.label ?? ''));
+  const grounding: Grounding = { text: masked(segmentText(state)), carried: new Set(), policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
+    latest: masked(state.segment.at(-1) ?? ''), solana: { price: env.verified?.orcaPrice?.price ?? null, swap: null }, explicitAssets: false,
+    ...saved.addresses.length ? { saved: saved.addresses } : {} };
   let workflow = env.workflow;
   const steps: Command[] = [], sentences: string[] = [], stepNotes: string[] = [];
   for (const [index, action] of actions.entries()) {
@@ -1350,24 +1637,61 @@ function resolvePosition(intent: Extract<CopilotIntentV2, { kind: 'POSITION' }>,
 }
 
 /** Planners → exact grammar → (for an existing step) the typed edit command → editor preview → proposal. */
-function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], composition: boolean, carried: ReadonlySet<CarriedField>, state: CopilotConversation,
+function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], composition: boolean, carriedIn: ReadonlySet<CarriedField>, state: CopilotConversation,
   env: CopilotEnvironment, notes: readonly string[], describe: (sentence: string) => string, label: string, editNodeId: string | null = null,
   swap: SwapSource | null = null, extras: Extras = {}): Result {
-  const language = intent.language, m = copilotCopy(language);
+  const language = intent.language, m = copilotCopy(language), a = ASSIST_COPY[language];
   // BUILD-BASE-001: the conversation (CopilotIntentV2) authors on the catalog networks too. PR B: with the verified Orca price and the funding swap.
   // BUILD-CHAT-LEARNING-001: learned vocabulary may only widen which networks/tokens the user named (see `Grounding.lexicon`).
   const lexicon = lexiconOf(state, env);
-  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
-    latest: state.segment.at(-1) ?? '',
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: unambiguous typos of network and coin names ("arbriturm", "etheruem") are read as the name they clearly are,
+  // but FloFi always says how it read them before it proposes: a corrected word never becomes a proposal in the same turn it was written.
+  // A word the learned vocabulary already knows keeps that path (a glossary meaning for a mainnet only suggests, and the user picks it).
+  const known = new Set(lexicon.map(entry => entry.term.toLowerCase()));
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: the words of a saved name are not the user naming a network, token or route ("Base da Ana", "Solange",
+  // "Mayan"): typo reading and grounding see the request with saved names masked; the address comes from the saved recipient itself.
+  const recipients = env.recipients ?? [], unmasked = segmentText(state), latestText = state.segment.at(-1) ?? '';
+  const masked = (text: string) => recipients.length ? maskSavedRecipients(text, recipients) : text;
+  const raw = correctTypos(masked(unmasked)), unknown = raw.corrections.filter(item => !known.has(item.written));
+  const fix = (text: string) => unknown.reduce((out, item) => out.replace(new RegExp(`(?<![\\p{L}])${item.written}(?![\\p{L}])`, 'giu'), item.corrected), text);
+  const corrected = unknown.length === raw.corrections.length ? raw : { text: fix(masked(unmasked)), corrections: unknown };
+  const shown = new Set(extras.typos ?? []);
+  const unshown = corrected.corrections.filter(item => !shown.has(item.written));
+  const typos = [...shown, ...unshown.map(item => item.written)];
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: a saved recipient named in the user's latest words replaces a carried destination ("manda o mesmo para Minha
+  // Carteira" repeats the step to that saved address, never to the old one); a typed new address is a change the model reports itself.
+  // "Manda o mesmo para mim" repeats the step to the user's own wallet: a carried third-party destination is dropped (the planner's "to me" rule).
+  let carried = carriedIn;
+  if (carried.has('recipient') && releasesRecipient(state, env, extras)) {
+    actions = actions.map(action => (action.type === 'TRANSFER' || action.type === 'BRIDGE') && action.recipient ? { ...action, recipient: null } as CopilotAction : action);
+    carried = new Set([...carried].filter(field => field !== 'recipient'));
+  }
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: a saved recipient named exactly ("para Minha Solana") fills an empty destination with its public address. It is
+  // re-resolved on every turn of the request (the draft keeps its id, never the address), so its ecosystem is re-checked once the network is known.
+  const scope = !state.draft || operationsOf(state.draft.intent) === operationsOf(intent) ? unmasked : latestText;
+  const saved = savedRecipientFor(actions, state, env, language, intent, { ...extras, carried: [...carried], ...swap ? { swap } : {} }, scope, carried, masked(unmasked));
+  if ('result' in saved) return saved.result;
+  actions = saved.actions;
+  const grounding: Grounding = { text: corrected.text, carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
+    latest: fix(masked(latestText)),
     solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {}, ...extras.planned ? { explicitAssets: false } : {},
     // BUILD-FLOFI-UX-FIX-003: only a new single action reads "to 1 USDC" as an amount to receive; an edit's "to 4 USDC" is its new amount.
-    ...intent.kind === 'ACTION' && !composition ? { receiving: true } : {} };
+    ...intent.kind === 'ACTION' && !composition ? { receiving: true } : {}, ...saved.addresses.length ? { saved: saved.addresses } : {} };
   if (!composition && !extras.planned) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon, grounding.receiving === true));
-  const draftIntent: CopilotIntentV2 = intent.kind === 'ACTION' ? { ...intent, action: actions[0]! } : intent.kind === 'COMPOSITION' ? { ...intent, actions } : intent;
+  // The stored draft never holds a saved address: it keeps the recipient's id, so the next turn resolves (and re-checks) it again.
+  const open = (list: readonly CopilotAction[]) => saved.id ? list.map(action => (action.type === 'TRANSFER' || action.type === 'BRIDGE') && action.recipient !== null
+    && saved.addresses.includes(action.recipient) ? { ...action, recipient: null } as CopilotAction : action) : list;
+  const draftIntent: CopilotIntentV2 = intent.kind === 'ACTION' ? { ...intent, action: open(actions)[0]! } : intent.kind === 'COMPOSITION' ? { ...intent, actions: open(actions) } : intent;
+  const kept = { ...extras, carried: [...carried], ...swap ? { swap } : {}, ...typos.length ? { typos } : {}, ...saved.id ? { savedRecipient: saved.id } : {} };
+  const readNotes = [...unshown.length ? [a.readAs(unshown)] : [], ...saved.notes];
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
-  if (planned.kind !== 'PLAN') return stopped(planned, draftIntent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
+  if (planned.kind !== 'PLAN') return stopped(planned, draftIntent, state, env, m, kept, readNotes);
   const outcome = proposalFromPlan(planned.plan, env, language);
-  if (outcome.kind !== 'PROPOSAL') return stopped(outcome, draftIntent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
+  if (outcome.kind !== 'PROPOSAL') return stopped(outcome, draftIntent, state, env, m, kept, readNotes);
+  // The plan is complete, but a word was read through a typo correction the user has not seen yet: confirm that reading first.
+  if (unshown.length) return question(state, m, a.confirmReading(unshown, outcome.sentence), [a.confirmOption],
+    { intent: draftIntent, expected: ['target'], validated: validatedDraftFields(draftIntent, segmentText(state)), options: [{ label: a.confirmOption, fill: { kind: 'EXTRAS', extras: kept } }],
+      amountFill: false, snapshot: snapshotOf(env), extras: kept });
   let command = outcome.command;
   if (editNodeId) {
     const edit = editCommandFor(env.workflow, env.context, editNodeId, command);
@@ -1380,18 +1704,24 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   // BUILD-CHAT-LEARNING-002: how each field was read — the request's own words up to FloFi's first question, then the user's answers.
   const asked = state.askedAt ?? state.segment.length, request = state.segment.slice(0, asked).join('\n'), answers = state.segment.slice(asked).join('\n');
   const readings = env.learning ? proposalReadings(stepFields(changedSteps(env, command)[0]), request, answers, lexicon, carried) : [];
-  const proposed = propose(state, env, command, outcome.sentence, describe(outcome.sentence), [...notes, ...outcome.notes, ...used.map(entry => usedNote(entry, language))], label,
+  const proposed = propose(state, env, command, outcome.sentence, describe(outcome.sentence), [...notes, ...saved.notes, ...outcome.notes, ...used.map(entry => usedNote(entry, language))], label,
     readings.length ? { readings, request } : null);
   if (proposed.reply.kind !== 'PROPOSAL') return proposed;
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: a new public address the user typed may be saved for later, only if they choose to (never required, never
+  // asked again for an address already saved or declined here). Saving is independent of this proposal and authorizes nothing.
+  const offered = recipientOfferFor(actions, saved.addresses, state, env, language);
+  if (offered) return withAdaptation(withLearning({ reply: { ...proposed.reply, offer: { text: a.recipientOffer(offered.short), options: [a.recipientSaveOption, a.recipientNotNowOption] } },
+    next: { ...proposed.next, recipientOffer: offered.offer } }, env, [], used), env, mergeAdaptations(clarifiedAdaptation(readings, request), inferredUse(readings)));
   // A word FloFi asked about and the user answered is adapted for the rest of the conversation; every reading FloFi made on its own is reported.
   return withAdaptation(withLearning(proposed, env, [], used), env, mergeAdaptations(clarifiedAdaptation(readings, request), inferredUse(readings)));
 }
 function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, m: CopilotCopy,
-  extras: Extras = {}): Result {
+  extras: Extras = {}, readNotes: readonly string[] = []): Result {
   if (outcome.kind === 'UNSUPPORTED' || outcome.kind === 'REJECTED') {
     if (outcome.missing?.length) {
       const draft: Draft = { intent, grounding: segmentText(state), expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [], amountFill: false, snapshot: snapshotOf(env), extras };
-      const value = reply(outcome.kind === 'REJECTED' ? 'FAILED' : 'UNSUPPORTED', outcome.message, outcome.code ? { code: outcome.code } : {});
+      // How FloFi read a misspelled word is shown here too: the stored draft counts that reading as seen.
+      const value = reply(outcome.kind === 'REJECTED' ? 'FAILED' : 'UNSUPPORTED', outcome.message, { ...outcome.code ? { code: outcome.code } : {}, ...readNotes.length ? { notes: [...readNotes] } : {} });
       return { reply: value, next: { ...state, draft, transcript: bounded([...state.transcript, { role: 'assistant', text: outcome.message }]) } };
     }
     return outcome.kind === 'UNSUPPORTED' ? refused(state, m, outcome.message) : failed(state, m, outcome.message);
@@ -1403,7 +1733,74 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: actionFills(intent, outcome.missing, suggested.options), snapshot: snapshotOf(env), extras,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
-  return question(state, m, outcome.question, suggested.options, draft, suggested.notes);
+  return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes]);
+}
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient a request names, for its empty destination (a send's recipient, a bridge's destination
+ * wallet). Exactly one name selects one address; several names, or part of a name, is a question; an address of the other ecosystem than the
+ * destination network is refused with the reason (a send cannot cross ecosystems: that is a bridge). The model never sees the name or address.
+ */
+function savedRecipientFor(actions: readonly CopilotAction[], state: CopilotConversation, env: CopilotEnvironment, language: CopilotLanguage, intent: CopilotIntentV2,
+  extras: Extras, scope: string, carried: ReadonlySet<CarriedField>, maskedText: string):
+  { readonly actions: readonly CopilotAction[]; readonly addresses: readonly string[]; readonly notes: readonly string[]; readonly id: string | null } | { readonly result: Result } {
+  const none = { actions, addresses: [] as string[], notes: [] as string[], id: null };
+  const recipients = env.recipients ?? [], a = ASSIST_COPY[language], m = copilotCopy(language);
+  // A recipient picked from FloFi's own buttons (or resolved earlier in this request) must still be in this account's list: otherwise the request
+  // is stale and nothing falls back to matching other names.
+  const picked = extras.savedRecipient ? recipients.find(recipient => recipient.id === extras.savedRecipient) ?? null : null;
+  if (extras.savedRecipient && !picked) return { result: failed(closeSegment(state), m, a.recipientStale) };
+  if (!recipients.length) return none;
+  // "Para mim" / "to my wallet" is the connected owner wallet: a saved name never replaces it.
+  if (!picked && SELF_RECIPIENT.test(scope)) return none;
+  const mention = picked ? { kind: 'ONE' as const, recipient: picked } : matchSavedRecipients(scope, recipients);
+  if (mention.kind === 'NONE') return none;
+  const fillable = actions.filter(action => action.type === 'TRANSFER' || action.type === 'BRIDGE');
+  if (!fillable.length) return { ...none, notes: mention.kind === 'ONE' ? [a.recipientNotUsed(mention.recipient.label)] : [] };
+  // "Which one?": each saved name is a button that picks exactly that recipient for the same request (its step, edit and values are kept).
+  if (mention.kind === 'CHOOSE') { const labels = mention.candidates.map(recipient => recipient.label);
+    const asked = question(state, m, a.recipientChoose(labels), labels, { intent, expected: ['recipient'], options: mention.candidates.map(recipient =>
+      ({ label: recipient.label, fill: { kind: 'EXTRAS' as const, extras: { ...extras, savedRecipient: recipient.id } } })), amountFill: false, snapshot: snapshotOf(env), extras });
+    return { result: { ...asked, reply: { ...asked.reply, verbatimOptions: true } } }; }
+  const chosen = mention.recipient, ecosystem = chosen.ecosystem === 'EVM' ? 'EVM' : 'Solana';
+  const same = (address: string | null) => address !== null && (chosen.ecosystem === 'EVM' ? address.toLowerCase() === chosen.address : address === chosen.address);
+  // The ecosystem is enforced against a network the user named (outside saved names) or one carried from the step; a network only the model
+  // guessed is asked instead, and the recipient waits by id until then.
+  const named: readonly string[] = mentionedNetworks(maskedText);
+  // Only the request's final send or bridge goes to the saved recipient ("bridge to Arbitrum, then send to Ana": the bridge stays with the owner).
+  const last = actions.reduce((at, action, index) => (action.type === 'TRANSFER' || action.type === 'BRIDGE') && (action.recipient === null || same(action.recipient)) ? index : at, -1);
+  if (last < 0) return { ...none, notes: [a.recipientNotUsed(chosen.label)] };
+  const filled: CopilotAction[] = [];
+  for (const [index, action] of actions.entries()) {
+    if (index !== last || (action.type !== 'TRANSFER' && action.type !== 'BRIDGE')) { filled.push(action); continue; }
+    const network = action.type === 'TRANSFER' ? action.network : action.destinationNetwork;
+    const known = network && network !== 'OTHER' && (named.includes(network) || carried.has(action.type === 'TRANSFER' ? 'network' : 'destinationNetwork'));
+    const wanted = network && network !== 'OTHER' ? (networkOfCopilot(network).family === 'solana' || /^SOLANA/.test(network) ? 'SOLANA' : 'EVM') : null;
+    if (wanted && wanted !== chosen.ecosystem) {
+      if (known) return { result: refused(state, m, a.recipientWrongEcosystem(chosen.label, ecosystem, COPILOT_NETWORK_LABEL[network as Exclude<CopilotNetwork, 'OTHER'>],
+        action.type === 'BRIDGE')) };
+      filled.push({ ...action, recipient: null } as CopilotAction); continue;
+    }
+    filled.push({ ...action, recipient: chosen.address } as CopilotAction);
+  }
+  return { actions: filled, addresses: [chosen.address], notes: [a.recipientNamed(chosen.label, ecosystem, chosen.address)], id: chosen.id };
+}
+/** The optional save offer for a public address the user typed in this request (not a saved one, not already saved, not declined here). */
+function recipientOfferFor(actions: readonly CopilotAction[], savedAddresses: readonly string[], state: CopilotConversation, env: CopilotEnvironment, language: CopilotLanguage):
+  { readonly offer: RecipientOffer; readonly short: string } | null {
+  if (!env.recipientWrites) return null;
+  for (const action of actions) {
+    if ((action.type !== 'TRANSFER' && action.type !== 'BRIDGE') || !action.recipient || savedAddresses.includes(action.recipient)) continue;
+    const ecosystem = ecosystemOfAddress(action.recipient), address = ecosystem ? savedRecipientAddress(ecosystem, action.recipient) : null;
+    if (!ecosystem || !address || !groundedAddress(segmentText(state), action.recipient)) continue;
+    if ((env.recipients ?? []).some(recipient => recipient.ecosystem === ecosystem && recipient.address === address) || (state.recipientDeclined ?? []).includes(address)) continue;
+    const pt = language === 'PT';
+    // A neutral suggestion: a typed address may be anyone's, so FloFi never proposes a name that calls it the user's own wallet.
+    const tail = `${address.slice(0, 4)}…${address.slice(-4)}`;
+    const suggestion = ecosystem === 'SOLANA' ? (pt ? `Destinatário Solana ${tail}` : `Solana recipient ${tail}`) : (pt ? `Destinatário EVM ${tail}` : `EVM recipient ${tail}`);
+    return { offer: { address, ecosystem, suggestion: (env.recipients ?? []).some(recipient => recipientLabelKey(recipient.label) === recipientLabelKey(suggestion)) ? null : suggestion,
+      naming: false }, short: `${address.slice(0, 6)}…${address.slice(-4)}` };
+  }
+  return null;
 }
 /** Defense in depth, then the editor preview: an unappliable or empty edit is explained instead of shown as a proposal. */
 function propose(state: CopilotConversation, env: CopilotEnvironment, command: Command, sentence: string, text: string, notes: readonly string[], label: string,

@@ -8,6 +8,10 @@ import type { ConversationLanguage, ConversationReview } from './conversation-li
 export type ChatMessage = {
   readonly id: number; readonly role: 'you' | 'system' | 'ai' | 'flofi'; readonly text: string;
   readonly notes?: readonly string[]; readonly options?: readonly string[];
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: a FloFi page that answers a "where/how" question (a relative path from the platform guide). */
+  readonly link?: { readonly path: string; readonly label: string };
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the options are the user's own saved names (rendered and sent untranslated). */
+  readonly verbatim?: boolean;
   /** FloFi's lifecycle copy is written in this language; other `system` copy is translated by the interface. */
   readonly language?: ConversationLanguage;
   readonly review?: ConversationReview; readonly question?: string;

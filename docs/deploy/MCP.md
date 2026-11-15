@@ -83,9 +83,9 @@ clients in BUILD-MCP-002 (see the report's consumer acceptance section).
 
 | Scope | Tools |
 | --- | --- |
-| `flofi.strategy` | `get_supported_networks`, `get_supported_assets`, `get_capabilities`, `plan_strategy`, `compose_strategy`, `validate_strategy`, `review_strategy`, `simulate_strategy` |
+| `flofi.strategy` | `get_supported_networks`, `get_supported_assets`, `get_capabilities`, `plan_strategy`, `compose_strategy`, `validate_strategy`, `review_strategy`, `simulate_strategy`; education and product guide (general knowledge, never live data): `explain_concept`, `explain_strategy`, `get_platform_help`; the static `list_automation_types` |
 | `flofi.approval` | `request_user_approval`, `get_approval_status`; app-only (MCP Apps visibility `["app"]`, hidden from the model): `open_approval_session`, `get_execution_progress` |
-| `flofi.runs` | `get_execution_status`, `get_evidence` — only runs of wallets the account **linked on FloFi** (`/connections`) |
+| `flofi.runs` | `get_execution_status`, `get_evidence`, `get_automation_status` (read-only) — only runs and automations of wallets the account **linked on FloFi** (`/connections`) |
 
 Every tool input is a closed JSON Schema. Errors are `{ ok: false, code }`; schema violations name the path and rule, never the value.
 
@@ -99,6 +99,11 @@ Every tool input is a closed JSON Schema. Errors are `{ ok: false, code }`; sche
 | `request_user_approval` | `{ strategy, workflowHash }` | re-composes and re-checks; returns `approvalId`, the nonsecret `approvalUrl` (`<origin>/approve#apr_…`), `workflowHash`, `expiresAt`, `status`, `networkEnvironment`, `fundsClass`, `steps`, `authority: "NONE"`, `requires`, `preExecution`; attaches the panel. Private capability URLs are delivered to the panel through client-only `_meta`, outside model-visible content. |
 | `get_approval_status` | `{ approvalId }` | PENDING / CLAIMED / APPLIED / EXPIRED / SUPERSEDED / REVOKED / STALE, and the runs started from it while the owner shares them |
 | `get_execution_status`, `get_evidence` | `{ executionId, … }` | owner-scoped; anything not readable is `RUN_NOT_FOUND` |
+| `explain_concept` | `{ concept? \| term?, level?, protocol?, language? }` (exactly one of `concept` — a catalog id — or `term` — ≤ 80 characters in the user's words, EN/PT) | FloFi's shared concept catalog (`domain/intelligence/concepts.ts`, the same text as the web chat and channels): `id`, `name`, `text`, `notes`, `related`, `generalKnowledge: true`, `liveData: false`, `liveValues` (live values come only from Simulation and Review). `CONCEPT_UNKNOWN` (with the catalog ids; the term is never echoed), `CONCEPT_INPUT_INVALID` |
+| `explain_strategy` | `{ strategy, workflowHash?, language? }` | the same composition and hash as `compose_strategy` (same refusal codes); each canonical step in FloFi's presentation words with its key concepts, the deterministic review findings, and every concept that applies to the steps (collateral, health factor, liquidation, LTV for a borrow; slippage for swaps and bridges; token approvals; impermanent loss for liquidity) located in the workflow. No live health factor, LTV, price or APY; `authority: NONE…` |
+| `get_platform_help` | `{ topic? \| question?, language? }` | FloFi's platform guide on the MCP surface (`platformGuide(…, 'MCP')`: never an `APPLY_CHANGE` / `PREPARE_CHANGE` mode; web-only topics such as saved recipients are not offered); the whole guide without input; links are relative FloFi paths on `websiteUrl`. `PLATFORM_TOPIC_UNKNOWN`, `PLATFORM_HELP_INPUT_INVALID` |
+| `list_automation_types` | `{ language? }` | static: `SCHEDULED_DCA`, `PRICE_TRIGGER`, `DAILY_WATCH` with FloFi's EN/PT descriptions; `executionMode: CONFIRM_EACH_TIME` (the owner confirms every execution in their wallet); delegated execution retired (`EXECUTOR_FUNDED_GAS_RETIRED`); the automation FAQ; managing an automation is the owner's, in the FloFi app |
+| `get_automation_status` | `{ ruleId?, language? }` (`ruleId`: `aut_` + 26 base32) | read-only, owner-scoped AS each linked wallet (namespace kept: EVM and Solana; a developer credential: its granted EVM wallets), through the Automations read path (`server/automation-operation.ts`: embedded, or `POST /v1/automations/overview\|history` on the API with the owner header). Per rule: `summary`, `state`, `nextEvaluationAt`, `lastOutcome`, `explanation` (why it ran or not, from recorded facts) — never balances or approval links. `AUTOMATION_NOT_FOUND` (absent and not owned are identical), `MCP_WALLET_LINK_REQUIRED`, `AUTOMATIONS_NOT_ENABLED`; a failed wallet read makes the answer `status: INCOMPLETE` (never an empty list); a timeout is `STATUS_UNKNOWN`. No tool creates, pauses, resumes, archives, changes or approves an automation |
 
 A `strategy` is a version 1 single action — `bridge`, `swap`, `supply`, `borrow`, `repay`, `withdraw`, `add_liquidity`,
 `lending_composition` (fields as in the `get_capabilities` examples) — or a version 2 workflow `{ "version": 2, "steps": [ … ] }`
@@ -144,8 +149,8 @@ iframe can see (diagnostics for the owner's experiments).
 ## 5. Wallet links (`/connections`)
 
 In the browser that holds the FloFi account (the consent cookie), prove a wallet and click **Link** to let that account's MCP
-connections read the wallet's runs (`flofi.runs`). Links expire after 30 days and can be removed there; `/connections` also
-withdraws open approval requests. A link never lets anyone sign or move funds.
+connections read the wallet's runs and the read-only status of its automations (`flofi.runs`). Links expire after 30 days and can be
+removed there; `/connections` also withdraws open approval requests. A link never lets anyone sign, move funds or change an automation.
 
 ## 6. Mainnet
 

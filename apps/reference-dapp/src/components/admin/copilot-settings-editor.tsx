@@ -27,7 +27,12 @@ export type EditorHistory = { version: number; createdAt: string; createdBy: str
   model: string | null; providers: readonly Provider[]; isNull: boolean };
 type Probe = { ok: boolean; code: string | null; intentKind: string | null; durationMs?: number; inputTokens?: number | null; outputTokens?: number | null;
   reasoningTokens?: number | null; responseModel?: string | null; provider?: Provider; model?: string; estimatedCostUsd?: number | null;
-  upstream: { code: string | null; param: string | null; status?: number } | null };
+  upstream: { code: string | null; param: string | null; status?: number; reason?: string | null } | null;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the channel scope tested and whether the live tool definitions were offered (never run). */
+  scope?: Scope; toolsOffered?: boolean;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001 (Anthropic): how structured output was sent and the request's measured complexity. */
+  structure?: { output: 'CONSTRAINED' | 'PROMPTED'; toolsStrict: boolean; unionParameters: number; optionalParameters: number; strictTools: number;
+    limits: { strictTools: number; optionalParameters: number; unionParameters: number } } };
 
 const SCOPES: readonly { id: Scope; label: string }[] = [{ id: 'WEB', label: 'FloFi chat (web)' }, { id: 'TELEGRAM', label: 'Telegram' }, { id: 'WHATSAPP', label: 'WhatsApp' }];
 const PROVIDER_LABEL: Record<Provider, string> = { OPENAI: 'OpenAI', ANTHROPIC: 'Anthropic' };
@@ -69,6 +74,20 @@ const PROBE_FAILURES: Record<string, string> = {
   COPILOT_RESPONSE_INCOMPLETE: 'The answer was cut off. Raise the maximum output tokens or lower the reasoning effort.',
   COPILOT_INTENT_INVALID: 'The model answered, but its answer failed FloFi’s validation, so it would be discarded in production.',
   COPILOT_RESPONSE_INVALID: 'The model’s answer could not be read as FloFi’s structured format.',
+};
+/** BUILD-FLOFI-UNIFIED-COPILOT-001: closed diagnostic categories of a provider's invalid-request answer (never its message text). */
+const UPSTREAM_REASONS: Record<string, string> = {
+  SCHEMA_TOO_COMPLEX: 'The structured-output schema exceeds the provider’s compile limits.',
+  SCHEMA_UNSUPPORTED: 'The provider does not support a feature of the structured-output schema.',
+  SAMPLING_UNSUPPORTED: 'The provider does not accept sampling parameters (temperature) for this model.',
+  EFFORT_UNSUPPORTED: 'This model does not accept the selected reasoning effort.',
+  THINKING_UNSUPPORTED: 'This model does not accept the thinking configuration.',
+  TOOL_CHOICE_UNSUPPORTED: 'This model does not accept the tool-choice setting.',
+  CONTEXT_TOO_LONG: 'The request is longer than the model’s context window.',
+  MAX_TOKENS_INVALID: 'The maximum output tokens are outside what this model accepts.',
+  PREFILL_UNSUPPORTED: 'This model does not accept an assistant prefill.',
+  DATA_RETENTION: 'The organization’s data-retention setting does not allow this model.',
+  MESSAGE_ORDER: 'The provider refused the conversation’s message order.',
 };
 const describe = (code: string, field?: string | null) => `${MESSAGES[code] ?? `Refused (${code}).`}${field ? ` Field: ${field}.` : ''}`;
 const familyOf = (families: readonly EditorFamily[], provider: Provider, model: string) =>
@@ -199,14 +218,20 @@ function ProbeResult({ probe }: { probe: Probe }) {
       <dt>Tokens</dt><dd>{tokens}{probe.reasoningTokens ? ` (${probe.reasoningTokens} reasoning)` : ''}</dd>
       <dt>Estimated cost</dt><dd>{probe.estimatedCostUsd != null ? `${usd(probe.estimatedCostUsd)} (list price; not billing data)` : 'no listed price'}</dd>
     </dl>
-    <p className="admin-diff">The test interprets one fixed, harmless request (“Swap 1 USDC to WETH…”). No workflow is changed and nothing is signed, submitted or executed.</p>
+    <p className="admin-diff">The test interprets one fixed, harmless request (“Swap 1 USDC to WETH…”) with the same strict format and tool definitions as a live turn; no tool runs. No workflow is changed and nothing is signed, submitted or executed.</p>
     <details className="admin-details"><summary>Technical details</summary><div className="admin-details-body">
       <dl className="admin-dl">
         <dt>Provider / model</dt><dd>{probe.provider ?? '—'} · <code>{probe.model ?? '—'}</code></dd>
+        {probe.scope ? <><dt>Tested as</dt><dd>{SCOPES.find(item => item.id === probe.scope)?.label ?? probe.scope}{probe.toolsOffered
+          ? ' · with the live read-only tool definitions (no tool was run)' : ' · tools are off on this deployment'}</dd></> : null}
         <dt>Served by</dt><dd>{probe.responseModel ? <code>{probe.responseModel}</code> : '—'}</dd>
         <dt>Result code</dt><dd>{probe.code ? <code>{probe.code}</code> : 'OK'}</dd>
         {probe.upstream ? <><dt>Provider error</dt><dd>{probe.upstream.status ? `HTTP ${probe.upstream.status} · ` : ''}{probe.upstream.code ? <code>{probe.upstream.code}</code> : 'unspecified'}
-          {probe.upstream.param ? <> · parameter <code>{probe.upstream.param}</code></> : null}</dd></> : null}
+          {probe.upstream.param ? <> · parameter <code>{probe.upstream.param}</code></> : null}
+          {probe.upstream.reason ? <> · {UPSTREAM_REASONS[probe.upstream.reason] ?? <code>{probe.upstream.reason}</code>}</> : null}</dd></> : null}
+        {probe.structure ? <><dt>Structured output</dt><dd>{probe.structure.output === 'CONSTRAINED' ? 'Schema-constrained (output_config.format)'
+          : 'Schema in the cached system prompt; FloFi validates every answer'}{probe.structure.toolsStrict ? '' : ' · tools not strict'} · {probe.structure.unionParameters} union /{' '}
+          {probe.structure.optionalParameters} optional parameters (provider limits {probe.structure.limits.unionParameters} / {probe.structure.limits.optionalParameters})</dd></> : null}
       </dl>
     </div></details>
   </div>;
@@ -256,9 +281,9 @@ export function CopilotSettingsEditor({ csrf, canWrite, activeVersion, initial, 
     const result = await send({ action: 'rollback', expectedVersion: activeVersion, toVersion: version, reason }, `Version {version} restores version ${version}.`);
     if (result) window.location.reload();
   }
-  async function test(settings: EditorSettings) {
+  async function test(settings: EditorSettings, scope: Scope = 'WEB') {
     setProbe(null);
-    const result = await send({ action: 'probe', settings: normalized(settings) }, 'Test finished.');
+    const result = await send({ action: 'probe', settings: normalized(settings), scope }, 'Test finished.');
     if (result?.probe) setProbe(result.probe);
   }
   async function refreshModels() {
@@ -297,7 +322,7 @@ export function CopilotSettingsEditor({ csrf, canWrite, activeVersion, initial, 
             {value ? <SettingsFields value={value} families={families} providers={providers} models={list} disabled={disabled} idPrefix={`override-${scope.id}`} starting={starting}
               onChange={next => setDocument(current => ({ ...current, overrides: { ...current.overrides, [scope.id]: next } }))}/> : null}
             {value ? <div className="admin-actions"><button type="button" className="admin-button" disabled={disabled || !testable(value)} title={testTitle(value)}
-              onClick={() => void test(value)}>Test {scope.label} settings</button></div> : null}
+              onClick={() => void test(value, scope.id)}>Test {scope.label} settings</button></div> : null}
           </div>; })}
       </div>
     </section>

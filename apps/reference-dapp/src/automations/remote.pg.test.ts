@@ -107,6 +107,9 @@ describe('BUILD-AUTOMATION-001 on the remote runtime (Vercel BFF → Railway API
       .toEqual([401, 'WALLET_SESSION_REQUIRED']);
     expect(await post('/v1/automations/create', { authorization: `Bearer ${TOKEN}`, 'x-flofi-workflow-owner': `eip155:${OWNER_A.address}` }, { args: [weeklyDca()] }))
       .toEqual([400, 'IDEMPOTENCY_KEY_REQUIRED']);
+    // A schedule replacement creates a rule, so it is idempotency-keyed like a creation.
+    expect(await post('/v1/automations/replace', { authorization: `Bearer ${TOKEN}`, 'x-flofi-workflow-owner': `eip155:${OWNER_A.address}` },
+      { args: ['aut_' + 'a'.repeat(26), 1, { schedule: { frequency: 'DAILY', weekday: null, time: '07:00' } }] })).toEqual([400, 'IDEMPOTENCY_KEY_REQUIRED']);
     expect(await post('/v1/automations/runFlow', { authorization: `Bearer ${TOKEN}`, 'x-flofi-workflow-owner': `eip155:${OWNER_A.address}` })).toEqual([404, 'AUTOMATION_OPERATION_UNKNOWN']);
     expect(await post('/v1/approvals/view', { authorization: `Bearer ${TOKEN}`, 'x-flofi-wallet-principals': `eip155:${OWNER_A.address},eip155:${OWNER_B.address}` },
       { args: ['flofi_auhs_x'] })).toEqual([400, 'WALLET_PRINCIPAL_INVALID']);
@@ -119,7 +122,8 @@ describe('BUILD-AUTOMATION-001 on the remote runtime (Vercel BFF → Railway API
     await railwayWorker()();
     const occurrence = value(await op<OverviewView>(OWNER_A, 'overview', [])).pending[0]!;
     expect(value(await op<OverviewView>(OWNER_B, 'overview', []))).toMatchObject({ rules: [], pending: [] });
-    for (const [method, args] of [['history', [rule.ruleId]], ['setState', [rule.ruleId, rule.version, 'PAUSE']], ['rebind', [rule.ruleId, rule.version]]] as const)
+    for (const [method, args] of [['history', [rule.ruleId]], ['setState', [rule.ruleId, rule.version, 'PAUSE']], ['rebind', [rule.ruleId, rule.version]],
+      ['replace', [rule.ruleId, rule.version, { schedule: { frequency: 'WEEKLY', weekday: 5, time: '09:30' } }]]] as const)
       expect([method, await op(OWNER_B, method, args)]).toEqual([method, { ok: false, code: 'AUTOMATION_NOT_FOUND' }]);
     for (const method of ['open', 'dismiss'] as const)
       expect([method, await op(OWNER_B, method, [occurrence.occurrenceId])]).toEqual([method, { ok: false, code: 'AUTOMATION_OCCURRENCE_NOT_FOUND' }]);
@@ -128,6 +132,12 @@ describe('BUILD-AUTOMATION-001 on the remote runtime (Vercel BFF → Railway API
     const secret = decodeURIComponent(new URL(opened.approvalUrl).hash.slice(1));
     expect(await refusal(remoteApproval('claim', [secret, false], as(OWNER_B)))).toBe('AUTOMATION_OWNER_MISMATCH');
     expect((await t.db.query('SELECT state FROM automation_rules WHERE rule_id = $1', [rule.ruleId])).rows[0]).toEqual({ state: 'ACTIVE' });
+    // The owner's own schedule change crosses the same boundary: the new rule is created and the old one archived, its proposal withdrawn.
+    const replaced = value(await op<{ created: RuleView; archived: RuleView }>(OWNER_A, 'replace', [rule.ruleId, rule.version,
+      { schedule: { frequency: 'WEEKLY', weekday: 5, time: '09:30' } }]));
+    expect(replaced).toMatchObject({ archived: { ruleId: rule.ruleId, state: 'ARCHIVED' }, created: { state: 'ACTIVE', schedule: { frequency: 'WEEKLY', weekday: 5, time: '09:30' },
+      action: rule.action, limits: rule.limits, executionMode: 'CONFIRM_EACH_TIME' } });
+    expect(value(await op<OverviewView>(OWNER_A, 'overview', [])).pending).toEqual([]);
   });
 
   it('a remotely created automation is evaluated by the Railway worker’s sweep — no cron — and racing the protected dispatch still yields one occurrence', async () => {

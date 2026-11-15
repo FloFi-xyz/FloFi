@@ -1366,7 +1366,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.strategy"
           ],
           [
-           "get_supported_networks, get_supported_assets, get_capabilities, plan_strategy, compose_strategy, validate_strategy, review_strategy, simulate_strategy"
+           "get_supported_networks, get_supported_assets, get_capabilities, plan_strategy, compose_strategy, validate_strategy, review_strategy, simulate_strategy; explain_concept, explain_strategy, get_platform_help e list_automation_types (conhecimento geral e guia do FloFi, nunca dados ao vivo)"
           ]
          ],
          [
@@ -1382,7 +1382,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.runs"
           ],
           [
-           "get_execution_status, get_evidence para carteiras vinculadas no FloFi"
+           "get_execution_status, get_evidence e get_automation_status (somente leitura) para carteiras vinculadas no FloFi; automações só são criadas ou alteradas pelo dono no app FloFi"
           ]
          ]
         ]
@@ -3293,7 +3293,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.strategy"
           ],
           [
-           "get_supported_networks, get_supported_assets, get_capabilities, plan_strategy, compose_strategy, validate_strategy, review_strategy, simulate_strategy"
+           "get_supported_networks, get_supported_assets, get_capabilities, plan_strategy, compose_strategy, validate_strategy, review_strategy, simulate_strategy; explain_concept, explain_strategy, get_platform_help and list_automation_types (general knowledge and FloFi's guide, never live data)"
           ]
          ],
          [
@@ -3309,7 +3309,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
            "flofi.runs"
           ],
           [
-           "get_execution_status, get_evidence for wallets linked on FloFi"
+           "get_execution_status, get_evidence and get_automation_status (read-only) for wallets linked on FloFi; automations are created or changed only by their owner in the FloFi app"
           ]
          ]
         ]

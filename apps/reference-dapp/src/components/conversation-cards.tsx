@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
 import { translate, useLocale } from '../i18n/locale';
 import { sumByAsset, type ConversationLanguage, type ConversationReview } from '../domain/conversation-lifecycle';
 import { shortDecimal } from '../domain/review-block';
@@ -9,6 +9,7 @@ import { networkChoiceOptions, networkOfOption } from '../domain/approved-ux';
 import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { walletChainRef } from '../wallet/evm-networks';
 import { NetworkBrandIcon } from './brand-icon';
+import { loadSavedRecipients, savedRecipientForAddress, useSavedRecipients } from '../state/saved-recipients-store';
 
 export { networkChoiceOptions };
 /**
@@ -115,13 +116,20 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
   const onTop = review.fees.filter(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && !NETWORK_FEE.test(line.label));
   // Review round 2: the full destination (a shortened address invites look-alike mistakes), tagged when it is one of the owner's own wallets.
   const owned = (step: CompactReviewStep) => step.destinationOwned ?? Boolean(step.destination && review.account && sameWallet(step.destination, review.account));
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: DISPLAY ONLY — the signed-in account's saved name for the bound destination, when its canonical address is
+  // exactly that destination. The full address stays the value shown and signed; nothing here derives an address from a name, and the name
+  // never makes the destination "your wallet" or removes a warning.
+  const saved = useSavedRecipients(), idle = saved.status === 'IDLE', destinations = review.steps.some(step => step.destination);
+  useEffect(() => { if (destinations) void loadSavedRecipients({ ifStale: true }); }, [destinations, idle]);
+  const savedName = (step: CompactReviewStep) => savedRecipientForAddress(step.destination, saved.recipients)?.label ?? null;
   const compact = (step: CompactReviewStep) => <dl className="conversation-review-compact">
     {step.input !== '—' && <div><dt>{t('Sends')}</dt><dd title={step.input}>{shortAmount(t(step.input), 'up')}</dd></div>}
     {step.result && <div><dt>{t('Receives')}</dt><dd title={step.result}>{/^\d/.test(step.result) ? t('≈ {0}', shortAmount(step.result, 'down')) : t(step.result)}</dd></div>}
     {step.minimum && <div><dt>{t('Minimum')}</dt><dd title={step.minimum}>{shortAmount(step.minimum, 'down')}</dd></div>}
     {stepFee && <div><dt>{t('Network fee')}</dt><dd>{stepFee}</dd></div>}
     {step.destination && <div data-wrap="true" data-destination-owned={owned(step) || undefined}><dt>{t('Destination')}</dt>
-      <dd><code>{step.destination}</code>{owned(step) ? <span className="conversation-review-owned"> · {t('Your wallet')}</span> : null}</dd></div>}
+      <dd><code>{step.destination}</code>{owned(step) ? <span className="conversation-review-owned"> · {t('Your wallet')}</span> : null}
+        {savedName(step) ? <span className="conversation-review-saved" data-saved-recipient="true" title={t('Your saved name for this address. It is not proof of who controls it.')}> · {savedName(step)}</span> : null}</dd></div>}
     {step.details.filter(materialDetail).map(line => <div key={`${line.label}:${line.value}`} data-wrap="true" data-detail={line.label}><dt>{t(line.label)}</dt>
       <dd>{line.label === 'Token mint' ? <code>{line.value}</code> : t(line.value)}</dd></div>)}
   </dl>;

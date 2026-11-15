@@ -54,4 +54,8 @@ export type OverviewView = { readonly rules: readonly RuleView[]; readonly pendi
   readonly capabilities: CapabilityView; readonly telegram: TelegramView };
 export type RuleHistoryView = { readonly rule: RuleView; readonly entries: readonly HistoryEntryView[]; readonly occurrences: readonly OccurrenceView[] };
 export type OpenedView = { readonly approvalUrl: string; readonly expiresAt: string };
+/** A schedule change by replacement: the new rule (same action, limits, expiry and mode) and the archived one it replaced. */
+export type ReplacedView = { readonly created: RuleView; readonly archived: RuleView };
+/** The schedule part an owner may change by replacement; the time zone stays the rule's. */
+export type SchedulePatchView = { readonly frequency: 'DAILY' | 'WEEKLY'; readonly weekday: number | null; readonly time: string };
 export type LinkCodeView = { readonly code: string; readonly expiresAt: string; readonly command: string };
