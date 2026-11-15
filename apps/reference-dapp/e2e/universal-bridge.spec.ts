@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
-import { test, expect, chooseWallet, openSimulationDetails, AUTHORIZE_IN_WALLET, sendChatCommand } from './fixtures';
+import { test, expect, chooseWallet, openSimulationDetails, AUTHORIZE_IN_WALLET, readWorkflowIr, sendChatCommand } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
 import { createTestWallet, personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import type { BuildEstimateResult } from '../src/domain/build-estimate';
@@ -57,7 +57,11 @@ async function reset(): Promise<{ solana: ReturnType<typeof createMockedSolanaWa
   return { solana, evm };
 }
 /** The test's EVM wallet (an injected EIP-1193 provider): signs sign-in messages; its only broadcast is the MOCKED loopback chain. */
-async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' | 'pause-reject' = 'normal') {
+/**
+ * `nonce-ahead-once` (BUILD-P0-MAINNET-EXECUTION-RELIABILITY, Incident A): the wallet's first `pending` count is one above the chain's (a pending
+ * transaction FloFi's RPC does not see), then it agrees — as when the owner clears that transaction in the wallet and comes back.
+ */
+async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' | 'pause-reject' | 'nonce-ahead-once' = 'normal') {
   await page.exposeFunction('flofiUniversalControl', control);
   await page.exposeFunction('flofiUniversalSign', (message: unknown) => wallet.signMessage(personalSignText(message)));
   await page.addInitScript(({ owner, mode }) => {
@@ -70,7 +74,12 @@ async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' |
       if (input.method === 'eth_chainId') return state.chain;
       if (input.method === 'wallet_switchEthereumChain') { state.chain = (input.params?.[0] as { chainId: string }).chainId; return null; }
       if (input.method === 'personal_sign') return w.flofiUniversalSign(input.params?.[0]);
-      if (input.method === 'eth_getTransactionCount') return w.flofiUniversalControl('MOCK_nonce', [...input.params ?? [], state.chain]);
+      if (input.method === 'eth_getTransactionCount') {
+        const count = await w.flofiUniversalControl('MOCK_nonce', [...input.params ?? [], state.chain]) as string;
+        if (mode !== 'nonce-ahead-once' || (w as unknown as { nonceAheadServed?: boolean }).nonceAheadServed) return count;
+        (w as unknown as { nonceAheadServed?: boolean }).nonceAheadServed = true;
+        return '0x' + (BigInt(count) + 1n).toString(16);
+      }
       if (input.method === 'eth_sendTransaction') { w.evmSends.push(input.params?.[0]);
         if (mode === 'pause-reject') await new Promise((_resolve, reject) => { w.rejectEvmRequest = () => reject(Object.assign(new Error('Owner rejected'), { code: 4001 })); });
         return w.flofiUniversalControl('MOCK_evm_send', [{ ...input.params?.[0] as object, chainId: state.chain }]); }
@@ -324,5 +333,35 @@ test('financial truth: an unresolved EVM wallet stays navigable and recoverable,
   await expect(page.locator('.execution-summary')).toContainText('Transaction not submitted');
   expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
   expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
+  networkGuard.assertClean();
+});
+
+test('Incident A/D: a wallet reporting another transaction number sends nothing, reads "not submitted", and the same workflow continues with Refresh & review', async ({ page, networkGuard }) => {
+  await installEvmWallet(page, wallets.evm, 'nonce-ahead-once');
+  await authorByChat(page, 'bridge 1 USDC from Base to Arbitrum receive WETH');
+  const workflowBefore = JSON.parse(await readWorkflowIr(page)) as { workflowId: string; revision: number };
+  await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('Guaranteed minimum');
+  await acceptAndExecute(page);
+  // Refused before the wallet's send method: the attempt is cancelled, the owner is told what disagreed, nothing reached the wallet or chain.
+  await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: cancelled');
+  await expect(panel(page)).toContainText('Your wallet shows a pending transaction that FloFi does not see on the network yet');
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
+  expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
+  // The consumer outcome is "not submitted" — never "needs attention" — and the run offers Refresh & review on the same workflow.
+  await openEditorSection(page, 'Execute');
+  const summary = page.locator('.execution-summary').first();
+  await expect(summary).toContainText('Transaction not submitted');
+  await expect(summary).not.toContainText('needs attention');
+  await page.getByRole('button', { name: 'Refresh & review', exact: true }).first().click();
+  await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('Guaranteed minimum');
+  const workflowAfter = JSON.parse(await readWorkflowIr(page)) as { workflowId: string; revision: number };
+  expect([workflowAfter.workflowId, workflowAfter.revision]).toEqual([workflowBefore.workflowId, workflowBefore.revision]);
+  // The fresh preparation reads the wallet's count again; it now agrees and the approval is sent once, at the still-next nonce.
+  await acceptAndExecute(page);
+  await control('MOCK_mine', [{ blocks: 3 }]);
+  await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: confirmed', { timeout: 30_000 });
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 1 });
   networkGuard.assertClean();
 });
