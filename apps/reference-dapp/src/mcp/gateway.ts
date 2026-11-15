@@ -35,6 +35,7 @@ import { mcpState, type McpState } from './oauth/state.ts';
 import { boundedRuntime, deploymentRuntime, type McpRuntime } from './runtime.ts';
 import { APPROVAL_TOOL_NAMES, createFlofiMcpServer, timeoutResult, TOOL_SCOPES, type ToolName } from './tools.ts';
 import { createRequestBudget, isDeadlineError, MCP_UPSTREAM_TIMEOUTS, withinBudget, type RequestBudget } from './deadline.ts';
+import { deploymentAutomationReader, type AutomationReadPort } from './automations.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type GatewayLogger = { readonly info: (event: string, fields?: Readonly<Record<string, string | number | boolean | null>>) => void;
@@ -42,6 +43,8 @@ export type GatewayLogger = { readonly info: (event: string, fields?: Readonly<R
 export type GatewayOptions = { readonly env?: Env; readonly runtime?: McpRuntime; readonly logger?: GatewayLogger; readonly state?: McpState; readonly now?: () => Date;
   /** Tests: the request budget (default `MCP_REQUEST_BUDGET_MS`) and the tool margin before it. */
   readonly betaHost?: McpBetaHost;
+  /** Tests: the read-only automation port of `get_automation_status` (default: the deployment's Automations read path). */
+  readonly automations?: AutomationReadPort;
   readonly budgetMs?: number; readonly marginMs?: number };
 export const MCP_MAX_BODY_BYTES = 65_536;
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
@@ -215,14 +218,17 @@ async function serve(request: Request, options: GatewayOptions, budget: RequestB
     if (!links) { logger?.warn('mcp.oauth.store_unavailable', { request_id: budget.requestId }); return reject(503, 'MCP_OAUTH_STORE_UNAVAILABLE'); }
     const productIdentity = betaIdentity;
     const eligible = productIdentity ? await store(async () => mcpBetaWallets(options.betaHost ?? await mcpStateHost(env), productIdentity, links, now.getTime(), env)).catch(() => []) : links;
-    principal = Object.freeze({ ...principal, wallets: Object.freeze(eligible.map(l => l.address)) });
+    // `owners` keeps each link's namespace (a Solana wallet owns its automations as `solana`); `wallets` stays the address list runs are read by.
+    principal = Object.freeze({ ...principal, wallets: Object.freeze(eligible.map(l => l.address)),
+      owners: Object.freeze(eligible.map(l => Object.freeze({ namespace: l.namespace, address: l.address }))) });
   }
   // Every runtime call of this request is bounded by its budget (an injected runtime too).
   const runtime = options.runtime ? boundedRuntime(options.runtime, budget) : deploymentRuntime(env, budget), active = principal;
   const policy = readHandoffPolicy(env), ui = panelConfig(env);
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the route passes `process.env`; a hosted deployment is always Mainnet-only).
   const scope = networkScope({ ...process.env, ...env });
-  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, ...state ? { state } : {}, ...oauth ? { oauth } : {},
+  const automations = options.automations ?? deploymentAutomationReader(env, budget);
+  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, budget, automations, ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => { seen.outcome = event.outcome;
       logger?.info('mcp.tool', { request_id: budget.requestId, principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }); } }),
   // `auto` answers with one JSON body: no tool emits a notification before its result.

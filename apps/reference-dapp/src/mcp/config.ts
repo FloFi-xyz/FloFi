@@ -25,13 +25,22 @@ import type { McpScope } from './oauth/config.ts';
 type Env = Readonly<Record<string, string | undefined>>;
 /** A static developer/partner credential: operator-granted read wallets, no account, so no approval handoffs. */
 export type McpCredentialPrincipal = { readonly kind: 'mcp-credential'; readonly id: string; readonly tenantId: string; readonly wallets: readonly string[] };
+/** A wallet a principal may read as, with its namespace (automations are owned per wallet: `{namespace, address}`). */
+export type McpWalletOwner = { readonly namespace: 'eip155' | 'solana'; readonly address: string };
 /**
  * BUILD-MCP-002: an OAuth-connected client acting for a pseudonymous FloFi account. `id` is the grant; `wallets` are the wallets
- * the account linked on FloFi (filled only for `flofi.runs` reads). Neither the account nor a link is wallet ownership.
+ * the account linked on FloFi (filled only for `flofi.runs` reads), and `owners` the same links with their namespace. Neither the
+ * account nor a link is wallet ownership.
  */
 export type McpOAuthPrincipal = { readonly kind: 'mcp-oauth'; readonly id: string; readonly tenantId: string; readonly accountId: string; readonly clientId: string;
-  readonly clientName: string; readonly scopes: readonly McpScope[]; readonly wallets: readonly string[] };
+  readonly clientName: string; readonly scopes: readonly McpScope[]; readonly wallets: readonly string[]; readonly owners?: readonly McpWalletOwner[] };
 export type McpPrincipal = McpCredentialPrincipal | McpOAuthPrincipal;
+/**
+ * The wallets a principal may read owner-scoped records as, namespace included: an OAuth account's linked wallets (EVM or Solana, filled by the
+ * gateway for `flofi.runs`), or a static credential's operator-granted wallets (EVM only, `WALLET`). Never an address from a request.
+ */
+export const principalOwners = (principal: McpPrincipal): readonly McpWalletOwner[] => principal.kind === 'mcp-oauth' ? principal.owners ?? []
+  : principal.wallets.map(address => ({ namespace: 'eip155' as const, address }));
 /** What a static credential may call: everything read-only of BUILD-MCP-001, never an approval request (it has no account). */
 export const CREDENTIAL_SCOPES: readonly McpScope[] = Object.freeze(['flofi.strategy', 'flofi.runs']);
 export const principalScopes = (principal: McpPrincipal): readonly McpScope[] => principal.kind === 'mcp-oauth' ? principal.scopes : CREDENTIAL_SCOPES;

@@ -10,6 +10,7 @@
  *   conceptFollowUp(text)                    "não entendi", "me dá um exemplo", "e na Aave?", "e no meu workflow?", "mais detalhes"
  *   answerConcept(id, request)               the explanation at a level, optionally for a protocol, with follow-up options
  *   conceptInWorkflow(id, steps, language)   the concept in the user's own workflow, from FloFi's canonical steps only
+ *   conceptsForSteps(steps)                  every concept that applies to a workflow's canonical steps (the reverse of `steps`)
  */
 import type { CopilotLanguage } from '../copilot-messages';
 import type { WorkflowStep } from '../workflow-steps';
@@ -506,6 +507,15 @@ export function conceptInWorkflow(id: ConceptId, steps: readonly WorkflowStep[],
   const lines = relevant.slice(0, 6).map((step, index) => `${index + 1}. ${describe(step)}`);
   return { text: (pt ? `No seu workflow, ${copy.name} aparece aqui:\n` : `In your workflow, ${copy.name} shows up here:\n`) + lines.join('\n'),
     notes: [copy.flofi, pt ? 'Valores ao vivo (preços, health factor, taxas) só aparecem na Simulação e na Review.' : 'Live values (prices, health factor, fees) only appear in Simulation and Review.'] };
+}
+
+/**
+ * The concepts that apply to these canonical workflow steps — the reverse of each concept's `steps` — in catalog order. Read from the steps'
+ * types only (`workflow-steps.ts`), never from a live value; used by surfaces that explain a whole workflow (MCP `explain_strategy`).
+ */
+export function conceptsForSteps(steps: readonly Pick<WorkflowStep, 'detail'>[]): ConceptId[] {
+  const types = new Set(steps.map(step => step.detail.type));
+  return CONCEPT_IDS.filter(id => CONCEPTS[id].steps.some(type => types.has(type)));
 }
 
 /** Every number that appears in FloFi's own copy of a concept (illustrative values), for the eval's grounded-number invariant. */

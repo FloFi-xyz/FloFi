@@ -26,6 +26,11 @@ describe('BUILD-FLOFI-MAINNET-PRODUCT-001: MCP offers and composes mainnet strat
     const refused = await client.callTool('compose_strategy', { strategy: testnetSwap });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/mainnetOnly/);
+    // explain_strategy composes exactly like compose_strategy: the same refusal, never an explanation of a test network.
+    const explained = await client.callTool('explain_strategy', { strategy: testnetSwap });
+    expect(explained.isError).toBe(true);
+    expect(explained.text).toMatch(/mainnetOnly/);
+    expect((await client.callTool('explain_strategy', { strategy: mainnetSwap })).output).toMatchObject({ ok: true, fundsClass: 'REAL_FUNDS', liveData: false });
     const composed = await client.callTool('compose_strategy', { strategy: mainnetSwap });
     expect(composed.isError).toBe(false);
     expect(composed.output).toMatchObject({ ok: true, fundsClass: 'REAL_FUNDS', strategy: { network: 'base' } });
