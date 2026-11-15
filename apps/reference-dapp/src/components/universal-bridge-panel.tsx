@@ -22,6 +22,7 @@ import { AssetSearch } from './asset-search';
 import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
 import type { DiscoveryCandidate } from '../server/universal-router/discovery';
+import { walletNonceMessage } from '../domain/wallet-nonce';
 
 /**
  * BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge on the Canvas — any of the five mainnets to any other, any provider-supported asset on
@@ -280,7 +281,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   const canExecute = Boolean(authorized && !router.retired && !pending && fresh > 0 && router.executionEnabled);
   const canRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && ['PREPARED', 'AUTHORIZED'].includes(record.phase) &&
     !record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state)) && (record.requote || fresh === 0));
-  const message = (code: string | null | undefined) => code ? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
+  const message = (code: string | null | undefined) => code ? walletNonceMessage(code) ?? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
   const info = router.error ?? record?.error;
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
   const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';

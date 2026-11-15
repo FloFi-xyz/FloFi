@@ -13,6 +13,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { PendingExecutionNote } from './execution-concurrency-notes';
+import { walletNonceMessage } from '../domain/wallet-nonce';
 
 /** Copy is written for Robinhood Testnet; another transfer network's name is substituted. Display text only. */
 const short = (network: TransferNetwork) => network === 'Robinhood Chain Testnet' ? 'Robinhood' : network;
@@ -159,7 +160,7 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
       {record?.evidence && observation?.facts && <><p>{tr("Transfer reconciled. Exactly one owner-signed transaction, nonce ")}{tr(observation.facts.nonceBefore)} → {tr(observation.facts.nonceAfter)}{tr(", block ")}{tr(observation.facts.blockNumber)}{tr("; network cost ")}{tr(formatEth(observation.facts.fee))}{tr(" ETH; balance ")}{tr(formatEth(observation.facts.balanceBefore))} → {tr(formatEth(observation.facts.balanceAfter))}{tr(" ETH.")}</p>
         <a download="flofi-rh-demo-001-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info && <p role="status">{tr(transferCopy(messages[info] ?? 'The transfer needs attention. Inspect technical details and observe any existing transaction.', network))}</p>}
+    {info && <p role="status">{tr(transferCopy(walletNonceMessage(info) ?? messages[info] ?? 'The transfer needs attention. Inspect technical details and observe any existing transaction.', network))}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({ error: info, attempt, observations: record?.observations, walletDiagnostic: record?.walletDiagnostic,
       environment: record?.evidence?.bundle.environment, journal: record?.journal.entries.filter(e => e.level === 'attempt').map(e => e.toState) }, null, 2)}</pre></details>
   </section>;

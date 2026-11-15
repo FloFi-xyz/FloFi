@@ -27,6 +27,7 @@ import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
 import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
+import { walletNonceMessage } from './wallet-nonce';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -189,6 +190,11 @@ export function simulationError(error: string): string {
   if (/WALLET_NOT_FOUND|WALLET_CONNECTION_REJECTED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
   if (/OWNER_REVIEW_MISMATCH/i.test(error)) return 'The connected wallet is not the wallet this Review was prepared for, so nothing was sent. Reconnect that wallet, or simulate again with this one.';
   if (/HANDOFF_NOT_AUTHORIZED/i.test(error)) return 'The reviewed request was no longer authorized when FloFi was about to open your wallet, so nothing was sent. Review it again.';
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a wallet-side disagreement is worded as what it is (a lagging wallet view, a pending wallet transaction,
+  // or two different counts); only FloFi's own chain reads (NONCE_CHANGED) say another transaction took the slot.
+  const walletNonce = walletNonceMessage(error);
+  if (walletNonce) return walletNonce;
+  if (error === 'UNIVERSAL_ATTEMPT_LIMIT_SIMULATE_AGAIN') return 'This run reached its limit of wallet attempts, so nothing more was sent. Simulate again to start a fresh run of the same workflow.';
   if (/NONCE_MISMATCH|NONCE_CHANGED/i.test(error)) return 'Another transaction from this wallet took the next transaction slot (nonce), so nothing was sent. Review it again.';
   if (/SEMANTIC_REVISION_CHANGED|SEMANTIC_EDIT|TRANSACTION_ARTIFACT_CHANGED/i.test(error)) return 'The workflow or its reviewed transaction changed before your wallet was asked, so nothing was sent. Review it again.';
   if (/WALLET_PROVIDER_CHANGED|WALLET_CHANGED/i.test(error)) return 'Your wallet connection changed, so nothing was sent. Reconnect the reviewed wallet and review again.';

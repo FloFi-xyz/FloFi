@@ -7,7 +7,7 @@ import { createCryptoActionNode, selectCryptoNetwork } from './crypto-action-pic
 import { projectReview } from './review-presentation';
 import { projectCanvasAction } from './canvas-lifecycle';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
-import { currentExecution, isFinalExecutionResult, nothingSubmitted, projectExecutionResult } from './execution-result';
+import { currentExecution, isFinalExecutionResult, nothingSubmitted, projectExecutionResult, refreshableAfterNothingSent } from './execution-result';
 import { reviewFixture, reviewNow, reviewExpiry } from '../test-utils/review-fixture';
 import type { SimulationSource } from './simulation-presentation';
 import type { ExecutionControlsState } from '../state/execution-controls';
@@ -53,6 +53,50 @@ describe('shared Canvas lifecycle across runtime projections', () => {
     const refused = { ...f, source: { ...f.source, state: { ...f.source.state, error: 'ROUTE_CHANGED', record: { ...record, requote: true, error: 'ROUTE_CHANGED' } } } as unknown as SimulationSource };
     expect(projectCanvasAction(refused, controls)).toEqual({ kind: 'simulate', label: 'Simulate again', disabled: false });
     expect(projectCanvasAction({ ...refused, invalidWorkflow: true }, controls)).toMatchObject({ kind: 'simulate', disabled: true });
+  });
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident D): a bridge request FloFi refused before the wallet (its transaction number disagreed) is
+  // "not submitted" and continues the same workflow with Refresh & review — never "needs attention" with only "Create new workflow". (The record →
+  // lifecycle projection of these notes is covered on real universal records in server/universal-router/service.test.ts.)
+  type Op = { id: string; state: string; hash?: string | null; approval?: boolean; reason?: string };
+  function bridgeRun(kind: 'router' | 'universal' | 'public', ops: Op[]): ExecutionControlsState {
+    const f = fixture('router'), operations = ops.map(o => ({ nodeId: 'n1', title: o.id, label: o.state, hash: null, chain: 'eip155:8453', explorer: null, fee: null, approval: false,
+      intent: false, wallet: o.id !== 'destination', ...o }));
+    const step = { id: 's1', number: 1, action: 'Bridge', input: '1 USDC', pair: null, network: 'Base', provider: 'Relay', tokens: [], state: 'not-submitted', label: '', operations };
+    const progress = { started: true, restored: false, local: false, matchesWorkflow: true, steps: [step], active: step, completed: 0, label: 'Execution needs attention', message: '',
+      state: 'attention', runKey: 'xuni-1', fingerprint: '', busy: false };
+    return { ...f, source: { ...f.source, kind } as unknown as SimulationSource, progress } as unknown as ExecutionControlsState;
+  }
+  it.each(['UNIVERSAL_WALLET_NONCE_AHEAD', 'ROUTER_WALLET_NONCE_BEHIND', 'ROUTER_NONCE_CHANGED'])('a %s refusal before the wallet offers Refresh & review on the same workflow', reason => {
+    for (const kind of ['router', 'universal'] as const) {
+      const f = bridgeRun(kind, [{ id: 'APPROVAL', state: 'not-submitted', approval: true, reason }, { id: 'DEPOSIT', state: 'waiting' }, { id: 'destination', state: 'waiting' }]);
+      expect(refreshableAfterNothingSent(f.progress)).toBe(true);
+      expect(projectExecutionResult(f.progress)).toMatchObject({ label: 'Transaction not submitted' });
+      expect(projectCanvasAction(f, controls)).toEqual({ kind: 'simulate', label: 'Refresh & review', disabled: false });
+      expect(projectCanvasAction({ ...f, invalidWorkflow: true }, controls)).toMatchObject({ kind: 'simulate', disabled: true });
+    }
+  });
+  it('words a wallet nonce refusal plainly in the result (nothing was sent by FloFi)', () => {
+    const f = bridgeRun('universal', [{ id: 'APPROVAL', state: 'not-submitted', approval: true, reason: 'UNIVERSAL_WALLET_NONCE_MISMATCH' }, { id: 'DEPOSIT', state: 'waiting' }]);
+    expect(projectExecutionResult(f.progress)?.message).toBe('Your wallet and the network reported different transaction numbers. No transaction was sent by FloFi. Check pending wallet transactions, then refresh and review this step again.');
+  });
+  it('a confirmed approval followed by a refused deposit keeps the approval and continues with Refresh & review (re-quote in place)', () => {
+    const f = bridgeRun('universal', [{ id: 'APPROVAL', state: 'confirmed', approval: true, hash: hash('a') }, { id: 'DEPOSIT', state: 'not-submitted', reason: 'UNIVERSAL_WALLET_NONCE_AHEAD' },
+      { id: 'destination', state: 'waiting' }]);
+    expect(projectExecutionResult(f.progress)).toMatchObject({ label: 'Execution partially completed' });
+    expect(projectCanvasAction(f, controls)).toEqual({ kind: 'simulate', label: 'Refresh & review', disabled: false });
+  });
+  it.each([
+    ['an unknown submission result', [{ id: 'APPROVAL', state: 'uncertain', approval: true }]],
+    ['a submitted deposit', [{ id: 'APPROVAL', state: 'confirmed', approval: true, hash: hash('a') }, { id: 'DEPOSIT', state: 'pending', hash: hash('b') }]],
+    ['a confirmed deposit then a refused later request', [{ id: 'DEPOSIT', state: 'confirmed', hash: hash('b') }, { id: 'destination', state: 'not-submitted' }]],
+  ] as [string, Op[]][])('%s is never offered Refresh & review', (_label, ops) => {
+    const f = bridgeRun('universal', ops);
+    expect(refreshableAfterNothingSent(f.progress)).toBe(false);
+    expect(projectCanvasAction(f, controls).label).not.toBe('Refresh & review');
+  });
+  it('other runtimes keep their own wording (Refresh & review is the bridges’ in-place continuation only)', () => {
+    const f = bridgeRun('public', [{ id: 'swap', state: 'not-submitted' }]);
+    expect(projectCanvasAction(f, controls).label).not.toBe('Refresh & review');
   });
   it('a wallet request declined before submission concludes the attempt: Simulate again, also after a reload, never "Recover execution"', () => {
     for (const restored of [false, true]) {

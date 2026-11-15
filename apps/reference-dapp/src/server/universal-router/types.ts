@@ -5,6 +5,8 @@ import type { EvidenceBundle, RouteChange, RouterPhase, SemanticWorkflow, Univer
   UniversalRoutingProvider } from '@defi-workflow-engine/workflow-contracts';
 import type { AllowanceObservation, FinancialObservation } from '../../domain/financial-observation';
 import type { ProviderStatusHint } from './relay-provider.ts';
+import type { WalletNonceEvidence } from '../../domain/wallet-nonce.ts';
+import type { WalletNonceCheck } from './nonce-check.ts';
 
 export const UNIVERSAL_RUN_ID = /^xuni-[a-f0-9]{32}$/;
 export type UniversalProvenance = 'PUBLIC_MAINNET' | 'MOCKED';
@@ -24,7 +26,8 @@ type AttemptBase = { readonly attemptId: string; readonly step: UniversalStep; r
 export type UniversalEvmAttempt = AttemptBase & { readonly ecosystem: 'EVM'; readonly nonce: string; readonly preparedAtBlock: number; readonly tx: EvmTx;
   readonly replacementHash: string | null; readonly conflictingTransactionHash?: string; readonly receipt: { readonly transactionHash: string; readonly status: 0 | 1; readonly blockNumber: number; readonly blockHash: string;
     readonly from: string; readonly gasCostWei: string; readonly submissionKind: 'DIRECT' | 'DELEGATED_SINGLE' } | null;
-  /** Durable cursor of the order-log scan used when the hash was lost. */ readonly depositScanFrom?: number };
+  /** Durable cursor of the order-log scan used when the hash was lost. */ readonly depositScanFrom?: number;
+  /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: both sides of a pre-send wallet nonce refusal (CANCELLED attempts only). */ readonly nonceCheck?: WalletNonceCheck };
 export type UniversalSolanaAttempt = AttemptBase & { readonly ecosystem: 'SOLANA'; readonly step: 'DEPOSIT'; readonly messageHash: string;
   readonly preparedAtHeight: number; readonly lastValidBlockHeight: number;
   /** The owner-signed bytes FloFi verified and broadcast (base64), kept for reconciliation against the landed transaction. */ readonly transaction: string | null;
@@ -102,6 +105,8 @@ export type UniversalRecord = { readonly format: 'flofi.universal-bridge-run.v1'
   readonly verdict: UniversalVerdict; readonly error: string | null;
   /** The delivered amount proven on the destination chain (what a later bound step may spend). */ readonly received: string | null;
   /** Durable FloFi 0.1% obligation (or waiver) once the run reaches a terminal verdict; null while PENDING. */ readonly feeObligation: UniversalFeeObligation | null };
-export type UniversalWalletDiagnostic = { attemptId?: string; invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number };
+export type UniversalWalletDiagnostic = { attemptId?: string; invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number;
+  /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: the wallet's side of a pre-send nonce refusal (two counts and their relation; nothing else). */
+  nonce?: WalletNonceEvidence };
 export type UniversalBegin = { readonly record: UniversalRecord; readonly attempt: UniversalAttempt } &
   ({ readonly ecosystem: 'EVM'; readonly transaction: EvmTx } | { readonly ecosystem: 'SOLANA'; readonly unsignedTransaction: string; readonly walletChain: 'solana:mainnet' });

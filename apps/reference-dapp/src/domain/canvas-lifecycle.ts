@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { projectReview } from './review-presentation';
-import { currentExecution, isFinalExecutionResult, nothingSubmitted } from './execution-result';
+import { currentExecution, isFinalExecutionResult, nothingSubmitted, refreshableAfterNothingSent } from './execution-result';
 import type { ExecutionControlsState } from '../state/execution-controls';
 
 const FRESH_SIMULATION_AFTER_NOTHING_SENT: readonly string[] = ['public', 'solana-swap', 'solana-pool', 'solana-composition', 'solana-transfer'];
+/** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: bridges whose shell simulation re-quotes in place after a landed approval (`refreshBridgeAfterApproval`). */
+const REFRESH_AFTER_PRESEND_REFUSAL: readonly string[] = ['universal', 'router'];
+export const REFRESH_AND_REVIEW_LABEL = 'Refresh & review';
 /** A Solana composition whose swap is reconciled and bound, and whose position has no transaction yet. */
 function awaitsPosition(source: ExecutionControlsState['source']): boolean {
   if (source.kind !== 'solana-composition') return false;
@@ -34,6 +37,10 @@ export function projectCanvasAction(props: ExecutionControlsState, controls: {
     // BUILD-FIX-UX-001: a public swap whose wallet request was declined before submission submitted nothing; starting over needs a fresh
     // quote, Review and wallet confirmation and cannot repeat anything (its record stays saved). The Solana runs record the same
     // pre-submission outcome (declined, wallet error, changed or stale bytes refused before any broadcast) and recover the same way.
+    // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a bridge request refused before the wallet (e.g. its transaction number disagreed) continues the same
+    // workflow: a fresh preparation and Review, never a resend and never a rebuilt Canvas.
+    if (REFRESH_AFTER_PRESEND_REFUSAL.includes(props.source.kind) && refreshableAfterNothingSent(progress))
+      return { kind: 'simulate', label: REFRESH_AND_REVIEW_LABEL, disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
     if (FRESH_SIMULATION_AFTER_NOTHING_SENT.includes(props.source.kind) && nothingSubmitted(progress)) return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
     // A confirmed prefix can need a fresh quote/Review before its still-unattempted suffix.
     // Never offer simulation as a retry for an unresolved submitted operation.

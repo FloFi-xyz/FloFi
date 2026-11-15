@@ -11,6 +11,7 @@ import { transferBegin, transferHandoff, transferInvalidate, transferObserve, tr
 import type { TransferRecord, TransferWalletDiagnostic } from '../server/robinhood-transfer-service';
 import { bindFloFiSigning } from '../wallet/flofi-wallet-channel';
 import { signingContextOf } from '../wallet/flofi-signing';
+import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 
 const key = 'gryloo:rh-demo-001:transfer';
 const REFUSALS = [4001, 4100, 4200];
@@ -104,7 +105,13 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
       if (injected() !== provider) throw new Error('TRANSFER_WALLET_PROVIDER_CHANGED');
       if (!Array.isArray(accounts) || typeof accounts[0] !== 'string' || accounts[0].toLowerCase() !== session.account) throw new Error('TRANSFER_WRONG_ACCOUNT');
       if (typeof chain !== 'string' || chain.toLowerCase() !== reviewedChain) throw new Error('TRANSFER_WRONG_CHAIN');
-      if (quantity(pending) !== BigInt(record.review.nonce)) throw new Error('TRANSFER_WALLET_NONCE_MISMATCH');
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: the classified pre-send check (domain/wallet-nonce.ts); a lagging wallet view is re-read (bounded).
+      let first: unknown = '0x' + quantity(pending).toString(16);
+      const evidence = await observeWalletNonce({ reviewed: BigInt(record.review.nonce), read: async () => { if (first !== undefined) { const value = first; first = undefined; return value; }
+        return request('eth_getTransactionCount', [session.account, 'pending']); }, stillCurrent: () => {
+        if (JSON.stringify(latest.current) !== JSON.stringify(snapshot)) throw new Error('TRANSFER_SEMANTIC_REVISION_CHANGED');
+        if (injected() !== provider) throw new Error('TRANSFER_WALLET_PROVIDER_CHANGED'); } });
+      const refusal = walletNonceRefusal('TRANSFER', evidence); if (refusal) throw new Error(refusal);
     };
     let prepared = false;
     try {

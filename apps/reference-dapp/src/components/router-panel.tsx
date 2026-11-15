@@ -16,6 +16,7 @@ import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { authoringEnvironment, useExecutionEnvironment } from '../state/capability-store';
 import { PendingExecutionNote } from './execution-concurrency-notes';
+import { walletNonceMessage } from '../domain/wallet-nonce';
 
 /**
  * Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia; BUILD-RH-002 adds
@@ -202,7 +203,7 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
   const { state } = useWorkflow(), router = useRouter();
   const node = state.workflow.nodes.find(n => routerDetails(n)), fields = node ? routerDetails(node) : null;
-  const network = router.network, l = LABELS[network], messages = messagesFor(l), message = (code: string | null | undefined) => !code ? null : messages[code] ?? null;
+  const network = router.network, l = LABELS[network], messages = messagesFor(l), message = (code: string | null | undefined) => !code ? null : walletNonceMessage(code) ?? messages[code] ?? null;
   // Source-side amounts (input, fees, approvals, balance, refund) and destination-side amounts (outputs, fill) in their own tokens.
   const { pair } = ROUTER_NETWORK_OPTIONS[network], usdc = tokenAmount(pair.source), out = tokenAmount(pair.destination);
   const record = router.record, r = record?.review, route = r?.route, last = record?.attempts.at(-1);

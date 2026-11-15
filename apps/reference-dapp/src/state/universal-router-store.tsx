@@ -15,6 +15,7 @@ import { solanaSessionStatus, solanaSignIn, solanaSignInChallenge, walletSession
 import { universalBridgeOfWorkflow, type UniversalBridgeDetails } from '../domain/universal-bridge-authoring';
 import { resolvedAddress, useDestinationWallets } from './destination-wallets';
 import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeReviewChange } from '../domain/bridge-review-recovery';
+import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import type { UniversalRecord, UniversalWalletDiagnostic } from '../server/universal-router/types';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
@@ -265,8 +266,12 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       await validateSession();
       // BUILD-FLOFI-UX-FIX-003 (as the Router does): the wallet's own view of the next transaction number must be the reviewed one. A request the
       // wallet would queue behind another (or a wallet RPC that disagrees with FloFi's) is stopped before signing, never sent with a clashing nonce.
-      const walletNonce = await request('eth_getTransactionCount', [current.owner, 'pending']);
-      if (typeof walletNonce !== 'string' || !/^0x[0-9a-fA-F]+$/.test(walletNonce) || BigInt(walletNonce) !== BigInt(tx.nonce)) throw new Error('UNIVERSAL_WALLET_NONCE_MISMATCH');
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: the disagreement is classified (`domain/wallet-nonce.ts`); only a wallet view that LAGS the chain is
+      // read again (bounded, session re-validated before each read). The evidence travels with the pre-send refusal for support.
+      const nonceEvidence = await observeWalletNonce({ reviewed: BigInt(tx.nonce), read: () => request('eth_getTransactionCount', [current.owner, 'pending']),
+        stillCurrent: async () => { if (visibleRun.current !== id) throw new Error('UNIVERSAL_RUN_CHANGED'); await validateSession(); } });
+      const nonceRefusal = walletNonceRefusal('UNIVERSAL', nonceEvidence);
+      if (nonceRefusal) { diagnostic.nonce = nonceEvidence; throw new Error(nonceRefusal); }
       acceptCurrent(unwrap(await universalHandoff(id)));
       setSigning(true); diagnostic.invoked = true;
       let hash: unknown;

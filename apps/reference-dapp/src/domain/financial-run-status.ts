@@ -6,6 +6,10 @@ export function financialAttemptState(attempt: Attempt | null | undefined): stri
   if (attempt.state === 'NOT_FOUND' && /SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(attempt.note ?? '') && attempt.step?.includes('APPROV')) return 'SUBMISSION_RESULT_UNKNOWN';
   if (attempt.state === 'CANCELLED' && /_(REJECTED|WALLET_REJECTED)$/.test(attempt.note ?? '')) return 'REJECTED';
   if (attempt.state === 'CANCELLED' && /_(WALLET_NOT_SUBMITTED|WRONG_OWNER|WRONG_CHAIN|SEMANTIC_REVISION_CHANGED)$/.test(attempt.note ?? '')) return 'NOT_SUBMITTED';
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a refusal FloFi made before the wallet's send method was ever called (the server records CANCELLED for
+  // these only from PREPARED with no wallet invocation): the wallet's nonce disagreed, FloFi's own nonce read moved at the hand-off, the wallet
+  // provider or the visible run changed, or a read failed first. Nothing of it can have reached the network.
+  if (attempt.state === 'CANCELLED' && /_(WALLET_NONCE_(MISMATCH|BEHIND|AHEAD|RESPONSE_INVALID)|NONCE_CHANGED|WALLET_PROVIDER_CHANGED|RUN_CHANGED|RPC_ERROR_BEFORE_WALLET_SUBMISSION|WALLET_PREFLIGHT)$/.test(attempt.note ?? '')) return 'NOT_SUBMITTED';
   return attempt.state;
 }
 export function financialRunStatus(record: { verdict: string; phase: string; attempts: readonly Attempt[]; source?: unknown }): string {

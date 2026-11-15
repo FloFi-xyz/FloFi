@@ -100,10 +100,14 @@ export function executionExplorer(chain: string, hash: string, local = false): s
  * (`execution-phase.ts`) and the label's parameters (a network name, passed to the translator as `{0}`). The state machine (`state`) is unchanged.
  */
 export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean; wallet: boolean;
-  phase?: ExecutionPhase; labelArgs?: readonly string[] };
+  phase?: ExecutionPhase; labelArgs?: readonly string[];
+  /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: why a request was not submitted (the attempt's closed refusal code), for the owner's sentence. */
+  reason?: string };
 export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[];
   labelArgs?: readonly string[] };
-export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
+export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean;
+  /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): the run belongs to another workflow identity than an explicitly created new Canvas. */
+  detached?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
 
 /**
  * BUILD-FLOFI-MAINNET-EXEC-002 review round 3: a router or universal attempt that was CANCELLED (a proven pre-broadcast refusal: the wallet
@@ -116,7 +120,17 @@ export function supersededUnsent(attempt: { readonly state: string; readonly rev
   return attempt.state === 'CANCELLED' && !attempt.transactionHash && !attempt.replacementHash
     && Boolean(attempt.reviewCommitment) && Boolean(commitment) && attempt.reviewCommitment !== commitment;
 }
-export function projectExecutionLifecycle(currentWorkflow: Workflow, context: ReviewContext, source: ExecutionLifecycleSource): ExecutionLifecycle {
+/** Records the closed refusal code of a request that provably was not submitted (no hash; its attempt reads NOT_SUBMITTED). */
+function notSubmittedReason(op: LifecycleOperation, attempt: { readonly state: string; readonly note: string | null; readonly step?: string } | undefined) {
+  if (op.state === 'not-submitted' && !op.hash && attempt?.note && /^[A-Z][A-Z0-9_]{2,80}$/.test(attempt.note)) op.reason = attempt.note;
+}
+/**
+ * `freshWorkflow` (BUILD-P0-MAINNET-EXECUTION-RELIABILITY, Incident F): the Canvas is a workflow the owner explicitly created with New workflow.
+ * A run of ANOTHER workflow identity is then `detached` from it — final or not — so a previous run's progress, errors or late status updates
+ * never appear on the new Canvas. Detaching is presentation only: the run's record, server-side observation and reconciliation are untouched,
+ * and it stays in the Dashboard and History.
+ */
+export function projectExecutionLifecycle(currentWorkflow: Workflow, context: ReviewContext, source: ExecutionLifecycleSource, options: { readonly freshWorkflow?: boolean } = {}): ExecutionLifecycle {
   let workflow = currentWorkflow, runKey: string | null = null, local = false, restored = false, superseded = false;
   const reconciliation = source.kind === 'fork-swap' ? source.state.execution?.evidence.at(-1)?.outcome : source.kind === 'fork-pool' ? source.state.status?.reconciliation?.outcome : null;
   const runUncertain = ['DIVERGENT', 'INCONCLUSIVE'].includes(reconciliation ?? '') || 'record' in source.state && source.state.record && 'verdict' in source.state.record && ['DIVERGENT', 'INCONCLUSIVE'].includes(source.state.record.verdict);
@@ -192,6 +206,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       for (const step of calls) {
         const a = attempts.filter(a => a.step === step).at(-1);
         add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', r.review.intent.sourceChain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
+        notSubmittedReason(operations.at(-1)!, a);
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE' : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
@@ -214,6 +229,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
           : a?.ecosystem === 'SOLANA' ? simulationAmount(a.feeLamports, 9, 'SOL') : null;
         add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : step === 'UNWRAP' ? `Unwrap ${r.review.route.inputToken.symbol} to ETH` : 'Bridge deposit', chain, financialAttemptState(a),
           a?.ecosystem === 'EVM' ? a.replacementHash ?? a.transactionHash : a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', gas);
+        notSubmittedReason(operations.at(-1)!, a);
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE'
@@ -357,6 +373,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     : approvalLanded ? `${completed} of ${steps.length} actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.`
     : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
   // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.
-  const matchesWorkflow = !planUnavailable && (JSON.stringify(workflow) === JSON.stringify(currentWorkflow) || restored && isPristineDraft(currentWorkflow));
-  return { started, restored, local, matchesWorkflow, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
+  const detached = Boolean(options.freshWorkflow && runKey !== null && workflow.workflowId !== currentWorkflow.workflowId);
+  const matchesWorkflow = !planUnavailable && !detached && (JSON.stringify(workflow) === JSON.stringify(currentWorkflow) || restored && isPristineDraft(currentWorkflow));
+  return { started, restored, local, matchesWorkflow, ...detached ? { detached } : {}, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
 }

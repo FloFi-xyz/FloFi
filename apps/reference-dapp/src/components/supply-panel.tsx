@@ -10,6 +10,7 @@ import { useSupply } from '../state/supply-store';
 import { TokenAmountInput } from './token-amount-input';
 import { LendingReserveStatus, reserveOptionLabel, useAaveReserves } from './lending-reserve-status';
 import { PendingExecutionNote } from './execution-concurrency-notes';
+import { walletNonceMessage } from '../domain/wallet-nonce';
 export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
@@ -86,7 +87,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
         <button type="button" disabled={supply.busy} onClick={()=>void supply.recoverReview()}>{tr("Prepare fresh review")}</button></>}
       {record?.evidence&&<><p>{tr("Supply independently reconciled. Position increased by ")}{tr(formatUnits(record.observations.at(-1)?.delta??'0',shown.decimals))} {tr(shown.asset)}.</p><a download="flofi-aave-supply-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
-    {info&&<p role="status">{lendingCopy(messages[info]??'Execution needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
+    {info&&<p role="status">{lendingCopy(walletNonceMessage(info)??messages[info]??'Execution needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,submissionError:record?.submissionError,walletDiagnostic:record?.walletDiagnostic,notSubmitted:record?.notSubmitted,absence:record?.absence,recoveryOf:record?.recoveryOf,review,attempts:record?.attempts,observations:record?.observations,verdict:record?.verdict,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;
 }

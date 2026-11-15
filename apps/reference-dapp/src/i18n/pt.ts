@@ -52,6 +52,7 @@ import { portugueseLocaleContract } from './pt-locale-contract';
 import { portugueseExecutionContinuity } from './pt-execution-continuity';
 import { portugueseMainnetExec } from './pt-mainnet-exec';
 import { portugueseRound2Requote } from './pt-round2-requote';
+import { portugueseExecutionReliability } from './pt-execution-reliability';
 import { portugueseRound2Frontend } from './pt-round2-frontend';
 import { portugueseGasCircle } from './pt-gas-circle';
 import { portugueseGasKora } from './pt-gas-kora';
@@ -332,4 +333,6 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseGasKora,
   // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003: the 0x Gasless swap on Robinhood Chain (new keys, last).
   ...portugueseGasZeroEx,
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: classified nonce refusals, bridge cost disclosure, Log out (new keys, last).
+  ...portugueseExecutionReliability,
 };
