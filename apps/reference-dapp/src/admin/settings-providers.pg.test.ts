@@ -114,7 +114,9 @@ describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware settings (PostgreSQL)', ()
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('https://api.anthropic.com/v1/messages');
     expect(calls[0]!.headers['x-api-key']).toBe('test-ant-key');
-    expect(calls[0]!.body).not.toHaveProperty('tools');
+    // The live tool definitions are offered so the provider's schema limits are probed as in production, but no tool can run.
+    expect(calls[0]!.body.tool_choice).toEqual({ type: 'none' });
+    expect((calls[0]!.body.messages as { content: { text: string }[] }[])[0]!.content[0]!.text).toBe('Swap 1 USDC to WETH on Base with 0.5% slippage');
     // Provider readiness is checked before anything is sent; an Anthropic error keeps only allow-listed diagnostics.
     expect(await settings(operator, { action: 'probe', settings: claude }, { fetch: async () => { throw new Error('must not be called'); }, ...later }))
       .toEqual({ status: 409, body: { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: 'ANTHROPIC' } });
@@ -144,9 +146,17 @@ describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware settings (PostgreSQL)', ()
     for (const effort of ['medium', null] as const) {
       const probed = await settings(operator, { action: 'probe', settings: { ...claude, reasoningEffort: effort } }, { env: both, fetch: enforcing });
       expect(probed.body).toMatchObject({ ok: true, probe: { ok: true, code: null, upstream: null, intentKind: 'ACTION',
-        structure: { output: 'PROMPTED', toolsStrict: true, strictTools: 0, optionalParameters: 0, limits: { unionParameters: 16 } } } });
+        scope: 'WEB', toolsOffered: true,
+        structure: { output: 'PROMPTED', toolsStrict: true, strictTools: 9, optionalParameters: 0, limits: { unionParameters: 16 } } } });
     }
+    // The probe meets the provider's limits exactly as a live turn does: the output contract is prompted, the live tool definitions stay strict,
+    // and no tool may run (tool_choice none).
     expect(sent.every(body => !(body.output_config as { format?: unknown } | undefined)?.format)).toBe(true);
+    expect(sent.every(body => (body.tools as unknown[]).length === 9 && (body.tool_choice as { type: string }).type === 'none')).toBe(true);
+    expect(await settings(operator, { action: 'probe', settings: claude, scope: 'TELEGRAM' }, { env: both, fetch: enforcing })).toMatchObject({ status: 200,
+      body: { probe: { ok: true, scope: 'TELEGRAM' } } });
+    expect(await settings(operator, { action: 'probe', settings: claude, scope: 'EMAIL' }, { env: both, fetch: enforcing })).toEqual({ status: 400,
+      body: { ok: false, code: 'ADMIN_REQUEST_INVALID' } });
     // The pre-fix request shape (the V2 schema as output_config.format) is what the double refuses, and the operator sees why.
     const refused = await settings(operator, { action: 'probe', settings: claude }, { env: both, fetch: async () => new Response(JSON.stringify({ type: 'error',
       error: { type: 'invalid_request_error', message: 'Schema is too complex for compilation.' } }), { status: 400 }) });
@@ -155,7 +165,7 @@ describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware settings (PostgreSQL)', ()
     expect(JSON.stringify(refused.body)).not.toContain('too complex for compilation');
     const audit = (await t.db.query<{ detail: Record<string, unknown> }>(`SELECT detail FROM admin_audit_events WHERE kind = 'ADMIN_COPILOT_PROBE' AND event_id > $1 ORDER BY event_id`,
       [since])).rows;
-    expect(audit.at(-1)!.detail).toMatchObject({ provider: 'ANTHROPIC', upstreamReason: 'SCHEMA_TOO_COMPLEX', structure: 'PROMPTED' });
+    expect(audit.at(-1)!.detail).toMatchObject({ provider: 'ANTHROPIC', scope: 'WEB', upstreamStatus: 400, upstreamReason: 'SCHEMA_TOO_COMPLEX', structure: 'PROMPTED' });
   });
 
   it('activates Anthropic per channel independently: changing one override leaves the others, and rollback restores the previous provider', async () => {

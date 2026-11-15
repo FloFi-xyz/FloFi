@@ -6,7 +6,7 @@
  *                                                                 appends it as version expectedVersion + 1
  *   rollback  `{ action, expectedVersion, toVersion, reason? }`  appends a version restoring an older one (re-validated today)
  *   reset     `{ action, expectedVersion, reason? }`             appends a NULL document: back to the environment bootstrap
- *   probe     `{ action, settings }`                             one live strict-schema request with candidate settings (rate-limited)
+ *   probe     `{ action, settings, scope? }`                     one live strict-schema request with candidate settings (rate-limited)
  *   models    `{ action, provider }`                             re-reads the provider's model list now (Anthropic; rate-limited)
  *
  * Nothing here can set an API key, the Copilot mode, its instructions or its output schema. Every change takes effect on the next
@@ -20,13 +20,21 @@
 import { COPILOT_SERVER_LIMITS, interpretCopilotV2, type CopilotHttpResponse, type CopilotTransport } from '../server/copilot-service.ts';
 import { anthropicRequestPlan, CopilotProviderError, createProviderTransport, discoverAnthropicModels, estimatedCostUsd, providerApiKey, providerReadiness,
   type AnthropicRejection, type AnthropicStructure } from '../server/copilot-providers.ts';
-import { CopilotSettingsError, documentProviders, storedDocument, validateRuntimeSettings, validateSettingsDocument, type CopilotSettingsDocument } from '../server/copilot-settings.ts';
+import { COPILOT_SCOPES, CopilotSettingsError, documentProviders, storedDocument, validateRuntimeSettings, validateSettingsDocument, type CopilotScope,
+  type CopilotSettingsDocument } from '../server/copilot-settings.ts';
 import { appendSettingsVersion, readActiveSettings, readSettingsVersion, type SettingsVersion } from '../server/runtime-settings-store.ts';
+import { networkScope } from '../server/network-scope.ts';
+import { COPILOT_TOOL_DEFINITIONS, copilotToolsEnabled, type CopilotToolkit } from '../platform/copilot-tools.ts';
 import { adminMutation, codeOf, json, readJsonObject, type AdminHttpOptions } from './http.ts';
 
 export type SettingsHttpOptions = AdminHttpOptions & { readonly fetch?: typeof fetch };
 export const PROBE_WINDOW_MS = 600_000, PROBE_LIMIT = 10;
-export const PROBE_TRANSCRIPT = Object.freeze({ version: '2', messages: [{ role: 'user', text: 'Swap 1 USDC to WETH on Base Sepolia with 0.5% slippage' }] });
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the probe's fixed, harmless request names a network of the deployment's own scope (a mainnet in the public
+ * product, where a test-network request would only be refused and still look "ok"). It is only interpreted: nothing is proposed, signed or sent.
+ */
+export const PROBE_TRANSCRIPT = Object.freeze({ version: '2', messages: [{ role: 'user', text: 'Swap 1 USDC to WETH on Base with 0.5% slippage' }] });
+export const ENGINEERING_PROBE_TRANSCRIPT = Object.freeze({ version: '2', messages: [{ role: 'user', text: 'Swap 1 USDC to WETH on Base Sepolia with 0.5% slippage' }] });
 export const MODELS_REFRESH_LIMIT = 10;
 const UPSTREAM_CODES = new Set(['unsupported_parameter', 'unsupported_value', 'model_not_found', 'invalid_value', 'invalid_type', 'invalid_json_schema']);
 const UPSTREAM_PARAMS = new Set(['model', 'temperature', 'reasoning', 'reasoning.effort', 'max_output_tokens', 'text.format', 'text.format.schema', 'instructions']);
@@ -43,14 +51,21 @@ const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.s
 const versionOf = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 
 /** Only allow-listed fields of an upstream 4xx error body are ever returned (never its free-text message). */
-export function upstreamRejection(response: CopilotHttpResponse | null): { readonly code: string | null; readonly param: string | null } | null {
+export function upstreamRejection(response: CopilotHttpResponse | null): { readonly code: string | null; readonly param: string | null; readonly status: number } | null {
   if (!response || response.status < 400 || response.status >= 500) return null;
   try {
     const error = (JSON.parse(response.body) as { error?: { code?: unknown; param?: unknown } }).error;
     return { code: typeof error?.code === 'string' && UPSTREAM_CODES.has(error.code) ? error.code : null,
-      param: typeof error?.param === 'string' && UPSTREAM_PARAMS.has(error.param) ? error.param : null };
-  } catch { return { code: null, param: null }; }
+      param: typeof error?.param === 'string' && UPSTREAM_PARAMS.has(error.param) ? error.param : null, status: response.status };
+  } catch { return { code: null, param: null, status: response.status }; }
 }
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the probe sends the same strict tool definitions a live turn of that scope sends (so a provider's schema
+ * limits are tested exactly as production meets them), but with `tool_choice: none` from the first round: no tool ever runs, so a probe reads
+ * no route, quote, wallet or workflow.
+ */
+const PROBE_TOOLKIT: CopilotToolkit = Object.freeze({ definitions: COPILOT_TOOL_DEFINITIONS,
+  run: async () => ({ name: null, category: null, outcome: 'REFUSED', output: { ok: false, code: 'PROBE_TOOLS_NOT_RUN' } }) });
 
 export async function handleCopilotSettings(request: Request, options: SettingsHttpOptions = {}): Promise<Response> {
   const allowed = await adminMutation(request, options, 'write');
@@ -69,6 +84,10 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
     let settings;
     try { settings = validateRuntimeSettings(body.settings, 'settings'); }
     catch (error) { return json(400, { ok: false, ...settingsError(error) }); }
+    // The scope the operator tests (default WEB): Telegram and WhatsApp turns are Channel Core turns with the same tool definitions.
+    if (body.scope !== undefined && !(COPILOT_SCOPES as readonly unknown[]).includes(body.scope)) return json(400, { ok: false, code: 'ADMIN_REQUEST_INVALID' });
+    const scope: CopilotScope = (body.scope as CopilotScope | undefined) ?? 'WEB';
+    const tools = copilotToolsEnabled(env) ? PROBE_TOOLKIT : null;
     // The provider's own key, checked before anything is sent; a probe never borrows the other provider's key.
     const apiKey = providerApiKey(env, settings.provider);
     if (!apiKey) return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: settings.provider });
@@ -84,7 +103,8 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
       catch (error) { if (error instanceof CopilotProviderError) provider = error.upstream; throw error; }
     };
     let telemetry: { outcome: string; durationMs: number; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; responseModel: string | null } | null = null;
-    const result = await interpretCopilotV2(PROBE_TRANSCRIPT, { transport, mode: 'live',
+    const result = await interpretCopilotV2(networkScope(env) === 'ENGINEERING' ? ENGINEERING_PROBE_TRANSCRIPT : PROBE_TRANSCRIPT, { transport, mode: 'live',
+      surface: scope === 'WEB' ? 'WEB' : 'CHANNEL', toolkit: tools, orchestration: { maxRounds: 0 },
       settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
       telemetry: record => { telemetry = { outcome: record.outcome, durationMs: record.durationMs, inputTokens: record.inputTokens, outputTokens: record.outputTokens,
         reasoningTokens: record.reasoningTokens, responseModel: record.responseModel }; } });
@@ -96,13 +116,13 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
     const recorded = telemetry as { outcome: string } | null, code = result.ok ? null : recorded && recorded.outcome !== 'OK' ? recorded.outcome : result.code;
     const { outcome: _recorded, ...measured } = (telemetry ?? {}) as Record<string, unknown>;
     const planned = structure as AnthropicStructure | null;
-    const outcome = { ok: result.ok, code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection,
+    const outcome = { ok: result.ok, code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection, scope, toolsOffered: tools !== null,
       provider: settings.provider, model: settings.model, estimatedCostUsd: estimatedCostUsdValue, ...measured,
       ...planned ? { structure: { output: planned.output, toolsStrict: planned.strictTools, unionParameters: planned.complexity.unionParameters,
         optionalParameters: planned.complexity.optionalParameters, strictTools: planned.complexity.strictTools, limits: planned.limits } } : {} };
     void _recorded;
-    await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', code, { model: settings.model, provider: settings.provider,
-      upstreamParam: rejection?.param ?? null, ...rejection && 'reason' in rejection ? { upstreamReason: rejection.reason } : {},
+    await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', code, { model: settings.model, provider: settings.provider, scope,
+      upstreamParam: rejection?.param ?? null, upstreamStatus: rejection?.status ?? null, ...rejection && 'reason' in rejection ? { upstreamReason: rejection.reason } : {},
       ...planned ? { structure: planned.output } : {} });
     return json(200, { ok: true, probe: outcome });
   }

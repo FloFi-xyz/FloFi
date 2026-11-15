@@ -28,6 +28,8 @@ export type EditorHistory = { version: number; createdAt: string; createdBy: str
 type Probe = { ok: boolean; code: string | null; intentKind: string | null; durationMs?: number; inputTokens?: number | null; outputTokens?: number | null;
   reasoningTokens?: number | null; responseModel?: string | null; provider?: Provider; model?: string; estimatedCostUsd?: number | null;
   upstream: { code: string | null; param: string | null; status?: number; reason?: string | null } | null;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the channel scope tested and whether the live tool definitions were offered (never run). */
+  scope?: Scope; toolsOffered?: boolean;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001 (Anthropic): how structured output was sent and the request's measured complexity. */
   structure?: { output: 'CONSTRAINED' | 'PROMPTED'; toolsStrict: boolean; unionParameters: number; optionalParameters: number; strictTools: number;
     limits: { strictTools: number; optionalParameters: number; unionParameters: number } } };
@@ -216,10 +218,12 @@ function ProbeResult({ probe }: { probe: Probe }) {
       <dt>Tokens</dt><dd>{tokens}{probe.reasoningTokens ? ` (${probe.reasoningTokens} reasoning)` : ''}</dd>
       <dt>Estimated cost</dt><dd>{probe.estimatedCostUsd != null ? `${usd(probe.estimatedCostUsd)} (list price; not billing data)` : 'no listed price'}</dd>
     </dl>
-    <p className="admin-diff">The test interprets one fixed, harmless request (“Swap 1 USDC to WETH…”). No workflow is changed and nothing is signed, submitted or executed.</p>
+    <p className="admin-diff">The test interprets one fixed, harmless request (“Swap 1 USDC to WETH…”) with the same strict format and tool definitions as a live turn; no tool runs. No workflow is changed and nothing is signed, submitted or executed.</p>
     <details className="admin-details"><summary>Technical details</summary><div className="admin-details-body">
       <dl className="admin-dl">
         <dt>Provider / model</dt><dd>{probe.provider ?? '—'} · <code>{probe.model ?? '—'}</code></dd>
+        {probe.scope ? <><dt>Tested as</dt><dd>{SCOPES.find(item => item.id === probe.scope)?.label ?? probe.scope}{probe.toolsOffered
+          ? ' · with the live read-only tool definitions (no tool was run)' : ' · tools are off on this deployment'}</dd></> : null}
         <dt>Served by</dt><dd>{probe.responseModel ? <code>{probe.responseModel}</code> : '—'}</dd>
         <dt>Result code</dt><dd>{probe.code ? <code>{probe.code}</code> : 'OK'}</dd>
         {probe.upstream ? <><dt>Provider error</dt><dd>{probe.upstream.status ? `HTTP ${probe.upstream.status} · ` : ''}{probe.upstream.code ? <code>{probe.upstream.code}</code> : 'unspecified'}
@@ -277,9 +281,9 @@ export function CopilotSettingsEditor({ csrf, canWrite, activeVersion, initial, 
     const result = await send({ action: 'rollback', expectedVersion: activeVersion, toVersion: version, reason }, `Version {version} restores version ${version}.`);
     if (result) window.location.reload();
   }
-  async function test(settings: EditorSettings) {
+  async function test(settings: EditorSettings, scope: Scope = 'WEB') {
     setProbe(null);
-    const result = await send({ action: 'probe', settings: normalized(settings) }, 'Test finished.');
+    const result = await send({ action: 'probe', settings: normalized(settings), scope }, 'Test finished.');
     if (result?.probe) setProbe(result.probe);
   }
   async function refreshModels() {
@@ -318,7 +322,7 @@ export function CopilotSettingsEditor({ csrf, canWrite, activeVersion, initial, 
             {value ? <SettingsFields value={value} families={families} providers={providers} models={list} disabled={disabled} idPrefix={`override-${scope.id}`} starting={starting}
               onChange={next => setDocument(current => ({ ...current, overrides: { ...current.overrides, [scope.id]: next } }))}/> : null}
             {value ? <div className="admin-actions"><button type="button" className="admin-button" disabled={disabled || !testable(value)} title={testTitle(value)}
-              onClick={() => void test(value)}>Test {scope.label} settings</button></div> : null}
+              onClick={() => void test(value, scope.id)}>Test {scope.label} settings</button></div> : null}
           </div>; })}
       </div>
     </section>
