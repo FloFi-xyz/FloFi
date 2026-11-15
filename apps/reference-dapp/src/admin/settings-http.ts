@@ -18,8 +18,8 @@
  * exactly like a live turn. It offers no tools, touches no workflow and can never sign, submit or execute anything.
  */
 import { COPILOT_SERVER_LIMITS, interpretCopilotV2, type CopilotHttpResponse, type CopilotTransport } from '../server/copilot-service.ts';
-import { CopilotProviderError, createProviderTransport, discoverAnthropicModels, estimatedCostUsd, providerApiKey, providerReadiness,
-  type AnthropicRejection } from '../server/copilot-providers.ts';
+import { anthropicRequestPlan, CopilotProviderError, createProviderTransport, discoverAnthropicModels, estimatedCostUsd, providerApiKey, providerReadiness,
+  type AnthropicRejection, type AnthropicStructure } from '../server/copilot-providers.ts';
 import { CopilotSettingsError, documentProviders, storedDocument, validateRuntimeSettings, validateSettingsDocument, type CopilotSettingsDocument } from '../server/copilot-settings.ts';
 import { appendSettingsVersion, readActiveSettings, readSettingsVersion, type SettingsVersion } from '../server/runtime-settings-store.ts';
 import { adminMutation, codeOf, json, readJsonObject, type AdminHttpOptions } from './http.ts';
@@ -74,9 +74,12 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
     if (!apiKey) return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: settings.provider });
     const recent = await base.store.countAudit('ADMIN_COPILOT_PROBE', new Date(base.now.getTime() - PROBE_WINDOW_MS)).catch(() => PROBE_LIMIT);
     if (recent >= PROBE_LIMIT) return json(429, { ok: false, code: 'ADMIN_PROBE_RATE_LIMITED' });
-    let last: CopilotHttpResponse | null = null, provider: AnthropicRejection | null = null;
+    let last: CopilotHttpResponse | null = null, provider: AnthropicRejection | null = null, structure: AnthropicStructure | null = null;
     const live = createProviderTransport(settings.provider, apiKey, options.fetch ?? fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
     const transport: CopilotTransport = async input => {
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: the operator sees how the structured output reached Anthropic (constrained grammar or prompted
+      // contract) and the request's measured complexity against the documented limits. Computed locally from the same body; never sent.
+      if (settings.provider === 'ANTHROPIC' && !structure) { try { structure = anthropicRequestPlan(JSON.parse(input.body) as Record<string, unknown>).structure; } catch { /* the transport reports it */ } }
       try { return last = await live(input); }
       catch (error) { if (error instanceof CopilotProviderError) provider = error.upstream; throw error; }
     };
@@ -86,17 +89,21 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
       telemetry: record => { telemetry = { outcome: record.outcome, durationMs: record.durationMs, inputTokens: record.inputTokens, outputTokens: record.outputTokens,
         reasoningTokens: record.reasoningTokens, responseModel: record.responseModel }; } });
     const rejected = provider as AnthropicRejection | null;
-    const rejection = result.ok ? null : rejected ? { code: rejected.type, param: rejected.param, status: rejected.status } : upstreamRejection(last);
+    const rejection = result.ok ? null : rejected ? { code: rejected.type, param: rejected.param, status: rejected.status, reason: rejected.reason ?? null } : upstreamRejection(last);
     const used = telemetry as { inputTokens: number | null; outputTokens: number | null } | null;
     const estimatedCostUsdValue = used?.inputTokens != null && used.outputTokens != null ? estimatedCostUsd(settings.model, used.inputTokens, used.outputTokens) : null;
     // The operator sees the precise outcome (the telemetry record's), not the provider-neutral code shown to users.
     const recorded = telemetry as { outcome: string } | null, code = result.ok ? null : recorded && recorded.outcome !== 'OK' ? recorded.outcome : result.code;
     const { outcome: _recorded, ...measured } = (telemetry ?? {}) as Record<string, unknown>;
+    const planned = structure as AnthropicStructure | null;
     const outcome = { ok: result.ok, code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection,
-      provider: settings.provider, model: settings.model, estimatedCostUsd: estimatedCostUsdValue, ...measured };
+      provider: settings.provider, model: settings.model, estimatedCostUsd: estimatedCostUsdValue, ...measured,
+      ...planned ? { structure: { output: planned.output, toolsStrict: planned.strictTools, unionParameters: planned.complexity.unionParameters,
+        optionalParameters: planned.complexity.optionalParameters, strictTools: planned.complexity.strictTools, limits: planned.limits } } : {} };
     void _recorded;
     await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', code, { model: settings.model, provider: settings.provider,
-      upstreamParam: rejection?.param ?? null });
+      upstreamParam: rejection?.param ?? null, ...rejection && 'reason' in rejection ? { upstreamReason: rejection.reason } : {},
+      ...planned ? { structure: planned.output } : {} });
     return json(200, { ok: true, probe: outcome });
   }
   if (body.action === 'models') {

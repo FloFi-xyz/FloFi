@@ -89,6 +89,125 @@ export function anthropicSchema(schema: unknown): unknown {
   return out;
 }
 
+// ── Structured-output planning (BUILD-FLOFI-UNIFIED-COPILOT-001) ─────────────────────────────────────────────────────────────────────────
+/**
+ * Root cause of the Admin probe's `400 invalid_request_error` (`COPILOT_UPSTREAM_REJECTED`) on every Anthropic model, with or without effort:
+ * Anthropic compiles `output_config.format` and `strict` tool schemas into a grammar and enforces explicit per-request complexity limits
+ * (structured outputs → "Schema complexity limits"): at most 20 strict tools, 24 optional parameters and 16 parameters with union types
+ * (`anyOf` or a type array such as `["string","null"]`), summed over every strict schema of the request. FloFi's Copilot V2 output contract
+ * is a strict OpenAI schema whose optional fields are all nullable: once translated it carries 160 union-typed parameters (83 type arrays,
+ * 77 `anyOf`) in 48 nested objects, ten times the limit, so the API refused it before any model ran. OpenAI accepts the same schema.
+ *
+ * The fix keeps the one shared contract and decides per request how it reaches Anthropic:
+ *
+ *   CONSTRAINED  the whole request (output schema + strict tools) is within every documented limit: `output_config.format` as before.
+ *   PROMPTED     it is not: the same schema is sent as the output contract in a cached system block, with no grammar, and the answer is the
+ *                single JSON object the model writes (`extractAnswerJson`). Strict tools stay strict while they alone are within the limits.
+ *
+ * Nothing about what the model may do changes: every answer still passes FloFi's full deterministic validation (`parseCopilotOutputV2`,
+ * closed vocabularies, exact keys, bounded strings, grounding) and every tool argument FloFi's own validators. A malformed answer fails closed
+ * (`COPILOT_RESPONSE_INVALID`); it is never repaired, guessed or retried.
+ */
+export const ANTHROPIC_SCHEMA_LIMITS = Object.freeze({ strictTools: 20, optionalParameters: 24, unionParameters: 16 });
+export type SchemaComplexity = { readonly unionParameters: number; readonly optionalParameters: number; readonly strictTools: number };
+/** The documented complexity of strict schemas, counted as Anthropic counts it (every schema, `$defs` included). */
+export function schemaComplexity(schemas: readonly unknown[], strictTools = 0): SchemaComplexity {
+  let unionParameters = 0, optionalParameters = 0;
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (!record(node)) return;
+    if (Array.isArray(node.type) || Array.isArray(node.anyOf)) unionParameters += 1;
+    if (record(node.properties)) {
+      const required = new Set(Array.isArray(node.required) ? node.required : []);
+      for (const name of Object.keys(node.properties)) if (!required.has(name)) optionalParameters += 1;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'properties' && record(value)) Object.values(value).forEach(walk);
+      else if (key !== 'enum' && key !== 'const' && typeof value === 'object') walk(value);
+    }
+  };
+  schemas.forEach(walk);
+  return { unionParameters, optionalParameters, strictTools };
+}
+const withinLimits = (complexity: SchemaComplexity) => complexity.unionParameters <= ANTHROPIC_SCHEMA_LIMITS.unionParameters
+  && complexity.optionalParameters <= ANTHROPIC_SCHEMA_LIMITS.optionalParameters && complexity.strictTools <= ANTHROPIC_SCHEMA_LIMITS.strictTools;
+export type AnthropicStructure = { readonly output: 'CONSTRAINED' | 'PROMPTED'; readonly strictTools: boolean; readonly complexity: SchemaComplexity;
+  readonly limits: typeof ANTHROPIC_SCHEMA_LIMITS };
+/** How a request with this (already translated) output schema and these strict tool schemas is sent. Deterministic; no network. */
+export function planAnthropicStructure(outputSchema: unknown, strictToolSchemas: readonly unknown[]): AnthropicStructure {
+  const complexity = schemaComplexity([outputSchema, ...strictToolSchemas], strictToolSchemas.length);
+  if (withinLimits(complexity)) return { output: 'CONSTRAINED', strictTools: true, complexity, limits: ANTHROPIC_SCHEMA_LIMITS };
+  return { output: 'PROMPTED', strictTools: withinLimits(schemaComplexity(strictToolSchemas, strictToolSchemas.length)), complexity, limits: ANTHROPIC_SCHEMA_LIMITS };
+}
+
+/**
+ * A schema with every repeated subtree of at least `minBytes` moved into `$defs` (largest first), for the PROMPTED output contract only:
+ * the same constraints, a fraction of the tokens (the V2 contract repeats the action shapes and descriptions many times). Never compiled.
+ */
+export function compactSchema(schema: unknown, minBytes = 240): Record<string, unknown> {
+  const defs: Record<string, unknown> = {};
+  let root: unknown = schema;
+  for (let round = 0; round < 64; round += 1) {
+    const counts = new Map<string, { node: unknown; count: number }>();
+    const visit = (node: unknown, top: boolean): void => {
+      if (Array.isArray(node)) { node.forEach(child => visit(child, false)); return; }
+      if (!record(node)) return;
+      if (!top && typeof node.$ref !== 'string') {
+        const key = JSON.stringify(node);
+        if (key.length >= minBytes) { const seen = counts.get(key); counts.set(key, { node, count: (seen?.count ?? 0) + 1 }); }
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'properties' && record(value)) Object.values(value).forEach(child => visit(child, false));
+        else if (key !== 'enum' && typeof value === 'object') visit(value, false);
+      }
+    };
+    visit(root, true);
+    Object.values(defs).forEach(def => visit(def, true));
+    const best = [...counts.entries()].filter(([, seen]) => seen.count > 1).sort(([a], [b]) => b.length - a.length)[0];
+    if (!best) break;
+    const [key] = best, name = `d${Object.keys(defs).length + 1}`, ref = { $ref: `#/$defs/${name}` };
+    const replace = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(replace);
+      if (!record(node)) return node;
+      if (JSON.stringify(node) === key) return ref;
+      return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, k === 'enum' ? v : replace(v)]));
+    };
+    const definition = JSON.parse(key) as unknown;
+    root = replace(root);
+    for (const [existing, value] of Object.entries(defs)) defs[existing] = replace(value);
+    defs[name] = definition;
+  }
+  return { ...(root as Record<string, unknown>), ...Object.keys(defs).length ? { $defs: defs } : {} };
+}
+/** The PROMPTED output contract: the system block that carries the schema (cached: it is identical on every request). */
+export function promptedOutputContract(schema: unknown): string {
+  return 'OUTPUT CONTRACT. Your final answer is exactly one JSON object that validates against the JSON Schema below, and nothing else: no prose before ' +
+    'or after it, no Markdown, no code fences. Every property listed in "required" must be present; use null exactly where the schema allows null and ' +
+    'the instructions say so; never add a property the schema does not list; enum values are written exactly as listed. FloFi validates the object ' +
+    'strictly and discards anything that does not match.\nJSON Schema:\n' + JSON.stringify(compactSchema(schema));
+}
+/**
+ * The single JSON object of a PROMPTED answer: the whole text, or the only fenced block, or the only top-level object in the text. Anything
+ * else (no object, two objects, an unbalanced object) is refused. The object is then validated in full by the shared reader.
+ */
+export function extractAnswerJson(text: string): string {
+  const trimmed = text.trim();
+  try { if (record(JSON.parse(trimmed))) return trimmed; } catch { /* not a bare object */ }
+  const fences = [...trimmed.matchAll(/```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n?```/g)];
+  if (fences.length === 1) { const inner = fences[0]![1]!.trim(); try { if (record(JSON.parse(inner))) return inner; } catch { /* fall through */ } }
+  const spans: string[] = [];
+  let depth = 0, start = -1, inString = false, escaped = false;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const char = trimmed[index]!;
+    if (inString) { if (escaped) escaped = false; else if (char === '\\') escaped = true; else if (char === '"') inString = false; continue; }
+    if (char === '"' && depth > 0) { inString = true; continue; }
+    if (char === '{') { if (depth === 0) start = index; depth += 1; }
+    else if (char === '}' && depth > 0) { depth -= 1; if (depth === 0) spans.push(trimmed.slice(start, index + 1)); }
+  }
+  const objects = spans.filter(span => { try { return record(JSON.parse(span)); } catch { return false; } });
+  return objects.length === 1 && depth === 0 ? objects[0]! : fail('COPILOT_RESPONSE_INVALID');
+}
+
 // ── Request translation ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** Marks the assistant turn of a tool round, echoed back unchanged on the next round (thinking blocks included, as the API requires). */
 export const ANTHROPIC_ECHO = 'flofi.anthropic.turn.v1:';
@@ -98,6 +217,10 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 
 /** The Messages API request equivalent to one Copilot request body (the provider-neutral body `copilot-service.ts` builds). */
 export function anthropicRequest(body: Record<string, unknown>): Record<string, unknown> {
+  return anthropicRequestPlan(body).request;
+}
+/** The Messages API request and how its structured output is enforced (see `planAnthropicStructure`). */
+export function anthropicRequestPlan(body: Record<string, unknown>): { readonly request: Record<string, unknown>; readonly structure: AnthropicStructure } {
   if (typeof body.model !== 'string' || typeof body.instructions !== 'string' || !Array.isArray(body.input)) return fail('COPILOT_REQUEST_INVALID');
   // FloFi never sends sampling parameters to Anthropic (the API version refuses them); a request that has one is a configuration error.
   if (body.temperature !== undefined) return fail('COPILOT_PARAMETER_UNSUPPORTED');
@@ -139,13 +262,20 @@ export function anthropicRequest(body: Record<string, unknown>): Record<string, 
   const format = record(body.text) && record(body.text.format) ? body.text.format : null;
   if (!format || format.type !== 'json_schema' || !record(format.schema)) return fail('COPILOT_REQUEST_INVALID');
   const effort = record(body.reasoning) && typeof body.reasoning.effort === 'string' ? body.reasoning.effort : null;
-  const tools = Array.isArray(body.tools) ? (body.tools as unknown[]).map(tool => {
+  const translated = Array.isArray(body.tools) ? (body.tools as unknown[]).map(tool => {
     if (!record(tool) || tool.type !== 'function' || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !record(tool.parameters)) return fail('COPILOT_REQUEST_INVALID');
-    return { name: tool.name, description: tool.description, input_schema: anthropicSchema(tool.parameters), ...tool.strict === true ? { strict: true } : {} };
+    return { name: tool.name, description: tool.description, input_schema: anthropicSchema(tool.parameters), strict: tool.strict === true };
   }) : null;
-  return { model: body.model, max_tokens: body.max_output_tokens, system, messages,
+  const schema = anthropicSchema(format.schema);
+  const structure = planAnthropicStructure(schema, (translated ?? []).filter(tool => tool.strict).map(tool => tool.input_schema));
+  const tools = translated?.map(({ strict, ...tool }) => strict && structure.strictTools ? { ...tool, strict: true } : tool) ?? null;
+  // PROMPTED: the output contract follows the fixed instructions, before any per-request block, so the two stay one cacheable prefix.
+  if (structure.output === 'PROMPTED') system.splice(1, 0, { type: 'text', text: promptedOutputContract(schema), cache_control: { type: 'ephemeral' } });
+  const request = { model: body.model, max_tokens: body.max_output_tokens, system, messages,
     ...tools ? { tools, tool_choice: { type: body.tool_choice === 'none' ? 'none' : 'auto' } } : {},
-    output_config: { format: { type: 'json_schema', schema: anthropicSchema(format.schema) }, ...effort ? { effort } : {} } };
+    ...structure.output === 'CONSTRAINED' ? { output_config: { format: { type: 'json_schema', schema }, ...effort ? { effort } : {} } }
+      : effort ? { output_config: { effort } } : {} };
+  return { request, structure };
 }
 
 // ── Response translation ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -156,7 +286,7 @@ const count = (value: unknown): number | null => typeof value === 'number' && Nu
  * incomplete, tool calls become function calls (with the whole assistant turn kept for the echo), and any block FloFi did not ask for
  * (server tools, unknown types) stays an unknown item that the shared reader refuses.
  */
-export function responsesBodyFromAnthropic(text: string): string {
+export function responsesBodyFromAnthropic(text: string, options: { readonly prompted?: boolean } = {}): string {
   let message: Record<string, unknown>;
   try { const parsed: unknown = JSON.parse(text); if (!record(parsed)) return fail('COPILOT_RESPONSE_INVALID'); message = parsed; } catch { return fail('COPILOT_RESPONSE_INVALID'); }
   if (message.type !== 'message' || message.role !== 'assistant' || !Array.isArray(message.content)) return fail('COPILOT_RESPONSE_INVALID');
@@ -183,7 +313,9 @@ export function responsesBodyFromAnthropic(text: string): string {
     // Never the provider's own type name: a block named like a shared item ('reasoning', 'message') must not be skipped as one.
     output.push({ type: 'provider_block_unexpected' });
   }
-  if (texts.length) output.splice(calls.length ? 1 : 0, 0, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: texts.join(''), annotations: [] }] });
+  // A PROMPTED final answer is reduced to its single JSON object (a tool round's text is not an answer and is left as it is).
+  const answer = options.prompted && !calls.length && texts.length ? extractAnswerJson(texts.join('')) : texts.join('');
+  if (texts.length) output.splice(calls.length ? 1 : 0, 0, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer, annotations: [] }] });
   return JSON.stringify({ ...shared, status: 'completed', output });
 }
 
@@ -191,8 +323,26 @@ export function responsesBodyFromAnthropic(text: string): string {
 export const ANTHROPIC_ERROR_TYPES = new Set(['invalid_request_error', 'authentication_error', 'billing_error', 'permission_error', 'not_found_error',
   'request_too_large', 'rate_limit_error', 'api_error', 'overloaded_error']);
 /** Request parameters an invalid-request message may name; only these names are ever surfaced (never the message itself). */
-const ANTHROPIC_PARAMS = ['output_config.format', 'output_config.effort', 'output_config', 'max_tokens', 'temperature', 'thinking', 'tool_choice', 'tools', 'model', 'system'];
-export type AnthropicRejection = { readonly status: number; readonly type: string | null; readonly param: string | null };
+const ANTHROPIC_PARAMS = ['output_config.format', 'output_config.effort', 'output_config', 'max_tokens', 'temperature', 'thinking', 'tool_choice', 'tools', 'model', 'system',
+  'cache_control', 'messages'];
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: a closed diagnostic category for an invalid request, recognized from the provider's message by fixed patterns
+ * (first match wins). Only the category is ever surfaced to the operator; the message text never leaves this function.
+ */
+export const ANTHROPIC_REJECTION_REASONS: readonly (readonly [string, RegExp])[] = Object.freeze([
+  ['SCHEMA_TOO_COMPLEX', /too complex|union type|optional parameters|strict tools|grammar|compil/i],
+  ['SCHEMA_UNSUPPORTED', /json[ _-]?schema|output_config\.format|\bschema\b|additionalProperties|\$ref|recursive/i],
+  ['SAMPLING_UNSUPPORTED', /temperature|top_p|top_k/i],
+  ['EFFORT_UNSUPPORTED', /effort/i],
+  ['THINKING_UNSUPPORTED', /thinking/i],
+  ['TOOL_CHOICE_UNSUPPORTED', /tool_choice/i],
+  ['CONTEXT_TOO_LONG', /prompt is too long|context window|too many (?:input )?tokens/i],
+  ['MAX_TOKENS_INVALID', /max_tokens/i],
+  ['PREFILL_UNSUPPORTED', /prefill/i],
+  ['DATA_RETENTION', /retention/i],
+  ['MESSAGE_ORDER', /must alternate|first message must|roles must/i],
+] as const);
+export type AnthropicRejection = { readonly status: number; readonly type: string | null; readonly param: string | null; readonly reason?: string | null };
 /** An upstream refusal with its allow-listed diagnostics (for an authorized operator's live test). */
 export class CopilotProviderError extends CopilotServiceError {
   constructor(code: string, readonly upstream: AnthropicRejection) { super(code); }
@@ -211,7 +361,8 @@ export function anthropicRejection(status: number, body: string): { readonly cod
   const code = billing ? 'COPILOT_UPSTREAM_BILLING' : status === 401 || status === 403 ? 'COPILOT_UPSTREAM_UNAUTHORIZED'
     : status === 404 ? 'COPILOT_UPSTREAM_MODEL_UNAVAILABLE' : status === 429 ? 'COPILOT_UPSTREAM_RATE_LIMITED' : status === 408 ? 'COPILOT_TIMEOUT'
       : status === 413 ? 'COPILOT_UPSTREAM_REJECTED' : status >= 400 && status < 500 ? 'COPILOT_UPSTREAM_REJECTED' : 'COPILOT_UPSTREAM_UNAVAILABLE';
-  return { code, upstream: { status, type: billing && !type ? 'billing_error' : type, param } };
+  const reason = status === 400 && !billing ? ANTHROPIC_REJECTION_REASONS.find(([, pattern]) => pattern.test(message))?.[0] ?? null : null;
+  return { code, upstream: { status, type: billing && !type ? 'billing_error' : type, param, reason } };
 }
 
 /** The live Anthropic transport: one fixed HTTPS endpoint, no redirects, a hard timeout and a byte cap. Errors carry codes only. */
@@ -221,7 +372,7 @@ export function createAnthropicTransport(apiKey: string, fetchImpl: typeof fetch
     let parsed: unknown;
     try { parsed = JSON.parse(body); } catch { return fail('COPILOT_REQUEST_INVALID'); }
     if (!record(parsed)) return fail('COPILOT_REQUEST_INVALID');
-    const request = JSON.stringify(anthropicRequest(parsed));
+    const plan = anthropicRequestPlan(parsed), request = JSON.stringify(plan.request);
     let response: Response, text: string;
     try {
       response = await fetchImpl(ANTHROPIC_MESSAGES_URL, { method: 'POST', body: request, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(limits.timeoutMs),
@@ -238,7 +389,7 @@ export function createAnthropicTransport(apiKey: string, fetchImpl: typeof fetch
       const rejected = anthropicRejection(response.status, text);
       throw new CopilotProviderError(rejected.code, rejected.upstream);
     }
-    const translated = responsesBodyFromAnthropic(text);
+    const translated = responsesBodyFromAnthropic(text, { prompted: plan.structure.output === 'PROMPTED' });
     if (translated.length > limits.maxResponseBytes) return fail('COPILOT_RESPONSE_TOO_LARGE');
     return { status: response.status, body: translated, retryAfter } satisfies CopilotHttpResponse;
   };

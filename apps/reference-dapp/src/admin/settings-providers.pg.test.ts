@@ -127,6 +127,60 @@ describe('BUILD-ADMIN-AI-PROVIDERS-001 provider-aware settings (PostgreSQL)', ()
     expect(probes.map(row => row.detail.provider)).toEqual(['ANTHROPIC', 'ANTHROPIC']);
   });
 
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: an Anthropic double that enforces the documented structured-output limits (at most 16 union-typed parameters
+  // across the request's strict schemas) answers exactly what production answered before the fix, and accepts the fixed request.
+  it('passes the probe against an Anthropic double that enforces the documented schema limits, and names the cause when they are exceeded', async () => {
+    const operator = await adminSession('OPERATOR');
+    const { schemaComplexity } = await import('../server/copilot-providers.ts');
+    const sent: Record<string, unknown>[] = [];
+    const enforcing = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { output_config?: { format?: { schema?: unknown } }; tools?: { strict?: boolean; input_schema: unknown }[] };
+      sent.push(body as Record<string, unknown>);
+      const strict = [body.output_config?.format?.schema, ...(body.tools ?? []).filter(tool => tool.strict).map(tool => tool.input_schema)].filter(Boolean);
+      if (schemaComplexity(strict).unionParameters > 16) return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error',
+        message: `Schema contains too many parameters with union types (${schemaComplexity(strict).unionParameters} parameters with type arrays or anyOf). The limit is 16.` } }), { status: 400 });
+      return anthropicReply();
+    }) as typeof fetch;
+    for (const effort of ['medium', null] as const) {
+      const probed = await settings(operator, { action: 'probe', settings: { ...claude, reasoningEffort: effort } }, { env: both, fetch: enforcing });
+      expect(probed.body).toMatchObject({ ok: true, probe: { ok: true, code: null, upstream: null, intentKind: 'ACTION',
+        structure: { output: 'PROMPTED', toolsStrict: true, strictTools: 0, optionalParameters: 0, limits: { unionParameters: 16 } } } });
+    }
+    expect(sent.every(body => !(body.output_config as { format?: unknown } | undefined)?.format)).toBe(true);
+    // The pre-fix request shape (the V2 schema as output_config.format) is what the double refuses, and the operator sees why.
+    const refused = await settings(operator, { action: 'probe', settings: claude }, { env: both, fetch: async () => new Response(JSON.stringify({ type: 'error',
+      error: { type: 'invalid_request_error', message: 'Schema is too complex for compilation.' } }), { status: 400 }) });
+    expect(refused.body).toMatchObject({ ok: true, probe: { ok: false, code: 'COPILOT_UPSTREAM_REJECTED',
+      upstream: { code: 'invalid_request_error', status: 400, reason: 'SCHEMA_TOO_COMPLEX' } } });
+    expect(JSON.stringify(refused.body)).not.toContain('too complex for compilation');
+    const audit = (await t.db.query<{ detail: Record<string, unknown> }>(`SELECT detail FROM admin_audit_events WHERE kind = 'ADMIN_COPILOT_PROBE' AND event_id > $1 ORDER BY event_id`,
+      [since])).rows;
+    expect(audit.at(-1)!.detail).toMatchObject({ provider: 'ANTHROPIC', upstreamReason: 'SCHEMA_TOO_COMPLEX', structure: 'PROMPTED' });
+  });
+
+  it('activates Anthropic per channel independently: changing one override leaves the others, and rollback restores the previous provider', async () => {
+    const operator = await adminSession('OPERATOR');
+    const { resolveCopilotLive, hostSettingsReader } = await import('../server/copilot-runtime.ts');
+    const reader = hostSettingsReader({ db: t.db, tenantId: 'default' });
+    const resolved = async () => Object.fromEntries(await Promise.all((['WEB', 'TELEGRAM', 'WHATSAPP'] as const).map(async scope => {
+      const live = await resolveCopilotLive(both, scope, reader);
+      return [scope, live.ok ? `${live.provider}:${live.settings.model}` : live.code] as const;
+    })));
+    const first = { schema: COPILOT_SETTINGS_SCHEMA, default: runtime, overrides: { WEB: claude } };
+    expect(await settings(operator, { action: 'save', expectedVersion: v0, document: first }, { env: both })).toMatchObject({ status: 200 });
+    expect(await resolved()).toEqual({ WEB: 'ANTHROPIC:claude-sonnet-5-5', TELEGRAM: 'OPENAI:gpt-5-mini', WHATSAPP: 'OPENAI:gpt-5-mini' });
+    const second = { ...first, overrides: { WEB: claude, TELEGRAM: { ...claude, model: 'claude-haiku-5-5', reasoningEffort: 'low' } } };
+    expect(await settings(operator, { action: 'save', expectedVersion: v0 + 1, document: second }, { env: both })).toMatchObject({ status: 200 });
+    expect(await resolved()).toEqual({ WEB: 'ANTHROPIC:claude-sonnet-5-5', TELEGRAM: 'ANTHROPIC:claude-haiku-5-5', WHATSAPP: 'OPENAI:gpt-5-mini' });
+    const third = { ...second, overrides: { ...second.overrides, WEB: { ...runtime, model: 'gpt-5-nano' } } };
+    expect(await settings(operator, { action: 'save', expectedVersion: v0 + 2, document: third }, { env: both })).toMatchObject({ status: 200 });
+    expect(await resolved()).toEqual({ WEB: 'OPENAI:gpt-5-nano', TELEGRAM: 'ANTHROPIC:claude-haiku-5-5', WHATSAPP: 'OPENAI:gpt-5-mini' });
+    // Back to what was active before this test (an earlier version, or the environment bootstrap when there was none).
+    expect(await settings(operator, v0 > 0 ? { action: 'rollback', expectedVersion: v0 + 3, toVersion: v0 } : { action: 'reset', expectedVersion: v0 + 3 }, { env: both }))
+      .toMatchObject({ status: 200 });
+    expect(Object.values(await resolved()).every(value => !value.startsWith('ANTHROPIC'))).toBe(true);
+  });
+
   it('routes a live channel request to the provider its runtime settings name, with no redeploy', async () => {
     const operator = await adminSession('OPERATOR');
     const mixed = { schema: COPILOT_SETTINGS_SCHEMA, default: runtime, overrides: { WEB: claude } };
