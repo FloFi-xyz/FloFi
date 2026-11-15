@@ -235,4 +235,44 @@ describe('replace keeps the same limits: period counts and the cooldown carry ov
     await dispatch(h);
     expect(await evaluated(b.ruleId)).toEqual(['TRIGGERED']);
   });
+
+  it('follows duplicated and cyclic forged links promptly and counts each rule once', async () => {
+    // Two rules of wallet A, each with one counted proposal this week (Monday and Tuesday) that the owner loaded into their workflow.
+    const h = automationHarness(t.db), weekly = { maxAmountPerExecution: '50', maxAmountPerPeriod: { amount: '1000', period: 'WEEK' },
+      maxOccurrencesPerPeriod: { count: 10, period: 'WEEK' }, cooldownMinutes: 0, maxSlippageBps: 100 };
+    const a = await h.service().create(OWNER_A, weeklyDca({ limits: weekly }));
+    const b = await h.service().create(OWNER_A, weeklyDca({ limits: weekly, schedule: { frequency: 'WEEKLY', weekday: 2, time: '09:00', timezone: 'Europe/Lisbon' } }));
+    for (const at of ['2026-10-12T08:00:30Z', '2026-10-13T08:00:30Z']) {
+      h.set(at);
+      await dispatch(h);
+      const [pending] = (await h.service().overview(OWNER_A)).pending;
+      await h.service().open(OWNER_A, pending!.occurrenceId);
+      const handoff = (await t.db.query<{ handoff_id: string }>(`SELECT handoff_id FROM automation_occurrences WHERE occurrence_id = $1`, [pending!.occurrenceId])).rows[0]!.handoff_id;
+      expect(await h.store.completeApproval(pending!.occurrenceId, handoff, h.now())).toBe(true);
+    }
+    expect([await evaluated(a.ruleId), await evaluated(b.ruleId)]).toEqual([['TRIGGERED'], ['TRIGGERED']]);
+    // Forged links `replace` never writes: b → a twice (identical rows) and a → b twice (a 2-cycle). A recursion that kept a depth or path in
+    // its rows would multiply them at every step (2^n) or loop; the lineage is still exactly {a, b}.
+    const link = (from: string, to: string) => t.db.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome, detail)
+      VALUES ('default', $1, now(), 'AUTOMATION_REPLACEMENT', $2::jsonb)`, [from, JSON.stringify({ replaces: to })]);
+    for (const [from, to] of [[b.ruleId, a.ruleId], [b.ruleId, a.ruleId], [a.ruleId, b.ruleId], [a.ruleId, b.ruleId]] as const) await link(from, to);
+    const week = new Date('2026-10-11T23:00:00.000Z');   // Monday 2026-10-12 00:00 Europe/Lisbon (WEST)
+    const usageOf = async (ruleId: string) => {
+      let usage: unknown = null;
+      const rule = (await h.store.getRule(OWNER_A, ruleId))!;
+      // Read inside the evaluator's locked transaction, then roll it back: nothing is committed.
+      const rolledBack = await refusal(h.store.evaluate(ruleId, rule.nextEvaluationAt!, async (_, reads) => {
+        usage = await reads.usage({ amount: week, count: week });
+        throw new Error('READ_ONLY');
+      }));
+      expect(rolledBack).toBe('READ_ONLY');
+      return usage;
+    };
+    const started = Date.now();
+    for (const ruleId of [a.ruleId, b.ruleId]) expect(await usageOf(ruleId)).toEqual({ countPeriod: 2, lastOccurrenceAt: Date.parse('2026-10-13T08:00:00.000Z'),
+      amountPeriod: { sum: '100', asset: 'USDC' } });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // Each rule's own history is unchanged by the reads.
+    expect([await evaluated(a.ruleId), await evaluated(b.ruleId)]).toEqual([['TRIGGERED'], ['TRIGGERED']]);
+  }, 15_000);
 });

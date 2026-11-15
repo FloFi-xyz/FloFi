@@ -60,25 +60,28 @@ const NOTIFY_KIND = 'automation.notify', EVALUATE_KIND = 'automation.evaluate';
 export const DELEGATION_EXECUTE_KIND = 'delegation.execute';
 const json = (value: unknown) => value === null || value === undefined ? null : JSON.stringify(value);
 
-/** How many schedule changes back a rule's lineage is followed (a bound, not a product limit: a chain is linear and acyclic). */
-const MAX_LINEAGE_DEPTH = 64;
+/** At most how many rules a rule's lineage holds, itself included (a bound, not a product limit: `replace` only ever makes a linear chain). */
+const MAX_LINEAGE_RULES = 64;
 
 export function createPgAutomationStore(db: Database, tenantId: string): AutomationStore {
   /**
    * The rule and every rule it replaced, transitively (`replace` = a schedule change): the replacement link recorded by `archiveReplaced` in
-   * the new rule's history (`AUTOMATION_REPLACEMENT`, detail `{ replaces }`). Followed only to the same owner's rules in this tenant, and at
-   * most MAX_LINEAGE_DEPTH links. History retention (90 days, `purge`) cannot cut a link that matters: a link is purged only when the rule
-   * it names was archived more than 90 days ago, so all its occurrences are older than any period (≤ a month) or cooldown (≤ 31 days).
+   * the new rule's history (`AUTOMATION_REPLACEMENT`, detail `{ replaces }`). Followed only to the same owner's rules in this tenant.
+   * The recursion is a UNION over `rule_id` alone, so a rule already reached is never expanded again: duplicated or cyclic link rows (which
+   * `replace` never writes) cannot multiply rows or loop, and each rule appears once. The rows are read lazily and at most MAX_LINEAGE_RULES
+   * of them (the rule itself first, then the nearest replaced rules), a hard cap on the work. History retention (90 days, `purge`) cannot
+   * cut a link that matters: a link is purged only when the rule it names was archived more than 90 days ago, so all its occurrences are
+   * older than any period (≤ a month) or cooldown (≤ 31 days).
    */
-  const lineage = async (tx: Queryable, rule: RuleRecord): Promise<string[]> => (await tx.query<{ ids: string[] }>(`WITH RECURSIVE lineage (rule_id, depth) AS (
-        SELECT $2::text, 0
-        UNION ALL
-        SELECT replaced.rule_id, lineage.depth + 1 FROM lineage
+  const lineage = async (tx: Queryable, rule: RuleRecord): Promise<string[]> => (await tx.query<{ ids: string[] }>(`WITH RECURSIVE lineage (rule_id) AS (
+        SELECT $2::text
+        UNION
+        SELECT replaced.rule_id FROM lineage
           JOIN automation_evaluations e ON e.tenant_id = $1 AND e.rule_id = lineage.rule_id AND e.outcome = 'AUTOMATION_REPLACEMENT'
           JOIN automation_rules replaced ON replaced.tenant_id = $1 AND replaced.rule_id = e.detail->>'replaces'
-            AND replaced.owner_namespace = $3 AND replaced.owner_account = $4
-          WHERE lineage.depth < $5)
-      SELECT array_agg(DISTINCT rule_id) AS ids FROM lineage`, [tenantId, rule.ruleId, rule.owner.namespace, rule.owner.address, MAX_LINEAGE_DEPTH])).rows[0]!.ids;
+            AND replaced.owner_namespace = $3 AND replaced.owner_account = $4)
+      SELECT array_agg(rule_id) AS ids FROM (SELECT rule_id FROM lineage LIMIT $5) capped`,
+  [tenantId, rule.ruleId, rule.owner.namespace, rule.owner.address, MAX_LINEAGE_RULES])).rows[0]!.ids;
   const reads = (tx: Queryable, rule: RuleRecord): EvaluationReads => ({
     // A schedule change keeps the same limits: usage counts the occurrences of the rule's whole lineage, not only its own.
     async usage(starts, except) {

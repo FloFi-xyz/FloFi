@@ -11,7 +11,8 @@
  *   ruleSummary          one line: kind, name, action, schedule or condition, state and execution mode
  *   explainRuleStatus    why a rule ran, did not run, or when it is evaluated next — only from recorded facts; a missing fact is named, never guessed
  *   AUTOMATION_FAQ       short answers that state what the code does (EN/PT), `automationFaq` and the keyword matcher `matchAutomationFaq`
- *   parseScheduleChange  a deterministic EN/PT reading of a schedule change ("muda para sexta", "change it to Friday 9:30"); it never invents a time
+ *   parseScheduleChange  a deterministic EN/PT reading of a schedule change ("muda para sexta", "change it to Friday 9:30"); it fails closed —
+ *                        a word it did not read and that is no filler refuses the change — and never invents a time or a day
  */
 import { translate } from '../i18n/translate.ts';
 import type { Language } from '../i18n/language.ts';
@@ -386,35 +387,46 @@ export function matchAutomationFaq(text: string): AutomationFaqTopic | null {
 export type ScheduleChange = SchedulePatchView;
 type Mention<T> = { readonly index: number; readonly end: number; readonly value: T };
 const pad = (n: number) => String(n).padStart(2, '0');
+/** Portuguese weekday abbreviations ("seg", "ter", …, "sáb", "dom", with or without a dot): read in a schedule change only, never by the FAQ matcher. */
+const PT_WEEKDAY_ABBREVIATIONS = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'] as const;
+const WEEKDAY_READINGS: readonly (readonly [string, number])[] = WEEKDAY_WORDS.map(([words, day]) => [`${words}|${PT_WEEKDAY_ABBREVIATIONS[day - 1]!}`, day] as const);
+const WEEKDAY_ALTERNATION = WEEKDAY_READINGS.map(([w]) => w).join('|');
 function weekdayMentions(t: string): Mention<number>[] {
   const found: Mention<number>[] = [];
-  for (const [words, day] of WEEKDAY_WORDS) for (const m of t.matchAll(new RegExp(`\\b(?:${words})\\b`, 'g'))) found.push({ index: m.index, end: m.index + m[0].length, value: day });
+  for (const [words, day] of WEEKDAY_READINGS) for (const m of t.matchAll(new RegExp(`\\b(?:${words})\\b`, 'g'))) found.push({ index: m.index, end: m.index + m[0].length, value: day });
   return found.sort((a, b) => a.index - b.index);
 }
 /** A time anchor: "às" (folded "as"), "at", "a partir das", "@". */
 const AT = `(?:\\b(?:as|at|a partir das)|@)`;
 /**
  * "às 10" / "at 9" when an end, a punctuation mark, a weekday or a linking word follows — and never when the hour goes on with more of a time
- * FloFi did not read ("at 9.5", "às 9 e 5": refused below rather than read as 9:00).
+ * FloFi did not read ("at 9.5", "às 9 e 5", "às 9 e meio": refused below rather than read as 9:00).
  */
-const AT_HOUR = new RegExp(`${AT}\\s*([01]?\\d|2[0-3])(?::([0-5]\\d))?(?![.,]\\d|\\s*(?:e|and)\\s+(?:\\d|meia|quinze|um quarto|a half|half))(?:\\s*(?:horas?|hrs?|o'?clock))?(?=\\s*(?:$|[.,;!?)]|(?:${
-  WEEKDAY_WORDS.map(([w]) => w).join('|')}|da|de|do|no|na|em|on|in|every|each|toda|todo|todos|todas|e|and|ou|or|por|pelo|pela|please)\\b))`, 'g');
-const MINUTE_WORD: Readonly<Record<string, string>> = { meia: '30', quinze: '15' };
+const AT_HOUR = new RegExp(`${AT}\\s*([01]?\\d|2[0-3])(?::([0-5]\\d))?(?![.,]\\d|\\s*(?:e|and)\\b)(?:\\s*(?:horas?|hrs?|o'?clock))?(?=\\s*(?:$|[.,;!?)]|(?:${
+  WEEKDAY_ALTERNATION}|da|de|do|no|na|em|on|in|every|each|toda|todo|todos|todas|ou|or|por|pelo|pela|please)\\b))`, 'g');
+/** Spoken minutes after an hour ("e meia", "e dez", "e quarenta e cinco"); two digits ("e 15") are read as written, a single digit ("e 5") is not. */
+const SPOKEN_MINUTES: Readonly<Record<string, string>> = { meia: '30', cinco: '05', dez: '10', quinze: '15', vinte: '20', 'vinte e cinco': '25', trinta: '30',
+  'trinta e cinco': '35', quarenta: '40', 'quarenta e cinco': '45', cinquenta: '50', 'cinquenta e cinco': '55' };
+/** The minutes of an "<hour> e <minutes>" form: the longest spoken form first, and never one that goes on ("e vinte e seis" is not read as :20). */
+const MINUTES = `(${Object.keys(SPOKEN_MINUTES).sort((a, b) => b.length - a.length).join('|')}|[0-5]\\d)(?:\\s*min(?:utos?)?)?\\b(?!\\s+(?:e|and)\\s)`;
 /**
  * Spelled clock forms rewritten as H:MM before reading, only where they are certainly a time: "às 9.30", "at 9,45", "9.30pm", "9,30h",
- * "às 9 e meia", "às 9 e 15", "9h e quinze". Greetings ("boa tarde") are dropped so they are never read as a part of the day.
+ * "1:30 p. m.", "às 9 e meia", "às 9 e 15", "às 9 e quarenta e cinco", "às 9 horas e trinta minutos", "9h e quinze", "meio-dia e 15",
+ * "meia-noite e meia". Greetings ("boa tarde") are dropped so they are never read as a part of the day.
  */
 function clockForms(t: string): string {
-  const minutes = (minute: string) => MINUTE_WORD[minute] ?? minute;
+  const minutes = (minute: string) => SPOKEN_MINUTES[minute] ?? minute;
   return t.replace(/\b(?:bom dia|boa tarde|boa noite|good morning|good afternoon|good evening|good night)\b/g, ' ')
+    .replace(/(\d)\s*([ap])\s*\.\s*m\s*\.?(?![a-z])/g, '$1$2m')
     .replace(new RegExp(`(${AT}\\s*)([01]?\\d|2[0-3])[.,]([0-5]\\d)(?![\\d.,])`, 'g'), '$1$2:$3')
     .replace(/\b([01]?\d|2[0-3])[.,]([0-5]\d)(?=\s*(?:[ap]\.?m\.?(?![a-z])|h\b|hs\b|hrs?\b|horas?\b|(?:da|de) (?:manha|tarde|noite)\b|in the (?:morning|afternoon|evening)\b))/g, '$1:$2')
-    .replace(new RegExp(`(${AT}\\s*)([01]?\\d|2[0-3])\\s*(?:h|horas?)?\\s+e\\s+(meia|quinze|[0-5]\\d)(?:\\s*min(?:utos?)?)?\\b`, 'g'),
+    .replace(new RegExp(`(${AT}\\s*)([01]?\\d|2[0-3])\\s*(?:h|horas?)?\\s+e\\s+${MINUTES}`, 'g'),
       (_, prefix: string, hour: string, minute: string) => `${prefix}${hour}:${minutes(minute)}`)
-    .replace(/\b([01]?\d|2[0-3])\s*(?:h|horas?)\s+e\s+(meia|quinze|[0-5]\d)(?:\s*min(?:utos?)?)?\b/g, (_, hour: string, minute: string) => `${hour}:${minutes(minute)}`)
+    .replace(new RegExp(`\\b([01]?\\d|2[0-3])\\s*(?:h|horas?)\\s+e\\s+${MINUTES}`, 'g'), (_, hour: string, minute: string) => `${hour}:${minutes(minute)}`)
+    .replace(new RegExp(`\\b(meio[- ]dia|meia[- ]noite)\\s+e\\s+${MINUTES}`, 'g'), (_, word: string, minute: string) => `${word.startsWith('meio') ? '12' : '00'}:${minutes(minute)}`)
     .replace(/\s+/g, ' ').trim();
 }
-/** Explicit times only: 09:30, 9h30, 10h, 10 horas, 7pm, 3 da tarde, às 10, at 9, meio-dia, midnight (after `clockForms`). A bare number is never a time. */
+/** Explicit times only: 09:30, 9h30, 10:00h, 10h, 7pm, 3 da tarde, às 10, at 9, às 10 horas, meio-dia, midnight (after `clockForms`). A bare number is never a time. */
 function timeMentions(t: string): Mention<string>[] {
   const found: Mention<string>[] = [];
   const add = (m: RegExpMatchArray, hour: number, minute: number) => {
@@ -431,13 +443,36 @@ function timeMentions(t: string): Mention<string>[] {
     if (morning && h === 12) continue;
     add(m, morning ? h : h < 12 ? h + 12 : /noite|night/.test(period) ? 0 : 12, Number(m[2] ?? 0));
   }
-  for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*[:h]\s*([0-5]\d)\b/g)) add(m, Number(m[1]), Number(m[2]));
+  // "10:00h" / "10:00 horas" carry their unit with them.
+  for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*[:h]\s*([0-5]\d)(?:\s*(?:hs?|hrs?|horas?)\b|\b)/g)) add(m, Number(m[1]), Number(m[2]));
   for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*(?:h|hs|hrs?)\b/g)) add(m, Number(m[1]), 0);
   // "às 10" / "at 9" only when an end, a punctuation mark, a weekday or a linking word follows ("as 2 automações" is no time).
   for (const m of t.matchAll(AT_HOUR)) add(m, Number(m[1]), Number(m[2] ?? 0));
   for (const m of t.matchAll(/\b(?:meio[- ]dia|noon|midday)\b/g)) add(m, 12, 0);
   for (const m of t.matchAll(/\b(?:meia[- ]noite|midnight)\b/g)) add(m, 0, 0);
   return found.sort((a, b) => a.index - b.index);
+}
+/**
+ * The frequency words FloFi reads. "every single day", "all days" and "todas as noites / manhãs" are read as daily only together with a time
+ * the person wrote (and, for nights or mornings, a time that is one: "todas as noites às 9" is refused, never read as 09:00 or 21:00).
+ */
+type Frequency = 'DAILY' | 'WEEKLY' | 'EVERY_DAY_AT' | 'NIGHTS' | 'MORNINGS';
+const FREQUENCY_WORDS: readonly (readonly [RegExp, Frequency])[] = [
+  [/\b(?:diariamente|diaria|diario|todo (?:o )?dia|todos os dias|cada dia|every ?day|each day|daily)\b/g, 'DAILY'],
+  [/\b(?:semanal|semanalmente|toda semana|todas as semanas|cada semana|every week|each week|weekly)\b/g, 'WEEKLY'],
+  [/\b(?:every single day|all days)\b/g, 'EVERY_DAY_AT'], [/\btodas as noites\b/g, 'NIGHTS'], [/\btodas as manhas\b/g, 'MORNINGS'],
+];
+function frequencyMentions(t: string): Mention<Frequency>[] {
+  const found: Mention<Frequency>[] = [];
+  for (const [words, frequency] of FREQUENCY_WORDS) for (const m of t.matchAll(words)) found.push({ index: m.index, end: m.index + m[0].length, value: frequency });
+  return found;
+}
+/** Whether a frequency holds with the time read (undefined: no time was written). */
+function frequencyFits(frequency: Frequency, time: string | undefined): boolean {
+  if (frequency === 'DAILY' || frequency === 'WEEKLY') return true;
+  if (time === undefined) return false;
+  const hour = Number(time.slice(0, 2));
+  return frequency === 'NIGHTS' ? hour >= 18 : frequency === 'MORNINGS' ? hour >= 5 && hour < 12 : true;
 }
 /**
  * One value from several mentions: a single distinct value, or — only in an explicit change "from X to Y" / "de X para Y" with a change
@@ -458,6 +493,7 @@ const MONTHS_ALONE = 'janeiro|fevereiro|abril|maio|junho|julho|agosto|setembro|o
 /**
  * Schedules FloFi does not support, and qualifiers a daily or weekly reading would silently drop: monthly and dated schedules, "every other" /
  * "every N", fortnightly, several times per period, weekdays-only and weekends, exceptions, one-off and relative dates, start and end dates.
+ * (The FILLER check below refuses every other unread word as well; these name the common cases.)
  */
 const UNSUPPORTED = new RegExp([
   '\\b(?:mensal|mensalmente|todo mes|cada mes|monthly|every month|each month)\\b',
@@ -470,6 +506,8 @@ const UNSUPPORTED = new RegExp([
   '\\b(?:exceto|excepto|except|excluding|exclude|menos|salvo|tirando|sem ser|but not)\\b',
   '\\b(?:hoje|amanha|ontem|today|tomorrow|tonight|yesterday|until|till|desde|starting|beginning)\\b', '\\bate (?:o )?dia\\b',
   '\\bnext (?:week|month|year)\\b', '\\b(?:semana|mes|ano) que vem\\b', '\\bproxim[ao] (?:semana|mes|ano)\\b', '\\ba partir d[eo]\\b',
+  // Approximate times ("~9am", "≈ 10h"): never read as exact.
+  '[~\\u2248\\u00b1]',
 ].join('|'));
 /**
  * What is left of a time once the times FloFi read are taken out: if any of it remains, the person wrote a time FloFi cannot read exactly, and
@@ -479,15 +517,35 @@ const UNSUPPORTED = new RegExp([
 const UNREAD_TIME = new RegExp([
   '\\d\\s*[.,:]\\s*\\d', '\\d\\s*(?:h|hs|hrs?|horas?|hours?|min|minutos?|minutes?|[ap]\\.?m\\.?)(?![a-z])', `${AT}\\s*\\d`, '\\d\\s+(?:or|ou)\\s+\\d',
   '\\b(?:as|at)\\s+(?:uma|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\b',
-  `\\b(?:${WEEKDAY_WORDS.map(([w]) => w).join('|')}|daily|diariamente|diaria|diario|todos os dias|everyday|weekly|semanal|semanalmente)\\b,?\\s+\\d`,
+  `\\b(?:${WEEKDAY_ALTERNATION}|daily|diariamente|diaria|diario|todos os dias|everyday|weekly|semanal|semanalmente)\\b,?\\s+\\d`,
   "\\b(?:meia|quinze|quarto|quarter|half|o'?clock|manha|tarde|noite|madrugada|morning|afternoon|evening|night)\\b",
 ].join('|'));
+/** A weekday named as one date rather than a weekly day: "this friday", "esta sexta", "next friday", "última sexta". */
+const ONE_DATE = /\b(?:this|that|next|last|coming|esta|este|essa|esse|isso|nesta|neste|nessa|nesse|proxim[ao]s?|ultim[ao]s?)\s+$/;
 /**
- * The schedule a person asked for, read deterministically from their words: `{ frequency, weekday, time }`, or null when the request is not
- * a schedule FloFi supports or is ambiguous. A weekday makes it WEEKLY; "daily" / "todos os dias" makes it DAILY. Anything not said is kept
- * from `current`: a time that was not written is never invented (the current time stays), and "weekly" with no weekday keeps the current one
- * (or, from a daily schedule, is null: FloFi does not pick a day). With no current schedule, every part must be said. A time FloFi cannot read
- * exactly, a choice of times ("9 or 10") and any qualifier it would drop (UNSUPPORTED) make it null: never a time or a day the person did not write.
+ * The only words a schedule change may contain besides what FloFi read (a time, a weekday, a frequency): words with no schedule meaning,
+ * accents folded, plus the phrase "por favor". Any other word or number left over — "last", "second", "next", "que vem", "por 3 semanas",
+ * "before", "UTC", "around", "lá pelas", an amount or an asset — refuses the change: FloFi asks for the day and time instead of dropping it.
+ */
+const FILLER: ReadonlySet<string> = new Set([
+  'change', 'move', 'switch', 'reschedule', 'update', 'edit', 'make', 'set', 'put', 'it', 'this', 'that', 'the', 'a', 'an', 'my', 'please', 'instead', 'now', 'then',
+  'ok', 'okay', 'to', 'for', 'on', 'at', 'in', 'from', 'every', 'each', 'schedule', 'time', 'day', 'automation', 'dca',
+  'muda', 'mude', 'mudar', 'mudo', 'altera', 'altere', 'alterar', 'troca', 'troque', 'trocar', 'passa', 'passe', 'passar', 'coloca', 'coloque', 'colocar', 'mova', 'mover',
+  'edita', 'edite', 'editar', 'reagenda', 'reagende', 'reagendar', 'agenda', 'agende', 'agendar', 'para', 'pra', 'pro', 'o', 'os', 'as', 'ao', 'na', 'no', 'nas', 'nos',
+  'em', 'de', 'da', 'do', 'das', 'dos', 'horario', 'hora', 'dia', 'essa', 'esse', 'isso', 'minha', 'meu', 'agora', 'entao', 'toda', 'todo', 'todas', 'todos', 'cada',
+  'automacao', 'agendamento']);
+/** `t` with the mentioned spans blanked out. */
+const blank = (t: string, mentions: readonly Mention<unknown>[]) => mentions.reduce((rest, m) => rest.slice(0, m.index) + ' '.repeat(m.end - m.index) + rest.slice(m.end), t);
+/** The words (any script) and numbers left in `rest` that are not FILLER. */
+const unreadWords = (rest: string) => (rest.replace(/\bpor favor\b/g, ' ').match(/[\p{L}\p{N}]+/gu) ?? []).filter(word => !FILLER.has(word));
+/**
+ * The schedule a person asked for, read deterministically from their words: `{ frequency, weekday, time }`, or null. It FAILS CLOSED by
+ * construction: after reading the weekday, the time and the frequency, every word left must be a FILLER word (no schedule meaning); any other
+ * word or number — a qualifier, a time zone, an approximation, a date, an amount — makes it null, so FloFi asks for the day and time instead.
+ * A weekday makes it WEEKLY; "daily" / "todos os dias" makes it DAILY. Anything not said is kept from `current`: a time that was not written
+ * is never invented (the current time stays), and "weekly" with no weekday keeps the current one (or, from a daily schedule, is null: FloFi
+ * does not pick a day). With no current schedule, every part must be said. A time FloFi cannot read exactly, a choice of times ("9 or 10"),
+ * several weekdays and any qualifier it would drop make it null: never a time or a day the person did not write.
  */
 export function parseScheduleChange(text: string, current: RuleView['schedule']): ScheduleChange | null {
   const t = clockForms(foldText(text));
@@ -497,13 +555,15 @@ export function parseScheduleChange(text: string, current: RuleView['schedule'])
   for (const m of t.matchAll(/\b(?:dias?|days?)\s+(\d{1,2})(?!\d)/g)) if (!times.some(time => time.index === m.index + m[0].length - m[1]!.length)) return null;
   // A time offered as one of several ("at 9 or 10", "9h ou 10h") is ambiguous.
   if (times.some(m => /^\s*(?:or|ou)\b/.test(t.slice(m.end)) || /\b(?:or|ou)\s*$/.test(t.slice(0, m.index)))) return null;
-  let rest = t;
-  for (const m of times) rest = rest.slice(0, m.index) + ' '.repeat(m.end - m.index) + rest.slice(m.end);
-  if (UNREAD_TIME.test(rest)) return null;
-  const daily = /\b(?:diariamente|diaria|diario|todo (?:o )?dia|todos os dias|cada dia|every ?day|each day|daily)\b/.test(t);
-  const weekly = /\b(?:semanal|semanalmente|toda semana|todas as semanas|cada semana|every week|each week|weekly)\b/.test(t);
-  const day = resolve(t, weekdayMentions(t)), time = resolve(t, times);
+  if (UNREAD_TIME.test(blank(t, times))) return null;
+  const days = weekdayMentions(t), frequencies = frequencyMentions(t);
+  if (days.some(d => ONE_DATE.test(t.slice(0, d.index)))) return null;
+  // Fail closed: every word was read above or is a filler.
+  if (unreadWords(blank(t, [...times, ...days, ...frequencies])).length) return null;
+  const daily = frequencies.some(f => f.value !== 'WEEKLY'), weekly = frequencies.some(f => f.value === 'WEEKLY');
+  const day = resolve(t, days), time = resolve(t, times);
   if (day === null || time === null || (daily && (day !== undefined || weekly))) return null;
+  if (!frequencies.every(f => frequencyFits(f.value, time))) return null;
   if (!daily && !weekly && day === undefined && time === undefined) return null;
   const chosen = time ?? current?.time;
   if (!chosen) return null;

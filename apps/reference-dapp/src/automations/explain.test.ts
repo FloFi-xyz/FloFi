@@ -230,6 +230,42 @@ describe('parseScheduleChange (deterministic, never invents a time)', () => {
     ['às sextas às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
     ['Boa tarde! Muda para sexta às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
     ['Friday at 10 o’clock', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    // Portuguese spoken minutes after an hour, read exactly (also after "9h" / "9 horas"), and after meio-dia / meia-noite.
+    ['às 9 e cinco', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:05' }],
+    ['às 9 e dez', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:10' }],
+    ['às 9 e vinte', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:20' }],
+    ['às 9 e vinte e cinco', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:25' }],
+    ['às 9 e trinta', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:30' }],
+    ['às 9 e trinta e cinco', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:35' }],
+    ['às 9 e quarenta', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:40' }],
+    ['às 9 e quarenta e cinco', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:45' }],
+    ['às 9 e cinquenta', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:50' }],
+    ['às 9 e cinquenta e cinco', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:55' }],
+    ['muda para sexta às 10 e dez', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:10' }],
+    ['às 13 e trinta', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '13:30' }],
+    ['9h e trinta', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:30' }],
+    ['às 9 horas e trinta minutos', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:30' }],
+    ['meio-dia e 15', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '12:15' }],
+    ['muda para sexta ao meio-dia e meia', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '12:30' }],
+    ['meia-noite e 30', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '00:30' }],
+    ['às 10:00h', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '10:00' }],
+    // Spaced a. m. / p. m. is read as written: 13:30, never 01:30.
+    ['at 1:30 p. m.', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '13:30' }],
+    ['at 9 a. m. on friday', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '09:00' }],
+    // Portuguese weekday abbreviations (with or without a dot).
+    ['muda para sex às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['qua às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 3, time: '10:00' }],
+    ['sáb. às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 6, time: '10:00' }],
+    ['muda para seg.', { frequency: 'WEEKLY', weekday: 5, time: '07:45' }, { frequency: 'WEEKLY', weekday: 1, time: '07:45' }],
+    // Daily synonyms, read only together with a written time (a night or a morning only at a time that is one).
+    ['todas as noites às 21h', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '21:00' }],
+    ['todas as manhãs às 7h', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '07:00' }],
+    ['all days at 9', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    ['every single day at 9am', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    // Filler words around what FloFi read (no schedule meaning).
+    ['Muda para sexta-feira às 10h, por favor', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['change the time to 10am', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '10:00' }],
+    ['muda o horário da minha automação para quarta às 8h', weeklyMonday, { frequency: 'WEEKLY', weekday: 3, time: '08:00' }],
   ])('%j → %j', (text, current, expected) => expect(parseScheduleChange(text, current)).toEqual(expected));
   it.each<[string, RuleView['schedule']]>([
     ['de segunda a sexta', weeklyMonday],                                       // a range, not one weekday
@@ -254,4 +290,34 @@ describe('parseScheduleChange (deterministic, never invents a time)', () => {
     ['todo dia exceto domingo às 9h', weeklyMonday], ['every day except Sunday at 9am', weeklyMonday], ['hoje às 10h', weeklyMonday], ['today at 10am', weeklyMonday],
     ['tomorrow at 10am', weeklyMonday], ['toda sexta a partir de amanhã', weeklyMonday], ['every Friday until December', weeklyMonday],
   ])('%j → null', (text, current) => expect(parseScheduleChange(text, current)).toBeNull());
+
+  // Fails closed by construction: a word or number FloFi did not read and that is no filler refuses the change (FloFi then asks for the day
+  // and time). The current schedule is Monday 07:45, so a dropped qualifier would show up as 07:45 or as a weekday nobody wrote.
+  const mondayAt0745 = { frequency: 'WEEKLY', weekday: 1, time: '07:45' } as const;
+  it.each([
+    // Spoken forms FloFi does not read exactly.
+    'às 9 e meio', 'às 9 e vinte e seis', 'noon thirty', 'muda para sexta 十点', '~9am',
+    // Ordinal, last and month-relative days.
+    'last friday of the month at 10am', 'última sexta do mês às 10h', 'primeira segunda do mês às 9h', 'second friday at 10am', 'fim do mês às 10h',
+    // Intervals, alternation and several times per week.
+    'de 15 em 15 dias às 10h', 'de duas em duas semanas às 10h', 'every couple of weeks at 9am', 'on alternate fridays at 10am', 'sexta sim sexta não às 10h',
+    '3x por semana às 9h', '2x a week at 9am',
+    // One-off and relative dates.
+    'in 3 days at 9am', 'daqui a 3 dias às 9h', 'next friday at 10am', 'sexta que vem às 10h', 'esta sexta às 10h', 'this friday at 10am', 'only this friday at 10am',
+    // Durations, bounds and time zones.
+    'every friday at 9am for 4 weeks', 'toda sexta às 9h por 3 semanas', 'before 9am', 'after 9am', 'antes das 9h', 'até às 9h', 'by 9am', 'at 10am EST', 'at 10am UTC',
+    'friday at 10am New York time', 'sexta às 10h horário de Brasília', 'at 10am UTC-3', 'from friday onwards at 9am',
+    // A range, and daily synonyms without a time or with a time that contradicts them.
+    'seg a sex às 9h', 'every single day', 'todas as noites às 9', 'todas as manhãs',
+    // A bare number is no time, and an approximate time is no exact one: never Friday at the current 07:45.
+    'change to 10 on friday', 'muda para 10 na sexta', 'change to friday around 10', 'muda pra sexta lá pelas 10', 'friday at like 9',
+    // Words FloFi has no reading for, even next to a readable change.
+    'quero ter a automação às 10h', 'muda o dia para sexta e a hora para 10h',
+  ])('%j → null (never a time or a day the person did not write)', text => expect(parseScheduleChange(text, mondayAt0745)).toBeNull());
+  it('refuses a request that names the automation by its amount or asset: FloFi asks for the day and time instead', () => {
+    expect(parseScheduleChange('change the 0.5 ETH one to friday at 10am', mondayAt0745)).toBeNull();
+    expect(parseScheduleChange('muda a de 50 USDC para sexta às 10h', mondayAt0745)).toBeNull();
+    // The same change without the naming is read.
+    expect(parseScheduleChange('change it to friday at 10am', mondayAt0745)).toEqual({ frequency: 'WEEKLY', weekday: 5, time: '10:00' });
+  });
 });

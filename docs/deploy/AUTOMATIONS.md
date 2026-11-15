@@ -122,7 +122,14 @@ in the public product an older test-network proposal is never opened for review 
   period never resets them. Refused: another owner's id (NOT FOUND), an archived or expired rule, a price trigger (no schedule:
   `AUTOMATION_REPLACE_UNSUPPORTED`), an unchanged schedule (`AUTOMATION_SCHEDULE_UNCHANGED`), a rule waiting for a rebind (re-checked under the
   old rule's lock: `AUTOMATION_WORKFLOW_CHANGED` / `AUTOMATION_STRATEGY_STALE`), and a delegated rule (`DELEGATED_REAUTHORIZATION_REQUIRED`).
-  Saving the replacement authorizes no spending.
+  Saving the replacement authorizes no spending. **In the Copilot**, the new schedule is read from the owner's words deterministically, with
+  no model (`automations/explain.ts` `parseScheduleChange`, EN/PT): a weekday, an exact time and a daily or weekly frequency, surrounded only
+  by filler words such as "muda para" or "change it to". It fails closed: **anything FloFi cannot read exactly is refused and the owner is
+  asked for the day and time** — any other word or number, for example "every other", "last Friday of the month", "next Friday", "for 4
+  weeks", "before 9am", a time zone, an approximate time ("around 10"), a bare number or an amount naming the automation. For a saved
+  automation the change card then asks for the new day and time and offers no change to confirm. A part the owner did not mention (the time
+  in "muda para sexta") keeps its current value; nothing else is filled in, and a saved automation changes only after the owner's explicit
+  confirmation.
 - **One occurrence, one proposal.** Opening a proposal again withdraws the previous approval first; once the owner has added it to their
   workflow it is completed and cannot be proposed or dismissed again (`AUTOMATION_OCCURRENCE_COMPLETED`).
 - **Workflow edits** never change an automation: a saved workflow it came from is recorded by id, hash and version; an edit marks the
