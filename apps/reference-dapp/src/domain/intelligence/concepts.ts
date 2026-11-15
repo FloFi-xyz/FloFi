@@ -465,7 +465,8 @@ export function conceptFollowUp(text: string): ConceptFollowUp | null {
 
 // ── Answers ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 export type ConceptAnswer = { readonly text: string; readonly notes: readonly string[]; readonly options: readonly string[]; readonly state: ConceptState };
-const PROTOCOL_LABEL: Readonly<Record<ConceptProtocol, string>> = { AAVE: 'Aave', UNISWAP: 'Uniswap', JUPITER: 'Jupiter', ORCA: 'Orca', ACROSS: 'Across' };
+/** Protocol names (proper nouns, the same in every language). */
+const PROTOCOL_LABEL = Object.freeze({ AAVE: 'Aave', UNISWAP: 'Uniswap', JUPITER: 'Jupiter', ORCA: 'Orca', ACROSS: 'Across' }) satisfies Readonly<Record<ConceptProtocol, string>>;
 const FOLLOW = {
   EN: { simpler: 'Explain it more simply', example: 'Give me an example', advanced: 'More detail', workflow: 'And in my workflow?', protocol: (name: string) => `How does it work on ${name}?`,
     general: 'General knowledge, not live data: no price, rate or position of yours is stated here.', example_label: 'Illustrative numbers only, not a quote.',

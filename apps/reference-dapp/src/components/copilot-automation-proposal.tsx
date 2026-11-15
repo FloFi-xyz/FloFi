@@ -17,8 +17,10 @@ import { WalletProof, type useWalletProof } from './wallet-proof';
  * carries no mode, limit, expiry or Credential: the owner enters the limits, FloFi resolves every step's Credential, and nothing is created
  * before "Create and review authorization" or activated before the owner's passkey signs the one workflow authorization.
  */
-export function CopilotAutomationProposal({ input, owner, proof, dismiss }: {
+export function CopilotAutomationProposal({ input, owner, proof, dismiss, onCreated }: {
   input: AutomationInput; owner: WorkflowOwner | null; proof?: ReturnType<typeof useWalletProof>; dismiss(): void;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: tells the conversation the owner created it (a later "muda para segunda" is then a confirmed replacement). */
+  onCreated?: () => void;
 }) {
   const { t } = useLocale();
   const [access, setAccess] = useState<{ owner: string; input: AutomationInput; capabilities: CapabilityView } | null>(null);
@@ -55,7 +57,7 @@ export function CopilotAutomationProposal({ input, owner, proof, dismiss }: {
     try {
       const result = await createAutomation(owner, input);
       if (current !== generation.current) return;
-      if (result.ok) setCreated(true);
+      if (result.ok) { setCreated(true); onCreated?.(); }
       else if (result.code === 'WALLET_SESSION_REQUIRED') { setAccess(null); setVerification(ownerKey); }
       else setError('FloFi could not complete this ({0}).'.replace('{0}', result.code));
     } catch { if (current === generation.current) setError('Automations are unavailable on this deployment right now.'); }

@@ -120,6 +120,9 @@ export const ASSIST_COPY = {
     recipientChoose: (names: readonly string[]) => `Which saved recipient do you mean: ${join(names.map(name => `“${name}”`), 'or')}?`,
     recipientWrongEcosystem: (label: string, ecosystem: string, network: string, bridge: boolean) => `“${label}” is a ${ecosystem} address, and ${network} needs a${ecosystem === 'Solana' ? 'n EVM' : ' Solana'} address.${bridge ? '' : ` To send to ${ecosystem === 'Solana' ? 'Solana' : 'an EVM network'} from ${network}, ask for a bridge instead.`}`,
     recipientsUnavailable: 'Saved recipients are only available in the FloFi app, signed in to your account.',
+    recipientSaved: (label: string) => `Saved as “${label}” in Credentials → Saved recipients. It is only a name for that public address; your request is unchanged.`,
+    recipientExists: (label: string) => `That address is already saved as “${label}”. Nothing was changed.`,
+    recipientSaveFailed: 'FloFi could not save it right now. Nothing was changed; you can save it later in Credentials.',
   },
   PT: {
     stillOpen: (question: string) => `Seu pedido continua aberto — ${question}`,
@@ -147,6 +150,9 @@ export const ASSIST_COPY = {
     recipientChoose: (names: readonly string[]) => `Qual destinatário salvo você quer usar: ${join(names.map(name => `“${name}”`), 'ou')}?`,
     recipientWrongEcosystem: (label: string, ecosystem: string, network: string, bridge: boolean) => `“${label}” é um endereço ${ecosystem}, e a ${network} precisa de um endereço ${ecosystem === 'Solana' ? 'EVM' : 'Solana'}.${bridge ? '' : ` Para enviar ${ecosystem === 'Solana' ? 'para a Solana' : 'para uma rede EVM'} a partir da ${network}, peça uma bridge.`}`,
     recipientsUnavailable: 'Destinatários salvos só estão disponíveis no app FloFi, com sua conta conectada.',
+    recipientSaved: (label: string) => `Salvo como “${label}” em Credentials → Destinatários salvos. É só um nome para esse endereço público; seu pedido continua igual.`,
+    recipientExists: (label: string) => `Esse endereço já está salvo como “${label}”. Nada foi alterado.`,
+    recipientSaveFailed: 'A FloFi não conseguiu salvar agora. Nada foi alterado; você pode salvar depois em Credentials.',
   },
 } as const satisfies Record<CopilotLanguage, Record<string, unknown>>;
 export type AssistCopy = (typeof ASSIST_COPY)[CopilotLanguage];

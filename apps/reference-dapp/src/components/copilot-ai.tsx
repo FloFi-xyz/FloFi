@@ -13,13 +13,15 @@ import { LEARNING_CHANGED } from './wallet-proof';
 import type { Command } from '../domain/commands';
 import { chainStatus } from '../domain/artifact-chain';
 import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type SimulationFlow } from '../domain/copilot-answers';
-import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
+import { automationCreated, closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
   type CopilotReply, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from '../domain/copilot-conversation';
 import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
 import { reconciledRemaining } from '../domain/copilot-reconciled-context';
 import { useSolanaComposition } from '../state/solana-composition-store';
 import { workflowSteps } from '../domain/workflow-steps';
 import { ensureCopilotCatalogs } from '../state/copilot-catalogs';
+import { loadSavedRecipients, saveRecipientReference, savedRecipientsSnapshot, useSavedRecipients } from '../state/saved-recipients-store';
+import { ASSIST_COPY } from '../domain/copilot-assist';
 import type { CopilotMode } from '../server/copilot-service';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflowCapability } from '../state/capability-store';
@@ -132,6 +134,11 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   }, []);
   /** A read-only snapshot of Flofi state for the engine, taken now. */
   // The language is read at each turn (the interface can switch mid-conversation); the callback itself stays stable.
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients (in memory only; cleared on sign-out). The engine resolves exact
+  // saved names itself and masks them before any request leaves for a model; a save happens only on the user's explicit request.
+  const recipients = useSavedRecipients();
+  const recipientsRef = useRef(recipients);
+  recipientsRef.current = recipients;
   const interfaceLanguageRef = useRef(interfaceLanguage);
   interfaceLanguageRef.current = interfaceLanguage;
   const environmentNow = useCallback((): CopilotEnvironment => {
@@ -151,8 +158,9 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
     const view = learningView.current;
     const interfaceLanguage = interfaceLanguageRef.current;
+    const saved = recipientsRef.current.status === 'READY' ? savedRecipientsSnapshot().recipients : null;
     return { ...interfaceLanguage ? { interfaceLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
-      verified, ...view?.enabled ? { learning: view.learning } : {} };
+      verified, ...view?.enabled ? { learning: view.learning } : {}, ...saved ? { recipients: saved, recipientWrites: true } : {}, surface: 'WEB' };
   }, []);
   /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */
   const loadVerified = useCallback(async (intent: unknown) => {
@@ -227,8 +235,19 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   const drafting = useCallback(() => Boolean(conversation.current.draft), []);
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi just explained a DeFi concept, so "não entendi" refers to it (not to an execution blocker). */
   const explaining = useCallback(() => Boolean(conversation.current.concept), []);
+  /** The owner created the automation FloFi proposed: a later schedule change is a confirmed replacement of the saved rule. */
+  const automationCreatedNow = useCallback(() => { conversation.current = automationCreated(conversation.current); }, []);
   /** BUILD-CHAT-LEARNING-001: performs the memory action the user just confirmed, and reports the turn's content-free feedback. */
-  const settle = useCallback(async (reply: CopilotReply): Promise<CopilotReply> => {
+  const settle = useCallback(async (input: CopilotReply): Promise<CopilotReply> => {
+    let reply = input;
+    // BUILD-FLOFI-UNIFIED-COPILOT-001: the user asked FloFi to save a typed public address under a name. Only the server's answer is reported.
+    if (reply.recipientSave) {
+      const a = ASSIST_COPY[conversation.current.language === 'PT' ? 'PT' : 'EN'], { recipientSave: wanted, ...rest } = reply;
+      const result = await saveRecipientReference(wanted).catch(() => ({ ok: false as const, code: 'RECIPIENTS_REQUEST_FAILED' }));
+      reply = { ...rest, text: result.ok ? a.recipientSaved(result.value.label) : result.code === 'RECIPIENT_EXISTS' && 'existing' in result && result.existing
+        ? a.recipientExists(result.existing.label) : result.code === 'RECIPIENT_LABEL_TAKEN' ? a.recipientLabelTaken(wanted.label)
+        : result.code === 'RECIPIENTS_UNAVAILABLE' || result.code === 'ACCOUNT_SESSION_REQUIRED' ? a.recipientsUnavailable : a.recipientSaveFailed };
+    }
     const view = learningView.current;
     if (!view?.enabled) return reply;
     let out = reply;
@@ -257,6 +276,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     try {
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
+      // The account's saved names, read again when stale (signed out or not available: none, and nothing is offered).
+      await loadSavedRecipients({ ifStale: true }).catch(() => undefined);
       const before = conversation.current, start = startTurn(before, text, environmentNow());
       // BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (counters and codes only), best effort and never awaited by the chat.
       const measure = (reply: CopilotReply, next: CopilotConversation, interpreted: string | null) =>
@@ -288,7 +309,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   }, [interpret]);
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
-    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining };
+    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining, automationCreated: automationCreatedNow };
 }
 
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: the example names a mainnet (the public product never suggests a test network). */

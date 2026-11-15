@@ -10,6 +10,7 @@ import type { FlofiConversation } from '../state/flofi-conversation';
 import { shownMessage } from '../domain/chat-message';
 import { ConversationReviewCard, NetworkChoices, networkChoiceOptions } from './conversation-cards';
 import { CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
+import { CopilotAutomationManager } from './copilot-automation-manager';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
 
 /**
@@ -68,7 +69,10 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
       {/* BUILD0-UX-001: no execution report card in the chat. FloFi's own short messages announce each phase (wallet request, uncertainty, the
           result and what to do next); the Execute stage and the Dashboard keep the steps, transactions and evidence. */}
       {busy && row(false, 'busy', <div className="message ai" role="status"><small className="sr-only">{tr(copilotLabel('ai', copilot.mode))}</small><p>{tr("Interpreting your message…")}</p></div>)}
-      {conversation.automation && <CopilotAutomationProposal input={conversation.automation} owner={owner} {...(proof ? { proof } : {})} dismiss={conversation.dismissAutomation}/>}
+      {conversation.automation && <CopilotAutomationProposal input={conversation.automation} owner={owner} {...(proof ? { proof } : {})} dismiss={conversation.dismissAutomation}
+        onCreated={() => conversation.copilot.automationCreated?.()}/>}
+      {conversation.manage && <CopilotAutomationManager operation={conversation.manage.operation} request={conversation.manage.request} owner={owner} {...(proof ? { proof } : {})}
+        dismiss={conversation.dismissManage}/>}
     </div>
     {/* P0 approved UX (board 04): the label stays for assistive technology (visually hidden); Send is an icon inside the field, neutral until
         there is text, and shows a spinner while FloFi is answering. Submitting is unchanged. */}
