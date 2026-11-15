@@ -76,6 +76,14 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (Release A): the v26 build keeps working on a database with 0027 — six new tables with their own
+    // functions, triggers and indexes (nonce-conflict diagnostics; Support privacy controls); nothing pre-existing changes. This certificate must
+    // be deployed to every database consumer BEFORE any build that ships 0027 migrates.
+    base: { version: 26, name: 'flight_early_list', sha256: '51fc9c3195ba179a4068b7c66a267216ed102d0a65f1c59a6e94fd8fb34f10c8' },
+    migrations: [{ version: 27, name: 'reconciliation_privacy', sha256: '6edd545c5f7076aa85468c52e79a198df187af71001793695675527f5f96c069' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#19-certificate-0027_reconciliation_privacy',
+  },
+  {
     // The v24 compatibility release must ship this certificate BEFORE applying 0025/0026 to shared infrastructure.
     base: { version: 24, name: 'flight_launch', sha256: 'a9def02ddd0ec6ccd89181dc51d9f7f50a20b9265feec8b236abd9e4a3fa7bc0' },
     migrations: [{ version: 25, name: 'flight_gate', sha256: 'f150b1259014b90d6dbe249ad43d23b3a13ccfb9c53a0f0cc214200d7866abc0' },
