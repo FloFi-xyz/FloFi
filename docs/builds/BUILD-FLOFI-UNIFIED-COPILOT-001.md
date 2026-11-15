@@ -70,8 +70,9 @@ None of these paths changes the workflow. When a request is still open, their an
   lexicon are skipped.
 - Every correction is shown before any proposal. A correction the user can see gets a "read as" note. One that would change a real-funds
   identity is asked as a confirm question.
-- ETH/WETH, USDC/USDC.e, the ARB token versus Arbitrum, SOL/SPL and EVM/Solana stay distinct. "ethereum" read as a coin means native ETH;
-  as a network it means Ethereum.
+- ETH/WETH, USDC/USDC.e, the ARB token versus Arbitrum, SOL/SPL and EVM/Solana stay distinct. "Ethereum" is the coin only in a coin position:
+  after an amount, after a trade verb, or before "por/for/to <token>". In that position it never also names the Ethereum network, so
+  "trocar 1 ethereum por usdc" asks which network.
 - An unsaved automation proposal can be rescheduled from schedule words alone ("muda para segunda"). A message naming an asset or verb is a new
   request and goes to the model.
 
@@ -94,9 +95,21 @@ opening question words. The conversation then continues in that language.
   insufficient balance, notifications and retired delegated execution.
 - **Chat management**: list, pause, resume, archive and reschedule open `CopilotAutomationManager`. It reads through the existing
   owner-verified actions and changes nothing until the owner clicks Confirm on the exact change shown.
-- **Reschedule**: definitions are immutable, so a reschedule is a confirmed replacement (`service.replace` / `store.archiveReplaced`). A new
-  rule is created and the old one archived in one transaction. A paused rule's replacement stays paused, and the mode stays CONFIRM_EACH_TIME
-  only.
+- **Reschedule**: definitions are immutable, so a reschedule is a confirmed replacement (`service.replace` / `store.archiveReplaced`).
+  - A new rule is created and the old one archived in one transaction. The attention flag is re-checked under the row lock.
+  - A paused rule's replacement stays paused, and the mode stays CONFIRM_EACH_TIME only.
+  - Period limits and cooldown carry over the replacement chain. A same-owner, tenant-scoped, deduplicating recursive read over the existing
+    `AUTOMATION_REPLACEMENT` records does this, with no migration.
+  - Pending proposals of the old rule are withdrawn, and the confirm card says so.
+- **Schedule reading** (`parseScheduleChange`): deterministic, with no model. It returns exactly the weekday, time and frequency the user
+  wrote, or nothing, and then FloFi asks. Anything it cannot account for is refused, including:
+  - two times;
+  - an hour that does not fit its part of the day;
+  - time-zone qualifiers;
+  - relative or one-off dates;
+  - a clock word with no time after it.
+  
+  "1 da noite" is 01:00, "9 da noite" 21:00 and "12 da noite" midnight.
 - Delegated execution is reported as retired (`EXECUTOR_FUNDED_GAS_RETIRED`).
 
 ## 5. Platform settings assistant (`domain/intelligence/platform-guide.ts`)
@@ -113,11 +126,20 @@ opening question words. The conversation then continues in that language.
   System Program are refused.
 - Saving is opt-in: offered once after a typed address, never required. Credentials supports rename, list and delete. Duplicates are
   refused, with 60 writes per 10 min.
-- A name resolves only on an exact folded-label match, with no typo tolerance. An ambiguous name gets a CHOOSE question. A wrong-ecosystem
-  recipient is refused.
+- A name resolves only on an exact folded-label match, with no typo tolerance. An ambiguous name gets a CHOOSE question, whose buttons pick
+  that recipient and are shown untranslated. A saved address pasted in full resolves to that recipient.
+- The chosen recipient is kept by id for the whole request. The draft never stores its address, and it is re-resolved and re-checked against
+  the network on every turn.
+  - In a plan, only the final send or bridge is filled.
+  - A wrong-ecosystem recipient is refused only for a network the user named or that was carried.
+  - A stale choice prepares nothing.
+- "Para mim" / "minha carteira" always means the connected wallet. Names that would capture it cannot be saved: Carteira, Wallet, "My wallet …",
+  yes/no words, names without a letter, network and token names.
+- The words of a saved name never ground a network, token or route. Typo reading and grounding use the masked text.
 - The resolved address goes through the same review, simulation and wallet-signature path as a typed one. Review shows the full address with
   the name beside it, for display only.
-- Saved names are masked (`maskSavedRecipients`) before any model request.
+- Saved names, partial names and saved addresses are masked (`maskSavedRecipients`) in every transcript entry before any model request.
+  Masking keeps every name masked once in the conversation, even if the list later becomes unavailable.
 - The status ("Your account wallet", "Connected") is derived at read time from verified wallets. A saved recipient is never a key, an
   allowlist entry or proof of ownership.
 - Deleting the account deletes its saved recipients (cascade).
@@ -169,9 +191,42 @@ say so, but grants approved before this change were approved under the older wor
   `domain/copilot-automation.ts`.
 - Saved recipients never reach a model or a channel.
 
-## 11. Tests and validation
+## 11. Tests and validation (local, at the PR head)
 
-<!-- filled at delivery -->
+These are local results; CircleCI remains the certification authority (Section 14).
+
+| Gate | Result |
+| --- | --- |
+| Typecheck (`next typegen` + `tsc --noEmit`) | pass |
+| ESLint on every added or modified TS/TSX/MJS file | pass |
+| Schema drift (`export-schemas.mjs --check`) | pass (11 exports) |
+| Unit suite (as `pnpm test`: packages, app, backend; `--testTimeout=30000`) | **8728 passed, 0 failed, 2 skipped** (684 files) |
+| PostgreSQL suites (all 129 `*.pg.test.ts`, loopback PostgreSQL 16.15) | **877 passed, 1 failed** |
+| `governance_lite.py` and its unittest suite | pass (278 unittests) |
+| `agent_guard.py check` (coverage map) | pass (19 domains, 176 modules) |
+| `git diff --check` | clean |
+| Browser (Playwright) suites | **not run locally**: they need a production build and the pinned Anvil runtime; CircleCI runs all three browser shards |
+| Production build (`pnpm build`) | **not run locally**: an unnecessary production build was out of scope; CircleCI builds |
+| Live Anthropic probe (`pnpm test:copilot-live`) | **not run**: no key; SKIPPED is not a pass |
+
+- **Skipped unit tests:** the 2 skipped are `composition-service.test.ts` and `mode-b-service.test.ts`. They are older fork-runtime-gated
+  tests (`it.skipIf(!path|!pin)`), not touched by this branch.
+- **The one PostgreSQL failure** is `forward-compatibility.pg.test.ts` ("what 0015 does to a v14 database"). It fails identically on unmodified
+  `origin/main` in this container, verified in a temporary `main` worktree. It is an environment difference (local PostgreSQL 16.15; CI pins
+  `postgres:18.6`), not a regression. This branch does not touch that test or migration 0015.
+- **New and changed suites, with what they cover:**
+  - `unified-copilot.test.ts` (33 cases): journeys A–D, guidance, continuity, and two review-regression rounds.
+  - `copilot-assist.test.ts`, `concepts.test.ts`, `platform-guide.test.ts`.
+  - `saved-recipients.test.ts`: masking, matching, reserved names, and a backtracking bound.
+  - `saved-recipients-store.test.ts`: write-after-invalidation and stale-row handling.
+  - `copilot-automation.test.ts`, `copilot-eval` corpus (N01–N09).
+  - `explain.test.ts`: 497 cases, including all 48 final violations grouped by root cause and a must-work list.
+  - `replace.pg.test.ts`: lineage limits and cooldown, the forged cross-owner link, cycles and duplicates, and the attention re-check under
+    lock.
+  - `recipient-store.pg`, `certificate-0028.pg`, `settings-providers.pg`.
+  - The MCP `education`, `automation-status` and `no-model` suites.
+- **Every review regression test was confirmed to fail on the pre-fix code and pass after the fix.** In the final parser pass, 55 of the 79
+  new cases fail on the previous parser; the other 24 are must-work and control cases.
 
 ## 12. Migrations, production configuration, rollout and rollback
 
@@ -183,3 +238,87 @@ say so, but grants approved before this change were approved under the older wor
   owner action in Admin after Test connection passes.
 - **Rollback.** Revert the PR, or roll back to the previous Vercel/Railway deployment. No data migration has to be undone: 0028 is not
   applied by Release A. Copilot settings rollback is unchanged (Admin → Restore previous).
+
+## 13. Engineering review and the final parser pass
+
+**Reviewers.** The read-only FloFi specialists reviewed this branch:
+
+- chat, security, automations;
+- data-privacy, MCP, channels;
+- admin-analytics, frontend-UX, transfer-payments;
+- workflow, bridge, and a security re-review.
+
+They had to work from the current source, because the review hook blocks Git-ignored diff files.
+
+Verified findings in the shared Copilot engine, saved recipients, the web chat and automations were fixed in this PR. Each has a regression
+test.
+
+**Final parser pass.** The last adversarial round of the schedule reader left 48 violations, from 4 root causes:
+
+| Root cause | Cases | Fix |
+| --- | --- | --- |
+| A second hour read as minutes ("10h 11h" as 10:11) | 19 | Two hours are asked for |
+| An hour that does not fit its part of the day ("1 da noite" as 13:00, "11 da tarde" as 23:00) | 17 | Explicit table; "1 da noite" = 01:00 |
+| A time-zone qualifier dropped ("my time", "meu horário") | 5 | Asked for |
+| A clock anchor with no time kept the current time ("friday at") | 7 | Asked for |
+
+All four were fixed in one pass, and that pass closed the correction loop.
+
+## 14. Status, remaining items and follow-up PR
+
+**Certification.** CircleCI certifies this PR (static, unit, PostgreSQL 18, fork and three browser shards). Local evidence does not certify
+public execution, the live Anthropic API, Neon or Release B.
+
+**Release conditions.** None of these block merging the code; each must hold before the related feature is enabled in production:
+
+1. **Anthropic:** Admin → Copilot → Test connection must pass for each scope (Web, Telegram, WhatsApp) before Anthropic is activated there.
+   The fix has offline evidence only.
+2. **Saved recipients:** they stay unavailable until the owner runs Release B (migration 0028).
+3. **MCP `get_automation_status`:** it sits under the existing `flofi.runs` scope.
+   - Grants consented before this change (refresh families last at most 30 days) can read automation status without having seen the new
+     wording.
+   - Before deploying, the owner either accepts that window explicitly or holds this one tool until the follow-up below.
+   - The other four MCP tools need only `flofi.strategy` and read no user data.
+
+**Remaining verified defects, not fixed here (scope frozen), for a follow-up PR:**
+
+- **MCP**
+  - Medium:
+    - The consent re-gating for `get_automation_status` (above).
+    - The single-rule status reports `pendingProposals: 0`.
+  - Low:
+    - Platform-help automation copy mentions pausing.
+    - No output cap on the automation list.
+    - The status read records an already-applied approval as completed (a bookkeeping write).
+    - A failed beta-eligibility read is reported as "no linked wallet".
+    - The delegation concept copy says it is available "where enabled" (it is retired).
+  - Nit: links without `websiteUrl`.
+- **Channels**, all low:
+  - After a concept answer, "pode executar" skips the authorization notice.
+  - An aside's follow-up choices can capture a bare numeric answer.
+  - A reply with both a link and a choice drops the choice.
+  - The guide gives web-only wording on Telegram and WhatsApp.
+  - The automation handoff wording.
+  - Nits: duplicate page lists, the surface default, comments.
+- **Admin**
+  - Medium:
+    - Anthropic cost estimates price cached prompt tokens at the full input rate.
+    - `extractAnswerJson` accepts a bare object plus a fenced object. Either answer still passes FloFi's full validation and Review, so it
+      fails safe.
+  - Low:
+    - The probe reports "Works" for a schema-valid misreading.
+    - The structure line compares the wrong numbers.
+    - A Default-card test is audited as WEB.
+- **Frontend**, all low:
+  - The manager card's expired-proof path.
+  - Credentials loading and error states, refresh losing an open form, and early "Detected" validation.
+  - Accessibility of the Review name tag and some focus and label gaps.
+  - Platform-guide Portuguese page names, and "Ligações" → "Conexões".
+- **Schedule reader**, low and all fail-safe: some valid but uncommon phrasings are refused and asked for: "set it for 10am", "12 noon", a
+  bare "9 horas", "same time friday".
+- **Data-privacy**, nits: the lock-wait comment wording, and the 0028 reversal SQL read from the release document.
+- **Pre-existing on `main`:** a model answer inherits an open draft's carried values even for a new request. This branch limits that for its
+  own new fields only.
+
+Fixes for the MCP, channels and admin/frontend items were drafted in separate local worktrees when the scope was frozen. They were neither
+verified nor merged into this PR.
