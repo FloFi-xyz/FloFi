@@ -4,11 +4,17 @@
  * provider, Sends, Receives ≈, Minimum, Network fee, Destination — plus permissions and material warnings; exact values, every fee line, FloFi's
  * fee, the quote expiry, limits and evidence caveats are under a closed Technical details disclosure. Amounts shorten in the safe direction.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ConversationReview } from '../domain/conversation-lifecycle';
 import { ConversationReviewCard, MATERIAL_STEP_DETAILS, compactNetworkFee, shortAmount, type CompactReviewStep } from './conversation-cards';
+
+// BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's saved recipients, from the (mocked) in-memory store; the address matching is the real one.
+const saved = vi.hoisted(() => ({ state: { status: 'IDLE', recipients: [] as unknown[], code: null as string | null } }));
+vi.mock('../state/saved-recipients-store', async importOriginal => ({ ...await importOriginal<typeof import('../state/saved-recipients-store')>(),
+  useSavedRecipients: () => saved.state, loadSavedRecipients: vi.fn(async () => saved.state) }));
+afterEach(() => { saved.state = { status: 'IDLE', recipients: [], code: null }; });
 
 const step = (patch: Partial<ConversationReview['steps'][number]> = {}): ConversationReview['steps'][number] => ({
   number: 1, action: 'Swap', input: '2 USDC', pair: 'USDC → ETH', networks: 'Arbitrum One', provider: 'Uniswap', result: '0.001023456789123456 ETH',
@@ -78,6 +84,29 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 compact chat Review', () => {
     // An explicit "not the owner's" wins over a match with the signing wallet.
     const notOwned: CompactReviewStep = { ...step({ action: 'Bridge', destination: owner }), destinationOwned: false };
     expect(visible(renderToStaticMarkup(createElement(ConversationReviewCard, { review: review({ steps: [notOwned] }), language: 'EN' })))).not.toContain('Your wallet');
+  });
+  it('BUILD-FLOFI-UNIFIED-COPILOT-001: tags the destination with the account\'s saved name only on an exact canonical match, display only', () => {
+    const evm = '0x52908400098527886e0f7030069857d2e4169ee7', checksummed = '0x52908400098527886E0F7030069857D2E4169EE7', sol = 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq';
+    const at = '2026-11-15T12:00:00.000Z';
+    saved.state = { status: 'READY', code: null, recipients: [
+      { id: 'rcp_' + 'a'.repeat(26), label: 'Carteira da empresa', address: evm, ecosystem: 'EVM', createdAt: at, updatedAt: at, status: 'EXTERNAL' },
+      { id: 'rcp_' + 'b'.repeat(26), label: 'Minha Solana', address: sol, ecosystem: 'SOLANA', createdAt: at, updatedAt: at, status: 'ACCOUNT_WALLET' }] };
+    const card = (destination: string, patch: Partial<CompactReviewStep> = {}) => renderToStaticMarkup(createElement(ConversationReviewCard,
+      { review: review({ steps: [{ ...step({ action: 'Bridge', destination }), ...patch }] }), language: 'EN' }));
+    const tag = (label: string) => `<span class="conversation-review-saved" data-saved-recipient="true" title="Your saved name for this address. It is not proof of who controls it."> · ${label}</span>`;
+    // The bound address stays exactly as bound (here its EIP-55 spelling) and in full; the name follows it, and it is not "your wallet".
+    const named = card(checksummed);
+    expect(visible(named)).toContain(`<div data-wrap="true"><dt>Destination</dt><dd><code>${checksummed}</code>${tag('Carteira da empresa')}</dd></div>`);
+    expect(visible(named)).not.toContain('Your wallet');
+    expect(visible(named)).toContain('Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
+    expect(visible(card(sol))).toContain(`<code>${sol}</code>${tag('Minha Solana')}`);
+    // One character off, another case of a Solana address or no saved list: no name at all.
+    expect(visible(card(evm.slice(0, -1) + '8'))).not.toContain('conversation-review-saved');
+    expect(visible(card(sol.toLowerCase()))).not.toContain('conversation-review-saved');
+    // Owned (by the step's own binding) and saved: both tags, the ownership one from the Review, never from the name.
+    expect(visible(card(sol, { destinationOwned: true }))).toContain(`<span class="conversation-review-owned"> · Your wallet</span>${tag('Minha Solana')}`);
+    saved.state = { status: 'IDLE', recipients: [], code: null };
+    expect(visible(card(checksummed))).toContain(`<dd><code>${checksummed}</code></dd>`);
   });
   it('reads in Portuguese', () => {
     const html = renderToStaticMarkup(createElement(ConversationReviewCard, { review: review(), language: 'PT' }));

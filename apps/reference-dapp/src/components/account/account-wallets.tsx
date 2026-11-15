@@ -18,6 +18,7 @@ import { openFloFiWallet, requestFloFiWallet } from '../../wallet/flofi-wallet-c
 import { syncFloFiWallets } from '../../wallet/flofi-wallet-sync';
 import { exportActions, isLegacyWallet, shortAddress, type AccountWallet } from '../../accounts/account-model';
 import { useFloFiPrivy } from '../../accounts/privy-client';
+import { invalidateSavedRecipients } from '../../state/saved-recipients-store';
 import { useFloFiWallet } from '../flofi-wallet-continue';
 import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
@@ -93,11 +94,12 @@ export function DeleteAccount({ state }: { state: AccountState }) {
   async function remove() {
     const result = await deleteFloFiAccount().catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
     if (!result.ok) { setError(result.code); return; }
+    invalidateSavedRecipients();
     window.location.assign('/login');
   }
   return <div className="workspace-inline-form" role="group" aria-label={t('Delete FloFi account')}>
     {confirming ? <>
-      <p>{t('Delete your FloFi account? Your sign-in identities, sessions and saved wallet addresses are deleted from FloFi.')}{' '}
+      <p>{t('Delete your FloFi account? Your sign-in identities, sessions, saved wallet addresses and saved recipients are deleted from FloFi.')}{' '}
         {t(managed ? 'Wallets created or imported in FloFi are not deleted: they stay with their provider and their funds are unchanged. Export them first if you want to keep using them elsewhere.'
           : 'Your wallets and their funds are not affected.')}{' '}
         {state.account?.privy ? t('Your sign-in and wallets at our wallet provider, Privy, are not deleted by this. To have Privy delete them too, export your wallets first, then ask FloFi (see Privacy).') : null}</p>

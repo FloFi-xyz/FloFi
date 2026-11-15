@@ -27,6 +27,9 @@ import { walletInventory, walletStatus, type WalletInventoryEntry } from '../dom
 import { floFiWalletProviderKey, isFloFiWalletChoice } from '../wallet/flofi-wallet-sync';
 import { StatusTag } from './dashboard/dashboard-status';
 import { invalidateAccountWallets } from '../state/destination-wallets';
+import { ecosystemOfAddress, SAVED_RECIPIENT_LIMITS, type SavedRecipientEcosystem, type SavedRecipientStatus, type SavedRecipientView } from '../domain/saved-recipients';
+import { invalidateSavedRecipients, loadSavedRecipients, removeRecipientReference, renameRecipientReference, saveRecipientReference,
+  useSavedRecipients } from '../state/saved-recipients-store';
 
 type IconName = 'wallet' | 'agent' | 'key' | 'plus' | 'copy' | 'card' | 'secret';
 function WorkspaceIcon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -316,6 +319,139 @@ function CardEntryDialog({ onClose, onAdded }: { onClose(): void; onAdded(label:
   </dialog>;
 }
 
+const RECIPIENT_ECOSYSTEM: Readonly<Record<SavedRecipientEcosystem, string>> = { EVM: 'EVM', SOLANA: 'Solana' };
+const RECIPIENT_STATUS: Readonly<Record<SavedRecipientStatus, string>> = { EXTERNAL: 'External', ACCOUNT_WALLET: 'Your account wallet', CONNECTED: 'Connected' };
+const SIGN_IN_HERE = '/login?returnTo=%2Fapp%2Fcredentials';
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: Credentials → Saved recipients, the signed-in account's address book of PUBLIC addresses (server-side, per
+ * account; nothing in this browser's storage). A name is a label only: the status comes from the account's verified wallets, never from the
+ * name, and saving grants no authority. Signed out, it only offers sign-in; where the deployment cannot store recipients yet (no accounts, or
+ * migration 0028 not applied), it says so and shows nothing else.
+ */
+export function SavedRecipientsSection({ account }: { account: AccountState | null }) {
+  const { t: tr } = useLocale();
+  const saved = useSavedRecipients();
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState('');
+  const signedIn = Boolean(account?.availability.accounts && account.account), idle = saved.status === 'IDLE';
+  // Read for this session when signed in, and again whenever the list was invalidated (another account read, sign-out, wallets changed).
+  useEffect(() => { if (signedIn) void loadSavedRecipients({ ifStale: true }); }, [signedIn, idle]);
+  const listed = signedIn && (saved.status === 'READY' || saved.status === 'ERROR' && saved.recipients.length > 0);
+  const unavailable = <p className="ux-panel-text" data-recipients="unavailable">{tr('Saved recipients are not available on this deployment yet.')}</p>;
+  const signIn = <p className="ux-panel-text">{tr('Sign in to save the addresses you send to in your FloFi account. Nothing is saved on this device.')}{' '}
+    <a href={SIGN_IN_HERE}>{tr('Sign in')}</a></p>;
+  const body = !account ? <p className="ux-panel-text">{tr('Loading saved recipients…')}</p>
+    : !account.availability.accounts ? unavailable
+      : !signedIn || saved.status === 'SIGNED_OUT' ? signIn
+        : saved.status === 'UNAVAILABLE' ? unavailable
+          : saved.status === 'ERROR' && !saved.recipients.length ? <p className="ux-panel-text" role="alert">{tr(accountMessage(saved.code ?? 'RECIPIENTS_REQUEST_FAILED'))}{' '}
+            <button type="button" className="ux-button ux-button-small" onClick={() => void loadSavedRecipients()}>{tr('Try again')}</button></p>
+            : !listed ? <p className="ux-panel-text">{tr('Loading saved recipients…')}</p>
+              : <>
+                <p className="ux-panel-text">{tr('A saved name is only a label for a public address. It is not proof of who owns the address and it authorizes nothing: every payment is still reviewed in full and signed in your own wallet.')}</p>
+                <p className="workspace-notice" role="status">{notice}</p>
+                {adding && <AddRecipientForm onCancel={() => setAdding(false)} onSaved={message => { setAdding(false); setNotice(message); }}/>}
+                {saved.recipients.length ? <ul className="ux-list">{saved.recipients.map(recipient => <li key={recipient.id}>
+                  <SavedRecipientRow recipient={recipient} onStatus={setNotice}/></li>)}</ul>
+                  : !adding && <p className="ux-panel-text">{tr('Save the addresses you send to under a name you recognize. Review still shows the full address.')}</p>}
+              </>;
+  return <section className="ux-panel" aria-labelledby="credentials-recipients">
+    <div className="ux-panel-head"><div><h2 id="credentials-recipients">{tr('Saved recipients')}</h2>{listed && <span className="ux-count">{saved.recipients.length}</span>}</div>
+      {listed && !adding && <button type="button" className="ux-button" disabled={saved.recipients.length >= SAVED_RECIPIENT_LIMITS.maxPerAccount}
+        onClick={() => { setNotice(''); setAdding(true); }}><WorkspaceIcon name="plus" size={18}/>{tr('Add recipient')}</button>}</div>
+    {body}
+  </section>;
+}
+
+/** Name + address; the ecosystem is detected from the address and shown before saving. Refusals are closed codes, shown inline. */
+function AddRecipientForm({ onCancel, onSaved }: { onCancel(): void; onSaved(message: string): void }) {
+  const { t: tr } = useLocale();
+  const [label, setLabel] = useState(''), [address, setAddress] = useState('');
+  const [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const id = useId();
+  const typed = address.trim(), detected = typed ? ecosystemOfAddress(typed) : null;
+  async function submit() {
+    setBusy(true); setError('');
+    const result = await saveRecipientReference({ label, address: typed, ...detected ? { ecosystem: detected } : {} });
+    setBusy(false);
+    if (result.ok) { onSaved(tr('{0} saved.', result.value.label)); return; }
+    setError(result.existing ? tr('This address is already saved as {0}. Nothing was changed.', result.existing.label) : tr(accountMessage(result.code)));
+  }
+  return <form className="ux-inline-form" aria-label={tr('Add recipient')} onSubmit={event => { event.preventDefault(); void submit(); }}
+    onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onCancel(); } }}>
+    <label htmlFor={`${id}-label`}>{tr('Name')}</label>
+    <input id={`${id}-label`} value={label} maxLength={SAVED_RECIPIENT_LIMITS.labelMax} autoComplete="off" autoFocus onChange={event => setLabel(event.currentTarget.value)}/>
+    <label htmlFor={`${id}-address`}>{tr('Public address')}</label>
+    <input id={`${id}-address`} className="ux-mono" value={address} maxLength={128} autoComplete="off" spellCheck={false} aria-describedby={`${id}-detected`}
+      onChange={event => setAddress(event.currentTarget.value)}/>
+    <p id={`${id}-detected`} aria-live="polite">{!typed ? tr('Paste an EVM (0x…) or Solana address.')
+      : detected ? tr('Detected: {0} address', RECIPIENT_ECOSYSTEM[detected]) : tr('This is not an EVM or Solana address yet.')}</p>
+    {error && <p className="workspace-inline-error" role="alert">{error}</p>}
+    <div className="ux-inline-actions"><button type="submit" className="ux-button ux-button-small" disabled={busy}>{tr('Save recipient')}</button>
+      <button type="button" className="ux-button ux-button-small" onClick={onCancel}>{tr('Cancel')}</button></div>
+  </form>;
+}
+
+/** One saved recipient: name, ecosystem, the FULL address (wrapping, never shortened) and its derived status; rename inline, remove after a confirmation. */
+function SavedRecipientRow({ recipient, onStatus }: { recipient: SavedRecipientView; onStatus(message: string): void }) {
+  const { t: tr } = useLocale();
+  const [mode, setMode] = useState<'view' | 'rename' | 'remove'>('view');
+  const [draft, setDraft] = useState(recipient.label), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const renameId = useId();
+  const close = () => { setMode('view'); setDraft(recipient.label); setError(''); };
+  async function copyAddress() {
+    try { await navigator.clipboard.writeText(recipient.address); onStatus(tr('Address copied.')); } catch { onStatus(tr('Address could not be copied.')); }
+  }
+  async function rename() {
+    setBusy(true);
+    const result = await renameRecipientReference(recipient.id, draft);
+    setBusy(false);
+    if (!result.ok) { setError(tr(accountMessage(result.code))); return; }
+    setMode('view'); setError(''); onStatus(tr('Recipient renamed.'));
+  }
+  async function remove() {
+    setBusy(true);
+    const result = await removeRecipientReference(recipient.id);
+    setBusy(false);
+    if (!result.ok && result.code !== 'RECIPIENT_NOT_FOUND') { setError(tr(accountMessage(result.code))); return; }
+    onStatus(tr('{0} removed from your saved recipients. No wallet or funds were affected.', recipient.label));
+  }
+  const menu: MenuItem[] = [
+    { key: 'copy', label: tr('Copy address'), ariaLabel: tr('Copy {0} address', recipient.label), onSelect: () => void copyAddress() },
+    { key: 'rename', label: tr('Rename'), ariaLabel: tr('Rename {0}', recipient.label), onSelect: () => { setDraft(recipient.label); setError(''); setMode('rename'); } },
+    { key: 'remove', label: tr('Remove'), ariaLabel: tr('Remove {0}', recipient.label), tone: 'danger', onSelect: () => { setError(''); setMode('remove'); } },
+  ];
+  const ecosystem = RECIPIENT_ECOSYSTEM[recipient.ecosystem];
+  return <article className="ux-wallet-row workspace-recipient-row" aria-label={`${recipient.label}, ${ecosystem}`} data-recipient-status={recipient.status}>
+    <div className="ux-row">
+      <span className="ux-row-icon workspace-network-icon"><img src={ecosystemIcons[recipient.ecosystem === 'EVM' ? 'evm' : 'solana']} width="28" height="28" alt=""/></span>
+      <div className="ux-row-main">
+        <h3 className="ux-row-name"><span>{recipient.label}</span></h3>
+        <p className="ux-row-meta">{ecosystem}</p>
+        <p className="ux-row-meta"><code className="ux-mono" data-recipient-address="">{recipient.address}</code></p>
+      </div>
+      <div className="ux-row-actions">
+        <span className="ux-tag" data-tone={recipient.status === 'EXTERNAL' ? 'neutral' : 'soon'}>{tr(RECIPIENT_STATUS[recipient.status])}</span>
+        <MoreMenu label={tr('More actions for {0}', recipient.label)} items={menu}/>
+      </div>
+    </div>
+    {mode === 'rename' ? <form className="ux-inline-form" onSubmit={event => { event.preventDefault(); void rename(); }}
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
+      <label htmlFor={renameId}>{tr('Recipient name')}</label>
+      <input id={renameId} value={draft} maxLength={SAVED_RECIPIENT_LIMITS.labelMax} autoComplete="off" autoFocus aria-invalid={error ? 'true' : undefined}
+        aria-describedby={error ? `${renameId}-error` : undefined} onChange={event => setDraft(event.currentTarget.value)}/>
+      {error && <p id={`${renameId}-error`} className="workspace-inline-error" role="alert">{error}</p>}
+      <div className="ux-inline-actions"><button type="submit" className="ux-button ux-button-small" disabled={busy}>{tr('Save name')}</button>
+        <button type="button" className="ux-button ux-button-small" onClick={close}>{tr('Cancel')}</button></div>
+    </form> : mode === 'remove' ? <div className="ux-inline-form" role="group" aria-label={tr('Remove {0}', recipient.label)}>
+      <p>{tr('Remove {0} from your saved recipients? Only the saved name and address are removed; no wallet or funds are affected.', recipient.label)}</p>
+      {error && <p className="workspace-inline-error" role="alert">{error}</p>}
+      <div className="ux-inline-actions"><button type="button" className="ux-button ux-button-small ux-button-danger" disabled={busy} onClick={() => void remove()}>{tr('Remove')}</button>
+        <button type="button" className="ux-button ux-button-small" onClick={close}>{tr('Cancel')}</button></div>
+    </div> : null}
+  </article>;
+}
+
 function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefined }) {
   const { t: tr } = useLocale();
   const evm = useBuild009Wallet();
@@ -327,7 +463,8 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-03): the signed-in account's wallets join this one section (read after load, public data only).
   const [account, setAccount] = useState<AccountState | null>(null);
   // BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a wallet linked, removed or renamed here also refreshes the bridge destination resolution.
-  const loadAccount = useCallback(() => { invalidateAccountWallets(); void accountState().then(setAccount, () => setAccount(null)); }, []);
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: saved recipients are re-read with the account too (statuses follow the account's wallets; never another session's list).
+  const loadAccount = useCallback(() => { invalidateAccountWallets(); invalidateSavedRecipients(); void accountState().then(setAccount, () => setAccount(null)); }, []);
   useEffect(() => { loadAccount(); }, [loadAccount]);
   // A Google/Apple/email link that failed returns here with a classified code.
   useEffect(() => {
@@ -390,6 +527,7 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
         onStatus={setStatus} onAccountChanged={loadAccount}/></li>)}</ul>
         : <p className="ux-panel-text">{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p>}
     </section>
+    <SavedRecipientsSection account={account}/>
     <section className="ux-panel" aria-labelledby="credentials-cards">
       <div className="ux-panel-head"><div><h2 id="credentials-cards">{tr("Cards")}</h2><span className="ux-count">{credentials.cards.length}</span></div>
         <button type="button" className="ux-button" onClick={() => setCardEntry(true)}><WorkspaceIcon name="plus" size={18}/>{tr("Add card")}</button></div>

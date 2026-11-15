@@ -78,6 +78,14 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // BUILD-FLOFI-UNIFIED-COPILOT-001 (Release A): the v27 build keeps working on a database with 0028 — one new table, flofi_account_recipients
+    // (an account's saved recipients: public addresses and names), with a foreign key to flofi_accounts ON DELETE CASCADE; nothing pre-existing
+    // changes. This certificate must be deployed to every database consumer BEFORE any build that ships 0028 migrates.
+    base: { version: 27, name: 'reconciliation_privacy', sha256: '6edd545c5f7076aa85468c52e79a198df187af71001793695675527f5f96c069' },
+    migrations: [{ version: 28, name: 'saved_recipients', sha256: 'ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#20-certificate-0028_saved_recipients',
+  },
+  {
     // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (Release A): the v26 build keeps working on a database with 0027 — six new tables with their own
     // functions, triggers and indexes (nonce-conflict diagnostics; Support privacy controls); nothing pre-existing changes. This certificate must
     // be deployed to every database consumer BEFORE any build that ships 0027 migrates.
