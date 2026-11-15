@@ -108,7 +108,7 @@ opening question words. The conversation then continues in that language.
   - time-zone qualifiers;
   - relative or one-off dates;
   - a clock word with no time after it.
-  
+
   "1 da noite" is 01:00, "9 da noite" 21:00 and "12 da noite" midnight.
 - Delegated execution is reported as retired (`EXECUTOR_FUNDED_GAS_RETIRED`).
 
