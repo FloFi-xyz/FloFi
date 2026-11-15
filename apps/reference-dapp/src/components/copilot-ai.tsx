@@ -136,11 +136,18 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   // The language is read at each turn (the interface can switch mid-conversation); the callback itself stays stable.
   // BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients (in memory only; cleared on sign-out). The engine resolves exact
   // saved names itself and masks them before any request leaves for a model; a save happens only on the user's explicit request.
-  // Subscribed so a sign-in user change drops the list at once; each turn reads the store's snapshot itself (`environmentNow`).
+  // Subscribed so a sign-in user change drops the list at once; each turn reads the store's snapshot itself (`recipientsNow`).
   useSavedRecipients();
   const interfaceLanguageRef = useRef(interfaceLanguage);
   interfaceLanguageRef.current = interfaceLanguage;
-  const environmentNow = useCallback((): CopilotEnvironment => {
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the account's saved recipients as the store holds them right now (not the last render): any known list resolves
+   * and masks names, even while a refresh failed; only a READY list may be written to (the save offer). */
+  const recipientsNow = useCallback((): Pick<CopilotEnvironment, 'recipients' | 'recipientWrites'> => {
+    const list = savedRecipientsSnapshot();
+    return { ...list.recipients.length ? { recipients: list.recipients } : {}, ...list.status === 'READY' ? { recipientWrites: true } : {} };
+  }, []);
+  /** The workflow, proposal, wallet and facts a message is written against (everything but the saved recipients). */
+  const contextNow = useCallback((): CopilotEnvironment => {
     const now = latest.current, store = now.workflow, current = store.state.workflow;
     const steps = workflowSteps(current, store.context), flow = simulationFlowOf(steps);
     const owner = flow === 'MOCKED_CHAIN' ? null : now.flows[flow];
@@ -157,12 +164,10 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
     const view = learningView.current;
     const interfaceLanguage = interfaceLanguageRef.current;
-    // The list as it is at this turn (not the last render): any known list resolves and masks names, even while a refresh failed; only a READY
-    // list may be written to (the save offer).
-    const recipientsNow = savedRecipientsSnapshot(), saved = recipientsNow.recipients.length ? recipientsNow.recipients : null;
     return { ...interfaceLanguage ? { interfaceLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
-      verified, ...view?.enabled ? { learning: view.learning } : {}, ...saved ? { recipients: saved } : {}, ...recipientsNow.status === 'READY' ? { recipientWrites: true } : {}, surface: 'WEB' };
+      verified, ...view?.enabled ? { learning: view.learning } : {}, surface: 'WEB' };
   }, []);
+  const environmentNow = useCallback((): CopilotEnvironment => ({ ...contextNow(), ...recipientsNow() }), [contextNow, recipientsNow]);
   /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */
   const loadVerified = useCallback(async (intent: unknown) => {
     const shape = JSON.stringify(intent) ?? '';
@@ -277,10 +282,13 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     try {
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
+      // The workflow, proposal and wallet this message is written against, taken before FloFi reads the saved names: a change while it reads them
+      // (or while the model interprets) discards the late answer, exactly as without the read.
+      const sent = contextNow();
       // The account's saved names, read again when stale (signed out or not available: none, and nothing is offered).
       // Never more than a moment: a slow read leaves the turn with the list already known.
       await Promise.race([loadSavedRecipients({ ifStale: true }).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 2500))]);
-      const before = conversation.current, start = startTurn(before, text, environmentNow());
+      const before = conversation.current, start = startTurn(before, text, { ...sent, ...recipientsNow() });
       // BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (counters and codes only), best effort and never awaited by the chat.
       const measure = (reply: CopilotReply, next: CopilotConversation, interpreted: string | null) =>
         void copilotTurnReport(turnMetrics(before, reply, next, interpreted, 'WEB')).catch(() => undefined);
@@ -300,7 +308,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       measure(finished.reply, finished.next, result.ok ? String((result.intent as { kind?: unknown } | null)?.kind ?? '') || null : null);
       return show(await settle(finished.reply));
     } finally { setBusy(false); }
-  }, [environmentNow, show, settle, loadVerified]);
+  }, [contextNow, recipientsNow, environmentNow, show, settle, loadVerified]);
   /** The Copilot's reply, or null when it is not enabled on this server (the caller shows its exact-grammar guidance). */
   const respond = useCallback(async (text: string): Promise<CopilotReply | null> => {
     const resolved = await (status.current ?? Promise.resolve<CopilotMode>('off'));
