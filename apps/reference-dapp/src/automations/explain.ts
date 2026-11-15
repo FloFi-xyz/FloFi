@@ -415,7 +415,7 @@ const AT_HOUR = new RegExp(`${AT}\\s*([01]?\\d|2[0-3])(?::([0-5]\\d))?(?![.,]\\d
 const SPOKEN_MINUTES: Readonly<Record<string, string>> = { meia: '30', cinco: '05', dez: '10', quinze: '15', vinte: '20', 'vinte e cinco': '25', trinta: '30',
   'trinta e cinco': '35', quarenta: '40', 'quarenta e cinco': '45', cinquenta: '50', 'cinquenta e cinco': '55' };
 /** The minutes of an "<hour> e <minutes>" form: the longest spoken form first, and never one that goes on ("e vinte e seis" is not read as :20). */
-const MINUTES = `(${Object.keys(SPOKEN_MINUTES).sort((a, b) => b.length - a.length).join('|')}|[0-5]\\d)(?:\\s*min(?:utos?)?)?\\b(?!\\s+(?:e|and)\\s)`;
+const MINUTES = `(${Object.keys(SPOKEN_MINUTES).sort((a, b) => b.length - a.length).join('|')}|[0-5]\\d)(?:\\s*min(?:utos?)?)?\\b(?!\\s+(?:e|and)\\s)(?!\\s*(?:hs?|hrs?|horas?|hours?)\\b)`;
 /**
  * Spelled clock forms rewritten as H:MM before reading, only where they are certainly a time: "às 9.30", "at 9,45", "9.30pm", "9,30h",
  * "1:30 p. m.", "às 9 e meia", "às 9 e 15", "às 9 e quarenta e cinco", "às 9 horas e trinta minutos", "9h e quinze", "meio-dia e 15",
@@ -430,8 +430,21 @@ function clockForms(t: string): string {
     .replace(new RegExp(`(${AT}\\s*)([01]?\\d|2[0-3])\\s*(?:h|horas?)?\\s+e\\s+${MINUTES}`, 'g'),
       (_, prefix: string, hour: string, minute: string) => `${prefix}${hour}:${minutes(minute)}`)
     .replace(new RegExp(`\\b([01]?\\d|2[0-3])\\s*(?:h|horas?)\\s+e\\s+${MINUTES}`, 'g'), (_, hour: string, minute: string) => `${hour}:${minutes(minute)}`)
-    .replace(new RegExp(`\\b(meio[- ]dia|meia[- ]noite)\\s+e\\s+${MINUTES}`, 'g'), (_, word: string, minute: string) => `${word.startsWith('meio') ? '12' : '00'}:${minutes(minute)}`)
+    .replace(new RegExp(`\\b(meio[- ]dia|meia[- ]noite)\\s+e\\s+${MINUTES}(?!\\s*(?:da|de|in the|at)\\s+(?:manha|tarde|noite|madrugada|morning|afternoon|evening|night)\\b)`, 'g'),
+      (_, word: string, minute: string) => `${word.startsWith('meio') ? '12' : '00'}:${minutes(minute)}`)
     .replace(/\s+/g, ' ').trim();
+}
+/**
+ * The hour of "<h> da manhã / da tarde / da noite / da madrugada" and "<h> in the morning / afternoon / evening / night", or null when the hour
+ * does not belong to that part of the day (refused, never guessed): manhã/morning 1–11; madrugada 1–5; tarde/afternoon 12 (noon) and 1–6
+ * (13:00–18:00); evening 5–11 (17:00–23:00); noite/night 6–11 (18:00–23:00), 12 (midnight) and 1–4 (01:00–04:00: "1 da noite" is 1 a.m.).
+ */
+function partOfDay(h: number, period: string): number | null {
+  if (/manha|morning/.test(period)) return h <= 11 ? h : null;
+  if (/madrugada/.test(period)) return h <= 5 ? h : null;
+  if (/tarde|afternoon/.test(period)) return h === 12 ? 12 : h <= 6 ? h + 12 : null;
+  if (/evening/.test(period)) return h >= 5 && h <= 11 ? h + 12 : null;
+  return h === 12 ? 0 : h <= 4 ? h : h >= 6 ? h + 12 : null;
 }
 /** Explicit times only: 09:30, 9h30, 10:00h, 10h, 7pm, 3 da tarde, às 10, at 9, às 10 horas, meio-dia, midnight (after `clockForms`). A bare number is never a time. */
 function timeMentions(t: string): Mention<string>[] {
@@ -444,14 +457,15 @@ function timeMentions(t: string): Mention<string>[] {
     const h = Number(m[1]) % 12;
     add(m, m[3]!.startsWith('p') ? h + 12 : h, Number(m[2] ?? 0));
   }
-  for (const m of t.matchAll(/\b(1[0-2]|0?[1-9])(?:[:h]([0-5]\d))?\s*(?:h\s*|horas?\s*)?(?:da|de|in the) (manha|tarde|noite|morning|afternoon|evening|night)\b/g)) {
-    const h = Number(m[1]), period = m[3]!, morning = /manha|morning/.test(period);
-    // "12 da noite" is midnight and "12 da tarde" noon; "12 da manhã" is ambiguous and refused.
-    if (morning && h === 12) continue;
-    add(m, morning ? h : h < 12 ? h + 12 : /noite|night/.test(period) ? 0 : 12, Number(m[2] ?? 0));
+  for (const m of t.matchAll(/\b(1[0-2]|0?[1-9])(?:[:h]([0-5]\d))?\s*(?:h\s*|horas?\s*)?(?:da|de|in the|at) (manha|tarde|noite|madrugada|morning|afternoon|evening|night)\b/g)) {
+    // An hour that does not belong to its part of the day ("11 da tarde", "12 in the evening") is refused: the part-of-day word stays unread.
+    const hour = partOfDay(Number(m[1]), m[3]!);
+    if (hour !== null) add(m, hour, Number(m[2] ?? 0));
   }
-  // "10:00h" / "10:00 horas" carry their unit with them.
-  for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*[:h]\s*([0-5]\d)(?:\s*(?:hs?|hrs?|horas?)\b|\b)/g)) add(m, Number(m[1]), Number(m[2]));
+  // "10:00h" / "10:00 horas" carry their unit with them; "10h30" too. Minutes followed by an hour unit are a second hour ("10h 11h",
+  // "10 h 20 h"): both are read as hours, and two times refuse the change.
+  for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?:\s*(?:hs?|hrs?|horas?)\b|\b)/g)) add(m, Number(m[1]), Number(m[2]));
+  for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*h\s*([0-5]\d)\b(?!\s*(?:hs?|hrs?|horas?|hours?)\b)/g)) add(m, Number(m[1]), Number(m[2]));
   for (const m of t.matchAll(/\b([01]?\d|2[0-3])\s*(?:h|hs|hrs?)\b/g)) add(m, Number(m[1]), 0);
   // "às 10" / "at 9" only when an end, a punctuation mark, a weekday or a linking word follows ("as 2 automações" is no time).
   for (const m of t.matchAll(AT_HOUR)) add(m, Number(m[1]), Number(m[2] ?? 0));
@@ -518,6 +532,8 @@ const UNSUPPORTED = new RegExp([
   '\\b(?:this|that|next|one) time\\b', '\\bfor now\\b', '\\bdia (?:todo|inteiro)\\b', '\\b(?:para|pra) n[ao]s?\\b',
   // Approximate times ("~9am", "≈ 10h"): never read as exact.
   '[~\\u2248\\u00b1]',
+  // A time-zone qualifier ("my time", "meu horário", "minha hora", "local time"): the rule keeps its own zone, so FloFi asks instead of guessing.
+  '\\b(?:my|your|our|local|meu|minha|seu|sua|nosso|nossa)\\s+(?:time|hora|horario|fuso)\\b', '\\bfuso\\b',
 ].join('|'));
 /**
  * What is left of a time once the times FloFi read are taken out: if any of it remains, the person wrote a time FloFi cannot read exactly, and
@@ -530,6 +546,8 @@ const UNREAD_TIME = new RegExp([
   `\\b(?:${WEEKDAY_ALTERNATION}|daily|diariamente|diaria|diario|todos os dias|everyday|weekly|semanal|semanalmente)\\b,?\\s+\\d`,
   "\\b(?:meia|quinze|quarto|quarter|half|o'?clock|manha|tarde|noite|madrugada|morning|afternoon|evening|night)\\b",
 ].join('|'));
+/** A clock anchor with no time after it ("friday at", "todo dia às", "sexta às ...", "at the time"): the current time never stands in for it. */
+const DANGLING_AT = /(?:\b(?:at|as)|@)\s*(?:[?!.\u2026]\s*)*(?:$|\bthe\b)/;
 /** A weekday named as one date rather than a weekly day: "this friday", "esta sexta", "next friday", "última sexta". */
 const ONE_DATE = /\b(?:this|that|next|last|coming|esta|este|essa|esse|isso|nesta|neste|nessa|nesse|proxim[ao]s?|ultim[ao]s?)\s+$/;
 /**
@@ -543,7 +561,9 @@ const FILLER: ReadonlySet<string> = new Set([
   'muda', 'mude', 'mudar', 'mudo', 'altera', 'altere', 'alterar', 'troca', 'troque', 'trocar', 'passa', 'passe', 'passar', 'coloca', 'coloque', 'colocar', 'mova', 'mover',
   'edita', 'edite', 'editar', 'reagenda', 'reagende', 'reagendar', 'agenda', 'agende', 'agendar', 'para', 'pra', 'pro', 'o', 'os', 'as', 'ao', 'na', 'no', 'nas', 'nos',
   'em', 'de', 'da', 'do', 'das', 'dos', 'horario', 'hora', 'dia', 'essa', 'esse', 'isso', 'minha', 'meu', 'agora', 'entao', 'toda', 'todo', 'todas', 'todos', 'cada',
-  'automacao', 'agendamento']);
+  'automacao', 'agendamento',
+  // Polite and common forms that carry no schedule meaning ("pode mudar para sexta?", "can you change it to friday", "aos sábados").
+  'pode', 'podes', 'poderia', 'voce', 'vc', 'can', 'could', 'would', 'you', 'aos']);
 /** `t` with the mentioned spans blanked out. */
 const blank = (t: string, mentions: readonly Mention<unknown>[]) => mentions.reduce((rest, m) => rest.slice(0, m.index) + ' '.repeat(m.end - m.index) + rest.slice(m.end), t);
 /**
@@ -588,11 +608,11 @@ const DURATION_WORDS: ReadonlySet<string> = new Set(['in', 'for', 'em']);
  * What may stand before a weekday (articles skipped) besides a clause start, a time or a frequency: "para sexta", "on Friday", "set it for
  * Friday", "toda sexta", "todas as sextas", "nas sextas", "no sábado", "ao sábado".
  */
-const DAY_LEADS: ReadonlySet<string> = new Set(['to', 'para', 'pra', 'pro', 'for', 'on', 'every', 'each', 'cada', 'toda', 'todo', 'todas', 'todos', 'na', 'nas', 'no', 'nos', 'ao']);
+const DAY_LEADS: ReadonlySet<string> = new Set(['to', 'para', 'pra', 'pro', 'for', 'on', 'every', 'each', 'cada', 'toda', 'todo', 'todas', 'todos', 'na', 'nas', 'no', 'nos', 'ao', 'aos', 'it']);
 /** What may stand before a frequency (articles skipped) besides a clause start, a time or a weekday: "muda para diário", "make it daily". */
 const FREQUENCY_LEADS: ReadonlySet<string> = new Set(['to', 'para', 'pra', 'pro', 'it']);
 /** Words that stand only before a weekday (articles skipped): "every Friday", "toda sexta", "todas as sextas", "on Friday", "nas sextas". */
-const BEFORE_A_DAY: ReadonlySet<string> = new Set(['every', 'each', 'cada', 'toda', 'todo', 'todas', 'todos', 'on', 'na', 'nas', 'nos']);
+const BEFORE_A_DAY: ReadonlySet<string> = new Set(['every', 'each', 'cada', 'toda', 'todo', 'todas', 'todos', 'on', 'na', 'nas', 'nos', 'aos']);
 /** "no" stands only right before a Portuguese masculine weekday ("no sábado", "no domingo"): before anything else it is the English negation ("no Friday", "no 10am"). */
 const NO_DAY = /^(?:sabados?|domingos?|sab|dom)$/;
 /** Words after which a mark ends a clause ("ok, sexta às 10h"); after any other word a mark starts nothing ("now, 2h", "for: 2h"). */
@@ -666,7 +686,7 @@ function sourcesIn(t: string, tokens: readonly Token[]): ReadonlySet<Mention<unk
  */
 export function parseScheduleChange(text: string, current: RuleView['schedule']): ScheduleChange | null {
   const t = clockForms(foldText(text));
-  if (!t || UNSUPPORTED.test(t)) return null;
+  if (!t || UNSUPPORTED.test(t) || DANGLING_AT.test(t)) return null;
   const times = timeMentions(t);
   // A day number that is no time FloFi read is a day of the month ("todo dia 5", "dia 15 às 10h"): unsupported. "todo dia 9h" is a time.
   for (const m of t.matchAll(/\b(?:dias?|days?)\s+(\d{1,2})(?!\d)/g)) if (!times.some(time => time.index === m.index + m[0].length - m[1]!.length)) return null;

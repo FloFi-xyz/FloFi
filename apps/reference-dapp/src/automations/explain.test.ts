@@ -385,3 +385,38 @@ describe('parseScheduleChange (deterministic, never invents a time)', () => {
     expect(parseScheduleChange('change from 9am to 10am', { frequency: 'WEEKLY', weekday: 1, time: '09:00' })).toEqual({ frequency: 'WEEKLY', weekday: 1, time: '10:00' });
   });
 });
+
+describe('parseScheduleChange — controlled finalization pass (four root causes of the last 48 violations)', () => {
+  const at0745: RuleView['schedule'] = { frequency: 'WEEKLY', weekday: 1, time: '07:45' };
+  const weekly = (weekday: number, time: string) => ({ frequency: 'WEEKLY' as const, weekday, time });
+  const daily = (time: string) => ({ frequency: 'DAILY' as const, weekday: null, time });
+  // RC1: a second hour written after the first is never read as minutes; two times are ambiguous and are asked for.
+  it.each(['10h 11h', 'sexta 10h 12h', 'every day 9h 21h', 'todo dia 8h 20h', 'diariamente 6h 18h', 'muda para 9h 10h', 'às 10h 11h', '10 h 20 h',
+    'sexta 9h 20hrs', '9h 59h', 'às 10h 15 horas', 'às 8h e 20 horas', 'todo dia às 8h e 20 horas', 'sexta às 10h e 15 h', 'às 9h e 21 horas', 'às 6h e 18 h',
+    'às 10 horas e 20 horas', '9 horas e 21 horas', 'meia-noite e 12 horas'])('RC1 %j → null', text => expect(parseScheduleChange(text, at0745)).toBeNull());
+  // RC2: the hour must belong to the part of the day; "1 da noite" is 1 a.m. (the owner's rule); anything else that does not fit is asked for.
+  it.each<[string, ReturnType<typeof parseScheduleChange>]>([
+    ['às 1 da noite', weekly(1, '01:00')], ['à 1 da noite', weekly(1, '01:00')], ['às 2 da noite', weekly(1, '02:00')], ['às 3 da noite', weekly(1, '03:00')],
+    ['às 4 da noite', weekly(1, '04:00')], ['às 2h30 da noite', weekly(1, '02:30')], ['às 1:30 da noite', weekly(1, '01:30')], ['at 1 in the night', weekly(1, '01:00')],
+    ['at 4 in the night', weekly(1, '04:00')], ['às 9 da noite', weekly(1, '21:00')], ['às 12 da noite', weekly(1, '00:00')], ['às 3 da madrugada', weekly(1, '03:00')],
+    ['às 3 da tarde', weekly(1, '15:00')], ['às 6 da tarde', weekly(1, '18:00')], ['às 12 da tarde', weekly(1, '12:00')], ['às 7 da manhã', weekly(1, '07:00')],
+    ['at 7 in the evening', weekly(1, '19:00')], ['sexta às 8 da noite', weekly(5, '20:00')],
+  ])('RC2 %j → %j', (text, expected) => expect(parseScheduleChange(text, at0745)).toEqual(expected));
+  it.each(['at 12 in the evening', 'at 12:30 in the evening', 'at 1 in the evening', 'at 2 in the evening', 'às 11 da tarde', 'at 11 in the afternoon',
+    'às 10 da tarde', 'meio-dia e quinze da noite', 'às 5 da noite', 'às 12 da manhã', 'às 8 da madrugada'])('RC2 %j → null', text =>
+    expect(parseScheduleChange(text, at0745)).toBeNull());
+  // RC3: a time-zone qualifier is never dropped (the rule keeps its own zone): FloFi asks.
+  it.each(['at 10am my time', 'friday 10am (my time)', 'às 10h meu horário', 'muda para sexta às 10h minha hora', 'at 10am in my time', 'at 10am local time'])(
+    'RC3 %j → null', text => expect(parseScheduleChange(text, at0745)).toBeNull());
+  // RC4: a clock anchor with no time after it never keeps the current time.
+  it.each(['change it to friday at', 'every day at', 'todo dia às', 'muda para sexta às', 'friday at ?', 'sexta às ...', 'friday at the time'])(
+    'RC4 %j → null', text => expect(parseScheduleChange(text, at0745)).toBeNull());
+  // Phrasings that must keep working (none of the fixes above may refuse them).
+  it.each<[string, ReturnType<typeof parseScheduleChange>]>([
+    ['muda para sexta', weekly(5, '07:45')], ['change it to friday at 10am', weekly(5, '10:00')], ['toda segunda às 9h', weekly(1, '09:00')],
+    ['every day at 9', daily('09:00')], ['às 21h30', weekly(1, '21:30')], ['9:30 pm', weekly(1, '21:30')], ['muda para quarta às 10 e meia', weekly(3, '10:30')],
+    ['todas as noites às 21h', daily('21:00')], ['às 10h30', weekly(1, '10:30')], ['às 9 e 15', weekly(1, '09:15')], ['às 9h e quarenta e cinco', weekly(1, '09:45')],
+    ['aos sábados às 10h', weekly(6, '10:00')], ['pode mudar para sexta?', weekly(5, '07:45')], ['can you change it to friday', weekly(5, '07:45')],
+    ['make it friday', weekly(5, '07:45')], ['make it friday at 10am', weekly(5, '10:00')], ['friday @ 10am', weekly(5, '10:00')], ['todo dia 9h', daily('09:00')],
+  ])('must work: %j → %j', (text, expected) => expect(parseScheduleChange(text, at0745)).toEqual(expected));
+});
