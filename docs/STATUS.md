@@ -7,6 +7,18 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## HOTFIX-FLOFI-PRODUCTION-RECOVERY-001 — history, Aave Supply on Arbitrum One, sign-in
+
+**Status: PR on `claude/peaceful-galileo-7r9j2j` (from main `8a92f1f`) — unit, disposable-PostgreSQL, MOCKED loopback-browser and read-only
+on-chain evidence; no transaction signed or sent, no production setting changed.**
+- History: the Dashboard now forwards the signed-in account's session to `/v1/runs` (it got `403 BETA_SESSION_REQUIRED`).
+- Aave: Aave governance moved the Ethereum, Base and Arbitrum One Pools to revision 12; the stale pins refused every Supply
+  (`SUPPLY_DEPLOYMENT_MISMATCH`). Verified upgrades are recorded and pinned; anything else still fails closed.
+- Sign-in: a `/login` page from an earlier deployment now says so and reloads instead of "Sign-in did not complete" on every retry.
+  Owner action: enable Vercel Skew Protection.
+
+See the [build note](builds/HOTFIX-FLOFI-PRODUCTION-RECOVERY-001.md).
+
 ## BUILD-FLOFI-FLIGHT-EMAILS-1311-001 — Boarding emails for Friday 13 Nov
 
 **Status: PR #189 — unit, disposable-PostgreSQL and CI evidence; nothing was sent from this work, and production operations are the
