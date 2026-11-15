@@ -8,8 +8,9 @@
  *   node apps/reference-dapp/backend/main.ts import-journal <flow> <absolute journal dir> <run id>
  *                                                            copy one validated local run log into PostgreSQL
  *
- * Configuration is environment-only (see docs/deploy/CLOUD.md). The backend holds no key, signs nothing and
- * has no transaction submission path; API and worker refuse to start against an unmigrated schema, and serve a newer one only
+ * Configuration is environment-only (see docs/deploy/CLOUD.md). The backend holds no key, signs nothing and creates no
+ * transaction: its only submission path is the workflow-run worker relaying bytes an owner's wallet already signed (USER_FUNDED groups,
+ * src/workflow-runs/worker.ts). API and worker refuse to start against an unmigrated schema, and serve a newer one only
  * under this build's forward-compatibility certificate (BUILD-DB-COMPAT-001, docs/deploy/SCHEMA-COMPATIBILITY.md).
  */
 import { readFile } from 'node:fs/promises';
@@ -21,8 +22,10 @@ import { createRobinhoodTransferService } from '../src/server/robinhood-transfer
 import { deploymentEnvironment } from '../src/server/deployment.ts';
 import { createSupplyService } from '../src/server/supply-service.ts';
 import { validatePublicRunLog } from '../src/server/public-testnet-service.ts';
+import type { WorkflowRunWorkerParts } from '../src/workflow-runs/worker.ts';
 import { createBackend } from './app.ts';
 import { flowMode, FLOWS, isFlowName, type FlowName } from './flows.ts';
+import { loadFailureFields, type LoadFailureFields } from './load-failure.ts';
 import { assertDedicatedPreviewDatabase } from './preview-migration.ts';
 
 const [command, ...rest] = process.argv.slice(2);
@@ -32,6 +35,11 @@ let stage = 'command';
 // BUILD-DB-COMPAT-001: the database's schema version, plus this build's and the certified newer migrations when the database is ahead.
 const schemaFields = (schema: SchemaCompatibility) => ({ schema_version: schema.version, ...schema.forward.length
   ? { application_schema_version: schema.application, forward_migrations: schema.forward.map(m => `${m.version}_${m.name}`).join(',') } : {} });
+// An opt-in subsystem that throws while loading is disabled with its fixed code plus the cause's closed fields (`load-failure.ts`): never the
+// exception text. Its own configuration refusals keep their `reason` (a variable name).
+type Disabled = { readonly disabled: string; readonly reason: string | null; readonly failure?: LoadFailureFields };
+const loadFailed = (code: string) => (error: unknown): Disabled => ({ disabled: code, reason: null, failure: loadFailureFields(error) });
+const disabledFields = (parts: Disabled) => ({ error_code: parts.disabled, reason: parts.reason ?? undefined, ...parts.failure });
 
 async function main(): Promise<void> {
   if (command === 'migrate') {
@@ -114,15 +122,18 @@ async function main(): Promise<void> {
     // (owner CRUD/state, no-authority handoffs). Off by default; a load failure leaves every existing route serving.
     let routes = backend.routes;
     if (process.env.FLOFI_AUTOMATIONS === 'enabled') {
-      const extra = await import('./automation-api.ts').then(m => m.loadAutomationApi(process.env, { db, tenantId: config.tenantId, backend, logger })).catch(() => null);
-      if (extra) { routes = [...routes, ...backend.protectRoutes(extra)]; logger.info('automation.api_enabled', { routes: extra.map(r => r.name).join(',') }); }
-      else logger.error('automation.api_disabled', { error_code: 'AUTOMATION_API_LOAD_FAILED' });
+      const extra = await import('./automation-api.ts').then(m => m.loadAutomationApi(process.env, { db, tenantId: config.tenantId, backend, logger }))
+        .catch(loadFailed('AUTOMATION_API_LOAD_FAILED'));
+      if (Array.isArray(extra)) { routes = [...routes, ...backend.protectRoutes(extra)]; logger.info('automation.api_enabled', { routes: extra.map(r => r.name).join(',') }); }
+      else logger.error('automation.api_disabled', disabledFields(extra));
       // BUILD-AUTOMATION-002: owner operations of delegated execution (passkeys, Credentials, authorizations). Off by default; they never
       // sign or submit (no executor on the API).
       if (process.env.FLOFI_DELEGATION === 'enabled') {
-        const delegation = await import('./delegation-api.ts').then(m => m.loadDelegationApi(process.env, { db, tenantId: config.tenantId, logger })).catch(() => null);
-        if (delegation) { routes = [...routes, ...backend.protectRoutes(delegation)]; logger.info('delegation.api_enabled', { routes: delegation.map(r => r.name).join(',') }); }
-        else logger.error('delegation.api_disabled', { error_code: 'DELEGATION_API_LOAD_FAILED' });
+        const delegation = await import('./delegation-api.ts').then(m => m.loadDelegationApi(process.env, { db, tenantId: config.tenantId, logger }))
+          .catch(loadFailed('DELEGATION_API_LOAD_FAILED'));
+        if (Array.isArray(delegation)) {
+          routes = [...routes, ...backend.protectRoutes(delegation)]; logger.info('delegation.api_enabled', { routes: delegation.map(r => r.name).join(',') });
+        } else logger.error('delegation.api_disabled', disabledFields(delegation));
       }
     }
     const server = createHttpServer({ routes, logger, authToken: config.apiAuthToken,
@@ -140,8 +151,8 @@ async function main(): Promise<void> {
   let automations: { readonly handlers: Readonly<Record<string, WorkHandler>>; readonly sweep: () => Promise<unknown> } | null = null;
   if (process.env.FLOFI_AUTOMATIONS === 'enabled') {
     const parts = await import('./automation-worker.ts').then(m => m.loadAutomationWorker(process.env, db, config.tenantId, logger))
-      .catch(() => ({ disabled: 'AUTOMATION_WORKER_LOAD_FAILED', reason: null }));
-    if ('disabled' in parts) logger.error('automation.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
+      .catch(loadFailed('AUTOMATION_WORKER_LOAD_FAILED'));
+    if ('disabled' in parts) logger.error('automation.worker_disabled', disabledFields(parts));
     else { automations = parts; logger.info('automation.worker_enabled', { kinds: Object.keys(parts.handlers).join(','), telegram: parts.telegram }); }
   }
   // BUILD-AUTOMATION-002: the delegated executor, opt-in (FLOFI_DELEGATED_EXECUTION=enabled) and only with a signer provider — which a hosted
@@ -149,25 +160,31 @@ async function main(): Promise<void> {
   let delegation: { readonly handlers: Readonly<Record<string, WorkHandler>>; readonly sweep: () => Promise<unknown> } | null = null;
   if (process.env.FLOFI_DELEGATED_EXECUTION === 'enabled') {
     const parts = await import('./delegation-worker.ts').then(m => m.loadDelegationWorker(process.env, db, config.tenantId, logger))
-      .catch(() => ({ disabled: 'DELEGATION_WORKER_LOAD_FAILED', reason: null }));
-    if ('disabled' in parts) logger.error('delegation.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
+      .catch(loadFailed('DELEGATION_WORKER_LOAD_FAILED'));
+    if ('disabled' in parts) logger.error('delegation.worker_disabled', disabledFields(parts));
     else { delegation = parts; logger.info('delegation.worker_enabled', { kinds: Object.keys(parts.handlers).join(',') }); }
   }
   // BUILD-CHAT-E2E-001: multi-step workflow runs, opt-in (FLOFI_WORKFLOW_RUNS=enabled): observes owner-signed steps through this worker's own
-  // flow services (read-only) and mirrors delegated executions; it never signs or submits. Off: nothing below changes.
-  let workflowRuns: { readonly handlers: Readonly<Record<string, WorkHandler>>; readonly sweep: () => Promise<unknown> } | null = null;
+  // flow services (read-only) and mirrors delegated executions; it never signs. For USER_FUNDED runs it relays only what the owner's wallet
+  // signed (same bytes on any resend; src/workflow-runs/worker.ts, src/user-funded/groups.ts). Off: nothing below changes.
+  let workflowRuns: WorkflowRunWorkerParts | null = null;
   if (process.env.FLOFI_WORKFLOW_RUNS === 'enabled') {
     const parts = await import('./workflow-run-worker.ts').then(m => m.loadWorkflowRunWorker(process.env, db, config.tenantId, logger, backend))
-      .catch(() => ({ disabled: 'WORKFLOW_RUN_WORKER_LOAD_FAILED', reason: null }));
-    if ('disabled' in parts) logger.error('workflow_run.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
-    else { workflowRuns = parts; logger.info('workflow_run.worker_enabled', { kinds: Object.keys(parts.handlers).join(',') }); }
+      .catch(loadFailed('WORKFLOW_RUN_WORKER_LOAD_FAILED'));
+    if ('disabled' in parts) logger.error('workflow_run.worker_disabled', disabledFields(parts));
+    else {
+      workflowRuns = parts;
+      // `user_funded`: `enabled`, or the closed code that leaves USER_FUNDED runs waiting; `delegation`: whether delegated runs are mirrored.
+      logger.info('workflow_run.worker_enabled', { kinds: Object.keys(parts.handlers).join(','), user_funded: parts.capabilities.userFunded,
+        delegation: parts.capabilities.delegation });
+    }
   }
   // BUILD-FLOFI-FLIGHT-LAUNCH-001: Flight FloFi campaign email (Resend), opt-in (FLOFI_FLIGHT_EMAIL=enabled). Its own cycle beside the queue;
   // a missing setting disables only it (logged with a fixed code). It never touches workflows, wallets or execution. Off: nothing changes.
   if (process.env.FLOFI_FLIGHT_EMAIL === 'enabled') {
     const parts = await import('./flight-email-worker.ts').then(m => m.loadFlightEmailWorker(process.env, db, config.tenantId, logger))
-      .catch(() => ({ disabled: 'FLIGHT_EMAIL_WORKER_LOAD_FAILED' }));
-    if ('disabled' in parts) logger.error('flight.email.worker_disabled', { error_code: parts.disabled });
+      .catch(loadFailed('FLIGHT_EMAIL_WORKER_LOAD_FAILED'));
+    if ('disabled' in parts) logger.error('flight.email.worker_disabled', disabledFields({ reason: null, ...parts }));
     else {
       parts.start();
       process.once('SIGTERM', () => { void parts.stop(); }); process.once('SIGINT', () => { void parts.stop(); });
@@ -181,8 +198,18 @@ async function main(): Promise<void> {
   const tenantQueue = createPostgresWorkQueue({ db, ownerId: config.workerId, tenantId: config.tenantId });
   const queue = { ...tenantQueue, claim: (limit: number) => tenantQueue.claim(limit, Object.keys(handlers)) };
   const worker = createWorker({ queue, handlers, logger, workerId: config.workerId, concurrency: config.workerConcurrency,
-    sweep: async () => { try { await sweep(db, { tenantId: config.tenantId }); } finally { await automations?.sweep(); await delegation?.sweep().catch(() => undefined);
-      await workflowRuns?.sweep().catch(() => undefined); } } });
+    sweep: async () => {
+      // Every subsystem sweeps even when another fails. A failure of the reconciliation sweep or the automation sweep still fails `work.sweep`
+      // (as before, now after the others ran); the delegation and workflow-run sweeps log their own closed cause instead of being dropped.
+      const reconciliation = await sweep(db, { tenantId: config.tenantId }).then(() => null, (error: unknown) => ({ error }));
+      const automation = await automations?.sweep().then(() => null, (error: unknown) => ({ error })) ?? null;
+      await delegation?.sweep().catch((error: unknown) => logger.warn('delegation.sweep_failed', loadFailureFields(error)));
+      await workflowRuns?.sweep().then(
+        ({ expired, rearmed }) => { if (expired || rearmed) logger.info('workflow_run.swept', { expired, rearmed }); },
+        (error: unknown) => logger.warn('workflow_run.sweep_failed', loadFailureFields(error)));
+      const failure = reconciliation ?? automation;
+      if (failure) throw failure.error;
+    } });
   workerLoop = worker;
   // A stop requested while the queue was being assembled is already closing the database: the loop never starts.
   if (!workerStopRequested) await worker.start();

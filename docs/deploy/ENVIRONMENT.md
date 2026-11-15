@@ -403,6 +403,17 @@ edit) cancels the API preview behind it, identical concurrent previews share one
 
 Scope these to the **Production** environment on Vercel: Preview deployments share the production database (see SCHEMA-COMPATIBILITY.md).
 
+The worker's startup log says `workflow_run.worker_enabled` once the runner is loaded, with `kinds: workflow-run.advance`, `user_funded`
+(`enabled`, or the closed code that leaves USER_FUNDED runs waiting) and `delegation` (whether delegated runs are mirrored). Its sweep logs
+`workflow_run.swept` (`expired`, `rearmed`) when it changed something and `workflow_run.sweep_failed` with the cause fields below. A load failure logs
+`workflow_run.worker_disabled` with `error_code: WORKFLOW_RUN_WORKER_LOAD_FAILED` and the cause as closed fields only: `cause_code` (a closed
+code or Node's `ERR_*` code), `node_error`, `sql_state`, `system_error`, `error_type` and `module` (the repository file it points at). The
+exception text is never logged.
+The other opt-in subsystems (`automation.*`, `delegation.*`, `flight.email.*`, API and worker) log the same fields on a load failure. Every
+module the backend loads must also load on plain Node with type stripping only, so no constructor parameter properties, `enum` or `namespace`:
+`backend/plain-node-closure.test.ts` checks the whole import graph. A violation in a module the runner imports disabled multi-step workflow runs
+on the production worker from 2026-11-13 to the hotfix (`src/gas-sponsorship/paymaster-service.ts`, `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`).
+
 ## 5l. Dashboard wallet portfolio (BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001, Dashboard → Wallet portfolio)
 
 A read-only snapshot of the connected wallet's balances: no signer, no submission, nothing persisted. Which networks it reads follows the

@@ -197,8 +197,8 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 owner user operation (ERC-4337 v0.7
 async function lostOperation(runId: string) {
   const owner = await evmWallet(), address = owner.address.toLowerCase(), receipts = new Map<string, unknown>(), sent: erc4337.PackedUserOperation[] = [];
   const state: { sequence: bigint | Error; head: bigint; logs: { blockNumber: bigint; log: Record<string, unknown> }[]; getLogs: Error | null; refusal: string | null;
-    nonceReads: number; ranges: [bigint, bigint][]; onSend: (() => void) | null } = { sequence: 0n, head: 1_000_000n, logs: [], getLogs: null, refusal: null, nonceReads: 0,
-    ranges: [], onSend: null };
+    nonceReads: number; ranges: [bigint, bigint][]; onSend: (() => void) | null; known: boolean } = { sequence: 0n, head: 1_000_000n, logs: [], getLogs: null, refusal: null,
+    nonceReads: 0, ranges: [], onSend: null, known: false };
   const plain = chain(address, 10n ** 18n, receipts);
   let key = 0n;
   const transport: ChainTransport = { chain: BASE, provenance: 'MOCKED', rpc: async (method, params) => {
@@ -222,7 +222,7 @@ async function lostOperation(runId: string) {
   const lostBundler: BundlerClient = { chainId: 8453, verify: async () => undefined,
     estimate: async () => ({ verificationGasLimit: 100_000n, callGasLimit: 200_000n, preVerificationGas: 60_000n }),
     send: async op => { sent.push(op); state.onSend?.(); if (state.refusal) throw bundlerRefusal(state.refusal); return erc4337.userOpHash(op, 8453); },
-    receipt: async () => null, known: async () => false };
+    receipt: async () => null, known: async () => state.known };
   const deps: UserFundedDeps = { chains: [BASE], evm: () => transport, bundler: () => lostBundler, solana: null, jupiter: null, now: () => new Date('2026-11-07T10:00:00Z') };
   const { composition, requirement } = compose(TWO_TRANSFERS);
   const prepared = await prepareGroup(deps, composition, requirement, { runId, groupIndex: 0, strategy: 'EVM_USER_OPERATION', chain: BASE, feePayer: address, stepFrom: 0, stepTo: 1 });
@@ -314,6 +314,24 @@ describe('P1 review fix: a user operation the bundler forgot is decided by the c
     // Consumed from now on: never resent again.
     expect(await o.reconcile()).toMatchObject({ status: 'RECONCILED', transactions: [txHash] });
     expect(o.sent).toHaveLength(4);
+  });
+
+  it('a refused resend of an operation the bundler meanwhile holds (a concurrent pass relayed it) is never FAILED: PENDING, then reconciled', async () => {
+    const o = await lostOperation('wfr_' + 'q'.repeat(26));
+    // Another pass relays the same signed bytes first; this pass's resend is refused as a duplicate in words no rule recognises.
+    o.state.refusal = 'duplicate user operation hash in mempool';
+    o.state.onSend = () => { o.state.known = true; };
+    const reads = o.state.nonceReads;
+    expect(await o.reconcile()).toEqual({ status: 'PENDING' });
+    // The nonce is unconsumed (only in the mempool), so without the bundler's word this used to read as FAILED: it is not read again here.
+    expect(o.state.nonceReads - reads).toBe(1);
+    expect(o.sent).toHaveLength(1);
+    // While the bundler knows it, reconciliation waits for its receipt (no lost-operation path, no resend).
+    expect(await o.reconcile()).toEqual({ status: 'PENDING' });
+    expect(o.sent).toHaveLength(1);
+    // The same refusal when the bundler does NOT hold it, and the nonce still unconsumed after it: provably never executed, FAILED.
+    o.state.known = false; o.state.onSend = null;
+    expect(await o.reconcile()).toEqual({ status: 'FAILED', code: 'USER_OPERATION_REJECTED', gasPaid: null, transactions: [] });
   });
 
   it('an unreadable EntryPoint nonce decides nothing: PENDING, nothing resent', async () => {
