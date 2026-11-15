@@ -12,7 +12,8 @@
  *   explainRuleStatus    why a rule ran, did not run, or when it is evaluated next — only from recorded facts; a missing fact is named, never guessed
  *   AUTOMATION_FAQ       short answers that state what the code does (EN/PT), `automationFaq` and the keyword matcher `matchAutomationFaq`
  *   parseScheduleChange  a deterministic EN/PT reading of a schedule change ("muda para sexta", "change it to Friday 9:30"); it fails closed —
- *                        a word it did not read and that is no filler refuses the change — and never invents a time or a day
+ *                        a word it did not read and that is no filler, a symbol or emoji, or a reading out of place ("in 2h", "from 9am",
+ *                        "no Friday") refuses the change — and never invents a time or a day
  */
 import { translate } from '../i18n/translate.ts';
 import type { Language } from '../i18n/language.ts';
@@ -387,17 +388,23 @@ export function matchAutomationFaq(text: string): AutomationFaqTopic | null {
 export type ScheduleChange = SchedulePatchView;
 type Mention<T> = { readonly index: number; readonly end: number; readonly value: T };
 const pad = (n: number) => String(n).padStart(2, '0');
-/** Portuguese weekday abbreviations ("seg", "ter", …, "sáb", "dom", with or without a dot): read in a schedule change only, never by the FAQ matcher. */
-const PT_WEEKDAY_ABBREVIATIONS = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'] as const;
-const WEEKDAY_READINGS: readonly (readonly [string, number])[] = WEEKDAY_WORDS.map(([words, day]) => [`${words}|${PT_WEEKDAY_ABBREVIATIONS[day - 1]!}`, day] as const);
+/**
+ * Portuguese weekday abbreviations ("seg", "qua", "qui", "sex", "sáb", "dom", with or without a dot): read in a schedule change only, never by
+ * the FAQ matcher. "ter" is not one: it is also the verb "to have" ("muda para ter a automação às 10h"), so Tuesday is read only as "terça".
+ */
+const PT_WEEKDAY_ABBREVIATIONS: Readonly<Partial<Record<number, string>>> = { 1: 'seg', 3: 'qua', 4: 'qui', 5: 'sex', 6: 'sab', 7: 'dom' };
+const WEEKDAY_READINGS: readonly (readonly [string, number])[] = WEEKDAY_WORDS.map(([words, day]) => {
+  const abbreviation = PT_WEEKDAY_ABBREVIATIONS[day];
+  return [abbreviation ? `${words}|${abbreviation}` : words, day] as const;
+});
 const WEEKDAY_ALTERNATION = WEEKDAY_READINGS.map(([w]) => w).join('|');
 function weekdayMentions(t: string): Mention<number>[] {
   const found: Mention<number>[] = [];
   for (const [words, day] of WEEKDAY_READINGS) for (const m of t.matchAll(new RegExp(`\\b(?:${words})\\b`, 'g'))) found.push({ index: m.index, end: m.index + m[0].length, value: day });
   return found.sort((a, b) => a.index - b.index);
 }
-/** A time anchor: "às" (folded "as"), "at", "a partir das", "@". */
-const AT = `(?:\\b(?:as|at|a partir das)|@)`;
+/** A time anchor: "às" (folded "as"), "at", "@". ("a partir das 10h", from 10h on, is a bound and refused in UNSUPPORTED.) */
+const AT = `(?:\\b(?:as|at)|@)`;
 /**
  * "às 10" / "at 9" when an end, a punctuation mark, a weekday or a linking word follows — and never when the hour goes on with more of a time
  * FloFi did not read ("at 9.5", "às 9 e 5", "às 9 e meio": refused below rather than read as 9:00).
@@ -475,17 +482,17 @@ function frequencyFits(frequency: Frequency, time: string | undefined): boolean 
   return frequency === 'NIGHTS' ? hour >= 18 : frequency === 'MORNINGS' ? hour >= 5 && hour < 12 : true;
 }
 /**
- * One value from several mentions: a single distinct value, or — only in an explicit change "from X to Y" / "de X para Y" with a change
- * verb — the value after the target word. Anything else is ambiguous (a range such as "segunda a sexta"): null.
+ * One value from the mentions of a weekday or of a time: a single mention that is no source ("from Friday", "das 10h"), or — only in an
+ * explicit change "from X to Y" / "de X para Y" with a change verb, nothing else between them, X the current value and Y another one — Y.
+ * Anything else is null: a repeated or ranged value ("de segunda a segunda", "de 9h às 9h", "monday to monday"), a source alone ("muda de
+ * sexta") or a source that is not the current value (FloFi does not move a schedule from a day or time it is not on).
  */
-function resolve<T>(t: string, mentions: readonly Mention<T>[]): T | null | undefined {
-  const distinct = [...new Set(mentions.map(m => m.value))];
-  if (!distinct.length) return undefined;
-  if (distinct.length === 1) return distinct[0]!;
-  if (distinct.length > 2 || !CHANGE_VERB.test(t)) return null;
-  const first = mentions[0]!, last = mentions[mentions.length - 1]!;
-  const before = t.slice(0, first.index), between = t.slice(first.end, last.index);
-  return /\b(?:from|de|da|do|dos|das)\s*$/.test(before) && /^\s*(?:to|para|pra)\b/.test(between) && first.value !== last.value ? last.value : null;
+function resolve<T>(t: string, mentions: readonly Mention<T>[], sources: ReadonlySet<Mention<unknown>>, current: T | null | undefined): T | null | undefined {
+  const [first, second] = mentions;
+  if (!first) return undefined;
+  if (!second) return sources.has(first) ? null : first.value;
+  return mentions.length === 2 && CHANGE_VERB.test(t) && sources.has(first) && !sources.has(second) && first.value === current && second.value !== current
+    && /^\s*(?:to|para|pra|pro)(?:\s+(?:o|os|a|as|the))?\s*$/.test(t.slice(first.end, second.index)) ? second.value : null;
 }
 const MONTHS = 'janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|march|april|may|june|july|august|september|october|november|december';
 /** Month names that are no ordinary word (EN "may" and "march" count only next to a day number). */
@@ -499,13 +506,16 @@ const UNSUPPORTED = new RegExp([
   '\\b(?:mensal|mensalmente|todo mes|cada mes|monthly|every month|each month)\\b',
   '\\b\\d{1,2}(?:st|nd|rd|th)\\b', '\\d\\s*[\\u00ba\\u00aa]', '\\bon the \\d', '\\b\\d{1,2}[/-]\\d{1,2}\\b',
   `\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:de\\s+|of\\s+)?(?:${MONTHS})\\b`, `\\b(?:${MONTHS})\\s+\\d{1,2}(?!\\d)`, `\\b(?:${MONTHS_ALONE})\\b`,
-  '\\b(?:every|each|a cada|cada)\\s+(?:\\d+|other|second|third|alternate|two|three|four|five|six|seven|eight|nine|ten|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|outra|outro|hour|hora|minute|minuto)\\b',
+  // "every 2h", "cada 6h", "a cada 12h": an interval, also when the number is glued to its unit.
+  '\\b(?:every|each|a cada|cada)\\s+(?:\\d|(?:other|second|third|alternate|two|three|four|five|six|seven|eight|nine|ten|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|outra|outro|hours?|horas?|minutes?|minutos?)\\b)',
   '\\b(?:biweekly|bi-weekly|fortnight\\w*|quinzen\\w*|bimestral|bimensal|trimestral|quarterly|semestral|yearly|annual\\w*|anual\\w*|hourly|de hora em hora)\\b',
   '\\b(?:twice|thrice|once|vez|vezes|times)\\b', '\\b(?:semana|dia) sim\\b', '\\balternad\\w*', '\\bintercalad\\w*',
-  '\\b(?:weekdays?|weekends?|workdays?|business days?|dias? uteis|dia util|dias? de semana|fins? de semana|fim de semana|finais de semana|final de semana)\\b',
+  '\\b(?:weekdays?|week[- ]days?|weekends?|week[- ]ends?|workdays?|work[- ]days?|business days?|dias? uteis|dia util|dias? de semana|fins? de semana|fim de semana|finais de semana|final de semana)\\b',
   '\\b(?:exceto|excepto|except|excluding|exclude|menos|salvo|tirando|sem ser|but not)\\b',
   '\\b(?:hoje|amanha|ontem|today|tomorrow|tonight|yesterday|until|till|desde|starting|beginning)\\b', '\\bate (?:o )?dia\\b',
-  '\\bnext (?:week|month|year)\\b', '\\b(?:semana|mes|ano) que vem\\b', '\\bproxim[ao] (?:semana|mes|ano)\\b', '\\ba partir d[eo]\\b',
+  '\\bnext (?:week|month|year)\\b', '\\b(?:semana|mes|ano) que vem\\b', '\\bproxim[ao] (?:semana|mes|ano)\\b', '\\ba partir d[aeo]s?\\b',
+  // One-off or temporary changes ("friday this time", "for now"), "o dia todo" (all day long) and "para na sexta" (parar: stop on Friday).
+  '\\b(?:this|that|next|one) time\\b', '\\bfor now\\b', '\\bdia (?:todo|inteiro)\\b', '\\b(?:para|pra) n[ao]s?\\b',
   // Approximate times ("~9am", "≈ 10h"): never read as exact.
   '[~\\u2248\\u00b1]',
 ].join('|'));
@@ -536,16 +546,123 @@ const FILLER: ReadonlySet<string> = new Set([
   'automacao', 'agendamento']);
 /** `t` with the mentioned spans blanked out. */
 const blank = (t: string, mentions: readonly Mention<unknown>[]) => mentions.reduce((rest, m) => rest.slice(0, m.index) + ' '.repeat(m.end - m.index) + rest.slice(m.end), t);
-/** The words (any script) and numbers left in `rest` that are not FILLER. */
-const unreadWords = (rest: string) => (rest.replace(/\bpor favor\b/g, ' ').match(/[\p{L}\p{N}]+/gu) ?? []).filter(word => !FILLER.has(word));
+/**
+ * The only marks a schedule change may contain besides what FloFi read: clause marks, and "@" right before a time ("friday @ 10am"). Any other
+ * symbol or emoji — "+2h", "-1h", ">9am", "≥ 9h", "9h/9h", "9h-9h", "≠ friday", "❌ friday", "sexta 🕙", "friday 🌅" — refuses the change:
+ * FloFi never drops what it cannot read.
+ */
+const MARKS: ReadonlySet<string> = new Set(['.', ',', ';', ':', '!', '?', "'", '"', '(', ')', '@']);
+type MentionKind = 'TIME' | 'DAY' | 'FREQUENCY';
+type Token = { readonly kind: MentionKind; readonly mention: Mention<unknown> } | { readonly kind: 'WORD'; readonly text: string } | { readonly kind: 'MARK'; readonly text: string };
+/**
+ * `t` as what FloFi read (each time, weekday and frequency) and the words and marks between them, in order — or null when two readings overlap,
+ * a word (any script) or number is no FILLER, or a symbol is no MARK.
+ */
+function tokenize(t: string, mentions: readonly (readonly [MentionKind, Mention<unknown>])[]): Token[] | null {
+  const text = t.replace(/\bpor favor\b/g, phrase => ' '.repeat(phrase.length));
+  const found: Token[] = [];
+  let at = 0;
+  const between = (end: number) => [...text.slice(at, end).matchAll(/[\p{L}\p{N}]+|\S/gu)].every(([piece]) => {
+    const word = /^[\p{L}\p{N}]/u.test(piece);
+    found.push(word ? { kind: 'WORD', text: piece } : { kind: 'MARK', text: piece });
+    return word ? FILLER.has(piece) : MARKS.has(piece);
+  });
+  for (const [kind, mention] of [...mentions].sort((a, b) => a[1].index - b[1].index)) {
+    if (mention.index < at || !between(mention.index)) return null;
+    found.push({ kind, mention });
+    at = mention.end;
+  }
+  return between(text.length) ? found : null;
+}
+/** Skipped when looking at what stands before a weekday or a frequency ("para o sábado", "todos os sábados", "às sextas"). */
+const ARTICLES: ReadonlySet<string> = new Set(['o', 'os', 'a', 'as', 'the']);
+/** Words that make the weekday or time right after them the one the schedule moves FROM ("from Monday", "de segunda", "das 9h"). */
+const SOURCE_WORDS: ReadonlySet<string> = new Set(['from', 'de', 'da', 'do', 'das', 'dos']);
+/** Clock anchors before a time: "às 10h", "at 9:30", "à meia-noite", "ao meio-dia", "@ 10am". */
+const TIME_ANCHORS: ReadonlySet<string> = new Set(['as', 'at', 'a', 'ao', '@']);
+/** What may stand right before an unanchored time besides a clause start, its weekday or its frequency: the target word ("to 10am", "para 10h"). */
+const TIME_LEADS: ReadonlySet<string> = new Set(['to', 'para', 'pra', 'pro']);
+/** Words that make the time after them a duration or an offset, even with a clock anchor ("in 2h", "for 2h", "em 2 horas e meia"). */
+const DURATION_WORDS: ReadonlySet<string> = new Set(['in', 'for', 'em']);
+/**
+ * What may stand before a weekday (articles skipped) besides a clause start, a time or a frequency: "para sexta", "on Friday", "set it for
+ * Friday", "toda sexta", "todas as sextas", "nas sextas", "no sábado", "ao sábado".
+ */
+const DAY_LEADS: ReadonlySet<string> = new Set(['to', 'para', 'pra', 'pro', 'for', 'on', 'every', 'each', 'cada', 'toda', 'todo', 'todas', 'todos', 'na', 'nas', 'no', 'nos', 'ao']);
+/** What may stand before a frequency (articles skipped) besides a clause start, a time or a weekday: "muda para diário", "make it daily". */
+const FREQUENCY_LEADS: ReadonlySet<string> = new Set(['to', 'para', 'pra', 'pro', 'it']);
+/** Words that stand only before a weekday (articles skipped): "every Friday", "toda sexta", "todas as sextas", "on Friday", "nas sextas". */
+const BEFORE_A_DAY: ReadonlySet<string> = new Set(['every', 'each', 'cada', 'toda', 'todo', 'todas', 'todos', 'on', 'na', 'nas', 'nos']);
+/** "no" stands only right before a Portuguese masculine weekday ("no sábado", "no domingo"): before anything else it is the English negation ("no Friday", "no 10am"). */
+const NO_DAY = /^(?:sabados?|domingos?|sab|dom)$/;
+/** Words after which a mark ends a clause ("ok, sexta às 10h"); after any other word a mark starts nothing ("now, 2h", "for: 2h"). */
+const CLAUSE_WORDS: ReadonlySet<string> = new Set(['ok', 'okay', 'please']);
+/**
+ * Where each reading stands, in a closed set of positions — fail closed: any other position refuses the change. A time stands after a clock
+ * anchor (às/at/à/ao/@), a clause start, a target word (to/para/pra/pro), its weekday or its frequency — never after "in", "for" or "em" (a
+ * duration or an offset: "in 2h", "em 2h30"), "every" / "cada" (an interval: "every 2h") or "no" (a negation: "no 10am"). A weekday stands
+ * after a clause start, a target word, "on" / "for", "every" / "toda" / "todas as", "na" / "nas" / "nos" / "no" (Portuguese masculine only) or
+ * "ao", a time or a frequency. A clause starts at the start of the text or at a mark after a reading or after "ok" / "please". "from" stands
+ * only before a weekday or a time, and no preposition ends a clause. A weekday or a time right after "from" / "de" / "da" / "do" / "das" /
+ * "dos" is a SOURCE (what the schedule moves from), returned so `resolve` can refuse it outside "from <current> to <new>"; a frequency is
+ * never one. Returns the sources, or null when a position is not one of these.
+ */
+function sourcesIn(t: string, tokens: readonly Token[]): ReadonlySet<Mention<unknown>> | null {
+  const sources = new Set<Mention<unknown>>();
+  const word = (j: number, words: ReadonlySet<string>) => { const token = tokens[j]; return token !== undefined && 'text' in token && words.has(token.text); };
+  const reading = (j: number, ...kinds: readonly MentionKind[]) => { const kind = tokens[j]?.kind; return kind !== undefined && (kinds as readonly string[]).includes(kind); };
+  const clause = (j: number) => {
+    if (j < 0) return true;
+    if (tokens[j]?.kind !== 'MARK' || word(j, TIME_ANCHORS)) return false;
+    let k = j - 1;
+    while (tokens[k]?.kind === 'MARK') k--;
+    return k < 0 || reading(k, 'TIME', 'DAY', 'FREQUENCY') || (tokens[k]?.kind === 'WORD' && word(k, CLAUSE_WORDS));
+  };
+  const back = (i: number) => { let j = i - 1; while (tokens[j]?.kind === 'WORD' && word(j, ARTICLES)) j--; return j; };
+  const ahead = (i: number) => { let j = i + 1; while (tokens[j]?.kind === 'WORD' && word(j, ARTICLES)) j++; return j; };
+  for (const [i, token] of tokens.entries()) {
+    if (token.kind === 'MARK') {
+      if (token.text === '@' && !reading(i + 1, 'TIME')) return null;
+      continue;
+    }
+    if (token.kind === 'WORD') {
+      if (token.text === 'from' && !reading(ahead(i), 'TIME', 'DAY')) return null;
+      if (BEFORE_A_DAY.has(token.text) && !reading(ahead(i), 'DAY')) return null;
+      if ((SOURCE_WORDS.has(token.text) || DURATION_WORDS.has(token.text)) && (i + 1 === tokens.length || tokens[i + 1]!.kind === 'MARK')) return null;
+      const right = tokens[i + 1];
+      if (token.text === 'no' && !(right?.kind === 'DAY' && NO_DAY.test(t.slice(right.mention.index, right.mention.end)))) return null;
+      continue;
+    }
+    if (token.kind === 'TIME') {
+      const anchored = /^(?:as|at|@)/.test(t.slice(token.mention.index, token.mention.end)), byAnchor = !anchored && word(i - 1, TIME_ANCHORS);
+      const lead = byAnchor ? i - 2 : i - 1;
+      if (word(lead, SOURCE_WORDS)) sources.add(token.mention);
+      else if (word(lead, DURATION_WORDS)) return null;
+      else if (!(anchored || byAnchor || clause(lead) || word(lead, TIME_LEADS) || reading(lead, 'DAY', 'FREQUENCY'))) return null;
+      continue;
+    }
+    const lead = back(i);
+    if (word(lead, SOURCE_WORDS)) {
+      if (token.kind === 'FREQUENCY') return null;
+      sources.add(token.mention);
+      continue;
+    }
+    const day = token.kind === 'DAY';
+    if (!(clause(lead) || word(lead, day ? DAY_LEADS : FREQUENCY_LEADS) || reading(lead, 'TIME', day ? 'FREQUENCY' : 'DAY'))) return null;
+  }
+  return sources;
+}
 /**
  * The schedule a person asked for, read deterministically from their words: `{ frequency, weekday, time }`, or null. It FAILS CLOSED by
- * construction: after reading the weekday, the time and the frequency, every word left must be a FILLER word (no schedule meaning); any other
- * word or number — a qualifier, a time zone, an approximation, a date, an amount — makes it null, so FloFi asks for the day and time instead.
- * A weekday makes it WEEKLY; "daily" / "todos os dias" makes it DAILY. Anything not said is kept from `current`: a time that was not written
- * is never invented (the current time stays), and "weekly" with no weekday keeps the current one (or, from a daily schedule, is null: FloFi
- * does not pick a day). With no current schedule, every part must be said. A time FloFi cannot read exactly, a choice of times ("9 or 10"),
- * several weekdays and any qualifier it would drop make it null: never a time or a day the person did not write.
+ * construction: after reading the weekday, the time and the frequency, every word left must be a FILLER word (no schedule meaning) and every
+ * symbol one of the MARKS, and each reading must stand where it can only mean the new schedule (`sourcesIn`); anything else — a qualifier, a
+ * time zone, an approximation, a date, an amount, a duration ("in 2h"), an interval ("every 2h", "de 2h em 2h"), a bound or source ("from 9am",
+ * "muda de sexta"), a range ("de segunda a segunda"), a negation ("no Friday"), a symbol or an emoji — makes it null, so FloFi asks for the day
+ * and time instead. A weekday makes it WEEKLY; "daily" / "todos os dias" makes it DAILY. Anything not said is kept from `current`: a time that
+ * was not written is never invented (the current time stays), and "weekly" with no weekday keeps the current one (or, from a daily schedule,
+ * is null: FloFi does not pick a day). With no current schedule, every part must be said. A time FloFi cannot read exactly, a choice of times
+ * ("9 or 10"), several weekdays and any qualifier it would drop make it null: never a time or a day the person did not write. An explicit
+ * "from X to Y" is read only when X is the current weekday or time.
  */
 export function parseScheduleChange(text: string, current: RuleView['schedule']): ScheduleChange | null {
   const t = clockForms(foldText(text));
@@ -558,10 +675,12 @@ export function parseScheduleChange(text: string, current: RuleView['schedule'])
   if (UNREAD_TIME.test(blank(t, times))) return null;
   const days = weekdayMentions(t), frequencies = frequencyMentions(t);
   if (days.some(d => ONE_DATE.test(t.slice(0, d.index)))) return null;
-  // Fail closed: every word was read above or is a filler.
-  if (unreadWords(blank(t, [...times, ...days, ...frequencies])).length) return null;
+  // Fail closed: every word was read above or is a filler, every symbol is a mark, and every reading stands where it means the new schedule.
+  const tokens = tokenize(t, [...times.map(m => ['TIME', m] as const), ...days.map(m => ['DAY', m] as const), ...frequencies.map(m => ['FREQUENCY', m] as const)]);
+  const sources = tokens && sourcesIn(t, tokens);
+  if (!sources) return null;
   const daily = frequencies.some(f => f.value !== 'WEEKLY'), weekly = frequencies.some(f => f.value === 'WEEKLY');
-  const day = resolve(t, days), time = resolve(t, times);
+  const day = resolve(t, days, sources, current?.frequency === 'WEEKLY' ? current.weekday : null), time = resolve(t, times, sources, current?.time);
   if (day === null || time === null || (daily && (day !== undefined || weekly))) return null;
   if (!frequencies.every(f => frequencyFits(f.value, time))) return null;
   if (!daily && !weekly && day === undefined && time === undefined) return null;

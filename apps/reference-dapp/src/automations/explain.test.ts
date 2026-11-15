@@ -320,4 +320,68 @@ describe('parseScheduleChange (deterministic, never invents a time)', () => {
     // The same change without the naming is read.
     expect(parseScheduleChange('change it to friday at 10am', mondayAt0745)).toEqual({ frequency: 'WEEKLY', weekday: 5, time: '10:00' });
   });
+
+  // Every reading must stand where it can only mean the new schedule; a symbol or emoji FloFi did not read refuses the change.
+  it.each([
+    // Durations and offsets: a time after "in", "for" or "em", or "from now", is no clock time.
+    'for 2h', 'for 2 hrs', 'every friday for 2h', 'every friday for 2 hrs', 'in 2h', 'in 3 hrs', 'em 2h', 'in 1h30', 'in 1h',
+    'em 1 hora e 15 minutos', 'em 2 horas e 30 minutos', 'muda para sexta em 2 horas e 30 minutos', 'em 2 horas e meia', 'em 1 hora e meia',
+    'em 2h e 30', 'em 2h30', '2h from now', '10h from now', 'in 2h from now', 'for 2h on friday', 'for 1h', 'for 3hrs every friday', 'in 12h',
+    'in 2h on friday', 'em 1h', 'em 3 horas e meia', 'em 1 hora e 30', 'em 2 horas e quinze minutos', 'muda para em 2h', 'change it to in 2h',
+    'in 1h on friday', 'in 2 h', 'in 2 hs', 'in at 9', 'for: 2h', 'now, 2h', 'daqui a 2h', 'within 2h', '2h later',
+    // Intervals: "every 2h", "cada 6h", "a cada 12h".
+    'cada 2h', 'a cada 12h', 'every 2h', 'each 2h', 'every 1h', 'every 6hrs', 'each 12h', 'cada 6h', 'a cada 1h', 'every 2hs', 'every 3h on friday',
+    'todo dia a cada 2h', 'every 8h daily', 'every 4h on fridays', 'every 12h', 'every 2h, friday', 'each 6hs', 'a cada 2hrs', 'every time at 9',
+    // Sources and bounds: a day or a time FloFi would move FROM, or one the schedule starts from, is not the new one.
+    'from 9am on', 'from 9am on fridays', 'from 9am', 'change it from friday', 'muda de sexta', 'muda da sexta-feira', 'change from 10am',
+    'muda das 10h', 'change from 10am to friday', 'muda de sexta para as 10h', 'change it from friday to 10am', 'change from 9am to friday',
+    'muda de 10h para sexta', 'from 10h', 'das 10h', 'from noon', 'from midnight', 'from 9am every friday', 'friday from 9am', 'from friday',
+    'from friday on', 'from friday at 10am', 'from 9am on mondays', 'from 10am, friday', 'from 10am on', 'change from friday', 'change it from 9am',
+    'move from friday', 'muda do sábado', 'muda das 9h', 'change from friday to 10am', 'from 10am to friday', 'muda das 9h para sexta',
+    'move it from noon to friday', 'muda do meio-dia para sexta', 'muda de domingo para às 10h', 'muda de sexta às 10h', 'muda das sextas às 10h',
+    'change from friday at 10am', 'change from friday 10am', 'a partir das 10h', 'todo dia a partir das 10h', 'from now on friday at 10am',
+    'muda do diário', 'from daily to weekly', 'muda de segunda às 9h para sexta às 10h',
+    // Same-value ranges and intervals: "de segunda a segunda" (every day), "de 2h em 2h" (every 2 hours), "9h/9h".
+    'de segunda a segunda', 'de segunda a segunda às 9h', 'de domingo a domingo às 10h', 'segunda a segunda', 'muda para de segunda a segunda',
+    'from sunday to sunday at 9', 'de sexta a sexta', 'monday to monday', 'friday to friday', 'de 2h em 2h', 'de 3h em 3h', 'todo dia de 12h em 12h',
+    '2h em 2h', 'de 6h em 6h', 'de 1h em 1h às sextas', '9h/9h', 'de 9h às 9h', 'das 9h às 9h', '9h-9h', '9am to 9am', 'muda de segunda para segunda',
+    // "ter" is the verb "to have" here, never Tuesday.
+    'muda para ter a automação às 10h', 'muda para ter o dca às 10h', 'pra ter às 10h', 'para ter às 10h', 'para ter o agendamento às 10h',
+    'muda para ter isso às 10h', 'muda pra ter essa automação às 9h',
+    // Symbols and emoji are never dropped: "+2h" is an offset, ">9am" a bound, "❌ friday" a negation, "🕙" a time FloFi does not read.
+    'agora + 2h', '+1h', '-1h', '+2h', 'friday +1h', '>9am', '<10am', '≥ 9h', '≤ 10h', '9am+', '> 9am', '❌ friday', 'friday ❌', '🚫 friday',
+    '≠ friday', 'now + 2h', 'now+1h', '+ 1h', '-2h', '- 2h', 'friday -1h', '>= 9am', '=> 9am', '!= friday', '9am-', 'friday+', '>friday',
+    '<friday', '≥ friday', '> sexta às 10h', 'sexta às >10h', '10h+', 'sexta 🕙', 'friday at 🕙', 'friday ⏰ 🕥', 'friday at 🔟',
+    'friday at 🕙 please', 'sexta 🌙', 'sexta ☀️', 'friday 🌅', 'friday 🌇', 'friday 🌃', 'sexta às 🕘🕤', 'fri​day', 'friday & monday', 'friday @',
+    // The English negation "no" (Portuguese "no" stands only before sábado / domingo).
+    'no friday', 'no fridays', 'no friday please', 'no 10am', 'no fridays please', 'no on friday', 'no 9am', 'no friday at 10am', 'no to friday',
+    'no friday no', 'no no friday', 'no saturday', 'friday, no monday',
+    // Weekdays only, one-off or temporary changes, "para" as "stop", and "all day".
+    'every week day at 9am', 'each week day', 'every week day', 'each week day at 10', 'every week-day', 'every week day at 10am',
+    'on friday this time', 'friday this time', 'this time on friday', 'change it to friday this time', 'friday for now',
+    'para na sexta', 'para no sábado', 'o dia todo às 9h',
+    // A day or a time FloFi did not read in its position: "muda o sábado" (which one?), "on 10am".
+    'muda o sábado', 'muda sexta', 'on 10am', 'friday from monday', 'change it to friday from monday',
+  ])('%j → null (no reading out of place, no symbol dropped)', text => expect(parseScheduleChange(text, mondayAt0745)).toBeNull());
+  it.each<[string, ReturnType<typeof parseScheduleChange>]>([
+    // An explicit change from the CURRENT day or time to another is read; from any other value it is refused (above and below).
+    ['change it from monday to friday', { frequency: 'WEEKLY', weekday: 5, time: '07:45' }],
+    ['muda da segunda para a sexta', { frequency: 'WEEKLY', weekday: 5, time: '07:45' }],
+    ['muda de segunda para sexta às 10h', { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['change from 7:45 to 10am', { frequency: 'WEEKLY', weekday: 1, time: '10:00' }],
+    ['muda das 7h45 para as 10h', { frequency: 'WEEKLY', weekday: 1, time: '10:00' }],
+    // Portuguese contractions and articles before a weekday, "@" before a time, "set it for Friday", "make it daily".
+    ['no sábado às 10h', { frequency: 'WEEKLY', weekday: 6, time: '10:00' }], ['nas sextas às 10h', { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['todos os sábados às 10h', { frequency: 'WEEKLY', weekday: 6, time: '10:00' }], ['muda para o sábado às 10h', { frequency: 'WEEKLY', weekday: 6, time: '10:00' }],
+    ['toda terça às 10h', { frequency: 'WEEKLY', weekday: 2, time: '10:00' }], ['friday @ 10am', { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['set it for friday at 10am', { frequency: 'WEEKLY', weekday: 5, time: '10:00' }], ['make it daily at 9am', { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    ['ok, sexta às 10h', { frequency: 'WEEKLY', weekday: 5, time: '10:00' }], ['muda às 10h', { frequency: 'WEEKLY', weekday: 1, time: '10:00' }],
+  ])('%j → %j', (text, expected) => expect(parseScheduleChange(text, mondayAt0745)).toEqual(expected));
+  it('reads "from X to Y" only when X is the current weekday or time', () => {
+    expect(parseScheduleChange('muda de sexta para segunda', mondayAt0745)).toBeNull();
+    expect(parseScheduleChange('change from 9am to 10am', mondayAt0745)).toBeNull();
+    expect(parseScheduleChange('muda de segunda para sexta', { frequency: 'DAILY', weekday: null, time: '07:45' })).toBeNull();
+    expect(parseScheduleChange('muda de sexta para segunda', { frequency: 'WEEKLY', weekday: 5, time: '07:45' })).toEqual({ frequency: 'WEEKLY', weekday: 1, time: '07:45' });
+    expect(parseScheduleChange('change from 9am to 10am', { frequency: 'WEEKLY', weekday: 1, time: '09:00' })).toEqual({ frequency: 'WEEKLY', weekday: 1, time: '10:00' });
+  });
 });

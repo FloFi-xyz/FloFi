@@ -124,9 +124,13 @@ in the public product an older test-network proposal is never opened for review 
   old rule's lock: `AUTOMATION_WORKFLOW_CHANGED` / `AUTOMATION_STRATEGY_STALE`), and a delegated rule (`DELEGATED_REAUTHORIZATION_REQUIRED`).
   Saving the replacement authorizes no spending. **In the Copilot**, the new schedule is read from the owner's words deterministically, with
   no model (`automations/explain.ts` `parseScheduleChange`, EN/PT): a weekday, an exact time and a daily or weekly frequency, surrounded only
-  by filler words such as "muda para" or "change it to". It fails closed: **anything FloFi cannot read exactly is refused and the owner is
-  asked for the day and time** — any other word or number, for example "every other", "last Friday of the month", "next Friday", "for 4
-  weeks", "before 9am", a time zone, an approximate time ("around 10"), a bare number or an amount naming the automation. For a saved
+  by filler words such as "muda para" or "change it to", each reading in a position where it can only mean the new schedule (a time after
+  "às" / "at" / "to" / "para" or its weekday, a weekday after "para" / "on" / "toda" / "na"). It fails closed: **anything FloFi cannot read
+  exactly is refused and the owner is asked for the day and time** — any other word, number, symbol or emoji, for example "every other",
+  "last Friday of the month", "next Friday", "for 4 weeks", "before 9am", a time zone, an approximate time ("around 10"), a bare number, an
+  amount naming the automation, a duration or offset ("in 2h", "em 2h30", "+1h"), an interval ("every 2h", "de 2h em 2h"), a bound ("from
+  9am", "a partir das 10h"), a range ("de segunda a segunda"), a negation ("no Friday", "❌ friday") or "this time". An explicit "from X to
+  Y" ("muda de segunda para sexta") is read only when X is the current day or time; a source alone ("muda de sexta") is refused. For a saved
   automation the change card then asks for the new day and time and offers no change to confirm. A part the owner did not mention (the time
   in "muda para sexta") keeps its current value; nothing else is filled in, and a saved automation changes only after the owner's explicit
   confirmation.
