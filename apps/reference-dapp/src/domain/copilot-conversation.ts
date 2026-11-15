@@ -28,10 +28,12 @@ import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopil
   type CopilotIntentV2, type CopilotOrdinal, type CopilotQuestionTopic, type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
 import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage } from './copilot-messages';
 import { answerQuestion, stepSentence, stepSummary, type CopilotFacts } from './copilot-answers';
-import { answerConcept, conceptCatalog, conceptFollowUp, conceptInWorkflow, conceptName, conceptQuestion, matchConcept, type ConceptId, type ConceptLevel,
+import { answerConcept, conceptCatalog, conceptFollowUp, conceptInWorkflow, conceptName, conceptQuestion, foldText, matchConcept, type ConceptId, type ConceptLevel,
   type ConceptProtocol, type ConceptState } from './intelligence/concepts';
 import { ASSIST_COPY, correctTypos, recipientOfferAnswer, resumeRequest } from './copilot-assist';
 import { matchPlatformTopic, platformAnswer, type PlatformSurface, type PlatformTopic } from './intelligence/platform-guide';
+import { automationFaq, matchAutomationFaq, parseScheduleChange } from '../automations/explain';
+import { validateAutomationInput } from '../automations/definition';
 import { ecosystemOfAddress, maskSavedRecipients, matchSavedRecipients, recipientLabelKey, savedRecipientAddress, savedRecipientLabel, SAVED_RECIPIENT_MARKER,
   type SavedRecipient, type SavedRecipientEcosystem } from './saved-recipients';
 import { copilotNetworksMentioned, type CopilotNetworkId } from './network-registry';
@@ -116,6 +118,11 @@ export type CopilotConversation = {
   readonly recipientOffer?: RecipientOffer | null;
   /** Addresses whose save offer the user declined in this conversation: never offered again. */
   readonly recipientDeclined?: readonly string[];
+  /**
+   * BUILD-FLOFI-UNIFIED-COPILOT-001: the automation this conversation is about — the proposal FloFi last showed (and whether the owner created it),
+   * or null input after a management turn — so "e se o preço cair?" or "muda para segunda" refers to it.
+   */
+  readonly automation?: { readonly input: AutomationInput | null; readonly created: boolean } | null;
 };
 export type RecipientOffer = { readonly address: string; readonly ecosystem: SavedRecipientEcosystem; readonly suggestion: string | null;
   /** True once the user accepted and FloFi asked for the name. */ readonly naming: boolean };
@@ -436,6 +443,9 @@ function changedSteps(env: CopilotEnvironment, command: Command): WorkflowStep[]
 }
 const pendingSteps = (env: CopilotEnvironment): WorkflowStep[] => env.pending && env.pending.command.type !== 'REMOVE' ? changedSteps(env, env.pending.command) : [];
 /** Records a proposal the user can now see, whoever made it (the Copilot or the exact grammar). */
+/** BUILD-FLOFI-UNIFIED-COPILOT-001: the owner created the automation FloFi proposed (its later changes are a confirmed replacement of the saved rule). */
+export const automationCreated = (state: CopilotConversation): CopilotConversation =>
+  state.automation ? { ...state, automation: { ...state.automation, created: true } } : state;
 export function recordProposal(state: CopilotConversation, env: CopilotEnvironment, command: Command, sentence?: string,
   learned: { readonly readings: readonly ProposalReading[]; readonly request: string } | null = null): CopilotConversation {
   if (state.referents[0]?.command === command) return state;
@@ -930,6 +940,44 @@ function platformReply(topic: PlatformTopic, language: CopilotLanguage, env: Cop
   const answer = platformAnswer(topic, language, env.surface ?? 'WEB');
   return reply('ANSWER', answer.text, { topic: 'PLATFORM', ...answer.link ? { link: answer.link } : {} });
 }
+const AUTOMATION_WORD = /(?:^|\s)(?:automac\w*|automation\w*|automatiz\w*|dca|recorrente|recurring|compra recorrente)(?:\s|$)/;
+const QUESTIONISH = /\?\s*$|(?:^|\s)(?:o que acontece|what happens|e se|what if|and if|como|how|por que|porque|why|pode|can it|will it|vai|sera que|e quando|when)(?:\s|$)/;
+const MANAGE_VERBS: readonly (readonly [CopilotAutomationOperation, RegExp])[] = [
+  ['PAUSE', /(?:^|\s)(?:pausa|pausar|pause|suspende|suspender)(?:\s|$)/], ['RESUME', /(?:^|\s)(?:retoma|retomar|resume|reativa|reativar|reactivate|despausa)(?:\s|$)/],
+  ['ARCHIVE', /(?:^|\s)(?:exclui|excluir|apaga|apagar|deleta|deletar|delete|remove|remover|cancela|cancelar|arquiva|arquivar|archive)(?:\s|$)/],
+  ['LIST', /(?:^|\s)(?:quais|which|what|lista|list|mostra|mostrar|show|ver|see)(?:\s|$)/]];
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the automation this conversation is about. A question about how automations behave is FloFi's own answer; "muda
+ * para segunda" re-proposes an automation the owner has not created yet (a saved one is changed only through FloFi's confirmed replacement); a
+ * pause/resume/delete/list request opens the owner's own automations for an explicit confirmation. Nothing here changes a saved automation.
+ */
+function automationTurn(state: CopilotConversation, text: string, env: CopilotEnvironment, language: CopilotLanguage): TurnStart | null {
+  const folded = foldText(text), about = Boolean(state.automation) || AUTOMATION_WORD.test(folded);
+  if (!about || folded.length > 160 || /0x[0-9a-f]{6}/i.test(text)) return null;
+  const a = ASSIST_COPY[language], current = state.automation?.input ?? null;
+  // A schedule change of the proposal FloFi just showed and the owner has not created: the same proposal, with the new schedule.
+  if (current && !state.automation?.created && 'schedule' in current && current.schedule) {
+    const change = parseScheduleChange(text, current.schedule);
+    if (change) {
+      const patched = { ...current, schedule: { ...current.schedule, ...change } } as AutomationInput, valid = validateAutomationInput(patched, Date.now());
+      if (valid.ok) {
+        const value = reply('AUTOMATION_PROPOSAL', a.automationUpdated, { automation: patched });
+        return { kind: 'LOCAL', reply: value, next: aside(state, text, COPILOT_TRANSCRIPT.proposed + patched.name, { automation: { input: patched, created: false } }) };
+      }
+    }
+  }
+  const manage = (operation: CopilotAutomationOperation): TurnStart => ({ kind: 'LOCAL', reply: withDraftReminder(reply('AUTOMATION_MANAGE', a.manage[operation],
+    { manage: { operation, request: text } }), state, language), next: aside(state, text, `Flofi opened the user's saved automations (${operation}).`, { automation: { input: null, created: true } }) });
+  const question = QUESTIONISH.test(folded), faq = matchAutomationFaq(text);
+  // A saved automation's schedule changes only by a confirmed replacement, which the owner's own automation view prepares.
+  if (state.automation?.created && faq === 'SCHEDULE_CHANGE' && !question) return manage('RESCHEDULE');
+  if (faq === 'WHY_NOT_RUN' && (state.automation?.created || AUTOMATION_WORD.test(folded))) return manage('WHY_NOT_RUN');
+  if (question && faq && faq !== 'SCHEDULE_CHANGE') return { kind: 'LOCAL', reply: withDraftReminder(reply('ANSWER', automationFaq(faq, language), { topic: 'AUTOMATIONS' }), state, language),
+    next: aside(state, text, `Flofi explained how automations behave (${faq}).`) };
+  if (!AUTOMATION_WORD.test(folded)) return null;
+  const verb = MANAGE_VERBS.find(([operation, pattern]) => pattern.test(folded) && (operation === 'LIST' || !question));
+  return verb ? manage(verb[0]) : null;
+}
 /** "What can you explain?": the catalog's names, with a few of them as options. */
 const conceptMenu = (language: CopilotLanguage): { readonly text: string; readonly notes: readonly string[]; readonly options: readonly string[] } => {
   const names = conceptCatalog(language).map(entry => entry.name);
@@ -945,6 +993,8 @@ function assistTurn(state: CopilotConversation, text: string, env: CopilotEnviro
   if (draft && answerDraftField(draft.intent, draft.expected ?? [], text)) return null;
   const followUp = state.concept ? conceptFollowUp(text) : null, asked = followUp ? null : conceptQuestion(text);
   if (!followUp && !asked) {
+    const automated = automationTurn(state, text, env, language);
+    if (automated) return automated;
     // "Como conecto minha Phantom?", "onde vejo minhas automações?": FloFi's own guide to its screens, never a change.
     const topic = matchPlatformTopic(text);
     if (!topic) return null;
@@ -1124,7 +1174,10 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
   switch (intent.kind) {
     case 'AUTOMATION': {
       const automation = groundAutomationDraft(intent.draft, segmentText(state), env.timezone ?? 'UTC', Date.now(), language);
-      if (automation.kind === 'PROPOSAL') return terminal(state, reply('AUTOMATION_PROPOSAL', ASSIST_COPY[language].automationProposal, { automation: automation.input }), COPILOT_TRANSCRIPT.proposed + automation.input.name);
+      if (automation.kind === 'PROPOSAL') {
+        const done = terminal(state, reply('AUTOMATION_PROPOSAL', ASSIST_COPY[language].automationProposal, { automation: automation.input }), COPILOT_TRANSCRIPT.proposed + automation.input.name);
+        return { ...done, next: { ...done.next, automation: { input: automation.input, created: false } } };
+      }
       if (automation.kind === 'CLARIFICATION') return question(state, m, automation.message, [], { intent, expected: automation.missing, options: [], amountFill: false, snapshot: snapshotOf(env) });
       return refused(state, m, automation.message);
     }
@@ -1135,8 +1188,9 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       const value = withDraftReminder(reply('AUTOMATION_MANAGE', ASSIST_COPY[language].manage[intent.operation], { manage: { operation: intent.operation, request: state.segment.at(-1) ?? '' } }),
         state, language);
       const summary = `Flofi opened the user's saved automations (${intent.operation}).`;
-      if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
-      return terminal(state, value, summary);
+      if (state.draft) return { reply: value, next: { ...state, automation: { input: null, created: true }, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+      const done = terminal(state, value, summary);
+      return { ...done, next: { ...done.next, automation: { input: null, created: true } } };
     }
     // PR B: a short, contextual reason; the full capability list is only the answer to a CAPABILITIES question.
     case 'UNSUPPORTED': return refused(state, m, publicText(safeCopilotProse(intent.reason)) || m.cannotAuthor);
@@ -1167,6 +1221,12 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       }
       // BUILD-FLOFI-INTELLIGENCE-001: a capability question about a named network is answered from that network's Capability API profile; the model's
       // explanation (grounded by the server in the tool facts it read) is shown apart from FloFi's own answer, labelled as such.
+      const faq = intent.topic === 'AUTOMATIONS' ? matchAutomationFaq(latest) : null;
+      if (faq) {
+        const value = withDraftReminder(reply('ANSWER', automationFaq(faq, language), { topic: 'AUTOMATIONS' }), state, language), summary = `Flofi explained how automations behave (${faq}).`;
+        if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } };
+        return terminal(state, value, summary);
+      }
       const platform = intent.topic === 'PLATFORM' ? matchPlatformTopic(latest) : null;
       if (platform) {
         const value = withDraftReminder(platformReply(platform, language, env), state, language), summary = `Flofi answered how to use FloFi (${platform}).`;
@@ -1526,7 +1586,12 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   const lexicon = lexiconOf(state, env);
   // BUILD-FLOFI-UNIFIED-COPILOT-001: unambiguous typos of network and coin names ("arbriturm", "etheruem") are read as the name they clearly are,
   // but FloFi always says how it read them before it proposes: a corrected word never becomes a proposal in the same turn it was written.
-  const corrected = correctTypos(segmentText(state)), shown = new Set(extras.typos ?? []);
+  // A word the learned vocabulary already knows keeps that path (a glossary meaning for a mainnet only suggests, and the user picks it).
+  const known = new Set(lexicon.map(entry => entry.term.toLowerCase()));
+  const raw = correctTypos(segmentText(state)), unknown = raw.corrections.filter(item => !known.has(item.written));
+  const corrected = unknown.length === raw.corrections.length ? raw
+    : { text: unknown.reduce((text, item) => text.replace(new RegExp(`(?<![\\p{L}])${item.written}(?![\\p{L}])`, 'giu'), item.corrected), segmentText(state)), corrections: unknown };
+  const shown = new Set(extras.typos ?? []);
   const unshown = corrected.corrections.filter(item => !shown.has(item.written));
   const typos = [...shown, ...unshown.map(item => item.written)];
   // BUILD-FLOFI-UNIFIED-COPILOT-001: a saved recipient named exactly ("para Minha Solana") fills an empty destination with its public address.
