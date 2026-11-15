@@ -602,6 +602,10 @@
       "path": "apps/reference-dapp/src/lib/dashboard/run-mapping.test.ts",
       "stage": "unit"
     },
+    "app.mcp.automation-status": {
+      "path": "apps/reference-dapp/src/mcp/automation-status.test.ts",
+      "stage": "unit"
+    },
     "app.mcp.beta-access.pg": {
       "path": "apps/reference-dapp/src/mcp/beta-access.pg.test.ts",
       "stage": "postgres"
@@ -613,6 +617,10 @@
     "app.mcp.deadline.pg": {
       "path": "apps/reference-dapp/src/mcp/deadline.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.mcp.education": {
+      "path": "apps/reference-dapp/src/mcp/education.test.ts",
+      "stage": "unit"
     },
     "app.mcp.gateway": {
       "path": "apps/reference-dapp/src/mcp/gateway.test.ts",
@@ -638,6 +646,10 @@
       "path": "apps/reference-dapp/src/mcp/oauth/foundation.test.ts",
       "stage": "unit"
     },
+    "app.mcp.oauth.no-model": {
+      "path": "apps/reference-dapp/src/mcp/oauth/no-model.test.ts",
+      "stage": "unit"
+    },
     "app.mcp.oauth.server.pg": {
       "path": "apps/reference-dapp/src/mcp/oauth/server.pg.test.ts",
       "stage": "postgres"
@@ -660,6 +672,10 @@
     },
     "app.platform.engineering-skills": {
       "path": "apps/reference-dapp/src/platform/engineering-skills.test.ts",
+      "stage": "unit"
+    },
+    "app.platform.explain": {
+      "path": "apps/reference-dapp/src/platform/explain.test.ts",
       "stage": "unit"
     },
     "app.platform.intelligence-parity": {
@@ -1429,11 +1445,14 @@
     "app.flight.launch",
     "app.i18n.catalog",
     "app.legal.privacy",
+    "app.mcp.automation-status",
+    "app.mcp.education",
     "app.mcp.gateway-deadline",
     "app.mcp.oauth.foundation",
     "app.platform.copilot-tools",
     "app.platform.engineering-continuity",
     "app.platform.engineering-skills",
+    "app.platform.explain",
     "app.platform.intelligence-parity",
     "app.server.base-swap",
     "app.server.channel-copilot-toolkit",
@@ -2687,7 +2706,8 @@
         "app.automations.schedule",
         "app.automations.scheduler.pg",
         "app.backend.automation-production.pg",
-        "app.components.copilot-automation-manager"
+        "app.components.copilot-automation-manager",
+        "app.mcp.automation-status"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -4732,6 +4752,7 @@
       "sources": [
         "apps/reference-dapp/src/mcp/app/panel.ts",
         "apps/reference-dapp/src/mcp/approval-profile.ts",
+        "apps/reference-dapp/src/mcp/automations.ts",
         "apps/reference-dapp/src/mcp/beta-access.ts",
         "apps/reference-dapp/src/mcp/config.ts",
         "apps/reference-dapp/src/mcp/deadline.ts",
@@ -4758,13 +4779,16 @@
         "apps/reference-dapp/src/mcp/tools.ts"
       ],
       "suites": [
+        "app.mcp.automation-status",
         "app.mcp.deadline",
         "app.mcp.deadline.pg",
+        "app.mcp.education",
         "app.mcp.gateway",
         "app.mcp.handoff.workflow.pg",
         "app.mcp.link-integrity.pg",
         "app.mcp.mainnet-only",
         "app.mcp.oauth.foundation",
+        "app.mcp.oauth.no-model",
         "app.mcp.oauth.server.pg",
         "app.mcp.pix-approval-status",
         "app.platform.engineering-continuity",
@@ -4907,6 +4931,7 @@
         "apps/reference-dapp/src/platform/capabilities.ts",
         "apps/reference-dapp/src/platform/catalogs.ts",
         "apps/reference-dapp/src/platform/executions.ts",
+        "apps/reference-dapp/src/platform/explain.ts",
         "apps/reference-dapp/src/platform/fixed-window.ts",
         "apps/reference-dapp/src/platform/handoff-store.ts",
         "apps/reference-dapp/src/platform/ids.ts",
@@ -4923,6 +4948,7 @@
       "suites": [
         "action-registry.engineering-regression",
         "app.platform.engineering-continuity",
+        "app.platform.explain",
         "app.platform.parity",
         "reference-compiler.review",
         "reference-compiler.simulation",
