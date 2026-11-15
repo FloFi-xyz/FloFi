@@ -74,3 +74,24 @@ describe('saved recipient names in a message', () => {
     expect(maskSavedRecipients('Swap 1 ETH to USDC on Base', list)).toBe('Swap 1 ETH to USDC on Base');
   });
 });
+
+describe('review regressions (flofi-security, flofi-chat)', () => {
+  it('a shorter name written on its own still counts beside a longer one ("pra Ana, não pra Mariana" is a question)', () => {
+    const ana = rcp('a', 'Ana', EVM, 'EVM'), mariana = rcp('b', 'Mariana', SOL, 'SOLANA');
+    expect(matchSavedRecipients('manda 10 USDC pra Ana, não pra Mariana', [ana, mariana])).toMatchObject({ kind: 'CHOOSE' });
+    // Inside a longer name only, the shorter one is not a second mention.
+    const carteira = rcp('c', 'Carteira', EVM, 'EVM'), daAna = rcp('d', 'Carteira da Ana', SOL, 'SOLANA');
+    expect(matchSavedRecipients('envia para carteira da ana', [carteira, daAna])).toEqual({ kind: 'ONE', recipient: daAna });
+  });
+  it('masks names with any accent or mark the key folds (Łódź, Šimon, São), and partial names', () => {
+    expect(maskSavedRecipients('para Łódź agora', [rcp('a', 'Łódź', EVM, 'EVM')])).toBe(`para ${SAVED_RECIPIENT_MARKER} agora`);
+    expect(maskSavedRecipients('to ŠIMON please', [rcp('a', 'Šimon', EVM, 'EVM')])).toBe(`to ${SAVED_RECIPIENT_MARKER} please`);
+    expect(maskSavedRecipients('manda pra carteira da empresa', [rcp('a', 'Carteira da empresa Solana', SOL, 'SOLANA')])).toBe(`manda pra ${SAVED_RECIPIENT_MARKER}`);
+    // Text without a saved name is unchanged, accents included.
+    expect(maskSavedRecipients('Não sei, você decide', [rcp('a', 'Ana', EVM, 'EVM')])).toBe('Não sei, você decide');
+  });
+  it('refuses names that already mean a network, a token or the user\'s own wallet', () => {
+    for (const name of ['Solana', 'Base', 'arbitrum one', 'ETH', 'usdc', 'Ethereum', 'minha carteira', 'My wallet', 'mim']) expect(savedRecipientLabel(name), name).toBeNull();
+    for (const name of ['Carteira da empresa Solana', 'Mãe', 'Base da Ana', 'Exchange']) expect(savedRecipientLabel(name), name).toBe(name);
+  });
+});

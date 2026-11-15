@@ -21,13 +21,15 @@ export const resumeRequest = (text: string): boolean => { const folded = foldTex
 
 // ── Typos ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 type Term = { readonly word: string; readonly label: string; readonly network: boolean };
+/** Words of network names that name no network on their own ("Base netwrok" is not Arbitrum One's "network"): never typo targets. */
+const GENERIC: ReadonlySet<string> = new Set(['network', 'mainnet', 'testnet', 'devnet', 'chain', 'sepolia', 'layer', 'rollup']);
 /** Network names (and their words) from the network registry, and coin names people write instead of a ticker. Only words of 5+ letters. */
 const TERMS: readonly Term[] = (() => {
   const out = new Map<string, Term>();
   for (const id of COPILOT_NETWORK_IDS) {
     const identity = networkOfCopilot(id);
     for (const label of [identity.name, ...identity.aliases]) for (const word of foldText(label).split(' '))
-      if (/^[a-z]{5,}$/.test(word) && !out.has(word)) out.set(word, { word, label: identity.name, network: true });
+      if (/^[a-z]{5,}$/.test(word) && !GENERIC.has(word) && !out.has(word)) out.set(word, { word, label: identity.name, network: true });
   }
   for (const [word, label] of [['ethereum', 'Ethereum'], ['ether', 'Ether'], ['solana', 'Solana'], ['tether', 'Tether'], ['bitcoin', 'Bitcoin']] as const)
     if (!out.has(word)) out.set(word, { word, label, network: false });
@@ -87,7 +89,13 @@ export function correctTypos(text: string): { readonly text: string; readonly co
 
 // ── Saving a recipient (optional, never required) ───────────────────────────────────────────────────────────────────────────────────────
 const ACCEPT = /^(?:(?:sim|yes|ok|claro|pode|quero)\s+)*(?:salva|salvar|salve|salvo|guarda|guardar|guarde|save|save it|keep it|adiciona|adicionar|add)(?:\s+(?:o|esse|este|a|essa|esta|it|this|that|the|endereco|address|destinatario|recipient|carteira|wallet|contato|contact|no credentials|in credentials|nos credentials|sim|please|por favor))*(?:\s+(?:como|as|com o nome|com nome|com o nome de|named|called|chamado|chamada)\s+(.+))?$/;
-const DECLINE = /^(?:(?:nao|no|nope|agora nao|not now|depois|later|skip|pular|dispensa|nao precisa|no thanks|nao obrigado|nao obrigada|sem salvar|dont save|do not save|nao salva|nao salvar)\s*)+$/;
+const DECLINE = /^(?:(?:nao|no|nope|agora nao|not now|depois|later|skip|pular|dispensa|nao precisa|no thanks|nao obrigado|nao obrigada|sem salvar|dont save|do not save|nao salva|nao salvar|cancel|cancela|cancelar|cancele|esquece|esqueca|deixa|deixa pra la|deixa para la|never mind|nevermind|forget it|forget about it|stop|para)\s*)+$/;
+/** A message that is a new request or an address, never a name for the address being saved (it drops the offer and is read as itself). */
+const REQUEST_VERB = /^(?:swap|bridge|send|transfer|buy|sell|supply|deposit|borrow|repay|withdraw|add|remove|troca|trocar|manda|mandar|envia|enviar|transfere|transferir|compra|comprar|vende|vender|deposita|depositar|empresta|emprestar|saca|sacar|fornece|fornecer|faz|fazer|quero|i want|please|por favor)(?:\s|$)/;
+export const requestLikeName = (text: string): boolean => {
+  const folded = foldText(text);
+  return REQUEST_VERB.test(folded) || /0x[0-9a-f]{6}/i.test(text) || /[1-9A-HJ-NP-Za-km-z]{32,}/.test(text) || /\d+(?:[.,]\d+)?\s*(?:usdc|usdt|eth|weth|sol|wbtc|btc|arb|dai)\b/i.test(text);
+};
 export type RecipientOfferAnswer = { readonly kind: 'ACCEPT'; readonly label: string | null } | { readonly kind: 'DECLINE' };
 /** The user's answer to FloFi's offer to save a typed address: accept (with an optional name written after "como"/"as"), or decline. */
 export function recipientOfferAnswer(text: string): RecipientOfferAnswer | null {
@@ -125,7 +133,7 @@ export const ASSIST_COPY = {
     recipientName: (suggestion: string | null) => `What name should I save it under?${suggestion ? ` For example: “${suggestion}”.` : ''}`,
     recipientSaving: (label: string) => `Saving “${label}” in Credentials…`,
     recipientDeclined: 'OK, not saved. Your request is unchanged.',
-    recipientLabelInvalid: 'That name cannot be used (at most 40 characters, no addresses or numbers that look like keys or cards). Try another name.',
+    recipientLabelInvalid: 'That name cannot be used (at most 40 characters, no addresses or numbers that look like keys or cards, and not a network, a token or “my wallet”). Try another name.',
     recipientLabelTaken: (label: string) => `You already have a saved recipient called “${label}”. Choose another name.`,
     recipientNamed: (label: string, ecosystem: string, address: string) => `Saved recipient “${label}” (${ecosystem}): ${address}. A saved name is not proof the wallet is yours; check the full address at Review.`,
     recipientChoose: (names: readonly string[]) => `Which saved recipient do you mean: ${join(names.map(name => `“${name}”`), 'or')}?`,
@@ -155,7 +163,7 @@ export const ASSIST_COPY = {
     recipientName: (suggestion: string | null) => `Com que nome eu salvo?${suggestion ? ` Por exemplo: “${suggestion}”.` : ''}`,
     recipientSaving: (label: string) => `Salvando “${label}” no Credentials…`,
     recipientDeclined: 'Certo, não salvei. Seu pedido continua igual.',
-    recipientLabelInvalid: 'Esse nome não pode ser usado (até 40 caracteres, sem endereços nem números que pareçam chaves ou cartões). Tente outro nome.',
+    recipientLabelInvalid: 'Esse nome não pode ser usado (até 40 caracteres, sem endereços nem números que pareçam chaves ou cartões, e não pode ser uma rede, um token ou “minha carteira”). Tente outro nome.',
     recipientLabelTaken: (label: string) => `Você já tem um destinatário salvo chamado “${label}”. Escolha outro nome.`,
     recipientNamed: (label: string, ecosystem: string, address: string) => `Destinatário salvo “${label}” (${ecosystem}): ${address}. Um nome salvo não prova que a carteira é sua; confira o endereço completo na Review.`,
     recipientChoose: (names: readonly string[]) => `Qual destinatário salvo você quer usar: ${join(names.map(name => `“${name}”`), 'ou')}?`,

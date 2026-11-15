@@ -201,3 +201,72 @@ describe('continuity and safety', () => {
     expect(s.say('WETH')).toMatchObject({ kind: 'PROPOSAL' });
   });
 });
+
+describe('review regressions (flofi-security, flofi-chat)', () => {
+  const OLD = '0x2222222222222222222222222222222222222222', SAVED_EVM = '0x1111111111111111111111111111111111111111';
+  it('no saved name or saved address reaches the model in FloFi\'s own transcript entries (a "which one?" question, a proposal summary)', () => {
+    const two = mainnet('PT'); two.recipients = [saved('Carteira da empresa Base', EVM, 'EVM'), saved('Carteira da empresa Arbitrum', SAVED_EVM, 'EVM', 'b')];
+    expect(two.say('envia 5 USDC na Base para a carteira da empresa', intent.action(act.transfer({ network: 'BASE', asset: 'USDC', amount: '5' }), 'PT'))!.kind).toBe('CLARIFICATION');
+    let sent = '';
+    two.say('na verdade, troca 1 ETH por USDC na Base', request => { sent = JSON.stringify(request.messages);
+      return { ok: true, intent: intent.action(act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT') }; });
+    expect(sent).not.toMatch(/Carteira da empresa|carteira da empresa/);
+    const s = mainnet('PT'); s.recipients = [saved('Minha Solana', SOL, 'SOLANA')];
+    expect(s.say('Manda 5 USDC da Base para Minha Solana', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '5' }), 'PT'))!.sentence).toContain(SOL);
+    s.say('agora troca 1 ETH por USDC na Base', request => { sent = JSON.stringify(request.messages);
+      return { ok: true, intent: intent.action(act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT') }; });
+    expect(sent).not.toContain(SOL);
+    expect(sent).not.toMatch(/Minha Solana/);
+  });
+  it('a saved name in a repeat replaces the carried destination, never keeping the old address', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Minha Carteira Base', SAVED_EVM, 'EVM')];
+    expect(s.say(`envia 5 USDC na Base para ${OLD}`, intent.action(act.transfer({ network: 'BASE', asset: 'USDC', amount: '5', recipient: OLD }), 'PT'))!.kind).toBe('PROPOSAL');
+    s.apply();
+    const again = s.say('manda o mesmo para Minha Carteira Base', intent.repeat({ recipient: SAVED_RECIPIENT_MARKER }, {}, 'PT'))!;
+    expect(again.kind).toBe('PROPOSAL');
+    expect(again.sentence).toContain(SAVED_EVM);
+    expect(again.sentence).not.toContain(OLD);
+  });
+  it('"which one?" buttons pick exactly that saved recipient for the same request, without a model call', () => {
+    const two = mainnet('PT'); two.recipients = [saved('Carteira da empresa Base', EVM, 'EVM'), saved('Carteira da empresa Arbitrum', SAVED_EVM, 'EVM', 'b')];
+    two.say('envia 5 USDC na Base para a carteira da empresa', intent.action(act.transfer({ network: 'BASE', asset: 'USDC', amount: '5' }), 'PT'));
+    const picked = two.say('Carteira da empresa Arbitrum')!;
+    expect(picked).toMatchObject({ kind: 'PROPOSAL' });
+    expect(picked.sentence).toContain(SAVED_EVM);
+    expect(two.turns.at(-1)!.request).toBeNull();
+  });
+  it('a typo reading is shown even when FloFi stops on another field, so the later proposal never carries an unseen correction', () => {
+    const s = mainnet();
+    const stopped = s.say('swap 1 etherr to XYZ on Arbitrum One', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'ETH', outputAsset: 'OTHER', amount: '1' })))!;
+    expect(stopped.kind).toBe('UNSUPPORTED');
+    expect(stopped.notes).toContain('I read “etherr” as Ether.');
+    expect(s.say('USDC', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' })))!.kind).toBe('PROPOSAL');
+  });
+  it('FloFi\'s own answer buttons win over a concept follow-up ("Across only" after "o que é bridge?" selects the route, it explains nothing)', () => {
+    const s = mainnet('PT');
+    expect(s.say('quero fazer uma bridge de USDC da Base para a Arbitrum One', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC' }), 'PT'))!.kind)
+      .toBe('CLARIFICATION');
+    expect(s.say('o que é bridge?')).toMatchObject({ kind: 'ANSWER', topic: 'CONCEPT' });
+    s.state = { ...s.state, draft: { ...s.state.draft!, shown: ['Só Across'], options: [{ label: 'Só Across', fill: { kind: 'ACTION', patch: { routing: 'ACROSS' } } }] } } as typeof s.state;
+    const picked = s.say('Só Across', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', routing: 'ACROSS' }), 'PT'))!;
+    expect(picked.topic).not.toBe('CONCEPT');
+  });
+  it('typo targets are distinctive names only: "Base netwrok" is not read as Arbitrum One', () => {
+    const reply = mainnet().say('swap 10 USDC to ETH on Base netwrok', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '10' })))!;
+    expect(reply.kind).toBe('PROPOSAL');
+    expect(JSON.stringify(reply)).not.toMatch(/Arbitrum/);
+  });
+  it('a request typed while FloFi waits for a name drops the offer instead of becoming the name; "cancelar" declines', () => {
+    const s = mainnet('PT'); s.recipients = []; s.recipientWrites = true;
+    s.say(`manda 20 USDC da Base para a Solana ${SOL}`, intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '20', recipient: SOL }), 'PT'));
+    s.say('Salvar');
+    expect(s.state.recipientOffer?.naming).toBe(true);
+    const next = s.say('troca 1 ETH por USDC na Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT'))!;
+    expect(next.recipientSave).toBeUndefined();
+    expect(next.kind).toBe('PROPOSAL');
+    const t = mainnet('PT'); t.recipients = []; t.recipientWrites = true;
+    t.say(`manda 20 USDC da Base para a Solana ${SOL}`, intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '20', recipient: SOL }), 'PT'));
+    t.say('Salvar');
+    expect(t.say('cancelar')).toMatchObject({ kind: 'ANSWER', text: 'Certo, não salvei. Seu pedido continua igual.' });
+  });
+});

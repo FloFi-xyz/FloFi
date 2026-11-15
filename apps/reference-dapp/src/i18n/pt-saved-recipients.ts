@@ -29,8 +29,8 @@ export const portugueseSavedRecipients: Readonly<Record<string, string>> = {
   'Too many changes to saved recipients in a short time. Nothing changed. Wait a few minutes, then try again.':
     'Muitas alterações nos destinatários salvos em pouco tempo. Nada mudou. Aguarde alguns minutos e tente de novo.',
   'Saved recipients could not be reached. Nothing changed. Try again.': 'Não foi possível acessar os destinatários salvos. Nada mudou. Tente de novo.',
-  'Use a name of 1–40 characters with letters or numbers. It cannot look like an address, a key or a card number.':
-    'Use um nome de 1–40 caracteres com letras ou números. Ele não pode parecer um endereço, uma chave ou um número de cartão.',
+  'Use a name of 1–40 characters with letters or numbers. It cannot look like an address, a key or a card number, and it cannot be a network, a token or “my wallet”.':
+    'Use um nome de 1–40 caracteres com letras ou números. Ele não pode parecer um endereço, uma chave ou um número de cartão, nem ser uma rede, um token ou “minha carteira”.',
   'Enter a valid EVM (0x…) or Solana wallet address. Nothing was saved.': 'Informe um endereço de carteira EVM (0x…) ou Solana válido. Nada foi salvo.',
   'You already use this name for another recipient. Choose a different name.': 'Você já usa este nome para outro destinatário. Escolha um nome diferente.',
   'This address is already saved. Nothing was changed.': 'Este endereço já está salvo. Nada foi alterado.',

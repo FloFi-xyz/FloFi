@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-FLOFI-UNIFIED-COPILOT-001: the deterministic helpers behind resume, typo tolerance, the optional recipient save and the reply language. */
 import { describe, expect, it } from 'vitest';
-import { correctTypos, questionLanguage, recipientOfferAnswer, resumeRequest } from './copilot-assist';
+import { correctTypos, questionLanguage, recipientOfferAnswer, requestLikeName, resumeRequest } from './copilot-assist';
 
 describe('resumeRequest', () => {
   it('reads only a plain "go back to my request", never a new value or an approval', () => {
@@ -22,6 +22,8 @@ describe('correctTypos', () => {
     for (const text of ['swap ETH to USDC on Arbitrum One', 'meu saldo na base', 'arbitragem de preço', 'USDC.e on Arbitrum', 'troca ARB por WETH', 'send to 0xabc']) {
       expect(correctTypos(text).corrections, text).toEqual([]);
     }
+    // Generic words of network names are never typo targets ("netwrok" is not Arbitrum One's "network", "mainet" is not Ethereum).
+    for (const text of ['swap 10 USDC to ETH on Base netwrok', 'bridge to Base mainet', 'arbitrum sepolai', 'robinhood chian']) expect(correctTypos(text).corrections, text).toEqual([]);
     // A word close to two names is ambiguous and is never corrected.
     expect(correctTypos('xxxxx').corrections).toEqual([]);
   });
@@ -34,7 +36,11 @@ describe('recipientOfferAnswer', () => {
     expect(recipientOfferAnswer('save it as "Mom"')).toEqual({ kind: 'ACCEPT', label: 'Mom' });
     expect(recipientOfferAnswer('agora não')).toEqual({ kind: 'DECLINE' });
     expect(recipientOfferAnswer('not now')).toEqual({ kind: 'DECLINE' });
+    for (const text of ['cancelar', 'cancela', 'esquece', 'never mind', 'deixa pra lá']) expect(recipientOfferAnswer(text), text).toEqual({ kind: 'DECLINE' });
     expect(recipientOfferAnswer('sim')).toBeNull();
+    // While FloFi waits for a name, a new request or an address is never a name.
+    for (const text of ['swap 10 USDC to ETH on Base', 'troca 1 ETH por USDC', 'manda 5 usdc', '0x1111111111111111111111111111111111111111']) expect(requestLikeName(text), text).toBe(true);
+    for (const text of ['Carteira da Ana', 'Mãe', 'Exchange 2']) expect(requestLikeName(text), text).toBe(false);
     expect(recipientOfferAnswer('envia 5 USDC')).toBeNull();
   });
 });

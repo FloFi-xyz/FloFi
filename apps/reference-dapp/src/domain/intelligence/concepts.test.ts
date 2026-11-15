@@ -20,6 +20,9 @@ describe('concept matching', () => {
     expect(matchConcept('olá, tudo bem?')).toBeNull();
     // Short aliases never match by typo: "gás" is gas, but "gasolina" or "aaves" do not become concepts by distance.
     expect(matchConcept('gasolina')).toBeNull();
+    // A typo keeps its first letter, and everyday near-misses are never concepts: "dúvida" is not "dívida", "field" is not "yield".
+    expect(matchConcept('tenho uma dúvida, como funciona a ponte?')).toBe('BRIDGE');
+    expect(matchConcept('this field is empty')).toBeNull();
   });
   it('answers only clean conceptual questions locally, never action requests', () => {
     expect(conceptQuestion('O que é slippage?')).toBe('SLIPPAGE');

@@ -399,13 +399,17 @@ function distance(a: string, b: string, limit: number): number {
   return rows[a.length]![b.length]!;
 }
 const tolerance = (word: string) => word.length >= 9 ? 2 : word.length >= 5 ? 1 : 0;
+/** Everyday words one letter away from an alias that must never be read as it ("dúvida" is not "dívida", "field" is not "yield"). A typo also
+ * keeps its first letter. */
+const NEAR_MISS: ReadonlySet<string> = new Set(['duvida', 'duvidas', 'field', 'fields', 'delay', 'delays', 'relay', 'shield', 'dividir', 'pronto', 'ponto']);
 /** Short aliases (il, lp, hf, gas, fee…) must match exactly as whole words; longer ones tolerate small typos per word. */
 function aliasIn(alias: string, words: readonly string[], folded: string): boolean {
   if (` ${folded} `.includes(` ${alias} `)) return true;
   const parts = alias.split(' ');
   if (parts.some(part => tolerance(part) === 0) && parts.length === 1) return false;
   for (let start = 0; start + parts.length <= words.length; start += 1)
-    if (parts.every((part, index) => { const word = words[start + index]!; return part === word || (tolerance(part) > 0 && distance(part, word, tolerance(part)) <= tolerance(part)); })) return true;
+    if (parts.every((part, index) => { const word = words[start + index]!; return part === word || (tolerance(part) > 0 && word[0] === part[0] && !NEAR_MISS.has(word)
+      && distance(part, word, tolerance(part)) <= tolerance(part)); })) return true;
   return false;
 }
 /** The concept a message names: the longest alias found (so "health factor" beats "factor", "concentrated liquidity" beats "liquidity"). */

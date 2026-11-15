@@ -89,7 +89,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   RECIPIENTS_UNAVAILABLE: 'Saved recipients are not available on this deployment yet.',
   RECIPIENTS_RATE_LIMITED: 'Too many changes to saved recipients in a short time. Nothing changed. Wait a few minutes, then try again.',
   RECIPIENTS_REQUEST_FAILED: 'Saved recipients could not be reached. Nothing changed. Try again.',
-  RECIPIENT_LABEL_INVALID: 'Use a name of 1–40 characters with letters or numbers. It cannot look like an address, a key or a card number.',
+  RECIPIENT_LABEL_INVALID: 'Use a name of 1–40 characters with letters or numbers. It cannot look like an address, a key or a card number, and it cannot be a network, a token or “my wallet”.',
   RECIPIENT_ADDRESS_INVALID: 'Enter a valid EVM (0x…) or Solana wallet address. Nothing was saved.',
   RECIPIENT_LABEL_TAKEN: 'You already use this name for another recipient. Choose a different name.',
   RECIPIENT_EXISTS: 'This address is already saved. Nothing was changed.',

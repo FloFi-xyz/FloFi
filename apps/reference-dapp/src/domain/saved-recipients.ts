@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: Saved Recipients — an account's address book of PUBLIC destination addresses ("Minha Solana", "Carteira da
- * empresa"), shared by the Credentials screen, the Copilot (web and linked channels) and the MCP lookup.
+ * empresa"), shared by the Credentials screen and the web Copilot. Chat channels and MCP do not read it (no verified account link there).
  *
  * A saved recipient is a name for a public address and nothing else. It is NOT a private key, a seed phrase, a signing credential, a delegation,
  * an authorization to move funds or proof that the account controls that address: a label never makes an address "your wallet". Its
@@ -10,12 +10,15 @@
  * Resolution is deterministic and conservative: only an exact (case- and accent-insensitive) label written by the user selects a recipient;
  * a partial name or several matches is a question, never a guess; there is no typo tolerance for a destination. The address is re-checked for
  * the destination network at every use (`checkRecipient` for transfers, `checkDestinationAddress` for bridges), shown in full at Review, and
- * never substituted after Review. Labels are masked before a request leaves for the model (`maskSavedRecipients`), so neither the label nor the
- * address of a saved recipient is sent to a model provider.
+ * never substituted after Review. Labels (and partial names) are masked in every transcript entry before a request leaves for the model
+ * (`maskSavedRecipients`), so neither the label nor the address of a saved recipient is sent to a model provider. A label cannot be a network,
+ * asset or "my wallet" phrase (`reservedRecipientLabel`): such a word keeps its meaning in a request.
  */
 import { isSolanaPublicKey } from '@defi-workflow-engine/workflow-contracts';
 import { RECIPIENT_FORMATS } from './recipient-address';
 import { credentialLabel } from './credentials';
+import { COPILOT_NETWORK_IDS, networkOfCopilot } from './network-registry';
+import { LEXICON_ASSETS } from './copilot-lexicon';
 
 export const SAVED_RECIPIENT_ECOSYSTEMS = ['EVM', 'SOLANA'] as const;
 export type SavedRecipientEcosystem = (typeof SAVED_RECIPIENT_ECOSYSTEMS)[number];
@@ -53,14 +56,30 @@ export function savedRecipientAddress(ecosystem: SavedRecipientEcosystem, value:
 }
 /** A label shaped like key material or an address (long hex or base58 runs) is refused, so a label can never carry an address or a secret. */
 export const keyShapedLabel = (value: string): boolean => /[0-9a-fA-F]{20,}/.test(value) || /[1-9A-HJ-NP-Za-km-z]{24,}/.test(value);
-/** A writable label: Credentials' printable single-line rule (≤ 40, no card number), never key-shaped. Null when not usable. */
+/** The comparison key of a label (case, every combining mark, punctuation and spacing folded): two labels with one key are the same name. */
+export const recipientLabelKey = (label: string): string =>
+  label.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+/**
+ * Names that already mean something in a request and so can never be a saved name: a network (and its aliases), an asset or coin name, or a
+ * phrase meaning the user's own wallet. "Solana" as a saved name would otherwise turn "bridge to Solana" into a send to that address.
+ */
+const RESERVED_LABELS: ReadonlySet<string> = (() => {
+  const out = new Set<string>(['me', 'mim', 'eu', 'myself', 'mim mesmo', 'mim mesma', 'my wallet', 'my own wallet', 'my connected wallet', 'minha carteira',
+    'minha propria carteira', 'a minha carteira', 'carteira conectada', 'connected wallet', 'ether', 'ethereum', 'solana', 'bitcoin', 'tether', 'usd coin',
+    'usdc e', 'arb', 'arbitrum']);
+  for (const asset of LEXICON_ASSETS) out.add(asset.toLowerCase());
+  for (const id of COPILOT_NETWORK_IDS) {
+    const network = networkOfCopilot(id);
+    for (const name of [network.name, ...network.aliases]) out.add(recipientLabelKey(name));
+  }
+  return out;
+})();
+export const reservedRecipientLabel = (label: string): boolean => RESERVED_LABELS.has(recipientLabelKey(label));
+/** A writable label: Credentials' printable single-line rule (≤ 40, no card number), never key-shaped or reserved. Null when not usable. */
 export function savedRecipientLabel(value: unknown): string | null {
   const label = credentialLabel(value);
-  return label && !keyShapedLabel(label) ? label : null;
+  return label && !keyShapedLabel(label) && !reservedRecipientLabel(label) ? label : null;
 }
-/** The comparison key of a label (case, accents, punctuation and spacing folded): two labels with one key are the same name. */
-export const recipientLabelKey = (label: string): string =>
-  label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 const KEYS = ['id', 'label', 'address', 'ecosystem', 'createdAt', 'updatedAt'] as const;
 /** Strict reader: an entry with any extra or missing field, an invalid address or label is dropped, never repaired. */
@@ -100,35 +119,45 @@ const folded = (text: string) => ` ${recipientLabelKey(text)} `;
 export function matchSavedRecipients(text: string, recipients: readonly SavedRecipient[]): RecipientMention {
   if (!recipients.length || !text.trim()) return { kind: 'NONE' };
   const haystack = folded(text);
-  const exact = recipients.map(recipient => ({ recipient, key: recipientLabelKey(recipient.label) }))
-    .filter(entry => entry.key && haystack.includes(` ${entry.key} `)).sort((a, b) => b.key.length - a.key.length);
+  // Every place each label is written, as spans of the folded message; a shorter name counts only where it is not part of a longer one
+  // ("Carteira" inside "Carteira da Ana"), so "pra Ana, não pra Mariana" names both and is a question.
+  const spans = (key: string): (readonly [number, number])[] => {
+    const out: (readonly [number, number])[] = [];
+    for (let at = haystack.indexOf(` ${key} `); at >= 0; at = haystack.indexOf(` ${key} `, at + 1)) out.push([at + 1, at + 1 + key.length]);
+    return out;
+  };
+  const exact = recipients.map(recipient => { const key = recipientLabelKey(recipient.label); return { recipient, key, spans: key ? spans(key) : [] }; })
+    .filter(entry => entry.spans.length).sort((a, b) => b.key.length - a.key.length);
   const kept: typeof exact = [];
-  for (const entry of exact) if (!kept.some(other => other.key.includes(entry.key))) kept.push(entry);
+  for (const entry of exact)
+    if (entry.spans.some(([start, end]) => !kept.some(other => other.spans.some(([from, to]) => from <= start && end <= to)))) kept.push(entry);
   if (kept.length === 1) return { kind: 'ONE', recipient: kept[0]!.recipient };
   if (kept.length > 1) return { kind: 'CHOOSE', candidates: kept.map(entry => entry.recipient) };
   // A partial name ("carteira da empresa" for "Carteira da empresa Solana"): at least two words of a label, in order, from its start.
-  const partial = recipients.filter(recipient => {
-    const words = recipientLabelKey(recipient.label).split(' ');
-    return words.length > 2 && [...Array(words.length - 1).keys()].slice(1).some(count => haystack.includes(` ${words.slice(0, count + 1).join(' ')} `));
-  });
+  const partial = recipients.filter(recipient => partialNames(recipient.label).some(name => haystack.includes(` ${name} `)));
   return partial.length ? { kind: 'CHOOSE', candidates: partial } : { kind: 'NONE' };
+}
+/** The leading word groups of a label of three or more words that count as writing it partially (two words up to all but one). */
+function partialNames(label: string): readonly string[] {
+  const words = recipientLabelKey(label).split(' ').filter(Boolean);
+  return words.length > 2 ? Array.from({ length: words.length - 2 }, (_, index) => words.slice(0, index + 2).join(' ')) : [];
 }
 /** What leaves for a model provider: every saved label (and a saved address written in full) replaced by a neutral marker. */
 export const SAVED_RECIPIENT_MARKER = '[saved recipient]';
 export function maskSavedRecipients(text: string, recipients: readonly SavedRecipient[]): string {
   if (!recipients.length) return text;
-  let out = text;
-  for (const recipient of [...recipients].sort((a, b) => b.label.length - a.label.length)) {
-    const words = recipientLabelKey(recipient.label).split(' ').filter(Boolean);
-    if (!words.length) continue;
-    // Accent- and case-insensitive whole-phrase match against the original text (separators between words may vary).
-    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${words.map(word => [...word].map(char => `[${char}${char.toUpperCase()}${ACCENTED[char] ?? ''}]`).join('')).join('[^\\p{L}\\p{N}]+')}(?![\\p{L}\\p{N}])`, 'gu');
+  // Matched on the decomposed text so any accent or mark folds as the label key does ("Łódź", "Šimon", "São"); recomposed afterwards.
+  let out = text.normalize('NFD');
+  const phrases = recipients.flatMap(recipient => [recipientLabelKey(recipient.label), ...partialNames(recipient.label)]).filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  for (const phrase of phrases) {
+    const letters = (word: string) => [...word].map(char => `${char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\p{M}*`).join('');
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${phrase.split(' ').map(letters).join('[^\\p{L}\\p{N}]+')}(?![\\p{L}\\p{N}])`, 'giu');
     out = out.replace(pattern, SAVED_RECIPIENT_MARKER);
-    if (recipient.ecosystem === 'SOLANA') out = out.split(recipient.address).join(SAVED_RECIPIENT_MARKER);
-    else out = out.replace(new RegExp(recipient.address, 'gi'), SAVED_RECIPIENT_MARKER);
   }
-  return out;
+  for (const recipient of recipients)
+    out = recipient.ecosystem === 'SOLANA' ? out.split(recipient.address).join(SAVED_RECIPIENT_MARKER) : out.replace(new RegExp(recipient.address, 'gi'), SAVED_RECIPIENT_MARKER);
+  return out.normalize('NFC');
 }
-const ACCENTED: Readonly<Record<string, string>> = { a: 'áàâãäÁÀÂÃÄ', e: 'éèêëÉÈÊË', i: 'íìîïÍÌÎÏ', o: 'óòôõöÓÒÔÕÖ', u: 'úùûüÚÙÛÜ', c: 'çÇ', n: 'ñÑ' };
 /** A short, display-only form of a saved recipient for lists and chips: label, ecosystem and the first/last characters of the address. */
 export const recipientChip = (recipient: SavedRecipient): string => `${recipient.label} · ${recipient.ecosystem === 'EVM' ? 'EVM' : 'Solana'} · ${recipient.address.slice(0, 6)}…${recipient.address.slice(-4)}`;

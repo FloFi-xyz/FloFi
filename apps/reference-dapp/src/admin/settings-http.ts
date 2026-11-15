@@ -15,7 +15,8 @@
  * BUILD-ADMIN-AI-PROVIDERS-001: settings name their provider. A document is saved in its canonical stored form (`storedDocument`). On a live
  * Copilot it is accepted only when every provider it uses has its key installed on this deployment — saving can never activate a provider
  * that would fail closed on the next request. (Without a live Copilot nothing is served, and settings can be prepared as before.) A probe uses the candidate's own provider and key; it interprets one harmless, fixed request and validates the intent
- * exactly like a live turn. It offers no tools, touches no workflow and can never sign, submit or execute anything.
+ * exactly like a live turn. It offers the production tool definitions (so the request has the production shape, BUILD-FLOFI-UNIFIED-COPILOT-001)
+ * but runs none of them (no orchestration round), touches no workflow and can never sign, submit or execute anything.
  */
 import { COPILOT_SERVER_LIMITS, interpretCopilotV2, type CopilotHttpResponse, type CopilotTransport } from '../server/copilot-service.ts';
 import { anthropicRequestPlan, CopilotProviderError, createProviderTransport, discoverAnthropicModels, estimatedCostUsd, providerApiKey, providerReadiness,

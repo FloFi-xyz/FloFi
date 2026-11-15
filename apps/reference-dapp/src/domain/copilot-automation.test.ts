@@ -162,4 +162,17 @@ describe('Copilot Automation interpretation and grounding', () => {
     expect(rescheduleDraft(input, 'compra SOL toda segunda', now)).toBeNull();
     expect(rescheduleDraft(input, 'todo dia 5', now)).toBeNull();
   });
+  it('an open automation question is answered by that request, and an earlier unsaved proposal stops being "this automation" once another request is resolved', () => {
+    const session = new CopilotSession();
+    const automation = (patch: Partial<AutomationDraft>) => ({ version: '2', language: 'EN', kind: 'AUTOMATION', draft: draft(patch) });
+    expect(session.say('Buy 10 USDC of ETH every day at 9:00 on Base Sepolia.', automation({}))).toMatchObject({ kind: 'AUTOMATION_PROPOSAL' });
+    expect(session.say('Also buy ETH with 5 USDC on Base Sepolia.', automation({ amount: '5', time: null }))).toMatchObject({ kind: 'CLARIFICATION' });
+    // "every Monday at 9am" answers the open question (the model reads it with the request); it never reschedules the first proposal locally.
+    const answered = session.say('every day at 10:00', automation({ amount: '5', time: '10:00' }))!;
+    expect(answered).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: { action: { amount: '5' } } });
+    expect(session.turns.at(-1)!.request).not.toBeNull();
+    // A question about an unsaved proposal is answered, never applied as a new schedule.
+    const asked = session.say('is 11:00 ok?', { version: '2', language: 'EN', kind: 'QUESTION', topic: 'AUTOMATIONS', target: null })!;
+    expect(asked.kind).not.toBe('AUTOMATION_PROPOSAL');
+  });
 });
