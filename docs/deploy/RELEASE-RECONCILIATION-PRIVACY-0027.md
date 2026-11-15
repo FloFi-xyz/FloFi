@@ -1,6 +1,6 @@
 # FloFi: release of BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (nonce-conflict reconciliation, Support privacy, Admin login; migration 0027)
 
-Status (2026-11-15): **Release A has been merged and deployed; Release B remains in preparation.** Release A was merged via [PR #197](https://github.com/FloFi-xyz/FloFi/pull/197) at `8b03736c513c3a3c17917f6a3533acd3a1af3499`. The Railway API and worker deployments report SUCCESS, the Vercel Production deployment reports READY, and a read-only Neon query still shows schema version 26. These deployment status checks do not replace the release-time `/readyz` and worker log checks. No Release B deployment or schema 0027 migration has been performed. Every Release B production step still requires owner authorization. Build report: [BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001](../builds/BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001.md).
+Status (2026-11-15): **Release A has been merged and deployed; Release B remains in preparation.** Release A was merged via [PR #197](https://github.com/FloFi-xyz/FloFi/pull/197) at `8b03736c513c3a3c17917f6a3533acd3a1af3499`. The Railway API and worker deployments report SUCCESS, the Vercel Production deployment reports READY, and a read-only Neon query still shows schema version 26. These deployment status checks do not replace the release-time `/readyz` and worker log checks. PR #192 (production hotfix, `2c61ce7`) was merged and deployed after it; that build also carries the certificate. The owner has authorized Release B end to end (merge, schema 0027 on Neon, Railway API, worker and Vercel), following the controlled procedure in the release order below. Build report: [BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001](../builds/BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001.md).
 
 ## Identities
 
@@ -24,7 +24,17 @@ A build that ships 0027 on a database at 26 refuses every database-backed featur
 refuses a database at 27 (`MIGRATION_HISTORY_MISMATCH`). So:
 
 1. **Release A — completed.** [PR #197](https://github.com/FloFi-xyz/FloFi/pull/197) merged the schema 0027 forward-compatibility certificate (including the independent `packages/cloud-runtime/test/certificate-0027.pg.test.ts` regression test and fixture) without shipping migration 0027. The merged Release A commit is `8b03736c513c3a3c17917f6a3533acd3a1af3499`. Railway API, Railway worker and Vercel Production have deployments for this commit reporting SUCCESS, SUCCESS and READY respectively; Neon remains on schema 26. **Before deploying Release B, verify that the exact Release A commit is actively serving in every production consumer, the API and worker are healthy (`/readyz`, startup/work processing and deploy logs), and the schema is still 26.** If any consumer has moved to an incompatible commit, stop and reassess rather than migrating.
-2. **Release B — this PR**, only after Release A is live everywhere:
+   **Controlled procedure for Release B (owner-authorized, 2026-11-15).** Railway API, Railway worker and Vercel Production all deploy
+   automatically and concurrently from `main` (Railway `checkSuites: false`; Vercel Production has its own `DATABASE_URL`). On the PR #192
+   merge the worker went live 10 s *before* the API, so a plain merge could start Release B consumers on schema 26
+   (`SCHEMA_NOT_MIGRATED`). Instead, 0027 is applied to Neon **before** the merge, while every consumer still runs `2c61ce7` (Release A
+   certificate + PR #192), which serves schema 27 by certificate. The transaction mirrors `migrate()` exactly: `pg_advisory_xact_lock(7340032001)`,
+   a guard that aborts unless the ledger is exactly the shipped 1–26 (version, name, SHA-256), the statements of
+   `0027_reconciliation_privacy.sql` (its own `SET LOCAL lock_timeout = '5s'` first), then the ledger row `(27, reconciliation_privacy,
+   6edd545c…c069)`. It was rehearsed on disposable PostgreSQL (schema dump identical to applying the file whole; a second run is refused by
+   the guard; the Release B runner then reports `versions=none schema_version=27`). After the merge, each consumer starts on schema 27 in any
+   order and the API pre-deploy is a no-op (`migrate.applied versions=none schema_version=27`).
+2. **Release B — this PR**, only after Release A is live everywhere (the generic order below; see the controlled procedure above):
    1. **Railway API** deploys first; its pre-deploy applies 0027 once (one transaction under the migration advisory lock, `lock_timeout 5s`; a
       failure rolls back to 26 and the previous deployment keeps serving — retry in a quieter moment). Check `migrate.applied versions=27`.
    2. **Railway worker** next. From now on, a run whose observation ends in a nonce conflict is investigated read-only and paced. Runs whose
