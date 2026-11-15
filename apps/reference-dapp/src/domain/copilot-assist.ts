@@ -62,6 +62,17 @@ function nearest(word: string): Term | null {
   return scored.length && (scored.length === 1 || scored[0]!.d < scored[1]!.d) ? scored[0]!.term : null;
 }
 /** The text with unambiguous typos of network and coin names corrected (letters only; everything else unchanged), and what was corrected. */
+/**
+ * The language of a short question FloFi answers itself ("O que é colateral?", "how do I connect Phantom?") when the interface gave none and the
+ * function-word detector is undecided: its opening question words. Null when they do not decide it.
+ */
+const PT_OPENERS = /^(?:o que|oque|que e|como|qual|quais|onde|por que|porque|pq|me explica|explica|explique|nao entendi|me da|me de|da um|e na|e no|e em|e como|quero|posso|preciso|tem como|da pra|minhas?|meus?)(?:\s|$)/;
+const EN_OPENERS = /^(?:what|whats|how|which|where|why|explain|tell me|i don t|i dont|give me|and on|and in|how about|what about|can i|do i|is there|i want|show me|my)(?:\s|$)/;
+export function questionLanguage(text: string): CopilotLanguage | null {
+  const folded = foldText(text).replace(/^(?:hey|hi|hello|ola|oi|ok|okay|e ai)[,\s]+/, '');
+  return PT_OPENERS.test(folded) ? 'PT' : EN_OPENERS.test(folded) ? 'EN' : null;
+}
+
 export function correctTypos(text: string): { readonly text: string; readonly corrections: readonly TypoCorrection[] } {
   const corrections: TypoCorrection[] = [];
   const out = text.replace(/[\p{L}]{5,}/gu, written => {

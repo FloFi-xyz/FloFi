@@ -25,6 +25,10 @@ describe('platform guide', () => {
     for (const [text, topic] of cases) expect([text, matchPlatformTopic(text)]).toEqual([text, topic]);
     // Requests are not configuration questions.
     expect(matchPlatformTopic('swap 1 ETH to USDC on Base')).toBeNull();
+    // A question about the user's own workflow is answered from its canonical facts (eval Q11), not by FloFi's guide.
+    expect(matchPlatformTopic('Which networks does this use?')).toBeNull();
+    expect(matchPlatformTopic('quais redes meu fluxo usa?')).toBeNull();
+    expect(matchPlatformTopic('which networks are supported?')).toBe('SUPPORTED_NETWORKS');
     expect(matchPlatformTopic('envia 10 USDC para 0x1111111111111111111111111111111111111111')).toBeNull();
     expect(matchPlatformTopic('quero mandar 5 USDC para minha carteira')).toBeNull();
   });

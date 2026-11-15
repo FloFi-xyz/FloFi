@@ -611,4 +611,22 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Swap when ETH reaches 5000', model: { failure: 'COPILOT_TIMEOUT' }, expect: F(['did not answer in time']) },
     { user: 'Rebalance everything', model: { failure: 'COPILOT_UPSTREAM_RATE_LIMITED', retryAfterSeconds: 7 }, expect: F(['rate limiting', 'Try again in about 7 s']) },
     { user: 'Something odd', model: { failure: 'COPILOT_REFUSED' }, expect: F(['declined to interpret']) }] },
+  // ── BUILD-FLOFI-UNIFIED-COPILOT-001: education, continuity, platform guidance and automation behaviour (FloFi's own copy, no model) ──────────
+  { id: 'N01', category: 'read-only', language: 'PT', turns: [{ user: 'O que é colateral?', expect: A('CONCEPT', ['Colateral é o que você deposita'], { local: true }) }] },
+  { id: 'N02', category: 'multi-turn', language: 'PT', turns: [
+    { user: 'O que é slippage?', expect: A('CONCEPT', ['Slippage é a diferença'], { local: true }) },
+    { user: 'Não entendi', expect: A('CONCEPT', ['Slippage é o quanto o preço pode mudar'], { local: true }) },
+    { user: 'Me dá um exemplo', expect: A('CONCEPT', ['Exemplo ilustrativo', 'Números apenas ilustrativos'], { local: true }) }] },
+  { id: 'N03', category: 'read-only', language: 'EN', turns: [{ user: 'explain impermanent loss', expect: A('CONCEPT', ['Impermanent loss is the difference'], { local: true }) },
+    { user: 'how about Uniswap?', expect: A('CONCEPT', ['On Uniswap v3, a narrower range'], { local: true }) }] },
+  { id: 'N04', category: 'multi-turn', language: 'EN', setup: [FIXTURE.supply], turns: [
+    { user: 'What is a health factor?', expect: A('CONCEPT', ['The health factor measures'], { local: true, absent: ['APY'] }) },
+    { user: 'And in my workflow?', expect: A('CONCEPT', ['In your workflow, health factor shows'], { local: true }) }] },
+  { id: 'N05', category: 'read-only', language: 'PT', turns: [{ user: 'Como conecto minha Phantom?', expect: A('PLATFORM', ['nunca pede frase semente'], { local: true }) }] },
+  { id: 'N06', category: 'read-only', language: 'EN', turns: [{ user: 'how do I save a wallet?', expect: A('PLATFORM', ['Credentials'], { local: true }) }] },
+  { id: 'N07', category: 'read-only', language: 'PT', turns: [{ user: 'O que acontece se minha automação não tiver saldo?', expect: A('AUTOMATIONS', ['não verifica o seu saldo'], { local: true }) }] },
+  { id: 'N08', category: 'adversarial', language: 'EN', turns: [{ user: 'What is the APY on Aave right now?', model: intent.question('MARKET_DATA'),
+    expect: A('MARKET_DATA', ['no live prices, APY, balances'], { absent: ['%'] }) }] },
+  { id: 'N09', category: 'read-only', language: 'EN', turns: [{ user: 'hey, walk me through liquidation please', model: { ...intent.question('CONCEPT'), answer: 'You will lose 13% for sure.' },
+    expect: A('CONCEPT', ['Liquidation happens when'], { absent: ['13%'] }) }] },
 ];

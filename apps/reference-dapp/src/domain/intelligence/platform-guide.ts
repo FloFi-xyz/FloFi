@@ -34,6 +34,8 @@ const mainnets = () => COPILOT_NETWORK_IDS.filter(id => networkOfCopilot(id).env
 
 type Entry = { readonly modes: readonly PlatformMode[]; readonly path: keyof typeof PLATFORM_PATHS | null; readonly requires: PlatformRequirement;
   readonly surfaces: readonly PlatformSurface[]; readonly keywords: readonly RegExp[];
+  /** Words that make the same question about the user's own workflow rather than FloFi (answered from the workflow's canonical facts instead). */
+  readonly unless?: RegExp;
   readonly copy: Readonly<Record<CopilotLanguage, { readonly label: string; readonly text: string }>> };
 const ALL: readonly PlatformSurface[] = PLATFORM_SURFACES;
 const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
@@ -43,6 +45,7 @@ const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
       PT: { label: 'Credentials', text: 'Use Conectar carteira na FloFi e escolha sua carteira: Phantom (Solana ou EVM), MetaMask, Rabby, Coinbase Wallet, Backpack ou Solflare. A FloFi só lê seu endereço público; sua carteira pede sua aprovação para cada assinatura, e a FloFi nunca pede frase semente. Carteiras conectadas e salvas aparecem em Credentials.' } } },
   SUPPORTED_NETWORKS: { modes: ['EXPLAIN'], path: null, requires: 'NONE', surfaces: ALL,
     keywords: [/(?:quais|which|what)\s+(?:redes|networks|chains|blockchains)/, /(?:redes|networks|chains)\s+(?:suportad|support|disponive|available)/],
+    unless: /(?:^|\s)(?:this|it|isso|esse|este|essa|esta|meu|minha|my|workflow|fluxo|estrategia|strategy)(?:\s|$)/,
     copy: { EN: { label: 'Networks', text: `FloFi works with real funds on ${mainnets().join(', ')}. Which actions each network supports is checked when you ask for one; test networks are not offered in the public product.` },
       PT: { label: 'Redes', text: `A FloFi opera com fundos reais na ${mainnets().join(', ')}. Quais ações cada rede suporta é verificado quando você pede uma; redes de teste não são oferecidas no produto público.` } } },
   SAVED_WALLETS: { modes: ['EXPLAIN', 'NAVIGATE', 'APPLY_CHANGE'], path: 'credentials', requires: 'ACCOUNT_SESSION', surfaces: ALL,
@@ -100,7 +103,7 @@ const CUE = /(?:^|\s)(?:como|onde|where|how|qual|quais|which|what|o que|quero|na
 export function matchPlatformTopic(text: string): PlatformTopic | null {
   const folded = foldText(text);
   if (!folded || folded.length > 160 || /\d/.test(folded) || /0x[0-9a-f]{6}/i.test(text) || !CUE.test(folded)) return null;
-  return PLATFORM_TOPICS.find(topic => GUIDE[topic].keywords.some(keyword => keyword.test(folded))) ?? null;
+  return PLATFORM_TOPICS.find(topic => GUIDE[topic].keywords.some(keyword => keyword.test(folded)) && !GUIDE[topic].unless?.test(folded)) ?? null;
 }
 export type PlatformAnswer = { readonly topic: PlatformTopic; readonly text: string; readonly link: { readonly path: string; readonly label: string } | null;
   readonly modes: readonly PlatformMode[]; readonly requires: PlatformRequirement };

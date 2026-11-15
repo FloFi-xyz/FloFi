@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { activeNetworkScope, introducedTestNetworks, publicText, testNetworkMessage } from './network-scope';
-import { groundAutomationDraft } from './copilot-automation';
+import { automationFaq, groundAutomationDraft, matchAutomationFaq, rescheduleDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { commandIsValid, SEQUENCE_STEP_COMMANDS, type Command } from './commands';
@@ -30,10 +30,8 @@ import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage 
 import { answerQuestion, stepSentence, stepSummary, type CopilotFacts } from './copilot-answers';
 import { answerConcept, conceptCatalog, conceptFollowUp, conceptInWorkflow, conceptName, conceptQuestion, foldText, matchConcept, type ConceptId, type ConceptLevel,
   type ConceptProtocol, type ConceptState } from './intelligence/concepts';
-import { ASSIST_COPY, correctTypos, recipientOfferAnswer, resumeRequest } from './copilot-assist';
+import { ASSIST_COPY, correctTypos, questionLanguage, recipientOfferAnswer, resumeRequest } from './copilot-assist';
 import { matchPlatformTopic, platformAnswer, type PlatformSurface, type PlatformTopic } from './intelligence/platform-guide';
-import { automationFaq, matchAutomationFaq, parseScheduleChange } from '../automations/explain';
-import { validateAutomationInput } from '../automations/definition';
 import { ecosystemOfAddress, maskSavedRecipients, matchSavedRecipients, recipientLabelKey, savedRecipientAddress, savedRecipientLabel, SAVED_RECIPIENT_MARKER,
   type SavedRecipient, type SavedRecipientEcosystem } from './saved-recipients';
 import { copilotNetworksMentioned, type CopilotNetworkId } from './network-registry';
@@ -956,15 +954,10 @@ function automationTurn(state: CopilotConversation, text: string, env: CopilotEn
   if (!about || folded.length > 160 || /0x[0-9a-f]{6}/i.test(text)) return null;
   const a = ASSIST_COPY[language], current = state.automation?.input ?? null;
   // A schedule change of the proposal FloFi just showed and the owner has not created: the same proposal, with the new schedule.
-  if (current && !state.automation?.created && 'schedule' in current && current.schedule) {
-    const change = parseScheduleChange(text, current.schedule);
-    if (change) {
-      const patched = { ...current, schedule: { ...current.schedule, ...change } } as AutomationInput, valid = validateAutomationInput(patched, Date.now());
-      if (valid.ok) {
-        const value = reply('AUTOMATION_PROPOSAL', a.automationUpdated, { automation: patched });
-        return { kind: 'LOCAL', reply: value, next: aside(state, text, COPILOT_TRANSCRIPT.proposed + patched.name, { automation: { input: patched, created: false } }) };
-      }
-    }
+  const patched = current && !state.automation?.created ? rescheduleDraft(current, text) : null;
+  if (patched) {
+    const value = reply('AUTOMATION_PROPOSAL', a.automationUpdated, { automation: patched });
+    return { kind: 'LOCAL', reply: value, next: aside(state, text, COPILOT_TRANSCRIPT.proposed + patched.name, { automation: { input: patched, created: false } }) };
   }
   const manage = (operation: CopilotAutomationOperation): TurnStart => ({ kind: 'LOCAL', reply: withDraftReminder(reply('AUTOMATION_MANAGE', a.manage[operation],
     { manage: { operation, request: text } }), state, language), next: aside(state, text, `Flofi opened the user's saved automations (${operation}).`, { automation: { input: null, created: true } }) });
@@ -1064,7 +1057,7 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       : preferredLanguage(state, env) ?? statement.said) };
   }
   // BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi's optional offer to save a typed address is answered by its buttons or words; anything else drops it.
-  const assistLanguage = env.interfaceLanguage ?? preferredLanguage(state, env) ?? messageLanguage(text) ?? state.language;
+  const assistLanguage = env.interfaceLanguage ?? preferredLanguage(state, env) ?? messageLanguage(text) ?? questionLanguage(text) ?? state.language;
   if (state.recipientOffer) {
     const offered = answerRecipientOffer(state, state.recipientOffer, text, assistLanguage, env);
     if (offered) return offered;
@@ -1075,7 +1068,8 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   // BUILD-FLOFI-UNIFIED-COPILOT-001: going back to the open request, a DeFi concept and its follow-ups are answered locally (no model, no change).
   if (!answered) {
     const assisted = assistTurn(state, text, env, assistLanguage);
-    if (assisted) return assisted;
+    // The conversation continues in the language FloFi just answered in ("mais detalhes" after a Portuguese explanation stays Portuguese).
+    if (assisted) return assisted.kind === 'LOCAL' && !state.languageSet ? { ...assisted, next: { ...assisted.next, language: assistLanguage } } : assisted;
     if (state.concept) state = { ...state, concept: null };
   }
   const draft = state.draft, picked = answered ? answered.pick : text;

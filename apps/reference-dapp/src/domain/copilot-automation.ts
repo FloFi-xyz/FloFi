@@ -7,6 +7,7 @@ import type { CapabilityView } from '../automations/views';
 import type { CopilotLanguage } from './copilot-messages';
 import { portugueseAutomations } from '../i18n/pt-automations';
 import { DEFAULT_SLIPPAGE_BPS } from './slippage-policy';
+import { parseScheduleChange } from '../automations/explain';
 
 export type { AutomationInput } from '../automations/definition';
 export type AutomationDraft = {
@@ -142,4 +143,20 @@ export function automationCapabilityIssue(input: AutomationInput, capabilities: 
   const action = 'action' in input ? input.action : null;
   if (action?.kind === 'ROUTE' && !capabilities.routes.some(r => r.asset === action.asset && r.network === action.network && r.executable)) return 'This action is not enabled on this deployment.';
   return null;
+}
+
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the Copilot's view of automation behaviour, routed through this adapter so the pure conversation engine never imports
+ * the automations domain directly (the purity invariant in copilot-eval.test.ts). FAQ copy is FloFi's own (`automations/explain.ts`).
+ */
+export { automationFaq, matchAutomationFaq } from '../automations/explain';
+/** A proposal the owner has not created yet, with the schedule the user just asked for, or null when the text is no schedule change or the result is invalid. */
+const NEW_REQUEST = /\b(?:buy|sell|swap|send|transfer|bridge|supply|deposit|borrow|withdraw|watch|alert|compr\w*|vend\w*|envi\w*|mand\w*|transfer\w*|deposit\w*|empresta\w*|sac\w*|fornec\w*|monitor\w*|eth|weth|usdc|usdt|btc|wbtc|sol|arb|dai|ethereum|bitcoin|solana)\b/i;
+export function rescheduleDraft(current: AutomationInput, text: string, now = Date.now()): AutomationInput | null {
+  // "Buy ETH every day" after a proposal is a new request (its own amount and asset come from the user's words), not a new schedule for this one.
+  if (!('schedule' in current) || !current.schedule || NEW_REQUEST.test(text)) return null;
+  const change = parseScheduleChange(text, current.schedule);
+  if (!change) return null;
+  const patched = { ...current, schedule: { ...current.schedule, ...change } } as AutomationInput;
+  return validateAutomationInput(patched, now).ok ? patched : null;
 }
