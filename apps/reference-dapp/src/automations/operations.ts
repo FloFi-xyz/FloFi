@@ -21,14 +21,18 @@ import { automationRuntime, newAutomationId, type AutomationHost, type Automatio
 import { createAutomationService } from './service.ts';
 import { createPgDelegationStore } from '../delegation/pg-store.ts';
 import type { Owner } from './store.ts';
+import type { SchedulePatchView } from './views.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export const AUTOMATION_OPERATIONS = Object.freeze(['overview', 'create', 'setState', 'rebind', 'history', 'open', 'dismiss', 'prepareWatch', 'telegramLinkCode',
-  'telegramUnlink'] as const);
+  'telegramUnlink', 'replace'] as const);
 export type AutomationOperation = (typeof AUTOMATION_OPERATIONS)[number];
 export const isAutomationOperation = (value: unknown): value is AutomationOperation => typeof value === 'string' && (AUTOMATION_OPERATIONS as readonly string[]).includes(value);
-/** The one creating operation that is not a compare-and-set or an owner-scoped state change: deduplicated by an idempotency key remotely. */
-export const IDEMPOTENT_OPERATIONS: ReadonlySet<AutomationOperation> = new Set(['create']);
+/**
+ * The operations that create a rule, deduplicated by an idempotency key remotely: `create`, and `replace` (a schedule change creates the
+ * replacing rule; its compare-and-set on the old rule's version already refuses a second application, and the key replays the first answer).
+ */
+export const IDEMPOTENT_OPERATIONS: ReadonlySet<AutomationOperation> = new Set(['create', 'replace']);
 export type AutomationService = ReturnType<typeof createAutomationService>;
 
 /** The owner-facing service of this process: its store, the shared handoff store and limiter, the engine gates and the price source. */
@@ -50,6 +54,16 @@ const invalid = (): never => { throw new Error('AUTOMATION_INPUT_INVALID'); };
 const id = (value: unknown) => typeof value === 'string' && value.length <= 64 ? value : invalid();
 const version = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : invalid();
 const AMOUNT = /^(0|[1-9][0-9]{0,29})(\.[0-9]{1,18})?$/;
+const closedObject = (value: unknown, keys: readonly string[]): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(k => keys.includes(k)) && keys.every(k => Object.hasOwn(value, k))
+    ? value as Record<string, unknown> : invalid();
+/** `replace`'s patch: exactly `{ schedule: { frequency, weekday, time } }` (the time zone stays the rule's); the service checks the semantics. */
+function schedulePatch(value: unknown): { readonly schedule: SchedulePatchView } {
+  const s = closedObject(closedObject(value, ['schedule']).schedule, ['frequency', 'weekday', 'time']);
+  if ((s.frequency !== 'DAILY' && s.frequency !== 'WEEKLY') || !(s.weekday === null || (Number.isInteger(s.weekday) && (s.weekday as number) >= 1 && (s.weekday as number) <= 7))
+    || typeof s.time !== 'string' || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(s.time)) invalid();
+  return { schedule: { frequency: s.frequency as SchedulePatchView['frequency'], weekday: s.weekday as number | null, time: s.time as string } };
+}
 
 /** Runs one operation for `owner` (the verified principal). Throws a closed code for invalid arguments and every refusal. */
 export async function runAutomationOperation(service: AutomationService, owner: Owner, method: AutomationOperation, args: readonly unknown[]): Promise<unknown> {
@@ -63,6 +77,7 @@ export async function runAutomationOperation(service: AutomationService, owner: 
       return service.setState(owner, id(args[0]), version(args[1]), action);
     }
     case 'rebind': arity(2); return service.rebind(owner, id(args[0]), version(args[1]));
+    case 'replace': arity(3); return service.replace(owner, id(args[0]), version(args[1]), schedulePatch(args[2]));
     case 'history': arity(1); return service.history(owner, id(args[0]));
     case 'open': arity(1); return service.open(owner, id(args[0]));
     case 'dismiss': arity(1); return service.dismiss(owner, id(args[0]));

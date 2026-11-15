@@ -20,7 +20,7 @@ automation state itself.
 | Piece | Where (production) | Notes |
 | --- | --- | --- |
 | Workspace `/app/automations` and its server actions | Vercel (BFF) | every action re-verifies the owner's HttpOnly wallet session, then forwards the operation to the API with the API bearer and the verified owner in the server-to-server `x-flofi-workflow-owner` header — the saved-workflow convention |
-| Automation CRUD/state: `POST /v1/automations/:method` | Railway API (`main.ts api`) | overview, create, pause/resume/archive, rebind, history, open, dismiss, watch Buy/Sell, Telegram link/unlink — every query scoped to the owner header; another owner's id answers NOT FOUND; `create` is idempotency-keyed |
+| Automation CRUD/state: `POST /v1/automations/:method` | Railway API (`main.ts api`) | overview, create, pause/resume/archive, rebind, replace (schedule change, §4), history, open, dismiss, watch Buy/Sell, Telegram link/unlink — every query scoped to the owner header; another owner's id answers NOT FOUND; `create` and `replace` are idempotency-keyed |
 | `/approve` for automation links: `POST /v1/approvals/:method` | Vercel `/approve` → Railway API | view / claim / apply / share on the SHARED approval model (same platform functions, same handoff store), with the wallets the browser proved in `x-flofi-wallet-principals`; other link kinds are unchanged. PR #72's recovery of an APPLIED proposal by its id (`resume`) is tried on Vercel's own surface first and, on the remote runtime, then on the API — for its proven claimant only, reissuing nothing |
 | Scheduler | Railway worker (`main.ts worker`) | its sweep (every 60 s) discovers due rules, expires, syncs approvals and applies retention; its claim loop runs `automation.evaluate` (the same handlers, work items and leases as the dispatch) |
 | State | Neon/PostgreSQL, migration `0010_automations` | rules, occurrences, history, Telegram links; approvals in the shared `mcp_handoffs` |
@@ -57,8 +57,9 @@ closed).
      and a keyed `FLOFI_AUTOMATION_CHAINLINK_RPC_URL` (or `GRYLOO_BASE_RPC_URL`). The API only reads which assets are observable (it
      never queries a price); without a price source, price triggers and daily watches cannot be created (`PRICE_ASSET_NOT_OBSERVABLE`)
      and scheduled DCAs still work.
-   - Keep `FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS` empty (mainnet refused by policy). The swap flows an automation proposes must be
-     enabled on the API as for any proposal (e.g. `GRYLOO_PUBLIC_TESTNET=record` for Base Sepolia).
+   - `FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS` lists the mainnet networks whose proposals FloFi may hand to their owner; it is empty by
+     default (`MAINNET_HANDOFF_DISABLED_BY_POLICY`), and listing a network is an owner decision (§7). The swap flows an automation proposes
+     must also be enabled on the API as for any proposal.
    - Its log says `automation.api_enabled` at start; a load failure logs `automation.api_disabled` and every other route keeps serving.
 3. **Railway worker** (same `DATABASE_URL` and `TENANT_ID` as the API): `FLOFI_AUTOMATIONS=enabled`, `FLOFI_PUBLIC_ORIGIN` and the
    same price variables. It needs **no** `FLOFI_AUTOMATION_SECRET` and no dispatch token (it mints no approval and serves no route).
@@ -77,7 +78,7 @@ closed).
 
 | Kind | Example | Action |
 | --- | --- | --- |
-| Scheduled DCA | Every Monday 09:00 Europe/Lisbon | a bound swap (USDC → WETH on Base Sepolia, …) proposed each time, or from a saved single-swap workflow |
+| Scheduled DCA | Every Monday 09:00 Europe/Lisbon | a bound swap (USDC → WETH on Base, …) proposed each time, or from a saved single-swap workflow |
 | Price trigger | If ETH falls below $3,000 / BTC falls 5 % from $100,000 | a bound swap of the observed asset, or "notify me only" |
 | Daily watch | Every day 09:00, check BTC / ETH / SOL | a report only; Ignore, or Buy / Sell (below) |
 
@@ -88,11 +89,14 @@ approval is created, and automation limits do not apply to it; the owner applies
 workflow. Likewise, after the owner adds an automation proposal to their workflow, any edit they make there is their own workflow:
 automation limits bound what FloFi proposes, not what the owner later chooses to sign.
 
-**Assets, honestly.** Observation: ETH, BTC, SOL (when the price source serves them). Execution: USDC ⇄ WETH on Base Sepolia and
-Ethereum Sepolia; devUSDC ⇄ SOL on Solana Devnet (needs the Devnet flow and a Solana wallet session). Base mainnet swaps are not
-owner-executable on current main (`OWNER_EXECUTION_NOT_IMPLEMENTED`); Solana mainnet is disabled by policy. **BTC has no swap route**
-(`BTC_EXECUTION_ROUTE_UNAVAILABLE`): BTC can be watched and alerted on, never bought through a substitute. Test-network swaps execute at
-test-pool prices, not at the observed market price.
+**Assets, honestly.** Observation: ETH, BTC, SOL (when the price source serves them). Execution: FloFi is a Mainnet-only product
+(BUILD-FLOFI-MAINNET-PRODUCT-001), so the workspace offers mainnet routes only — USDC ⇄ WETH on Base and Ethereum, USDC ⇄ SOL on Solana
+(a Solana route needs a Solana wallet session). A route is executable only when this deployment's flow gates allow it and its network is
+listed in `FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS`; by default none is (`MAINNET_HANDOFF_DISABLED_BY_POLICY`), so trade proposals are
+unavailable and daily watches and notify-only price triggers still work. The test-network routes (Base Sepolia, Ethereum Sepolia, Solana
+Devnet) are offered only to a local engineering server (`FLOFI_NETWORK_SCOPE=ENGINEERING_TESTNETS`, ignored on every hosted deployment);
+in the public product an older test-network proposal is never opened for review (`TEST_NETWORK_NOT_AVAILABLE`). **BTC has no swap route**
+(`BTC_EXECUTION_ROUTE_UNAVAILABLE`): BTC can be watched and alerted on, never bought through a substitute.
 
 ## 4. Semantics the owner can rely on
 
@@ -105,7 +109,17 @@ test-pool prices, not at the observed market price.
   when the rule is created (or resumed) waits for a new crossing. Stale or failed observations change nothing.
 - **Limits** (per execution, per day/week/month amount and count, cooldown, slippage, expiry) bound what FloFi proposes; they are
   checked when the rule is created or rebound, when an occurrence is created and when the owner opens it. They are not on-chain limits.
-  A rule's definition and limits never change after creation (enforced by the database); only its bound action can be rebound.
+  A rule's definition and limits never change after creation (enforced by the database, `AUTOMATION_RULE_IMMUTABLE`); only its bound
+  action can be rebound.
+- **Changing a schedule replaces the rule** (`replace`, server action `replaceAutomationSchedule`). After the owner's explicit
+  confirmation, FloFi creates a new rule — the old definition with only the day, frequency or time changed (the time zone stays), the same
+  bound action by value, limits, expiry and `CONFIRM_EACH_TIME` mode, re-checked like a creation — and archives the old rule, in one
+  transaction with a compare-and-set on the old rule's version (`AUTOMATION_VERSION_CONFLICT`). The old rule's open proposals are
+  withdrawn (`AUTOMATION_REPLACED`) and its approval links revoked; both histories record the link (`AUTOMATION_REPLACED` /
+  `AUTOMATION_REPLACEMENT`). It works at the 25-rule cap because the old rule leaves in the same transaction. A paused rule's replacement
+  stays paused. Refused: another owner's id (NOT FOUND), an archived or expired rule, a price trigger (no schedule:
+  `AUTOMATION_REPLACE_UNSUPPORTED`), an unchanged schedule (`AUTOMATION_SCHEDULE_UNCHANGED`), a rule waiting for a rebind, and a delegated
+  rule (`DELEGATED_REAUTHORIZATION_REQUIRED`). Saving the replacement authorizes no spending.
 - **One occurrence, one proposal.** Opening a proposal again withdraws the previous approval first; once the owner has added it to their
   workflow it is completed and cannot be proposed or dismissed again (`AUTOMATION_OCCURRENCE_COMPLETED`).
 - **Workflow edits** never change an automation: a saved workflow it came from is recorded by id, hash and version; an edit marks the
@@ -135,7 +149,7 @@ test-pool prices, not at the observed market price.
 
 Content-free JSON lines (`service: flofi-automations`): `automation.evaluated`, `automation.trigger_matched`,
 `automation.condition_not_met` (on changes only), `automation.occurrence_created`, `automation.approval_requested`,
-`automation.notification_attempted`, `automation.paused` / `resumed` / `archived` / `expired`, `automation.dispatch`. Fields are ids,
+`automation.notification_attempted`, `automation.paused` / `resumed` / `archived` / `replaced` / `expired`, `automation.dispatch`. Fields are ids,
 closed codes and counts only — never an owner address, a channel address, a link, a token or a signature.
 
 ## 7. What not to do
@@ -144,11 +158,21 @@ closed codes and counts only — never an owner address, a channel address, a li
 - Never list mainnet networks for automations without the owner's explicit decision and the legal review Channels and MCP require.
 - There is no "run this automation now" endpoint and none should be added: evaluation only ever produces proposals for the owner.
 
-## 8. "Automatic within limits" (BUILD-AUTOMATION-002, opt-in, not in standard production)
+## 8. "Automatic within limits" (BUILD-AUTOMATION-002) — retired
 
-`DELEGATED_WITH_LIMITS` is a second, explicit execution mode alongside the default `CONFIRM_EACH_TIME`. Rules of both modes live in the
-same `automation_rules` table and use the same scheduler and evaluator; Chat, the Automations form and (later) the Canvas all produce the
-same canonical rule. The owner:
+**Status: retired on every deployment (`EXECUTOR_FUNDED_GAS_RETIRED`; [ADR-0008](../adr/ADR-0008-user-funded-execution.md), invariant S1,
+BUILD-FLOFI-UNIVERSAL-WORKFLOW-002).** The delegated executor sent and paid for every redemption from FloFi's own session address, and
+FloFi never pays an owner's network fees. The product boundary (`delegation/operations.ts` `EXECUTOR_FUNDED_OPERATIONS`, embedded BFF and
+Railway API alike) therefore refuses every operation that would create new delegated authority — creating a delegated automation,
+preparing or completing a Credential, reviewing, signing or re-authorizing an authorization, resuming an execution — with
+`EXECUTOR_FUNDED_GAS_RETIRED`, and the delegation overview reports the executor and enrollment as retired. A delegated rule cannot be
+resumed (`EXECUTOR_FUNDED_GAS_RETIRED`), rebound or replaced (`DELEGATED_REAUTHORIZATION_REQUIRED`); it can still be paused or archived.
+Reading, revoking and ending existing authority stay available, so nothing already signed is stranded. The Automations form and the
+Copilot show "Automatic within limits" as unavailable. Owner-confirmed (`CONFIRM_EACH_TIME`) automations are unaffected.
+
+What follows is the design as built, kept for the existing records it explains. `DELEGATED_WITH_LIMITS` was a second, explicit execution
+mode alongside the default `CONFIRM_EACH_TIME`. Rules of both modes live in the same `automation_rules` table and use the same scheduler
+and evaluator. The owner:
 
 1. registers a passkey (Passkeys) after a fresh wallet sign-in;
 2. enrolls each wallet once in Credentials → Automatic execution. Each enrollment is one wallet signature per chain, granting a bounded
@@ -158,12 +182,11 @@ same canonical rule. The owner:
 4. reviews the human-readable authorization (steps, limits, expiry, what is enforced on-chain versus by FloFi) and signs it **once** with
    the passkey. That is not a blockchain signature.
 
-Each occurrence then runs without asking the owner again. In order, FloFi re-verifies the authority graph, atomically reserves the budget,
-runs a fresh simulation, checks the step against the signed limits, has the session signer submit it, reconciles and settles, and records
-evidence that names the Credential and grant of each step. An uncertain outcome never releases its reservation and is never re-signed.
-"Revoke authorization" stops the workflow at once. Revoking a Credential also needs the owner's wallet to disable the on-chain grant.
+Each occurrence then ran without asking the owner again: FloFi re-verified the authority graph, atomically reserved the budget, ran a fresh
+simulation, checked the step against the signed limits, had the session signer submit it, reconciled and settled, and recorded evidence
+naming the Credential and grant of each step. An uncertain outcome never released its reservation and was never re-signed. Today the
+executor refuses every step before simulation (`EXECUTOR_GAS_PAYER_REFUSED`, ADR-0008), so no delegated occurrence executes. "Revoke
+authorization" still stops a workflow at once, and revoking a Credential still needs the owner's wallet to disable the on-chain grant.
 
-Operationally: see [ENVIRONMENT.md §5g](ENVIRONMENT.md). The executor needs a production custody provider for its session signers, and none
-exists yet, so **production delegated signing is blocked** (`DELEGATED_SIGNER_UNAVAILABLE`). Only local rehearsals with disposable keys
-under `/tmp` and the loopback chain doubles can run it. Logs use the same content-free conventions (`delegation.*`): ids, closed codes and
-counts only, never a key, a signature or an address.
+Operationally: see [ENVIRONMENT.md §5g](ENVIRONMENT.md). Logs keep the same content-free conventions (`delegation.*`): ids, closed codes
+and counts only, never a key, a signature or an address.

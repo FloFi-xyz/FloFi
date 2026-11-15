@@ -16,10 +16,11 @@ import { evmWalletErrorMessage, evmWalletNotice, solanaWalletNotice, walletNotic
 
 /**
  * P0 hotfix (locale contract): every literal message handed to the catalog in the product — `t(...)` / `tr(...)` in components, and
- * `translate(language, ...)` in components, state, domain, server actions, presentation libraries and wallet copy — including the fallbacks of
- * `a ?? 'b'`, `a || 'b'` and conditionals. Tests, harnesses and the deliberate literal inventory are excluded.
+ * `translate(language, ...)` in components, state, domain, server actions, presentation libraries, wallet copy and the shared automation copy
+ * (`automations/explain.ts`) — including the fallbacks of `a ?? 'b'`, `a || 'b'` and conditionals. Tests, harnesses and the deliberate literal
+ * inventory are excluded.
  */
-const SCANNED = ['components', 'state', 'domain', 'app', 'lib', 'wallet'] as const;
+const SCANNED = ['components', 'state', 'domain', 'app', 'lib', 'wallet', 'automations'] as const;
 function sourceFiles(dir: string) {
   const root = fileURLToPath(new URL(`../${dir}/`, import.meta.url));
   return (readdirSync(root, { recursive: true }).filter(file => typeof file === 'string' && /\.tsx?$/.test(file) && !/\.test\.tsx?$|test-harness|\.d\.ts$/.test(file)) as string[])
@@ -54,7 +55,8 @@ function productMessages() {
 const copyLike = (text: string) => (/^[A-Za-z][a-z’']/.test(text) && /\s/.test(text) || /^[A-Z][a-z]+$/.test(text)) && !/^(?:https?:|eip155:|solana:)/.test(text);
 function copyTables() {
   const values = new Map<string, string>();
-  for (const dir of ['components', 'state', 'domain', 'lib'] as const) for (const { name, src } of sourceFiles(dir)) {
+  // `automations` holds the workspace's label tables since they became shared copy (`automations/explain.ts`).
+  for (const dir of ['components', 'state', 'domain', 'lib', 'automations'] as const) for (const { name, src } of sourceFiles(dir)) {
     if (/(^|\/)admin\//.test(name)) continue;
     const visit = (node: ts.Node) => {
       if (ts.isVariableDeclaration(node) && node.type && /Record<[^>]*,\s*string>/.test(node.type.getText(src)) && node.initializer && !/_PT$/.test(node.name.getText(src))) {
