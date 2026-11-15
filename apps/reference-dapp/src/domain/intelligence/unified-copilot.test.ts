@@ -10,6 +10,7 @@ import { CopilotSession, act, intent } from '../copilot-session.test-harness';
 import { setActiveNetworkScope } from '../network-scope';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence.test-harness';
 import { SAVED_RECIPIENT_MARKER, type SavedRecipient } from '../saved-recipients';
+import { automationCreated } from '../copilot-conversation';
 
 beforeAll(registerFixtureCatalogs);
 afterAll(() => { resetNetworkCatalogs(); setActiveNetworkScope(null); });
@@ -148,12 +149,24 @@ describe('Journey D and management — automations', () => {
     expect(pause).toMatchObject({ kind: 'AUTOMATION_MANAGE', text: 'Pronto para pausar. Nada muda até você confirmar.' });
     expect(pause.command).toBeUndefined();
   });
-  it('an automation proposal says in the user\'s language that creating it never authorizes spending', () => {
+  it('Journey D: "Compra 20 USDC de ETH toda sexta às 10h", "E se o preço cair?", "Muda para segunda" — then, once created, a confirmed replacement', () => {
     const s = mainnet('PT');
-    const reply = s.say('Compra 20 USDC de ETH toda sexta às 10h na Base', { version: '2', language: 'PT', kind: 'AUTOMATION', draft: { kind: 'SCHEDULED_DCA', name: null,
-      schedule: { frequency: 'WEEKLY', weekday: 5, time: '10:00' }, condition: null, action: { side: 'BUY', asset: 'ETH', network: 'BASE', amount: '20', spendAsset: 'USDC' },
-      watch: null } });
-    if (reply?.kind === 'AUTOMATION_PROPOSAL') expect(reply.text).toMatch(/criar nunca autoriza gastos/);
+    const draft = { kind: 'SCHEDULED_DCA', asset: 'ETH', side: 'BUY', network: 'BASE', amount: '20', spendAsset: 'USDC', time: '10:00', condition: null, threshold: null, percent: null };
+    const proposal = s.say('Compra 20 USDC de ETH toda sexta às 10h na Base', { version: '2', language: 'PT', kind: 'AUTOMATION', draft })!;
+    expect(proposal).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: { schedule: { frequency: 'WEEKLY', weekday: 5, time: '10:00' } } });
+    expect(proposal.text).toMatch(/criar nunca autoriza gastos/);
+    const price = s.say('E se o preço cair?')!;
+    expect(price).toMatchObject({ kind: 'ANSWER', topic: 'AUTOMATIONS' });
+    expect(price.text).toMatch(/^Uma compra recorrente propõe a compra no horário agendado, seja qual for o preço/);
+    const monday = s.say('Muda para segunda')!;
+    expect(monday).toMatchObject({ kind: 'AUTOMATION_PROPOSAL', automation: { schedule: { frequency: 'WEEKLY', weekday: 1, time: '10:00' }, action: { amount: '20' } } });
+    expect(s.say('O que acontece se eu não tiver saldo?')!.text).toMatch(/^O FloFi não verifica o seu saldo/);
+    // After the owner created it, a change is a replacement the owner confirms in their own automation view — never applied from the chat.
+    s.state = automationCreated(s.state);
+    expect(s.say('Muda para sexta-feira')).toMatchObject({ kind: 'AUTOMATION_MANAGE', manage: { operation: 'RESCHEDULE', request: 'Muda para sexta-feira' } });
+    expect(s.say('Pausa essa automação')).toMatchObject({ kind: 'AUTOMATION_MANAGE', manage: { operation: 'PAUSE' } });
+    expect(s.say('por que minha automação não rodou?')).toMatchObject({ kind: 'AUTOMATION_MANAGE', manage: { operation: 'WHY_NOT_RUN' } });
+    expect(s.turns.slice(1).every(turn => turn.request === null && turn.reply?.command === undefined)).toBe(true);
   });
 });
 
