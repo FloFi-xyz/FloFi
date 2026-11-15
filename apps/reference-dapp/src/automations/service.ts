@@ -15,6 +15,10 @@
  *                 (Apply proposal → Simulate → Review → sign); it is the owner's manual action, never an automated proposal
  *   rebind        the owner's explicit acceptance of a changed saved workflow (or re-composition after an engine change), re-checked
  *                 against the limits; proposals made under the old binding are withdrawn
+ *   replace       the owner's explicit schedule change. A rule's definition is immutable (AUTOMATION_RULE_IMMUTABLE), so the change is a
+ *                 NEW rule — the old definition with only the schedule changed, the same bound action (by value), limits, expiry and
+ *                 CONFIRM_EACH_TIME mode, re-checked like a creation — and the old rule archived (compare-and-set on its version), both in
+ *                 ONE transaction; the old rule's open proposals are withdrawn. A paused rule's replacement stays paused
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { savedWorkflowHash } from '../domain/saved-workflow.ts';
@@ -24,7 +28,7 @@ import { evaluateWorkflowGates, requestApproval, sharedRunsRead, type EngineRunt
 import { createSavedWorkflowStore } from '../server/saved-workflow-store.ts';
 import { networkScope } from '../server/network-scope.ts';
 import { automationApprovalScheme, automationRequester, AUTOMATION_HANDOFF_RULES, ruleScope, sameOwner } from './approval.ts';
-import { EXECUTION_ROUTES, observedAssetOf, routeStrategy, sideOf, type Side } from './assets.ts';
+import { EXECUTION_ROUTES, observedAssetOf, routeStrategy, sideOf, type Side, type SwapNetwork } from './assets.ts';
 import { bindStrategy, singleStrategy, sourceDrift, strategyOfSavedWorkflow, verifyBinding, type Binding } from './binding.ts';
 import type { AutomationConfig } from './config.ts';
 import { validateAutomationInput, type ActionRequest } from './definition.ts';
@@ -33,13 +37,13 @@ import { limitViolation } from './evaluator.ts';
 import { bindingViolation } from './limits.ts';
 import type { AutomationLogger } from './log.ts';
 import type { PriceSource } from './price-source.ts';
-import { nextSlotAfter } from './schedule.ts';
+import { nextSlotAfter, type Schedule } from './schedule.ts';
 import { MAX_RULES_PER_OWNER, OPEN_OCCURRENCE, type AutomationStore, type EvaluationRecord, type OccurrenceRecord, type Owner, type RuleRecord } from './store.ts';
 import { createLinkCode, ownerBucket, targetsOf, unlinkOwner } from './subscriptions.ts';
 import { conditionThreshold, OBSERVED_ASSETS, type ObservedAsset } from './trigger.ts';
 import { onceEachRun, recordedRunFacts } from './run-facts.ts';
-import type { ActionView, CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, OccurrenceView, OpenedView, OverviewView, RuleHistoryView, RuleView,
-  RouteCapability } from './views.ts';
+import type { ActionView, CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, OccurrenceView, OpenedView, OverviewView, ReplacedView, RuleHistoryView, RuleView,
+  RouteCapability, SchedulePatchView } from './views.ts';
 
 export type ServiceDeps = {
   readonly config: AutomationConfig; readonly db: Database; readonly store: AutomationStore; readonly handoffs: HandoffStore; readonly allow: WindowLimit;
@@ -81,6 +85,27 @@ export function ruleView(rule: RuleRecord, pending = 0): RuleView {
 }
 const historyView = (e: EvaluationRecord): HistoryEntryView => ({ at: e.at.toISOString(), outcome: e.outcome, occurrenceId: e.occurrenceId,
   observation: observations(e.observation)[0] ?? null, detail: e.detail });
+/** Key-order-independent JSON, to compare a stored definition (jsonb) with a freshly validated one. */
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v as object).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v);
+/** The bound action of a rule as the owner's input names it: its saved workflow, or the route its single swap is. */
+function actionRequestOf(binding: Binding): ActionRequest {
+  if (binding.source) return { kind: 'SAVED_WORKFLOW', workflowId: binding.source.workflowId };
+  const strategy = singleStrategy(binding.strategy), asset = strategy && observedAssetOf(strategy), side = strategy && sideOf(strategy);
+  if (!strategy || strategy.action !== 'swap' || !asset || !side || typeof strategy.slippageBps !== 'number') return refuse('AUTOMATION_ACTION_UNSUPPORTED');
+  return { kind: 'ROUTE', asset, side, network: strategy.network as SwapNetwork as Extract<ActionRequest, { kind: 'ROUTE' }>['network'], amount: strategy.amount,
+    slippageBps: strategy.slippageBps };
+}
+/** The owner's input that recreates `rule` with only its schedule changed (validated like any creation). */
+function replacementInput(rule: RuleRecord, schedule: Schedule): unknown {
+  const base = { version: 1, name: rule.name, expiresAt: rule.expiresAt?.toISOString() ?? null,
+    schedule: { frequency: schedule.frequency, weekday: schedule.weekday, time: schedule.time, timezone: schedule.timezone } };
+  if (rule.kind === 'DAILY_WATCH') return { ...base, kind: 'DAILY_WATCH', watch: { assets: [...rule.definition.watch?.assets ?? []] } };
+  if (rule.kind !== 'SCHEDULED_DCA' || !rule.binding) return refuse('AUTOMATION_REPLACE_UNSUPPORTED');
+  const l = rule.definition.limits;
+  return { ...base, kind: 'SCHEDULED_DCA', action: actionRequestOf(rule.binding), limits: { maxAmountPerExecution: l.maxAmountPerExecution,
+    maxAmountPerPeriod: l.maxAmountPerPeriod, maxOccurrencesPerPeriod: l.maxOccurrencesPerPeriod, cooldownMinutes: l.cooldownMinutes, maxSlippageBps: l.maxSlippageBps } };
+}
 
 export function createAutomationService(deps: ServiceDeps) {
   const { store, config } = deps;
@@ -250,6 +275,58 @@ export function createAutomationService(deps: ServiceDeps) {
         if (o.handoffId) await deps.handoffs.revokeForRequester(o.handoffId, ruleScope(ruleId), now).catch(() => null);
       deps.log.info('automation.rebound', { rule: ruleId, version: updated.version });
       return ruleView(updated);
+    },
+
+    /** The owner's explicit schedule change: a new rule replaces the old one (see the module comment). */
+    async replace(owner: Owner, ruleId: string, expectedVersion: number, patch: { readonly schedule: SchedulePatchView }): Promise<ReplacedView> {
+      const now = deps.now(), current = await store.getRule(owner, ruleId) ?? refuse('AUTOMATION_NOT_FOUND');
+      // A delegated rule's definition changes only through a new authorization revision the owner signs (retired here, EXECUTOR_FUNDED_GAS_RETIRED).
+      if (current.executionMode !== 'CONFIRM_EACH_TIME') refuse('DELEGATED_REAUTHORIZATION_REQUIRED');
+      if (current.version !== expectedVersion) refuse('AUTOMATION_VERSION_CONFLICT');
+      if (current.state !== 'ACTIVE' && current.state !== 'PAUSED') refuse(`AUTOMATION_${current.state}`);
+      if (current.expiresAt && current.expiresAt <= now) refuse('AUTOMATION_EXPIRED');
+      // A rule waiting for a rebind is rebound first: a replacement never carries a stale or drifted action forward silently.
+      if (current.attention) refuse(`AUTOMATION_${current.attention}`);
+      // Only scheduled rules have a schedule to change (a price trigger's condition is not a schedule).
+      const old = current.definition.schedule ?? refuse('AUTOMATION_REPLACE_UNSUPPORTED');
+      const schedule: Schedule = { frequency: patch.schedule.frequency, weekday: patch.schedule.weekday, time: patch.schedule.time, timezone: old.timezone };
+      if (schedule.frequency === old.frequency && schedule.weekday === old.weekday && schedule.time === old.time) refuse('AUTOMATION_SCHEDULE_UNCHANGED');
+      const validated = validateAutomationInput(replacementInput(current, schedule), now.getTime());
+      if (!validated.ok) refuse(validated.code);
+      const v = validated.ok ? validated.value : refuse('AUTOMATION_INPUT_INVALID');
+      // Only the schedule changes: the validated definition must be the stored one with the new schedule, under the same name, kind, zone and expiry.
+      if (canonical(v.definition) !== canonical({ ...current.definition, schedule }) || v.kind !== current.kind || v.name !== current.name || v.timezone !== current.timezone
+        || (v.expiresAt?.getTime() ?? null) !== (current.expiresAt?.getTime() ?? null)) refuse('AUTOMATION_REPLACE_UNSUPPORTED');
+      // The bound action is kept BY VALUE and re-checked like a creation: it still reproduces, its source workflow is unchanged, the owner's wallet
+      // can claim it, and its limits and this deployment's gates still allow it.
+      const binding = current.binding;
+      if (binding) {
+        if (!verifyBinding(binding).ok) refuse('STRATEGY_STALE');
+        if (v.action?.kind === 'ROUTE') {
+          const route = routeStrategy(v.action), rebuilt = route.ok ? bindStrategy(route.strategy) : null;
+          if (!rebuilt?.ok || rebuilt.binding.workflowHash !== binding.workflowHash) refuse('STRATEGY_STALE');
+        }
+        if (binding.source) {
+          const saved = await savedWorkflows(owner).get(binding.source.workflowId);
+          if (sourceDrift(binding.source, saved ? { workflowHash: savedWorkflowHash(saved.workflow), version: saved.version } : null)) refuse('AUTOMATION_WORKFLOW_CHANGED');
+        }
+        const single = singleStrategy(binding.strategy) ?? refuse('AUTOMATION_ACTION_UNSUPPORTED');
+        if (namespaceOf(single) !== owner.namespace) refuse('AUTOMATION_WALLET_NAMESPACE_MISMATCH');
+        await bindingAllowed({ definition: v.definition }, binding);
+      }
+      for (const asset of v.definition.watch?.assets ?? []) if (!deps.price.assets.includes(asset)) refuse('PRICE_ASSET_NOT_OBSERVABLE');
+      // One transaction: the new rule is inserted (the owner's creation lock held, one extra live rule admitted because the old one leaves),
+      // then the old one is archived and the live count re-checked against the cap — any refusal rolls both back.
+      const done: { archived?: RuleRecord } = {};
+      const created = await store.createRule({ ruleId: deps.newId('aut'), owner, name: v.name, kind: v.kind, definition: v.definition, binding, timezone: v.timezone,
+        expiresAt: v.expiresAt, nextEvaluationAt: new Date(nextSlotAfter(schedule, now.getTime()).at), scheduleCursor: now, paused: current.state === 'PAUSED' },
+      now, MAX_RULES_PER_OWNER + 1, async (tx, inserted) => { done.archived = await store.archiveReplaced(tx, owner, ruleId, expectedVersion, inserted, now, MAX_RULES_PER_OWNER); });
+      const replaced = done.archived ?? refuse('AUTOMATION_REPLACE_UNSUPPORTED');
+      // As for an archive: the old rule's approval links are revoked (best effort; the occurrences already ended in the transaction).
+      for (const o of await store.listOccurrences(owner, { ruleId, limit: 50 }, now))
+        if (o.handoffId) await deps.handoffs.revokeForRequester(o.handoffId, ruleScope(ruleId), now).catch(() => null);
+      deps.log.info('automation.replaced', { rule: ruleId, replacement: created.ruleId, version: replaced.version });
+      return { created: ruleView(created), archived: ruleView(replaced) };
     },
 
     async history(owner: Owner, ruleId: string): Promise<RuleHistoryView> {

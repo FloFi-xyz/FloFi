@@ -120,7 +120,7 @@ export function createPgAutomationStore(db: Database, tenantId: string): Automat
         VALUES ($1, $2, $3, $4, $5, $6, $19, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $18, $20, $21) RETURNING *`,
       [tenantId, rule.ruleId, rule.owner.namespace, rule.owner.address, rule.name, rule.kind, JSON.stringify(rule.definition), json(b?.strategy), b?.workflowHash ?? null,
         b?.engineVersion ?? null, b?.source?.workflowId ?? null, b?.source?.workflowHash ?? null, b?.source?.version ?? null, rule.timezone, rule.nextEvaluationAt,
-        rule.scheduleCursor, rule.expiresAt, now, rule.delegated ? 'PAUSED' : 'ACTIVE', rule.delegated ? 'DELEGATED_WITH_LIMITS' : 'CONFIRM_EACH_TIME',
+        rule.scheduleCursor, rule.expiresAt, now, rule.delegated || rule.paused ? 'PAUSED' : 'ACTIVE', rule.delegated ? 'DELEGATED_WITH_LIMITS' : 'CONFIRM_EACH_TIME',
         rule.delegated?.authorizationId ?? null])).rows[0]!;
       await tx.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome) VALUES ($1, $2, $3, 'AUTOMATION_CREATED')`, [tenantId, rule.ruleId, now]);
       const created = ruleOf(row);
@@ -150,6 +150,27 @@ export function createPgAutomationStore(db: Database, tenantId: string): Automat
         [tenantId, ruleId, now, next === 'ACTIVE' ? 'AUTOMATION_RESUMED' : next === 'PAUSED' ? 'AUTOMATION_PAUSED' : 'AUTOMATION_ARCHIVED']);
       return ruleOf(row);
     }),
+    async archiveReplaced(tx, owner, ruleId, expectedVersion, replacement, now, maxRules) {
+      // Lock order: the owner's creation lock (taken by createRule), then this rule, then its occurrences — as everywhere else.
+      let rule = await ownerRule(tx, owner, ruleId, true) ?? refuse('AUTOMATION_NOT_FOUND');
+      if (rule.version !== expectedVersion) refuse('AUTOMATION_VERSION_CONFLICT');
+      if (rule.executionMode !== 'CONFIRM_EACH_TIME') refuse('DELEGATED_REAUTHORIZATION_REQUIRED');
+      rule = await expireRuleIfLapsed(tx, rule, now);
+      if (rule.state !== 'ACTIVE' && rule.state !== 'PAUSED') refuse(`AUTOMATION_${rule.state}`);
+      if (replacement.ruleId === ruleId || replacement.kind !== rule.kind || replacement.owner.namespace !== owner.namespace || replacement.owner.address !== owner.address)
+        refuse('AUTOMATION_REPLACE_UNSUPPORTED');
+      const row = (await tx.query(`UPDATE automation_rules SET state = 'ARCHIVED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 RETURNING *`,
+        [tenantId, ruleId])).rows[0]!;
+      // Proposals of the replaced rule are withdrawn: nothing old is proposed once its schedule changed.
+      await endOpen(tx, ruleId, 'AUTOMATION_REPLACED', now);
+      await tx.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome, detail) VALUES ($1, $2, $3, 'AUTOMATION_REPLACED', $4::jsonb),
+        ($1, $5, $3, 'AUTOMATION_REPLACEMENT', $6::jsonb)`, [tenantId, ruleId, now, JSON.stringify({ replacedBy: replacement.ruleId }), replacement.ruleId,
+        JSON.stringify({ replaces: ruleId })]);
+      const live = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM automation_rules WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3
+        AND state <> 'ARCHIVED'`, [tenantId, owner.namespace, owner.address])).rows[0]!.n;
+      if (live > maxRules) refuse('AUTOMATION_RULE_LIMIT');
+      return ruleOf(row);
+    },
     rebind: (owner, ruleId, expectedVersion, binding, now) => db.transaction(async tx => {
       const rule = await ownerRule(tx, owner, ruleId, true) ?? refuse('AUTOMATION_NOT_FOUND');
       if (rule.version !== expectedVersion) refuse('AUTOMATION_VERSION_CONFLICT');
