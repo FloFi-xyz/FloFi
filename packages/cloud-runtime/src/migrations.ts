@@ -61,6 +61,8 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 26, name: 'flight_early_list', sha256: '51fc9c3195ba179a4068b7c66a267216ed102d0a65f1c59a6e94fd8fb34f10c8' },
   // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: nonce-conflict diagnostics and Support privacy controls (six new tables, own triggers). Additive.
   { version: 27, name: 'reconciliation_privacy', sha256: '6edd545c5f7076aa85468c52e79a198df187af71001793695675527f5f96c069' },
+  // BUILD-FLOFI-UNIFIED-COPILOT-001 Release B: one new table, flofi_account_recipients (an account's saved names for public addresses). Additive.
+  { version: 28, name: 'saved_recipients', sha256: 'ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f' },
 ].map(migration => Object.freeze(migration)));
 
 /**

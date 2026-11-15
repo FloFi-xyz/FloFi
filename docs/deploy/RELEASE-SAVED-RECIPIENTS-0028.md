@@ -1,7 +1,13 @@
 # FloFi: release of Saved Recipients (BUILD-FLOFI-UNIFIED-COPILOT-001; migration 0028)
 
-Status (2026-11-15): **Release A is in review (this pull request); nothing has been deployed or migrated.** No production database, Railway
-service or Vercel project was touched during engineering. Release B has not been prepared; its steps are below for the owner to run later.
+Status (2026-11-15):
+
+- **Release A is deployed.** PR #199 merged as `67f4e84`, which serves on Vercel Production, the Railway API and the Railway worker. The API
+  pre-deploy logged `migrate.applied versions=none schema_version=27`. Production stays at schema 27.
+- **Release B is prepared in its own pull request, not merged.** It ships the certified bytes and the `SHIPPED_MIGRATIONS` entry, and adds
+  `saved-recipients-migration.pg.test.ts`. That test also rehearses the Neon procedure below as written in this document, on disposable
+  PostgreSQL: the resulting catalog and ledger equal `migrate`'s, and a second run stops at `LEDGER_NOT_EXACTLY_V27`.
+- **0028 has not been applied to Neon.** That step is the owner's, from an operator shell, before Release B is merged (see the order below).
 
 **Saved recipients stay unavailable in production until Release B applies 0028.** Release A ships the feature's code, but every saved-recipient
 action answers `RECIPIENTS_UNAVAILABLE` until `schema_migrations` holds the exact certified 0028, and Credentials → Saved recipients shows
