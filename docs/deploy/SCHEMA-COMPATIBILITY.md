@@ -864,3 +864,50 @@ touches only the certificate, its fixture and this section, so it can be cherry-
 the Railway API pre-deploy. See [RELEASE-FLIGHT-LAUNCH-0024.md](./RELEASE-FLIGHT-LAUNCH-0024.md). Without Release A there is no application
 rollback once 0024 is applied: the previous build refuses schema 24 (`MIGRATION_HISTORY_MISMATCH`). No production migration or release was
 performed during engineering.
+
+## 19. Certificate 0027_reconciliation_privacy
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0026 `flight_early_list` (`51fc9c31…10c8`) | 0027 `reconciliation_privacy` | `6edd545c5f7076aa85468c52e79a198df187af71001793695675527f5f96c069` |
+
+Migration 0027 (BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001) is additive and changes no row. It creates six empty tables, each with its own
+functions, triggers and indexes:
+
+- `execution_nonce_conflicts` — the worker's read-only nonce-conflict investigations (a diagnostic cache; no flow reads it). Foreign key to
+  `execution_runs (tenant_id, run_id) ON DELETE CASCADE`, so the v26 owner-history purge still deletes a run (its diagnostic row goes with it).
+- `admin_support_texts` (immutable bodies; deletion refused under a legal hold), `admin_lookup_keys` (wrapped quarter keys; never deleted, only
+  destroyed; destruction refused under a hold), `privacy_legal_holds`, `privacy_requests`, `privacy_retention_activations` — each with a
+  transition trigger and foreign keys to `tenants`, and a statement trigger refusing `TRUNCATE` on the five privacy tables.
+- No tenant-deletion path exists, so the new `REFERENCES tenants` keys (no cascade) block nothing a v26 build does.
+- No function, trigger, CHECK, column or index of any pre-existing relation changes. `admin_audit_events` keeps its append-only trigger and
+  every row as written.
+
+A build without 0027 (v26) runs unchanged on schema 27, including on rows written by a build with it:
+- it never reads or writes the new tables; its `admin_audit_events` inserts and reads are unchanged. Support events written by the new build
+  carry `textRef`/`reasonRef` (and lookups `fpv`, `period`, `kid`) instead of inline text: a v26 Admin skips such notes in its note lists
+  (its `listNotes` requires `detail.text`) and shows such reasons as "—" (it reads `detail.reason`), never an error — a display difference only
+  during a rollback window. While rolled back, a v26 Admin writes new notes and reasons inline again (outside the new controls);
+- its purge path (`purge_unstarted_execution`, 0016) deletes `execution_runs`, which cascades into `execution_nonce_conflicts`; nothing else
+  references a pre-existing row.
+
+**Locks.** `SET LOCAL lock_timeout = '5s'`. Creating the foreign keys takes a SHARE ROW EXCLUSIVE lock on `execution_runs` and `tenants` for
+the remainder of the migration's (short) transaction: concurrent writes to those two tables wait for it (milliseconds — every new table is
+empty, so nothing is scanned). A lock that cannot be taken within 5 s fails the migration, which rolls back completely (proven:
+`reconciliation-privacy-migration.pg.test.ts`), and the previous deployment keeps serving.
+
+Release A's `packages/cloud-runtime/test/certificate-0027.pg.test.ts` applies the certified bytes (kept as
+`packages/cloud-runtime/test/fixtures/0027_reconciliation_privacy.sql`) under the v26 build and checks: schema 26 served unchanged; schema 27
+served only through the certificate (the strict check refuses it); the catalog diff (nothing pre-existing removed, redefined or added to);
+every earlier row surviving; v26 audit writes, the append-only guard and the 0016 purge mechanism (with the cascade) still working; the v26
+runner never changing a database ahead of it; and the lock-timeout rollback. `apps/reference-dapp/backend/schema-compatibility.pg.test.ts`
+runs the v26 API, worker, `main.ts`/CLI cold starts and Vercel paths across the new certificate. Release B adds
+`reconciliation-privacy-migration.pg.test.ts` for the shipped migration.
+
+**Release order.** Release A is the certificate `{ base: 0026 flight_early_list, migrations: [0027 reconciliation_privacy] }` with the exact
+bytes, deployed from a build whose newest shipped migration is 0026 to **every** database consumer (Vercel Production, Railway API, Railway
+worker) before any build that ships 0027 migrates. It is the commit `RELEASE A: schema 0027 compatibility certificate` of this build's branch,
+which touches only the certificate, its fixture, its test and this section (the manifest test `forward-compatibility.test.ts` also checks
+the fixture's bytes and this anchor), so it can be merged and deployed on its own. Release B (this build) then
+migrates from the Railway API pre-deploy; Release B adds the step-by-step release document `RELEASE-RECONCILIATION-PRIVACY-0027.md`. Without
+Release A there is no application rollback once 0027 is applied. No production migration or release was performed during engineering.

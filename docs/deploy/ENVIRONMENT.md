@@ -115,6 +115,7 @@ The Robinhood Chain Testnet endpoint has no override.
 | --- | --- | --- | --- | --- | --- |
 | `FLOFI_COPILOT` | `off`, `replay` (committed answers, no model — traced into the deployment), `live` | no | `replay` or `live` | as chosen | `off` |
 | `OPENAI_API_KEY` | Required for `live`; a dedicated project key with a spend limit | **yes** | with `live` | with `live` | — (`COPILOT_NOT_CONFIGURED`) |
+| `ANTHROPIC_API_KEY` | BUILD-ADMIN-AI-PROVIDERS-001: the Anthropic provider's key, independent of `OPENAI_API_KEY`. Needed only for channels whose AI Settings select Anthropic; a live Copilot with only this key works once an operator activates Anthropic settings. Vercel only (the Copilot never runs on Railway) | **yes** | optional | optional | — (Anthropic channels: `COPILOT_PROVIDER_NOT_CONFIGURED`) |
 | `OPENAI_COPILOT_MODEL` | Required for `live`; no built-in default, no fallback | no | with `live` | with `live` | — |
 | `OPENAI_COPILOT_TEMPERATURE`, `OPENAI_COPILOT_TIMEOUT_MS`, `OPENAI_COPILOT_MAX_OUTPUT_TOKENS`, `OPENAI_COPILOT_REASONING_EFFORT` | Tuning (an invalid value makes the Copilot unavailable) | no | optional | optional | 0 / 20000 / 4096 / unset |
 | `FLOFI_COPILOT_TELEMETRY` | `log` / `off`: one metadata line per live request, never content | no | optional | optional | `log` |
@@ -123,6 +124,11 @@ The Robinhood Chain Testnet endpoint has no override.
 
 BUILD-ADMIN-001: where PostgreSQL platform state exists, an administrator's versioned settings (`/admin` → AI Settings) override the
 `OPENAI_COPILOT_*` tuning and model per request without a redeploy; mode and key stay environment-only. See [ADMIN.md](ADMIN.md).
+
+BUILD-ADMIN-AI-PROVIDERS-001: those settings name a provider per channel (OpenAI or Anthropic). Each request uses only the selected
+provider's key; a missing key makes that channel unavailable (fail closed) and is never answered by the other provider. The
+`OPENAI_COPILOT_*` bootstrap stays OpenAI-only. Both keys are server-side Vercel variables (Production, and Preview only if a Preview
+should call the provider); neither belongs on the Railway API or worker, and neither may be `NEXT_PUBLIC_*`.
 
 ## 5b. Remote MCP gateway (BUILD-MCP-001 / BUILD-MCP-002, `POST /api/mcp`, OAuth, `/approve`)
 

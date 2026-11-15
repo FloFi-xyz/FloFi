@@ -270,7 +270,9 @@ export type WorkflowAnalytics = {
  * view's activity series starts at the bucket it covers, so the uncovered part of the range is never drawn as zero activity.
  */
 export function summarize(executions: readonly Execution[], range: AnalyticsRange, environment: AnalyticsEnvironment,
-  filter: { readonly action: ActionKind | 'ALL'; readonly outcome: OutcomeFilter }, coverage: Coverage = FULL_COVERAGE, idle: readonly IdleRuns[] = []): WorkflowAnalytics {
+  filter: { readonly action: ActionKind | 'ALL'; readonly outcome: OutcomeFilter }, coverage: Coverage = FULL_COVERAGE, idle: readonly IdleRuns[] = [],
+  /** Run ids with an OPEN attention lifecycle (`support/lifecycle.ts`). When given, `attention` counts executions with such a run; else the classifier's flag. */
+  openAttentionRuns: ReadonlySet<string> | null = null): WorkflowAnalytics {
   const truncated = coverage.truncated;
   // Runs that never started: simulated executions (authorized when the classifier says so), in their own environment; nothing else.
   const idleHere = idle.filter(group => environmentOf(group.provenance) === environment);
@@ -354,7 +356,7 @@ export function summarize(executions: readonly Execution[], range: AnalyticsRang
       executed: done.length, completed: outcomes.COMPLETED },
     outcomes, notExecuted: scoped.filter(e => e.classification.started && e.classification.outcome === 'NOT_EXECUTED').length,
     awaitingSignature: scoped.filter(e => e.classification.started && !e.classification.submitted && e.classification.outcome === 'IN_PROGRESS').length,
-    attention: scoped.filter(e => e.classification.started && e.classification.attention).length,
+    attention: scoped.filter(e => e.classification.started && (openAttentionRuns ? e.runIds.some(id => openAttentionRuns.has(id)) : e.classification.attention)).length,
     rates: { denominator, success: denominator ? outcomes.COMPLETED / denominator : null, failure: denominator ? outcomes.FAILED / denominator : null },
     workflows: { executed: new Set(done.map(e => e.workflowId)).size, completed: new Set(completedDone.map(e => e.workflowId)).size },
     series: buckets.map(at => ({ at, ...series.get(at)! })),

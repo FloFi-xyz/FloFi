@@ -17,7 +17,9 @@ export function copilotMetricsEnabled(env: Env, mode: CopilotMetricsMode): boole
 const ERRORS = new Set(['COPILOT_BUSY', 'COPILOT_INPUT_INVALID', 'COPILOT_INTENT_INVALID', 'COPILOT_REFUSED', 'COPILOT_REPLAY_INVALID',
   'COPILOT_REPLAY_MISS', 'COPILOT_RESPONSE_INCOMPLETE', 'COPILOT_RESPONSE_INVALID', 'COPILOT_RESPONSE_TOO_LARGE', 'COPILOT_TIMEOUT',
   'COPILOT_TOO_MANY_ACTIONS', 'COPILOT_UNAVAILABLE', 'COPILOT_UPSTREAM_RATE_LIMITED', 'COPILOT_UPSTREAM_REJECTED', 'COPILOT_UPSTREAM_UNAUTHORIZED',
-  'COPILOT_UPSTREAM_UNAVAILABLE']);
+  'COPILOT_UPSTREAM_UNAVAILABLE',
+  // BUILD-ADMIN-AI-PROVIDERS-001: provider outcomes the Anthropic transport distinguishes (credits/billing, a model this organization cannot use).
+  'COPILOT_UPSTREAM_BILLING', 'COPILOT_UPSTREAM_MODEL_UNAVAILABLE', 'COPILOT_PARAMETER_UNSUPPORTED', 'COPILOT_REQUEST_INVALID']);
 const COLUMNS = ['duration_ms', 'input_tokens', 'input_samples', 'output_tokens', 'output_samples', 'reasoning_tokens', 'reasoning_samples',
   'tool_calls', 'tool_failures', 'tool_rounds', 'mismatches', 'clarifications', 'repeated_question_reports', 'correction_reports', 'turns_to_proposal',
   'proposals', 'proposal_steps'] as const;

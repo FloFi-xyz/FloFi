@@ -16,7 +16,7 @@ import { createTestDatabase, type TestDatabase } from '../../../../packages/clou
 import { createTestWallet } from '../../../../packages/reference-reconciler/test/test-wallet.ts';
 import { channelInterpreter } from '../channels/core/interpreter.ts';
 import { channelLiveCopilot, hostSettingsReader, resolveCopilotLive } from '../server/copilot-runtime.ts';
-import { COPILOT_SETTINGS_SCHEMA, type CopilotRuntimeSettings } from '../server/copilot-settings.ts';
+import { COPILOT_SETTINGS_SCHEMA, type StoredRuntimeSettings } from '../server/copilot-settings.ts';
 import { runAdminCommand } from './cli-commands.ts';
 import { adminConfig } from './config.ts';
 import { handleAdminChallenge, handleAdminSignIn, type AdminHttpOptions } from './http.ts';
@@ -56,7 +56,7 @@ async function settings(session: Session, body: Record<string, unknown>, extra: 
   { ...options(), ...extra });
   return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
-const runtime: CopilotRuntimeSettings = { model: 'gpt-5-mini', temperature: null, reasoningEffort: 'low', maxOutputTokens: 6000, timeoutMs: 30_000, acknowledgedUnverified: false };
+const runtime: StoredRuntimeSettings = { model: 'gpt-5-mini', temperature: null, reasoningEffort: 'low', maxOutputTokens: 6000, timeoutMs: 30_000, acknowledgedUnverified: false };
 const documentWith = (model: string, telegram: string | null = null) => ({ schema: COPILOT_SETTINGS_SCHEMA, default: { ...runtime, model },
   overrides: telegram ? { TELEGRAM: { ...runtime, model: telegram, temperature: 0.2, reasoningEffort: null } } : {} });
 
@@ -125,7 +125,7 @@ describe('BUILD-ADMIN-001 Copilot settings API (PostgreSQL)', () => {
       ['ADMIN_COPILOT_SETTINGS_SAVED', 'REFUSED', 'COPILOT_SETTINGS_TEMPERATURE_UNSUPPORTED'], ['ADMIN_COPILOT_SETTINGS_SAVED', 'REFUSED', 'COPILOT_SETTINGS_MODEL_UNVERIFIED'],
       ['ADMIN_COPILOT_SETTINGS_SAVED', 'REFUSED', 'COPILOT_SETTINGS_SHAPE_INVALID'], ['ADMIN_COPILOT_SETTINGS_SAVED', 'OK', null],
       ['ADMIN_COPILOT_SETTINGS_ROLLED_BACK', 'OK', null], ['ADMIN_COPILOT_SETTINGS_RESET', 'OK', null]]);
-    expect(audit[0]!.detail).toEqual({ version: 1, restoredFrom: null, model: 'gpt-5-mini', overrides: 'TELEGRAM' });
+    expect(audit[0]!.detail).toEqual({ version: 1, restoredFrom: null, model: 'gpt-5-mini', providers: 'OPENAI', overrides: 'TELEGRAM' });
   });
 
   it('lets exactly one of two concurrent writers of the same version win', async () => {
@@ -210,6 +210,6 @@ describe('BUILD-ADMIN-001 Copilot settings API (PostgreSQL)', () => {
       .toEqual({ status: 429, body: { ok: false, code: 'ADMIN_PROBE_RATE_LIMITED' } });
     const probes = (await t.db.query<{ outcome: string; detail: Record<string, unknown> }>(`SELECT outcome, detail FROM admin_audit_events WHERE kind = 'ADMIN_COPILOT_PROBE' ORDER BY event_id`)).rows;
     expect(probes.length).toBe(PROBE_LIMIT);
-    expect(probes[1]).toEqual({ outcome: 'FAILED', detail: { model: 'my-model', upstreamParam: 'temperature' } });
+    expect(probes[1]).toEqual({ outcome: 'FAILED', detail: { model: 'my-model', provider: 'OPENAI', upstreamParam: 'temperature' } });
   });
 });

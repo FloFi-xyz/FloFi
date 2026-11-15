@@ -59,7 +59,8 @@ variables exist only for tests and must never be set in a deployment.
 | `API_AUTH_TOKEN` | Same value as the API's token. It also keys the wallet-session cookies (HKDF, separate label) unless `FLOFI_SESSION_SECRET` is set. |
 | `FLOFI_SESSION_SECRET` | Optional, ≥ 32 characters (`openssl rand -hex 32`): a key for the wallet-session cookies separate from `API_AUTH_TOKEN`. Rotating it signs every wallet out (no funds or runs are affected). |
 | `FLOFI_COPILOT` | Optional. `off` (default), `live` (AI interpretation through the OpenAI Responses API) or `replay` (committed test answers, no model; not for production). |
-| `OPENAI_API_KEY` | Required for `FLOFI_COPILOT=live`. Server-only; never `NEXT_PUBLIC_*`. Use a dedicated OpenAI project key with a spend limit. |
+| `OPENAI_API_KEY` | Required for `FLOFI_COPILOT=live`. Server-only; never `NEXT_PUBLIC_*`. Use a dedicated OpenAI project key with a spend limit. (BUILD-ADMIN-AI-PROVIDERS-001: optional when every channel's AI Settings select Anthropic.) |
+| `ANTHROPIC_API_KEY` | BUILD-ADMIN-AI-PROVIDERS-001, optional: the Anthropic provider's key for channels whose AI Settings select Anthropic (Messages API). Server-only, Vercel only; never `NEXT_PUBLIC_*`, never on Railway. Use a dedicated key in an Anthropic workspace with a spend limit. Installing it changes nothing until an operator activates Anthropic in `/admin/ai-settings`. |
 | `OPENAI_COPILOT_MODEL` | Required for `FLOFI_COPILOT=live`: the model ID the owner chooses (no built-in default). It must support strict JSON-schema structured outputs in the Responses API. |
 | `OPENAI_COPILOT_TEMPERATURE` | Optional, default `0`; set `omit` for models that reject the parameter. |
 | `OPENAI_COPILOT_TIMEOUT_MS` | Optional (BUILD-COPILOT-002), 5000–60000, default 20000. An invalid value makes the Copilot unavailable rather than using another limit. |
@@ -241,6 +242,8 @@ These steps need the owner's accounts. The repository already contains everythin
 * **Attention**: an item that exhausts its observation budget (500 deliveries or 7 days) becomes `DEAD` and sets
   `execution_runs.attention_required`; it is never resubmitted. Query:
   `SELECT tenant_id, run_id, status, error_code FROM execution_runs WHERE attention_required;`
+  The flag is never cleared to tidy counts: the Admin classifies each flagged run as active, under investigation, historical or verified
+  resolved from durable evidence ([ADMIN.md §5c](ADMIN.md)); a flag alone is not an active incident.
 * **Logs** are one JSON object per line with `trace_id`/`span_id` (W3C), `tenant_id`, `run_id`, `flow`,
   `action`, `worker_id`, `work_kind` and redacted values. Ship them to any collector.
 * **Retention**: the sweeper deletes `DONE` work items after 14 days and expired idempotency keys. Execution

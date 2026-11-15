@@ -39,7 +39,7 @@ describe('BUILD-ADMIN-001 admin configuration', () => {
   });
   it('refuses a secret shared with any other FloFi boundary', () => {
     for (const name of ['FLOFI_SESSION_SECRET', 'API_AUTH_TOKEN', 'FLOFI_CHANNEL_SECRET', 'FLOFI_AUTOMATION_SECRET', 'FLOFI_DEVELOPER_SECRET', 'FLOFI_MCP_OAUTH_SECRET',
-      'FLOFI_WEBHOOK_SECRET', 'OPENAI_API_KEY', 'TELEGRAM_WEBHOOK_SECRET', 'WHATSAPP_APP_SECRET', 'OBJECT_STORE_SECRET_ACCESS_KEY', 'CRON_SECRET'])
+      'FLOFI_WEBHOOK_SECRET', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'TELEGRAM_WEBHOOK_SECRET', 'WHATSAPP_APP_SECRET', 'OBJECT_STORE_SECRET_ACCESS_KEY', 'CRON_SECRET'])
       expect(adminConfig({ ...env, [name]: secret })).toEqual({ enabled: false, code: 'ADMIN_SESSION_SECRET_REUSED' });
     const config = adminConfig({ ...env, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex') });
     expect(config.enabled && config.key.length).toBe(32);

@@ -7,19 +7,27 @@
  *   rollback  `{ action, expectedVersion, toVersion, reason? }`  appends a version restoring an older one (re-validated today)
  *   reset     `{ action, expectedVersion, reason? }`             appends a NULL document: back to the environment bootstrap
  *   probe     `{ action, settings }`                             one live strict-schema request with candidate settings (rate-limited)
+ *   models    `{ action, provider }`                             re-reads the provider's model list now (Anthropic; rate-limited)
  *
- * Nothing here can set the API key, the Copilot mode, its instructions or its output schema. Every change takes effect on the next
+ * Nothing here can set an API key, the Copilot mode, its instructions or its output schema. Every change takes effect on the next
  * Copilot request of every instance (no cache, see `copilot-runtime.ts`).
+ *
+ * BUILD-ADMIN-AI-PROVIDERS-001: settings name their provider. A document is saved in its canonical stored form (`storedDocument`). On a live
+ * Copilot it is accepted only when every provider it uses has its key installed on this deployment — saving can never activate a provider
+ * that would fail closed on the next request. (Without a live Copilot nothing is served, and settings can be prepared as before.) A probe uses the candidate's own provider and key; it interprets one harmless, fixed request and validates the intent
+ * exactly like a live turn. It offers no tools, touches no workflow and can never sign, submit or execute anything.
  */
-import { COPILOT_SERVER_LIMITS, createOpenAITransport, interpretCopilotV2, type CopilotHttpResponse } from '../server/copilot-service.ts';
-import { copilotApiKey } from '../server/copilot-runtime.ts';
-import { CopilotSettingsError, validateRuntimeSettings, validateSettingsDocument, type CopilotSettingsDocument } from '../server/copilot-settings.ts';
+import { COPILOT_SERVER_LIMITS, interpretCopilotV2, type CopilotHttpResponse, type CopilotTransport } from '../server/copilot-service.ts';
+import { CopilotProviderError, createProviderTransport, discoverAnthropicModels, estimatedCostUsd, providerApiKey, providerReadiness,
+  type AnthropicRejection } from '../server/copilot-providers.ts';
+import { CopilotSettingsError, documentProviders, storedDocument, validateRuntimeSettings, validateSettingsDocument, type CopilotSettingsDocument } from '../server/copilot-settings.ts';
 import { appendSettingsVersion, readActiveSettings, readSettingsVersion, type SettingsVersion } from '../server/runtime-settings-store.ts';
 import { adminMutation, codeOf, json, readJsonObject, type AdminHttpOptions } from './http.ts';
 
 export type SettingsHttpOptions = AdminHttpOptions & { readonly fetch?: typeof fetch };
 export const PROBE_WINDOW_MS = 600_000, PROBE_LIMIT = 10;
 export const PROBE_TRANSCRIPT = Object.freeze({ version: '2', messages: [{ role: 'user', text: 'Swap 1 USDC to WETH on Base Sepolia with 0.5% slippage' }] });
+export const MODELS_REFRESH_LIMIT = 10;
 const UPSTREAM_CODES = new Set(['unsupported_parameter', 'unsupported_value', 'model_not_found', 'invalid_value', 'invalid_type', 'invalid_json_schema']);
 const UPSTREAM_PARAMS = new Set(['model', 'temperature', 'reasoning', 'reasoning.effort', 'max_output_tokens', 'text.format', 'text.format.schema', 'instructions']);
 
@@ -53,25 +61,55 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
   const audit = (kind: string, outcome: 'OK' | 'REFUSED' | 'FAILED', code: string | null, detail: Record<string, string | number | boolean | null> | null) =>
     base.store.audit({ actor, kind, outcome, code, target: 'settings:copilot', detail }).catch(() => undefined);
 
+  const env = options.env ?? process.env;
+  /** On a live Copilot, the first provider a document uses whose key is not installed here. */
+  const keyless = (document: CopilotSettingsDocument) => env.FLOFI_COPILOT === 'live' ? documentProviders(document).find(provider => !providerReadiness(env)[provider]) : undefined;
   if (body.action === 'probe') {
-    const apiKey = copilotApiKey(options.env ?? process.env);
-    if (!apiKey) return json(409, { ok: false, code: 'COPILOT_NOT_LIVE' });
+    if (env.FLOFI_COPILOT !== 'live') return json(409, { ok: false, code: 'COPILOT_NOT_LIVE' });
     let settings;
     try { settings = validateRuntimeSettings(body.settings, 'settings'); }
     catch (error) { return json(400, { ok: false, ...settingsError(error) }); }
+    // The provider's own key, checked before anything is sent; a probe never borrows the other provider's key.
+    const apiKey = providerApiKey(env, settings.provider);
+    if (!apiKey) return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: settings.provider });
     const recent = await base.store.countAudit('ADMIN_COPILOT_PROBE', new Date(base.now.getTime() - PROBE_WINDOW_MS)).catch(() => PROBE_LIMIT);
     if (recent >= PROBE_LIMIT) return json(429, { ok: false, code: 'ADMIN_PROBE_RATE_LIMITED' });
-    let last: CopilotHttpResponse | null = null;
-    const live = createOpenAITransport(apiKey, options.fetch ?? fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
-    let telemetry: { durationMs: number; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; responseModel: string | null } | null = null;
-    const result = await interpretCopilotV2(PROBE_TRANSCRIPT, { transport: async input => (last = await live(input)), mode: 'live',
+    let last: CopilotHttpResponse | null = null, provider: AnthropicRejection | null = null;
+    const live = createProviderTransport(settings.provider, apiKey, options.fetch ?? fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
+    const transport: CopilotTransport = async input => {
+      try { return last = await live(input); }
+      catch (error) { if (error instanceof CopilotProviderError) provider = error.upstream; throw error; }
+    };
+    let telemetry: { outcome: string; durationMs: number; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; responseModel: string | null } | null = null;
+    const result = await interpretCopilotV2(PROBE_TRANSCRIPT, { transport, mode: 'live',
       settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
-      telemetry: record => { telemetry = { durationMs: record.durationMs, inputTokens: record.inputTokens, outputTokens: record.outputTokens,
+      telemetry: record => { telemetry = { outcome: record.outcome, durationMs: record.durationMs, inputTokens: record.inputTokens, outputTokens: record.outputTokens,
         reasoningTokens: record.reasoningTokens, responseModel: record.responseModel }; } });
-    const rejection = result.ok ? null : upstreamRejection(last);
-    const outcome = { ok: result.ok, code: result.ok ? null : result.code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection, ...telemetry ?? {} };
-    await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', result.ok ? null : result.code, { model: settings.model, upstreamParam: rejection?.param ?? null });
+    const rejected = provider as AnthropicRejection | null;
+    const rejection = result.ok ? null : rejected ? { code: rejected.type, param: rejected.param, status: rejected.status } : upstreamRejection(last);
+    const used = telemetry as { inputTokens: number | null; outputTokens: number | null } | null;
+    const estimatedCostUsdValue = used?.inputTokens != null && used.outputTokens != null ? estimatedCostUsd(settings.model, used.inputTokens, used.outputTokens) : null;
+    // The operator sees the precise outcome (the telemetry record's), not the provider-neutral code shown to users.
+    const recorded = telemetry as { outcome: string } | null, code = result.ok ? null : recorded && recorded.outcome !== 'OK' ? recorded.outcome : result.code;
+    const { outcome: _recorded, ...measured } = (telemetry ?? {}) as Record<string, unknown>;
+    const outcome = { ok: result.ok, code, intentKind: result.ok ? result.intent.kind : null, upstream: rejection,
+      provider: settings.provider, model: settings.model, estimatedCostUsd: estimatedCostUsdValue, ...measured };
+    void _recorded;
+    await audit('ADMIN_COPILOT_PROBE', result.ok ? 'OK' : 'FAILED', code, { model: settings.model, provider: settings.provider,
+      upstreamParam: rejection?.param ?? null });
     return json(200, { ok: true, probe: outcome });
+  }
+  if (body.action === 'models') {
+    if (body.provider !== 'ANTHROPIC') return json(400, { ok: false, code: 'ADMIN_REQUEST_INVALID' });
+    if (env.FLOFI_COPILOT !== 'live') return json(409, { ok: false, code: 'COPILOT_NOT_LIVE' });
+    const apiKey = providerReadiness(env).ANTHROPIC ? env.ANTHROPIC_API_KEY!.trim() : null;
+    if (!apiKey) return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: 'ANTHROPIC' });
+    const recent = await base.store.countAudit('ADMIN_COPILOT_MODELS_REFRESHED', new Date(base.now.getTime() - PROBE_WINDOW_MS)).catch(() => MODELS_REFRESH_LIMIT);
+    if (recent >= MODELS_REFRESH_LIMIT) return json(429, { ok: false, code: 'ADMIN_PROBE_RATE_LIMITED' });
+    const discovery = await discoverAnthropicModels(apiKey, { fetch: options.fetch ?? fetch, fresh: true });
+    await audit('ADMIN_COPILOT_MODELS_REFRESHED', discovery.ok ? 'OK' : 'FAILED', discovery.ok ? null : discovery.code,
+      { provider: 'ANTHROPIC', models: discovery.ok ? discovery.models.length : null });
+    return json(200, { ok: true, discovery });
   }
 
   const expected = versionOf(body.expectedVersion), reason = reasonOf(body.reason);
@@ -90,6 +128,11 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
       await audit(kind, 'REFUSED', refused.code, { field: refused.field });
       return json(400, { ok: false, ...refused });
     }
+    const missing = keyless(document);
+    if (missing) {
+      await audit(kind, 'REFUSED', 'COPILOT_PROVIDER_NOT_CONFIGURED', { provider: missing });
+      return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: missing });
+    }
   } else if (body.action === 'rollback') {
     kind = 'ADMIN_COPILOT_SETTINGS_ROLLED_BACK';
     const target = versionOf(body.toVersion);
@@ -102,16 +145,23 @@ export async function handleCopilotSettings(request: Request, options: SettingsH
       await audit(kind, 'REFUSED', refused.code, { restoredFrom, field: refused.field });
       return json(400, { ok: false, ...refused });
     }
+    const missing = document ? keyless(document) : undefined;
+    if (missing) {
+      await audit(kind, 'REFUSED', 'COPILOT_PROVIDER_NOT_CONFIGURED', { restoredFrom, provider: missing });
+      return json(409, { ok: false, code: 'COPILOT_PROVIDER_NOT_CONFIGURED', provider: missing });
+    }
   } else if (body.action === 'reset') {
     kind = 'ADMIN_COPILOT_SETTINGS_RESET';
     document = null;
   } else return json(400, { ok: false, code: 'ADMIN_REQUEST_INVALID' });
 
-  if (active && same(active.document, document)) return json(409, { ok: false, code: 'ADMIN_SETTINGS_UNCHANGED' });
+  const stored = document === null ? null : storedDocument(document);
+  if (active && same(active.document, stored)) return json(409, { ok: false, code: 'ADMIN_SETTINGS_UNCHANGED' });
   if (!active && document === null) return json(409, { ok: false, code: 'ADMIN_SETTINGS_UNCHANGED' });
   try {
-    const written = await appendSettingsVersion(db, tenantId, { key: 'copilot', expectedVersion: expected, document, restoredFrom, createdBy: actor, reason });
+    const written = await appendSettingsVersion(db, tenantId, { key: 'copilot', expectedVersion: expected, document: stored, restoredFrom, createdBy: actor, reason });
     await audit(kind, 'OK', null, { version: written.version, restoredFrom, model: document?.default.model ?? null,
+      providers: document ? documentProviders(document).join(',') : null,
       overrides: document ? Object.keys(document.overrides).sort().join(',') || null : null });
     return json(200, { ok: true, version: written.version });
   } catch (error) {

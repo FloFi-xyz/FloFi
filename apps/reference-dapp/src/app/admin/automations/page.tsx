@@ -30,7 +30,7 @@ export default async function AdminAutomationsPage({ searchParams }: { searchPar
   const data = await automationAnalytics(page.host.db, page.host.tenantId, range, page.now).catch(() => null);
   const presets = [['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']] as const;
   return <AdminShell active="automations" context={page.context} title="Automations"
-    description="Rules are evaluated by the worker; every proposal still needs its owner, except delegated executions within signed limits.">
+    description="Scheduled and price-triggered rules. The worker evaluates them; every proposal still needs its owner's approval, except delegated executions within limits the owner signed.">
     <section className="admin-card" aria-label="Filters"><div className="admin-filters"><div className="admin-field">Time range (evaluations, occurrences, delegated executions)
       <nav className="admin-segmented">{presets.map(([id, label]) => <a key={id} href={`/admin/automations?range=${id}`} aria-current={range.preset === id ? 'true' : undefined}>{label}</a>)}</nav>
     </div></div></section>
