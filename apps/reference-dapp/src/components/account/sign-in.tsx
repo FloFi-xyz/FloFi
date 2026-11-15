@@ -14,6 +14,7 @@ import { useLocale } from '../../i18n/locale';
 import { privySignIn, type AccountState } from '../../app/account-action';
 import { useFloFiPrivy } from '../../accounts/privy-client';
 import { rememberSignIn } from '../../wallet/sign-in-wallet';
+import { invalidateSavedRecipients } from '../../state/saved-recipients-store';
 import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
 import { currentSignInPage, signInCallFailure, SIGN_IN_PAGE_OUTDATED } from './sign-in-failure';
@@ -44,7 +45,7 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
     const result = token ? await privySignIn(token, returnTo).catch((cause: unknown) => ({ ok: false as const, code: signInCallFailure(cause) }))
       : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
     // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the verified sign-in re-allows silent restore of the wallet just used (no prompt, no authority).
-    if (result.ok) { rememberSignIn(result.value.method); window.location.assign(result.value.next); return; }
+    if (result.ok) { rememberSignIn(result.value.method); invalidateSavedRecipients(); window.location.assign(result.value.next); return; }
     // A refused sign-in leaves no Privy session behind either, so the next attempt starts clean.
     await privy.logout();
     // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: this page belongs to an earlier deployment, whose sign-in call no longer exists. Retrying here
@@ -139,7 +140,7 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
     </>}
     <p id={statusId} className={styles.status} role="status">{notice || (available.accounts && !configured ? t('Methods shown as unavailable are not configured on this deployment yet.') : '')}</p>
     {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
-    {available.accounts && <p className={styles.small} style={{ textAlign: 'left' }}>{t('FloFi stores your sign-in identities (email address or provider ID, as verified by Privy) and the public addresses of your FloFi wallets and of wallets you link, never a key. You can delete your account in Credentials.')} <a href="/privacy">{t('Privacy')}</a></p>}
+    {available.accounts && <p className={styles.small} style={{ textAlign: 'left' }}>{t('FloFi stores your sign-in identities (email address or provider ID, as verified by Privy), the public addresses of your FloFi wallets and of wallets you link, and the recipients you save (a name and a public address), never a key. You can delete your account in Credentials.')} <a href="/privacy">{t('Privacy')}</a></p>}
     <div className={styles.notice}><span className={styles.noticeIcon}><AccountIcon name="shield" size={18}/></span><div>
       <strong>{t('Nothing executes without your review')}</strong>
       <p>{t('Your account is how you sign in. Transactions are always simulated, reviewed and signed by your own wallet.')}</p></div></div>
