@@ -18,7 +18,8 @@
  *   replace       the owner's explicit schedule change. A rule's definition is immutable (AUTOMATION_RULE_IMMUTABLE), so the change is a
  *                 NEW rule — the old definition with only the schedule changed, the same bound action (by value), limits, expiry and
  *                 CONFIRM_EACH_TIME mode, re-checked like a creation — and the old rule archived (compare-and-set on its version), both in
- *                 ONE transaction; the old rule's open proposals are withdrawn. A paused rule's replacement stays paused
+ *                 ONE transaction; the old rule's open proposals are withdrawn. A paused rule's replacement stays paused, and its limits
+ *                 keep counting the occurrences of the rules it replaced (`pg-store.ts` lineage)
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { savedWorkflowHash } from '../domain/saved-workflow.ts';

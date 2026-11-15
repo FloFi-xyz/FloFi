@@ -92,7 +92,8 @@ export function ruleSummary(rule: RuleView, language: Language): string {
     : rule.executionMode === 'DELEGATED_WITH_LIMITS' && !rule.action ? translate(language, 'Multi-step workflow (see Automatic within limits)') : actionText(rule.action, language);
   const when = rule.schedule ? scheduleText(rule, language)
     : rule.condition ? `${conditionText(rule.condition, language)} · ${translate(language, 'checked every {0} min', String(rule.condition.checkEveryMinutes))}` : '';
-  const mode = translate(language, rule.executionMode === 'DELEGATED_WITH_LIMITS' ? 'Automatic within limits' : 'Ask me before every execution');
+  // Delegated execution is retired (EXECUTOR_FUNDED_GAS_RETIRED): an existing delegated rule is never presented as an available mode.
+  const mode = translate(language, rule.executionMode === 'DELEGATED_WITH_LIMITS' ? 'Automatic within limits (retired on this deployment)' : 'Ask me before every execution');
   return `${translate(language, KIND_LABEL[rule.kind])} “${rule.name}”: ${[what, when, labelOf(language, STATE_LABEL, rule.state), mode].filter(Boolean).join(' · ')}`;
 }
 
@@ -215,8 +216,17 @@ function evaluationLines(rule: RuleView, history: readonly HistoryEntryView[] | 
   if (!entries.length) return rule.lastOutcome && rule.lastEvaluationAt
     ? [`${say(language, 'Last evaluation', 'Última avaliação')}: ${at(language, rule.lastEvaluationAt, rule.timezone)}${outcomeSentence(language, rule.lastOutcome, null, rule.lastObservation)}`]
     : [say(language, 'FloFi has not recorded any evaluation of this automation yet.', 'O FloFi ainda não registrou nenhuma avaliação desta automação.')];
-  const latest = entries[0]!, lines = [`${say(language, 'Latest recorded evaluation', 'Última avaliação registrada')}: ${at(language, latest.at, rule.timezone)}${
-    outcomeSentence(language, latest.outcome, latest.detail, latest.observation)}`];
+  const latest = entries[0]!;
+  // A price check is recorded in the history only when its outcome changes (`evaluator.ts` priced): a later check with the same outcome lives on
+  // the rule itself (`lastEvaluationAt`, `lastObservation`), so the latest check and its price come from there, never the older recorded price.
+  const unchanged = rule.kind === 'PRICE_TRIGGER' && rule.lastEvaluationAt !== null && rule.lastOutcome === latest.outcome
+    && Date.parse(rule.lastEvaluationAt) > Date.parse(latest.at);
+  const lines = unchanged ? [`${say(language, 'Latest evaluation', 'Última avaliação')}: ${at(language, rule.lastEvaluationAt, rule.timezone)}${
+    outcomeSentence(language, latest.outcome, latest.detail, rule.lastObservation)}`,
+  say(language, `Recorded since ${formatWhen(latest.at, rule.timezone, language)} and still the case at the latest evaluation (FloFi records a price check in the history only when its outcome changes).`,
+    `Registrado desde ${formatWhen(latest.at, rule.timezone, language)} e ainda era assim na última avaliação (o FloFi só registra uma verificação de preço no histórico quando o resultado muda).`)]
+    : [`${say(language, 'Latest recorded evaluation', 'Última avaliação registrada')}: ${at(language, latest.at, rule.timezone)}${
+      outcomeSentence(language, latest.outcome, latest.detail, latest.observation)}`];
   // The latest fact that blocked a proposal since the last one produced, when it is not the latest entry itself.
   const lastProduced = entries.findIndex(e => PRODUCED.has(e.outcome));
   const blocker = entries.slice(1, lastProduced === -1 ? undefined : lastProduced).find(e => blocking(e.outcome));
@@ -239,12 +249,15 @@ function occurrenceLines(o: OccurrenceView, timezone: string, language: Language
       `A ocorrência de ${due} foi entregue ao executor automático, que foi desativado neste ambiente (EXECUTOR_FUNDED_GAS_RETIRED).`)); break;
     case 'EXPIRED': {
       const withdrawn = o.outcome === 'AUTOMATION_ARCHIVED' || o.outcome === 'AUTOMATION_REPLACED' || o.outcome === 'AUTOMATION_REBOUND' || o.outcome === 'AUTOMATION_REBOUND_WITHDRAWN';
-      // An APPLIED handoff on a lapsed occurrence was used (the run lines below say what happened). Without an approval read, whether it was
-      // ever opened is not known here, so the limit fact is stated conditionally.
-      lines.push(withdrawn ? say(language, `The proposal from ${due} was withdrawn when the automation changed (${labelOf(language, OUTCOME_LABEL, o.outcome!)}).`,
-        `A proposta de ${due} foi retirada quando a automação mudou (${labelOf(language, OUTCOME_LABEL, o.outcome!)}).`)
-        : o.approval?.status === 'APPLIED' ? say(language, `The proposal from ${due} was loaded into your workflow before it expired.`,
-          `A proposta de ${due} foi carregada no seu fluxo antes de expirar.`)
+      // An APPLIED handoff on a lapsed or withdrawn occurrence was used: the owner loaded it before the automation changed or the proposal
+      // expired, so it is never described as withdrawn (the run lines below say what happened). Without an approval read, whether it was ever
+      // opened is not known here, so the limit fact is stated conditionally.
+      lines.push(o.approval?.status === 'APPLIED' ? withdrawn
+        ? say(language, `The proposal from ${due} was loaded into your workflow before the automation changed.`,
+          `A proposta de ${due} foi carregada no seu fluxo antes de a automação mudar.`)
+        : say(language, `The proposal from ${due} was loaded into your workflow before it expired.`, `A proposta de ${due} foi carregada no seu fluxo antes de expirar.`)
+        : withdrawn ? say(language, `The proposal from ${due} was withdrawn when the automation changed (${labelOf(language, OUTCOME_LABEL, o.outcome!)}).`,
+          `A proposta de ${due} foi retirada quando a automação mudou (${labelOf(language, OUTCOME_LABEL, o.outcome!)}).`)
           : o.approval ? say(language, `The proposal from ${due} expired after you opened it for review, without being loaded into your workflow.`,
             `A proposta de ${due} expirou depois de você abri-la para revisão, sem ser carregada no seu fluxo.`)
             : say(language, `The proposal from ${due} expired. If you never opened it, nothing was sent and it does not count against your limits.`,
@@ -338,9 +351,10 @@ export const automationFaq = (topic: AutomationFaqTopic, language: Language): st
 
 /** Lower case, accents folded (`não` → `nao`, `às` → `as`), whitespace collapsed. */
 export const foldText = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’‘]/g, "'").toLowerCase().replace(/\s+/g, ' ').trim();
+/** Weekday words, singular or plural ("on Fridays", "às sextas"): a plural is still that one weekday, never dropped. */
 const WEEKDAY_WORDS: readonly (readonly [string, number])[] = [
-  ['monday|mon|segunda(?:[- ]feira)?', 1], ['tuesday|tues?|terca(?:[- ]feira)?', 2], ['wednesday|wed|quarta(?:[- ]feira)?', 3],
-  ['thursday|thu(?:rs?)?|quinta(?:[- ]feira)?', 4], ['friday|fri|sexta(?:[- ]feira)?', 5], ['saturday|sat|sabado', 6], ['sunday|sun|domingo', 7]];
+  ['mondays?|mon|segundas?(?:[- ]feiras?)?', 1], ['tuesdays?|tues?|tercas?(?:[- ]feiras?)?', 2], ['wednesdays?|wed|quartas?(?:[- ]feiras?)?', 3],
+  ['thursdays?|thu(?:rs?)?|quintas?(?:[- ]feiras?)?', 4], ['fridays?|fri|sextas?(?:[- ]feiras?)?', 5], ['saturdays?|sat|sabados?', 6], ['sundays?|sun|domingos?', 7]];
 const ANY_WEEKDAY = new RegExp(`\\b(?:${WEEKDAY_WORDS.map(([w]) => w).join('|')})\\b`);
 const CHANGE_VERB = /\b(?:muda|mude|mudar|mudo|altera|altere|alterar|troca|troque|trocar|passa|passe|passar|move|mova|mover|change|switch|reschedule|update|edit|editar|edita|reagenda|reagendar)\b/;
 /** Ordered by precedence: the first topic whose test passes. */
@@ -377,9 +391,30 @@ function weekdayMentions(t: string): Mention<number>[] {
   for (const [words, day] of WEEKDAY_WORDS) for (const m of t.matchAll(new RegExp(`\\b(?:${words})\\b`, 'g'))) found.push({ index: m.index, end: m.index + m[0].length, value: day });
   return found.sort((a, b) => a.index - b.index);
 }
-const AT_HOUR = new RegExp(`(?:\\b(?:as|at|a partir das)|@)\\s*([01]?\\d|2[0-3])(?::([0-5]\\d))?(?:\\s*(?:horas?|hrs?|o'?clock))?(?=\\s*(?:$|[.,;!?)]|(?:${
+/** A time anchor: "às" (folded "as"), "at", "a partir das", "@". */
+const AT = `(?:\\b(?:as|at|a partir das)|@)`;
+/**
+ * "às 10" / "at 9" when an end, a punctuation mark, a weekday or a linking word follows — and never when the hour goes on with more of a time
+ * FloFi did not read ("at 9.5", "às 9 e 5": refused below rather than read as 9:00).
+ */
+const AT_HOUR = new RegExp(`${AT}\\s*([01]?\\d|2[0-3])(?::([0-5]\\d))?(?![.,]\\d|\\s*(?:e|and)\\s+(?:\\d|meia|quinze|um quarto|a half|half))(?:\\s*(?:horas?|hrs?|o'?clock))?(?=\\s*(?:$|[.,;!?)]|(?:${
   WEEKDAY_WORDS.map(([w]) => w).join('|')}|da|de|do|no|na|em|on|in|every|each|toda|todo|todos|todas|e|and|ou|or|por|pelo|pela|please)\\b))`, 'g');
-/** Explicit times only: 09:30, 9h30, 10h, 10 horas, 7pm, 3 da tarde, às 10, at 9, meio-dia, midnight. A bare number is never a time. */
+const MINUTE_WORD: Readonly<Record<string, string>> = { meia: '30', quinze: '15' };
+/**
+ * Spelled clock forms rewritten as H:MM before reading, only where they are certainly a time: "às 9.30", "at 9,45", "9.30pm", "9,30h",
+ * "às 9 e meia", "às 9 e 15", "9h e quinze". Greetings ("boa tarde") are dropped so they are never read as a part of the day.
+ */
+function clockForms(t: string): string {
+  const minutes = (minute: string) => MINUTE_WORD[minute] ?? minute;
+  return t.replace(/\b(?:bom dia|boa tarde|boa noite|good morning|good afternoon|good evening|good night)\b/g, ' ')
+    .replace(new RegExp(`(${AT}\\s*)([01]?\\d|2[0-3])[.,]([0-5]\\d)(?![\\d.,])`, 'g'), '$1$2:$3')
+    .replace(/\b([01]?\d|2[0-3])[.,]([0-5]\d)(?=\s*(?:[ap]\.?m\.?(?![a-z])|h\b|hs\b|hrs?\b|horas?\b|(?:da|de) (?:manha|tarde|noite)\b|in the (?:morning|afternoon|evening)\b))/g, '$1:$2')
+    .replace(new RegExp(`(${AT}\\s*)([01]?\\d|2[0-3])\\s*(?:h|horas?)?\\s+e\\s+(meia|quinze|[0-5]\\d)(?:\\s*min(?:utos?)?)?\\b`, 'g'),
+      (_, prefix: string, hour: string, minute: string) => `${prefix}${hour}:${minutes(minute)}`)
+    .replace(/\b([01]?\d|2[0-3])\s*(?:h|horas?)\s+e\s+(meia|quinze|[0-5]\d)(?:\s*min(?:utos?)?)?\b/g, (_, hour: string, minute: string) => `${hour}:${minutes(minute)}`)
+    .replace(/\s+/g, ' ').trim();
+}
+/** Explicit times only: 09:30, 9h30, 10h, 10 horas, 7pm, 3 da tarde, às 10, at 9, meio-dia, midnight (after `clockForms`). A bare number is never a time. */
 function timeMentions(t: string): Mention<string>[] {
   const found: Mention<string>[] = [];
   const add = (m: RegExpMatchArray, hour: number, minute: number) => {
@@ -417,20 +452,57 @@ function resolve<T>(t: string, mentions: readonly Mention<T>[]): T | null | unde
   const before = t.slice(0, first.index), between = t.slice(first.end, last.index);
   return /\b(?:from|de|da|do|dos|das)\s*$/.test(before) && /^\s*(?:to|para|pra)\b/.test(between) && first.value !== last.value ? last.value : null;
 }
+const MONTHS = 'janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|march|april|may|june|july|august|september|october|november|december';
+/** Month names that are no ordinary word (EN "may" and "march" count only next to a day number). */
+const MONTHS_ALONE = 'janeiro|fevereiro|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|january|february|april|june|july|august|september|october|november|december';
+/**
+ * Schedules FloFi does not support, and qualifiers a daily or weekly reading would silently drop: monthly and dated schedules, "every other" /
+ * "every N", fortnightly, several times per period, weekdays-only and weekends, exceptions, one-off and relative dates, start and end dates.
+ */
+const UNSUPPORTED = new RegExp([
+  '\\b(?:mensal|mensalmente|todo mes|cada mes|monthly|every month|each month)\\b',
+  '\\b\\d{1,2}(?:st|nd|rd|th)\\b', '\\d\\s*[\\u00ba\\u00aa]', '\\bon the \\d', '\\b\\d{1,2}[/-]\\d{1,2}\\b',
+  `\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:de\\s+|of\\s+)?(?:${MONTHS})\\b`, `\\b(?:${MONTHS})\\s+\\d{1,2}(?!\\d)`, `\\b(?:${MONTHS_ALONE})\\b`,
+  '\\b(?:every|each|a cada|cada)\\s+(?:\\d+|other|second|third|alternate|two|three|four|five|six|seven|eight|nine|ten|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|outra|outro|hour|hora|minute|minuto)\\b',
+  '\\b(?:biweekly|bi-weekly|fortnight\\w*|quinzen\\w*|bimestral|bimensal|trimestral|quarterly|semestral|yearly|annual\\w*|anual\\w*|hourly|de hora em hora)\\b',
+  '\\b(?:twice|thrice|once|vez|vezes|times)\\b', '\\b(?:semana|dia) sim\\b', '\\balternad\\w*', '\\bintercalad\\w*',
+  '\\b(?:weekdays?|weekends?|workdays?|business days?|dias? uteis|dia util|dias? de semana|fins? de semana|fim de semana|finais de semana|final de semana)\\b',
+  '\\b(?:exceto|excepto|except|excluding|exclude|menos|salvo|tirando|sem ser|but not)\\b',
+  '\\b(?:hoje|amanha|ontem|today|tomorrow|tonight|yesterday|until|till|desde|starting|beginning)\\b', '\\bate (?:o )?dia\\b',
+  '\\bnext (?:week|month|year)\\b', '\\b(?:semana|mes|ano) que vem\\b', '\\bproxim[ao] (?:semana|mes|ano)\\b', '\\ba partir d[eo]\\b',
+].join('|'));
+/**
+ * What is left of a time once the times FloFi read are taken out: if any of it remains, the person wrote a time FloFi cannot read exactly, and
+ * no other time (the current one included) may stand in for it — "at 9.5", "25h", "às 9 e 5", "às nove", "à noite", "half past 9",
+ * "sexta 10", "9 ou 10".
+ */
+const UNREAD_TIME = new RegExp([
+  '\\d\\s*[.,:]\\s*\\d', '\\d\\s*(?:h|hs|hrs?|horas?|hours?|min|minutos?|minutes?|[ap]\\.?m\\.?)(?![a-z])', `${AT}\\s*\\d`, '\\d\\s+(?:or|ou)\\s+\\d',
+  '\\b(?:as|at)\\s+(?:uma|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\\b',
+  `\\b(?:${WEEKDAY_WORDS.map(([w]) => w).join('|')}|daily|diariamente|diaria|diario|todos os dias|everyday|weekly|semanal|semanalmente)\\b,?\\s+\\d`,
+  "\\b(?:meia|quinze|quarto|quarter|half|o'?clock|manha|tarde|noite|madrugada|morning|afternoon|evening|night)\\b",
+].join('|'));
 /**
  * The schedule a person asked for, read deterministically from their words: `{ frequency, weekday, time }`, or null when the request is not
  * a schedule FloFi supports or is ambiguous. A weekday makes it WEEKLY; "daily" / "todos os dias" makes it DAILY. Anything not said is kept
  * from `current`: a time that was not written is never invented (the current time stays), and "weekly" with no weekday keeps the current one
- * (or, from a daily schedule, is null: FloFi does not pick a day). With no current schedule, every part must be said.
+ * (or, from a daily schedule, is null: FloFi does not pick a day). With no current schedule, every part must be said. A time FloFi cannot read
+ * exactly, a choice of times ("9 or 10") and any qualifier it would drop (UNSUPPORTED) make it null: never a time or a day the person did not write.
  */
 export function parseScheduleChange(text: string, current: RuleView['schedule']): ScheduleChange | null {
-  const t = foldText(text);
-  if (!t) return null;
-  // Monthly or day-of-month schedules ("todo dia 5", "monthly") are not supported: never read them as daily.
-  if (/\b(?:todo (?:o )?dia|every day|each day) \d|\b(?:mensal|mensalmente|todo mes|cada mes|monthly|every month|each month)\b/.test(t)) return null;
+  const t = clockForms(foldText(text));
+  if (!t || UNSUPPORTED.test(t)) return null;
+  const times = timeMentions(t);
+  // A day number that is no time FloFi read is a day of the month ("todo dia 5", "dia 15 às 10h"): unsupported. "todo dia 9h" is a time.
+  for (const m of t.matchAll(/\b(?:dias?|days?)\s+(\d{1,2})(?!\d)/g)) if (!times.some(time => time.index === m.index + m[0].length - m[1]!.length)) return null;
+  // A time offered as one of several ("at 9 or 10", "9h ou 10h") is ambiguous.
+  if (times.some(m => /^\s*(?:or|ou)\b/.test(t.slice(m.end)) || /\b(?:or|ou)\s*$/.test(t.slice(0, m.index)))) return null;
+  let rest = t;
+  for (const m of times) rest = rest.slice(0, m.index) + ' '.repeat(m.end - m.index) + rest.slice(m.end);
+  if (UNREAD_TIME.test(rest)) return null;
   const daily = /\b(?:diariamente|diaria|diario|todo (?:o )?dia|todos os dias|cada dia|every ?day|each day|daily)\b/.test(t);
   const weekly = /\b(?:semanal|semanalmente|toda semana|todas as semanas|cada semana|every week|each week|weekly)\b/.test(t);
-  const day = resolve(t, weekdayMentions(t)), time = resolve(t, timeMentions(t));
+  const day = resolve(t, weekdayMentions(t)), time = resolve(t, times);
   if (day === null || time === null || (daily && (day !== undefined || weekly))) return null;
   if (!daily && !weekly && day === undefined && time === undefined) return null;
   const chosen = time ?? current?.time;

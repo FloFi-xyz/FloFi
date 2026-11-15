@@ -60,17 +60,37 @@ const NOTIFY_KIND = 'automation.notify', EVALUATE_KIND = 'automation.evaluate';
 export const DELEGATION_EXECUTE_KIND = 'delegation.execute';
 const json = (value: unknown) => value === null || value === undefined ? null : JSON.stringify(value);
 
+/** How many schedule changes back a rule's lineage is followed (a bound, not a product limit: a chain is linear and acyclic). */
+const MAX_LINEAGE_DEPTH = 64;
+
 export function createPgAutomationStore(db: Database, tenantId: string): AutomationStore {
+  /**
+   * The rule and every rule it replaced, transitively (`replace` = a schedule change): the replacement link recorded by `archiveReplaced` in
+   * the new rule's history (`AUTOMATION_REPLACEMENT`, detail `{ replaces }`). Followed only to the same owner's rules in this tenant, and at
+   * most MAX_LINEAGE_DEPTH links. History retention (90 days, `purge`) cannot cut a link that matters: a link is purged only when the rule
+   * it names was archived more than 90 days ago, so all its occurrences are older than any period (≤ a month) or cooldown (≤ 31 days).
+   */
+  const lineage = async (tx: Queryable, rule: RuleRecord): Promise<string[]> => (await tx.query<{ ids: string[] }>(`WITH RECURSIVE lineage (rule_id, depth) AS (
+        SELECT $2::text, 0
+        UNION ALL
+        SELECT replaced.rule_id, lineage.depth + 1 FROM lineage
+          JOIN automation_evaluations e ON e.tenant_id = $1 AND e.rule_id = lineage.rule_id AND e.outcome = 'AUTOMATION_REPLACEMENT'
+          JOIN automation_rules replaced ON replaced.tenant_id = $1 AND replaced.rule_id = e.detail->>'replaces'
+            AND replaced.owner_namespace = $3 AND replaced.owner_account = $4
+          WHERE lineage.depth < $5)
+      SELECT array_agg(DISTINCT rule_id) AS ids FROM lineage`, [tenantId, rule.ruleId, rule.owner.namespace, rule.owner.address, MAX_LINEAGE_DEPTH])).rows[0]!.ids;
   const reads = (tx: Queryable, rule: RuleRecord): EvaluationReads => ({
+    // A schedule change keeps the same limits: usage counts the occurrences of the rule's whole lineage, not only its own.
     async usage(starts, except) {
+      const rules = await lineage(tx, rule);
       const counted = (await tx.query<{ n: number; total: string; assets: string[] | null }>(`SELECT
           count(*) FILTER (WHERE $3::timestamptz IS NOT NULL AND due_at >= $3)::int AS n,
           coalesce(sum(spend_amount) FILTER (WHERE $4::timestamptz IS NOT NULL AND due_at >= $4), 0)::text AS total,
           array_agg(DISTINCT spend_asset) FILTER (WHERE $4::timestamptz IS NOT NULL AND due_at >= $4 AND spend_asset IS NOT NULL) AS assets
-        FROM automation_occurrences WHERE tenant_id = $1 AND rule_id = $2 AND ${COUNTED} AND occurrence_id <> $5`,
-      [tenantId, rule.ruleId, starts.count, starts.amount, except ?? ''])).rows[0]!;
-      const last = (await tx.query<{ at: Date | null }>(`SELECT max(due_at) AS at FROM automation_occurrences WHERE tenant_id = $1 AND rule_id = $2 AND occurrence_id <> $3`,
-        [tenantId, rule.ruleId, except ?? ''])).rows[0]!.at;
+        FROM automation_occurrences WHERE tenant_id = $1 AND rule_id = ANY($2::text[]) AND ${COUNTED} AND occurrence_id <> $5`,
+      [tenantId, rules, starts.count, starts.amount, except ?? ''])).rows[0]!;
+      const last = (await tx.query<{ at: Date | null }>(`SELECT max(due_at) AS at FROM automation_occurrences WHERE tenant_id = $1 AND rule_id = ANY($2::text[])
+        AND occurrence_id <> $3`, [tenantId, rules, except ?? ''])).rows[0]!.at;
       const assets = counted.assets ?? [];
       return { countPeriod: starts.count ? counted.n : null, lastOccurrenceAt: last ? date(last).getTime() : null,
         amountPeriod: starts.amount ? { sum: decimalOf(counted.total) ?? '0', asset: assets.length === 1 ? assets[0]! : assets.length ? 'MIXED' : null } : null };
@@ -157,6 +177,9 @@ export function createPgAutomationStore(db: Database, tenantId: string): Automat
       if (rule.executionMode !== 'CONFIRM_EACH_TIME') refuse('DELEGATED_REAUTHORIZATION_REQUIRED');
       rule = await expireRuleIfLapsed(tx, rule, now);
       if (rule.state !== 'ACTIVE' && rule.state !== 'PAUSED') refuse(`AUTOMATION_${rule.state}`);
+      // Re-checked under the lock (as `attachHandoff` does): an evaluation may have marked the rule after the service read it, and a
+      // replacement must never carry a stale or drifted action forward — the owner rebinds first.
+      if (rule.attention) refuse(`AUTOMATION_${rule.attention}`);
       if (replacement.ruleId === ruleId || replacement.kind !== rule.kind || replacement.owner.namespace !== owner.namespace || replacement.owner.address !== owner.address)
         refuse('AUTOMATION_REPLACE_UNSUPPORTED');
       const row = (await tx.query(`UPDATE automation_rules SET state = 'ARCHIVED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 RETURNING *`,

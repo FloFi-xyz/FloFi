@@ -117,9 +117,12 @@ in the public product an older test-network proposal is never opened for review 
   transaction with a compare-and-set on the old rule's version (`AUTOMATION_VERSION_CONFLICT`). The old rule's open proposals are
   withdrawn (`AUTOMATION_REPLACED`) and its approval links revoked; both histories record the link (`AUTOMATION_REPLACED` /
   `AUTOMATION_REPLACEMENT`). It works at the 25-rule cap because the old rule leaves in the same transaction. A paused rule's replacement
-  stays paused. Refused: another owner's id (NOT FOUND), an archived or expired rule, a price trigger (no schedule:
-  `AUTOMATION_REPLACE_UNSUPPORTED`), an unchanged schedule (`AUTOMATION_SCHEDULE_UNCHANGED`), a rule waiting for a rebind, and a delegated
-  rule (`DELEGATED_REAUTHORIZATION_REQUIRED`). Saving the replacement authorizes no spending.
+  stays paused. **The limits carry over**: the new rule's period amount and count and its cooldown include the occurrences of every rule it
+  replaced (its lineage, followed through the `AUTOMATION_REPLACEMENT` links to the same owner's rules), so moving a schedule within a
+  period never resets them. Refused: another owner's id (NOT FOUND), an archived or expired rule, a price trigger (no schedule:
+  `AUTOMATION_REPLACE_UNSUPPORTED`), an unchanged schedule (`AUTOMATION_SCHEDULE_UNCHANGED`), a rule waiting for a rebind (re-checked under the
+  old rule's lock: `AUTOMATION_WORKFLOW_CHANGED` / `AUTOMATION_STRATEGY_STALE`), and a delegated rule (`DELEGATED_REAUTHORIZATION_REQUIRED`).
+  Saving the replacement authorizes no spending.
 - **One occurrence, one proposal.** Opening a proposal again withdraws the previous approval first; once the owner has added it to their
   workflow it is completed and cannot be proposed or dismissed again (`AUTOMATION_OCCURRENCE_COMPLETED`).
 - **Workflow edits** never change an automation: a saved workflow it came from is recorded by id, hash and version; an edit marks the

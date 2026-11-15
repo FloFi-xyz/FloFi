@@ -10,6 +10,9 @@ export const portugueseCopilotAssist: Readonly<Record<string, string>> = {
   'Tell me the new day and time, for example “muda para sexta às 10h”.': 'Diga o novo dia e horário, por exemplo “muda para sexta às 10h”.',
   'Nothing changes until you confirm. This never authorizes spending: each execution still asks for your wallet.':
     'Nada muda até você confirmar. Isso nunca autoriza gastos: cada execução continua pedindo a sua carteira.',
+  'Proposals still waiting from this automation ({0}) are withdrawn.': 'As propostas desta automação que ainda esperam por você ({0}) são retiradas.',
+  'The new automation stays paused until you resume it.': 'A nova automação continua em pausa até você retomá-la.',
+  'Automatic within limits (retired on this deployment)': 'Automático dentro dos limites (desativado neste ambiente)',
   'Archive (delete)': 'Arquivar (excluir)',
   'Change schedule': 'Mudar horário',
   'Open Automations': 'Abrir Automações',

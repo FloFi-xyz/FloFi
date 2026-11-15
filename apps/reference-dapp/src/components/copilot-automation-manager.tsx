@@ -23,7 +23,8 @@ const candidatesFor = (operation: CopilotAutomationOperation, rules: readonly Ru
   const live = rules.filter(rule => rule.state !== 'ARCHIVED');
   switch (operation) {
     case 'PAUSE': return live.filter(rule => rule.state === 'ACTIVE');
-    case 'RESUME': return live.filter(rule => rule.state === 'PAUSED');
+    // A delegated rule cannot be resumed (EXECUTOR_FUNDED_GAS_RETIRED): never offered as a choice that would fail.
+    case 'RESUME': return live.filter(rule => rule.state === 'PAUSED' && rule.executionMode === 'CONFIRM_EACH_TIME');
     case 'ARCHIVE': return live;
     case 'RESCHEDULE': return live.filter(rule => LIVE.has(rule.state) && rule.schedule !== null && rule.executionMode === 'CONFIRM_EACH_TIME');
     case 'LIST': return /\b(?:ativ|active)\w*/i.test(request) ? live.filter(rule => rule.state === 'ACTIVE') : live;
@@ -105,8 +106,13 @@ export function CopilotAutomationManager({ operation, request, owner, proof, dis
     {target && operation !== 'LIST' && candidates.length === 1 && <p>{ruleSummary(target, language)}</p>}
     {explained && <p className="automation-explanation">{explained}</p>}
     {operation === 'RESCHEDULE' && target && (change
-      ? <p>{t('From {0} to {1}. A saved automation cannot be edited in place: FloFi creates a new one with the new schedule and archives this one in the same step.',
-        scheduleText(target, language), scheduleText({ schedule: change, timezone: target.timezone }, language))}</p>
+      ? <>
+        <p>{t('From {0} to {1}. A saved automation cannot be edited in place: FloFi creates a new one with the new schedule and archives this one in the same step.',
+          scheduleText(target, language), scheduleText({ schedule: change, timezone: target.timezone }, language))}</p>
+        {/* What the replacement does besides the schedule (`service.ts` replace): open proposals end AUTOMATION_REPLACED; a paused rule's replacement is paused. */}
+        {target.pending > 0 && <p>{t('Proposals still waiting from this automation ({0}) are withdrawn.', String(target.pending))}</p>}
+        {target.state === 'PAUSED' && <p>{t('The new automation stays paused until you resume it.')}</p>}
+      </>
       : <p>{t('Tell me the new day and time, for example “muda para sexta às 10h”.')}</p>)}
     {verb && target && !done && <p>{t('Nothing changes until you confirm. This never authorizes spending: each execution still asks for your wallet.')}</p>}
     {error && <p role="alert">{t(error)}</p>}

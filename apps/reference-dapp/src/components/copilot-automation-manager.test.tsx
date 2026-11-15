@@ -14,12 +14,12 @@ vi.mock('../i18n/locale', () => ({ useLocale: () => ({ language: 'EN', t: (value
 vi.mock('./wallet-proof', () => ({ WalletProof: () => 'VERIFY_WALLET' }));
 
 const wallet: WorkflowOwner = { namespace: 'eip155', address: '0x' + 'a'.repeat(40) };
-const rule = (id: string, state: RuleView['state'], weekday = 5): RuleView => ({ ruleId: id, name: `DCA ${id}`, kind: 'SCHEDULED_DCA', state, executionMode: 'CONFIRM_EACH_TIME',
+const rule = (id: string, state: RuleView['state'], weekday = 5, patch: Partial<RuleView> = {}): RuleView => ({ ruleId: id, name: `DCA ${id}`, kind: 'SCHEDULED_DCA', state, executionMode: 'CONFIRM_EACH_TIME',
   authorizationId: null, version: 3, timezone: 'America/Sao_Paulo', schedule: { frequency: 'WEEKLY', weekday, time: '10:00' }, condition: null, watch: null,
   limits: { maxAmountPerExecution: '20', maxAmountPerPeriod: null, maxOccurrencesPerPeriod: null, cooldownMinutes: 0, maxSlippageBps: 100 },
   action: { network: 'base', networkLabel: 'Base', inputAsset: 'USDC', outputAsset: 'ETH', amount: '20', slippageBps: 100, side: 'BUY', fundsClass: 'REAL_FUNDS' },
   source: null, nextEvaluationAt: null, lastEvaluationAt: null, lastOutcome: null, lastObservation: null, armed: null, attention: null, expiresAt: null,
-  createdAt: '2026-11-01T00:00:00.000Z', pending: 0 });
+  createdAt: '2026-11-01T00:00:00.000Z', pending: 0, ...patch });
 type Element = ReactElement<{ children?: ReactNode; disabled?: boolean; onClick?: () => Promise<void> | void }>;
 function nodes(value: ReactNode): Element[] {
   if (Array.isArray(value)) return value.flatMap(nodes);
@@ -72,6 +72,31 @@ describe('CopilotAutomationManager', () => {
     await button(tree, 'Change schedule')!.props.onClick!();
     await flush();
     expect(f.replace).toHaveBeenCalledWith(wallet, 'a', 3, { frequency: 'WEEKLY', weekday: 1, time: '10:00' });
+  });
+  it('says before Confirm that waiting proposals are withdrawn and that a paused automation’s replacement stays paused', async () => {
+    f.overview.mockResolvedValue({ ok: true, value: { rules: [rule('a', 'PAUSED', 5, { pending: 2 })] } });
+    show('RESCHEDULE', 'Muda para segunda');
+    await flush();
+    const text = textOf(show('RESCHEDULE', 'Muda para segunda'));
+    expect(text).toContain('Proposals still waiting from this automation (2) are withdrawn.');
+    expect(text).toContain('The new automation stays paused until you resume it.');
+    expect(f.replace).not.toHaveBeenCalled();
+    host.unmount(); host = new HookHarness();
+    f.overview.mockResolvedValue({ ok: true, value: { rules: [rule('a', 'ACTIVE', 5)] } });
+    show('RESCHEDULE', 'Muda para segunda');
+    await flush();
+    const quiet = textOf(show('RESCHEDULE', 'Muda para segunda'));
+    expect(quiet).toMatch(/From .* to .*archives this one in the same step/);
+    expect(quiet).not.toMatch(/withdrawn|stays paused/);
+  });
+  it('never offers to resume a retired delegated automation', async () => {
+    f.overview.mockResolvedValue({ ok: true, value: { rules: [rule('d', 'PAUSED', 5, { executionMode: 'DELEGATED_WITH_LIMITS', authorizationId: 'dau_x' })] } });
+    show('RESUME', 'Retoma a automação');
+    await flush();
+    const tree = show('RESUME', 'Retoma a automação');
+    expect(textOf(tree)).toContain('None of your saved automations can take this change.');
+    expect(button(tree, 'Resume')).toBeUndefined();
+    expect(f.change).not.toHaveBeenCalled();
   });
   it('asks for wallet proof instead of reading when the session is not proven, and needs a connected wallet', async () => {
     f.overview.mockResolvedValue({ ok: false, code: 'WALLET_SESSION_REQUIRED' });

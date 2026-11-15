@@ -46,6 +46,11 @@ describe('ruleSummary', () => {
     expect(ruleSummary(priceRule(), 'EN')).toBe('Price trigger “ETH dip”: Prepare 50 USDC → WETH on Base · If ETH falls below $3,000 · checked every 15 min · Active · Ask me before every execution');
     expect(ruleSummary(rule({ kind: 'DAILY_WATCH', action: null, watch: { assets: ['ETH', 'BTC'] } }), 'EN')).toContain('Daily watch “Weekly ETH”: ETH / BTC · Notify me');
   });
+  it('never presents a retired delegated rule’s mode as available (EN/PT)', () => {
+    const delegated = rule({ executionMode: 'DELEGATED_WITH_LIMITS', authorizationId: 'dau_x', state: 'PAUSED' });
+    expect(ruleSummary(delegated, 'EN')).toMatch(/· Automatic within limits \(retired on this deployment\)$/);
+    expect(ruleSummary(delegated, 'PT')).toMatch(/· Automático dentro dos limites \(desativado neste ambiente\)$/);
+  });
 });
 
 describe('explainRuleStatus (recorded facts only)', () => {
@@ -90,6 +95,16 @@ describe('explainRuleStatus (recorded facts only)', () => {
     expect(explainRuleStatus(rule(), [], [occurrence({ state: 'EXPIRED', outcome: 'OCCURRENCE_EXPIRED', approval: { status: 'REVOKED', runs: [], runsComplete: true } })], 'EN').text)
       .toContain('expired after you opened it for review, without being loaded into your workflow.');
     expect(explainRuleStatus(rule(), [], [occurrence({ state: 'EXPIRED', outcome: 'AUTOMATION_REPLACED' })], 'PT').text).toContain('foi retirada quando a automação mudou');
+    // A proposal the owner had already loaded into their workflow is never described as withdrawn; its run lines stay.
+    for (const outcome of ['AUTOMATION_REPLACED', 'AUTOMATION_ARCHIVED', 'AUTOMATION_REBOUND', 'AUTOMATION_REBOUND_WITHDRAWN']) {
+      const applied = occurrence({ state: 'EXPIRED', outcome, approval: { status: 'APPLIED', runs: [], runsComplete: true } });
+      const en = explainRuleStatus(rule(), [], [applied], 'EN').text, pt = explainRuleStatus(rule(), [], [applied], 'PT').text;
+      expect(en, outcome).not.toMatch(/withdrawn|retirad/i);
+      expect(pt, outcome).not.toMatch(/withdrawn|retirad/i);
+      expect(en).toMatch(/The proposal from .* was loaded into your workflow before the automation changed\./);
+      expect(en).toContain('No run of it is recorded yet.');
+      expect(pt).toMatch(/A proposta de .* foi carregada no seu fluxo antes de a automação mudar\./);
+    }
     expect(explainRuleStatus(rule(), [], [occurrence({ state: 'DISMISSED', outcome: 'OWNER_DISMISSED' })], 'EN').text).toMatch(/You dismissed the proposal from /);
   });
   it('explains price-source failures and price steps from the history', () => {
@@ -101,6 +116,21 @@ describe('explainRuleStatus (recorded facts only)', () => {
     expect(explainRuleStatus(priceRule(), [entry('2026-11-09T09:00:00.000Z', 'CONDITION_NOT_MET', null, observed)], [], 'EN').text)
       .toContain('the price condition was not met (observed ETH $3,120.50).');
     expect(explainRuleStatus(priceRule(), [entry('2026-11-09T09:00:00.000Z', 'COOLDOWN')], [], 'EN').text).toContain('the price crossed during the cooldown');
+  });
+  it('reads a price check that is unchanged since its recorded entry from the rule itself: its latest time and price, never the old price as current', () => {
+    const old = { asset: 'ETH', priceUsd: '3120.5', observedAt: '2026-11-09T09:00:00.000Z', source: 'CHAINLINK', evidence: 'PUBLIC_READ_ONLY' };
+    const latest = { ...old, priceUsd: '3050', observedAt: '2026-11-10T14:15:00.000Z' };
+    const history = [entry('2026-11-09T09:00:00.000Z', 'CONDITION_NOT_MET', null, old)];
+    const r = explainRuleStatus(priceRule({ lastEvaluationAt: '2026-11-10T14:15:00.000Z', lastObservation: latest }), history, [], 'EN');
+    expect(r.lines[1]).toMatch(/^Latest evaluation: .*10.*Nov.*14:15.* — the price condition was not met \(observed ETH \$3,050\)\.$/);
+    expect(r.lines[2]).toMatch(/^Recorded since .*9.*Nov.*09:00.* and still the case at the latest evaluation \(FloFi records a price check in the history only when its outcome changes\)\.$/);
+    expect(r.text).not.toContain('3,120.50');
+    expect(explainRuleStatus(priceRule({ lastEvaluationAt: '2026-11-10T14:15:00.000Z', lastObservation: latest }), history, [], 'PT').text)
+      .toMatch(/Última avaliação: .*observado ETH \$3,050\).*\n.*Registrado desde .* e ainda era assim na última avaliação/s);
+    // A changed outcome, an equal time or a scheduled rule keep the recorded entry as the latest fact.
+    expect(explainRuleStatus(priceRule({ lastEvaluationAt: '2026-11-10T14:15:00.000Z', lastOutcome: 'PRICE_STALE', lastObservation: latest }), history, [], 'EN').lines[1])
+      .toMatch(/^Latest recorded evaluation: .*observed ETH \$3,120\.50/);
+    expect(explainRuleStatus(priceRule({ lastEvaluationAt: '2026-11-09T09:00:00.000Z', lastObservation: latest }), history, [], 'EN').lines[1]).toMatch(/^Latest recorded evaluation: /);
   });
   it('reports attention, notification failures and recorded run error codes as recorded', () => {
     const r = explainRuleStatus(rule({ attention: 'WORKFLOW_CHANGED' }), [entry('2026-11-09T09:00:00.000Z', 'WORKFLOW_CHANGED')], [occurrence({ state: 'COMPLETED',
@@ -182,6 +212,24 @@ describe('parseScheduleChange (deterministic, never invents a time)', () => {
     ['semanalmente', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:00' }],
     ['sábado à meia-noite', weeklyMonday, { frequency: 'WEEKLY', weekday: 6, time: '00:00' }],
     ['toda sexta às 10h', null, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    // Clock forms with a dot, a comma or spoken minutes are read exactly.
+    ['change it to Friday at 9.30pm', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '21:30' }],
+    ['at 9.45', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:45' }],
+    ['às 9,30', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:30' }],
+    ['muda para sexta às 9 e meia', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '09:30' }],
+    ['às 9 e 15', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '09:15' }],
+    ['às 9 e meia da noite', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '21:30' }],
+    ['muda para as 10h e quinze', weeklyMonday, { frequency: 'WEEKLY', weekday: 1, time: '10:15' }],
+    // "todo dia" followed by a time is daily, not a day of the month.
+    ['todo dia 9h', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    ['todo dia às 9h', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    ['every day 9am', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    ['every day at 9', weeklyMonday, { frequency: 'DAILY', weekday: null, time: '09:00' }],
+    // A plural weekday is that weekday; a greeting is no part of the day.
+    ['change it to Fridays at 10am', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['às sextas às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['Boa tarde! Muda para sexta às 10h', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
+    ['Friday at 10 o’clock', weeklyMonday, { frequency: 'WEEKLY', weekday: 5, time: '10:00' }],
   ])('%j → %j', (text, current, expected) => expect(parseScheduleChange(text, current)).toEqual(expected));
   it.each<[string, RuleView['schedule']]>([
     ['de segunda a sexta', weeklyMonday],                                       // a range, not one weekday
@@ -192,5 +240,18 @@ describe('parseScheduleChange (deterministic, never invents a time)', () => {
     ['pausa as 2 automações', weeklyMonday],                                    // "as 2" is no time
     ['muda para sexta', null],                                                  // no current time to keep, and none written
     ['muda das 9h para 10h ou 11h', weeklyMonday],                              // several times: ambiguous
+    // Never a time the person did not write: unreadable or alternative times are refused, not replaced by 09:00.
+    ['change to friday at 9 or 10', weeklyMonday], ['muda para sexta às 9h ou 10h', weeklyMonday], ['at 9.5', weeklyMonday], ['às 25h', weeklyMonday],
+    ['muda para sexta 9 e meia', weeklyMonday], ['às 9 e 5', weeklyMonday], ['muda para sexta às nove', weeklyMonday], ['every night at 9', weeklyMonday],
+    ['muda para sexta à tarde', weeklyMonday], ['half past 9 on Friday', weeklyMonday], ['muda para sexta 10', weeklyMonday], ['Friday 9 o’clock', weeklyMonday],
+    // Day of the month: "todo dia 5" without a time unit, with a time after it, or "dia 15".
+    ['todo dia 5 às 10h', weeklyMonday], ['muda para dia 15 às 10h', weeklyMonday], ['5 de março às 10h', weeklyMonday], ['on the 15th at 10am', weeklyMonday],
+    ['every month on the 1st at 9am', weeklyMonday], ['March 5 at 10am', weeklyMonday],
+    // Qualifiers FloFi would otherwise drop.
+    ['every other Friday at 10am', weeklyMonday], ['weekdays at 8am', weeklyMonday], ['a cada 15 dias às 10h', weeklyMonday], ['quinzenalmente às 10h', weeklyMonday],
+    ['muda para amanhã às 10', weeklyMonday], ['every 2 weeks', weeklyMonday], ['every 2 weeks on Friday', weeklyMonday], ['twice a week at 9am', weeklyMonday],
+    ['duas vezes por semana às 9h', weeklyMonday], ['todos os dias úteis às 9h', weeklyMonday], ['fim de semana às 10h', weeklyMonday], ['weekend at 10am', weeklyMonday],
+    ['todo dia exceto domingo às 9h', weeklyMonday], ['every day except Sunday at 9am', weeklyMonday], ['hoje às 10h', weeklyMonday], ['today at 10am', weeklyMonday],
+    ['tomorrow at 10am', weeklyMonday], ['toda sexta a partir de amanhã', weeklyMonday], ['every Friday until December', weeklyMonday],
   ])('%j → null', (text, current) => expect(parseScheduleChange(text, current)).toBeNull());
 });

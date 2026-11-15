@@ -13,7 +13,8 @@
  * Counted occurrences are the ones still open or taken up by the owner (PENDING_OWNER, APPROVAL_CREATED, COMPLETED) and the ones the
  * owner opened before they expired (their approval may still have been used); declined (DISMISSED) and never-opened expired proposals
  * do not count. Checked at creation and rebinding (binding limits), when an occurrence is created (all, under the
- * rule's row lock) and again when the owner opens it (all, excluding itself).
+ * rule's row lock) and again when the owner opens it (all, excluding itself). A rule that replaced others (a schedule change) counts their
+ * occurrences too: periods and the cooldown carry over the replacement (`pg-store.ts` lineage).
  */
 import { AMOUNT_SCALE, parseScaled } from './decimal.ts';
 import type { Period } from './schedule.ts';

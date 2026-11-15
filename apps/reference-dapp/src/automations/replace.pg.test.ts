@@ -3,7 +3,8 @@
  * A schedule change by replacement, on a disposable loopback PostgreSQL. A rule's definition is immutable (AUTOMATION_RULE_IMMUTABLE), so
  * `replace` creates a new rule — the old definition with only the schedule changed, the same bound action, limits, expiry and
  * CONFIRM_EACH_TIME mode — and archives the old one in ONE transaction: owner-scoped, compare-and-set on the old version, exact at the
- * 25-rule cap, refused for delegated rules, and the old rule's open proposals withdrawn.
+ * 25-rule cap, refused for delegated rules and for rules waiting for a rebind (re-checked under the lock), and the old rule's open proposals
+ * withdrawn. The limits stay the same in effect too: the new rule's period counts and cooldown include the replaced rules' occurrences.
  */
 import { createLogger, createPostgresWorkQueue } from '@defi-workflow-engine/cloud-runtime';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -138,6 +139,20 @@ describe('replace: a schedule change creates the new rule and archives the old o
     expect((await t.db.query(`SELECT count(*)::int AS n FROM automation_rules`)).rows[0]!.n).toBe(4);
   });
 
+  it('refuses, under the old rule’s lock, a rule that began waiting for a rebind after the service read it — rolling the new rule back', async () => {
+    const h = automationHarness(t.db), a = await h.service().create(OWNER_A, weeklyDca()), now = h.now();
+    // The service's own pre-check read the rule before this mark; the store re-checks it under the row lock.
+    await t.db.query(`UPDATE automation_rules SET attention = 'STRATEGY_STALE' WHERE rule_id = $1`, [a.ruleId]);
+    const stored = (await h.store.getRule(OWNER_A, a.ruleId))!;
+    const rule = { ruleId: newAutomationId('aut'), owner: OWNER_A, name: 'x', kind: 'SCHEDULED_DCA' as const, definition: stored.definition, binding: stored.binding,
+      timezone: 'Europe/Lisbon', expiresAt: null, nextEvaluationAt: now, scheduleCursor: now };
+    expect(await refusal(h.store.createRule(rule, now, MAX_RULES_PER_OWNER + 1, async (tx, inserted) => {
+      await h.store.archiveReplaced(tx, OWNER_A, a.ruleId, stored.version, inserted, now, MAX_RULES_PER_OWNER);
+    }))).toBe('AUTOMATION_STRATEGY_STALE');
+    expect(await h.store.getRule(OWNER_A, rule.ruleId)).toBeNull();
+    expect(await row(a.ruleId)).toMatchObject({ state: 'ACTIVE', version: '1' });
+  });
+
   it('withdraws the old rule’s open proposal and revokes its approval link', async () => {
     const h = automationHarness(t.db), a = await h.service().create(OWNER_A, weeklyDca());
     h.set('2026-10-12T08:00:30Z');
@@ -151,5 +166,73 @@ describe('replace: a schedule change creates the new rule and archives the old o
     const overview = await h.service().overview(OWNER_A);
     expect(overview.pending).toEqual([]);
     expect(overview.rules.map(r => [r.ruleId, r.state])).toEqual(expect.arrayContaining([[a.ruleId, 'ARCHIVED'], [created.ruleId, 'ACTIVE']]));
+  });
+});
+
+/** The new rule's recorded evaluations (outcome and limit code), oldest first. */
+const evaluated = (ruleId: string) => t.db.query<{ outcome: string; detail: Record<string, unknown> | null }>(`SELECT outcome, detail FROM automation_evaluations
+  WHERE rule_id = $1 AND outcome IN ('TRIGGERED', 'LIMIT_BLOCKED') ORDER BY evaluation_id`, [ruleId]).then(r => r.rows.map(e => e.outcome === 'LIMIT_BLOCKED' ? `LIMIT_BLOCKED:${String(e.detail?.code)}` : e.outcome));
+const versionOf = async (h: Harness, ruleId: string) => (await h.store.getRule(OWNER_A, ruleId))!.version;
+
+describe('replace keeps the same limits: period counts and the cooldown carry over the rules it replaced', () => {
+  it('counts the replaced rules’ occurrences in the period, transitively, until the period ends', async () => {
+    const h = automationHarness(t.db);
+    const a = await h.service().create(OWNER_A, weeklyDca({ limits: { maxAmountPerExecution: '50', maxAmountPerPeriod: null, maxOccurrencesPerPeriod: { count: 1, period: 'WEEK' },
+      cooldownMinutes: 0, maxSlippageBps: 100 } }));
+    // Monday 2026-10-12 09:00 Lisbon: the week's one proposal, which the owner loads into their workflow (COMPLETED: counted).
+    h.set('2026-10-12T08:00:30Z');
+    await dispatch(h);
+    const [pending] = (await h.service().overview(OWNER_A)).pending;
+    await h.service().open(OWNER_A, pending!.occurrenceId);
+    const handoff = (await t.db.query<{ handoff_id: string }>(`SELECT handoff_id FROM automation_occurrences WHERE occurrence_id = $1`, [pending!.occurrenceId])).rows[0]!.handoff_id;
+    expect(await h.store.completeApproval(pending!.occurrenceId, handoff, h.now())).toBe(true);
+    // Moved to Thursday of the same week: the new rule's slot is still in that week, so the limit of one per week blocks it.
+    const { created: b } = await h.service().replace(OWNER_A, a.ruleId, await versionOf(h, a.ruleId), { schedule: { frequency: 'WEEKLY', weekday: 4, time: '09:30' } });
+    h.set('2026-10-15T08:30:30Z');
+    await dispatch(h);
+    expect(await evaluated(b.ruleId)).toEqual(['LIMIT_BLOCKED:LIMIT_PERIOD_COUNT']);
+    // Moved again, to Saturday: the lineage is transitive (Saturday's rule replaced Thursday's, which replaced Monday's).
+    const { created: c } = await h.service().replace(OWNER_A, b.ruleId, await versionOf(h, b.ruleId), { schedule: { frequency: 'WEEKLY', weekday: 6, time: '10:00' } });
+    h.set('2026-10-17T09:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(c.ruleId)).toEqual(['LIMIT_BLOCKED:LIMIT_PERIOD_COUNT']);
+    // The next week is a new period: the rule proposes again.
+    h.set('2026-10-24T09:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(c.ruleId)).toEqual(['LIMIT_BLOCKED:LIMIT_PERIOD_COUNT', 'TRIGGERED']);
+  });
+
+  it('keeps the cooldown running from the replaced rule’s last occurrence', async () => {
+    const h = automationHarness(t.db);
+    const a = await h.service().create(OWNER_A, weeklyDca({ limits: { maxAmountPerExecution: '50', maxAmountPerPeriod: null, maxOccurrencesPerPeriod: null,
+      cooldownMinutes: 3 * 24 * 60, maxSlippageBps: 100 } }));
+    h.set('2026-10-12T08:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(a.ruleId)).toEqual(['TRIGGERED']);
+    // Wednesday is two days after Monday's proposal: inside the three-day cooldown.
+    const { created } = await h.service().replace(OWNER_A, a.ruleId, a.version, { schedule: { frequency: 'WEEKLY', weekday: 3, time: '09:00' } });
+    h.set('2026-10-14T08:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(created.ruleId)).toEqual(['LIMIT_BLOCKED:LIMIT_COOLDOWN']);
+    h.set('2026-10-21T08:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(created.ruleId)).toEqual(['LIMIT_BLOCKED:LIMIT_COOLDOWN', 'TRIGGERED']);
+  });
+
+  it('never follows a replacement link to another owner’s rule', async () => {
+    // The cooldown counts every occurrence (expired ones too), so wallet A's Monday proposal would block wallet B's Tuesday rule if followed.
+    const h = automationHarness(t.db), weekly = { maxAmountPerExecution: '50', maxAmountPerPeriod: null, maxOccurrencesPerPeriod: { count: 1, period: 'WEEK' },
+      cooldownMinutes: 3 * 24 * 60, maxSlippageBps: 100 };
+    const a = await h.service().create(OWNER_A, weeklyDca({ limits: weekly }));
+    const b = await h.service().create(OWNER_B, weeklyDca({ limits: weekly, schedule: { frequency: 'WEEKLY', weekday: 2, time: '09:00', timezone: 'Europe/Lisbon' } }));
+    // A forged link (replace itself only ever links one owner's rules) must not let wallet A's proposals count against wallet B's rule.
+    await t.db.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome, detail) VALUES ('default', $1, now(), 'AUTOMATION_REPLACEMENT', $2::jsonb)`,
+      [b.ruleId, JSON.stringify({ replaces: a.ruleId })]);
+    h.set('2026-10-12T08:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(a.ruleId)).toEqual(['TRIGGERED']);
+    h.set('2026-10-13T08:00:30Z');
+    await dispatch(h);
+    expect(await evaluated(b.ruleId)).toEqual(['TRIGGERED']);
   });
 });
