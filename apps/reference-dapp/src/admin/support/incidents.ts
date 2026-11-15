@@ -158,7 +158,11 @@ export function executionIncident(run: ExecutionSnapshot, facts: RunRecoveryFact
         : 'This execution still needs its transaction checked, but no check is queued. The background sweeper normally re-queues it within a minute — the worker may not be running.';
       const action = actions[0]!;
       eligibility = action.eligible ? 'RECOVERABLE_NOW' : action.state ?? 'INVESTIGATION';
-      recommended = action.eligible ? 'Resume the transaction check. It only reads the network and cannot submit anything.' : action.reason ?? 'Investigate.';
+      recommended = !action.eligible ? action.reason ?? 'Investigate.'
+        // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: a stop for review is not cured by checking again with the same evidence.
+        : reconcile?.state === 'DEAD' && reconcile.lastError === 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW'
+          ? 'Review the nonce-conflict investigation below and record a finding note. Resume the check only when there is new on-chain evidence: with unchanged evidence it stops again after one check (and counts toward the retry limit).'
+        : 'Resume the transaction check. It only reads the network and cannot submit anything.';
       break;
     }
     case 'EVIDENCE_ARCHIVE_STOPPED': {

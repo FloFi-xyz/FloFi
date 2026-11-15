@@ -2,7 +2,7 @@
 /** Read-only nonce discovery shared by EVM execution engines. Absence from one node is never proof of non-submission. */
 import type { Rpc } from './public-testnet-service.ts';
 
-type Attempt = { nonce: string; preparedAtBlock: number; tx: { from: string } };
+type Attempt = { nonce: string; preparedAtBlock: number; tx: { from: string }; conflictingTransactionHash?: string | null | undefined };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const quantity = (v: unknown): bigint => {
   if (typeof v !== 'string' || !/^0x[0-9a-f]+$/i.test(v)) throw Error('EVM_OBSERVATION_RPC_INVALID');
@@ -17,6 +17,11 @@ export async function discoverEvmNonce(rpc: Rpc, attempt: Attempt): Promise<
 > {
   const nonce = BigInt(attempt.nonce), owner = attempt.tx.from.toLowerCase();
   const count = async (block: number) => quantity(await rpc('eth_getTransactionCount', [owner, tag(block)]));
+  // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (P0): an earlier observation already found the transaction that consumed this nonce. Once that
+  // transaction is canonical and final it can never change, so it is re-verified by hash (four reads) instead of re-running the binary search
+  // (~25 reads per observation). Anything not proven here — not found, not final, not canonical, another sender or nonce — runs the full search.
+  const known = attempt.conflictingTransactionHash ? await finalConsumer(rpc, attempt.conflictingTransactionHash, owner, nonce, attempt.preparedAtBlock) : null;
+  if (known) return { consumed: true, tx: known };
   const head = Number(quantity(await rpc('eth_blockNumber', [])));
   if (!Number.isSafeInteger(head) || head < attempt.preparedAtBlock) throw Error('EVM_OBSERVATION_RPC_INVALID');
   const matches = (tx: unknown): tx is Record<string, unknown> => object(tx) && typeof tx.from === 'string' && tx.from.toLowerCase() === owner && quantity(tx.nonce) === nonce;
@@ -36,6 +41,23 @@ export async function discoverEvmNonce(rpc: Rpc, attempt: Attempt): Promise<
   const tx = block.transactions.find(matches);
   if (!tx) throw Error('EVM_OBSERVATION_DISCOVERY_INCONSISTENT');
   return { consumed: true, tx };
+}
+
+/** The recorded consumer of `nonce`, re-verified on chain as canonical and final, or null (the caller then searches from scratch). Never throws. */
+async function finalConsumer(rpc: Rpc, hash: string, owner: string, nonce: bigint, preparedAtBlock: number): Promise<Record<string, unknown> | null> {
+  try {
+    if (!/^0x[0-9a-f]{64}$/.test(hash)) return null;
+    const [tx, receipt, finalized] = await Promise.all([rpc('eth_getTransactionByHash', [hash]), rpc('eth_getTransactionReceipt', [hash]),
+      rpc('eth_getBlockByNumber', ['finalized', false])]);
+    if (!object(tx) || !object(receipt) || !object(finalized) || typeof tx.hash !== 'string' || tx.hash.toLowerCase() !== hash) return null;
+    if (typeof tx.from !== 'string' || tx.from.toLowerCase() !== owner || quantity(tx.nonce) !== nonce) return null;
+    const block = Number(quantity(tx.blockNumber)), blockHash = typeof tx.blockHash === 'string' ? tx.blockHash.toLowerCase() : null;
+    // As the full search: a consumer at or before the prepared block is not this attempt's (it throws NONCE_PREDATES_PREPARATION there).
+    if (!Number.isSafeInteger(block) || block <= preparedAtBlock || !blockHash || String(receipt.blockHash).toLowerCase() !== blockHash) return null;
+    if (block > Number(quantity(finalized.number))) return null;
+    const canonical = await rpc('eth_getBlockByNumber', [tag(block), false]);
+    return object(canonical) && String(canonical.hash).toLowerCase() === blockHash ? tx : null;
+  } catch { return null; }
 }
 
 export function sameEvmIntent(tx: Record<string, unknown>, expected: { chainId: string; from: string; to: string; data: string; value: string }, nonce: string): boolean {

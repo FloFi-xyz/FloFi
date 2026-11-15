@@ -7,6 +7,7 @@ import { FEATURE_LABELS, INCIDENT_LIFECYCLE_LABELS, SEVERITY_LABELS, type Incide
 import { RESOLUTION_LABELS } from '../../../../admin/support/lifecycle';
 import { ELIGIBILITY_LABELS, RECOVERY_ACTIONS } from '../../../../admin/support/registry';
 import { incidentDetail, notesByIncident, type IncidentDetail } from '../../../../admin/support/view';
+import { nonceConflictView, type RunCheckContext } from '../../../../admin/support/nonce-conflict-view';
 import { AdminShell, AdminUnavailable } from '../../../../components/admin/admin-shell';
 import { Section, Status, TechnicalDetails, type Tone } from '../../../../components/admin/admin-ui';
 import { NoteForm, RecoveryPanel } from '../../../../components/admin/support-console';
@@ -76,9 +77,49 @@ function Explanations({ codes }: { codes: readonly string[] }) {
 function Notes({ notes, incidentId, csrf, canWrite }: { notes: readonly Note[]; incidentId: string; csrf: string; canWrite: boolean }) {
   return <Section id="support-notes" title="Notes" description={`Status: ${STATUS_LABELS[incidentStatus(notes)]}. Notes are audited and never replace the execution’s own evidence.`}>
     {notes.length ? <ul className="admin-note-list">{notes.map(note => <li key={note.eventId}><strong>{NOTE_KIND_LABELS[note.kind]}</strong>
-      <span className="admin-diff"> · {when(note.at)} · <code>{note.actor.slice(0, 12)}…</code></span><div>{note.text}</div></li>)}</ul>
+      <span className="admin-diff"> · {when(note.at)} · <code>{note.actor.slice(0, 12)}…</code></span><div>{note.text ?? <span className="admin-diff">Text removed under the retention policy or an approved erasure request; the note record is kept.</span>}</div>
+      {note.textState === 'LEGACY' ? <div className="admin-diff">Written before the separate text store: kept in the audit record, not removable by retention.</div> : null}</li>)}</ul>
       : <p className="admin-empty">No notes yet.</p>}
     <div style={{ marginTop: 12 }}><NoteForm csrf={csrf} incidentId={incidentId} canWrite={canWrite}/></div>
+  </Section>;
+}
+
+/** BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the worker's read-only nonce-conflict investigations. Never "resolved": the outcome is the run's. */
+function NonceConflicts({ rows, context }: { rows: Extract<IncidentDetail, { type: 'run' }>['nonceConflicts']; context: RunCheckContext }) {
+  if (rows === null) return <Section id="support-nonce-conflict" title="Nonce-conflict investigation"><p className="admin-alert" data-tone="warn">
+    The investigation record could not be read right now. This says nothing about the execution’s outcome.</p></Section>;
+  if (!rows.length) return null;
+  return <Section id="support-nonce-conflict" title="Nonce-conflict investigation" tone="warn"
+    description="Read-only forensic checks by the worker. They never sign, submit or change the execution, and never decide its outcome.">
+    {rows.map(row => nonceConflictView(row, context)).map(v => <div key={v.attemptId} className="admin-scope" style={{ marginBottom: 10 }} data-testid="nonce-conflict">
+      <header><h3>{v.classification}</h3><Status tone={v.escalatedAt ? 'bad' : 'warn'}>{v.status}</Status></header>
+      <p>{v.meaning}</p>
+      <dl className="admin-dl">
+        <dt>Network · step · reserved nonce</dt><dd>{v.network} · {v.step} · <code>{v.nonce}</code></dd>
+        <dt>Transaction outcome</dt><dd>{v.outcome}</dd>
+        <dt>Consuming transaction</dt><dd>{v.conflictingTransaction ? <><code>{v.conflictingTransaction.hash}</code>
+          {v.conflictingTransaction.proven ? ` — verified final on chain (block ${v.conflictingTransaction.block})` : ' — recorded by the flow, not yet verified final'}
+          {v.conflictingTransaction.explorer ? <> · <a href={v.conflictingTransaction.explorer} rel="noreferrer noopener" target="_blank">explorer (a link, not evidence)</a></> : null}</>
+          : 'Not recorded'}</dd>
+        <dt>Evidence source</dt><dd>{v.evidenceSource}</dd>
+        <dt>Related FloFi workflow</dt><dd>{v.relatedWorkflows.length ? v.relatedWorkflows.map(w => <div key={w.runId}>
+          <a href={`/admin/support/incident?id=${encodeURIComponent(`run:${w.runId}`)}`}><code>{w.runId}</code></a> ({w.flow}) — {w.basis}</div>)
+          : 'None established by exact transaction hash.'}</dd>
+        <dt>Execution structure</dt><dd>{v.structure}</dd>
+        <dt>Reviewed effect</dt><dd>{v.effect}</dd>
+        <dt>Same call, another nonce</dt><dd>{v.alternate}</dd>
+        <dt>Later steps of this execution</dt><dd>{v.laterAttempts}</dd>
+        <dt>Proof completeness</dt><dd>{v.proofComplete ? 'Every check available for this step ran on final data (still not a proof of the outcome)' : 'Incomplete'}</dd>
+        <dt>Last independent on-chain verification</dt><dd>{when(v.lastVerifiedAt)}{v.lastCheckCode ? <> · last check: <code>{v.lastCheckCode}</code></> : null}</dd>
+        <dt>Checks</dt><dd>{v.investigations} since {when(v.firstObservedAt)} · unchanged for {v.stableObservations}{v.escalatedAt ? ` · escalated ${when(v.escalatedAt)}` : ''}</dd>
+        <dt>Why the outcome remains unknown</dt><dd><ul style={{ margin: 0, paddingLeft: 18 }}>{v.whyUnknown.map(reason => <li key={reason}>{reason}</li>)}</ul></dd>
+        <dt>Safe next action</dt><dd>{v.nextAction}</dd>
+      </dl>
+      <TechnicalDetails summary="Field-by-field comparison with the reviewed call">
+        <div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Field</th><th>Consuming transaction vs reviewed call</th></tr></thead>
+          <tbody>{v.comparison.map(c => <tr key={c.field}><td>{c.field}</td><td>{c.value}</td></tr>)}</tbody></table></div>
+      </TechnicalDetails>
+    </div>)}
   </Section>;
 }
 
@@ -90,6 +131,8 @@ function RunDetail({ detail, csrf, canRecover }: { detail: Extract<IncidentDetai
       : 'Your role can preview but not run recoveries.'}>
       <RecoveryPanel csrf={csrf} runId={run.runId} actions={actions}/>
     </Section> : null}
+    <NonceConflicts rows={detail.nonceConflicts} context={{ needsObservation: run.needsObservation,
+      reconcile: detail.facts?.latest.reconcile ? { state: detail.facts.latest.reconcile.state, createdAt: detail.facts.latest.reconcile.createdAt } : null }}/>
     <Section id="support-timeline" title="Timeline" description="Observed = recorded fact · Inferred = implied by a later fact · Unknown = cannot be established · Not recorded = this flow keeps no record.">
       <ol className="admin-timeline">{detail.milestones.map(m => <li key={m.key} data-evidence={m.evidence}>
         <span aria-hidden="true">{GLYPH[m.evidence]}</span><strong>{m.label}</strong><span className="admin-badge">{EVIDENCE_LABELS[m.evidence]}</span>
@@ -125,7 +168,8 @@ function RunDetail({ detail, csrf, canRecover }: { detail: Extract<IncidentDetai
         <strong>{entry.action && entry.action in RECOVERY_ACTIONS ? RECOVERY_ACTIONS[entry.action as keyof typeof RECOVERY_ACTIONS].name : entry.action}</strong>
         <span className="admin-diff"> · {when(entry.at)} · <code>{entry.actor.slice(0, 12)}…</code>{entry.operationId ? <> · <code>{entry.operationId}</code></> : null}</span>
         <div>{entry.outcome !== 'OK' ? `Refused: ${entry.code}` : entry.verification ? `${VERIFICATION_LABELS[entry.verification.status]} — ${entry.verification.detail}` : 'Not verifiable'}</div>
-        {entry.reason ? <div className="admin-diff">Reason: {entry.reason}</div> : null}</li>)}</ul>}
+        {entry.reason ? <div className="admin-diff">Reason: {entry.reason}</div> : entry.outcome === 'OK' && entry.reasonState === 'REMOVED'
+          ? <div className="admin-diff">Reason text removed under the retention policy or an approved erasure request.</div> : null}</li>)}</ul>}
     </Section>
   </>;
 }

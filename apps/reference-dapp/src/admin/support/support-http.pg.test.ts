@@ -14,6 +14,7 @@ import { adminConfig } from '../config.ts';
 import { handleAdminChallenge, handleAdminSignIn, type AdminHttpOptions } from '../http.ts';
 import { adminCsrfToken, readAdminSession } from '../session.ts';
 import { supportSearch } from './diagnostics.ts';
+import { periodFingerprinter, type Fingerprinter } from './privacy.ts';
 import { discoverIncidents, LIMITS } from './incidents.ts';
 import { ATTENTION_LIMIT } from './lifecycle.ts';
 import { executeRecovery, previewRecovery, recoveryHistory } from './recovery.ts';
@@ -28,6 +29,8 @@ import { loadExecutionAttention } from './lifecycle.ts';
 const ORIGIN = 'https://admin.flofi.example', DOMAIN = 'admin.flofi.example';
 const adminEnv = { FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') };
 const key = (() => { const c = adminConfig(adminEnv); if (!c.enabled) throw new Error(c.code); return c.key; })();
+// BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: lookups are fingerprinted under the current quarter's key (created on first use).
+const fingerprinter: Fingerprinter = value => periodFingerprinter(t.db, 'default', key, () => new Date())(value);
 let t: TestDatabase;
 const options = (): AdminHttpOptions => ({ env: adminEnv, host: { db: t.db, tenantId: 'default' }, now: () => new Date() });
 const host = () => ({ db: t.db, tenantId: 'default' });
@@ -177,7 +180,14 @@ describe('atomic, idempotent and verified recovery', () => {
     expect(ok).toHaveLength(1);
     expect(ok[0]).toMatchObject({ actor: operator.principalId, target: 'run:sup-idem', detail: { operationId: first.body.operationId, action: 'execution.resume-observation',
       runId: 'sup-idem', idempotencyKey, workItemId: first.body.workItemId, workKind: 'reconcile', attentionCleared: true, eligibility: 'ELIGIBLE',
-      precondition: 'DEAD:OBSERVATION_BUDGET_EXHAUSTED', runStatus: 'SUBMISSION_RESULT_UNKNOWN', reason: 'Provider outage resolved' } });
+      precondition: 'DEAD:OBSERVATION_BUDGET_EXHAUSTED', runStatus: 'SUBMISSION_RESULT_UNKNOWN' } });
+    // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the reason is no longer copied into the append-only skeleton; it is referenced and digested,
+    // and lives in the separately governed text store (written in the same transaction).
+    expect(ok[0]!.detail).not.toHaveProperty('reason');
+    expect(ok[0]!.detail).toMatchObject({ reasonRef: expect.stringMatching(/^stx_[a-z2-7]{26}$/), reasonDigest: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(JSON.stringify(ok[0])).not.toContain('Provider outage resolved');
+    expect((await t.db.query(`SELECT purpose, body, run_id FROM admin_support_texts WHERE text_id = $1`, [ok[0]!.detail!.reasonRef])).rows[0])
+      .toEqual({ purpose: 'RECOVERY_REASON', body: 'Provider outage resolved', run_id: 'sup-idem' });
     // A reused key for a different execution is refused, not replayed.
     await seed({ runId: 'sup-idem-b' });
     const tokenB = (await preview(operator, 'sup-idem-b')).body.preview.stateToken;
@@ -288,19 +298,19 @@ describe('search, notes, redaction and bounds', () => {
   it('audits searches by type and fingerprint only, restricts wallet lookups and never returns full addresses', async () => {
     const wallet = `0x${'ab'.repeat(20)}`;
     await seed({ runId: 'sup-wallet', owner: wallet, attention: false, work: [] });
-    expect(await supportSearch(host(), { principalId: viewer.principalId, role: 'VIEWER' }, wallet, new Date(), key)).toEqual({ ok: false, code: 'SUPPORT_SEARCH_WALLET_NOT_PERMITTED' });
-    const found = await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, wallet.toUpperCase().replace('0X', '0x'), new Date(), key);
+    expect(await supportSearch(host(), { principalId: viewer.principalId, role: 'VIEWER' }, wallet, new Date(), fingerprinter)).toEqual({ ok: false, code: 'SUPPORT_SEARCH_WALLET_NOT_PERMITTED' });
+    const found = await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, wallet.toUpperCase().replace('0X', '0x'), new Date(), fingerprinter);
     expect(found).toMatchObject({ ok: true, kind: 'WALLET', hits: [{ type: 'run', id: 'sup-wallet' }] });
     expect(JSON.stringify(found)).not.toContain(wallet.slice(2));
     const searches = await audits('SUPPORT_SEARCH');
     expect(JSON.stringify(searches)).not.toContain(wallet.slice(2));
     expect(searches.at(-1)).toMatchObject({ outcome: 'OK', detail: { type: 'WALLET', results: 1 } });
     expect(searches.at(-1)!.detail!.fingerprint).toMatch(/^[0-9a-f]{16}$/);
-    expect(await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, 'free text query', new Date(), key)).toEqual({ ok: false, code: 'SUPPORT_SEARCH_INVALID' });
+    expect(await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, 'free text query', new Date(), fingerprinter)).toEqual({ ok: false, code: 'SUPPORT_SEARCH_INVALID' });
   });
   it('bounds lookups and incident sources', async () => {
     for (let i = 0; i < 30; i++) await seed({ runId: `sup-bound-${i}`, workflowId: 'wf-bounded', attention: false, needsObservation: false, status: 'SIMULATED', attempts: [], work: [] });
-    const result = await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, 'wf-bounded', new Date(), key);
+    const result = await supportSearch(host(), { principalId: operator.principalId, role: 'OPERATOR' }, 'wf-bounded', new Date(), fingerprinter);
     expect(result).toMatchObject({ ok: true, truncated: true });
     expect(result.ok && result.hits.length).toBe(25);
     expect(ATTENTION_LIMIT + LIMITS.recent).toBeLessThanOrEqual(1000);
@@ -309,7 +319,13 @@ describe('search, notes, redaction and bounds', () => {
     expect((await call(operator, { action: 'note', incidentId: 'run:sup-idem', kind: 'ESCALATION', text: 'Escalated: provider bug' })).body).toEqual({ ok: true });
     expect((await call(operator, { action: 'note', incidentId: 'run:sup-idem', kind: 'FINDING', text: '<img src=x onerror=alert(1)>' })).body).toEqual({ ok: false, code: 'SUPPORT_NOTE_INVALID' });
     expect((await call(operator, { action: 'note', incidentId: 'DROP TABLE', kind: 'FINDING', text: 'valid text' })).body).toEqual({ ok: false, code: 'ADMIN_REQUEST_INVALID' });
-    expect((await audits('SUPPORT_NOTE')).map(a => a.detail)).toEqual([{ incidentId: 'run:sup-idem', noteKind: 'ESCALATION', text: 'Escalated: provider bug' }]);
+    // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the skeleton keeps a reference and a digest; the text is in the governed store (same transaction).
+    const notes = (await audits('SUPPORT_NOTE')).map(a => a.detail);
+    expect(notes).toEqual([{ incidentId: 'run:sup-idem', noteKind: 'ESCALATION', textRef: expect.stringMatching(/^stx_[a-z2-7]{26}$/),
+      textDigest: expect.stringMatching(/^[0-9a-f]{32}$/) }]);
+    expect(JSON.stringify(notes)).not.toContain('provider bug');
+    expect((await t.db.query(`SELECT purpose, body, run_id, incident_id FROM admin_support_texts WHERE text_id = $1`, [notes[0]!.textRef])).rows)
+      .toEqual([{ purpose: 'SUPPORT_NOTE', body: 'Escalated: provider bug', run_id: 'sup-idem', incident_id: 'run:sup-idem' }]);
   });
 });
 

@@ -169,7 +169,7 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
                 : entry.verification.status === 'INCONCLUSIVE' ? 'warn' : 'info'}>{entry.verification.status === 'RESOLVED' ? 'Task completed'
                 : entry.verification.status === 'STOPPED_AGAIN' ? 'Stopped again' : entry.verification.status === 'INCONCLUSIVE' ? 'Inconclusive' : 'Pending verification'}</Status>
               : <Status tone="warn">Not verifiable</Status>}</td>
-            <td>{entry.reason ?? '—'}</td>
+            <td>{entry.reason ?? (entry.outcome === 'OK' && entry.reasonState === 'REMOVED' ? <span className="admin-diff">Removed (retention or erasure)</span> : '—')}</td>
           </tr>)}</tbody></table></div>}
       {view.history && historyCounts && historyCounts.total > view.history.length ? <p className="admin-diff">Showing the newest {fmt(view.history.length)} of {fmt(historyCounts.total)} attempts;
         the counts above cover all of them.</p> : null}

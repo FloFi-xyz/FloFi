@@ -918,6 +918,10 @@
       "path": "apps/reference-dapp/src/workflow-runs/user-funded-run.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.certificate-0027.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0027.pg.test.ts",
+      "stage": "postgres"
+    },
     "cloud-runtime.copilot-metrics-migration.pg": {
       "path": "packages/cloud-runtime/test/copilot-metrics-migration.pg.test.ts",
       "stage": "postgres"
@@ -1301,6 +1305,26 @@
     "app.components.workflow-run-panel-flofi-circle": {
       "path": "apps/reference-dapp/src/components/workflow-run-panel.flofi-circle.test.tsx",
       "stage": "unit"
+    },
+    "app.server.nonce-conflict": {
+      "path": "apps/reference-dapp/src/server/nonce-conflict.test.ts",
+      "stage": "unit"
+    },
+    "app.server.evm-submission-discovery": {
+      "path": "apps/reference-dapp/src/server/evm-submission-discovery.test.ts",
+      "stage": "unit"
+    },
+    "app.backend.nonce-conflict-cloud.pg": {
+      "path": "apps/reference-dapp/backend/nonce-conflict-cloud.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.admin.support-privacy.pg": {
+      "path": "apps/reference-dapp/src/admin/support/privacy.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.e2e.admin-login-layout": {
+      "path": "apps/reference-dapp/e2e/admin-login-layout.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -1408,7 +1432,9 @@
     "reference-compiler.eip7702-upgrade",
     "app.components.circle-consent-card",
     "app.components.flofi-wallet-circle-flow",
-    "app.components.workflow-run-panel-flofi-circle"
+    "app.components.workflow-run-panel-flofi-circle",
+    "app.server.nonce-conflict",
+    "app.server.evm-submission-discovery"
   ],
   "modules": [
     {
@@ -1942,14 +1968,17 @@
         "apps/reference-dapp/src/app/admin/api/support/route.ts",
         "apps/reference-dapp/src/app/admin/support/incident/page.tsx",
         "apps/reference-dapp/src/app/admin/support/page.tsx",
-        "apps/reference-dapp/src/components/admin/support-console.tsx"
+        "apps/reference-dapp/src/components/admin/support-console.tsx",
+        "apps/reference-dapp/src/admin/support/nonce-conflict-view.ts"
       ],
       "suites": [
         "app.admin.http.pg",
         "app.admin.support",
         "app.admin.support-http.pg",
         "app.admin.support-lifecycle",
-        "app.backend.support-recovery-cloud.pg"
+        "app.backend.support-recovery-cloud.pg",
+        "app.backend.nonce-conflict-cloud.pg",
+        "app.server.nonce-conflict"
       ],
       "gaps": [
         "Recovery is proven against loopback PostgreSQL, the real worker reconcile handler and a MOCKED chain; no production incident or public network was exercised.",
@@ -1989,7 +2018,8 @@
         "app.admin.session",
         "app.admin.settings.pg",
         "app.server.copilot-metrics",
-        "app.server.copilot-metrics.pg"
+        "app.server.copilot-metrics.pg",
+        "app.e2e.admin-login-layout"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -2870,19 +2900,23 @@
         "packages/cloud-runtime/migrations/0023_user_funded_groups.sql",
         "packages/cloud-runtime/migrations/0025_flight_gate.sql",
         "packages/cloud-runtime/migrations/0026_flight_early_list.sql",
-        "packages/cloud-runtime/src/owner-history.ts"
+        "packages/cloud-runtime/src/owner-history.ts",
+        "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql"
       ],
       "suites": [
         "app.learning.automatic",
         "app.learning.automatic.pg",
         "app.learning.learning.pg",
+        "cloud-runtime.certificate-0027.pg",
         "cloud-runtime.copilot-metrics-migration.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
         "cloud-runtime.tenancy.pg",
         "cloud-runtime.editor-requester-migration.pg",
         "cloud-runtime.user-funded-groups-migration.pg",
-        "cloud-runtime.flight-gate-migration.pg"
+        "cloud-runtime.flight-gate-migration.pg",
+        "app.admin.support-privacy.pg",
+        "app.backend.nonce-conflict-cloud.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -2995,7 +3029,8 @@
         "app.admin.analytics.workflows",
         "app.admin.http.pg",
         "app.admin.session",
-        "app.admin.settings.pg"
+        "app.admin.settings.pg",
+        "app.e2e.admin-login-layout"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -6678,7 +6713,8 @@
         "app.wallet.solana-wallet",
         "reference-executor.recovery",
         "reference-executor.restart.fork",
-        "reference-reconciler.evidence"
+        "reference-reconciler.evidence",
+        "app.server.evm-submission-discovery"
       ],
       "gaps": [
         "Injected test wallets do not certify browser extension hardware/user ceremonies or real signatures; production delegated signing is unavailable.",
@@ -7706,6 +7742,57 @@
       "gaps": [
         "ADR-0010: token-paid network fees (Circle Paymaster, Pimlico Kora, 0x Gasless) are proven with deterministic loopback doubles only; no provider, bundler, wallet or mainnet is reached in CI, and no real-funds token-paid transaction has been recorded."
       ]
+    },
+    {
+      "id": "server--nonce-conflict-reconciliation",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-admin-analytics",
+        "flofi-automations",
+        "flofi-bridge",
+        "flofi-protocol-integrations",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": true,
+      "sources": [
+        "apps/reference-dapp/src/server/nonce-conflict-store.ts",
+        "apps/reference-dapp/src/server/nonce-conflict.fixtures.ts",
+        "apps/reference-dapp/src/server/nonce-conflict.ts"
+      ],
+      "suites": [
+        "app.backend.nonce-conflict-cloud.pg",
+        "app.server.evm-submission-discovery",
+        "app.server.nonce-conflict"
+      ],
+      "gaps": [
+        "Investigations are proven on deterministic in-memory chains and the MOCKED loopback router harness; no public RPC, production record or real incident was read.",
+        "EIP-7702 / batched inner calls are detected and classified as undetermined, never decoded; attributing an inner call still needs an operator with independent sources.",
+        "Alternate-nonce search covers ERC-20 approvals only (their Approval event); other steps rely on the flows' protocol-specific scans and deadlines."
+      ]
+    },
+    {
+      "id": "admin--support-privacy",
+      "primary": "flofi-data-privacy",
+      "dependencies": [
+        "flofi-admin-analytics",
+        "flofi-infrastructure-ci",
+        "flofi-security"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/admin/privacy-ops.ts",
+        "apps/reference-dapp/src/admin/support/privacy.ts"
+      ],
+      "suites": [
+        "app.admin.support-http.pg",
+        "app.admin.support-privacy.pg"
+      ],
+      "gaps": [
+        "Retention periods are proposals pending counsel; enforcement is inactive until an approved activation exists and has never run against production.",
+        "Legacy reason/note text written inline before migration 0027 stays in the append-only audit table; removing it needs a separately approved phase.",
+        "Database backups (Neon point-in-time recovery) keep deleted text and destroyed keys until their window passes."
+      ]
     }
   ],
   "requiredPostgresSuites": [
@@ -7746,6 +7833,7 @@
     "app.workflow-runs.cancel-run.pg",
     "app.workflow-runs.confirm-run.pg",
     "app.workflow-runs.user-funded-run.pg",
+    "cloud-runtime.certificate-0027.pg",
     "cloud-runtime.copilot-metrics-migration.pg",
     "cloud-runtime.dispatch.pg",
     "cloud-runtime.flight-flofi-migration.pg",
@@ -7757,6 +7845,8 @@
     "cloud-runtime.user-funded-groups-migration.pg",
     "app.workflow-runs.circle-gas-run.pg",
     "app.workflow-runs.flofi-wallet-circle-run.pg",
-    "app.workflow-runs.kora-gas-run.pg"
+    "app.workflow-runs.kora-gas-run.pg",
+    "app.backend.nonce-conflict-cloud.pg",
+    "app.admin.support-privacy.pg"
   ]
 }

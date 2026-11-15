@@ -12,14 +12,41 @@
  *   audit         [--limit 50]                                            the latest admin audit events (closed codes and ids only)
  *   index         [--limit 2000]                                          fills the analytics facts cache from executed runs' records (read-only on runs)
  *
+ * BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 — privacy procedures (docs/deploy/ADMIN.md#privacy-and-retention). Nothing is deleted without an
+ * approval reference; a wallet is read from standard input (`--wallet-stdin`), never from an argument.
+ *   retention-report                                                       dry run: what each policy would remove now (deletes nothing)
+ *   retention-activate --policy SUPPORT_TEXT|LOOKUP_KEYS --days N --approval-ref <ref>
+ *   retention-revoke   --policy …          retention-apply --policy … [--limit 5000]
+ *   legal-hold         --scope TENANT|RUN|LOOKUP_PERIOD [--value <run id|2026-Q4>] --reason-code <CODE> --approval-ref <ref>
+ *   legal-hold-release --hold <lgh_…> --approval-ref <ref>
+ *   privacy-request    --kind ACCESS|CORRECTION|ERASURE|OBJECTION|RESTRICTION --subject-kind WALLET (--wallet-stdin) | ADMIN_PRINCIPAL --principal <adm_…>
+ *   privacy-decide     --request <dsr_…> --decision APPROVED|REJECTED --code <CODE> --approval-ref <ref>
+ *   privacy-access     --request <dsr_…> [--wallet-stdin] [--include-text]      privacy-erase --request <dsr_…> [--wallet-stdin]
+ *   privacy-complete   --request <dsr_…> --code <CODE>                          (correction, objection, restriction)
+ *
  * Environment: DATABASE_URL (the deployment's database). The tenant is explicit: production/local `--tenant default`, a Vercel Preview
- * `--preview-branch <git branch>`. No secret is read or printed. Like `main.ts`, it runs on plain Node: every module it reaches imports
+ * `--preview-branch <git branch>`. No secret is printed; only the privacy commands that need the admin key read FLOFI_ADMIN_SESSION_SECRET. Like `main.ts`, it runs on plain Node: every module it reaches imports
  * with explicit extensions (`backend/admin-cli.test.ts`).
  */
 import { parseArgs } from 'node:util';
 import { assertSchemaCompatible, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { deploymentTenant } from '../src/server/deployment.ts';
 import { ADMIN_COMMANDS, runAdminCommand, type AdminCommand } from '../src/admin/cli-commands.ts';
+import { adminConfig } from '../src/admin/config.ts';
+
+/** The wallet of a data-subject request: the first line of standard input (so it never reaches shell history or the process list). */
+async function readWallet(): Promise<string> {
+  if (process.stdin.isTTY) process.stderr.write('Wallet address (not echoed to logs): ');
+  let text = '';
+  for await (const chunk of process.stdin) { text += String(chunk); if (text.includes('\n') || text.length > 200) break; }
+  return text.split('\n')[0]!.trim();
+}
+/** The admin key, from the operator's FLOFI_ADMIN_SESSION_SECRET exactly as the console derives it. Never printed. */
+function adminKey(): Buffer {
+  const config = adminConfig({ ...process.env, FLOFI_ADMIN: 'enabled' });
+  if (!config.enabled) throw new Error('ADMIN_KEY_REQUIRED: set FLOFI_ADMIN_SESSION_SECRET in this shell');
+  return config.key;
+}
 
 function tenantOf(values: { tenant?: string | undefined; 'preview-branch'?: string | undefined }): string {
   if (Boolean(values.tenant) === Boolean(values['preview-branch'])) throw new Error('TENANT_REQUIRED: pass exactly one of --tenant or --preview-branch');
@@ -28,16 +55,19 @@ function tenantOf(values: { tenant?: string | undefined; 'preview-branch'?: stri
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
-  if (!command || !(ADMIN_COMMANDS as readonly string[]).includes(command)) throw new Error(`COMMAND_INVALID: one of ${ADMIN_COMMANDS.join(', ')}`);
+  if (!command || !(ADMIN_COMMANDS as readonly string[]).includes(command)) throw new Error(`COMMAND_INVALID: one of the ${ADMIN_COMMANDS.length} commands listed at the top of backend/admin-cli.ts`);
   const { values } = parseArgs({ args: rest, strict: true, allowPositionals: false, options: { tenant: { type: 'string' }, 'preview-branch': { type: 'string' },
-    wallet: { type: 'string' }, role: { type: 'string' }, label: { type: 'string' }, principal: { type: 'string' }, limit: { type: 'string' } } });
+    wallet: { type: 'string' }, role: { type: 'string' }, label: { type: 'string' }, principal: { type: 'string' }, limit: { type: 'string' },
+    policy: { type: 'string' }, days: { type: 'string' }, 'approval-ref': { type: 'string' }, scope: { type: 'string' }, value: { type: 'string' },
+    'reason-code': { type: 'string' }, hold: { type: 'string' }, kind: { type: 'string' }, 'subject-kind': { type: 'string' }, request: { type: 'string' },
+    decision: { type: 'string' }, code: { type: 'string' }, 'include-text': { type: 'boolean' }, 'wallet-stdin': { type: 'boolean' } } });
   const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });
   try {
     await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);
     await ensureTenant(db, tenantId);
-    const out = await runAdminCommand(command as AdminCommand, values, db, tenantId);
+    const out = await runAdminCommand(command as AdminCommand, values, db, tenantId, { env: process.env, adminKey, wallet: readWallet, now: () => new Date() });
     process.stdout.write(JSON.stringify({ tenantId, ...out }, null, 2) + '\n');
   } finally { await db.close(); }
 }

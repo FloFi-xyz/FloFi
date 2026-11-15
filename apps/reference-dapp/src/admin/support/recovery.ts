@@ -13,11 +13,13 @@
  *              stopped again → failed; anything else → inconclusive. "Accepted" is never reported as "resolved".
  *
  * Every refusal is audited (bounded per window, like refused sign-ins). The operator's reason is stored, bounded and control-character free;
- * no address, key, transcript or payload is recorded.
+ * no address, key, transcript or payload is recorded. BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the reason lives in the separately governed
+ * text store (written in the same transaction); the audit skeleton keeps only its reference and digest.
  */
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { typedId } from '../../platform/ids.ts';
 import { recordAudit } from '../store.ts';
+import { PROPOSED_TEXT_RETENTION_DAYS, readSupportTexts, resolveText, writeSupportText, type TextState } from './privacy.ts';
 import { attentionClearable, RECOVERY_ACTIONS, RETRY_WINDOW_DAYS, stateToken, type Eligibility, type RecoveryActionId, type RecoveryWorkKind,
   type RunRecoveryFacts, type WorkFact, type WorkState } from './registry.ts';
 
@@ -120,7 +122,7 @@ type Replay = { detail: { operationId: string; action: string; runId: string; wo
 /**
  * Runs one registered recovery action atomically. Throws `RecoveryRefusal` for anything that is not executed (the caller audits it).
  */
-export async function executeRecovery(host: Host, actor: string, request: RecoveryRequest, now: Date): Promise<RecoveryResult> {
+export async function executeRecovery(host: Host, actor: string, request: RecoveryRequest, now: Date, textRetentionDays = PROPOSED_TEXT_RETENTION_DAYS): Promise<RecoveryResult> {
   const definition = RECOVERY_ACTIONS[request.action], kind = definition.workKind;
   const committed = await host.db.transaction(async tx => {
     // One recovery at a time per tenant (they are rare and short): idempotency keys and the rate limit are then checked consistently.
@@ -152,10 +154,12 @@ export async function executeRecovery(host: Host, actor: string, request: Recove
     const clear = attentionClearable(facts, kind);
     if (clear) await tx.query(`UPDATE execution_runs SET attention_required = false WHERE tenant_id = $1 AND run_id = $2 AND attention_required`, [host.tenantId, facts.runId]);
     const operationId = typedId('rop'), last = facts.latest[kind];
+    const reason = await writeSupportText(tx, host.tenantId, { purpose: 'RECOVERY_REASON', body: request.reason, runId: facts.runId, incidentId: `run:${facts.runId}`,
+      actor, now, retentionDays: textRetentionDays });
     await recordAudit(tx, host.tenantId, { actor, kind: RECOVERY_AUDIT_KIND, outcome: 'OK', code: null, target: `run:${facts.runId}`.slice(0, 120),
       detail: { operationId, action: request.action, runId: facts.runId, flow: facts.flow, idempotencyKey: request.idempotencyKey, workItemId: queued.rows[0].id,
         workKind: kind, attentionCleared: clear, eligibility: 'ELIGIBLE', precondition: last ? `${last.state}:${last.lastError ?? 'NONE'}`.slice(0, 120) : 'NO_TASK',
-        runStatus: facts.status, reason: request.reason } });
+        runStatus: facts.status, reasonRef: reason.textRef, reasonDigest: reason.textDigest } });
     return { operationId, workItemId: queued.rows[0].id, attentionCleared: clear, replayed: false };
   });
   // Committed: a failing read-back never turns this into a failure report (the task is queued and audited).
@@ -206,7 +210,9 @@ export async function auditRecoveryRefusal(db: Database, tenantId: string, actor
 }
 
 export type HistoryEntry = { readonly eventId: string; readonly at: string; readonly actor: string; readonly outcome: 'OK' | 'REFUSED' | 'FAILED'; readonly code: string | null;
-  readonly operationId: string | null; readonly action: string | null; readonly runId: string | null; readonly reason: string | null; readonly attentionCleared: boolean;
+  readonly operationId: string | null; readonly action: string | null; readonly runId: string | null; readonly reason: string | null;
+  /** Whether the reason text is in the separate store, inline from before that store existed, or removed (retention or erasure). */
+  readonly reasonState: TextState; readonly attentionCleared: boolean;
   readonly verification: Verification | null };
 type HistoryRow = { event_id: string; at: Date; actor: string; outcome: HistoryEntry['outcome']; code: string | null; detail: Record<string, unknown> | null };
 const str = (value: unknown) => typeof value === 'string' ? value : null;
@@ -224,11 +230,13 @@ export async function recoveryHistory(host: Host, now: Date, options: { readonly
       LEFT JOIN execution_runs r ON r.tenant_id = $1 AND r.run_id = x.run_id`,
   [host.tenantId, ok.map(row => row.event_id), ok.map(row => str(row.detail!.runId)!), ok.map(row => str(row.detail!.workItemId)!)])).rows : [];
   const byEvent = new Map(facts.map(row => [row.event_id, row]));
+  const texts = await readSupportTexts(host.db, host.tenantId, rows.flatMap(row => typeof row.detail?.reasonRef === 'string' ? [row.detail.reasonRef] : []));
   return rows.map(row => {
     const detail = row.detail ?? {}, action = str(detail.action), fact = byEvent.get(row.event_id);
     const kind: RecoveryWorkKind | null = action && Object.hasOwn(RECOVERY_ACTIONS, action) ? RECOVERY_ACTIONS[action as RecoveryActionId].workKind : null;
     return { eventId: row.event_id, at: row.at.toISOString(), actor: row.actor, outcome: row.outcome, code: row.code, operationId: str(detail.operationId), action,
-      runId: str(detail.runId), reason: str(detail.reason), attentionCleared: detail.attentionCleared === true,
+      runId: str(detail.runId), ...(() => { const r = row.outcome === 'OK' ? resolveText(detail, 'reasonRef', 'reason', texts) : { text: null, state: 'REMOVED' as const };
+        return { reason: r.text, reasonState: r.state }; })(), attentionCleared: detail.attentionCleared === true,
       verification: row.outcome === 'OK' && fact && kind ? verification(kind, fact) : null };
   });
 }

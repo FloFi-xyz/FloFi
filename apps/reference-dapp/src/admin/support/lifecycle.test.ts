@@ -10,7 +10,7 @@ import { identifierShaped } from './diagnostics.ts';
 import type { ExecutionSnapshot } from './executions.ts';
 import { executionIncident, submissionOf } from './incidents.ts';
 import { countAttention, investigationOf, OWNER_REVIEW_CODE, runAttention } from './lifecycle.ts';
-import { RECOVERY_ACTIONS, stateToken, type RunRecoveryFacts, type StoppedKind, type WorkFact } from './registry.ts';
+import { RECOVERY_ACTIONS, RETRY_LIMIT, stateToken, type RunRecoveryFacts, type StoppedKind, type WorkFact } from './registry.ts';
 
 const now = new Date('2026-11-14T12:00:00.000Z'), hour = 3_600_000, day = 24 * hour;
 const task = (kind: string, state: WorkFact['state'], lastError: string | null = null, id = '7', deliveries = 500): WorkFact =>
@@ -220,6 +220,19 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 attention lifecycle', () => {
       'UNIVERSAL_WALLET_CHANGED_REVIEW_REQUIRED', 'ROUTER_STATE_CORRUPT_TRANSACTION_PENDING']) expect([code, retryableStopReason(code)]).toEqual([code, false]);
     expect(retryableStopReason('OBSERVATION_BUDGET_EXHAUSTED')).toBe(true);
     expect(explainCode('ROUTER_STATE_CORRUPT_TRANSACTION_PENDING')).toMatchObject({ remedy: 'CODE' });
+  });
+
+  it('BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: a stable nonce conflict stops for review, is not called transient, and allows exactly a read-only re-inspection', () => {
+    expect(explainCode('NONCE_CONFLICT_STABLE_OPERATOR_REVIEW')).toMatchObject({ known: true, remedy: 'UNKNOWN', category: 'CONFIRMATION',
+      meaning: expect.stringMatching(/outcome stays UNKNOWN/) });
+    expect(retryableStopReason('NONCE_CONFLICT_STABLE_OPERATOR_REVIEW')).toBe(true);
+    // The exception is exact: lookalike codes and the nonce-conflict observation codes themselves stay non-retryable.
+    for (const code of ['NONCE_CONFLICT_STABLE_OPERATOR_REVIEW_X', 'X_NONCE_CONFLICT_STABLE_OPERATOR_REVIEW', 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION'])
+      expect([code, retryableStopReason(code)]).toEqual([code, false]);
+    const { facts } = shape({ runId: 'xuni-a', flow: 'crosschain-universal', status: 'SUBMISSION_RESULT_UNKNOWN', provenance: 'PUBLIC_MAINNET', needsObservation: true,
+      errorCode: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION', latest: { reconcile: task('reconcile', 'DEAD', 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW', '9', 7) } });
+    expect(RECOVERY_ACTIONS['execution.resume-observation'].check(facts)).toEqual({ eligible: true });
+    expect(RECOVERY_ACTIONS['execution.resume-observation'].check({ ...facts, recentRecoveries: RETRY_LIMIT })).toMatchObject({ eligible: false, code: 'SUPPORT_RETRY_LIMIT_REACHED' });
   });
 
   it('review fixes: free-text screening refuses Brazilian document and phone formats and IP addresses, and keeps dates and record ids', () => {

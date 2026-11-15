@@ -359,8 +359,10 @@ test('Support & Recovery: discover a stopped check, preview, confirm, run and ve
     await expect(result).toContainText(/Accepted — pending verification|Verified: task completed|Not resolved: stopped again|Inconclusive/);
     await expect(result).toContainText(/rop_[a-z2-7]{26}/);
     expect((await db.query(`SELECT count(*)::int AS n FROM work_items WHERE run_id = 'e2e-stuck' AND kind = 'reconcile' AND state <> 'DEAD'`)).rows).toEqual([{ n: 1 }]);
-    expect((await db.query(`SELECT outcome, detail->>'reason' AS reason FROM admin_audit_events WHERE kind = 'SUPPORT_RECOVERY'`)).rows)
-      .toEqual([{ outcome: 'OK', reason: 'E2E: provider outage resolved' }]);
+    // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the audit skeleton references the reason; its text lives in the governed text store.
+    expect((await db.query(`SELECT a.outcome, a.detail ? 'reason' AS inline, t.body AS reason FROM admin_audit_events a
+      JOIN admin_support_texts t ON t.tenant_id = a.tenant_id AND t.text_id = a.detail->>'reasonRef' WHERE a.kind = 'SUPPORT_RECOVERY'`)).rows)
+      .toEqual([{ outcome: 'OK', inline: false, reason: 'E2E: provider outage resolved' }]);
     await page.getByRole('textbox', { name: /^Note \(plain text/ }).fill('Customer informed; watching the check.');
     await page.getByRole('button', { name: 'Add note' }).click();
     await expect(page.getByText('Note added.')).toBeVisible();
