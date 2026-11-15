@@ -19,7 +19,17 @@ export const COPILOT_STEP_KINDS = ['SWAP', 'BRIDGE', 'SUPPLY', 'BORROW', 'REPAY'
 export const COPILOT_ORDINALS = ['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'LAST'] as const;
 export const COPILOT_REUSE_FIELDS = ['network', 'asset', 'amount', 'destination', 'recipient', 'slippage'] as const;
 export const COPILOT_QUESTION_TOPICS = ['WORKFLOW_OVERVIEW', 'STEP_COUNT', 'STEP_DETAIL', 'PROTOCOLS', 'NETWORKS', 'APPROVALS', 'EXECUTION_FLOW',
-  'EXECUTION_BLOCKERS', 'MANIFEST', 'SIMULATION', 'FAILURE', 'PROPOSAL', 'REVIEW_FINDINGS', 'CAPABILITIES', 'MARKET_DATA', 'OTHER'] as const;
+  'EXECUTION_BLOCKERS', 'MANIFEST', 'SIMULATION', 'FAILURE', 'PROPOSAL', 'REVIEW_FINDINGS', 'CAPABILITIES', 'MARKET_DATA', 'OTHER',
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: a DeFi concept ("o que é colateral?"), how FloFi's automations behave ("e se eu não tiver saldo?"), and how to
+  // use or configure FloFi itself ("como conecto minha Phantom?"). FloFi answers each from its own copy; the model only classifies.
+  'CONCEPT', 'AUTOMATIONS', 'PLATFORM'] as const;
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: managing the user's SAVED automations. The model only names the operation; which automation, its current
+ * state and any new schedule are read by FloFi (the owner's own records and the user's words). LIST/STATUS/EXPLAIN/WHY_NOT_RUN are reads;
+ * PAUSE/RESUME/ARCHIVE/RESCHEDULE are only PREPARED here — each changes nothing until the owner confirms it through FloFi's authorized action.
+ */
+export const COPILOT_AUTOMATION_OPERATIONS = ['LIST', 'STATUS', 'EXPLAIN', 'WHY_NOT_RUN', 'PAUSE', 'RESUME', 'ARCHIVE', 'RESCHEDULE'] as const;
+export type CopilotAutomationOperation = (typeof COPILOT_AUTOMATION_OPERATIONS)[number];
 export const COPILOT_V2_MISSING_FIELDS = [...COPILOT_MISSING_FIELDS, 'inputAsset', 'outputAsset', 'target'] as const;
 /** Managing an existing FloFi-registered position: remove part of its liquidity, or all of it and close it. */
 export const COPILOT_POSITION_OPERATIONS = ['DECREASE', 'EXIT'] as const;
@@ -76,6 +86,7 @@ export type CopilotIntentV2 = Common & (
       /** BUILD-FLOFI-INTELLIGENCE-001: the model's explanation from FloFi's tool facts (absent in older answers); shown only when grounded. */ readonly answer?: string | null }
   | { readonly kind: 'GOAL'; readonly goal: CopilotGoal; readonly answer?: string | null }
   | ({ readonly kind: 'POSITION' } & CopilotPositionRequest)
+  | { readonly kind: 'AUTOMATION_MANAGE'; readonly operation: CopilotAutomationOperation }
   | { readonly kind: 'CLARIFICATION_REQUIRED'; readonly missing: readonly CopilotV2MissingField[]; readonly question: string; readonly options: readonly string[] }
   | { readonly kind: 'UNSUPPORTED'; readonly reason: string });
 
@@ -174,6 +185,7 @@ export function parseCopilotIntentV2(value: unknown): CopilotIntentV2 {
       return { ...common(v), kind, operation: oneOf(COPILOT_POSITION_OPERATIONS, v.operation), protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol),
         network: nullableOneOf(COPILOT_V2_NETWORKS, v.network), percent: amount(v.percent) };
     }
+    case 'AUTOMATION_MANAGE': { const v = keys(['operation']); return { ...common(v), kind, operation: oneOf(COPILOT_AUTOMATION_OPERATIONS, v.operation) }; }
     case 'CLARIFICATION_REQUIRED': {
       const v = keys(['missing', 'question', 'options']);
       const missing = list(v.missing, COPILOT_V2_MISSING_FIELDS.length).map(item => oneOf(COPILOT_V2_MISSING_FIELDS, item));
@@ -250,6 +262,9 @@ export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: 
   object({ ...head('QUESTION'), topic: choice(COPILOT_QUESTION_TOPICS, 'What the read-only question is about.'),
     target: { anyOf: [TARGET, { type: 'null' }], description: 'The step the question is about, if any.' }, answer: ANSWER }),
   object({ ...head('GOAL'), goal: GOAL, answer: ANSWER }),
+  object({ ...head('AUTOMATION_MANAGE'), operation: choice(COPILOT_AUTOMATION_OPERATIONS, 'What the user wants to do with automations they ALREADY saved: LIST them ' +
+    '("quais automações eu tenho?"), STATUS or EXPLAIN one, WHY_NOT_RUN ("por que não rodou?"), PAUSE, RESUME, ARCHIVE (delete/cancel), or RESCHEDULE ("muda para sexta"). ' +
+    'FloFi reads which automation and the new schedule from the user\'s own words and records; never put them here.') }),
   object({ ...head('CLARIFICATION_REQUIRED'), missing: { type: 'array', items: choice(COPILOT_V2_MISSING_FIELDS, 'Missing field.') },
     question: string('One short question in the user\'s language.'), options: { type: 'array', description: 'Up to 4 short answer options.', items: string('Option.') } }),
   object({ ...head('UNSUPPORTED'), reason: string('One short sentence in the user\'s language.') }),

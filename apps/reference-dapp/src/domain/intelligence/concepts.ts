@@ -271,7 +271,8 @@ const CONCEPTS: Readonly<Record<ConceptId, Concept>> = {
       flofi: 'Na FloFi você pode definir uma faixa de preço, uma faixa percentual ou a faixa completa num passo de liquidez; a Review mostra a faixa exata e os depósitos máximos antes de você assinar.',
       protocols: { UNISWAP: 'Na Uniswap v3 a posição é um NFT com tick inferior e superior.', ORCA: 'Nos Whirlpools da Orca a posição é um NFT de posição com ticks inferior e superior, na Solana.' } } },
 
-  GAS_FEES: { aliases: ['gas', 'gas fee', 'gas fees', 'fees', 'fee', 'taxa', 'taxas', 'taxa de rede', 'taxa de gas', 'custo de rede', 'network fee', 'transaction fee', 'gwei', 'priority fee'],
+  GAS_FEES: { aliases: ['gas', 'gas fee', 'gas fees', 'taxa de rede', 'taxas de rede', 'taxa de gas', 'taxa de transacao', 'custo de rede', 'network fee', 'network fees', 'transaction fee',
+    'transaction fees', 'gwei', 'priority fee'],
     related: ['SLIPPAGE', 'BRIDGE'], steps: [...SWAPS, ...BRIDGES, ...LENDING, ...POSITIONS, 'TRANSFER'],
     EN: { name: 'gas and transaction fees',
       standard: 'Gas is the fee you pay a blockchain to process your transaction, paid in the network\'s native coin (ETH on Ethereum, Base and Arbitrum; SOL on Solana). It is separate from protocol fees, such as a pool\'s swap fee or a bridge provider\'s fee. Gas varies with network demand.',
@@ -421,15 +422,24 @@ const ACTION_WORDS = /(?:^|\s)(?:swap|swaps|trocar|troca|troque|supply|fornecer|
 const withoutNamedDigits = (folded: string) => folded.replace(/(?:^|\s)(?:v\d|eli5|erc 20|erc20|l2|layer 2|web3)(?=\s|$)/g, ' ');
 const QUESTION_CUE = /(?:^|\s)(?:o que (?:e|sao|significa|quer dizer)|oq e|oque e|que e|que sao|o que seria|me explica|explica|explique|explicar|como funciona|como funcionam|pra que serve|para que serve|qual a diferenca|diferenca entre|significa|significado|definicao|nao sei o que e|what s|whats|what is|what are|what does|explain|how does|how do|what is the difference|difference between|meaning of|define|definition|tell me about|me fala sobre|fala sobre|quero entender|quero aprender|teach me|me ensina)(?:\s|$)/;
 /** A clean conceptual question ("o que é slippage?", "explain impermanent loss"), never an action request with amounts or addresses. */
+/**
+ * A question about a LIVE value ("what is the APY on Aave?", "qual o preço do ETH agora?", "my health factor") or about the user's own items ("minha
+ * automação", "my position") is not a concept question: it goes to the interpreter, which answers it from FloFi's records or says live values are
+ * only in Simulation and Review (MARKET_DATA). Concept answers never stand in for a live value.
+ */
+const LIVE_OR_OWN = /(?:^|\s)(?:what s the|whats the|what is the|what are the|qual (?:e )?(?:o|a)|quanto|quantos|how much|how many|current|currently|atual|atualmente|agora|hoje|now|today|right now|live|ao vivo|meu|minha|meus|minhas|my|mine|nosso|nossa)(?:\s|$)/;
 export function conceptQuestion(text: string): ConceptId | null {
   const folded = foldText(text);
   if (!folded || folded.length > 160 || /\d/.test(withoutNamedDigits(folded)) || /0x[0-9a-f]{6}/i.test(text)) return null;
   const id = matchConcept(text);
-  if (!id) return null;
-  const opening = QUESTION_CUE.exec(` ${folded}`)?.index ?? -1, words = folded.split(' ');
+  if (!id || LIVE_OR_OWN.test(folded)) return null;
+  const opening = QUESTION_CUE.exec(` ${folded}`)?.index ?? -1;
   // "faz um swap e me explica slippage" is a request: an action word before the question goes to the interpreter.
   if (ACTION_WORDS.test(folded) && !(opening >= 0 && opening <= 2)) return null;
-  const bare = words.length <= 4 && /\?\s*$/.test(text.trim());
+  // A bare concept name as a question ("slippage?", "o health factor?") is a question about it; nothing else without a question cue.
+  const rest = ` ${folded} `.replace(new RegExp(` (?:${CONCEPTS[id].aliases.map(alias => alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}) `), ' ')
+    .replace(/ (?:o|a|os|as|the|um|uma|an?) /g, ' ').trim();
+  const bare = rest === '' && /\?\s*$/.test(text.trim());
   return opening >= 0 || bare ? id : null;
 }
 export type ConceptFollowUp = { readonly kind: 'LEVEL'; readonly level: ConceptLevel } | { readonly kind: 'PROTOCOL'; readonly protocol: ConceptProtocol } | { readonly kind: 'WORKFLOW' };

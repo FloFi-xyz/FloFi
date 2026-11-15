@@ -34,6 +34,17 @@ describe('concept matching', () => {
     expect(conceptQuestion('slippage de 1%?')).toBeNull();
     expect(conceptQuestion('envia para 0x1111111111111111111111111111111111111111 o que é gas')).toBeNull();
     expect(conceptQuestion('slippage')).toBeNull();
+    // Live values and the user's own items are never answered with a concept (eval Q30: "What is the APY on Aave?" is MARKET_DATA).
+    expect(conceptQuestion('What is the APY on Aave?')).toBeNull();
+    expect(conceptQuestion('qual o health factor da minha posição?')).toBeNull();
+    expect(conceptQuestion('como funciona minha automação?')).toBeNull();
+    expect(conceptQuestion('quanto está o gas agora?')).toBeNull();
+    expect(conceptQuestion('what is APY?')).toBe('APY_APR');
+    // A bare name with "?" is a question about it; a generic word with "?" ("qual a taxa?", "e a taxa?") is not.
+    expect(conceptQuestion('o health factor?')).toBe('HEALTH_FACTOR');
+    expect(conceptQuestion('qual a taxa?')).toBeNull();
+    expect(conceptQuestion('e a taxa?')).toBeNull();
+    expect(conceptQuestion('minhas automações?')).toBeNull();
   });
   it('reads follow-ups about the concept just explained', () => {
     expect(conceptFollowUp('Não entendi.')).toEqual({ kind: 'LEVEL', level: 'SIMPLE' });

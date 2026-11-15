@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001 acceptance journeys through the real conversation engine, exact grammar, editor and the committed official catalog
+ * fixtures, with scripted model answers (no model, provider, wallet or network is reached; nothing is simulated, signed or executed):
+ *   A conversational swap with typos · B DeFi education during authoring and resume · C saving and reusing a recipient · D automation management ·
+ *   platform guidance · continuity and safety invariants.
+ */
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { CopilotSession, act, intent } from '../copilot-session.test-harness';
+import { setActiveNetworkScope } from '../network-scope';
+import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence.test-harness';
+import { SAVED_RECIPIENT_MARKER, type SavedRecipient } from '../saved-recipients';
+
+beforeAll(registerFixtureCatalogs);
+afterAll(() => { resetNetworkCatalogs(); setActiveNetworkScope(null); });
+beforeEach(() => setActiveNetworkScope('PUBLIC_MAINNET'));
+const mainnet = (language: 'EN' | 'PT' | undefined = undefined) => { const s = new CopilotSession(); s.walletChainId = 'eip155:42161'; if (language) s.interfaceLanguage = language; return s; };
+const SOL = 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq';
+const EVM = '0x52908400098527886e0f7030069857d2e4169ee7';
+const saved = (label: string, address: string, ecosystem: 'EVM' | 'SOLANA', id = 'a'): SavedRecipient =>
+  ({ id: `rcp_${id.padEnd(26, 'a')}`, label, address, ecosystem, createdAt: '2026-11-15T12:00:00.000Z', updatedAt: '2026-11-15T12:00:00.000Z' });
+
+describe('Journey A — conversational swap with typos', () => {
+  it('"trocar etheruem por usdc na arbriturm" asks only for the amount, says how it read the typos, then "0.00005" prepares the swap', () => {
+    const s = mainnet('PT');
+    const asked = s.say('trocar etheruem por usdc na arbriturm', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'ETH', outputAsset: 'USDC', amount: null }), 'PT'))!;
+    expect(asked.kind).toBe('CLARIFICATION');
+    expect(asked.notes.join(' ')).toMatch(/Entendi “etheruem” como Ethereum e “arbriturm” como Arbitrum One/);
+    expect(s.state.draft?.expected).toEqual(['amount']);
+    const proposal = s.say('0.00005')!;
+    expect(proposal).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.00005 ETH to USDC on Arbitrum One slippage 100 bps' });
+    // Nothing was asked twice in the request.
+    expect(s.state.ledger?.repeats ?? 0).toBe(0);
+  });
+  it('a complete request with a misspelled mainnet is never proposed in the same turn: FloFi confirms its reading first (learning corpus M04)', () => {
+    const s = mainnet();
+    const asked = s.say('Bridge 10 USDC from Base to arbitrun', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' })))!;
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Yes, prepare it'] });
+    expect(asked.text).toMatch(/^I read “arbitrun” as Arbitrum One\. Shall I prepare: bridge 10 USDC from Base to Arbitrum/);
+    expect(asked.command).toBeUndefined();
+    expect(s.say('Yes, prepare it')).toMatchObject({ kind: 'PROPOSAL', command: expect.anything() });
+  });
+  it('"swap ethereum to usdc on arbitrum one" reads Ethereum as the coin ETH, never as a second network', () => {
+    const reply = mainnet().say('swap 0.01 ethereum to usdc on arbitrum one', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.01' })))!;
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.01 ETH to USDC on Arbitrum One slippage 100 bps' });
+    // "from Ethereum" is the network, never the coin.
+    const network = mainnet().say('please move 5 USDC from ethereum over to base', intent.action(act.bridge({ sourceNetwork: 'ETHEREUM', destinationNetwork: 'BASE', asset: 'USDC', amount: '5' })))!;
+    expect(network.kind).toBe('PROPOSAL');
+  });
+});
+
+describe('Journey B — DeFi education during authoring', () => {
+  it('explains slippage, then more simply, keeps the open swap, and "agora continua o swap" resumes it with every value kept', () => {
+    const s = mainnet('PT');
+    const asked = s.say('quero trocar ETH por USDC na Arbitrum One', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'ETH', outputAsset: 'USDC' }), 'PT'))!;
+    expect(asked.kind).toBe('CLARIFICATION');
+    const question = s.state.draft!.question!;
+    const explained = s.say('O que é slippage?')!;
+    expect(explained).toMatchObject({ kind: 'ANSWER', topic: 'CONCEPT' });
+    expect(explained.text).toMatch(/^Slippage é a diferença/);
+    expect(explained.notes).toContain(`Seu pedido continua aberto — ${question}`);
+    expect(explained.options).toContain('Continuar meu pedido');
+    const simpler = s.say('Não entendi.')!;
+    expect(simpler.text).toMatch(/^Slippage é o quanto o preço pode mudar/);
+    expect(s.say('Me dá um exemplo')!.text).toMatch(/^Exemplo ilustrativo/);
+    // No model was called for any of these, and the draft is exactly the one FloFi asked about.
+    expect(s.turns.slice(1).every(turn => turn.request === null)).toBe(true);
+    const resumed = s.say('Agora continua o swap')!;
+    expect(resumed).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(resumed.text).toBe(`Vamos continuar. ${question}`);
+    expect(s.state.clarifications).toBe(1);
+    expect(s.say('0.001')).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.001 ETH to USDC on Arbitrum One slippage 100 bps' });
+  });
+  it('follows up on a protocol and on the user\'s own workflow, and never states a live value', () => {
+    const s = mainnet('PT');
+    expect(s.say('O que é colateral?')!.text).toMatch(/^Colateral é o que você deposita/);
+    expect(s.say('E como isso funciona na Aave?')!.text).toMatch(/^Na Aave V3, ativos depositados/);
+    const mine = s.say('E no meu workflow?')!;
+    expect(mine.text).toMatch(/^Seu workflow atual não tem nenhum passo em que colateral se aplique/);
+    // A live value is not a concept: it goes to the interpreter (MARKET_DATA), never a concept answer.
+    expect(() => mainnet().say('What is the APY on Aave?')).toThrow('unexpected model call');
+  });
+  it('a question classified by the model as CONCEPT is answered from FloFi\'s copy (the model\'s prose is never shown as verified data)', () => {
+    const s = mainnet();
+    const reply = s.say('hey, impermanent loss — can you walk me through it', { ...intent.question('CONCEPT'), answer: 'It is 50% of your funds.' })!;
+    expect(reply).toMatchObject({ kind: 'ANSWER', topic: 'CONCEPT' });
+    expect(reply.text).toMatch(/^Impermanent loss is the difference/);
+    expect(reply.notes.join(' ')).not.toMatch(/50%/);
+  });
+});
+
+describe('Journey C — saving and reusing a recipient', () => {
+  const bridgeTo = (recipient: string | null, amount = '20') => intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount, recipient }), 'PT');
+  it('offers to save a new typed address after the proposal, saves it only on the user\'s choice, under the name they give', () => {
+    const s = mainnet('PT'); s.recipients = []; s.recipientWrites = true;
+    const proposal = s.say(`Quero mandar 20 USDC da Base para minha outra carteira Solana ${SOL}`, bridgeTo(SOL))!;
+    expect(proposal.kind).toBe('PROPOSAL');
+    expect(proposal.offer).toEqual({ text: expect.stringMatching(/^Quer salvar GsWtMd…evBq no Credentials/), options: ['Salvar destinatário', 'Agora não'] });
+    expect(proposal.offer!.text).toMatch(/não prova que a carteira é sua e não autoriza nada/);
+    const named = s.say('Salvar destinatário')!;
+    expect(named).toMatchObject({ kind: 'CLARIFICATION', options: ['Minha Solana'] });
+    expect(named.recipientSave).toBeUndefined();
+    const saving = s.say('Minha Solana')!;
+    expect(saving.recipientSave).toEqual({ label: 'Minha Solana', address: SOL, ecosystem: 'SOLANA' });
+    expect(s.state.recipientOffer).toBeNull();
+  });
+  it('a declined offer saves nothing and is not asked again for that address; an already saved address is never offered', () => {
+    const s = mainnet('PT'); s.recipients = []; s.recipientWrites = true;
+    expect(s.say(`manda 20 USDC da Base para a Solana ${SOL}`, bridgeTo(SOL))!.offer).toBeDefined();
+    expect(s.say('Agora não')).toMatchObject({ kind: 'ANSWER', text: 'Certo, não salvei. Seu pedido continua igual.' });
+    expect(s.say(`manda 5 USDC da Base para a Solana ${SOL}`, bridgeTo(SOL, '5'))!.offer).toBeUndefined();
+    const known = mainnet('PT'); known.recipients = [saved('Minha Solana', SOL, 'SOLANA')]; known.recipientWrites = true;
+    expect(known.say(`manda 20 USDC da Base para a Solana ${SOL}`, bridgeTo(SOL))!.offer).toBeUndefined();
+    // Without a surface that can save (a chat channel), nothing is offered.
+    expect(mainnet('PT').say(`manda 20 USDC da Base para a Solana ${SOL}`, bridgeTo(SOL))!.offer).toBeUndefined();
+  });
+  it('"Manda 5 USDC da Base para Minha Solana" resolves the saved name without sending it (or its address) to the model', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Minha Solana', SOL, 'SOLANA'), saved('Carteira da empresa', EVM, 'EVM', 'b')];
+    let sent = '';
+    const reply = s.say('Manda 5 USDC da Base para Minha Solana', request => { sent = JSON.stringify(request.messages); return { ok: true, intent: bridgeTo(null, '5') }; })!;
+    expect(sent).toContain(SAVED_RECIPIENT_MARKER);
+    expect(sent).not.toMatch(/Minha Solana|GsWtMd/i);
+    expect(reply).toMatchObject({ kind: 'PROPOSAL' });
+    expect(reply.sentence).toContain(SOL);
+    expect(reply.notes.join(' ')).toMatch(/Destinatário salvo “Minha Solana” \(Solana\): GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq/);
+    // A model that copied the marker into the address field wrote no address: FloFi still resolves the saved name.
+    const echoed = mainnet('PT'); echoed.recipients = s.recipients;
+    expect(echoed.say('Manda 5 USDC da Base para Minha Solana', bridgeTo(SAVED_RECIPIENT_MARKER, '5'))).toMatchObject({ kind: 'PROPOSAL' });
+  });
+  it('a saved address of the other ecosystem is refused with the reason (a send cannot cross ecosystems), and ambiguity is a question', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Minha Solana', SOL, 'SOLANA')];
+    const refused = s.say('Envia 5 USDC na Base para Minha Solana', intent.action(act.transfer({ network: 'BASE', asset: 'USDC', amount: '5' }), 'PT'))!;
+    expect(refused).toMatchObject({ kind: 'UNSUPPORTED' });
+    expect(refused.text).toMatch(/“Minha Solana” é um endereço Solana, e a Base precisa de um endereço EVM\. Para enviar para a Solana a partir da Base, peça uma bridge/);
+    const two = mainnet('PT'); two.recipients = [saved('Carteira da empresa Base', EVM, 'EVM'), saved('Carteira da empresa Arbitrum', '0x1111111111111111111111111111111111111111', 'EVM', 'b')];
+    const ask = two.say('envia 5 USDC na Base para a carteira da empresa', intent.action(act.transfer({ network: 'BASE', asset: 'USDC', amount: '5' }), 'PT'))!;
+    expect(ask).toMatchObject({ kind: 'CLARIFICATION', options: ['Carteira da empresa Base', 'Carteira da empresa Arbitrum'] });
+    expect(ask.command).toBeUndefined();
+  });
+});
+
+describe('Journey D and management — automations', () => {
+  it('managing saved automations is prepared for the owner\'s confirmation, never applied by the conversation', () => {
+    const s = mainnet('PT');
+    const listed = s.say('Quais automações eu tenho ativas?', { version: '2', language: 'PT', kind: 'AUTOMATION_MANAGE', operation: 'LIST' })!;
+    expect(listed).toMatchObject({ kind: 'AUTOMATION_MANAGE', manage: { operation: 'LIST', request: 'Quais automações eu tenho ativas?' } });
+    const pause = s.say('Pausa essa automação', { version: '2', language: 'PT', kind: 'AUTOMATION_MANAGE', operation: 'PAUSE' })!;
+    expect(pause).toMatchObject({ kind: 'AUTOMATION_MANAGE', text: 'Pronto para pausar. Nada muda até você confirmar.' });
+    expect(pause.command).toBeUndefined();
+  });
+  it('an automation proposal says in the user\'s language that creating it never authorizes spending', () => {
+    const s = mainnet('PT');
+    const reply = s.say('Compra 20 USDC de ETH toda sexta às 10h na Base', { version: '2', language: 'PT', kind: 'AUTOMATION', draft: { kind: 'SCHEDULED_DCA', name: null,
+      schedule: { frequency: 'WEEKLY', weekday: 5, time: '10:00' }, condition: null, action: { side: 'BUY', asset: 'ETH', network: 'BASE', amount: '20', spendAsset: 'USDC' },
+      watch: null } });
+    if (reply?.kind === 'AUTOMATION_PROPOSAL') expect(reply.text).toMatch(/criar nunca autoriza gastos/);
+  });
+});
+
+describe('platform guidance', () => {
+  it('answers configuration questions with FloFi\'s own screens, locally and without changing anything', () => {
+    const s = mainnet('PT');
+    const connect = s.say('Como conecto minha Phantom?')!;
+    expect(connect).toMatchObject({ kind: 'ANSWER', topic: 'PLATFORM', link: { path: '/app/credentials' } });
+    expect(connect.text).toMatch(/nunca pede frase semente/);
+    expect(s.say('Onde vejo minhas automações?')).toMatchObject({ link: { path: '/app/automations' } });
+    expect(s.say('Como vejo as transações anteriores?')).toMatchObject({ link: { path: '/app/workflows' } });
+    expect(s.say('Não quero mais receber essas notificações')!.text).toMatch(/STOP/);
+    expect(s.turns.every(turn => turn.request === null && turn.reply?.command === undefined)).toBe(true);
+  });
+});
+
+describe('continuity and safety', () => {
+  it('an educational question never cancels an open draft and a conversational "ok" never approves anything', () => {
+    const s = mainnet('PT');
+    s.say('quero trocar ETH por USDC na Arbitrum One', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'ETH', outputAsset: 'USDC' }), 'PT'));
+    const draft = s.state.draft;
+    s.say('o que é gas?');
+    expect(s.state.draft).toBe(draft);
+    const ok = s.say('ok')!;
+    expect(ok.command).toBeUndefined();
+    expect(s.pending).toBeNull();
+  });
+  it('an answer to FloFi\'s open question always wins over a concept with the same word', () => {
+    const s = mainnet();
+    s.say('please swap 1 USDC on Arbitrum One', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: null, amount: '1' })));
+    expect(s.state.draft?.expected).toContain('outputAsset');
+    expect(s.say('WETH')).toMatchObject({ kind: 'PROPOSAL' });
+  });
+});

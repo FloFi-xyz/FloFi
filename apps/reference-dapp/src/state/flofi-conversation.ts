@@ -851,7 +851,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // P0 approved UX (board 07): while a blocker is active, "explain / why? / não entendi" explains THAT blocker, with the same facts as the panel.
       // It changes nothing else: an open question keeps its answer buttons, a promised auto-continue stays promised, and a clarification the model
       // is drafting still receives the message. A run whose request already landed is never told "nothing was sent": only this request was not.
-      if (bridge.blocker && isExplainRequest(text) && !copilot.drafting()) {
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: right after a DeFi concept explanation, "não entendi" asks about that concept instead.
+      if (bridge.blocker && isExplainRequest(text) && !copilot.drafting() && !copilot.explaining?.()) {
         const blocker = bridge.blocker, facts = blockerExplanation(blocker), started = Boolean(blocker.started || currentExecution(latest.current.bridge.progress)?.started);
         // The blocker's title and sentence are catalog keys, each translated and joined as `{0}: {1}` (never an English piece in Portuguese).
         const said = (language: ConversationLanguage) => facts ? translate(language, facts.text, ...facts.parameters.map(value => translate(language, value)))
@@ -883,7 +884,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           bare === 'NO' ? {} : { options: [asked.addAnother, asked.review] }]);
         return;
       }
-      const request = lifecycleRequest(text);
+      // BUILD-FLOFI-UNIFIED-COPILOT-001: while FloFi's own question is open, "continuar" resumes that request (the Copilot re-asks it); it is
+      // never read as "review the workflow".
+      const request = copilot.drafting() ? null : lifecycleRequest(text);
       if (request) { lifecycle(scope, request, language); return; }
       if (bridge.networkAction && offeredNetwork(text)) { bridge.networkAction.request(); return; }
       // Offered options are matched in either language (the interface language may have changed since they were offered).
@@ -959,9 +962,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
             : reply.sentence ? spoken === 'PT' ? `Interpretado como “${reply.sentence}”.` : `Interpreted as “${reply.sentence}”.` : null;
           commit(scope, reply.command, { exact: false, role: 'ai', language: spoken, ...reply.command.type === 'MANAGE_SOLANA_POSITION' && read
             ? { summary: read.replace(/\.$/, ''), notes: reply.notes } : { notes: [...read ? [read] : [], ...reply.notes] } });
+          // BUILD-FLOFI-UNIFIED-COPILOT-001: the optional offer to save the typed address, after the proposal and independent of it.
+          if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
           return;
         }
-        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options });
+        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options, ...reply.link ? { link: reply.link } : {} });
+        if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
         return;
       }
       dismissProposal();

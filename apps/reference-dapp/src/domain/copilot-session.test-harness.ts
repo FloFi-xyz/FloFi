@@ -8,6 +8,7 @@ import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalA
   type CopilotLearning, type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from './copilot-conversation';
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
 import type { PendingAgentCapability } from './agent-rollout';
+import type { SavedRecipient } from './saved-recipients';
 
 /**
  * Test-only: drives the real conversation engine the way the Copilot panel does — "explain" and the exact grammar
@@ -31,6 +32,9 @@ export class CopilotSession {
   agentRollout: readonly PendingAgentCapability[] | undefined = undefined;
   /** P0 approved UX: the active interface language the web chat passes (absent: the engine as before). */
   interfaceLanguage: 'EN' | 'PT' | undefined = undefined;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients and whether the surface may save one (absent: none, as before). */
+  recipients: readonly SavedRecipient[] | undefined = undefined;
+  recipientWrites = false;
   readonly turns: TurnRecord[] = [];
   constructor(setup: readonly string[] | Workflow = [], wallet: string | null = TEST_WALLET) {
     this.wallet = wallet;
@@ -40,7 +44,8 @@ export class CopilotSession {
   currentFacts(): CopilotFacts { return buildCopilotFacts({ workflow: this.workflow, context: this.context, pending: this.pending, ...this.facts }); }
   env(): CopilotEnvironment {
     return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts(),
-      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {}, ...this.agentRollout ? { agentRollout: this.agentRollout } : {}, ...this.interfaceLanguage ? { interfaceLanguage: this.interfaceLanguage } : {} };
+      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {}, ...this.agentRollout ? { agentRollout: this.agentRollout } : {}, ...this.interfaceLanguage ? { interfaceLanguage: this.interfaceLanguage } : {},
+      ...this.recipients ? { recipients: this.recipients } : {}, ...this.recipientWrites ? { recipientWrites: true } : {} };
   }
   propose(command: Command) {
     const before = { workflow: this.workflow, error: null };

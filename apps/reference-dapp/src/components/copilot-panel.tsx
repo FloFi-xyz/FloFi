@@ -55,7 +55,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
       return row(message.role === 'you', message.id, <div className={`message ${message.role === 'flofi' ? 'system flofi' : message.role}`}>
         {(message.role === 'you' || showLabels) && <small className="sr-only">{tr(message.role === 'you' ? 'YOU' : message.role === 'flofi' || message.role === 'system' && !copilot.enabled ? 'FLOFI' : copilotLabel(message.role, copilot.mode))}</small>}
         {message.role === 'ai' || message.role === 'flofi' ? <>
-          <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} disabled={busy} onPick={send}/>
+          <CopilotMessage text={message.text} notes={message.role === 'ai' || !message.review ? message.notes : undefined} options={message.review || message.question ? undefined : options} link={message.link} disabled={busy} onPick={send}/>
           {message.review && !reviewInPanel && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
           {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}

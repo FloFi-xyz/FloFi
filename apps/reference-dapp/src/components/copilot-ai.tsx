@@ -64,7 +64,7 @@ type Record_ = { readonly record?: unknown; readonly run?: unknown; readonly ret
 /** A random id of this browser conversation (it only lets the server count a request once; it identifies nobody). */
 const conversationId = () => typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
   : `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
-const TERMINAL: ReadonlySet<string> = new Set(['PROPOSAL', 'AUTOMATION_PROPOSAL', 'ANSWER', 'UNSUPPORTED', 'FAILED']);
+const TERMINAL: ReadonlySet<string> = new Set(['PROPOSAL', 'AUTOMATION_PROPOSAL', 'AUTOMATION_MANAGE', 'ANSWER', 'UNSUPPORTED', 'FAILED']);
 const authorized = (value: unknown) => {
   const record = value as { authorization?: unknown; reviewedManifestHash?: unknown } | null;
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
@@ -225,6 +225,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   const language = useCallback(() => conversation.current.language, []);
   /** Whether FloFi's own clarification question is open (the request still misses a required field). */
   const drafting = useCallback(() => Boolean(conversation.current.draft), []);
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi just explained a DeFi concept, so "não entendi" refers to it (not to an execution blocker). */
+  const explaining = useCallback(() => Boolean(conversation.current.concept), []);
   /** BUILD-CHAT-LEARNING-001: performs the memory action the user just confirmed, and reports the turn's content-free feedback. */
   const settle = useCallback(async (reply: CopilotReply): Promise<CopilotReply> => {
     const view = learningView.current;
@@ -286,7 +288,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   }, [interpret]);
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
-    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting };
+    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining };
 }
 
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: the example names a mainnet (the public product never suggests a test network). */
@@ -311,12 +313,15 @@ export function useFollowLatest(enabled: boolean, messages: number, busy: boolea
   return ref;
 }
 /** A Copilot answer: plain text, deterministic notes, and clarification options that are sent as the next message. */
-export function CopilotMessage({ text, notes, options, disabled, onPick }: { text: string; notes?: readonly string[] | undefined; options?: readonly string[] | undefined;
+export function CopilotMessage({ text, notes, options, link, disabled, onPick }: { text: string; notes?: readonly string[] | undefined; options?: readonly string[] | undefined;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: a FloFi page from the platform guide (a relative path; never a link the model wrote). */
+  link?: { readonly path: string; readonly label: string } | undefined;
   disabled: boolean; onPick(option: string): void }) {
   const { t: tr } = useLocale();
   return <>
     <p>{tr(text)}</p>
     {notes && notes.length > 0 && <ul className="copilot-notes">{notes.map((note, index) => <li key={index}>{tr(note)}</li>)}</ul>}
+    {link && /^\/(?:app|connections)(?:\/[a-z-]+)*$/.test(link.path) && <p className="copilot-link"><a href={link.path}>{tr(link.label)} →</a></p>}
     {options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
       {options.map(option => <button key={option} type="button" className="quiet" disabled={disabled} onClick={() => onPick(tr(option))}>{tr(option)}</button>)}</div>}
   </>;

@@ -102,7 +102,12 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
    * BUILD-FLOFI-UX-FIX-003: the request is a new action (not an edit or repeat of a step), so an amount written after "to"/"receive" ("bridge ETH to
    * 1 USDC") is what the user wants to receive. Absent: no destination-amount reading (edits, V1, goal steps).
    */
-  readonly receiving?: boolean };
+  readonly receiving?: boolean;
+  /**
+   * BUILD-FLOFI-UNIFIED-COPILOT-001: public addresses FloFi itself resolved from a Saved Recipient the user named exactly in this request
+   * (`saved-recipients.ts`). They ground a destination like a typed address (and are re-checked for the network like one); nothing else.
+   */
+  readonly saved?: readonly string[] };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
@@ -138,7 +143,13 @@ const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegE
 
 /** P0 hotfix (FIX 1): native ETH on a catalog network is grounded only by the user's own "ETH"/"ether" — "WETH" is a different asset and never
  * makes a model-reported ETH native (`ASSET_MENTIONS.ETH` also accepts "weth", for the test networks' WETH-only swaps). */
-const NATIVE_ETH_NAMED = /\beth\b|\bether\b/i;
+const NATIVE_ETH_WORDS = /\beth\b|\bether\b/i;
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: people also name the coin by its network's name ("trocar ethereum por usdc na arbitrum", "swap ethereum to
+ * usdc on arbitrum one"). "Ethereum" names native ETH only where it is a token, never after a network word ("on/na/from/da/para Ethereum").
+ */
+const ETHEREUM_AS_COIN = /(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)\bethereum\b(?![\s-]*(?:mainnet|sepolia|network|rede|chain))/i;
+const NATIVE_ETH_NAMED = { test: (text: string) => NATIVE_ETH_WORDS.test(text) || ETHEREUM_AS_COIN.test(text) };
 /** WETH as people write it ("weth", "w-eth", "wrapped ether"): removed before native ETH is looked for (its catalog name "Ether" is inside it). */
 const WRAPPED_ETH_WORDS = /\bweth\b|\bw[\s-]+eth\b|\bwrapped[\s-]+eth(?:er)?\b/gi;
 /** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
@@ -335,6 +346,7 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   return value;
 }
 function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+  if (value !== null && field === 'recipient' && g.saved?.includes(value)) return value;
   if (value !== null && !g.carried.has(field)) {
     const assetAddresses = [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
     const mentions = [...g.text.matchAll(/0x[0-9a-fA-F]{40}/g)].filter(match => match[0].toLowerCase() === value.toLowerCase());
@@ -572,6 +584,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const destinationEcosystem = UNIVERSAL_NETWORKS[dst].ecosystem === 'SOLANA' ? 'Solana' : 'EVM';
   const solanaRecipient = () => {
     if (a.recipient !== null && /^0x/i.test(a.recipient)) return refuse(m.universalRecipientFormat(dstName, destinationEcosystem));
+    if (a.recipient !== null && g.saved?.includes(a.recipient) && isSolanaPublicKey(a.recipient)) return a.recipient;
     const outputIdentity = resolveUniversalAsset(dst, outputAsset).asset;
     // Explicit token references and the selected token mint are asset identities, never implicit recipient wallets.
     const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9@])/g)].map(match => match[0])

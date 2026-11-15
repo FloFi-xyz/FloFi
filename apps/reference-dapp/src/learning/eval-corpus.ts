@@ -13,7 +13,7 @@ import type { CopilotNetworkId } from '../domain/network-registry.ts';
 import type { LexiconTarget } from '../domain/copilot-lexicon.ts';
 
 export const LEARNING_CORPUS_ID = 'learning-corpus.v2';
-export type EvalReplyKind = 'EXACT' | 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY';
+export type EvalReplyKind = 'EXACT' | 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'AUTOMATION_MANAGE' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY';
 export type LearningEvalCategory = 'intent' | 'ambiguity' | 'mainnet-guard' | 'adversarial' | 'unsupported' | 'correction' | 'private' | 'memory' | 'adaptation';
 export type LearningEvalTurn = { readonly user: string; readonly model?: Record<string, unknown>;
   readonly expect: { readonly kind: EvalReplyKind | readonly EvalReplyKind[]; readonly sentence?: string; readonly note?: string;
