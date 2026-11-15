@@ -66,7 +66,10 @@ export const recipientLabelKey = (label: string): string =>
 const RESERVED_LABELS: ReadonlySet<string> = (() => {
   const out = new Set<string>(['me', 'mim', 'eu', 'myself', 'mim mesmo', 'mim mesma', 'my wallet', 'my own wallet', 'my connected wallet', 'minha carteira',
     'minha propria carteira', 'a minha carteira', 'carteira conectada', 'connected wallet', 'ether', 'ethereum', 'solana', 'bitcoin', 'tether', 'usd coin',
-    'usdc e', 'arb', 'arbitrum']);
+    'usdc e', 'arb', 'arbitrum',
+    // The words of "my wallet" phrases on their own ("para minha carteira" must keep meaning the user's own wallet), and FloFi's answer words.
+    'wallet', 'carteira', 'minha', 'meu', 'my', 'mine', 'own', 'self', 'propria', 'proprio', 'conectada', 'connected',
+    'sim', 'nao', 'yes', 'no', 'ok', 'okay', 'cancel', 'cancelar', 'save', 'salvar']);
   for (const asset of LEXICON_ASSETS) out.add(asset.toLowerCase());
   for (const id of COPILOT_NETWORK_IDS) {
     const network = networkOfCopilot(id);
@@ -74,11 +77,19 @@ const RESERVED_LABELS: ReadonlySet<string> = (() => {
   }
   return out;
 })();
-export const reservedRecipientLabel = (label: string): boolean => RESERVED_LABELS.has(recipientLabelKey(label));
-/** A writable label: Credentials' printable single-line rule (≤ 40, no card number), never key-shaped or reserved. Null when not usable. */
+/** A phrase meaning the user's own wallet may not even start a name ("My wallet Ledger" would capture "send to my wallet"). */
+const RESERVED_PREFIXES = ['my wallet', 'my own wallet', 'my connected wallet', 'minha carteira', 'minha propria carteira', 'a minha carteira', 'para mim', 'to me'];
+export const reservedRecipientLabel = (label: string): boolean => {
+  const key = recipientLabelKey(label);
+  return RESERVED_LABELS.has(key) || RESERVED_PREFIXES.some(prefix => key.startsWith(`${prefix} `));
+};
+/** What a stored row must satisfy to be listed (read side): Credentials' printable rule and never key-shaped. Words that became reserved later
+ * (a new network named like an old label) do not hide a stored row: it stays listed, renamable, removable and masked, but never resolves. */
+const storedRecipientLabel = (value: unknown): string | null => { const label = credentialLabel(value); return label && !keyShapedLabel(label) ? label : null; };
+/** A writable label (create and rename): stored rules, at least one letter (a name like "10" would read as an amount), never reserved. */
 export function savedRecipientLabel(value: unknown): string | null {
-  const label = credentialLabel(value);
-  return label && !keyShapedLabel(label) && !reservedRecipientLabel(label) ? label : null;
+  const label = storedRecipientLabel(value);
+  return label && /\p{L}/u.test(label) && !reservedRecipientLabel(label) ? label : null;
 }
 
 const KEYS = ['id', 'label', 'address', 'ecosystem', 'createdAt', 'updatedAt'] as const;
@@ -89,7 +100,7 @@ export function readSavedRecipient(value: unknown): SavedRecipient | null {
   if (own.length !== KEYS.length || !KEYS.every(key => own.includes(key))) return null;
   if (typeof v.id !== 'string' || !SAVED_RECIPIENT_ID.test(v.id)) return null;
   if (v.ecosystem !== 'EVM' && v.ecosystem !== 'SOLANA') return null;
-  if (savedRecipientAddress(v.ecosystem, v.address) !== v.address || savedRecipientLabel(v.label) !== v.label) return null;
+  if (savedRecipientAddress(v.ecosystem, v.address) !== v.address || storedRecipientLabel(v.label) !== v.label) return null;
   if (typeof v.createdAt !== 'string' || !TIMESTAMP.test(v.createdAt) || typeof v.updatedAt !== 'string' || !TIMESTAMP.test(v.updatedAt)) return null;
   return { id: v.id, label: v.label as string, address: v.address as string, ecosystem: v.ecosystem, createdAt: v.createdAt, updatedAt: v.updatedAt };
 }
@@ -126,21 +137,29 @@ export function matchSavedRecipients(text: string, recipients: readonly SavedRec
     for (let at = haystack.indexOf(` ${key} `); at >= 0; at = haystack.indexOf(` ${key} `, at + 1)) out.push([at + 1, at + 1 + key.length]);
     return out;
   };
-  const exact = recipients.map(recipient => { const key = recipientLabelKey(recipient.label); return { recipient, key, spans: key ? spans(key) : [] }; })
+  // A label that is reserved (stored before its word became a network or token name) is listed and masked but never selects anything.
+  const usable = recipients.filter(recipient => !reservedRecipientLabel(recipient.label));
+  const exact = usable.map(recipient => { const key = recipientLabelKey(recipient.label); return { recipient, key, spans: key ? spans(key) : [] }; })
     .filter(entry => entry.spans.length).sort((a, b) => b.key.length - a.key.length);
   const kept: typeof exact = [];
   for (const entry of exact)
     if (entry.spans.some(([start, end]) => !kept.some(other => other.spans.some(([from, to]) => from <= start && end <= to)))) kept.push(entry);
-  if (kept.length === 1) return { kind: 'ONE', recipient: kept[0]!.recipient };
-  if (kept.length > 1) return { kind: 'CHOOSE', candidates: kept.map(entry => entry.recipient) };
+  // A saved address written in full names that recipient too (the model only sees the marker, so FloFi resolves it here).
+  const lower = text.toLowerCase();
+  const pasted = recipients.filter(recipient => recipient.ecosystem === 'SOLANA' ? text.includes(recipient.address) : lower.includes(recipient.address));
+  const named = [...kept.map(entry => entry.recipient), ...pasted].filter((recipient, index, all) => all.findIndex(other => other.id === recipient.id) === index);
+  if (named.length === 1) return { kind: 'ONE', recipient: named[0]! };
+  if (named.length > 1) return { kind: 'CHOOSE', candidates: named };
   // A partial name ("carteira da empresa" for "Carteira da empresa Solana"): at least two words of a label, in order, from its start.
-  const partial = recipients.filter(recipient => partialNames(recipient.label).some(name => haystack.includes(` ${name} `)));
+  const partial = usable.filter(recipient => partialNames(recipient.label).some(name => haystack.includes(` ${name} `)));
   return partial.length ? { kind: 'CHOOSE', candidates: partial } : { kind: 'NONE' };
 }
-/** The leading word groups of a label of three or more words that count as writing it partially (two words up to all but one). */
+/** The leading word groups of a label of three or more words that count as writing it partially (two words up to all but one). A group that is
+ * itself a reserved name ("arbitrum one" of "Arbitrum One Ana") never counts: it keeps its own meaning in a request. */
 function partialNames(label: string): readonly string[] {
   const words = recipientLabelKey(label).split(' ').filter(Boolean);
-  return words.length > 2 ? Array.from({ length: words.length - 2 }, (_, index) => words.slice(0, index + 2).join(' ')) : [];
+  return (words.length > 2 ? Array.from({ length: words.length - 2 }, (_, index) => words.slice(0, index + 2).join(' ')) : [])
+    .filter(name => !reservedRecipientLabel(name));
 }
 /** What leaves for a model provider: every saved label (and a saved address written in full) replaced by a neutral marker. */
 export const SAVED_RECIPIENT_MARKER = '[saved recipient]';
@@ -152,7 +171,8 @@ export function maskSavedRecipients(text: string, recipients: readonly SavedReci
     .sort((a, b) => b.length - a.length);
   for (const phrase of phrases) {
     const letters = (word: string) => [...word].map(char => `${char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\p{M}*`).join('');
-    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${phrase.split(' ').map(letters).join('[^\\p{L}\\p{N}]+')}(?![\\p{L}\\p{N}])`, 'giu');
+    // Each letter takes its own marks; a separator starts with a non-mark, so no input can be split two ways (no backtracking blow-up).
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${phrase.split(' ').map(letters).join('(?:[^\\p{L}\\p{N}\\p{M}]\\p{M}*)+')}(?![\\p{L}\\p{N}])`, 'giu');
     out = out.replace(pattern, SAVED_RECIPIENT_MARKER);
   }
   for (const recipient of recipients)

@@ -66,6 +66,14 @@ function refused<T>(code: string): RecipientOutcome<T> {
   return { ok: false, code };
 }
 function changed(recipients: readonly SavedRecipientView[]): void { generation++; readAt = Date.now(); publish({ status: 'READY', recipients, code: null }); }
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: a write that finishes after the list was invalidated (another sign-in, a re-read) or left READY never publishes a
+ * list built from the old one: the next read fetches the current session's list instead.
+ */
+function changedSince(started: number, next: () => readonly SavedRecipientView[]): void {
+  if (started !== generation || state.status !== 'READY') { readAt = 0; return; }
+  changed(next());
+}
 const upsert = (recipient: SavedRecipientView) => {
   const at = state.recipients.findIndex(other => other.id === recipient.id);
   return at < 0 ? [...state.recipients, recipient] : state.recipients.map((other, index) => index === at ? recipient : other);
@@ -86,6 +94,8 @@ export function useSavedRecipients(): SavedRecipientsState {
 
 export function loadSavedRecipients(options: { readonly ifStale?: boolean } = {}): Promise<SavedRecipientsState> {
   if (inflight && inflight.generation === generation) return inflight.promise;
+  // Signed out or not available on this deployment: nothing to re-read until the session changes (sign-in invalidates the list).
+  if (options.ifStale && (state.status === 'SIGNED_OUT' || state.status === 'UNAVAILABLE')) return Promise.resolve(state);
   if (options.ifStale && state.status !== 'IDLE' && state.status !== 'ERROR' && Date.now() - readAt < SAVED_RECIPIENTS_FRESH_MS) return Promise.resolve(state);
   const started = ++generation;
   publish({ ...state, status: 'LOADING', code: null });
@@ -100,27 +110,32 @@ export function loadSavedRecipients(options: { readonly ifStale?: boolean } = {}
 }
 
 export async function saveRecipientReference(input: SaveRecipientInput): Promise<RecipientOutcome<SavedRecipientView>> {
+  const started = generation;
   const result = await saveRecipient(input).catch(() => ({ ok: false as const, code: 'RECIPIENTS_REQUEST_FAILED' }));
   if (!result.ok && 'existing' in result) {
     // Nothing was written: the account already holds this address, and the list shows that record (under its own name).
-    changed(upsert(result.existing));
+    changedSince(started, () => upsert(result.existing));
     return { ok: false, code: 'RECIPIENT_EXISTS', existing: result.existing };
   }
   if (!result.ok) return refused(closed(result.code));
-  changed(upsert(result.value));
+  changedSince(started, () => upsert(result.value));
   return { ok: true, value: result.value };
 }
 export async function renameRecipientReference(id: string, label: string): Promise<RecipientOutcome<SavedRecipientView>> {
+  const started = generation;
   const result = await renameSavedRecipient(id, label).catch(() => ({ ok: false as const, code: 'RECIPIENTS_REQUEST_FAILED' }));
+  // Already gone (removed elsewhere): the list drops it, as a remove does.
+  if (!result.ok && result.code === 'RECIPIENT_NOT_FOUND') { changedSince(started, () => state.recipients.filter(recipient => recipient.id !== id)); return { ok: false, code: 'RECIPIENT_NOT_FOUND' }; }
   if (!result.ok) return refused(closed(result.code));
-  changed(upsert(result.value));
+  changedSince(started, () => upsert(result.value));
   return { ok: true, value: result.value };
 }
 export async function removeRecipientReference(id: string): Promise<RecipientOutcome<null>> {
+  const started = generation;
   const result = await removeSavedRecipient(id).catch(() => ({ ok: false as const, code: 'RECIPIENTS_REQUEST_FAILED' }));
   // Already gone (removed elsewhere): the list drops it too, and the caller still learns it was not found.
   if (!result.ok && result.code !== 'RECIPIENT_NOT_FOUND') return refused(closed(result.code));
-  changed(state.recipients.filter(recipient => recipient.id !== id));
+  changedSince(started, () => state.recipients.filter(recipient => recipient.id !== id));
   return result.ok ? { ok: true, value: null } : { ok: false, code: 'RECIPIENT_NOT_FOUND' };
 }
 

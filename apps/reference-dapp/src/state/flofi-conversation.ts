@@ -225,7 +225,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null, lastOwner = useRef(ownerKey), lastEpoch = useRef(epoch), lastWorkflow = useRef(state.workflow.workflowId);
   function reset() {
     session.current += 1; ids.current = 1;
-    setMessages([intro()]); setQuestion(null); setAutomation(null); setDestination(null); setInput('');
+    // BUILD-FLOFI-UNIFIED-COPILOT-001: the automation manager card belongs to the previous owner's conversation too.
+    setMessages([intro()]); setQuestion(null); setAutomation(null); setManage(null); setDestination(null); setInput('');
     copilot.clear(); pendingCommit.current = null; lastCommit.current = null; reviewLock.current = null; watch.current = null; restored.current = null;
     resume.current = null; handover.current = null; lastReview.current = null; requote.current = null; declined.current = new Set(); finished.current = null;
   }
@@ -970,7 +971,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
           return;
         }
-        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options, ...reply.link ? { link: reply.link } : {} });
+        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options, ...reply.link ? { link: reply.link } : {}, ...reply.verbatimOptions ? { verbatim: true } : {} });
         if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
         return;
       }

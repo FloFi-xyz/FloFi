@@ -94,4 +94,25 @@ describe('review regressions (flofi-security, flofi-chat)', () => {
     for (const name of ['Solana', 'Base', 'arbitrum one', 'ETH', 'usdc', 'Ethereum', 'minha carteira', 'My wallet', 'mim']) expect(savedRecipientLabel(name), name).toBeNull();
     for (const name of ['Carteira da empresa Solana', 'Mãe', 'Base da Ana', 'Exchange']) expect(savedRecipientLabel(name), name).toBe(name);
   });
+  it('round 2: stored rows whose name later became reserved stay listed and masked, but never resolve; a pasted saved address resolves', () => {
+    const legacy = { ...rcp('a', 'Sonic', EVM, 'EVM'), label: 'Solana' };
+    expect(readSavedRecipient(legacy)).toEqual(legacy);
+    expect(matchSavedRecipients('manda para Solana', [legacy])).toEqual({ kind: 'NONE' });
+    expect(maskSavedRecipients('manda para Solana', [legacy])).toBe(`manda para ${SAVED_RECIPIENT_MARKER}`);
+    const ana = rcp('b', 'Ana', EVM, 'EVM');
+    expect(matchSavedRecipients(`envia para ${EVM_CHECKSUM}`, [ana])).toEqual({ kind: 'ONE', recipient: ana });
+    // "Arbitrum One Ana": its leading words "arbitrum one" are a network and never count as writing the name partially.
+    const named = rcp('c', 'Arbitrum One Ana', SOL, 'SOLANA');
+    expect(matchSavedRecipients('bridge to Arbitrum One', [named])).toEqual({ kind: 'NONE' });
+    expect(maskSavedRecipients('bridge to Arbitrum One', [named])).toBe('bridge to Arbitrum One');
+  });
+  it('round 2: the mask cannot backtrack exponentially on a crafted label and mark-stuffed text', () => {
+    // Letters separated only by combining marks, ending in a letter so the match fails at the end: the old separator ([^\p{L}\p{N}]+, which
+    // also matches marks) split each gap several ways and took seconds at 12 words and effectively forever at 20.
+    const label = 'a b c d e f g h i j k l m n o p q r s t';
+    const text = label.split(' ').slice(0, -1).map(letter => `${letter}\u0301\u0302\u0303\u0304`).join('') + 'tx';
+    const started = performance.now();
+    maskSavedRecipients(text, [rcp('a', label, EVM, 'EVM')]);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
 });

@@ -146,14 +146,22 @@ const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegE
 const NATIVE_ETH_WORDS = /\beth\b|\bether\b/i;
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: people also name the coin by its network's name ("trocar ethereum por usdc na arbitrum", "swap ethereum to
- * usdc on arbitrum one"). "Ethereum" names native ETH only where it is a token, never after a network word ("on/na/from/da/para Ethereum").
+ * usdc on arbitrum one"). "Ethereum" is the coin only in a coin position: after an amount ("1 ethereum"), after a trade verb ("swap/trocar
+ * (o) ethereum"), or before "por/for/to/into <token>". Anywhere else it is the network. A coin-position "ethereum" never names the Ethereum
+ * network (`mentionedNetworks` removes it), so "trocar 1 ethereum por usdc" still asks which network: one word never grounds both.
  */
-const ETHEREUM_AS_COIN = /(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)\bethereum\b(?![\s-]*(?:mainnet|sepolia|network|rede|chain))/i;
+const COIN_VERBS = String.raw`(?:swap|trade|buy|sell|convert|exchange|troca|trocar|troque|compra|comprar|compre|vende|vender|venda|converte|converter|converta)`;
+const ETHEREUM_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_VERBS}\s+(?:(?:o|a|os|as|my|meu|meus|minha|the|all|todo|tudo|some|um|uma)\s+)?))ethereum\b`
+  + String.raw`|(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)`
+  + String.raw`\bethereum(?=\s+(?:por|for|to|into|em|pra|para)\s+(?:usdc(?:\.e)?|usdt|weth|wbtc|btc|sol|dai|arb|eth|ether)\b)`;
+const ETHEREUM_AS_COIN = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'i');
+const ETHEREUM_AS_COIN_ALL = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'gi');
 const NATIVE_ETH_NAMED = { test: (text: string) => NATIVE_ETH_WORDS.test(text) || ETHEREUM_AS_COIN.test(text) };
 /** WETH as people write it ("weth", "w-eth", "wrapped ether"): removed before native ETH is looked for (its catalog name "Ether" is inside it). */
 const WRAPPED_ETH_WORDS = /\bweth\b|\bw[\s-]+eth\b|\bwrapped[\s-]+eth(?:er)?\b/gi;
 /** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
-export function mentionedNetworks(text: string): Network[] {
+export function mentionedNetworks(raw: string): Network[] {
+  const text = raw.replace(ETHEREUM_AS_COIN_ALL, ' ');
   return copilotNetworksMentioned(text).filter(id => {
     const identity = networkOfCopilot(id);
     // Catalog names can equal a chain alias (ARB is named Arbitrum). Asset context alone cannot choose a mainnet.
@@ -666,7 +674,8 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
  * The network must be named; the sentence is the exact grammar's (`transfer 0.01 ETH on Base to 0x…`).
  */
 /** UX-001: the user names the connected owner as the destination, in the request or as the answer to "Which wallet should I send it to?". */
-const SELF_RECIPIENT = /\b(?:to|into)\s+(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)\b|\b(?:para|pra)\s+(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira)(?![\p{L}\p{N}])/iu;
+/** "To me" / "para minha carteira": the connected owner wallet (also read by the conversation: a saved name never replaces it). */
+export const SELF_RECIPIENT = /\b(?:to|into)\s+(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)\b|\b(?:para|pra)\s+(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira)(?![\p{L}\p{N}])/iu;
 const SELF_ANSWER = /^(?:(?:to\s+)?(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)|(?:para\s+)?(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira))[.!]?$/iu;
 function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];

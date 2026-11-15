@@ -97,4 +97,30 @@ describe('saved recipients store', () => {
     expect(store.savedRecipientForAddress('Maria', [maria])).toBeNull();
     expect(store.savedRecipientForAddress(null, [maria])).toBeNull();
   });
+  it('a write that finishes after an invalidation never publishes a list built from the old one (review: flofi-data-privacy)', async () => {
+    actions.list.mockResolvedValue({ ok: true, value: [maria] });
+    await store.loadSavedRecipients();
+    let finish: (value: unknown) => void = () => undefined;
+    actions.save.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const pending = store.saveRecipientReference({ label: 'Minha Solana', address: SOL });
+    store.invalidateSavedRecipients();
+    finish({ ok: true, value: solana });
+    await pending;
+    // The old list (with Maria) was not republished with the new row: the next read fetches the current session's list.
+    expect(store.savedRecipientsSnapshot()).toEqual({ status: 'IDLE', recipients: [], code: null });
+  });
+  it('renaming a recipient removed elsewhere drops the row, as a remove does', async () => {
+    actions.list.mockResolvedValue({ ok: true, value: [maria, solana] });
+    await store.loadSavedRecipients();
+    actions.rename.mockResolvedValue({ ok: false, code: 'RECIPIENT_NOT_FOUND' });
+    expect(await store.renameRecipientReference(maria.id, 'Mãe')).toEqual({ ok: false, code: 'RECIPIENT_NOT_FOUND' });
+    expect(store.savedRecipientsSnapshot().recipients).toEqual([solana]);
+  });
+  it('a signed-out or unavailable state is not re-read on every chat turn (only an invalidation reads again)', async () => {
+    actions.list.mockResolvedValue({ ok: false, code: 'RECIPIENTS_UNAVAILABLE' });
+    await store.loadSavedRecipients();
+    await store.loadSavedRecipients({ ifStale: true });
+    await store.loadSavedRecipients({ ifStale: true });
+    expect(actions.list).toHaveBeenCalledTimes(1);
+  });
 });

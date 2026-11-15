@@ -9,7 +9,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CopilotSession, act, intent } from '../copilot-session.test-harness';
 import { setActiveNetworkScope } from '../network-scope';
 import { registerFixtureCatalogs, resetNetworkCatalogs } from './intelligence.test-harness';
-import { SAVED_RECIPIENT_MARKER, type SavedRecipient } from '../saved-recipients';
+import { SAVED_RECIPIENT_MARKER, savedRecipientLabel, type SavedRecipient } from '../saved-recipients';
+import { FIXTURE } from '../copilot-test-fixtures';
 import { automationCreated } from '../copilot-conversation';
 
 beforeAll(registerFixtureCatalogs);
@@ -96,10 +97,11 @@ describe('Journey C — saving and reusing a recipient', () => {
     const s = mainnet('PT'); s.recipients = []; s.recipientWrites = true;
     const proposal = s.say(`Quero mandar 20 USDC da Base para minha outra carteira Solana ${SOL}`, bridgeTo(SOL))!;
     expect(proposal.kind).toBe('PROPOSAL');
-    expect(proposal.offer).toEqual({ text: expect.stringMatching(/^Quer salvar GsWtMd…evBq no Credentials/), options: ['Salvar destinatário', 'Agora não'] });
+    expect(proposal.offer).toEqual({ text: expect.stringMatching(/^Quer salvar GsWtMd…evBq em Credenciais/), options: ['Salvar destinatário', 'Agora não'] });
     expect(proposal.offer!.text).toMatch(/não prova que a carteira é sua e não autoriza nada/);
     const named = s.say('Salvar destinatário')!;
-    expect(named).toMatchObject({ kind: 'CLARIFICATION', options: ['Minha Solana'] });
+    // FloFi's suggestion is neutral (a typed address may be anyone's); the user names it as they like.
+    expect(named).toMatchObject({ kind: 'CLARIFICATION', options: ['Destinatário Solana GsWt…evBq'] });
     expect(named.recipientSave).toBeUndefined();
     const saving = s.say('Minha Solana')!;
     expect(saving.recipientSave).toEqual({ label: 'Minha Solana', address: SOL, ecosystem: 'SOLANA' });
@@ -118,7 +120,13 @@ describe('Journey C — saving and reusing a recipient', () => {
   it('"Manda 5 USDC da Base para Minha Solana" resolves the saved name without sending it (or its address) to the model', () => {
     const s = mainnet('PT'); s.recipients = [saved('Minha Solana', SOL, 'SOLANA'), saved('Carteira da empresa', EVM, 'EVM', 'b')];
     let sent = '';
-    const reply = s.say('Manda 5 USDC da Base para Minha Solana', request => { sent = JSON.stringify(request.messages); return { ok: true, intent: bridgeTo(null, '5') }; })!;
+    // The words of a saved name never name a network for the user: "Minha Solana" alone does not choose the Solana destination, so FloFi asks,
+    // keeps the saved recipient for the request, and the answer proposes to it (re-checked against the network now named).
+    const asked = s.say('Manda 5 USDC da Base para Minha Solana', request => { sent = JSON.stringify(request.messages);
+      return { ok: true, intent: intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: null, asset: 'USDC', amount: '5' }), 'PT') }; })!;
+    expect(asked.kind).toBe('CLARIFICATION');
+    expect(s.state.draft?.intent.kind === 'ACTION' && s.state.draft.intent.action.type === 'BRIDGE' ? s.state.draft.intent.action.recipient : 'x').toBeNull();
+    const reply = s.say('Solana', bridgeTo(null, '5'))!;
     expect(sent).toContain(SAVED_RECIPIENT_MARKER);
     expect(sent).not.toMatch(/Minha Solana|GsWtMd/i);
     expect(reply).toMatchObject({ kind: 'PROPOSAL' });
@@ -126,7 +134,7 @@ describe('Journey C — saving and reusing a recipient', () => {
     expect(reply.notes.join(' ')).toMatch(/Destinatário salvo “Minha Solana” \(Solana\): GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq/);
     // A model that copied the marker into the address field wrote no address: FloFi still resolves the saved name.
     const echoed = mainnet('PT'); echoed.recipients = s.recipients;
-    expect(echoed.say('Manda 5 USDC da Base para Minha Solana', bridgeTo(SAVED_RECIPIENT_MARKER, '5'))).toMatchObject({ kind: 'PROPOSAL' });
+    expect(echoed.say('Manda 5 USDC da Base para a rede Solana, para Minha Solana', bridgeTo(SAVED_RECIPIENT_MARKER, '5'))).toMatchObject({ kind: 'PROPOSAL' });
   });
   it('a saved address of the other ecosystem is refused with the reason (a send cannot cross ecosystems), and ambiguity is a question', () => {
     const s = mainnet('PT'); s.recipients = [saved('Minha Solana', SOL, 'SOLANA')];
@@ -212,17 +220,17 @@ describe('review regressions (flofi-security, flofi-chat)', () => {
       return { ok: true, intent: intent.action(act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT') }; });
     expect(sent).not.toMatch(/Carteira da empresa|carteira da empresa/);
     const s = mainnet('PT'); s.recipients = [saved('Minha Solana', SOL, 'SOLANA')];
-    expect(s.say('Manda 5 USDC da Base para Minha Solana', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '5' }), 'PT'))!.sentence).toContain(SOL);
+    expect(s.say('Manda 5 USDC da Base para a rede Solana, para Minha Solana', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '5' }), 'PT'))!.sentence).toContain(SOL);
     s.say('agora troca 1 ETH por USDC na Base', request => { sent = JSON.stringify(request.messages);
       return { ok: true, intent: intent.action(act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT') }; });
     expect(sent).not.toContain(SOL);
     expect(sent).not.toMatch(/Minha Solana/);
   });
   it('a saved name in a repeat replaces the carried destination, never keeping the old address', () => {
-    const s = mainnet('PT'); s.recipients = [saved('Minha Carteira Base', SAVED_EVM, 'EVM')];
+    const s = mainnet('PT'); s.recipients = [saved('Conta da Ana', SAVED_EVM, 'EVM')];
     expect(s.say(`envia 5 USDC na Base para ${OLD}`, intent.action(act.transfer({ network: 'BASE', asset: 'USDC', amount: '5', recipient: OLD }), 'PT'))!.kind).toBe('PROPOSAL');
     s.apply();
-    const again = s.say('manda o mesmo para Minha Carteira Base', intent.repeat({ recipient: SAVED_RECIPIENT_MARKER }, {}, 'PT'))!;
+    const again = s.say('manda o mesmo para Conta da Ana', intent.repeat({ recipient: SAVED_RECIPIENT_MARKER }, {}, 'PT'))!;
     expect(again.kind).toBe('PROPOSAL');
     expect(again.sentence).toContain(SAVED_EVM);
     expect(again.sentence).not.toContain(OLD);
@@ -268,5 +276,93 @@ describe('review regressions (flofi-security, flofi-chat)', () => {
     t.say(`manda 20 USDC da Base para a Solana ${SOL}`, intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '20', recipient: SOL }), 'PT'));
     t.say('Salvar');
     expect(t.say('cancelar')).toMatchObject({ kind: 'ANSWER', text: 'Certo, não salvei. Seu pedido continua igual.' });
+  });
+});
+
+describe('review regressions, round 2 (flofi-security, flofi-transfer-payments, flofi-workflow, flofi-bridge, flofi-data-privacy)', () => {
+  const ANA = '0x3333333333333333333333333333333333333333', OLD = '0x2222222222222222222222222222222222222222';
+  const send = (fields: Record<string, unknown>) => intent.action(act.transfer({ network: 'BASE', asset: 'USDC', ...fields }), 'PT');
+  it('a saved recipient survives FloFi\'s follow-up question: "envia USDC na Base para Ana", then "10", sends to Ana', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Ana', ANA, 'EVM')];
+    expect(s.say('envia USDC na Base para Ana', send({ amount: null }))!.kind).toBe('CLARIFICATION');
+    const proposal = s.say('10')!;
+    expect(proposal.kind).toBe('PROPOSAL');
+    expect(proposal.sentence).toContain(ANA);
+  });
+  it('"para mim" / "minha carteira" is the connected wallet, never a saved name; names that would capture it cannot be saved', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Ana', ANA, 'EVM')];
+    const self = s.say('envia 10 USDC na Base para minha carteira, não para a Ana', send({ amount: '10' }))!;
+    expect(JSON.stringify(self)).not.toContain(ANA);
+    for (const name of ['Carteira', 'Wallet', 'My wallet Ledger', 'Minha carteira EVM', 'sim', 'ok', '10']) expect(savedRecipientLabel(name), name).toBeNull();
+  });
+  it('"manda o mesmo para mim" repeats to the connected wallet, never to the carried third party', () => {
+    const s = mainnet('PT');
+    expect(s.say(`envia 5 USDC na Base para ${OLD}`, send({ amount: '5', recipient: OLD }))!.kind).toBe('PROPOSAL');
+    s.apply();
+    const again = s.say('manda o mesmo de novo para mim', intent.repeat({}, {}, 'PT'))!;
+    expect(again.kind).toBe('PROPOSAL');
+    expect(again.sentence).toBe('transfer 5 USDC on Base');
+    // The note names the earlier proposal it kept values from, and no longer claims the destination was kept.
+    expect(again.notes[0]).toMatch(/: rede, token, valor\.$/);
+    expect(again.notes.join(' ')).toMatch(/sua carteira conectada/);
+  });
+  it('a saved address pasted in full is that saved recipient (the model only sees the marker)', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Ana', ANA, 'EVM')];
+    let sent = '';
+    const reply = s.say(`envia 10 USDC na Base para ${ANA}`, request => { sent = JSON.stringify(request.messages); return { ok: true, intent: send({ amount: '10' }) }; })!;
+    expect(sent).not.toContain(ANA);
+    expect(reply.kind).toBe('PROPOSAL');
+    expect(reply.sentence).toContain(ANA);
+  });
+  it('a network only the model guessed never refuses a saved recipient for its ecosystem: FloFi asks the network instead', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Ana', ANA, 'EVM')];
+    const reply = s.say('manda 10 USDC para Ana', intent.action(act.transfer({ network: 'SOLANA', asset: 'USDC', amount: '10' }), 'PT'))!;
+    expect(reply.kind).toBe('CLARIFICATION');
+    expect(reply.text).not.toMatch(/endereço EVM/);
+  });
+  it('the words of a saved name never choose a network ("Base da Ana" does not mean Base mainnet)', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Base da Ana', ANA, 'EVM')];
+    const reply = s.say('manda 10 USDC pra Base da Ana', send({ amount: '10' }))!;
+    expect(reply.kind).toBe('CLARIFICATION');
+    expect(reply.command).toBeUndefined();
+  });
+  it('a stale "which one?" button (the recipient was removed) prepares nothing and never falls back to another name', () => {
+    const two = mainnet('PT'); two.recipients = [saved('Carteira da empresa Base', EVM, 'EVM'), saved('Carteira da empresa Arbitrum', ANA, 'EVM', 'b')];
+    two.say('envia 5 USDC na Base para a carteira da empresa', send({ amount: '5' }));
+    two.recipients = [saved('Carteira da empresa Base', EVM, 'EVM')];
+    const reply = two.say('Carteira da empresa Arbitrum')!;
+    expect(reply.kind).toBe('FAILED');
+    expect(reply.command).toBeUndefined();
+  });
+  it('a new operation does not inherit the abandoned request\'s saved recipient', () => {
+    const s = mainnet('PT'); s.recipients = [saved('Ana', ANA, 'EVM')];
+    s.say('envia USDC na Base para Ana', send({ amount: null }));
+    const bridge = s.say('na verdade, faz bridge de 50 USDC da Arbitrum One para a Base',
+      intent.action(act.bridge({ sourceNetwork: 'ARBITRUM', destinationNetwork: 'BASE', asset: 'USDC', amount: '50' }), 'PT'))!;
+    expect(JSON.stringify(bridge)).not.toContain(ANA);
+  });
+  it('masking keeps every name it masked once, even when the list is no longer passed (refresh failed, signed out)', () => {
+    const two = mainnet('PT'); two.recipients = [saved('Carteira da empresa Base', EVM, 'EVM'), saved('Mariana', ANA, 'EVM', 'b')];
+    two.say('envia 5 USDC na Base para a carteira da empresa', send({ amount: '5' }));
+    two.recipients = undefined;
+    let sent = '';
+    two.say('esquece, troca 1 ETH por USDC na Base', request => { sent = JSON.stringify(request.messages);
+      return { ok: true, intent: intent.action(act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT') }; });
+    expect(sent).not.toMatch(/Carteira da empresa/i);
+  });
+  it('"trocar 1 ethereum por usdc" names the coin, not the Ethereum network: FloFi asks which network', () => {
+    const reply = mainnet('PT').say('trocar 1 ethereum por usdc', intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'ETH', outputAsset: 'USDC', amount: '1' }), 'PT'))!;
+    expect(reply.kind).toBe('CLARIFICATION');
+    // "na Ethereum" is the network; "1 USDC na Ethereum para USDC" never reads Ethereum as the coin.
+    const network = mainnet('PT').say('quero trocar 1 USDC por ETH na Ethereum', intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }), 'PT'))!;
+    expect(network.kind).toBe('PROPOSAL');
+  });
+  it('a step pinned by an edit question never applies to the next, different request', () => {
+    const s = new CopilotSession([FIXTURE.baseSwap, FIXTURE.mainnetBridge]); s.walletChainId = 'eip155:8453'; s.interfaceLanguage = 'PT';
+    const asked = s.say('muda a rede do passo 1 para arbriturm', intent.edit({ network: 'ARBITRUM' }, { ordinal: 'FIRST' }, 'PT'))!;
+    expect(asked.kind).toBe('CLARIFICATION');
+    const removal = s.say('não, remove o passo da bridge', intent.remove({ step: 'BRIDGE' }, 'PT'))!;
+    expect(JSON.stringify(removal)).toMatch(/bridge/i);
+    expect(JSON.stringify(removal)).not.toMatch(/remove[^"]*swap/i);
   });
 });

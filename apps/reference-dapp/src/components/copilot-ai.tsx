@@ -136,9 +136,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   // The language is read at each turn (the interface can switch mid-conversation); the callback itself stays stable.
   // BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients (in memory only; cleared on sign-out). The engine resolves exact
   // saved names itself and masks them before any request leaves for a model; a save happens only on the user's explicit request.
-  const recipients = useSavedRecipients();
-  const recipientsRef = useRef(recipients);
-  recipientsRef.current = recipients;
+  // Subscribed so a sign-in user change drops the list at once; each turn reads the store's snapshot itself (`environmentNow`).
+  useSavedRecipients();
   const interfaceLanguageRef = useRef(interfaceLanguage);
   interfaceLanguageRef.current = interfaceLanguage;
   const environmentNow = useCallback((): CopilotEnvironment => {
@@ -158,9 +157,11 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
     const view = learningView.current;
     const interfaceLanguage = interfaceLanguageRef.current;
-    const saved = recipientsRef.current.status === 'READY' ? savedRecipientsSnapshot().recipients : null;
+    // The list as it is at this turn (not the last render): any known list resolves and masks names, even while a refresh failed; only a READY
+    // list may be written to (the save offer).
+    const recipientsNow = savedRecipientsSnapshot(), saved = recipientsNow.recipients.length ? recipientsNow.recipients : null;
     return { ...interfaceLanguage ? { interfaceLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
-      verified, ...view?.enabled ? { learning: view.learning } : {}, ...saved ? { recipients: saved, recipientWrites: true } : {}, surface: 'WEB' };
+      verified, ...view?.enabled ? { learning: view.learning } : {}, ...saved ? { recipients: saved } : {}, ...recipientsNow.status === 'READY' ? { recipientWrites: true } : {}, surface: 'WEB' };
   }, []);
   /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */
   const loadVerified = useCallback(async (intent: unknown) => {
@@ -277,7 +278,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
       // The account's saved names, read again when stale (signed out or not available: none, and nothing is offered).
-      await loadSavedRecipients({ ifStale: true }).catch(() => undefined);
+      // Never more than a moment: a slow read leaves the turn with the list already known.
+      await Promise.race([loadSavedRecipients({ ifStale: true }).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 2500))]);
       const before = conversation.current, start = startTurn(before, text, environmentNow());
       // BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (counters and codes only), best effort and never awaited by the chat.
       const measure = (reply: CopilotReply, next: CopilotConversation, interpreted: string | null) =>
@@ -334,7 +336,9 @@ export function useFollowLatest(enabled: boolean, messages: number, busy: boolea
   return ref;
 }
 /** A Copilot answer: plain text, deterministic notes, and clarification options that are sent as the next message. */
-export function CopilotMessage({ text, notes, options, link, disabled, onPick }: { text: string; notes?: readonly string[] | undefined; options?: readonly string[] | undefined;
+export function CopilotMessage({ text, notes, options, link, verbatim, disabled, onPick }: { text: string; notes?: readonly string[] | undefined; options?: readonly string[] | undefined;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: options that are the user's own words (saved names): shown and sent exactly as saved, never translated. */
+  verbatim?: boolean | undefined;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: a FloFi page from the platform guide (a relative path; never a link the model wrote). */
   link?: { readonly path: string; readonly label: string } | undefined;
   disabled: boolean; onPick(option: string): void }) {
@@ -344,7 +348,7 @@ export function CopilotMessage({ text, notes, options, link, disabled, onPick }:
     {notes && notes.length > 0 && <ul className="copilot-notes">{notes.map((note, index) => <li key={index}>{tr(note)}</li>)}</ul>}
     {link && /^\/(?:app|connections)(?:\/[a-z-]+)*$/.test(link.path) && <p className="copilot-link"><a href={link.path}>{tr(link.label)} →</a></p>}
     {options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-      {options.map(option => <button key={option} type="button" className="quiet" disabled={disabled} onClick={() => onPick(tr(option))}>{tr(option)}</button>)}</div>}
+      {options.map(option => <button key={option} type="button" className="quiet" disabled={disabled} onClick={() => onPick(verbatim ? option : tr(option))}>{verbatim ? option : tr(option)}</button>)}</div>}
   </>;
 }
 /** Shown inside the existing proposal box when the pending proposal came from the Copilot. */
