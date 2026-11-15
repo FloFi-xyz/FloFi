@@ -143,6 +143,7 @@ function koraMessage(error: string): string | null {
     return 'Paying the network fee in USDC or USDT is not available right now, so nothing was sent. Add SOL for the network fee, then simulate again.';
   return 'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.';
 }
+export const SINGLE_SWAP_NATIVE_FEE_MESSAGE = 'Add funds for the network fee, then simulate again. This swap pays its network fee in ETH on this network; paying it in USDC is not available for a single swap yet, so nothing was signed.';
 export function simulationError(error: string): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
   const flight = flightRefusalMessage(error);
@@ -172,6 +173,10 @@ export function simulationError(error: string): string {
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
   // An Aave reserve short of liquidity (or collateral) is not the owner's balance: it keeps the lending sentence, before the balance rule.
   if (/^(?:BORROW|WITHDRAW)_INSUFFICIENT_LIQUIDITY$|LIQUIDITY_(?:UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_COLLATERAL/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident B): a single owner-wallet swap pays its network fee in the network's own ETH. FloFi's USDC fee
+  // payment (Circle Paymaster) runs only inside multi-step workflow runs from an eligible smart account today, so it is not offered here: the
+  // owner is told the real limitation instead of a bare "add funds".
+  if (error === 'INSUFFICIENT_GAS_FUNDS') return SINGLE_SWAP_NATIVE_FEE_MESSAGE;
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';

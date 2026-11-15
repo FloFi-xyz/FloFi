@@ -72,4 +72,14 @@ describe('wallet nonce classification (Incident A)', () => {
     expect(simulationError('UNIVERSAL_NONCE_CHANGED')).toMatch(/Another transaction from this wallet took the next transaction slot/);
     expect(walletNonceMessage('UNIVERSAL_NONCE_CHANGED')).toBeNull();
   });
+  it('Incident B: a single swap short of ETH says the real limitation (no USDC fee for a single swap yet) and keeps the Insufficient balance title', async () => {
+    const { simulationStatusPresentation } = await import('./simulation-presentation');
+    const text = simulationError('INSUFFICIENT_GAS_FUNDS');
+    expect(text).toMatch(/^Add funds for the network fee, then simulate again\. This swap pays its network fee in ETH/);
+    expect(text).toMatch(/not available for a single swap yet, so nothing was signed/);
+    expect(simulationStatusPresentation({ status: 'blocked', message: text, expiresAt: null, steps: [], fees: [], warnings: [] }).label).toBe('Insufficient balance');
+    expect(translate('PT', text)).toMatch(/^Adicione fundos/);
+    // Other native shortfalls keep their existing sentence.
+    expect(simulationError('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE')).toBe('Add funds for the network fee, then simulate again.');
+  });
 });
