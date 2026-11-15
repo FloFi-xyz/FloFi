@@ -52,7 +52,12 @@ const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.sl
  * side keeps the wallet identity and Settings. The passive "Workflow network" label is gone (the Canvas header chip shows it); its row keeps the
  * real jobs: the attention strip and switch button when the wallet is on another network, and provider errors.
  */
-export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false, center }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean;
+export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false, center, newWorkflow }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean;
+  /**
+   * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): the drawer's "New workflow" starts a genuinely new workflow (new identity, clean Canvas and
+   * conversation) and opens Chat on it. Before, it only switched to the Chat section, which kept talking to the previous Canvas and its run.
+   */
+  newWorkflow?: () => void;
   /** The Editor stepper, only while the Editor (Create, Simulate, Execute) is open. */ center?: ReactNode }) {
   const { t: tr } = useLocale();
   const { walletKind } = useExecutionEnvironment();
@@ -107,7 +112,7 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const networkAttention = Boolean(!solanaActive && build009.account && switchTarget && build009.chainId !== switchTarget.hex);
   const walletProviderError = Boolean(!solanaActive && !build009.account && build009.providerError);
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
-    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? () => setTab(BUILD_ENTRY) : undefined}
+    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? newWorkflow ?? (() => setTab(BUILD_ENTRY)) : undefined}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
     {!compact && <div className="top-bar-center">{center}</div>}
     <div className="top-meta">
@@ -119,8 +124,9 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
           : restoring ? <span className="wallet-connection" role="status">{tr("Restoring wallet…")}</span>
             : <><span className="wallet-connection">{tr(solanaActive ? 'Solana wallet not connected' : 'Wallet not connected')}</span><button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>}
       </div>
-      {/* Log out lives in the drawer; only the compact /approve signing surface (no drawer) keeps Disconnect in Settings. */}
-      <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled} showDisconnect={compact}/>
+      {/* BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): Log out is under the gear on every surface again (the drawer keeps its own entry to
+          the same flow). */}
+      <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>
     </div>
     {!compact && <div className="shell-network-row" data-empty={networkAttention || walletProviderError || engineering ? undefined : 'true'}>
       {networkAttention && <p className="network-attention" role="status"><span>{tr('Your wallet is on {0}. Switch to {1} to continue.', tr(networkName(build009.chainId)), tr(networkName(switchTarget!.hex)))}</span>

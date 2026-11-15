@@ -194,9 +194,12 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const stored = readPersistedEditor(editorStorage());
     if (stored?.workflow) dispatchHistory({ type: 'RESTORE_PERSISTED_CANVAS', workflowId: stored.workflowId, workflow: stored.workflow,
       layout: readCanvasLayout(stored.workflow as unknown as Workflow) });
+    // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): a reload of a workflow the owner explicitly created stays that new workflow (same
+    // identity; no recovered run of another workflow is brought onto it).
+    else if (stored?.fresh) { dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId: stored.workflowId }); setNewWorkflow(true); }
     setPersistenceReady(true);
   }, [persistCanvas]);
-  useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow); }, [persistCanvas, persistenceReady, state.workflow]);
+  useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow, newWorkflow); }, [persistCanvas, persistenceReady, state.workflow, newWorkflow]);
   const moveCanvasNodes = useCallback((positions: Readonly<Record<string, { x: number; y: number }>>) =>
     dispatchHistory({ type: 'MOVE', positions }), []);
   const duplicateCanvasNodes = useCallback((nodeIds: readonly string[]) =>

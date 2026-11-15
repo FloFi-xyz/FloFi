@@ -12,9 +12,13 @@ import { forgetAccountPresence, useAccountPresence } from '../state/account-pres
 import { useProductBootstrap } from '../state/product-bootstrap';
 
 /**
- * P0 approved UX (board 03b): Settings holds preferences and the account — Language, Theme, My account, Privacy and memory, Support. Log out lives
- * once, in the ☰ drawer; only surfaces without a drawer (the compact /approve signing surface, the MCP route states) keep Disconnect here
- * (`showDisconnect`, the documented exception).
+ * P0 approved UX (board 03b): Settings holds preferences and the account — Language, Theme, My account, Privacy and memory, Support, and the
+ * session action. BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): since the approved-UX shell (2026-11-12) the session action had been
+ * hidden here on every surface with a drawer, so signed-in owners no longer found Log out under the gear. It is back, as the same flow
+ * (`src/accounts/disconnect.ts`, also behind the drawer's Log out): signed in, "Log out" ends the FloFi session (server revocation, cookie, Privy,
+ * this page's wallet connection) and lands on sign-in; without a FloFi session, "Disconnect" only closes this app's wallet connection — a wallet
+ * disconnect is never presented as an account logout. Neither revokes on-chain permissions, sends a transaction or touches a run in progress.
+ * `showDisconnect={false}` remains for surfaces that must not offer it.
  */
 export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, showDisconnect = true }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void;
   showDisconnect?: boolean }) {
@@ -149,7 +153,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, sh
         title={tr(signedIn ? 'End your FloFi session on this device and disconnect your wallet. Your account, wallets and history are kept.'
           : 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.')}
         onClick={() => { void disconnect(); setOpen(false); toggle.current?.focus(); }}>
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M10 12h11m-4-4 4 4-4 4"/></svg><span>{tr("Disconnect")}</span>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5M10 12h11m-4-4 4 4-4 4"/></svg><span>{tr(signedIn ? 'Log out' : 'Disconnect')}</span>
       </button>
       </>}
     </div>}

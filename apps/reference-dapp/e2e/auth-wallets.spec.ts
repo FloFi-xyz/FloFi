@@ -465,10 +465,11 @@ test('Disconnect revokes the session, logs out of Privy and lands on /login; Bac
   await expect(page.getByRole('region', { name: 'Wallets', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'My wallets' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
-  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one Disconnect, no separate Sign out. P0 approved UX (board 03b): that one control is the
-  // ☰ drawer's "Log out"; Settings holds preferences and the account only.
+  // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-04): one session action, no separate Sign out. BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F):
+  // signed in, Settings offers it again as "Log out" (the same flow as the ☰ drawer's Log out); a wallet-only "Disconnect" is never shown instead.
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Disconnect', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Settings options', exact: true }).getByRole('button', { name: 'Log out', exact: true })).toBeEnabled();
   await page.keyboard.press('Escape');
   await logOut(page);
   await expect(page).toHaveURL('/login');

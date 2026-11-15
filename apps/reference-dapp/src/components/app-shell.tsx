@@ -124,6 +124,7 @@ import { BUILD_ENTRY, buildEntryFresh, buildEntryLanding } from '../domain/build
 import { editorOverview, EMPTY_EDITOR_OVERVIEW } from '../domain/editor-overview';
 import { EditorOverviewPanel, focusCanvasStep } from './editor-overview-panel';
 import { EditorStepper } from './editor-stepper';
+import { isPristineDraft } from '../domain/initial-workflow';
 
 /** `approvalSlot`/`approvalGate` (BUILD-FLOFI-UX-UI-002, `/approve` only): where the proposal's notice renders, and whether Simulate and
  * Execute stay closed until the proposal is loaded for the proven wallet.
@@ -563,9 +564,21 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // UX-004: after a final result, start a genuinely clean workflow in Build. Only workflow-scoped state resets (canvas, drafts, proposal,
   // selection, name, Review binding, notices, Copilot conversation); the wallet connection, sign-in session and preferences are untouched.
   const [workflowEpoch, setWorkflowEpoch] = useState(0);
-  function startNewWorkflow() {
+  function resetForNewWorkflow() {
     setFlightBlock(null); createNewWorkflow(); setWorkflowName('Your Workflow'); selectAction(null); setSaveNotice(null); setShowVerification(false); setAutomateCanvas(false);
-    setWorkflowEpoch(epoch => epoch + 1); setTab('Build');
+    setWorkflowEpoch(epoch => epoch + 1);
+  }
+  function startNewWorkflow() { resetForNewWorkflow(); setTab('Build'); }
+  /**
+   * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): the sidebar's and the Dashboard's "New workflow". The same clean start as "Create new
+   * workflow" (new identity; Canvas, selection, proposal, Review binding and Copilot conversation reset; wallet connection and sign-in kept),
+   * opening on Chat with an empty request. It cancels nothing: a run already submitted keeps being observed and stays in the Dashboard/History.
+   */
+  function startNewChatWorkflow() {
+    // Already a clean workspace (untouched Canvas, no run on it, no proposal, no conversation): nothing to reset — repeated clicks never mint
+    // identities, and a request the owner is still typing in Chat stays.
+    if (isPristineDraft(state.workflow) && !currentExecution(executionProgress) && !executionProgress.started && !proposal && conversation.messages.length === 0) { setTab(BUILD_ENTRY); return; }
+    resetForNewWorkflow(); setTab(BUILD_ENTRY); setEntryDraft('');
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
   const betaNotice = <><p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>
@@ -709,7 +722,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       gated={approvalGate} walletIssue={walletIssue} networkAction={networkAction} walletRequestError={walletConnection.notice ? tr(...walletConnection.notice) : null} connectWallet={() => void walletConnection.connect()} approvalSlot={approvalSlot} onViewInFloFi={onViewInFloFi}
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;
-  if (secondaryRoute) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
+  if (secondaryRoute) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <main id="workspace" className="main secondary-workspace" tabIndex={-1} aria-label={tr('{0} workspace', tr(secondaryRoute.label))}><SecondaryProductWorkspace workspace={secondaryRoute.id} workflows={{ ...workflows, loading: library.loading, connected: Boolean(owner), verification: owner && library.error === 'WALLET_SESSION_REQUIRED' ? <WorkflowVerification namespace={owner.namespace} account={owner.address} proof={proof}/> : undefined,
       // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history moved here from the Dashboard (same records, same server-checked actions).
       records: secondaryRoute.id === 'workflows' && owner ? <DashboardWorkspace mode="records" workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} workflowProgress={workflowProgress}
@@ -719,14 +732,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         canvas: automateCanvas ? { workflow: state.workflow, name: workflowName, dismiss: () => setAutomateCanvas(false) } : null }}/>
 </main>
   </div>;
-  if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
+  if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context}
       workflowProgress={workflowProgress} runId={dashboardRoute?.runId ?? null} portfolio={<PortfolioWidget evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
-      build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)} create={entry ? () => setTab(BUILD_ENTRY) : undefined}/></main>
+      build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)} create={entry ? startNewChatWorkflow : undefined}/></main>
   </div>;
   // BUILD0-UX-001: Build 0 has no Canvas, chat panel or summary bar; its request continues in the same conversation, shown in Build 1.
   // BUILD-FLOFI-CHAT-EDITOR-UX-001: Build 0 is presented as Chat and Build 1 as the Editor; this section and its continuation are unchanged.
-  if (tab === BUILD_ENTRY) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}/>{betaNotice}
+  if (tab === BUILD_ENTRY) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className="main build-entry-workspace" tabIndex={-1} aria-label={tr('Chat')}>
       <BuildEntry conversation={conversation} workflow={state.workflow} proposal={proposal} actions={orderedActions.length} draft={entryDraft} setDraft={setEntryDraft}
@@ -734,7 +747,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     </main>
   </div>;
   if (authoringIncomplete && tab !== 'Build') return <div className="app-shell" inert={!interactive}><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}
-    center={<EditorStepper tab={tab} setTab={setTab} disabled incomplete/>}/>{betaNotice}<main className="main"><section className="panel stage-empty"><p>{tr("Configure the action amount on the Canvas first.")}</p><button type="button" onClick={() => setTab('Build')}>{tr("Return to the Canvas")}</button></section></main></div>;
+    center={<EditorStepper tab={tab} setTab={setTab} disabled incomplete/>} newWorkflow={startNewChatWorkflow}/>{betaNotice}<main className="main"><section className="panel stage-empty"><p>{tr("Configure the action amount on the Canvas first.")}</p><button type="button" onClick={() => setTab('Build')}>{tr("Return to the Canvas")}</button></section></main></div>;
   // P0 approved UX (board 08): while this workflow's execution is live (not final), the Canvas shows "Editing paused during execution" (the shell
   // already refuses edits then; this makes it visible). Read from the execution records, never a timer.
   const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas runActive={editingPaused} estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} settingsId={settingsId} workflowName={workflowName} renameWorkflow={setWorkflowName} onNewWorkflow={startNewWorkflow} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} overview={overview}/>{chat}</div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}{selectedId && !editingPaused && <ActionSettingsPopover key={selectedId} selectedId={selectedId} select={selectAction} open={settingsId === selectedId} close={closeActionSettings}/>}
@@ -768,7 +781,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     expiresAt: runReviewed?.validUntil && Number.isFinite(Date.parse(runReviewed.validUntil)) ? Date.parse(runReviewed.validUntil) : null, executionStarted: workflowStarted,
     subject: 'review' as const };
   const reviewFooterAction = groupedPrimary ? <EditorWorkflowRunPrimaryAction state={workflowRunHere}/> : simulateActionFor(null);
-  return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} center={editorStepper}/>{betaNotice}
+  return <EstimateOwnersContext.Provider value={estimateOwners}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} center={editorStepper} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     {/* P0 workflow execution: after a reload, a whole-workflow run this browser started is offered (never followed silently). */}
     {workflowRunHere.earlier && tab !== 'Execute' && <div className="editor-run-earlier-notice" role="status">
@@ -781,6 +794,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary} reviewBlock={reviewBlock}
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         workflowProgress={workflowProgress} continuation={groupedPrimary ? null : executeContinuation} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
+        refreshAndReview={() => { setTab('Simulate'); void simulateAgain(); }}
         workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?

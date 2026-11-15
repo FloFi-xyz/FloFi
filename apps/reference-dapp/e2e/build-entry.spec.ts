@@ -187,13 +187,21 @@ test('Create strategy runs the existing interpreter and opens Build 1 with the w
   await expect(chat(page).locator('.message.you > p')).toHaveText(['Swap 1 USDC to WETH on Base slippage 50 bps']);
   await expect(chat(page)).toContainText('Swap added to your workflow: 1 USDC');
   await expect(page.locator('.wallet-connection')).toHaveText('Wallet not connected');
-  // Build 0 is reachable again (the drawer's New workflow); its composer is empty after the request was added.
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): the drawer's New workflow starts a genuinely new workflow — a new identity, an empty
+  // Canvas and a fresh conversation — instead of reopening Chat on the previous Canvas ("A new request is added to it").
+  const before = JSON.parse(await readWorkflowIr(page)) as { workflowId: string };
   await openChat(page);
   await expect(request(page)).toHaveValue('');
-  await expect(entry(page)).toContainText('Your workflow already has 1 step. A new request is added to it.');
-  // P0 approved UX: with steps already on the workflow, the entry's one action adds to it.
-  await expect(entry(page).getByRole('button', { name: 'Add to workflow', exact: true })).toBeVisible();
-  await expect(entry(page).getByRole('button', { name: 'Create workflow', exact: true })).toHaveCount(0);
+  await expect(entry(page)).not.toContainText('Your workflow already has');
+  await expect(entry(page).getByRole('button', { name: 'Add to workflow', exact: true })).toHaveCount(0);
+  const fresh = JSON.parse(await readWorkflowIr(page)) as { workflowId: string; revision: number; nodes: unknown[] };
+  expect(fresh.workflowId).not.toBe(before.workflowId); expect(fresh.revision).toBe(0);
+  await openEditorSection(page, 'Build');
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
+  await expect(chat(page).locator('.message.you')).toHaveCount(0);
+  // A second click on an already clean workspace changes nothing (no new identity per click).
+  await openChat(page);
+  expect((JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId).toBe(fresh.workflowId);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 

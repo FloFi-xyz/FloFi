@@ -19,8 +19,13 @@ const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 type ReadStorage = Pick<Storage, 'getItem'> | null;
 type WriteStorage = Pick<Storage, 'setItem'> | null;
 
-/** What this browser remembers of the Editor: its workflow identity, and its workflow once it has an action (null: the empty draft). */
-export type PersistedEditor = { readonly workflowId: string; readonly workflow: SemanticWorkflow | null };
+/**
+ * What this browser remembers of the Editor: its workflow identity, and its workflow once it has an action (null: the empty draft).
+ * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): `fresh` marks an empty draft the owner explicitly created with New workflow. After a reload
+ * it keeps that identity and stays a new workflow: a run recovered from this browser is NOT brought back onto it (it stays in the Dashboard and
+ * History, and keeps being observed). Only the visit's own untouched initial draft may still receive a recovered run, as before.
+ */
+export type PersistedEditor = { readonly workflowId: string; readonly workflow: SemanticWorkflow | null; readonly fresh?: true };
 
 /** The browser's storage, or null where it is blocked (private modes, sandboxed frames). */
 export function editorStorage(): (Pick<Storage, 'getItem' | 'setItem'>) | null {
@@ -39,20 +44,20 @@ export function readPersistedEditor(storage: ReadStorage): PersistedEditor | nul
   let value: unknown;
   try { value = JSON.parse(storage.getItem(EDITOR_WORKFLOW_STORAGE_KEY) ?? 'null'); } catch { return null; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as { format?: unknown; workflowId?: unknown; workflow?: unknown };
+  const record = value as { format?: unknown; workflowId?: unknown; workflow?: unknown; fresh?: unknown };
   if (record.format !== FORMAT || typeof record.workflowId !== 'string' || !WORKFLOW_ID.test(record.workflowId)) return null;
   // The empty draft is remembered as "nothing to restore": its identity is the visit's own (a run recovered from this browser may still be
   // brought back onto that untouched Canvas, exactly as before).
-  if (record.workflow === null || record.workflow === undefined) return { workflowId: record.workflowId, workflow: null };
+  if (record.workflow === null || record.workflow === undefined) return { workflowId: record.workflowId, workflow: null, ...record.fresh === true ? { fresh: true as const } : {} };
   try {
     const workflow = validateSavedWorkflow(record.workflow);
     return workflow.workflowId === record.workflowId ? { workflowId: record.workflowId, workflow } : null;
   } catch { return null; }
 }
 /** Remembers the Editor's current workflow (its identity alone while it has no action). Storage is optional: a failure changes nothing. */
-export function persistEditor(storage: WriteStorage, workflow: Workflow): void {
+export function persistEditor(storage: WriteStorage, workflow: Workflow, fresh = false): void {
   if (!storage || !WORKFLOW_ID.test(workflow.workflowId)) return;
   const actionable = workflow.nodes.some(node => !node.actionType.startsWith('mock-'));
-  try { storage.setItem(EDITOR_WORKFLOW_STORAGE_KEY, JSON.stringify({ format: FORMAT, workflowId: workflow.workflowId, workflow: actionable ? workflow : null })); }
+  try { storage.setItem(EDITOR_WORKFLOW_STORAGE_KEY, JSON.stringify({ format: FORMAT, workflowId: workflow.workflowId, workflow: actionable ? workflow : null, ...fresh && !actionable ? { fresh: true } : {} })); }
   catch { /* storage is optional (quota, private mode); the Canvas stays as it is this visit */ }
 }
