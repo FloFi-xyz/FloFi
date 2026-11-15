@@ -28,6 +28,7 @@ import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
 import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
 import { walletNonceMessage } from './wallet-nonce';
+import { basisPointsLabel, bridgeIncludedCost, HIGH_BRIDGE_COST_BASIS_POINTS } from './bridge-costs';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -382,7 +383,22 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.', 'CEILING');
-      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.', 'INCLUDED');
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident E): when every included provider fee is in the input token, its total and share of the
+      // amount sent are exact; the fees then read as parts of that one included total (as the Router's do), so nothing is counted twice.
+      const includedCost = bridgeIncludedCost(route);
+      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, includedCost ? 'Part of the fees included in the quote.' : 'Included in the quoted output.', includedCost ? 'COMPONENT' : 'INCLUDED');
+      for (const f of route.fees) if (!f.included && BigInt(f.amount) > 0n && f.kind !== 'SOURCE_NETWORK_FEE') fee(f.label, f.amount, f.decimals, f.symbol, 'Paid separately, on top of the amount sent.', 'ADDITIONAL');
+      if (includedCost) {
+        const share = basisPointsLabel(includedCost.basisPoints);
+        fee('Provider fees included in the quote', includedCost.units.toString(), includedCost.decimals, includedCost.symbol,
+          'About {0} of the amount you send. Already taken out of the expected amount; never charged again.'.replace('{0}', share), 'INCLUDED');
+        if (includedCost.basisPoints >= HIGH_BRIDGE_COST_BASIS_POINTS) warn('attention',
+          'Provider fees take about {0} of the amount you send. Fixed costs weigh more for small amounts. Review the amounts before you continue.'.replace('{0}', share));
+      }
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident C): a Solana recipient without a token account for this token gets one on delivery.
+      if (q.destination.recipientTokenAccount === 'MISSING') warn('info',
+        'The recipient’s Solana wallet has no {0} account yet. The bridge provider creates it at delivery; its one-time cost is part of the provider’s destination fee, already included in the quote.'
+          .replace('{0}', route.outputToken.symbol));
       fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
         '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));

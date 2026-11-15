@@ -66,7 +66,13 @@ export type UniversalReview = {
   readonly route: UniversalRoute; readonly routeCommitment: string;
   readonly tokens: { readonly input: TokenFacts; readonly output: TokenFacts };
   readonly source: EvmReviewSource | SolanaReviewSource;
-  readonly destination: { readonly chainId: string; readonly position: { readonly kind: 'BLOCK' | 'SLOT'; readonly height: number }; readonly recipientBalance: string };
+  readonly destination: { readonly chainId: string; readonly position: { readonly kind: 'BLOCK' | 'SLOT'; readonly height: number }; readonly recipientBalance: string;
+    /**
+     * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident C): a Solana token delivery's recipient associated token account, read at Review. MISSING:
+     * the provider creates it on delivery and its rent is part of the provider's destination fee (Relay does not separate it; included in the
+     * quote, never charged again by FloFi). Absent for EVM and native SOL deliveries, and on Reviews made before this field existed.
+     */
+    readonly recipientTokenAccount?: 'EXISTS' | 'MISSING' };
   readonly deadlines: { readonly reviewExpiresAt: string; readonly quoteExpiresAt: string; readonly orderDeadline: number };
   /**
    * FloFi's approved 0.1% fee per completed workflow (disclosure at Review). Collection is recorded as an obligation only —

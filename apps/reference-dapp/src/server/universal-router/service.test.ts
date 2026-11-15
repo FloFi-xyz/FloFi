@@ -820,6 +820,19 @@ describe('BUILD-P0-MAINNET-EXECUTION-RELIABILITY: pre-send wallet nonce refusals
     expect(fresh.id).not.toBe(run.id);
   }, 60_000);
 
+  it('Base USDC → Solana USDC records whether the explicit recipient already holds a USDC token account (Incident C); EVM deliveries record none', async () => {
+    const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: token('base'),
+      outputAsset: token('solana'), amount: '1000000', recipient: SOLANA_RECIPIENT });
+    const missing = await c.service.simulate(w, EVM_OWNER);
+    expect(missing.review.destination.recipientTokenAccount).toBe('MISSING');
+    c.solana.setToken(SOLANA_RECIPIENT, USDC.solana, 1n);
+    const exists = await c.service.simulate(w, EVM_OWNER);
+    expect(exists.review.destination.recipientTokenAccount).toBe('EXISTS');
+    expect(exists.review.recipient).toBe(SOLANA_RECIPIENT);
+    const toEvm = await c.service.simulate(workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS['arbitrum-one'].chain, inputAsset: token('base'),
+      outputAsset: token('arbitrum-one'), amount: '1000000', recipient: 'CONNECTED_OWNER' }), EVM_OWNER);
+    expect(toEvm.review.destination.recipientTokenAccount).toBeUndefined();
+  });
   it('Base USDC → Solana USDC with an explicit recipient: the approval refusal keeps the explicit Solana recipient and Base-native gas', async () => {
     const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: token('base'),
       outputAsset: token('solana'), amount: '1000000', recipient: SOLANA_RECIPIENT });

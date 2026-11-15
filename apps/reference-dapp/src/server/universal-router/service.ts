@@ -226,14 +226,17 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     if (destination.ecosystem === 'EVM') {
       const { d, rpc } = evmOf(destination.chain), head = await evm.evmHead(rpc, d), at = evm.tag(head.number);
       const code = evm.hex(await rpc('eth_getCode', [recipient, at]));
-      return { position: { kind: 'BLOCK' as const, height: head.number }, recipientBalance: (await evm.evmBalance(rpc, recipient, output.address, at)).toString(), hasCode: code.length > 2 };
+      return { position: { kind: 'BLOCK' as const, height: head.number }, recipientBalance: (await evm.evmBalance(rpc, recipient, output.address, at)).toString(), hasCode: code.length > 2,
+        tokenAccount: null };
     }
     await sol.assertSolanaRecipient(input.solanaRpc, recipient);
     const ata = output.kind === 'TOKEN' ? associatedTokenAddress(recipient, output.address!, programIdOf(output)!, SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID) : null;
     const { slot, accounts } = await readSolanaAccounts(input.solanaRpc, ata ? [recipient, ata] : [recipient]);
     let balance = accounts[0]?.lamports ?? 0n;
+    // An initialized token account is at least 165 bytes; anything else (absent, or not yet a token account) is created on delivery.
+    const tokenAccount = ata ? accounts[1] && accounts[1].data.length >= 165 ? 'EXISTS' as const : 'MISSING' as const : null;
     if (ata) { const account = accounts[1]; balance = account && account.data.length >= 165 ? decodeSplTokenAccount(account.data, output.program === 'token-2022').amount : 0n; }
-    return { position: { kind: 'SLOT' as const, height: slot }, recipientBalance: balance.toString(), hasCode: false };
+    return { position: { kind: 'SLOT' as const, height: slot }, recipientBalance: balance.toString(), hasCode: false, tokenAccount };
   }
 
   // --- quotes and selection -------------------------------------------------------------------------------------------
@@ -371,7 +374,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         slippageBps: f.slippageBps, providers: [...f.providers], selection: f.selection },
       selection: { policy: f.selection, selected: route.provider, considered: x.considered }, route, routeCommitment: universalRouteCommitment(route),
       tokens: { input: { ...x.inputFacts, symbol: route.inputToken.symbol }, output: { ...x.outputFacts, symbol: route.outputToken.symbol } },
-      source: x.source, destination: { chainId: f.destination.chain, position: x.destination.position, recipientBalance: x.destination.recipientBalance },
+      source: x.source, destination: { chainId: f.destination.chain, position: x.destination.position, recipientBalance: x.destination.recipientBalance,
+        ...x.destination.tokenAccount ? { recipientTokenAccount: x.destination.tokenAccount } : {} },
       deadlines: { reviewExpiresAt: x.expiresAt, quoteExpiresAt: route.quote.expiresAt, orderDeadline: route.order.deadline },
       feePolicy: flofiFeePolicy({ upperBound: x.networkFee, symbol: f.source.native.symbol, decimals: f.source.native.decimals }),
       authorizations: { sourceSignatures: x.signatures, destinationAuthorization: 'NONE' }, artifacts: x.artifacts };
