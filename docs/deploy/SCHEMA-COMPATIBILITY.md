@@ -896,16 +896,18 @@ the remainder of the migration's (short) transaction: concurrent writes to those
 empty, so nothing is scanned). A lock that cannot be taken within 5 s fails the migration, which rolls back completely (proven:
 `reconciliation-privacy-migration.pg.test.ts`), and the previous deployment keeps serving.
 
-`packages/cloud-runtime/test/reconciliation-privacy-migration.pg.test.ts` checks the exact bytes (also kept as
-`packages/cloud-runtime/test/fixtures/0027_reconciliation_privacy.sql`), the catalog diff (nothing pre-existing removed, redefined or added to),
-every earlier row surviving, the certificate and the strict check, the purge cascade, tenant-scoped foreign keys and the lock-timeout rollback.
-`apps/reference-dapp/backend/schema-compatibility.pg.test.ts` runs the v26 API, worker and Vercel paths across the new certificate.
+Release A's `packages/cloud-runtime/test/certificate-0027.pg.test.ts` applies the certified bytes (kept as
+`packages/cloud-runtime/test/fixtures/0027_reconciliation_privacy.sql`) under the v26 build and checks: schema 26 served unchanged; schema 27
+served only through the certificate (the strict check refuses it); the catalog diff (nothing pre-existing removed, redefined or added to);
+every earlier row surviving; v26 audit writes, the append-only guard and the 0016 purge mechanism (with the cascade) still working; the v26
+runner never changing a database ahead of it; and the lock-timeout rollback. `apps/reference-dapp/backend/schema-compatibility.pg.test.ts`
+runs the v26 API, worker, `main.ts`/CLI cold starts and Vercel paths across the new certificate. Release B adds
+`reconciliation-privacy-migration.pg.test.ts` for the shipped migration.
 
 **Release order.** Release A is the certificate `{ base: 0026 flight_early_list, migrations: [0027 reconciliation_privacy] }` with the exact
 bytes, deployed from a build whose newest shipped migration is 0026 to **every** database consumer (Vercel Production, Railway API, Railway
 worker) before any build that ships 0027 migrates. It is the commit `RELEASE A: schema 0027 compatibility certificate` of this build's branch,
-which touches only the certificate, its fixture and this section (the manifest test `forward-compatibility.test.ts` checks the fixture's bytes
-and this anchor; the backend `schema-compatibility.pg.test.ts` applies the fixture under the v26 build), so it can be cherry-picked on its own.
-`reconciliation-privacy-migration.pg.test.ts` needs the shipped migration and belongs to Release B. Release B (this build) then
-migrates from the Railway API pre-deploy. See [RELEASE-RECONCILIATION-PRIVACY-0027.md](./RELEASE-RECONCILIATION-PRIVACY-0027.md). Without
+which touches only the certificate, its fixture, its test and this section (the manifest test `forward-compatibility.test.ts` also checks
+the fixture's bytes and this anchor), so it can be merged and deployed on its own. Release B (this build) then
+migrates from the Railway API pre-deploy; Release B adds the step-by-step release document `RELEASE-RECONCILIATION-PRIVACY-0027.md`. Without
 Release A there is no application rollback once 0027 is applied. No production migration or release was performed during engineering.
