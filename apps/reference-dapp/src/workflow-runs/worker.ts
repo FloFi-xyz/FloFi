@@ -45,13 +45,17 @@ export async function sweepWorkflowRuns(store: WorkflowRunStore, db: Database, t
   return { expired: n, rearmed: open.length };
 }
 
-export type WorkflowRunWorkerParts = { readonly handlers: Readonly<Record<string, WorkHandler>>; readonly sweep: () => Promise<unknown> };
+/** `capabilities`: what this runner can do beyond observing owner steps, for its startup log (`enabled`, or the closed code that disabled it). */
+export type WorkflowRunWorkerParts = { readonly handlers: Readonly<Record<string, WorkHandler>>; readonly sweep: () => Promise<{ readonly expired: number; readonly rearmed: number }>;
+  readonly capabilities: { readonly userFunded: string; readonly delegation: boolean } };
 export function workflowRunWorkerParts(env: Env, db: Database, tenantId: string, logger: Logger, runtime: EngineRuntime):
   WorkflowRunWorkerParts | { readonly disabled: string; readonly reason: string | null } {
   if (env.FLOFI_WORKFLOW_RUNS !== 'enabled') return { disabled: 'WORKFLOW_RUNS_NOT_ENABLED', reason: null };
   const store = createPgWorkflowRunStore(db, tenantId);
   const delegation = env.FLOFI_DELEGATION === 'enabled' ? createPgDelegationStore(db, tenantId) : null;
+  const userFunded = userFundedRuntime(env, fetch, { db, tenantId });
   const deps: RunnerDeps = { store, runtime, delegation, policyFor: () => null, now: () => new Date(), log: (event, fields) => logger.info(event, fields),
-    userFunded: userFundedRuntime(env, fetch, { db, tenantId }).deps };
-  return { handlers: workflowRunHandlers(deps), sweep: () => sweepWorkflowRuns(store, db, tenantId, new Date()) };
+    userFunded: userFunded.deps };
+  return { handlers: workflowRunHandlers(deps), sweep: () => sweepWorkflowRuns(store, db, tenantId, new Date()),
+    capabilities: { userFunded: userFunded.deps ? 'enabled' : userFunded.facts.code ?? 'USER_FUNDED_NOT_ENABLED', delegation: delegation !== null } };
 }

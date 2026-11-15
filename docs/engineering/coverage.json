@@ -1318,6 +1318,18 @@
       "path": "apps/reference-dapp/backend/nonce-conflict-cloud.pg.test.ts",
       "stage": "postgres"
     },
+    "app.backend.load-failure": {
+      "path": "apps/reference-dapp/backend/load-failure.test.ts",
+      "stage": "unit"
+    },
+    "app.backend.plain-node-closure": {
+      "path": "apps/reference-dapp/backend/plain-node-closure.test.ts",
+      "stage": "unit"
+    },
+    "app.backend.workflow-run-worker-startup.pg": {
+      "path": "apps/reference-dapp/backend/workflow-run-worker-startup.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.admin.support-privacy.pg": {
       "path": "apps/reference-dapp/src/admin/support/privacy.pg.test.ts",
       "stage": "postgres"
@@ -1434,7 +1446,9 @@
     "app.components.flofi-wallet-circle-flow",
     "app.components.workflow-run-panel-flofi-circle",
     "app.server.nonce-conflict",
-    "app.server.evm-submission-discovery"
+    "app.server.evm-submission-discovery",
+    "app.backend.load-failure",
+    "app.backend.plain-node-closure"
   ],
   "modules": [
     {
@@ -2765,6 +2779,7 @@
       "sources": [
         "apps/reference-dapp/backend/app.ts",
         "apps/reference-dapp/backend/flows.ts",
+        "apps/reference-dapp/backend/load-failure.ts",
         "apps/reference-dapp/backend/main.ts",
         "apps/reference-dapp/backend/preview-migration.ts",
         "apps/reference-dapp/backend/preview.ts",
@@ -2773,6 +2788,9 @@
       ],
       "suites": [
         "action-registry.engineering-regression",
+        "app.backend.load-failure",
+        "app.backend.plain-node-closure",
+        "app.backend.workflow-run-worker-startup.pg",
         "app.platform.engineering-continuity",
         "app.platform.parity",
         "reference-compiler.review",
@@ -7848,6 +7866,7 @@
     "app.workflow-runs.flofi-wallet-circle-run.pg",
     "app.workflow-runs.kora-gas-run.pg",
     "app.backend.nonce-conflict-cloud.pg",
-    "app.admin.support-privacy.pg"
+    "app.admin.support-privacy.pg",
+    "app.backend.workflow-run-worker-startup.pg"
   ]
 }

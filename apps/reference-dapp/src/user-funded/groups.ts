@@ -1122,6 +1122,10 @@ async function reconcileLostUserOperation(deps: UserFundedDeps, t: ChainTranspor
   if (consumed === false) {
     const resent = await relayUserOperation(deps, prepared, authorization, runOwner);
     if (resent.ok || resent.code.startsWith('BETA_') || RESEND_RETRYABLE.has(resent.code)) return { status: 'PENDING' };
+    // A concurrent pass (the worker and an owner's status poll reconcile without a shared lock) may have handed the same signed bytes to the
+    // bundler a moment earlier, and a bundler can refuse that duplicate in words FloFi does not recognise. While the bundler now holds the
+    // operation it can still execute: nothing is decided (PENDING; the next pass reads its receipt), never FAILED.
+    if (await deps.bundler(group.chain)?.known(userOpHash).catch(() => false)) return { status: 'PENDING' };
     consumed = await userOperationNonceConsumed(t, op, entryPoint);
     if (consumed === false) return { status: 'FAILED', code: resent.code, gasPaid: null, transactions: [] };
   }

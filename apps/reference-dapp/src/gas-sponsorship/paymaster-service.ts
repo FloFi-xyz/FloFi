@@ -34,7 +34,9 @@ export type PaymasterServiceDeps = { readonly sponsor: EvmSponsor; readonly gran
 const METHODS = ['pm_getPaymasterStubData', 'pm_getPaymasterData'] as const;
 const QUANTITY = /^0x[0-9a-fA-F]{1,64}$/, ADDRESS = /^0x[0-9a-fA-F]{40}$/, DATA = /^0x(?:[0-9a-fA-F]{2})*$/;
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-class Refusal extends Error { constructor(readonly rpcCode: number, code: string) { super(code); } }
+// An explicit field, not a constructor parameter property: the Railway worker loads this module on plain Node, whose type stripping
+// refuses parameter properties (ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX), which disabled the workflow-run worker.
+class Refusal extends Error { readonly rpcCode: number; constructor(rpcCode: number, code: string) { super(code); this.rpcCode = rpcCode; } }
 const refuse = (code: string, rpcCode = -32602): never => { throw new Refusal(rpcCode, code); };
 /** A ledger/grant failure as a closed code: its own `GAS_SPONSOR_*` refusal, else UNAVAILABLE (never a storage or driver message). */
 const closed = (cause: unknown) => cause instanceof Error && /^GAS_SPONSOR_[A-Z0-9_]{1,80}$/.test(cause.message) ? cause.message : 'GAS_SPONSOR_UNAVAILABLE';
