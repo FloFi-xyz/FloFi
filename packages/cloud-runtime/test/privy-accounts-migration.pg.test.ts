@@ -73,8 +73,11 @@ describe('Privy accounts additive migration (0019)', () => {
       // Any other managed provider is refused, and external wallets are still never exportable.
       await expect(wallet("'EVM', '0x' || repeat('9', 40), 'GENERATED', 'other', 'FloFi wallet', 'wallet-12345678', 'PRIVATE_KEY', 'EVM wallet'")).rejects.toThrow();
       await expect(wallet("'EVM', '0x' || repeat('a', 40), 'EXTERNAL', 'privy', 'Wallet', NULL, 'PRIVATE_KEY', 'Wallet'")).rejects.toThrow();
-      const columns = (await t.db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'flofi_account%'`)).rows
-        .map(row => String((row as { column_name: string }).column_name));
+      const columns = (await t.db.query(`SELECT table_name, column_name FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'flofi_account%'`)).rows
+        .map(row => row as { table_name: string; column_name: string })
+        // BUILD-FLOFI-UNIFIED-COPILOT-001 (0028): `flofi_account_recipients.label_key` is the folded comparison key of a display name (unique per
+        // account), never secret material; its name is fixed by the certified 0028 bytes. Exactly that column is exempt; any other is still refused.
+        .filter(column => !(column.table_name === 'flofi_account_recipients' && column.column_name === 'label_key')).map(column => column.column_name);
       expect(columns.filter(name => /key|seed|mnemonic|secret|password|token|otp|phrase/i.test(name))).toEqual([]);
     } finally { await t.drop(); }
   });
