@@ -13,16 +13,14 @@
  * `recovery` must name a registered action (`registry.ts`); there is no generic retry, no free-form operation and no way to pass a work
  * kind, payload, SQL or code. Every refusal of a recovery request is audited.
  */
-import { hkdfSync } from 'node:crypto';
 import { adminPermits } from '../guard.ts';
 import { adminMutation, json, readJsonObject, type AdminHttpOptions } from '../http.ts';
 import { recordAudit } from '../store.ts';
 import { freeText, isIncidentId, NOTE_KINDS, noteText, supportSearch, type NoteKind } from './diagnostics.ts';
 import { auditRecoveryRefusal, executeRecovery, IDEMPOTENCY_KEY, previewRecovery, RecoveryRefusal, RUN_ID, STATE_TOKEN } from './recovery.ts';
 import { isRecoveryActionId, RECOVERY_ACTIONS } from './registry.ts';
+import { periodFingerprinter, supportPrivacyConfig, writeSupportText } from './privacy.ts';
 
-/** A dedicated subkey for lookup fingerprints, separate from session sealing and CSRF (rotating the admin secret also rotates it). */
-const searchKey = (key: Buffer) => Buffer.from(hkdfSync('sha256', key, 'flofi', 'flofi/admin-support-search/v1', 32));
 export const NOTE_RATE_WINDOW_MS = 600_000, NOTE_RATE_LIMIT = 60;
 
 export async function handleSupport(request: Request, options: AdminHttpOptions = {}): Promise<Response> {
@@ -53,7 +51,8 @@ export async function handleSupport(request: Request, options: AdminHttpOptions 
 
   if (action === 'search') {
     if (typeof body!.q !== 'string' || body!.q.length > 200) return json(400, { ok: false, code: 'ADMIN_REQUEST_INVALID' });
-    const result = await supportSearch(host, context.principal, body!.q, base.now, searchKey(base.key));
+    // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the quarter's lookup key (wrapped under a subkey of the admin secret), not the secret's v1 subkey.
+    const result = await supportSearch(host, context.principal, body!.q, base.now, periodFingerprinter(host.db, host.tenantId, base.key, () => base.now));
     return result.ok ? json(200, result) : json(result.code === 'SUPPORT_SEARCH_RATE_LIMITED' ? 429 : result.code === 'SUPPORT_SEARCH_WALLET_NOT_PERMITTED' ? 403
       : result.code === 'SUPPORT_SEARCH_UNAVAILABLE' ? 503 : 400, result);
   }
@@ -75,7 +74,8 @@ export async function handleSupport(request: Request, options: AdminHttpOptions 
       return json(400, { ok: false, code: 'SUPPORT_REASON_REQUIRED' });
     }
     try {
-      const result = await executeRecovery(host, actor, { runId, action: recovery, stateToken: token, idempotencyKey: key, reason }, base.now);
+      const result = await executeRecovery(host, actor, { runId, action: recovery, stateToken: token, idempotencyKey: key, reason }, base.now,
+        supportPrivacyConfig(process.env).textRetentionDays);
       return json(200, { ok: true, ...result });
     } catch (error) {
       if (error instanceof RecoveryRefusal) {
@@ -96,8 +96,15 @@ export async function handleSupport(request: Request, options: AdminHttpOptions 
       const { rows } = await host.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM admin_audit_events WHERE tenant_id = $1 AND kind = 'SUPPORT_NOTE' AND actor = $2 AND at >= $3`,
         [host.tenantId, actor, new Date(base.now.getTime() - NOTE_RATE_WINDOW_MS)]);
       if ((rows[0]?.n ?? 0) >= NOTE_RATE_LIMIT) return json(429, { ok: false, code: 'SUPPORT_NOTE_RATE_LIMITED' });
-      await recordAudit(host.db, host.tenantId, { actor, kind: 'SUPPORT_NOTE', outcome: 'OK', target: body!.incidentId.slice(0, 120),
-        detail: { incidentId: body!.incidentId, noteKind: kind as NoteKind, text } });
+      // The text goes to the separately governed store and the audit skeleton keeps its reference and digest — one transaction, so neither
+      // can exist without the other. The text is never copied into the append-only audit JSON.
+      const incidentId = body!.incidentId, runId = incidentId.startsWith('run:') ? incidentId.slice(4) : null;
+      await host.db.transaction(async tx => {
+        const stored = await writeSupportText(tx, host.tenantId, { purpose: 'SUPPORT_NOTE', body: text, runId: runId && RUN_ID.test(runId) ? runId : null, incidentId,
+          actor, now: base.now, retentionDays: supportPrivacyConfig(process.env).textRetentionDays });
+        await recordAudit(tx, host.tenantId, { actor, kind: 'SUPPORT_NOTE', outcome: 'OK', target: incidentId.slice(0, 120),
+          detail: { incidentId, noteKind: kind as NoteKind, textRef: stored.textRef, textDigest: stored.textDigest } });
+      });
       return json(200, { ok: true });
     } catch { return json(503, { ok: false, code: 'SUPPORT_STORE_UNAVAILABLE' }); }
   }

@@ -59,6 +59,8 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   // BUILD-FLOFI-FLIGHT-GATE-002: beta grants, invite expiry/revocation and Google Forms provenance.
   { version: 25, name: 'flight_gate', sha256: 'f150b1259014b90d6dbe249ad43d23b3a13ccfb9c53a0f0cc214200d7866abc0' },
   { version: 26, name: 'flight_early_list', sha256: '51fc9c3195ba179a4068b7c66a267216ed102d0a65f1c59a6e94fd8fb34f10c8' },
+  // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: nonce-conflict diagnostics and Support privacy controls (six new tables, own triggers). Additive.
+  { version: 27, name: 'reconciliation_privacy', sha256: '6edd545c5f7076aa85468c52e79a198df187af71001793695675527f5f96c069' },
 ].map(migration => Object.freeze(migration)));
 
 /**

@@ -54,4 +54,14 @@ describe('Flight legal pages use the saved language and factual approved content
     expect(html).not.toContain('Invite codes and access links are stored only as hashes');
     expect(html).not.toContain('your session (30 days)');
   });
+  it('BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: explains operator support access and its audit, as proposals under legal review, without a certification claim', async () => {
+    for (const [language, texts] of [['EN', ['Support, operator access and audit', 'keyed fingerprint (never the address)', 'under legal review',
+      'not enforced automatically yet', 'cannot sign or submit transactions for you', 'flofi.xyz@gmail.com']],
+    ['PT', ['Suporte, acesso de operadores e auditoria', 'nunca o endereço', 'em revisão jurídica', 'ainda não são aplicados automaticamente']]] as const) {
+      vi.mocked(siteLanguage).mockResolvedValue(language);
+      const html = renderToStaticMarkup(await PrivacyPage());
+      for (const text of texts) expect(html).toContain(text);
+      expect(html).not.toMatch(/LGPD[- ]certified|GDPR[- ]certified|certificad[oa] (pela )?LGPD|fully compliant/i);
+    }
+  });
 });

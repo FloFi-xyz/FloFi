@@ -48,6 +48,12 @@ const EXACT: Readonly<Record<string, Entry>> = {
     meaning: 'The task’s handler returned without recording a result, so it was rescheduled.', likelyCause: null },
   EXECUTION_LEASE_LOST: { label: 'Concurrent update', category: 'BACKGROUND', remedy: 'TRANSIENT', userAction: null, deployment: 'NO',
     meaning: 'Another process was updating the same execution at that moment; the work is retried.', likelyCause: null },
+  // BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: not transient — nothing temporary failed. Re-inspection is still allowed (`retryableStopReason`).
+  NONCE_CONFLICT_STABLE_OPERATOR_REVIEW: { label: 'Nonce conflict needs operator review', category: 'CONFIRMATION', remedy: 'UNKNOWN', userAction: null, deployment: 'NO',
+    meaning: 'The automatic check stopped because repeated, complete investigations of the same nonce conflict returned exactly the same evidence: further identical '
+      + 'checks could not change the verdict. The transaction outcome stays UNKNOWN — this is not success, failure or non-execution. The investigation '
+      + '(conflicting transaction, comparison, delegation and alternate-nonce scan) is shown on the execution’s diagnostics.',
+    likelyCause: 'Another transaction (possibly another FloFi workflow or the owner’s wallet) used the nonce reserved for the reviewed call.' },
   EVIDENCE_STORE_NOT_CONFIGURED: { label: 'Evidence storage not configured', category: 'BACKGROUND', remedy: 'CONFIGURATION', userAction: null, deployment: 'CONFIG',
     meaning: 'The worker has no evidence object store, so finished executions cannot be archived.', likelyCause: null },
   UNCLASSIFIED_ERROR: { label: 'Unclassified error', category: 'UNKNOWN', remedy: 'UNKNOWN', userAction: null, deployment: 'UNKNOWN',
@@ -124,5 +130,10 @@ export function explainCode(code: string | null | undefined): CodeExplanation | 
 /** Work-item stop reasons after which re-running the same idempotent task can help (the cause may have been temporary). */
 export function retryableStopReason(code: string | null): boolean {
   const explanation = explainCode(code);
-  return explanation !== null && explanation.remedy === 'TRANSIENT';
+  return explanation !== null && (explanation.remedy === 'TRANSIENT' || REINSPECTABLE.has(explanation.code));
 }
+/**
+ * Stop reasons that are not transient but after which ONE read-only re-inspection may still help (new evidence can appear on chain). Exact
+ * codes only; the registry's retry limit still bounds how often an operator can resume the check.
+ */
+const REINSPECTABLE: ReadonlySet<string> = new Set(['NONCE_CONFLICT_STABLE_OPERATOR_REVIEW']);

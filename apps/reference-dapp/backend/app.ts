@@ -25,6 +25,9 @@ import { isFlightRecoveryMethod } from '../src/server/flight-access.ts';
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
 import { validateSavedWorkflow, workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../src/domain/saved-workflow.ts';
 import { createOwnerHistory, type HistoryDisposition, type HistoryKind } from '@defi-workflow-engine/cloud-runtime';
+import { investigateNonceConflict, NONCE_CONFLICT_CODE, nonceConflictPacing, nonceConflictSubject, STABLE_ESCALATION_CODE,
+  type NonceConflictPacing } from '../src/server/nonce-conflict.ts';
+import { loadNonceConflict, markNonceConflictEscalated, peerAttempts, peersByTransaction, previousScan, recordNonceConflict } from '../src/server/nonce-conflict-store.ts';
 
 /** Methods that could put a transaction on any network. Observer (worker) transports reject them unconditionally. */
 const SUBMISSION_METHODS = new Set(['sendTransaction', 'eth_sendRawTransaction', 'eth_sendTransaction']);
@@ -578,6 +581,41 @@ export function createBackend(options: BackendOptions) {
   };
   const failure = (error: unknown) => error instanceof Error && CODE.test(error.message) ? error.message : 'WORK_HANDLER_FAILED';
 
+  /**
+   * BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (P0): the read client a nonce-conflict investigation uses for `chainId` — the flow's own
+   * observe-only transport (no submission method can pass `observeOnly`). The investigation checks `eth_chainId` itself.
+   */
+  const investigationRpc = (flow: FlowName, chainId: string): Rpc | null => {
+    const deps = depsFor(flow, true), client = deps.universal?.evmRpcs[`eip155:${chainId}`] ?? deps.chains?.rpcs[`eip155:${chainId}`] ?? deps.rpc;
+    return client ? observeOnly(client) : null; // per-chain clients are not wrapped by depsFor: wrap whichever is used
+  };
+  /**
+   * Investigates the run's conflicted attempt (read-only: chain reads and tenant-scoped database reads, one diagnostic row written) and returns
+   * how the worker should pace the next check. Null when the record has no investigable conflict or the investigation itself failed — the
+   * caller then keeps the worker's ordinary backoff. It never changes the run, its attempts or its outcome.
+   */
+  async function investigateConflict(flow: FlowName, tenantId: string, record: unknown, log: Parameters<WorkHandler>[2]): Promise<NonceConflictPacing | null> {
+    const subject = nonceConflictSubject(flow, record);
+    const rpc = subject ? investigationRpc(flow, subject.chainId) : null;
+    if (!subject || !rpc) return null;
+    try {
+      const at = new Date(), [stored, peers] = await Promise.all([loadNonceConflict(db, tenantId, subject.runId, subject.attemptId), peerAttempts(db, tenantId, subject)]);
+      const report = await investigateNonceConflict({ rpc: (method, params) => rpc(method, params), subject, peers, previousScan: previousScan(stored),
+        candidatePeers: hashes => peersByTransaction(db, tenantId, subject, hashes) });
+      const tracked = await recordNonceConflict(db, tenantId, subject, report, at);
+      // A failed read keeps the stored report, but paces like the failure it was (the worker's normal backoff).
+      const effective = report.classification === 'INSUFFICIENT_CHAIN_EVIDENCE' ? report : tracked.report;
+      const pacing = nonceConflictPacing(effective, { stableObservations: tracked.stableObservations, firstObservedAt: tracked.firstObservedAt }, at);
+      log.info('reconcile.nonce_conflict', { flow, run_id: subject.runId, attempt_id: subject.attemptId, classification: report.classification,
+        stored_classification: tracked.classification, proof_complete: tracked.report.proofComplete, stable_observations: tracked.stableObservations,
+        evidence_fingerprint: tracked.report.evidenceFingerprint.slice(0, 16), next_delay_ms: pacing.delayMs, escalate: pacing.escalate });
+      return pacing;
+    } catch (error) {
+      log.warn('reconcile.nonce_conflict_failed', { flow, run_id: subject.runId, error_code: failure(error) });
+      return null;
+    }
+  }
+
   /** Read-only observation of an attempt that may have reached the network. Never submits; never touches PREPARED. */
   const reconcile: WorkHandler = async (item, settle, log) => {
     const target = payload(item);
@@ -585,6 +623,7 @@ export function createBackend(options: BackendOptions) {
     const { flow, runId, definition } = target;
     if (flowMode(flow, env) === 'off') { await settle({ outcome: 'RETRY', delayMs: 300_000, reason: disabledCode(flow) }); return; }
     const leases = storage(flow, item.tenantId).leases, svc = service(flow, item.tenantId, true);
+    let conflict: { record: unknown; reason: string } | null = null;
     try {
       await leases.hold(runId, async () => {
         // Re-checked under the run lease: a stale item cannot act on an attempt created after it was queued.
@@ -594,8 +633,29 @@ export function createBackend(options: BackendOptions) {
         const pending = definition.needsObservation(next);
         log.info('reconcile.observed', { flow, run_id: runId, reconciliation_state: next.verdict ?? null, error_code: next.error ?? null,
           observation_outcome: next.observation?.outcome ?? null, observation_reason: next.observation?.reason ?? null, still_pending: pending });
-        await settle(pending ? { outcome: 'RETRY', delayMs: backoffMs(item.deliveries), reason: next.observation?.reason ?? next.error ?? 'OBSERVATION_PENDING' } : { outcome: 'DONE' });
+        const reason = next.observation?.reason ?? next.error ?? 'OBSERVATION_PENDING';
+        // P0: a nonce conflict is investigated after the run lease is released (its reads can take a while and change nothing in the run).
+        if (pending && NONCE_CONFLICT_CODE.test(next.error ?? '')) { conflict = { record: next, reason }; return; }
+        await settle(pending ? { outcome: 'RETRY', delayMs: backoffMs(item.deliveries), reason } : { outcome: 'DONE' });
       });
+      if (conflict) {
+        const { record, reason } = conflict as { record: unknown; reason: string };
+        const pacing = await investigateConflict(flow, item.tenantId, record, log);
+        // Settled back under the run lease, as every other observation is: if the run changed while it was investigated (an API observation, a
+        // wallet report, a later attempt), the decision is stale and the run is simply checked again at the normal cadence. Escalation only
+        // flags the run for an operator (outcome stays UNKNOWN); a resumed check observes it again and, with unchanged evidence (the stability
+        // count is kept), stops again after that one check.
+        await leases.hold(runId, async () => {
+          const unchanged = JSON.stringify(nonceConflictSubject(flow, await svc.load(runId))) === JSON.stringify(nonceConflictSubject(flow, record));
+          if (!unchanged) { await settle({ outcome: 'RETRY', delayMs: backoffMs(item.deliveries), reason }); return; }
+          if (pacing?.escalate) {
+            const subject = nonceConflictSubject(flow, record)!;
+            if (await settle({ outcome: 'DEAD', reason: STABLE_ESCALATION_CODE })) await markNonceConflictEscalated(db, item.tenantId, subject.runId, subject.attemptId, new Date());
+            return;
+          }
+          await settle({ outcome: 'RETRY', delayMs: pacing?.delayMs ?? backoffMs(item.deliveries), reason });
+        });
+      }
     } catch (error) {
       const code = failure(error);
       if (code === definition.busyCode || code === 'EXECUTION_LEASE_LOST') { await settle({ outcome: 'RETRY', delayMs: 2_000, reason: code }); return; }

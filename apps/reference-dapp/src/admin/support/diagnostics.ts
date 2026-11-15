@@ -6,7 +6,8 @@
  * execution id, incident id, background task id) — never free text — and returns at most SEARCH_LIMIT matches over existing indexes.
  * A wallet lookup links a person's wallet to their executions, so it needs the OPERATOR role. Every search is audited with the identifier
  * TYPE and a short keyed fingerprint of the value (enough to confirm later whether a given value was searched; the value itself is not
- * stored), and is rate-limited per administrator. Lookups are POSTs, so the value never appears in a URL, a request log or the browser
+ * stored), and is rate-limited per administrator. BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the fingerprint key is the current calendar
+ * quarter's (`privacy.ts`), so a quarter's lookups can be made unlinkable by destroying its key, without touching the audit rows. Lookups are POSTs, so the value never appears in a URL, a request log or the browser
  * history. Results never show a full wallet address.
  *
  * The timeline reports what the durable journal and attempts show, marking each milestone OBSERVED (a recorded fact), INFERRED (implied by a
@@ -18,6 +19,7 @@ import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { recordAudit, type AdminRole } from '../store.ts';
 import { classifyRun } from '../analytics/classify.ts';
 import { submissionOf, type ExecutionSnapshot } from './incidents.ts';
+import { readSupportTexts, resolveText, type Fingerprinter, type TextState } from './privacy.ts';
 
 export const SEARCH_LIMIT = 25, SEARCH_RATE_WINDOW_MS = 600_000, SEARCH_RATE_LIMIT = 120;
 export type SearchKind = 'TRANSACTION_HASH' | 'WALLET' | 'WORKFLOW_RUN' | 'DELEGATED_EXECUTION' | 'INCIDENT' | 'WORK_ITEM' | 'EXECUTION_OR_WORKFLOW';
@@ -41,8 +43,8 @@ export function searchKind(raw: string): { readonly kind: SearchKind; readonly v
   return null;
 }
 /**
- * A keyed fingerprint (HMAC-SHA-256 under the deployment's admin key, 16 hex): it confirms whether a known value was searched, but cannot be
- * reversed by hashing candidate addresses without the key.
+ * A keyed fingerprint (HMAC-SHA-256, 16 hex): it confirms whether a known value was searched, but cannot be reversed by hashing candidate
+ * addresses without the key. The v1 key (before this build) was a subkey of the admin secret; new lookups use the quarter's key (`privacy.ts`).
  */
 export const fingerprint = (key: Buffer, value: string) => createHmac('sha256', key).update(`support-search.${value}`).digest('hex').slice(0, 16);
 export const shortAccount = (account: string) => account.length > 12 ? `${account.slice(0, 6)}…${account.slice(-4)}` : account;
@@ -56,10 +58,14 @@ type Host = { readonly db: Database; readonly tenantId: string };
 type Row = { id: string; label: string; status: string; at: Date | null };
 
 /** One audited, bounded, permission-checked support lookup. */
-export async function supportSearch(host: Host, actor: { readonly principalId: string; readonly role: AdminRole }, raw: string, now: Date, key: Buffer): Promise<SearchResult> {
+export async function supportSearch(host: Host, actor: { readonly principalId: string; readonly role: AdminRole }, raw: string, now: Date,
+  fingerprinter: Fingerprinter): Promise<SearchResult> {
   const { db, tenantId } = host, parsed = searchKind(raw);
+  // The period key is read (or created) once per lookup, only after the rate limit. Without it nothing is looked up (fail closed): an
+  // unaudited lookup is never possible.
+  let print: { fingerprint: string | null; fpv?: 2; period?: string; kid?: string } = { fingerprint: null };
   const audit = (outcome: 'OK' | 'REFUSED', code: string | null, type: string, results: number | null) => recordAudit(db, tenantId, { actor: actor.principalId,
-    kind: 'SUPPORT_SEARCH', outcome, code, detail: { type, fingerprint: parsed ? fingerprint(key, parsed.value) : null, results } }).catch(() => undefined);
+    kind: 'SUPPORT_SEARCH', outcome, code, detail: { type, ...print, results } }).catch(() => undefined);
   // The rate limit comes first, so even refused lookups cannot flood the audit trail.
   let recent: number;
   try {
@@ -68,6 +74,9 @@ export async function supportSearch(host: Host, actor: { readonly principalId: s
   } catch { return { ok: false, code: 'SUPPORT_SEARCH_UNAVAILABLE' }; }
   if (recent >= SEARCH_RATE_LIMIT) return { ok: false, code: 'SUPPORT_SEARCH_RATE_LIMITED' };
   if (!parsed) { await audit('REFUSED', 'SUPPORT_SEARCH_INVALID', 'UNRECOGNISED', null); return { ok: false, code: 'SUPPORT_SEARCH_INVALID' }; }
+  const keyed = await fingerprinter(parsed.value).catch(() => null);
+  if (keyed) print = { fingerprint: keyed.fingerprint, fpv: keyed.fpv, period: keyed.period, kid: keyed.kid };
+  if (!keyed) { await audit('REFUSED', 'SUPPORT_SEARCH_UNAVAILABLE', parsed.kind, null); return { ok: false, code: 'SUPPORT_SEARCH_UNAVAILABLE' }; }
   if (parsed.kind === 'WALLET' && actor.role !== 'OPERATOR') {
     await audit('REFUSED', 'SUPPORT_SEARCH_WALLET_NOT_PERMITTED', parsed.kind, null);
     return { ok: false, code: 'SUPPORT_SEARCH_WALLET_NOT_PERMITTED' };
@@ -130,7 +139,7 @@ export async function supportSearch(host: Host, actor: { readonly principalId: s
     all = await db.transaction(async tx => {
       const found = await lookup(tx);
       await recordAudit(tx, tenantId, { actor: actor.principalId, kind: 'SUPPORT_SEARCH', outcome: 'OK', code: null,
-        detail: { type: parsed.kind, fingerprint: fingerprint(key, parsed.value), results: Math.min(found.length, SEARCH_LIMIT) } });
+        detail: { type: parsed.kind, ...print, results: Math.min(found.length, SEARCH_LIMIT) } });
       return found;
     });
   } catch { await audit('REFUSED', 'SUPPORT_SEARCH_UNAVAILABLE', parsed.kind, null); return { ok: false, code: 'SUPPORT_SEARCH_UNAVAILABLE' }; }
@@ -263,17 +272,24 @@ export function identifierShaped(text: string): boolean {
   return (text.match(/[1-9A-HJ-NP-Za-km-z]{32,}/g) ?? []).some(run => !/^[0-9a-f]+$/.test(run));
 }
 export const noteText = (value: unknown): string | null => freeText(value, 3, NOTE_MAX);
-export type Note = { readonly eventId: string; readonly at: string; readonly actor: string; readonly incidentId: string; readonly kind: NoteKind; readonly text: string };
+/**
+ * `text` is null when the note's text was removed (retention or an approved erasure): the note itself — who, when, which kind — stays. `textState`
+ * says which: AVAILABLE (separate text store), LEGACY (written inline before BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001) or REMOVED.
+ */
+export type Note = { readonly eventId: string; readonly at: string; readonly actor: string; readonly incidentId: string; readonly kind: NoteKind; readonly text: string | null;
+  readonly textState: TextState };
 /** Notes (append-only audit events), newest first, for some incidents or for all (bounded, 90 days). */
 export async function listNotes(host: Host, now: Date, incidentIds: readonly string[] | null = null): Promise<Note[]> {
-  const { rows } = await host.db.query<{ event_id: string; at: Date; actor: string; detail: { incidentId?: unknown; noteKind?: unknown; text?: unknown } | null }>(
+  const { rows } = await host.db.query<{ event_id: string; at: Date; actor: string; detail: { incidentId?: unknown; noteKind?: unknown; text?: unknown; textRef?: unknown } | null }>(
     `SELECT event_id::text, at, actor, detail FROM admin_audit_events WHERE tenant_id = $1 AND kind = 'SUPPORT_NOTE' AND outcome = 'OK' AND at >= $2
       AND ($3::text[] IS NULL OR detail->>'incidentId' = ANY($3::text[])) ORDER BY at DESC, event_id DESC LIMIT 500`,
     [host.tenantId, new Date(now.getTime() - 90 * 86_400_000), incidentIds ? [...incidentIds] : null]);
+  const texts = await readSupportTexts(host.db, host.tenantId, rows.flatMap(row => typeof row.detail?.textRef === 'string' ? [row.detail.textRef] : []));
   return rows.flatMap(row => {
-    const d = row.detail ?? {};
-    return typeof d.incidentId === 'string' && typeof d.text === 'string' && NOTE_KINDS.includes(d.noteKind as NoteKind)
-      ? [{ eventId: row.event_id, at: row.at.toISOString(), actor: row.actor, incidentId: d.incidentId, kind: d.noteKind as NoteKind, text: d.text }] : [];
+    const d = (row.detail ?? {}) as Record<string, unknown>;
+    if (typeof d.incidentId !== 'string' || !NOTE_KINDS.includes(d.noteKind as NoteKind) || typeof d.text !== 'string' && typeof d.textRef !== 'string') return [];
+    const { text, state } = resolveText(d, 'textRef', 'text', texts);
+    return [{ eventId: row.event_id, at: row.at.toISOString(), actor: row.actor, incidentId: d.incidentId, kind: d.noteKind as NoteKind, text, textState: state }];
   });
 }
 export type IncidentStatus = 'NEW' | 'INVESTIGATING' | 'ESCALATED' | 'RESOLUTION_NOTED';

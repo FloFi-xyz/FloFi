@@ -83,7 +83,7 @@ const definitions = [
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['journey-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'journey', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-ADMIN-001: the private Admin console (sign-in refusal and grant, dashboards, AI settings) on a disposable loopback database.
-  ['admin-console', ['admin-console.spec.ts'], { FLOFI_ADMIN_E2E: 'LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  ['admin-console', ['admin-console.spec.ts', 'admin-login-layout.spec.ts'], { FLOFI_ADMIN_E2E: 'LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['cloud-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'cloud', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['synthetic-fork-provenance', ['release-fork-provenance.spec.ts'], { GRYLOO_MODE_A_E2E: 'synthetic' }],
   ['cow-loopback', ['cow-intent.spec.ts', 'cow-recovery.spec.ts'], { GRYLOO_COW: 'loopback' }],

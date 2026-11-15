@@ -14,6 +14,14 @@
     --a-ok:#4ade80;--a-ok-soft:#10261a;--a-bad:#ff9fae;--a-bad-soft:#2a1519;--a-warn:#f5b94a;--a-warn-soft:#33270f;--a-neutral:#a4abb8;--a-neutral-soft:#1c2029;
     --a-focus:#93a6ff;--a-s1:#3987e5;--a-s2:#d95926;--a-s3:#199e70;--a-s4:#c98500;--a-s5:#d55181;--a-other:#5f5e58;--a-axis:#383835;color-scheme:dark}
 }
+/* BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (P2): the console paints the viewport from its topmost pixel. Root cause of the white strip: a page's
+   first child top margin (the sign-in's 12vh) collapsed through `.admin-root` and `body` (neither has padding, border or its own formatting
+   context), so both started 12vh down and the bare canvas — white, from the product's `body{background:#fff}` — showed above the console.
+   `flow-root` keeps child margins inside the console (no margin collapse, no layout change otherwise). The document background matches the
+   console only while an Admin page is in the DOM (`:has`), so overscroll and any gap never flash white; the product's styling is untouched. */
+.admin-root{display:flow-root}
+html:has(.admin-root),html:has(.admin-root) body{background:#f8fafd}
+@media (prefers-color-scheme:dark){html:has(.admin-root),html:has(.admin-root) body{background:#0b0d12}}
 .admin-root *{box-sizing:border-box}
 .admin-root a{color:var(--a-blue)}
 .admin-root :focus-visible{outline:2px solid var(--a-focus);outline-offset:2px}

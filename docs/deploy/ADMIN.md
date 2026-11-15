@@ -159,22 +159,77 @@ needs the owner's wallet (the owner opens the execution in FloFi), delegated exe
 workflow advances, corrupt state, unclassified statuses, a disabled feature or missing configuration on the worker, and anything that would
 decide an unknown outcome. The Admin never signs, submits, approves, transfers or changes a workflow.
 
-Audit kinds: `SUPPORT_RECOVERY` (OK with operation id `rop_…`, or REFUSED/FAILED with a code), `SUPPORT_SEARCH`, `SUPPORT_NOTE`. Limits: 30
+Audit kinds: `SUPPORT_RECOVERY` (OK with operation id `rop_…`, or REFUSED/FAILED with a code), `SUPPORT_SEARCH`, `SUPPORT_NOTE`, and the CLI's
+`PRIVACY_*` events. Limits: 30
 recoveries per 10 minutes (tenant, checked inside the serialized recovery transaction), 3 recoveries of one execution per 7 days, 120 lookups and
 60 notes per administrator per 10 minutes. Reasons and notes are visible to every administrator: never paste keys, passwords or personal data.
 They are screened (best effort) and refused when they contain wallet addresses, transaction hashes, e-mail addresses, standalone runs of 8+
 digits, CPF / CNPJ / RG or Brazilian phone formats, IPv4 addresses or @handles.
 
-**Retention (owner decision 2026-11-14; enforcement not yet built).** The owner approved an auditable recovery history but not indefinite
-retention of identifiable personal data. Support writes into the existing append-only `admin_audit_events` table, which nothing deletes: lookup
-rows (identifier type, a keyed fingerprint, a count — never the identifier), recovery rows (ids, codes, the operator's reason) and notes. The
-fingerprint uses a dedicated subkey derived from `FLOFI_ADMIN_SESSION_SECRET`; rotating that secret makes earlier fingerprints unlinkable (and ends
-every admin session). Proposed retention periods, purposes, candidate lawful bases under LGPD art. 7 and GDPR art. 6 (LGPD art. 6 X and art. 18
-are a principle and data-subject rights, not lawful bases), rights handling and the structural options to enforce retention without weakening the
-audit trail are in [BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 §9](../builds/BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001.md) for counsel; none needs to
-change audit storage until one is approved. The privacy notice should mention operator access to execution records for support. Notes about a
-run the owner later purges are not removed by the purge. Lookups are audited atomically with their results (no audit row, no results); opening a
-diagnostics page is not audited separately. Wallet lookups also find runs the owner archived (archiving hides, it does not erase).
+**Retention and privacy (BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001; built, enforcement inactive until approved).** The owner approved an
+auditable recovery history but not indefinite retention of identifiable personal data. Since migration 0027:
+
+- *Audit skeleton* — `SUPPORT_RECOVERY`, `SUPPORT_NOTE` and `SUPPORT_SEARCH` events stay in the append-only `admin_audit_events` table (who,
+  when, action, result and codes, run / operation / incident references). It is never updated or deleted by this build.
+- *Free text* — a recovery reason or note body lives in `admin_support_texts`, written in the same transaction as its audit event; the event keeps
+  `textRef` / `reasonRef` and a digest (HMAC under the text row's own salt). The text is never copied to the audit JSON, logs or errors. When a
+  text is removed (retention or an approved erasure) the page shows *Text removed under the retention policy or an approved erasure request* and
+  the event stays. Texts written before 0027 are inline in the audit table (shown as before) and are **not** removable by this build.
+- *Lookup fingerprints* — new lookups use a random key per calendar quarter (`admin_lookup_keys`), stored only wrapped (AES-256-GCM) under a
+  subkey of `FLOFI_ADMIN_SESSION_SECRET`: the database alone cannot recompute a fingerprint. Destroying a past quarter's key makes that quarter's
+  fingerprints unlinkable without touching audit rows and without rotating the admin secret. If the secret is rotated, older keys can no longer be
+  unwrapped (unlinkable) and a new key starts for the current quarter. Pre-0027 lookups use the v1 subkey (unlinkable only by rotating the secret).
+- *Periods* — **proposals, not legal determinations**: text 12 months (`FLOFI_SUPPORT_TEXT_RETENTION_DAYS`, default 365), lookup keys 12 months
+  after their quarter ends (`FLOFI_SUPPORT_LOOKUP_RETENTION_DAYS`, default 365). Both variables are optional; their defaults are the proposals. A
+  text's `expires_at` (from the configured period) is the schedule shown; enforcement uses the **approved** period of the active activation,
+  counted from when each text was written. Nothing is deleted by deploying or configuring: enforcement needs an approved activation.
+
+Privacy procedures (operator CLI, database access; `--wallet-stdin` reads a wallet from standard input, never from an argument; commands that
+need the admin key read `FLOFI_ADMIN_SESSION_SECRET` from the operator's shell and never print it). Every procedure is audited with codes and
+counts only (`PRIVACY_*` kinds), refuses anything a legal hold covers (the database enforces holds as well), and never deletes execution records,
+Evidence Bundles or the audit skeleton:
+
+```
+admin-cli.ts retention-report  --tenant default                         # dry run: what each policy would remove now; deletes nothing
+admin-cli.ts retention-activate --tenant default --policy SUPPORT_TEXT --days 365 --approval-ref <legal approval id>
+admin-cli.ts retention-apply   --tenant default --policy SUPPORT_TEXT   # refused without an ACTIVE activation
+admin-cli.ts retention-revoke  --tenant default --policy SUPPORT_TEXT
+admin-cli.ts legal-hold        --tenant default --scope RUN --value <run id> --reason-code DISPUTE_PENDING --approval-ref <ref>
+admin-cli.ts legal-hold-release --tenant default --hold <lgh_…> --approval-ref <ref>
+admin-cli.ts privacy-request   --tenant default --kind ACCESS|CORRECTION|ERASURE|OBJECTION|RESTRICTION --subject-kind WALLET --wallet-stdin
+admin-cli.ts privacy-decide    --tenant default --request <dsr_…> --decision APPROVED|REJECTED --code <CODE> --approval-ref <ref>
+admin-cli.ts privacy-access    --tenant default --request <dsr_…> --wallet-stdin [--include-text]
+admin-cli.ts privacy-erase     --tenant default --request <dsr_…> --wallet-stdin
+admin-cli.ts privacy-complete  --tenant default --request <dsr_…> --code CORRECTING_NOTE_ADDED   # correction / objection / restriction
+```
+
+A data-subject request stores the wallet only as a keyed fingerprint; the operator re-supplies the wallet for access or erasure and the CLI checks
+it against that fingerprint. **Access** lists the subject's execution runs (counts by flow), the Support texts about them, and the lookups that
+matched the wallet under every quarter key that still exists (and the v1 key) — quarters whose key was destroyed can no longer be matched, as
+intended. **Correction** is an added correcting note (notes are append-only) recorded with `privacy-complete`. **Erasure** deletes the subject's
+Support texts not under a hold — about their execution runs (including runs they purged), multi-step workflow runs and delegated executions,
+or written by them as an administrator; it keeps the audit skeleton, execution records and lookup fingerprints (those become unlinkable when their
+quarter key is destroyed) and says so in its result. A rejected request (for example `LEGAL_RETENTION_PURPOSE`) records its code. There is no
+"delete all history" control anywhere. The activation and approval references must name the approval they rest on (counsel or owner decision).
+Database backups (Neon point-in-time recovery) keep deleted text and destroyed keys until the backup window passes.
+
+Candidate lawful bases under LGPD art. 7 and GDPR art. 6 (LGPD art. 6 X and art. 18 are a principle and data-subject rights, not lawful bases),
+the balancing assessment and open legal questions are in [BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 §9](../builds/BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001.md)
+and [BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 §5](../builds/BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001.md). The public privacy notice now
+describes operator access to execution records, the audit and the proposed periods (`/privacy#support-audit`). Notes about a run the owner later
+purges are not removed by the purge (their text can be erased through a request). Lookups are audited atomically with their results (no audit
+row, no results — and no quarter key, no lookup); opening a diagnostics page is not audited separately. Wallet lookups also find runs the owner
+archived (archiving hides, it does not erase).
+
+**Nonce-conflict investigations (BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001).** When a run's observation ends in
+`*_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION`, the worker investigates read-only (the consuming transaction, a field-by-field comparison with
+the reviewed call, direct or delegated/EIP-7702 structure, the reviewed effect inside it, a bounded scan for the same approval under another
+nonce, and FloFi runs that recorded the same transaction by exact hash) and shows it on the run's Diagnose page under *Nonce-conflict
+investigation*. It never decides the outcome: the page always says *Unknown — this investigation never decides the transaction outcome*. Unchanged,
+complete evidence is re-checked from 15 minutes up to every 12 hours instead of every 10 minutes; after four unchanged checks and 24 hours the
+check stops with `NONCE_CONFLICT_STABLE_OPERATOR_REVIEW` (flagged for attention, outcome still unknown). *Resume transaction check* stays
+available for a read-only re-inspection when there is new evidence (the usual limit of 3 per 7 days applies); unchanged evidence stops again
+after one check. Explorer links on that page are navigation aids, not evidence.
 
 Counts combine mainnet, test networks and mocked runs; each incident shows its environment, and only mainnet runs (or runs whose provenance is
 not recognised) are marked as possibly involving real funds. A VIEWER can see transaction hashes in diagnostics; a public explorer reveals the

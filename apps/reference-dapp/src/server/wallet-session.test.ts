@@ -48,8 +48,12 @@ describe('BUILD-JOURNEY-001 wallet session', () => {
     const { challenge, message } = signIn(victim), signature = victim.signMessage(message);
     expect(() => verifyWalletSignIn(env, { challengeToken: challenge.token, domain: 'evil.example', uri: 'https://evil.example', address: victim.address, chainId: 84532,
       signature, now: later(5) })).toThrow('WALLET_SIGN_IN_ORIGIN_MISMATCH');
-    expect(() => verifyWalletSignIn(env, { challengeToken: challenge.token.slice(0, -2) + 'AA', ...origin, address: victim.address, chainId: 84532, signature,
-      now: later(5) })).toThrow('WALLET_SIGN_IN_CHALLENGE_INVALID');
+    // Tamper with the decoded MAC bytes: rewriting trailing base64url characters (e.g. `…AB` → `…AA`) can decode to the same bytes, because
+    // the last character of a 32-byte MAC carries non-canonical padding bits, which made this assertion fail about once in 1,000 runs.
+    const [challengeKind, challengeBody, challengeMac] = challenge.token.split('.'), tamperedMac = Buffer.from(challengeMac!, 'base64url');
+    tamperedMac[0] = tamperedMac[0]! ^ 0x01;
+    expect(() => verifyWalletSignIn(env, { challengeToken: `${challengeKind}.${challengeBody}.${tamperedMac.toString('base64url')}`, ...origin, address: victim.address,
+      chainId: 84532, signature, now: later(5) })).toThrow('WALLET_SIGN_IN_CHALLENGE_INVALID');
     // The signature covers the chain id: a different one rebuilds a different message.
     expect(() => verifyWalletSignIn(env, { challengeToken: challenge.token, ...origin, address: victim.address, chainId: 1, signature, now: later(5) }))
       .toThrow('WALLET_SIGNATURE_INVALID');

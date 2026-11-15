@@ -201,7 +201,7 @@ describe('search, notes and timeline', () => {
     expect(noteText('  RPC   outage resolved  ')).toBe('RPC outage resolved');
     for (const bad of ['', 'ab', 'x'.repeat(501), '<script>alert(1)</script>', 'line\u0007bell', 'bidi \u202e override', 'zero\u200bwidth', 'lone \ud800 surrogate', 42])
       expect(noteText(bad)).toBeNull();
-    const note = (kind: Note['kind']): Note => ({ eventId: '1', at: now.toISOString(), actor: 'adm_x', incidentId: 'run:a', kind, text: 'x' });
+    const note = (kind: Note['kind']): Note => ({ eventId: '1', at: now.toISOString(), actor: 'adm_x', incidentId: 'run:a', kind, text: 'x', textState: 'AVAILABLE' });
     expect([incidentStatus([]), incidentStatus([note('FINDING')]), incidentStatus([note('ESCALATION'), note('FINDING')]), incidentStatus([note('RESOLUTION')])])
       .toEqual(['NEW', 'INVESTIGATING', 'ESCALATED', 'RESOLUTION_NOTED']);
   });

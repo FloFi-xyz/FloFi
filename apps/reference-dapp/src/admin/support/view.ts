@@ -16,6 +16,7 @@ import { copilotIncidents, delegatedIncident, discoverIncidents, executionIncide
 import { investigationOf, latestNoteKinds, loadExecutionAttention, runAttention, type ExecutionAttention, type LatestNote, type Lifecycle } from './lifecycle.ts';
 import { loadRunFacts, recoveryHistory, recoverySummary, type HistoryEntry, type HistorySummary } from './recovery.ts';
 import { ELIGIBILITY_ORDER, type EligibilityState, type RunRecoveryFacts } from './registry.ts';
+import { listNonceConflicts, type NonceConflictRow } from '../../server/nonce-conflict-store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Host = { readonly db: Database; readonly tenantId: string };
@@ -114,7 +115,9 @@ export type StepRow = { readonly index: number; readonly state: string; readonly
 export type IncidentDetail =
   | { readonly type: 'run'; readonly incident: Incident | null; readonly run: ExecutionSnapshot; readonly facts: RunRecoveryFacts | null; readonly milestones: Milestone[];
       readonly journal: JournalRow[]; readonly journalTruncated: boolean; readonly attempts: AttemptRow[]; readonly attemptsTruncated: boolean; readonly tasks: TaskRow[];
-      readonly tasksTruncated: boolean; readonly history: HistoryEntry[] }
+      readonly tasksTruncated: boolean; readonly history: HistoryEntry[];
+      /** BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001: the worker's nonce-conflict investigations of this run; null when they could not be read. */
+      readonly nonceConflicts: NonceConflictRow[] | null }
   | { readonly type: 'work'; readonly incident: Incident | null; readonly task: TaskRow & { readonly runId: string | null; readonly superseded: boolean } }
   | { readonly type: 'workflow-run'; readonly incident: Incident | null; readonly row: WorkflowRunRow & { readonly createdAt: string }; readonly steps: StepRow[] }
   | { readonly type: 'delegated'; readonly incident: Incident | null; readonly row: DelegatedRow & { readonly createdAt: string }; readonly steps: StepRow[] }
@@ -130,12 +133,13 @@ export async function incidentDetail(env: Env, host: Host, now: Date, id: string
   if (prefix === 'run') {
     const [run] = await loadExecutions(db, tenantId, [key]);
     if (!run) return { type: 'not-found' };
-    const [facts, timeline, tasks, history, kinds] = await Promise.all([loadRunFacts(db, tenantId, key, now), loadTimelineFacts(host, key), runTasks(host, key),
-      recoveryHistory(host, now, { runId: key, days: 90, limit: 50 }), latestNoteKinds(db, tenantId, [id], now).catch(() => new Map<string, LatestNote>())]);
+    const [facts, timeline, tasks, history, kinds, nonceConflicts] = await Promise.all([loadRunFacts(db, tenantId, key, now), loadTimelineFacts(host, key), runTasks(host, key),
+      recoveryHistory(host, now, { runId: key, days: 90, limit: 50 }), latestNoteKinds(db, tenantId, [id], now).catch(() => new Map<string, LatestNote>()),
+      listNonceConflicts(db, tenantId, key).catch(() => null)]);
     const note = kinds.get(id), attention = runAttention(run, facts ?? undefined, investigationOf(note?.kind), now, note?.at ?? null);
     return { type: 'run', run, facts, incident: executionIncident(run, facts ?? undefined, now, attention), milestones: buildTimeline(run, timeline.journal, timeline.attempts),
       journal: timeline.journal, journalTruncated: timeline.journalTruncated, attempts: timeline.attempts, attemptsTruncated: timeline.attemptsTruncated,
-      tasks: tasks.tasks, tasksTruncated: tasks.truncated, history };
+      tasks: tasks.tasks, tasksTruncated: tasks.truncated, history, nonceConflicts };
   }
   if (prefix === 'work') {
     if (!/^[1-9][0-9]{0,17}$/.test(key)) return { type: 'not-found' };

@@ -317,6 +317,12 @@ No migration, no environment variable, no Railway or Vercel change. No productio
 
 ## 9. Privacy, retention and lawful bases (proposal for counsel — not implemented)
 
+> **Update (BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001).** Options 1 (separate free text) and 2 (period keys for lookup fingerprints), a
+> legal-hold mechanism and a CLI procedure for data-subject requests are now built (migration 0027). Destructive retention stays **inactive** until
+> an approved activation exists; the periods below remain proposals. Options 3 and 4 were not built. See
+> [BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001](BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001.md) and [ADMIN.md](../deploy/ADMIN.md). The text below is
+> kept as the original proposal.
+
 **Owner decision (2026-11-14).** Keep an auditable operational recovery history; do **not** keep identifiable personal data indefinitely;
 minimise personal data in notes and reasons; pseudonymise lookup identifiers; design for retention limits and data-subject rights; do not add a
 deletion mechanism that compromises financial audit integrity; document options before changing audit storage.

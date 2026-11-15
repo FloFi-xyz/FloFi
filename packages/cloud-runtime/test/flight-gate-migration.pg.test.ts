@@ -15,7 +15,8 @@ describe('Flight beta gate migrations 0025–0026 (disposable PostgreSQL)', () =
     }
     const t = await createTestDatabase({ migrated: false });
     try {
-      const migrations = await loadMigrations();
+      // Bounded to 0026: later migrations are certified and tested by their own suites.
+      const migrations = (await loadMigrations()).slice(0, 26);
       await migrate(t.db, migrations.slice(0, 24));
       await t.db.query(`INSERT INTO flight_invites (tenant_id, code, issuer) VALUES ('default', 'FLF-ABCD-EFGH', 'CREATOR')`);
       await t.db.query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice, joined_at)
