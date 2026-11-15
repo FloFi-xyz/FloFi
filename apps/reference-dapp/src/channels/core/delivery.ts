@@ -92,7 +92,7 @@ export const MAX_SEALED_BODY_BYTES = 12_288;
  * workflow visual is sealed with the body when it fits (BUILD-WORKFLOW-VISUAL-PRESENTATION-001).
  */
 export function sealReply(ctx: Pick<DeliveryContext, 'tenantId' | 'keys'>, outboxId: string, reply: ChannelReply, origin: string | null = null): Buffer {
-  const keep = origin !== null && reply.link !== null && workspaceLink(reply.link.url, origin);
+  const keep = reply.link !== null && (pageLink(reply.link.url) || (origin !== null && workspaceLink(reply.link.url, origin)));
   const { visual, ...rest } = reply, body = { ...rest, link: keep ? reply.link : null };
   const withVisual = visual ? JSON.stringify({ ...body, visual }) : null;
   const json = withVisual && Buffer.byteLength(withVisual) <= MAX_SEALED_BODY_BYTES ? withVisual : JSON.stringify(body);
@@ -101,8 +101,15 @@ export function sealReply(ctx: Pick<DeliveryContext, 'tenantId' | 'keys'>, outbo
 /** BUILD-AUTOMATION-001: the owner's own FloFi Automations workspace, optionally one occurrence (an opaque id) — never a secret. */
 export function workspaceLink(url: string, origin: string): boolean {
   const workspace = `${origin}/app/automations`, occurrence = `${workspace}?occurrence=`;
-  return url === workspace || (url.startsWith(occurrence) && /^occ_[a-z2-7]{26}$/.test(url.slice(occurrence.length)));
+  return url === workspace || (url.startsWith(occurrence) && /^occ_[a-z2-7]{26}$/.test(url.slice(occurrence.length))) || FLOFI_PAGES.some(page => url === `${origin}${page}`);
 }
+/**
+ * BUILD-FLOFI-UNIFIED-COPILOT-001: the closed set of secret-free FloFi pages a Copilot answer may point to ("where do I see my automations?"). A
+ * reply carries the relative path; delivery resolves it against its own trusted origin, so no other host or path can ever be sent.
+ */
+export const FLOFI_PAGES: readonly string[] = Object.freeze(['/app/automations', '/app/credentials', '/app/workflows', '/app/dashboard', '/app/agents', '/app/passkeys',
+  '/app/privacy', '/connections']);
+export const pageLink = (url: string): boolean => FLOFI_PAGES.includes(url);
 export const newOutboxId = () => channelRowId('cho');
 
 const UNSAFE = [/0x[0-9a-fA-F]{67,}/, /[A-Za-z0-9+/]{200,}={0,2}/, /flofi_(?:at|rt|code|csrf)_/, /\bBearer\s/i, /flofi_[a-z]{0,6}hs_/];
@@ -169,6 +176,7 @@ export async function deliverConversation(ctx: DeliveryContext, conversationId: 
       let reply: ChannelReply | null;
       try { reply = JSON.parse(open(ctx.keys.seal, o.bodySealed, bodyContext(ctx, o.outboxId)) ?? 'null') as ChannelReply | null; } catch { reply = null; }
       if (!reply) { await end('FAILED', 'BODY_UNREADABLE'); continue; }
+      if (reply.link && pageLink(reply.link.url)) reply = { ...reply, link: { ...reply.link, url: `${ctx.origin}${reply.link.url}` } };
       if (o.kind === 'APPROVAL') {
         const url = options.links?.get(o.outboxId);
         if (!url) { await lostLink(ctx, conversationId, o, language, now); await end('SKIPPED', 'APPROVAL_LINK_LOST'); continue; }

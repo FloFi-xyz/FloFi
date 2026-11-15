@@ -29,6 +29,7 @@ import { turnMetrics, type TurnMetrics } from '../../domain/intelligence/turn-me
 import { closeSegment, emptyConversation, failureText, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
   type CopilotLearning, type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type MemoryAction } from '../../domain/copilot-conversation';
 import { parseLexicon, type LexiconEntry } from '../../domain/copilot-lexicon';
+import { CONCEPT_IDS, CONCEPT_LEVELS, CONCEPT_PROTOCOLS } from '../../domain/intelligence/concepts';
 import { editorReducer, initialEditor } from '../../domain/editor';
 import type { Workflow } from '../../domain/initial-workflow';
 import { describeProposal } from '../../domain/proposal';
@@ -88,7 +89,9 @@ export type TurnInput = { readonly content: TurnContent; readonly state: Channel
   /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a text (and an untrusted intent) names; none = pinned assets only. */
   readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null;
   /** BUILD-CHAT-LEARNING-001: the sender's learning context; absent = learning off (the turn behaves exactly as before). */
-  readonly learning?: CopilotLearning | null };
+  readonly learning?: CopilotLearning | null;
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: which chat this is (a chat channel never applies a change; it links to the owner's FloFi page). */
+  readonly surface?: 'TELEGRAM' | 'WHATSAPP' };
 
 const BASE: Workflow = initialEditor().workflow;
 const CONTEXT = dappReviewContext();
@@ -148,6 +151,17 @@ function decodeCopilot(raw: unknown, env: CopilotEnvironment): CopilotConversati
   const conversation = structuredClone(c) as unknown as CopilotConversation;
   // BUILD-CHAT-LEARNING-001: this conversation's own aliases are re-validated (they are only ever a hint and a session meaning).
   if (conversation.aliases !== undefined) (conversation as { aliases?: readonly LexiconEntry[] }).aliases = parseLexicon(conversation.aliases, 'SESSION');
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: the explained concept is re-validated against the catalog; a channel never holds a save offer or saved recipients.
+  const concept = conversation.concept as { id?: unknown; level?: unknown; protocol?: unknown } | null | undefined;
+  if (concept !== undefined && concept !== null && !((CONCEPT_IDS as readonly unknown[]).includes(concept.id) && (CONCEPT_LEVELS as readonly unknown[]).includes(concept.level)
+    && (concept.protocol === null || (CONCEPT_PROTOCOLS as readonly unknown[]).includes(concept.protocol)))) (conversation as { concept?: unknown }).concept = null;
+  if (conversation.recipientOffer !== undefined) (conversation as { recipientOffer?: unknown }).recipientOffer = null;
+  const automation = conversation.automation as { input?: unknown; created?: unknown } | null | undefined;
+  // The stored input is FloFi's own sealed proposal; the engine validates it again before re-proposing it.
+  const input = automation?.input as { version?: unknown; kind?: unknown } | null | undefined;
+  if (automation && (typeof automation.created !== 'boolean' || (input !== null && (typeof input !== 'object' || input?.version !== 1
+    || !['SCHEDULED_DCA', 'PRICE_TRIGGER', 'DAILY_WATCH'].includes(String(input?.kind))))))
+    (conversation as { automation?: unknown }).automation = null;
   const snapshot = (conversation as unknown as { draft: { snapshot?: Record<string, unknown> } | null }).draft?.snapshot;
   if (snapshot) {
     snapshot.workflow = snapshot.workflow === BASE_MARK ? env.workflow : { stale: true };
@@ -155,12 +169,24 @@ function decodeCopilot(raw: unknown, env: CopilotEnvironment): CopilotConversati
   }
   return conversation;
 }
-function environment(pending: Command | null, learning: CopilotLearning | null = null): CopilotEnvironment {
+function environment(pending: Command | null, learning: CopilotLearning | null = null, surface: 'TELEGRAM' | 'WHATSAPP' = 'TELEGRAM'): CopilotEnvironment {
   const before = { workflow: BASE, error: null };
   const visible = pending ? { command: pending, diff: describeProposal(before, editorReducer(before, pending, CONTEXT), pending, CONTEXT) } : null;
+  // BUILD-FLOFI-UNIFIED-COPILOT-001: no account data reaches a channel conversation (no saved recipients, no save offers): a chat identity is not
+  // a verified FloFi account here. Concepts, platform guidance and automation behaviour are the same FloFi answers as on the web.
   return { workflow: BASE, context: CONTEXT, wallet: null, walletChainId: null, pending: visible, facts: buildCopilotFacts({ workflow: BASE, context: CONTEXT, pending: visible }),
-    ...learning ? { learning } : {} };
+    ...learning ? { learning } : {}, surface };
 }
+/** BUILD-FLOFI-UNIFIED-COPILOT-001: the FloFi pages a channel reply may link to (relative; delivery resolves them against its trusted origin). */
+const CHANNEL_PAGES = new Set(['/app/automations', '/app/credentials', '/app/workflows', '/app/dashboard', '/app/agents', '/app/passkeys', '/app/privacy', '/connections']);
+const HANDOFF = {
+  EN: { automationProposal: 'To create this automation, open Automations in the FloFi app: you review it there and create it with your connected wallet. Nothing is created from this chat, and creating it never authorizes spending.',
+    manage: 'Your saved automations are managed in the FloFi app, where your wallet proves they are yours: open Automations to see them, pause, resume, delete or change their schedule. Nothing is changed from this chat.',
+    automations: 'Automations' },
+  PT: { automationProposal: 'Para criar esta automação, abra Automações no app FloFi: lá você revisa e cria com a sua carteira conectada. Nada é criado por este chat, e criar nunca autoriza gastos.',
+    manage: 'Suas automações salvas são gerenciadas no app FloFi, onde sua carteira comprova que são suas: abra Automações para vê-las, pausar, retomar, excluir ou mudar o horário. Nada é alterado por este chat.',
+    automations: 'Automações' },
+} as const;
 /** The state with the conversation encoded and bounded: past the size bound the transcript restarts, never the pending proposal. */
 function withCopilot(state: ChannelState, conversation: CopilotConversation, env: CopilotEnvironment, patch: Partial<ChannelState> = {}): ChannelState {
   const next: ChannelState = { ...state, ...patch, copilot: encodeCopilot(conversation, env), language: conversation.language };
@@ -225,7 +251,7 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
       { command: next.at(-1) ?? null });
   }
   const learning = input.learning ?? null;
-  const pending = state.pending, env = environment(pending, learning), conversation = decodeCopilot(state.copilot, env);
+  const pending = state.pending, env = environment(pending, learning, input.surface ?? 'TELEGRAM'), conversation = decodeCopilot(state.copilot, env);
   const openQuestion = conversation.draft !== null || state.choices.length > 0;
   if (!openQuestion && AUTHORIZATION.test(normalized)) return decision('REPLY', 'AUTHORIZATION_REFUSED', greet([text(m.authority)]), greeted);
   // Catalog-network symbols resolve only in validated catalogs, registered for the networks this request names (where the deployment enables them).
@@ -257,11 +283,17 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
     const proposed = withCopilot({ ...greeted, language: next.language, requests }, next, environment(reply.command, learning), { pending: reply.command });
     return decision('PROPOSE', 'PROPOSED_INTERPRETED', [], proposed, { command: reply.command, aiInterpreted: true, notes: reply.notes, ...learned, metrics });
   }
-  // BUILD-CHAT-LEARNING-001: FloFi's memory offer is answered like its questions (buttons, or the number of the choice).
-  const choices = reply.kind === 'CLARIFICATION' || reply.kind === 'MEMORY' ? choicesOf(reply.options) : [];
-  const body = [reply.text, ...reply.notes].filter(Boolean).join('\n') || failureText('COPILOT_UNAVAILABLE', next.language);
+  // BUILD-CHAT-LEARNING-001: FloFi's memory offer is answered like its questions (buttons, or the number of the choice). BUILD-FLOFI-UNIFIED-COPILOT-001:
+  // an explanation's follow-ups ("Explica mais simples", "Me dá um exemplo") are offered the same way.
+  const choices = reply.kind === 'CLARIFICATION' || reply.kind === 'MEMORY' || reply.kind === 'ANSWER' ? choicesOf(reply.options) : [];
+  // Automations are created and changed only in the FloFi app (owner wallet proof); the chat says so and links there, never a dead-end button.
+  const handoff = HANDOFF[next.language === 'PT' ? 'PT' : 'EN'];
+  const shown = reply.kind === 'AUTOMATION_PROPOSAL' ? handoff.automationProposal : reply.kind === 'AUTOMATION_MANAGE' ? handoff.manage : reply.text;
+  const page = reply.kind === 'AUTOMATION_PROPOSAL' || reply.kind === 'AUTOMATION_MANAGE' ? { label: handoff.automations, url: '/app/automations' }
+    : reply.link && CHANNEL_PAGES.has(reply.link.path) ? { label: reply.link.label, url: reply.link.path } : null;
+  const body = [shown, ...reply.notes].filter(Boolean).join('\n') || failureText('COPILOT_UNAVAILABLE', next.language);
   const after = withCopilot({ ...greeted, language: next.language, choices, requests }, next, env);
-  const replies = [{ text: body, choices, link: null }];
+  const replies = [{ text: body, choices, link: page }];
   return decision('REPLY', `COPILOT_${reply.kind}`, state.greeted ? replies : [text(lm.firstContact(input.support, input.privacy)), ...replies], after,
     { ...reply.memory ? { memory: reply.memory } : {}, ...learned, metrics });
 }
