@@ -90,7 +90,8 @@ export async function readSupplyState(rpc: SupplyRpc, profileInput: AaveLendingP
         rpcUint(implementation) !== BigInt(profile.poolImplementation) || rpcHex(implementationCode).length < 4) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
     codes.push(provider,revision,oracle,oracleCode,implementation,implementationCode);
   } else if ('pinnedImplementation' in profile && profile.pinnedImplementation) {
-    // BUILD AAVE-V3-EXPANSION-001: the Base expansion reserves pin the address-book Pool implementation (ERC-1967 slot), the provider and the
+    // BUILD AAVE-V3-EXPANSION-001: the Base expansion reserves pin the address-book Pool implementation, or its recorded governance upgrade
+    // (AAVE_V3_POOL_UPGRADES), in the ERC-1967 slot, the provider and the
     // oracle at every read, so an upgrade between Simulate and the wallet request is never missed. (No revision is pinned: none was verified.)
     const [provider, oracle, oracleCode, implementation] = await Promise.all([call(profile.pool, supplyCall('ADDRESSES_PROVIDER()')),
       call(profile.provider, supplyCall('getPriceOracle()')), rpc('eth_getCode',[profile.oracle,tag]),

@@ -27,6 +27,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   PRIVY_NOT_AUTHORIZED: 'Sign-in is misconfigured on this deployment. Nothing was signed in.',
   PRIVY_RESPONSE_INVALID: 'The wallet provider sent an answer FloFi could not read. Nothing changed.',
   PRIVY_SIGN_IN_FAILED: 'Sign-in did not complete. Try again.',
+  SIGN_IN_PAGE_OUTDATED: 'FloFi was updated while you were signing in. Nothing was signed in. Sign in again.',
   PRIVY_LOGIN_METHOD_UNSUPPORTED: 'Sign in with Google, your email or a Web3 wallet.',
   PRIVY_SESSION_REQUIRED: 'Your wallet provider session has ended in this browser. Sign in again.',
   PRIVY_ACCOUNT_NOT_LINKED: 'Sign in again to add wallets.',
