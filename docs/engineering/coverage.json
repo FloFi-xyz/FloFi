@@ -1034,6 +1034,10 @@
       "path": "packages/cloud-runtime/test/http-drain.test.ts",
       "stage": "unit"
     },
+    "cloud-runtime.http-request-target": {
+      "path": "packages/cloud-runtime/test/http-request-target.test.ts",
+      "stage": "unit"
+    },
     "cloud-runtime.migration-manifest": {
       "path": "packages/cloud-runtime/test/migration-manifest.test.ts",
       "stage": "unit"
@@ -1532,6 +1536,7 @@
     "app.workflow-runs.execution-groups",
     "app.workflow-runs.received-amounts",
     "cloud-runtime.http-drain",
+    "cloud-runtime.http-request-target",
     "cloud-runtime.migration-manifest",
     "developer-sdk.webhooks",
     "reference-compiler.bridge",
@@ -3165,6 +3170,7 @@
         "cloud-runtime.dispatch.pg",
         "cloud-runtime.evidence-telemetry",
         "cloud-runtime.http-drain",
+        "cloud-runtime.http-request-target",
         "cloud-runtime.storage.pg",
         "cloud-runtime.tenancy.pg",
         "reference-compiler.review",

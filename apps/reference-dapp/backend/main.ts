@@ -142,15 +142,16 @@ async function main(): Promise<void> {
     server.listen(config.port, config.host, () => logger.info('api.listening', { port: config.port }));
     // Draining closes every connection after its answer (http.ts), so the server closes once in-flight requests end; the pool closes only after
     // every handler ended too (one whose caller disconnected keeps running). The 25 s cap stays below Railway's drainingSeconds (30) and is
-    // logged when reached: whatever was still running is cut (its claim and lease expire; nothing is lost).
+    // logged when reached: whatever was still running is cut and fails closed (its idempotency claim and run lease expire).
     let stopping = false;
     const shutdown = () => {
-      if (stopping) return;                     // SIGINT then SIGTERM: one drain, never a second close that ends the pool early
+      if (stopping) return;                     // a repeated SIGTERM or SIGINT: one drain, never a second close or the default kill
       stopping = true;
-      logger.info('api.stopping'); server.close(() => { server.drained().then(() => db.close()).finally(() => process.exit(0)); });
-      setTimeout(() => { logger.warn('api.stop_timeout'); process.exit(0); }, 25_000).unref();
+      logger.info('api.stopping');
+      setTimeout(() => { logger.warn('api.stop_timeout'); process.exit(0); }, 25_000).unref();      // armed first: the exit is always bounded
+      server.close(() => { server.drained().then(() => db.close()).finally(() => process.exit(0)); });
     };
-    process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
     return;
   }
   if (!evidenceStore) throw new Error('EVIDENCE_STORE_REQUIRED');

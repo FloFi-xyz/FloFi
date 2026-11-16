@@ -54,10 +54,12 @@ export function createHttpServer(options: HttpServerOptions): HttpServer {
   const limit = options.maxBodyBytes ?? 1_048_576, expected = options.authToken ? digest(options.authToken) : null;
   /**
    * BUILD-INFRA-API-FAILOVER-CERT-001: once `server.close()` was called (the API's SIGTERM drain) the server no longer listens, so new
-   * connections already reach another replica — but Node keeps serving NEW requests on connections kept alive, and a reverse proxy reuses
-   * its pooled ones. While draining, every answer (including one to a request that arrived before) closes its connection, and readiness
-   * reports false: no new work starts on the draining replica and the server closes once its last answer is written. `drained()` then
-   * covers handlers whose caller left before its answer, so the database is closed only after every handler ended.
+   * connections are refused — but Node keeps serving NEW requests on connections kept alive, and a reverse proxy reuses its pooled ones.
+   * While draining, every answer (including one to a request that arrived before) closes its connection, and readiness reports false, so a
+   * kept-alive connection carries no further request after its current answer. (Node's own limits remain: a connection opened before the
+   * drain that has not sent its request yet can still deliver one, a pipelined request behind a closing answer runs without its answer
+   * being delivered, and close() drops idle connections whose last answer is still being flushed.) `drained()` covers handlers whose caller
+   * left before its answer, so the database is closed only after every handler ended.
    */
   const reply = (response: ServerResponse, status: number, body: unknown, requestId: string) => send(response, status, body, requestId, !server.listening);
   let active = 0;
@@ -65,7 +67,11 @@ export function createHttpServer(options: HttpServerOptions): HttpServer {
   const drained = () => active === 0 ? Promise.resolve() : new Promise<void>(resolve => { waiting.push(resolve); });
   const settled = () => { if (--active === 0) for (const resolve of waiting.splice(0)) resolve(); };
   const server = createServer((request, response) => {
-    const requestId = randomUUID(), url = new URL(request.url ?? '/', 'http://internal'), method = request.method ?? 'GET';
+    const requestId = randomUUID(), method = request.method ?? 'GET';
+    let url: URL;
+    // A request-target the URL parser refuses (`//`, `//a:99999/`, `http://`) is answered here: thrown in this listener, it would end the
+    // process — one unauthenticated request taking a replica down (BUILD-INFRA-API-FAILOVER-CERT-001).
+    try { url = new URL(request.url ?? '/', 'http://internal'); } catch { reply(response, 400, { ok: false, code: 'REQUEST_INVALID' }, requestId); return; }
     if (method === 'GET' && url.pathname === '/healthz') { reply(response, 200, { ok: true }, requestId); return; }
     if (method === 'GET' && url.pathname === '/readyz') {
       if (!server.listening) { reply(response, 503, { ok: false }, requestId); return; }

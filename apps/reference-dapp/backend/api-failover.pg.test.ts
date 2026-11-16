@@ -7,15 +7,16 @@
  *
  *  1. Either replica serves any step of one owner run; the same idempotent request sent to both replicas at once executes once.
  *  2. SIGTERM on a replica with requests in flight: they complete, the draining replica takes no new work (its kept-alive connections are closed
- *     after their response, as a reverse proxy pools them; this client then retries on the other replica, as the BFF does), the other replica
- *     serves throughout, and the stopped one exits 0 long before the 25 s cap (Railway sends SIGKILL after drainingSeconds=30).
+ *     after their response, as a reverse proxy pools them; this client then sends the retry to the other replica itself — in production the
+ *     edge chooses), the other replica serves throughout, and the stopped one exits 0 long before the 25 s cap (SIGKILL at drainingSeconds=30).
  *  2b. A mutation whose caller already disconnected (its own deadline passed) still finishes before the stopping replica closes its database.
  *  3. A replica killed (SIGKILL) during `begin`'s chain read — before its first write — loses nothing: its idempotency claim (120 s) and run lease
  *     (30 s) block only that run until they expire; then the other replica completes the same request exactly once (fenced takeover).
  *  4. After every API replica restarted, the worker reconciles the owner-signed attempt and a fresh replica reports it RECONCILED: one transaction.
  *
- * The pool bound (replicas × DATABASE_POOL_MAX) is sampled from pg_stat_activity throughout. Not exercised here: Railway's edge proxy (routing, retries),
- * Flight/beta mode with wallet principals, and hosted-only guards (these processes are not "hosted").
+ * PostgreSQL connections are sampled from pg_stat_activity (an observation; the pool size itself is pg.Pool's `max`). Not exercised here:
+ * Railway's edge proxy (routing, retries), Flight/beta mode with wallet principals, hosted-only guards (these processes are not "hosted"), and
+ * the opt-in route families (automations, delegation), whose replica safety rests on the code audit. Needs 127.0.0.1:8553 to itself.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -37,15 +38,22 @@ const workflow: SemanticWorkflow = { schemaVersion: '1.0.0', workflowId: 'failov
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const dir = mkdtempSync(join(tmpdir(), 'flofi-api-failover-'));
 
-/** The MOCKED loopback chain the harness transport reads (fixed port 8553), with per-method latency to hold requests in flight. */
+/**
+ * The MOCKED loopback chain the harness transport reads (fixed port 8553, so this suite needs the port to itself), with per-method latency,
+ * and a gate that holds every `eth_getTransactionCount` until the test opens it: requests stay inside their handlers exactly until then.
+ */
 const chain = createRobinhoodTransferChain({ nonce: 40 });
 const delays = new Map<string, number>(), calls = new Map<string, number>();
+let gate: { readonly held: Promise<void>; readonly open: () => void } | null = null;
+const closeGate = () => { let open!: () => void; const held = new Promise<void>(resolve => { open = resolve; }); gate = { held, open }; };
+const openGate = () => { gate?.open(); gate = null; };
 let chainServer: Server;
 function serveChain(): Promise<void> {
   chainServer = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += String(chunk);
     const { id, method, params } = JSON.parse(body) as { id: unknown; method: string; params: unknown[] };
     calls.set(method, (calls.get(method) ?? 0) + 1);
+    if (method === 'eth_getTransactionCount' && gate) await gate.held;
     if (delays.get(method)) await sleep(delays.get(method)!);
     res.setHeader('content-type', 'application/json');
     try { res.end(JSON.stringify({ jsonrpc: '2.0', id, result: await chain.rpc(method, params) }, (_, v: unknown) => typeof v === 'bigint' ? v.toString() : v)); }
@@ -147,7 +155,7 @@ beforeAll(async () => {
   [a, b] = await Promise.all([startApi('a'), startApi('b')]);
 }, 120_000);
 // A failed scenario never leaves chain latency behind for the next one.
-afterEach(() => { delays.clear(); });
+afterEach(() => { delays.clear(); openGate(); });
 afterAll(async () => {
   try {
     for (const proc of procs) if (proc.child.exitCode === null && proc.child.signalCode === null) proc.child.kill('SIGKILL');
@@ -206,8 +214,8 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: two API replicas (main.ts api, plai
           await sleep(100);
         }
       })();
-      // Three owner requests are in flight on replica A (held by the chain read) when it receives SIGTERM.
-      delays.set('eth_getTransactionCount', 800);
+      // Three owner requests are in flight on replica A (held at the chain read) when it receives SIGTERM.
+      closeGate();
       const before = calls.get('eth_getTransactionCount') ?? 0;
       const inflightKeys = [key('inflight'), key('inflight'), key('inflight')];
       const inflight = inflightKeys.map(k => flow(a, 'simulate', [workflow, owner], k));
@@ -220,8 +228,17 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: two API replicas (main.ts api, plai
       }
       const stoppedAt = Date.now();
       a.child.kill('SIGTERM');
+      // Released only once A is draining: every answer below is written after server.close().
+      for (const deadline = Date.now() + 10_000; !events(a).includes('api.stopping');) {
+        if (Date.now() > deadline) throw new Error('A_NOT_STOPPING');
+        await sleep(10);
+      }
+      // A drains with its three requests held for 2 s; B keeps answering meanwhile.
+      const servedAtStop = served;
+      await sleep(2_000);
+      expect(served - servedAtStop).toBeGreaterThan(2);
+      openGate();
       const answered = await Promise.all(inflight);
-      delays.clear();
       // Every request that was in flight completes normally.
       for (const reply of answered) expect([reply.status, reply.body.ok]).toEqual([200, true]);
       // Draining: each kept-alive connection is closed after its answer, so the proxy's next request on its pooled connections cannot reach
@@ -246,7 +263,7 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: two API replicas (main.ts api, plai
         expect(await ok<TransferRecord>(flow(b, 'status', [reply.id]))).toMatchObject({ id: reply.id, verdict: reply.verdict });
       for (const k of [...inflightKeys, next]) expect(await claim(k)).toMatchObject({ state: 'COMPLETED' });
       expect(await liveLeases()).toEqual([]);
-      // Two replicas never held more PostgreSQL connections than replicas × DATABASE_POOL_MAX.
+      // An observation, not a proof of the bound (this load stays below each pool's size): connections stayed within replicas × DATABASE_POOL_MAX.
       expect(peakApiConnections).toBeGreaterThan(0);
       expect(peakApiConnections).toBeLessThanOrEqual(2 * POOL_MAX);
     } finally { polling = false; delays.clear(); }
@@ -254,24 +271,35 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: two API replicas (main.ts api, plai
 
   it('2b: a mutation whose caller already left finishes before the stopping replica closes its database', async () => {
     const a2 = await startApi('a2'), runsBefore = await count('execution_runs'), k = key('orphan');
-    // The BFF's own deadline passed: it disconnects while its simulate is held by the chain read. The handler keeps running.
-    delays.set('eth_getTransactionCount', 1_500);
+    // The BFF's own deadline passed: it disconnects while its simulate is held at the chain read. The handler keeps running.
+    closeGate();
+    const before = calls.get('eth_getTransactionCount') ?? 0;
     const text = JSON.stringify({ args: [workflow, owner] });
     const orphan = request({ host: '127.0.0.1', port: a2.port, method: 'POST', path: '/v1/flows/robinhood-transfer/simulate', agent: false,
       headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), 'idempotency-key': k } });
     orphan.on('error', () => undefined);
     orphan.end(text);
-    for (const deadline = Date.now() + 10_000; (await claim(k))?.state !== 'IN_PROGRESS';) {
+    for (const deadline = Date.now() + 10_000; (await claim(k))?.state !== 'IN_PROGRESS' || (calls.get('eth_getTransactionCount') ?? 0) === before;) {
       if (Date.now() > deadline) throw new Error('ORPHAN_NOT_STARTED');
       await sleep(25);
     }
     orphan.destroy();
-    await sleep(100);
     // No connection is left, so the server closes at once; the database must stay open until the orphaned handler ended.
     const stoppedAt = Date.now();
     a2.child.kill('SIGTERM');
+    for (const deadline = Date.now() + 10_000; !events(a2).includes('api.stopping');) {
+      if (Date.now() > deadline) throw new Error('A2_NOT_STOPPING');
+      await sleep(10);
+    }
+    a2.child.kill('SIGTERM');                                            // a repeated stop must not end the drain
+    await sleep(200);                                                    // the drain is under way; the handler is still held
+    expect([a2.child.exitCode, a2.child.signalCode]).toEqual([null, null]);
+    expect(await claim(k)).toMatchObject({ state: 'IN_PROGRESS' });
+    openGate();
     const exit = await a2.exited;
-    delays.clear();
+    // The handler ended (its span is logged when it answers) after the drain had begun.
+    const index = (match: (r: Record<string, unknown>) => boolean) => a2.records.findIndex(match);
+    expect(index(r => r.event === 'http.request' && r.http_route === 'flow')).toBeGreaterThan(index(r => r.event === 'api.stopping'));
     expect({ code: exit.code, signal: exit.signal }).toEqual({ code: 0, signal: null });
     expect(exit.at - stoppedAt).toBeLessThan(15_000);
     expect(events(a2)).not.toContain('api.stop_timeout');
