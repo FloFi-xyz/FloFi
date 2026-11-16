@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
 import { SECONDARY_WORKSPACES as items, secondaryWorkspaceRoute, type SecondaryWorkspace } from '../domain/secondary-workspaces';
 import { dashboardRoute } from '../lib/dashboard/routes';
@@ -63,6 +63,12 @@ const railListeners = new Set<() => void>();
 const subscribeRail = (listener: () => void) => { railListeners.add(listener); return () => { railListeners.delete(listener); }; };
 function setRailExpanded(value: boolean) { railExpanded = value; for (const listener of railListeners) listener(); }
 const useRailExpanded = () => useSyncExternalStore(subscribeRail, () => railExpanded, () => false);
+/**
+ * Where the pointer chose a rail item. The section it opens may remount the top bar under a pointer that has not moved, and the browser then
+ * reports a fresh pointer-over: no name is shown again until the pointer actually moves away from this point.
+ */
+let tipHold: { readonly x: number; readonly y: number } | null = null;
+const held = (x: number, y: number) => tipHold !== null && Math.abs(x - tipHold.x) < 3 && Math.abs(y - tipHold.y) < 3;
 
 /**
  * All navigation uses the persistent product shell (the desktop rail or the mobile overlay). BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar —
@@ -144,7 +150,15 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
     if (delay > 0) tipTimer.current = setTimeout(place, delay); else place();
   }
   const tipHandlers = {
-    onPointerOver: (event: ReactPointerEvent<HTMLElement>) => { setEngaged(true); if (event.pointerType === 'mouse') showTip(event.target, 300); },
+    onPointerOver: (event: ReactPointerEvent<HTMLElement>) => {
+      setEngaged(true);
+      if (event.pointerType !== 'mouse' || held(event.clientX, event.clientY)) return;
+      tipHold = null; showTip(event.target, 300);
+    },
+    onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.pointerType !== 'mouse' || !tipHold || held(event.clientX, event.clientY)) return;
+      tipHold = null; showTip(event.target, 300);
+    },
     onPointerOut: (event: ReactPointerEvent<HTMLElement>) => {
       const next = event.relatedTarget instanceof Element ? event.relatedTarget.closest('[data-navigation-tip]') : null;
       if (next !== (event.target instanceof Element ? event.target.closest('[data-navigation-tip]') : null)) hideTip();
@@ -156,6 +170,8 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
     },
     onBlur: hideTip,
     onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Escape') hideTip(); },
+    // Choosing an item hides its name (and cancels a pending one), as the Canvas rail does; moving the pointer again shows names again.
+    onClick: (event: ReactMouseEvent<HTMLElement>) => { hideTip(); if (event.detail > 0) tipHold = { x: event.clientX, y: event.clientY }; },
   };
 
   useEffect(() => {

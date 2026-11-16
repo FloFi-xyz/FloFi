@@ -236,6 +236,26 @@ test.describe('UX-01 collapsible navigation rail', () => {
     await expect(tooltip).toHaveAttribute('aria-hidden', 'true');
     await page.mouse.move(900, 600);
     await expect(tooltip).toHaveCount(0);
+    // Choosing an item hides its name, even with the pointer still on it (nothing covers the page it opens).
+    await panel.hover();
+    await expect(tooltip).toHaveText('Painel');
+    await panel.click();
+    await expect(page).toHaveURL('/app/dashboard');
+    await page.waitForTimeout(500);
+    await expect(tooltip).toHaveCount(0);
+    await page.goto('/app'); await expect(page.locator('.app-shell').first()).not.toHaveAttribute('inert', { timeout: 30_000 });
+    // Also when the section it opens rebuilds the header under a pointer that has not moved (Chat → Editor); moving shows names again.
+    const editor = navigationDrawer(page).getByRole('link', { name: 'Editor', exact: true });
+    await editor.hover(); await expect(tooltip).toHaveText('Editor');
+    await editor.click();
+    await expect(editorStep(page, 'Build')).toHaveAttribute('aria-current', 'step');
+    await page.waitForTimeout(600);
+    await expect(tooltip).toHaveCount(0);
+    const editorBox = await box(navigationDrawer(page).getByRole('link', { name: 'Editor', exact: true }));
+    await page.mouse.move(editorBox.x + editorBox.width / 2 + 6, editorBox.y + editorBox.height / 2 + 4);
+    await expect(tooltip).toHaveText('Editor');
+    await page.mouse.move(900, 600); await expect(tooltip).toHaveCount(0);
+    await navigationDrawer(page).getByRole('link', { name: 'Novo fluxo', exact: true }).click();
     // Status tags are part of the name.
     await navigationDrawer(page).getByRole('link', { name: /^Agentes/ }).hover();
     await expect(tooltip).toHaveText('Agentes · Em teste');
