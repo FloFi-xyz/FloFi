@@ -208,11 +208,19 @@ describe('product shell rendering', () => {
     expect(wallet.reset).not.toHaveBeenCalled();
   });
 
-  it('keeps Disconnect in Settings only on the compact signing surface (Log out lives in the drawer elsewhere)', () => {
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): since the approved-UX shell Settings hid its session action wherever a drawer existed, so
+  // Log out disappeared from under the gear. It is offered on every surface again (the drawer keeps its own entry to the same flow).
+  it('offers the session action in Settings on every surface (desktop drawer shell and the compact signing surface)', () => {
     renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
-    expect(vi.mocked(HeaderSettings).mock.calls.at(-1)?.[0]).toMatchObject({ showDisconnect: false });
+    expect(vi.mocked(HeaderSettings).mock.calls.at(-1)?.[0].showDisconnect).not.toBe(false);
     renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn(), compact: true }));
-    expect(vi.mocked(HeaderSettings).mock.calls.at(-1)?.[0]).toMatchObject({ showDisconnect: true });
+    expect(vi.mocked(HeaderSettings).mock.calls.at(-1)?.[0].showDisconnect).not.toBe(false);
+  });
+  it('the drawer New workflow starts a genuinely new workflow when the shell provides one (never only a section switch)', () => {
+    const setTab = vi.fn(), newWorkflow = vi.fn();
+    renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab, entry: true, newWorkflow }));
+    vi.mocked(NavigationDrawer).mock.calls.at(-1)![0].onChat!();
+    expect(newWorkflow).toHaveBeenCalledTimes(1); expect(setTab).not.toHaveBeenCalled();
   });
 
   it('renders the Chat and Editor labels from the Portuguese catalog', () => {

@@ -737,3 +737,125 @@ describe('BUILD-FLOFI-MAINNET-EXEC-002 WETH paid to Relay as native ETH (the own
     await expect(c.service.simulate(w, EVM_OWNER)).rejects.toThrow('RELAY_PAYMENT_MISMATCH');
   });
 });
+
+describe('BUILD-P0-MAINNET-EXECUTION-RELIABILITY: pre-send wallet nonce refusals (Incident A, D)', () => {
+  // Base USDC → Solana USDC (the incident route category); an ERC-20 input, so the first wallet request is the exact approval.
+  const evmBridge = () => workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: token('base'),
+    outputAsset: token('solana'), amount: '10000000', recipient: SOLANA_RECIPIENT });
+  const nonceRefusal = (attemptId: string, nonce: { reviewed: string; wallet: string | null; relation: 'WALLET_AHEAD' | 'WALLET_BEHIND' | 'INVALID'; reads: number }, code: string) =>
+    ({ invoked: false, attemptId, code, nonce, calls: [{ method: 'eth_accounts' }, { method: 'eth_chainId' }, { method: 'eth_getTransactionCount', result: nonce.wallet === null ? null : '0x' + BigInt(nonce.wallet).toString(16) }] });
+
+  it('records both sides of the disagreement, never as a submission, and the same run and workflow continue after a fresh Review (same reserved nonce)', async () => {
+    const c = await setup(), base = c.chainOf('base'), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    // The incident sequence: an Aave transaction confirmed just before (nonce 15) → FloFi reads 16 as next.
+    base.state.nonces.set(EVM_OWNER, 16); base.mine();
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.ecosystem !== 'EVM' || begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    expect(begun.attempt.nonce).toBe('16');
+    const refused = await c.service.walletFailure(run.id, nonceRefusal(begun.attempt.attemptId, { reviewed: '16', wallet: '17', relation: 'WALLET_AHEAD', reads: 1 }, 'UNIVERSAL_WALLET_NONCE_AHEAD'));
+    const cancelled = refused.attempts.at(-1)!;
+    expect(cancelled).toMatchObject({ state: 'CANCELLED', note: 'UNIVERSAL_WALLET_NONCE_AHEAD', transactionHash: null,
+      nonceCheck: { reviewed: '16', wallet: '17', walletRelation: 'WALLET_AHEAD', reads: 1, chainLatest: '16', chainPending: '16', chainRelation: 'UNCHANGED' } });
+    expect(refused).toMatchObject({ verdict: 'PENDING', phase: 'PREPARED', authorization: null, error: 'UNIVERSAL_WALLET_NONCE_AHEAD' });
+    // Nothing is observed for it (no hash, nothing in flight) and every consumer view says "not submitted", never "needs on-chain recovery".
+    expect(universalNeedsObservation(refused)).toBe(false);
+    expect(financialRunStatus(refused)).not.toMatch(/UNKNOWN|PENDING|SUBMITTING/);
+    const { progress } = financialView(refused);
+    const op = progress.steps.flatMap(s => s.operations).find(o => o.id === 'APPROVAL')!;
+    expect(op).toMatchObject({ state: 'not-submitted', hash: null, reason: 'UNIVERSAL_WALLET_NONCE_AHEAD' });
+    const { projectExecutionResult, refreshableAfterNothingSent } = await import('../../domain/execution-result');
+    expect(projectExecutionResult(progress)).toMatchObject({ label: 'Transaction not submitted',
+      message: 'Your wallet shows a pending transaction that FloFi does not see on the network yet, so nothing was sent by FloFi. Check pending transactions in your wallet, then refresh and review this step again.' });
+    expect(refreshableAfterNothingSent(progress)).toBe(true);
+    // The log round-trips (the new evidence passes the store validator) and the run is re-reviewable in place.
+    await roundTripLog(c, run.id);
+    await c.service.review(run.id, refused.review.commitment, w);
+    const again = await c.service.begin(run.id, EVM_OWNER, w); if (again.ecosystem !== 'EVM' || again.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    // The nonce reservation was released with the refusal: the second attempt reserves the same, still-next nonce — never skips ahead.
+    expect(again.attempt).toMatchObject({ step: 'APPROVAL', nonce: '16', state: 'PREPARED' });
+    await c.service.handoff(run.id);
+    const { hash } = base.wallet.send(again.transaction);
+    await c.service.report(run.id, { kind: 'HASH', hash });
+    expect((await c.service.observe(run.id)).attempts.at(-1)).toMatchObject({ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash });
+  });
+
+  it('a slot really consumed by another transaction is classified from the chain itself, not from the wallet', async () => {
+    const c = await setup(), base = c.chainOf('base'), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    const reviewedNonce = Number(begun.attempt.nonce);
+    base.state.nonces.set(EVM_OWNER, reviewedNonce + 1); base.state.pending.delete(EVM_OWNER); base.mine();
+    const refused = await c.service.walletFailure(run.id, nonceRefusal(begun.attempt.attemptId, { reviewed: begun.attempt.nonce, wallet: String(reviewedNonce + 1), relation: 'WALLET_AHEAD', reads: 1 }, 'UNIVERSAL_WALLET_NONCE_AHEAD'));
+    expect((refused.attempts.at(-1) as { nonceCheck?: unknown }).nonceCheck).toMatchObject({ chainRelation: 'CONSUMED', chainLatest: String(reviewedNonce + 1) });
+    // A fresh preparation reads the new next nonce; it never reuses the consumed one.
+    await c.service.review(run.id, refused.review.commitment, w);
+    const again = await c.service.begin(run.id, EVM_OWNER, w); if (again.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    expect(again.attempt.nonce).toBe(String(reviewedNonce + 1));
+  });
+
+  it('drops browser evidence that is not for the attempt’s own nonce or not a canonical count', async () => {
+    const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    const forged = await c.service.walletFailure(run.id, { ...nonceRefusal(begun.attempt.attemptId, { reviewed: '999', wallet: '1000', relation: 'WALLET_AHEAD', reads: 7 }, 'UNIVERSAL_WALLET_NONCE_MISMATCH') });
+    expect((forged.attempts.at(-1) as { nonceCheck?: unknown }).nonceCheck).toMatchObject({ reviewed: begun.attempt.nonce, wallet: null, walletRelation: 'INVALID', reads: 1 });
+  });
+
+  it('a proven wallet refusal is named by the server from its refusal code, never by the client label (security review)', async () => {
+    const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id);
+    const refused = await c.service.walletFailure(run.id, { invoked: true, attemptId: begun.attempt.attemptId, rejectionCode: 4001, code: 'UNIVERSAL_WALLET_NONCE_AHEAD',
+      calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    expect(refused.attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNIVERSAL_REJECTED' });
+    expect((refused.attempts.at(-1) as { nonceCheck?: unknown }).nonceCheck).toBeUndefined();
+  });
+  it('a submitted request can never be recorded as a pre-send nonce refusal', async () => {
+    const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id);
+    await expect(c.service.walletFailure(run.id, nonceRefusal(begun.attempt.attemptId, { reviewed: begun.attempt.nonce, wallet: begun.attempt.nonce, relation: 'INVALID', reads: 1 },
+      'UNIVERSAL_WALLET_NONCE_MISMATCH'))).rejects.toThrow('UNIVERSAL_DIAGNOSTIC_NOT_PRE_SUBMISSION');
+  });
+
+  it('repeated pre-send refusals stop cleanly at the run’s attempt limit (a fresh simulation starts a new run)', async () => {
+    const c = await setup(), w = evmBridge();
+    let run = await reviewed(c, w, EVM_OWNER);
+    for (let i = 0; i < 16; i++) {
+      const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+      run = await c.service.walletFailure(run.id, nonceRefusal(begun.attempt.attemptId, { reviewed: begun.attempt.nonce, wallet: '0', relation: 'WALLET_BEHIND', reads: 3 }, 'UNIVERSAL_WALLET_NONCE_BEHIND'));
+      run = await c.service.review(run.id, run.review.commitment, w);
+    }
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow('UNIVERSAL_ATTEMPT_LIMIT_SIMULATE_AGAIN');
+    expect((await roundTripLog(c, run.id)).attempts).toHaveLength(16);
+    const fresh = await c.service.simulate(w, EVM_OWNER);
+    expect(fresh.id).not.toBe(run.id);
+  }, 60_000);
+
+  it('Base USDC → Solana USDC records whether the explicit recipient already holds a USDC token account (Incident C); EVM deliveries record none', async () => {
+    const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: token('base'),
+      outputAsset: token('solana'), amount: '1000000', recipient: SOLANA_RECIPIENT });
+    const missing = await c.service.simulate(w, EVM_OWNER);
+    expect(missing.review.destination.recipientTokenAccount).toBe('MISSING');
+    c.solana.setToken(SOLANA_RECIPIENT, USDC.solana, 1n);
+    const exists = await c.service.simulate(w, EVM_OWNER);
+    expect(exists.review.destination.recipientTokenAccount).toBe('EXISTS');
+    expect(exists.review.recipient).toBe(SOLANA_RECIPIENT);
+    const toEvm = await c.service.simulate(workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS['arbitrum-one'].chain, inputAsset: token('base'),
+      outputAsset: token('arbitrum-one'), amount: '1000000', recipient: 'CONNECTED_OWNER' }), EVM_OWNER);
+    expect(toEvm.review.destination.recipientTokenAccount).toBeUndefined();
+  });
+  it('Base USDC → Solana USDC with an explicit recipient: the approval refusal keeps the explicit Solana recipient and Base-native gas', async () => {
+    const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: token('base'),
+      outputAsset: token('solana'), amount: '1000000', recipient: SOLANA_RECIPIENT });
+    const run = await reviewed(c, w, EVM_OWNER);
+    expect(run.review).toMatchObject({ recipient: SOLANA_RECIPIENT, recipientKind: 'EXPLICIT' });
+    expect(run.review.feePolicy.networkFeeSymbol).toBe('ETH');
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    expect(begun.attempt.step).toBe('APPROVAL');
+    const refused = await c.service.walletFailure(run.id, nonceRefusal(begun.attempt.attemptId, { reviewed: begun.attempt.nonce, wallet: '0', relation: 'WALLET_BEHIND', reads: 3 }, 'UNIVERSAL_WALLET_NONCE_BEHIND'));
+    expect(refused.review).toMatchObject({ recipient: SOLANA_RECIPIENT, recipientKind: 'EXPLICIT' });
+    expect(refused.review.route.recipient).toBe(SOLANA_RECIPIENT);
+    // A refresh (re-quote in place) keeps the reviewed explicit recipient; it is never replaced by the connected EVM wallet.
+    c.tick(121_000); for (const m of Object.values(c.evm)) m.mine();
+    const fresh = await c.service.refresh(run.id);
+    expect(fresh.review).toMatchObject({ recipient: SOLANA_RECIPIENT, recipientKind: 'EXPLICIT' });
+  });
+});

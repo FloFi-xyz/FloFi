@@ -1429,6 +1429,18 @@
     "app.components.robinhood-transfer-panel": {
       "path": "apps/reference-dapp/src/components/robinhood-transfer-panel.test.tsx",
       "stage": "unit"
+    },
+    "app.domain.bridge-costs": {
+      "path": "apps/reference-dapp/src/domain/bridge-costs.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.wallet-nonce": {
+      "path": "apps/reference-dapp/src/domain/wallet-nonce.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.new-workflow-isolation": {
+      "path": "apps/reference-dapp/src/domain/new-workflow-isolation.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -3968,7 +3980,8 @@
         "apps/reference-dapp/src/domain/bridge-swap-authoring.ts",
         "apps/reference-dapp/src/domain/destination-wallet.ts",
         "apps/reference-dapp/src/domain/router-authoring.ts",
-        "apps/reference-dapp/src/domain/universal-bridge-authoring.ts"
+        "apps/reference-dapp/src/domain/universal-bridge-authoring.ts",
+        "apps/reference-dapp/src/domain/bridge-costs.ts"
       ],
       "suites": [
         "app.domain.bridge-requote",
@@ -3977,7 +3990,8 @@
         "app.server.universal-router.service",
         "reference-compiler.bridge",
         "reference-executor.bridge",
-        "reference-reconciler.bridge"
+        "reference-reconciler.bridge",
+        "app.domain.bridge-costs"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -4253,7 +4267,8 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "apps/reference-dapp/src/domain/mode-a.ts"
+        "apps/reference-dapp/src/domain/mode-a.ts",
+        "apps/reference-dapp/src/domain/wallet-nonce.ts"
       ],
       "suites": [
         "app.state.wallet-review-continuity",
@@ -4262,7 +4277,8 @@
         "app.wallet.solana-wallet",
         "reference-executor.recovery",
         "reference-executor.restart.fork",
-        "reference-reconciler.evidence"
+        "reference-reconciler.evidence",
+        "app.domain.wallet-nonce"
       ],
       "gaps": [
         "Injected test wallets do not certify browser extension hardware/user ceremonies or real signatures; production delegated signing is unavailable.",
@@ -4368,7 +4384,8 @@
         "app.domain.editor-run",
         "app.domain.flight-refusal",
         "app.domain.p0-swap-bridge-connections",
-        "app.domain.gas-payment"
+        "app.domain.gas-payment",
+        "app.domain.new-workflow-isolation"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4648,7 +4665,8 @@
         "apps/reference-dapp/src/i18n/pt-gas-circle.ts",
         "apps/reference-dapp/src/i18n/pt-gas-kora.ts",
         "apps/reference-dapp/src/i18n/pt-gas-zerox.ts",
-        "apps/reference-dapp/src/i18n/pt-smart-account-transfer.ts"
+        "apps/reference-dapp/src/i18n/pt-smart-account-transfer.ts",
+        "apps/reference-dapp/src/i18n/pt-execution-reliability.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -6533,7 +6551,8 @@
         "apps/reference-dapp/src/server/universal-router/service.ts",
         "apps/reference-dapp/src/server/universal-router/solana-chain.ts",
         "apps/reference-dapp/src/server/universal-router/types.ts",
-        "apps/reference-dapp/src/server/universal-router/wrapped-native.ts"
+        "apps/reference-dapp/src/server/universal-router/wrapped-native.ts",
+        "apps/reference-dapp/src/server/universal-router/nonce-check.ts"
       ],
       "suites": [
         "app.server.router-service",

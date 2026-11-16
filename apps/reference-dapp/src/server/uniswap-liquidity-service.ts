@@ -855,7 +855,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         error.code === diagnostic.rejectionCode && REFUSALS.includes(error.code);
       if ((diagnostic.invoked || send) && !refused || !attempt || attempt.transactionHash ||
           !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state)) fail('UNISWAP_DIAGNOSTIC_NOT_PRE_SUBMISSION');
-      return save(replaceAttempt({ ...record, authorization: null, error: diagnostic.code }, { ...attempt, state: 'CANCELLED', note: diagnostic.code }));
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (security review): after an unknown wallet outcome only a proven refusal concludes the attempt, and a
+      // refusal is named by the server, never by a client label.
+      if (!diagnostic.invoked && attempt.state === 'SUBMISSION_RESULT_UNKNOWN') fail('UNISWAP_DIAGNOSTIC_NOT_PRE_SUBMISSION');
+      const note = refused ? 'UNISWAP_REJECTED' : diagnostic.code;
+      return save(replaceAttempt({ ...record, authorization: null, error: note }, { ...attempt, state: 'CANCELLED', note }));
     }); },
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */
     async observe(id: string): Promise<UniswapLiquidityRecord> { return locked(id, async () => {

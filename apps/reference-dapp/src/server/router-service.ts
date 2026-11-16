@@ -28,6 +28,7 @@ import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-exe
 import { verifyOwnerSubmission, type Rpc } from './public-testnet-service.ts';
 import { acrossCallPlan, depositMatches as acrossDepositMatches, fillMatches, refundMatches, routeMatchesIntent, routeMatchesPair } from './across-route.ts';
 import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fees.ts';
+import { refusalNote } from '../domain/wallet-nonce.ts';
 import type { RouteProvider, RouteRequest, TransferHint } from './router-providers.ts';
 
 export const ROUTER_RUN_ID = /^xroute-[a-f0-9]{32}$/;
@@ -1033,7 +1034,12 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         REFUSALS.includes(error.code);
       if ((diagnostic.invoked || send) && !refused || !attempt || attempt.transactionHash || !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state))
         fail('ROUTER_DIAGNOSTIC_NOT_PRE_SUBMISSION');
-      return save(replaceAttempt(deauthorized(record, diagnostic.code), { ...attempt, state: 'CANCELLED', note: diagnostic.code }));
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (security review): SUBMISSION_RESULT_UNKNOWN is reached only after the wallet was asked, so only a
+      // proven wallet refusal may conclude it; a "never invoked" report there is refused (it would read as not submitted and re-offer the step).
+      if (!diagnostic.invoked && attempt.state === 'SUBMISSION_RESULT_UNKNOWN') fail('ROUTER_DIAGNOSTIC_NOT_PRE_SUBMISSION');
+      // A wallet refusal is named by the server from its refusal code, never by a client label (which could claim a pre-wallet reason).
+      const note = refused ? refusalNote('ROUTER', error!.code as number) : diagnostic.code;
+      return save(replaceAttempt(deauthorized(record, note), { ...attempt, state: 'CANCELLED', note }));
     }); },
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */
     async observe(id: string): Promise<RouterRecord> { return locked(id, async () => {

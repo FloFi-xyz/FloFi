@@ -11,6 +11,7 @@ import { uniswapLiquidityBegin, uniswapLiquidityHandoff, uniswapLiquidityInvalid
   uniswapLiquidityInfo, catalogLiquidityInfo, catalogLiquidityMode } from '../app/uniswap-liquidity-action';
 import { CATALOG_NETWORK_IDENTITIES, networkIdentity } from '../domain/network-registry';
 import type { UniswapLiquidityPrice, UniswapLiquidityRecord, UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
+import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 
 const KEY = 'flofi:uniswap-liquidity:run';
 const REFUSALS = [4001, 4100, 4200];
@@ -19,11 +20,6 @@ type Store = { available: boolean; executionEnabled: boolean; record: UniswapLiq
   simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>;
   switchNetwork(): Promise<void>; fetchPrice(chain?: 'eip155:84532' | 'eip155:11155111'): Promise<UniswapLiquidityPrice | null> };
 const Context = createContext<Store | null>(null);
-function quantity(value: unknown): bigint {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return BigInt(value);
-  if (typeof value === 'string' && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(value)) return BigInt(value);
-  throw new Error('UNISWAP_WALLET_NONCE_RESPONSE_INVALID');
-}
 function errorValue(value: unknown): unknown {
   if (!value || typeof value !== 'object') return typeof value === 'string' ? value.slice(0, 512) : value ?? null;
   const v = value as { code?: unknown; message?: unknown };
@@ -142,7 +138,18 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       if (injected() !== provider) throw new Error('UNISWAP_WALLET_PROVIDER_CHANGED');
       if (!Array.isArray(accounts) || typeof accounts[0] !== 'string' || accounts[0].toLowerCase() !== record.owner) throw new Error('UNISWAP_WRONG_OWNER');
       if (typeof chain !== 'string' || chain.toLowerCase() !== reviewedChain) throw new Error('UNISWAP_WRONG_CHAIN');
-      if (nonce !== null && quantity(await request('eth_getTransactionCount', [record.owner, 'pending'])) !== BigInt(nonce)) throw new Error('UNISWAP_WALLET_NONCE_MISMATCH');
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: the wallet's pending count must equal the reviewed nonce; a lagging wallet view is re-read (bounded).
+      if (nonce !== null) {
+        const evidence = await observeWalletNonce({ reviewed: BigInt(nonce), read: () => request('eth_getTransactionCount', [record.owner, 'pending']), stillCurrent: async () => {
+          if (latest.current !== editing) throw new Error('UNISWAP_SEMANTIC_REVISION_CHANGED');
+          if (injected() !== provider) throw new Error('UNISWAP_WALLET_PROVIDER_CHANGED');
+          // The owner and network are read again from the wallet before every re-read (wallet-execution review).
+          const accounts = await request('eth_accounts'), chain = await request('eth_chainId');
+          if (!Array.isArray(accounts) || typeof accounts[0] !== 'string' || accounts[0].toLowerCase() !== record.owner) throw new Error('UNISWAP_WRONG_OWNER');
+          if (typeof chain !== 'string' || chain.toLowerCase() !== reviewedChain) throw new Error('UNISWAP_WRONG_CHAIN');
+        } });
+        const refusal = walletNonceRefusal('UNISWAP', evidence, 'RESPONSE_INVALID'); if (refusal) throw new Error(refusal);
+      }
     };
     let prepared = false;
     try {

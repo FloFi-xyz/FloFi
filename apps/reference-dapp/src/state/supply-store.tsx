@@ -9,6 +9,7 @@ import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { supplySimulate, supplyReview, supplyBegin, supplyReport, supplyObserve, supplyStatus, supplyInvalidate, supplyRecoverReview, supplyWalletFailure, supplyWalletTrace, supplyHandoff } from '../app/supply-action';
 import type { SupplyRecord, SupplyWalletDiagnostic } from '../server/supply-service';
 import { isPristineDraft } from '../domain/initial-workflow';
+import { observeWalletNonce, reviewNonceRefusal } from '../domain/wallet-nonce';
 function walletValue(value:unknown,depth=0,seen=new Set<object>()):unknown{
   if(value===undefined)return null;
   if(value===null||typeof value==='boolean'||typeof value==='number')return value;
@@ -108,7 +109,15 @@ export function SupplyProvider({children}:{children:ReactNode}){
       if(injected()!==provider)throw new Error('SUPPLY_WALLET_PROVIDER_CHANGED');
       if(!Array.isArray(accounts)||typeof accounts[0]!=='string'||accounts[0].toLowerCase()!==session.account)throw new Error('SUPPLY_WRONG_ACCOUNT');
       if(typeof chain!=='string'||chain.toLowerCase()!==reviewedChain)throw new Error('SUPPLY_WRONG_CHAIN');
-      if(supplyWalletNonce(pendingNonce)!==BigInt(nonce))throw new Error('SUPPLY_WALLET_NONCE_MISMATCH');
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: the classified pre-send check (domain/wallet-nonce.ts); a lagging wallet view is re-read (bounded).
+      let first:unknown='0x'+supplyWalletNonce(pendingNonce).toString(16);
+      const evidence=await observeWalletNonce({reviewed:BigInt(nonce),read:async()=>{if(first!==undefined){const value=first;first=undefined;return value;}return request('eth_getTransactionCount',[session.account,'pending']);},
+        stillCurrent:async()=>{if(JSON.stringify(latest.current)!==JSON.stringify(snapshot))throw new Error('SUPPLY_SEMANTIC_REVISION_CHANGED');if(injected()!==provider)throw new Error('SUPPLY_WALLET_PROVIDER_CHANGED');
+          const again=await request('eth_accounts'),chainAgain=await request('eth_chainId');
+          if(!Array.isArray(again)||typeof again[0]!=='string'||again[0].toLowerCase()!==session.account)throw new Error('SUPPLY_WRONG_ACCOUNT');
+          if(typeof chainAgain!=='string'||chainAgain.toLowerCase()!==reviewedChain)throw new Error('SUPPLY_WRONG_CHAIN');}});
+      // Compared with the Review's nonce: a higher wallet count is worded neutrally (the Review may simply be stale).
+      const refusal=reviewNonceRefusal('SUPPLY',evidence);if(refusal)throw new Error(refusal);
     };
     try{
       const expectedNonce=(BigInt(record.review.state.nonce)+(record.attempts.some(a=>a.step==='APPROVAL'&&a.reconciled)?1n:0n)).toString();

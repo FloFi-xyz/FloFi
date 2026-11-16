@@ -14,7 +14,9 @@ import { ExecutionTimeline } from './execution-timeline';
 import { NetworkBrandIcon } from './brand-icon';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
-import { isFinalExecutionResult } from '../domain/execution-result';
+import { isFinalExecutionResult, refreshableAfterNothingSent } from '../domain/execution-result';
+
+const REFRESHABLE_SOURCES: readonly string[] = ['universal', 'router'];
 import { STEPS_COMPLETED, type WorkflowProgressView } from '../domain/workflow-progress';
 import { SequenceContinuationPanel, WorkflowProgressList, type SequenceContinuation } from './workflow-progress-panel';
 
@@ -29,6 +31,7 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   startNewWorkflow?: () => void;
   /** BUILD0-UX-001: opens the Dashboard, where the run's full record is kept. */
   openDashboard?: () => void;
+
   /**
    * BUILD-FLOFI-UNIVERSAL-SINGLE-AUTH-MAINNET-001: "Run workflow" — a multi-step Canvas workflow starts the shared workflow run on `/approve`
    * (shown under the status, beside the step-by-step path). It never asks the wallet for anything here.
@@ -85,10 +88,13 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const progressList = progress && progress.total > 1 && !continuation && !reviewBlock ? <WorkflowProgressList progress={progress} heading={false}/> : null;
   // The actions only this summary offers: connect the execution wallet, start a new workflow (and navigation back to Build/Simulate).
   const connectWallet = execution.connect && authorization.accepted && !wallet.changed && !execution.started;
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a bridge request refused before the wallet continues with the timeline's own Refresh & review (the Canvas
+  // action, `canvas-lifecycle.ts`); starting a new workflow is then the secondary choice, never the only one.
+  const refreshable = Boolean(result && REFRESHABLE_SOURCES.includes(props.source.kind) && refreshableAfterNothingSent(live));
   const startNew = Boolean(result && props.startNewWorkflow && isFinalExecutionResult(live));
   const stageActions = <>
     {connectWallet && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
-    {startNew && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
+    {startNew && <button type="button" className={`${refreshable ? 'secondary' : 'primary'} execute-new-workflow`} onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
   </>;
   const tone = verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked'
     : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked';

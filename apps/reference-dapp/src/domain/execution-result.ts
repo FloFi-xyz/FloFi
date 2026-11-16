@@ -2,6 +2,7 @@
 /** Result presentation only. Completion and uncertainty come from the existing lifecycle. */
 import type { ExecutionLifecycle } from './execution-lifecycle';
 import { shellChainLabel } from './product-shell';
+import { walletNonceMessage } from './wallet-nonce';
 
 export type ExecutionResult = {
   label: string;
@@ -38,11 +39,13 @@ export function projectExecutionResult(progress: ExecutionLifecycle | null | und
   // Every incomplete request ended before submission (recorded as not submitted): nothing of this run reached the network.
   const nothingSent = !(completed > 0 || confirmedActions || confirmedApproval) && incomplete.length > 0 && incomplete.every(operation => !operation.hash && operation.state === 'not-submitted');
   const approvalOnly = confirmedApproval && !confirmedActions && incomplete.length > 0 && incomplete.every(operation => !operation.hash && ['not-submitted', 'failed', 'cancelled'].includes(operation.state));
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a request FloFi stopped before the wallet because the wallet's transaction number disagreed says so.
+  const nonceReason = incomplete.map(operation => operation.state === 'not-submitted' && !operation.hash && operation.reason ? walletNonceMessage(operation.reason) : null).find(Boolean) ?? null;
   return {
     label: completed > 0 || confirmedActions || confirmedApproval ? 'Execution partially completed' : declined || nothingSent ? 'Transaction not submitted' : definitiveFailure ? 'Execution failed' : 'Execution needs attention',
     message: approvalOnly ? 'An earlier approval is confirmed. The remaining request did not complete. Network costs and token allowance may remain.'
       : declined ? 'Wallet confirmation was declined. Earlier confirmed requests remain recorded.' : definitiveFailure ? 'A recorded action failed. Earlier confirmed actions remain recorded.'
-      : nothingSent ? 'No transaction from this run was sent, so nothing reached the network. The step result explains why.' : 'The run has an incomplete action. Any confirmed actions remain recorded.',
+      : nothingSent ? nonceReason ?? 'No transaction from this run was sent, so nothing reached the network. The step result explains why.' : 'The run has an incomplete action. Any confirmed actions remain recorded.',
     tone: 'attention', completed, total, countLabel, networks,
   };
 }
@@ -75,5 +78,24 @@ export function nothingSubmitted(progress: ExecutionLifecycle | null | undefined
  */
 export function currentExecution(progress: ExecutionLifecycle | null | undefined): ExecutionLifecycle | null {
   if (!progress?.started) return null;
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): a run of another workflow identity never describes an explicitly created new Canvas, even
+  // while it is unresolved; it keeps being observed and stays in the Dashboard and History.
+  if (progress.detached) return null;
   return progress.matchesWorkflow === false && !progress.planUnavailable && isFinalExecutionResult(progress) ? null : progress;
+}
+
+/**
+ * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident D): a final run whose remaining wallet request was refused before submission (recorded as not
+ * submitted: no hash, a pre-wallet refusal), with at most confirmed token approvals before it (a landed unwrap is excluded: its in-place re-quote needs the reconciled
+ * unwrap, which this projection cannot see, and a fresh run would quote from WETH the owner no longer holds). Nothing of the
+ * refused request reached the network, so the SAME workflow can be prepared and reviewed again in place — a bridge whose approval landed is
+ * re-quoted on its own run, otherwise a fresh simulation starts — without rebuilding the Canvas. Confirmed requests stay recorded and are never
+ * sent again. An unresolved, uncertain or submitted request never qualifies.
+ */
+export function refreshableAfterNothingSent(progress: ExecutionLifecycle | null | undefined): boolean {
+  if (!progress || !isFinalExecutionResult(progress) || progress.state !== 'attention') return false;
+  const touched = progress.steps.flatMap(step => step.operations).filter(operation => operation.state !== 'waiting');
+  const refused = touched.filter(operation => operation.state === 'not-submitted' && !operation.hash);
+  return refused.length > 0 && touched.every(operation => operation.state === 'not-submitted' && !operation.hash
+    || operation.state === 'confirmed' && operation.approval);
 }

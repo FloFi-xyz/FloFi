@@ -16,6 +16,7 @@ import type { UniswapLiquidityStep, UniswapTokenView } from '../server/uniswap-l
 import { catalogLiquidityCopy, liquidityRunNetwork, robinhoodLiquidityDetails } from '../domain/robinhood-liquidity-authoring';
 import { StockFacts } from './stock-facts';
 import { PendingExecutionNote } from './execution-concurrency-notes';
+import { walletNonceMessage } from '../domain/wallet-nonce';
 
 /** Canvas form for the canonical concentrated-liquidity node: Uniswap v3 USDC / WETH on Base Sepolia (0.05%) or Ethereum Sepolia (0.3%). */
 /** Copy is written for Base Sepolia; another network's name is substituted. Display text only. */
@@ -150,7 +151,7 @@ const messages: Record<string, string> = {
   STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED: 'A Stock Token multiplier changed since Review. Your authorization was cleared; simulate and review again.',
   STOCK_TOKEN_NOT_DISPOSABLE: 'The official registry does not allow depositing this Stock Token right now. Nothing was signed.',
 };
-const message = (code: string | null | undefined) => !code ? null : messages[code] ?? null;
+const message = (code: string | null | undefined) => !code ? null : walletNonceMessage(code) ?? messages[code] ?? null;
 /** An amount of one pool token in its own decimals (USDC and WETH on the testnet profiles; any catalog token on Robinhood Chain). */
 const tokenAmount = (token: Pick<UniswapTokenView, 'symbol' | 'decimals'>) => (units: string | null | undefined) => units ? `${formatTokenAmount(units, token.decimals)} ${token.symbol}` : '--';
 const USDC_VIEW = { symbol: 'USDC', decimals: 6 }, WETH_VIEW = { symbol: 'WETH', decimals: 18 };

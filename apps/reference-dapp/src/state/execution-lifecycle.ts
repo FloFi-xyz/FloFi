@@ -26,7 +26,7 @@ import { useCow } from './cow-store';
 /** Subscribes to existing durable records. No effect, polling loop or execution callback. */
 export function useExecutionLifecycle(kind: SimulationSource['kind'], wallet: ReviewWallet) {
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the run of the runtime workflow (a sequence's current step, else the canonical workflow).
-  const { runtimeWorkflow, context } = useWorkflow();
+  const { runtimeWorkflow, context, newWorkflow } = useWorkflow();
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
   const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const solanaComposition = useSolanaComposition();
@@ -40,7 +40,7 @@ export function useExecutionLifecycle(kind: SimulationSource['kind'], wallet: Re
     : kind === 'composition' ? { kind, state: composition }
     : runtimeWorkflow.nodes.some(node => node.adapterConstraints.protocols.includes('cow-protocol')) || cow.recoveryOnly ? { kind: 'cow', state: cow }
     : { kind: 'unavailable', state: { busy: false, error: null } };
-  const progress = projectExecutionLifecycle(runtimeWorkflow, context, source);
+  const progress = projectExecutionLifecycle(runtimeWorkflow, context, source, { freshWorkflow: newWorkflow });
   const view = projectExecutionRecovery(source, progress, wallet);
   // Each callback is an existing observation-only path. No start, request, worker or retry callback is used.
   const check = view.action === null ? null

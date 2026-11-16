@@ -27,6 +27,8 @@ import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 import { floFiWalletMessage } from '../wallet/flofi-signing';
 import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
 import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
+import { walletNonceMessage } from './wallet-nonce';
+import { basisPointsLabel, bridgeIncludedCost, HIGH_BRIDGE_COST_BASIS_POINTS } from './bridge-costs';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -141,6 +143,7 @@ function koraMessage(error: string): string | null {
     return 'Paying the network fee in USDC or USDT is not available right now, so nothing was sent. Add SOL for the network fee, then simulate again.';
   return 'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.';
 }
+export const SINGLE_SWAP_NATIVE_FEE_MESSAGE = 'Add funds for the network fee, then simulate again. This swap pays its network fee in ETH on this network; paying it in USDC is not available for a single swap yet, so nothing was signed.';
 export function simulationError(error: string): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
   const flight = flightRefusalMessage(error);
@@ -170,6 +173,10 @@ export function simulationError(error: string): string {
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
   // An Aave reserve short of liquidity (or collateral) is not the owner's balance: it keeps the lending sentence, before the balance rule.
   if (/^(?:BORROW|WITHDRAW)_INSUFFICIENT_LIQUIDITY$|LIQUIDITY_(?:UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_COLLATERAL/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident B): a single owner-wallet swap pays its network fee in the network's own ETH. FloFi's USDC fee
+  // payment (Circle Paymaster) runs only inside multi-step workflow runs from an eligible smart account today, so it is not offered here: the
+  // owner is told the real limitation instead of a bare "add funds".
+  if (error === 'INSUFFICIENT_GAS_FUNDS') return SINGLE_SWAP_NATIVE_FEE_MESSAGE;
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
@@ -189,6 +196,11 @@ export function simulationError(error: string): string {
   if (/WALLET_NOT_FOUND|WALLET_CONNECTION_REJECTED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
   if (/OWNER_REVIEW_MISMATCH/i.test(error)) return 'The connected wallet is not the wallet this Review was prepared for, so nothing was sent. Reconnect that wallet, or simulate again with this one.';
   if (/HANDOFF_NOT_AUTHORIZED/i.test(error)) return 'The reviewed request was no longer authorized when FloFi was about to open your wallet, so nothing was sent. Review it again.';
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a wallet-side disagreement is worded as what it is (a lagging wallet view, a pending wallet transaction,
+  // or two different counts); only FloFi's own chain reads (NONCE_CHANGED) say another transaction took the slot.
+  const walletNonce = walletNonceMessage(error);
+  if (walletNonce) return walletNonce;
+  if (error === 'UNIVERSAL_ATTEMPT_LIMIT_SIMULATE_AGAIN') return 'This run reached its limit of wallet attempts, so nothing more was sent. Simulate again to start a fresh run of the same workflow.';
   if (/NONCE_MISMATCH|NONCE_CHANGED/i.test(error)) return 'Another transaction from this wallet took the next transaction slot (nonce), so nothing was sent. Review it again.';
   if (/SEMANTIC_REVISION_CHANGED|SEMANTIC_EDIT|TRANSACTION_ARTIFACT_CHANGED/i.test(error)) return 'The workflow or its reviewed transaction changed before your wallet was asked, so nothing was sent. Review it again.';
   if (/WALLET_PROVIDER_CHANGED|WALLET_CHANGED/i.test(error)) return 'Your wallet connection changed, so nothing was sent. Reconnect the reviewed wallet and review again.';
@@ -379,7 +391,22 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.', 'CEILING');
-      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.', 'INCLUDED');
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident E): when every included provider fee is in the input token, its total and share of the
+      // amount sent are exact; the fees then read as parts of that one included total (as the Router's do), so nothing is counted twice.
+      const includedCost = bridgeIncludedCost(route);
+      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, includedCost ? 'Part of the fees included in the quote.' : 'Included in the quoted output.', includedCost ? 'COMPONENT' : 'INCLUDED');
+      for (const f of route.fees) if (!f.included && BigInt(f.amount) > 0n && f.kind !== 'SOURCE_NETWORK_FEE') fee(f.label, f.amount, f.decimals, f.symbol, 'Paid separately, on top of the amount sent.', 'ADDITIONAL');
+      if (includedCost) {
+        const share = basisPointsLabel(includedCost.basisPoints);
+        fee('Provider fees included in the quote', includedCost.units.toString(), includedCost.decimals, includedCost.symbol,
+          'About {0} of the amount you send. Already taken out of the expected amount; never charged again.'.replace('{0}', share), 'INCLUDED');
+        if (includedCost.basisPoints >= HIGH_BRIDGE_COST_BASIS_POINTS) warn('attention',
+          'Provider fees take about {0} of the amount you send. Fixed costs weigh more for small amounts. Review the amounts before you continue.'.replace('{0}', share));
+      }
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident C): a Solana recipient without a token account for this token gets one on delivery.
+      if (q.destination.recipientTokenAccount === 'MISSING') warn('info',
+        'The recipient’s Solana wallet has no {0} account yet. The bridge provider creates it at delivery; its one-time cost is part of the provider’s destination fee, already included in the quote.'
+          .replace('{0}', route.outputToken.symbol));
       fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
         '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not charged at this time. Waived if the workflow fails or refunds.', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));

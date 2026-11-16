@@ -39,6 +39,8 @@ import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from '../evm-
 import * as sol from './solana-chain.ts';
 import type { ProviderStatusHint, UniversalProviderAdapter, UniversalQuoteRequest } from './relay-provider.ts';
 import { feeObligationFor, flofiFeePolicy } from './fee-obligation.ts';
+import { refusalNote, WALLET_NONCE_REFUSAL } from '../../domain/wallet-nonce.ts';
+import { chainRelationOf, type WalletNonceCheck } from './nonce-check.ts';
 import { assertUnwrapEffects, unwrapCall, wrappedNativeOf } from './wrapped-native.ts';
 import { UNIVERSAL_ACTIVE, UNIVERSAL_OBSERVABLE, UNIVERSAL_RUN_ID, UNIVERSAL_SETTLING, UNIVERSAL_TERMINAL, type DestinationDelivery, type EvmReviewSource, type EvmTx,
   type ProviderConsideration, type SolanaReviewSource, type SourceSettlement, type TokenFacts, type UniversalAttempt, type UniversalBegin, type UniversalEvidence,
@@ -224,14 +226,17 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     if (destination.ecosystem === 'EVM') {
       const { d, rpc } = evmOf(destination.chain), head = await evm.evmHead(rpc, d), at = evm.tag(head.number);
       const code = evm.hex(await rpc('eth_getCode', [recipient, at]));
-      return { position: { kind: 'BLOCK' as const, height: head.number }, recipientBalance: (await evm.evmBalance(rpc, recipient, output.address, at)).toString(), hasCode: code.length > 2 };
+      return { position: { kind: 'BLOCK' as const, height: head.number }, recipientBalance: (await evm.evmBalance(rpc, recipient, output.address, at)).toString(), hasCode: code.length > 2,
+        tokenAccount: null };
     }
     await sol.assertSolanaRecipient(input.solanaRpc, recipient);
     const ata = output.kind === 'TOKEN' ? associatedTokenAddress(recipient, output.address!, programIdOf(output)!, SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID) : null;
     const { slot, accounts } = await readSolanaAccounts(input.solanaRpc, ata ? [recipient, ata] : [recipient]);
     let balance = accounts[0]?.lamports ?? 0n;
+    // An initialized token account is at least 165 bytes; anything else (absent, or not yet a token account) is created on delivery.
+    const tokenAccount = ata ? accounts[1] && accounts[1].data.length >= 165 ? 'EXISTS' as const : 'MISSING' as const : null;
     if (ata) { const account = accounts[1]; balance = account && account.data.length >= 165 ? decodeSplTokenAccount(account.data, output.program === 'token-2022').amount : 0n; }
-    return { position: { kind: 'SLOT' as const, height: slot }, recipientBalance: balance.toString(), hasCode: false };
+    return { position: { kind: 'SLOT' as const, height: slot }, recipientBalance: balance.toString(), hasCode: false, tokenAccount };
   }
 
   // --- quotes and selection -------------------------------------------------------------------------------------------
@@ -369,7 +374,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         slippageBps: f.slippageBps, providers: [...f.providers], selection: f.selection },
       selection: { policy: f.selection, selected: route.provider, considered: x.considered }, route, routeCommitment: universalRouteCommitment(route),
       tokens: { input: { ...x.inputFacts, symbol: route.inputToken.symbol }, output: { ...x.outputFacts, symbol: route.outputToken.symbol } },
-      source: x.source, destination: { chainId: f.destination.chain, position: x.destination.position, recipientBalance: x.destination.recipientBalance },
+      source: x.source, destination: { chainId: f.destination.chain, position: x.destination.position, recipientBalance: x.destination.recipientBalance,
+        ...x.destination.tokenAccount ? { recipientTokenAccount: x.destination.tokenAccount } : {} },
       deadlines: { reviewExpiresAt: x.expiresAt, quoteExpiresAt: route.quote.expiresAt, orderDeadline: route.order.deadline },
       feePolicy: flofiFeePolicy({ upperBound: x.networkFee, symbol: f.source.native.symbol, decimals: f.source.native.decimals }),
       authorizations: { sourceSignatures: x.signatures, destinationAuthorization: 'NONE' }, artifacts: x.artifacts };
@@ -414,6 +420,22 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       return invalid('UNIVERSAL_L1_FEES_CHANGED_REVIEW_REQUIRED');
     const balance = evm.quantity(await rpc('eth_getBalance', [tx.from, at]));
     if (balance < BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + l1 + BigInt(tx.value)) fail('UNIVERSAL_INSUFFICIENT_GAS');
+  }
+  /** Bounded, validated evidence of a pre-send nonce refusal. A browser value that is not the attempt's own nonce or a canonical count is dropped. */
+  async function nonceCheckOf(record: UniversalRecord, attempt: UniversalEvmAttempt, reported: unknown): Promise<WalletNonceCheck> {
+    const r = isObject(reported) ? reported as Record<string, unknown> : {};
+    const count = (v: unknown) => typeof v === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(v) ? v : null;
+    const wallet = r.reviewed === attempt.nonce ? count(r.wallet) : null;
+    const walletRelation = wallet === null ? 'INVALID' as const : BigInt(wallet) < BigInt(attempt.nonce) ? 'WALLET_BEHIND' as const : BigInt(wallet) > BigInt(attempt.nonce) ? 'WALLET_AHEAD' as const : 'ALIGNED' as const;
+    let chainLatest: string | null = null, chainPending: string | null = null;
+    try {
+      const { rpc } = evmOf(record.review.route.sourceChain);
+      const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(evm.quantity),
+        rpc('eth_getTransactionCount', [record.owner, 'pending']).then(evm.quantity)]);
+      chainLatest = latest.toString(); chainPending = pending.toString();
+    } catch { /* The refusal stands either way; the chain side is simply unknown. */ }
+    return { reviewed: attempt.nonce, wallet, walletRelation, reads: typeof r.reads === 'number' && Number.isInteger(r.reads) && r.reads >= 1 && r.reads <= 3 ? r.reads : 1,
+      chainLatest, chainPending, chainRelation: chainRelationOf(attempt.nonce, chainLatest, chainPending), observedAt: now().toISOString() };
   }
   async function beginEvm(record0: UniversalRecord, owner: string): Promise<UniversalBegin> {
     let record = record0;
@@ -884,6 +906,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       if (record.phase !== 'AUTHORIZED' || record.authorization !== record.review.commitment) fail('UNIVERSAL_REVIEW_REQUIRED');
       if (now().getTime() >= Date.parse(record.review.expiresAt)) { await save(deauthorized(record, 'UNIVERSAL_REVIEW_EXPIRED', [], true)); fail('UNIVERSAL_REVIEW_EXPIRED'); }
       if (record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state))) fail('UNIVERSAL_DEPOSIT_MAY_EXIST_OBSERVE');
+      // A run keeps at most 16 attempts (its log validator refuses more). Retries after pre-send refusals stop cleanly here: a fresh simulation
+      // starts a new run of the same workflow (nothing of this one was sent by its cancelled attempts).
+      if (record.attempts.length >= 16) fail('UNIVERSAL_ATTEMPT_LIMIT_SIMULATE_AGAIN');
       return network.ecosystem === 'EVM' ? beginEvm(record, owner) : beginSolana(record);
     }); },
     /** EVM: the handoff boundary; SUBMITTING is durable before the browser calls the wallet. */
@@ -970,7 +995,13 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       const refused = diagnostic.invoked && send !== undefined && send.result === undefined && typeof error?.code === 'number' && error.code === diagnostic.rejectionCode &&
         REFUSALS.includes(error.code);
       if ((!diagnostic.invoked && attempt!.state !== 'PREPARED') || (diagnostic.invoked || send) && !refused || !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt!.state)) fail('UNIVERSAL_DIAGNOSTIC_NOT_PRE_SUBMISSION');
-      return save(replaceAttempt(deauthorized(record, diagnostic.code), { ...attempt!, state: 'CANCELLED', note: diagnostic.code }));
+      // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a pre-send wallet nonce refusal keeps both sides of the disagreement (the wallet's count as the
+      // browser read it, FloFi's own latest/pending reads now), so support can tell a lagging wallet view from a real pending transaction.
+      const nonceCheck = !diagnostic.invoked && WALLET_NONCE_REFUSAL.test(diagnostic.code)
+        ? await nonceCheckOf(record, attempt as UniversalEvmAttempt, diagnostic.nonce) : undefined;
+      // A wallet refusal is named by the server from its refusal code (security review), never by a client label that could claim a pre-wallet reason.
+      const note = refused ? refusalNote('UNIVERSAL', error!.code as number) : diagnostic.code;
+      return save(replaceAttempt(deauthorized(record, note), { ...attempt!, state: 'CANCELLED', note, ...nonceCheck ? { nonceCheck } : {} }));
     }); },
     /** Observation never sends, even when a wallet response or an earlier worker was lost. */
     async observe(id: string): Promise<UniversalRecord> { return locked(id, async () => {
