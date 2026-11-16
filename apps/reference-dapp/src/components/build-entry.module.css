@@ -41,6 +41,12 @@
 .suggestions button:not(:disabled):hover{border-color:var(--accent);background:var(--surface-raised)}
 .suggestions button:disabled{opacity:.6;cursor:not-allowed}
 .chipIcon{width:18px;height:18px;flex:none;color:var(--accent)}
+/* BUILD UX POLISH 004 (UX-03): one small centred line under the suggestions — the question neutral, only the action in the FloFi accent. */
+.manual{margin:-6px 0 0;color:var(--muted);font-size:14px;line-height:1.5}
+.manual a{border-radius:4px;color:var(--accent);font-weight:600;text-decoration:none;text-underline-offset:3px;cursor:pointer}
+.manual a:hover{text-decoration:underline}
+.manual a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;text-decoration:underline}
+.manual a[aria-disabled="true"]{opacity:.6;cursor:not-allowed;text-decoration:none}
 
 :global(:root[data-theme="dark"]) .mascotLight{display:none}
 :global(:root[data-theme="dark"]) .mascotDark{display:block}

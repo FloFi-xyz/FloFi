@@ -3,7 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
-import { expectProductSection, navigationLink, openBuilder, openProductSection, type NavigationItem } from './build-entry-navigation';
+import { expectProductSection, navigationLink, openBuilder, openProductSection, railToggle, type NavigationItem } from './build-entry-navigation';
 
 /**
  * P0 approved UX (board 03b): the drawer's items, in order — New workflow (the Chat entry), Editor, Dashboard; Library (Your workflows,
@@ -12,6 +12,11 @@ import { expectProductSection, navigationLink, openBuilder, openProductSection, 
  */
 const DRAWER_ITEMS = ['New workflow', 'Editor', 'Dashboard', 'Your workflows', 'Automations', 'Credentials', 'Agents', 'Passkeys'];
 const itemLabels = (page: Page) => page.locator('.navigation-drawer nav').getByRole('link').evaluateAll(links => links.map(link => link.querySelector('span')?.textContent ?? ''));
+/**
+ * BUILD UX POLISH 004 (UX-01, intentional change): the overlay drawer is the phone (≤ 800 px) navigation; a desktop shows the same items as a
+ * persistent rail (ux-polish-004.spec.ts). These cases certify the drawer at a phone width, opened with ☰ (the shell's one `.navigation-trigger`, ☰ at this width).
+ */
+const PHONE = { width: 390, height: 844 };
 const item = (page: Page, label: string) => navigationLink(page, (label === 'New workflow' ? 'Chat' : label) as NavigationItem);
 
 async function geometry(page: Page) {
@@ -32,9 +37,11 @@ for (const theme of ['light', 'dark'] as const) {
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
+    await page.setViewportSize(PHONE);
     await installSupplyWallet(page); await openBuilder(page);
     await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const trigger = page.locator('.navigation-trigger'), drawer = page.locator('.navigation-drawer'), layer = page.locator('.navigation-layer');
+    await expect(railToggle(page)).toHaveCount(0);
     await expect(trigger).toHaveAccessibleName('Open navigation');
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
     await expect(drawer).toBeHidden(); await expect(layer).toHaveAttribute('inert', '');
@@ -61,7 +68,7 @@ for (const theme of ['light', 'dark'] as const) {
     for (const label of DRAWER_ITEMS.slice(1, 7)) { await page.keyboard.press('Tab'); await expect(item(page, label)).toBeFocused(); }
     await page.keyboard.press('Enter'); await expect(page).toHaveURL('/app/agents'); await expect(drawer).toBeHidden();
     await trigger.click(); await trigger.click(); await expect(drawer).toBeHidden();
-    await trigger.click(); await page.mouse.click(1400, 500); await expect(drawer).toBeHidden(); await expect(trigger).toBeFocused();
+    await trigger.click(); await page.mouse.click(PHONE.width - 10, 600); await expect(drawer).toBeHidden(); await expect(trigger).toBeFocused();
     await trigger.click(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(drawer).toBeHidden();
     await expect(page.getByRole('switch', { name: 'Language', exact: true })).toBeVisible();
@@ -84,7 +91,8 @@ for (const theme of ['light', 'dark'] as const) {
     const trigger = page.locator('.navigation-trigger');
     const drawer = page.locator('.navigation-drawer');
     const measurements: Record<string, Awaited<ReturnType<typeof geometry>>> = {};
-    for (const width of [320, 375, 768, 1024, 1440]) {
+    // UX-01: the overlay drawer at phone and tablet widths (the desktop rail's geometry is certified in ux-polish-004.spec.ts).
+    for (const width of [320, 375, 768]) {
       await page.setViewportSize({ width, height: 900 });
       for (const stage of ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
         await openProductSection(page, stage);
@@ -131,7 +139,7 @@ test('drawer opens and closes with a restrained reversible slide and respects re
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  await page.emulateMedia({ reducedMotion: 'no-preference' }); await openBuilder(page);
+  await page.emulateMedia({ reducedMotion: 'no-preference' }); await page.setViewportSize(PHONE); await openBuilder(page);
   const trigger = page.locator('.navigation-trigger');
   const drawer = page.locator('.navigation-drawer');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
@@ -156,16 +164,19 @@ test('drawer opens and closes with a restrained reversible slide and respects re
         await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
         samples.push({ x: new DOMMatrix(getComputedStyle(drawer).transform).m41, visibility: getComputedStyle(layer).visibility });
       }
-      return { duration: style.transitionDuration, easing: style.transitionTimingFunction, samples };
+      return { duration: style.transitionDuration, easing: style.transitionTimingFunction, samples, width: drawer.getBoundingClientRect().width };
     }, open);
+    // UX-01: certified at a phone width, where the drawer is min(88vw, 320 px) wide (260 px only on the former desktop overlay).
+    const hidden = -motion.width;
+    expect(motion.width).toBeCloseTo(Math.min(PHONE.width * .88, 320), 0);
     expect(motion.duration).toBe('0.22s'); expect(motion.easing).toBe('ease-out');
-    expect(motion.samples.some(sample => sample.x > -260 && sample.x < 0 && sample.visibility === 'visible')).toBe(true);
-    expect(motion.samples.every(sample => sample.x >= -260 && sample.x <= 0)).toBe(true);
+    expect(motion.samples.some(sample => sample.x > hidden && sample.x < 0 && sample.visibility === 'visible')).toBe(true);
+    expect(motion.samples.every(sample => sample.x >= hidden - 0.5 && sample.x <= 0)).toBe(true);
     for (let index = 1; index < motion.samples.length; index++) {
       const delta = motion.samples[index]!.x - motion.samples[index - 1]!.x;
       expect(open ? delta >= 0 : delta <= 0).toBe(true);
     }
-    expect(motion.samples.at(-1)!.x).toBe(open ? 0 : -260);
+    expect(motion.samples.at(-1)!.x).toBeCloseTo(open ? 0 : hidden, 0);
   }
   await trigger.click(); await expect(drawer).toBeHidden();
   // A quick reversal settles open, with no extra layer or stuck backdrop.

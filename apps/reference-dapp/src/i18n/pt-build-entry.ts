@@ -19,6 +19,8 @@ export const portugueseBuildEntry: Readonly<Record<string, string>> = {
   'Example requests': 'Exemplos de pedidos', 'Earn yield': 'Gerar rendimento', 'Swap assets': 'Trocar ativos', 'Provide liquidity': 'Fornecer liquidez',
   'Use collateral': 'Usar colateral', 'Multi-step strategy': 'Estratégia em várias etapas',
   'Prefer the editor? Build manually': 'Prefere o editor? Montar manualmente',
+  // BUILD UX POLISH 004 (UX-03): the link under the suggestions; only the second part is the link.
+  'Prefer the editor?': 'Prefere o editor?', 'Build it manually': 'Construa manualmente',
   'Nothing executes without your review and authorization.': 'Nada é executado sem a sua revisão e autorização.',
   'You can start without connecting a wallet.': 'Você pode começar sem conectar uma carteira.',
   'Execution result': 'Resultado da execução', 'View in Dashboard': 'Ver no Painel',

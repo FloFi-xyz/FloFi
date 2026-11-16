@@ -8,7 +8,7 @@
  * "Plan · n steps", shown from two steps on.
  */
 import { test, expect, sendChatCommand, readWorkflowIr } from './fixtures';
-import { openBuilder, editorSectionAction, editorSteps, expectEditorSection, navigationDrawer, navigationLink, openNavigation } from './build-entry-navigation';
+import { closeNavigation, openBuilder, editorSectionAction, editorSteps, expectEditorSection, navigationDrawer, navigationLink, openNavigation } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 
 test('the stepper opens the Editor sections in order, marks only where the owner is, and keeps the global navigation', async ({ page }) => {
@@ -21,8 +21,9 @@ test('the stepper opens the Editor sections in order, marks only where the owner
   await expect(navigationDrawer(page).getByRole('link').first()).toHaveText('New workflow');
   await expect(navigationLink(page, 'Editor')).toHaveAttribute('aria-current', 'page');
   await expect(navigationLink(page, 'Dashboard')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(navigationDrawer(page)).toHaveCount(0);
+  // BUILD UX POLISH 004 (UX-01): on this desktop viewport the navigation is the persistent rail (no overlay to close); a phone closes its drawer.
+  await closeNavigation(page);
+  await expect(navigationDrawer(page)).toBeVisible();
   await sendChatCommand(page, 'Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
   await steps.getByRole('button', { name: 'Simulate', exact: true }).click();
   await expectEditorSection(page, 'Simulate');

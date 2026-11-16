@@ -22,7 +22,7 @@ import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { codeFor, codeHash, linkTokenFor, sha256Hex, tokenIdFor, unsubscribeTokenFor } from '../src/flight/access';
 import { E2E_APP_ORIGIN, returningVisitor } from './app-origin';
 import { openSimulationDetails } from './fixtures';
-import { continueToBuilder } from './build-entry-navigation';
+import { continueToBuilder, navigationTrigger } from './build-entry-navigation';
 import { authorSolanaSwap, chooseSolanaWallet, jupiterControl } from './jupiter-fixtures';
 
 const PRIVY = process.env.FLOFI_PRIVY_EMULATOR_ORIGIN ?? '';
@@ -688,8 +688,10 @@ test('every CTA and link resolves; the campaign posts link to a real page with t
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Say where you’re going.');
   // With the rollout flag disabled in this legacy campaign profile, the existing /app behavior is preserved.
   await page.goto('/app');
-  // P0 approved UX (board 03b): the product shell's navigation is the ☰ drawer (the former stage tabs are gone).
-  await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toBeVisible();
+  // P0 approved UX (board 03b): the product shell's navigation (the former stage tabs are gone). BUILD UX POLISH 004 (UX-01): on this desktop
+  // viewport it is the persistent rail, revealed by its chevron (☰ remains the phone drawer's trigger).
+  await expect(navigationTrigger(page)).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'FloFi navigation', exact: true })).toBeVisible();
 });
 
 

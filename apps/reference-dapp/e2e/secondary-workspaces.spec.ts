@@ -4,7 +4,7 @@ import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import type { Page } from '@playwright/test';
-import { editorSteps, expectEditorSection, navigateTo, navigationDrawer, navigationLink, openBuilder, openEditorSection } from './build-entry-navigation';
+import { closeNavigation, editorSteps, expectEditorSection, navigateTo, navigationLink, navigationTrigger, openBuilder, openEditorSection, openNavigation } from './build-entry-navigation';
 
 const workspaces = ['Credentials', 'Agents', 'Passkeys'] as const;
 function watchErrors(page: Page) {
@@ -18,7 +18,8 @@ async function navigateWorkspace(page: Page, label: typeof workspaces[number]) {
   await navigateTo(page, label);
   await expect(page).toHaveURL(`/app/${label.toLowerCase()}`);
   await expect(page.getByRole('heading', { name: label, level: 1 })).toBeVisible();
-  await expect(page.locator('.navigation-drawer')).toBeHidden();
+  // BUILD UX POLISH 004 (UX-01): the phone drawer closes after a choice; a desktop rail stays in view (it has no overlay).
+  await expect(page.locator('.navigation-layer[data-open="true"]')).toHaveCount(0);
 }
 async function stageGeometry(page: Page) {
   return page.evaluate(() => Object.fromEntries(['.top-bar', 'main', '.canvas', '.canvas-head', '.flow-surface', '.canvas-foot', '.canvas-primary-action', '.canvas-navigator', '.copilot', '.simulation-summary', '.execution-plan', '.summary-bar'].map(selector => {
@@ -50,12 +51,10 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('0x1111…1111');
       // P0 approved UX (board 03b): no stage tabs; the Editor stepper is shown only in the Editor, never on a secondary page.
       await expect(editorSteps(page)).toHaveCount(0);
-      await page.locator('.navigation-trigger').click();
-      const navigation = navigationDrawer(page);
+      const navigation = await openNavigation(page);
       await expect(navigationLink(page, label)).toHaveAttribute('aria-current', 'page');
       await expect(navigation.locator('[aria-current=page]')).toHaveCount(1);
-      await page.keyboard.press('Escape');
-      await expect(page.locator('.navigation-trigger')).toBeFocused();
+      await closeNavigation(page);
       expect(await page.evaluate(() => (window as unknown as { shellMarker: string }).shellMarker)).toBe('persistent-shell');
     }
     await navigateWorkspace(page, 'Credentials');
@@ -99,9 +98,9 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /requestAccounts|send|sign|switch|addEthereumChain/i.test(request.method)))).toEqual([]);
     await page.goBack(); await expect(page).toHaveURL('/app/agents');
     await page.goForward(); await expect(page).toHaveURL('/app/passkeys');
-    await page.locator('.navigation-trigger').click();
+    await openNavigation(page);
     await expect(navigationLink(page, 'Passkeys')).toHaveAttribute('aria-current', 'page');
-    await page.keyboard.press('Escape');
+    await closeNavigation(page);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await selectSettingsTheme(page, theme === 'light' ? 'dark' : 'light');
     await selectSettingsTheme(page, theme);
@@ -130,7 +129,7 @@ for (const theme of ['light', 'dark'] as const) {
         // BUILD-FLOFI-MAINNET-PRODUCT-001: Mainnet-only, so the header has no network selector.
         await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
-        await expect(page.locator('.navigation-trigger')).toBeInViewport();
+        await expect(navigationTrigger(page)).toBeInViewport();
         await expect(page.locator('.secondary-workspace-heading')).toHaveCSS('font-family', /Outfit/);
         const surfaces = page.locator('.workspace-empty, .workspace-connect-panel, .workspace-passkey-control');
         for (const surface of await surfaces.all()) await expect(surface).toHaveCSS('background-color', theme === 'dark' ? 'rgb(21, 24, 31)' : 'rgb(255, 255, 255)');
@@ -139,10 +138,9 @@ for (const theme of ['light', 'dark'] as const) {
           const columns = await page.locator('.workspace-wallet-grid').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
           expect(columns).toBe(width <= 800 ? 1 : 2);
         }
-        await page.locator('.navigation-trigger').click();
-        await expect(page.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page');
-        await page.keyboard.press('Escape');
-        await expect(page.locator('.navigation-trigger')).toBeFocused();
+        await openNavigation(page);
+        await expect(navigationLink(page, label)).toHaveAttribute('aria-current', 'page');
+        await closeNavigation(page);
         if (width === 320 || width === 1440) await page.screenshot({ path: testInfo.outputPath(`${label.toLowerCase()}-${theme}-${width}.png`), fullPage: true });
       }
     }
