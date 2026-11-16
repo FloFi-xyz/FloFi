@@ -32,7 +32,7 @@ import { walletChainRef } from '../wallet/evm-networks';
 import { shellChainLabel } from '../domain/product-shell';
 import { WorkflowMoreMenu, WorkflowName } from './workflow-name';
 import { DarkSpotlight } from './dark-spotlight';
-import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
+import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator, CanvasWheelNavigation } from './canvas-navigator';
 import { PanelRevealer, PanelRevealProvider } from './canvas-panel-reveal';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardDestination, type CardRecipient, type ComposerCardData } from './composer-card';
@@ -1072,6 +1072,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => runActive ? undefined : connect(source, target, sourceHandle, targetHandle)}>
         <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
         <Background gap={22} size={1.5} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right"/><PanelRevealer/>
+        {/* BUILD UX POLISH 004 (UXA-02): mouse wheel zooms at the cursor; lists in cards scroll; the page and chat keep their own scrolling. */}
+        <CanvasWheelNavigation/>
         <SelectionToolbar ids={toolbarIds}>{selectionTools}</SelectionToolbar>
       </ReactFlow></PanelRevealProvider>
       {/* UX-006: an empty Canvas shows the uncommitted proposal confirmation in the empty state's place; Apply/Dismiss are unchanged. */}

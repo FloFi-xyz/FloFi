@@ -55,7 +55,9 @@ describe('Your workflows secondary workspace presentation', () => {
   });
   it.each([['EN', 'Your workflows'], ['PT', 'Seus fluxos']] as const)('has only a navigation entry in %s and renders the library in its workspace', (language, label) => {
     const html = renderToStaticMarkup(<LocaleProvider initialLanguage={language}><NavigationDrawer pathname="/app/workflows" onBuild={vi.fn()} onDisconnect={vi.fn()} disconnectDisabled/></LocaleProvider>);
-    expect(html).toContain('href="/app/workflows"'); expect(html).toContain(`aria-current="page"`); expect(html).toContain(`<span>${label}</span>`);
+    expect(html).toContain('href="/app/workflows"'); expect(html).toContain(`aria-current="page"`);
+    // BUILD UX POLISH 004 (UX-01): the item's name is its label span (visually hidden only in the collapsed desktop rail).
+    expect(html).toContain(`<span class="navigation-row-label">${label}</span>`);
     for (const value of ['navigation-workflows', 'My saved name', 'Refresh', 'Loading', 'temporarily unavailable', 'No workflows yet']) expect(html).not.toContain(value);
     const workspace = renderToStaticMarkup(<LocaleProvider initialLanguage={language}><SecondaryProductWorkspace workspace="workflows" workflows={{ list: { items: [{ ...row, name: 'Save workflow' }], hasMore: false }, busy: false, error: null, open: vi.fn(), refresh: vi.fn() }}/></LocaleProvider>);
     expect(workspace).toContain(`<h1>${label}</h1>`); expect(workspace).toContain('<span>Save workflow</span>'); expect(workspace).not.toContain('navigation-drawer');

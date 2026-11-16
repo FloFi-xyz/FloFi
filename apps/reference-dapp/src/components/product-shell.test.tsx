@@ -64,12 +64,24 @@ describe('product shell rendering', () => {
     expect(wallet.switchTo).not.toHaveBeenCalled();
   });
 
-  it('places the closed navigation trigger before the approved FloFi logo', () => {
+  // BUILD UX POLISH 004 (intentional change): UX-01 — the navigation control (the rail's chevron on a desktop, ☰ on a phone) precedes the logo and
+  // the server renders the collapsed desktop rail; UX-02 — the logo is a link to the Dashboard with a named destination.
+  it('places the navigation control before the approved FloFi logo, which links to the Dashboard', () => {
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
-    expect(html.indexOf('aria-label="Open navigation"')).toBeLessThan(html.indexOf('class="flofi-logo"'));
-    expect(html).toContain('data-open="false" aria-hidden="true" inert=""');
+    const logo = html.indexOf('class="flofi-logo"');
+    expect(html.indexOf('class="navigation-trigger" aria-label="Expand navigation"')).toBeGreaterThan(-1);
+    expect(html.indexOf('class="navigation-trigger" aria-label="Expand navigation"')).toBeLessThan(logo);
+    expect(html).toContain('class="navigation-layer" data-open="false" data-expanded="false">');
+    expect(html).toMatch(/<a class="flofi-logo-link" aria-label="FloFi — go to the Dashboard" href="\/app\/dashboard"><span class="flofi-logo" role="img" aria-label="FloFi">/);
+    expect(html.match(/href="\/app\/dashboard"/g)).toHaveLength(2);
     expect(wallet.connect).not.toHaveBeenCalled();
     expect(wallet.switchTo).not.toHaveBeenCalled();
+  });
+
+  it('keeps the logo inert on the compact signing header, which has no navigation', () => {
+    const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn(), compact: true }));
+    expect(html).toContain('class="flofi-logo"');
+    expect(html).not.toMatch(/flofi-logo-link|navigation-control|href="\/app\/dashboard"/);
   });
 
   // BUILD-FLOFI-MAINNET-PRODUCT-001: FloFi is Mainnet-only, so the header has no Mainnet/Testnet selector, whatever network the wallet is on.
