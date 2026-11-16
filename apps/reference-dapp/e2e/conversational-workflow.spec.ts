@@ -203,18 +203,26 @@ test('a correction retires the Review; a second action keeps the first; an unsup
   networkGuard.assertClean();
 });
 
-test('another wallet never inherits a confirmation: the conversation restarts, and a stale "yes" executes nothing', async ({ page, request, networkGuard }) => {
+test('another wallet never inherits a confirmation: the open question is retired, the conversation stays, and a stale "yes" executes nothing', async ({ page, request, networkGuard }) => {
   const owner = await setup(page, request);
   await chatSwap(page);
   await chatReview(page);
   await pick(page, 'Yes, I confirm');
   await expect(flofi(page)).toContainText('Would you like to execute this workflow now?');
+  const before = await chat(page).locator('.message:not(.conversation-execution-message)').count();
   await page.evaluate(address => (window as unknown as { flofiJourneyWallet: { switchAccount(address: string): void } }).flofiJourneyWallet.switchAccount(address), owner.other);
-  // A different owner: nothing of the previous conversation (or its open question) carries over.
-  await expect(chat(page).locator('.message:not(.conversation-execution-message)')).toHaveCount(1, { timeout: 15_000 });
-  await expect(chat(page)).not.toContainText('Would you like to execute this workflow now?');
+  // HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): the conversation belongs to the account and the workflow, never to a
+  // wallet, so a wallet switch no longer wipes it (the reported chat loss). What must never carry over still does not:
+  // the open confirmation was bound to the previous wallet and is retired at once, its answer buttons are gone, and FloFi says why.
+  await expect(flofi(page)).toContainText('The connected wallet changed, so the confirmation no longer applies.', { timeout: 15_000 });
+  await expect(chat(page).locator('.message:not(.conversation-execution-message)')).toHaveCount(before + 1);
+  await expect(chat(page).getByRole('button', { name: 'Yes, execute', exact: true })).toHaveCount(0);
+  // A stale typed "yes" executes nothing: execution needs a fresh Review with this wallet and both confirmations again.
   await say(page, 'Yes, execute');
+  await expect(chat(page).locator('.message:not(.conversation-execution-message)')).toHaveCount(before + 3);
   await page.waitForTimeout(500);
+  await expect(page.locator('.copilot')).not.toHaveAttribute('data-conversation-phase', 'AWAITING_WALLET');
+  await expect(chat(page)).not.toContainText('Preparing your reviewed wallet request');
   expect(owner.requested()).toBe(0); expect(await owner.sends()).toBe(0);
   networkGuard.assertClean();
 });
