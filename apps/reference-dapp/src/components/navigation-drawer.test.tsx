@@ -10,18 +10,21 @@ const render = (props: Partial<ComponentProps<typeof NavigationDrawer>> = {}) =>
 }));
 
 describe('navigation drawer shell', () => {
-  // BUILD UX POLISH 004 (UX-01, intentional change): the server renders the desktop rail — collapsed, never inert — with the chevron that shows the
-  // names; the ☰ trigger stays in the markup for the mobile drawer (CSS shows exactly one of them, and keeps the drawer closed on a narrow screen
-  // until the client applies `inert`/`aria-hidden`). Both controls name the same navigation.
-  it('renders the collapsed desktop rail with its chevron, keeping the mobile ☰ trigger, both linked to the navigation', () => {
+  // BUILD UX POLISH 004 (UX-01, intentional change): the server renders the desktop rail — collapsed, never inert — and one navigation control:
+  // the desktop chevron that shows the names (its label and expanded state follow the width once the client knows it; on a phone the same
+  // button is ☰ and opens the overlay drawer, whose CSS keeps it closed until the client applies `inert`/`aria-hidden`).
+  it('renders the collapsed desktop rail with one navigation control linked to it, carrying both icons', () => {
     const html = render();
     const controlledId = html.match(/aria-controls="([^"]+)"/)?.[1];
     expect(controlledId).toBeTruthy();
-    expect(html.match(new RegExp(`aria-controls="${controlledId}"`, 'g'))).toHaveLength(2);
-    expect(html).toContain('class="navigation-trigger navigation-menu-trigger" aria-label="Open navigation" aria-expanded="false"');
+    expect(html.match(/<button[^>]*class="navigation-trigger"/g)).toHaveLength(1);
+    expect(html.match(/aria-controls=/g)).toHaveLength(1);
+    expect(html).toContain('class="navigation-trigger" aria-label="Expand navigation" title="Expand navigation" aria-expanded="false"');
+    expect(html).toContain('<svg class="navigation-trigger-menu"');
     expect(html).toContain('M4 6h16M4 12h16M4 18h16');
-    expect(html).toContain('class="navigation-trigger navigation-rail-toggle" aria-label="Expand navigation" title="Expand navigation" aria-expanded="false"');
+    expect(html).toContain('<svg class="navigation-trigger-rail"');
     expect(html).toContain('<path d="m9 6 6 6-6 6"></path>');
+    expect(html).not.toContain('aria-label="Open navigation"');
     expect(html).toContain(`id="${controlledId}" class="navigation-drawer"`);
     expect(html).toContain('class="navigation-layer" data-open="false" data-expanded="false">');
     expect(html).not.toMatch(/navigation-layer"[^>]*(aria-hidden|inert)/);

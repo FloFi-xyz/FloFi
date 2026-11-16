@@ -40,7 +40,8 @@ function LegalIcon({ item }: { item: 'terms' | 'privacy' }) {
  * overlays the workspace exactly as before. The server renders the desktop markup; CSS keeps the drawer closed on a narrow screen until the
  * client knows it (`inert`/`aria-hidden` follow then).
  */
-const COMPACT_NAVIGATION_QUERY = '(max-width: 800px)';
+// The exact complement of the CSS `(min-width: 801px)`, so a fractional width (browser zoom) never falls between the two.
+const COMPACT_NAVIGATION_QUERY = 'not all and (min-width: 801px)';
 function useCompactNavigation() {
   const [compact, setCompact] = useState(false);
   useEffect(() => {
@@ -62,8 +63,6 @@ const railListeners = new Set<() => void>();
 const subscribeRail = (listener: () => void) => { railListeners.add(listener); return () => { railListeners.delete(listener); }; };
 function setRailExpanded(value: boolean) { railExpanded = value; for (const listener of railListeners) listener(); }
 const useRailExpanded = () => useSyncExternalStore(subscribeRail, () => railExpanded, () => false);
-/** Test seam: the next render starts from the collapsed default. */
-export function resetNavigationRail() { setRailExpanded(false); }
 
 /**
  * All navigation uses the persistent product shell (the desktop rail or the mobile overlay). BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar —
@@ -209,17 +208,16 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   }, [open, close]);
 
   const closed = compact && !open;
-  const rail = expanded ? 'Collapse navigation' : 'Expand navigation';
+  // One control in the header, so assistive technology and keyboard order always meet exactly one: on a phone ☰ opens the overlay drawer (as
+  // before); on a desktop the chevron shows or hides the rail's names, like the Canvas rail's own toggle (it points right while collapsed). The
+  // server renders the desktop control; CSS shows the matching icon at once and the label follows once the client knows the width.
+  const label = compact ? open ? 'Close navigation' : 'Open navigation' : expanded ? 'Collapse navigation' : 'Expand navigation';
   return <div className="navigation-control" ref={container}>
-    {/* Mobile (≤ 800 px): ☰ opens the overlay drawer, as before. CSS shows exactly one of these two controls. */}
-    <button ref={trigger} type="button" className="navigation-trigger navigation-menu-trigger" aria-label={tr(open ? 'Close navigation' : 'Open navigation')}
-      aria-expanded={open} aria-controls={drawerId} onClick={() => { if (open) close(true); else { setOpen(true); } }}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-    </button>
-    {/* Desktop: the chevron shows or hides the rail's names, like the Canvas rail's own toggle (it points right while collapsed). */}
-    <button type="button" className="navigation-trigger navigation-rail-toggle" aria-label={tr(rail)} title={tr(rail)} aria-expanded={expanded} aria-controls={drawerId}
-      onClick={() => { hideTip(); setRailExpanded(!expanded); }}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+    <button ref={trigger} type="button" className="navigation-trigger" aria-label={tr(label)} title={compact ? undefined : tr(label)}
+      aria-expanded={compact ? open : expanded} aria-controls={drawerId}
+      onClick={() => { if (compact) { if (open) close(true); else setOpen(true); } else { hideTip(); setRailExpanded(!expanded); } }}>
+      <svg className="navigation-trigger-menu" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      <svg className="navigation-trigger-rail" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
     </button>
     <div ref={layer} className="navigation-layer" data-open={open} data-expanded={expanded} aria-hidden={closed || undefined} inert={closed}>
       <div className="navigation-backdrop" aria-hidden="true" onClick={() => close(true)}/>

@@ -756,37 +756,45 @@
 @media(prefers-reduced-motion:reduce){:root .app-shell :is(.navigation-layer,.navigation-drawer,.navigation-backdrop){transition:none}}
 /* BUILD UX POLISH 004 (UX-01): above 800 px the same navigation is a persistent rail below the header — icons only (64 px, the Canvas rail's
    width) until the chevron beside the logo shows the names and groups (260 px, the drawer's own look). The workspace beside it takes the rest of
-   the width; the header keeps its full width. At 800 px and below nothing changes: ☰ opens the overlay drawer. */
-.navigation-rail-toggle,.navigation-legal-icon{display:none}
+   the width; the header keeps its full width. From 1360 px the expanded rail moves the workspace aside; below that it floats over it with the
+   drawer's shadow, so the Editor's width-tuned layouts (the chat beside the Canvas, the docked toolbar) only ever give up the collapsed 64 px.
+   At 800 px and below nothing changes: ☰ opens the overlay drawer. */
+.navigation-trigger-rail,.navigation-legal-icon{display:none}
 .flofi-logo-link{display:inline-flex;align-items:center;border-radius:8px;color:inherit;text-decoration:none}
 .flofi-logo-link:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 @media(min-width:801px){
-  .app-shell:has(>.top-bar .navigation-layer){--navigation-rail-width:64px;padding-left:var(--navigation-rail-width)}
-  .app-shell:has(>.top-bar .navigation-layer[data-expanded=true]){--navigation-rail-width:260px}
-  .app-shell:has(>.top-bar .navigation-layer)>.top-bar{margin-left:calc(-1 * var(--navigation-rail-width))}
-  .navigation-control .navigation-menu-trigger{display:none}
-  .navigation-control .navigation-rail-toggle{display:grid}
-  .navigation-rail-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
-  .navigation-rail-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-  .navigation-layer{right:auto;z-index:30;width:var(--navigation-rail-width,64px);overflow:visible;visibility:visible;pointer-events:auto;transition:none}
+  .app-shell:has(>.top-bar .navigation-layer){--navigation-rail-space:64px;padding-left:var(--navigation-rail-space)}
+  .app-shell:has(>.top-bar .navigation-layer)>.top-bar{margin-left:calc(-1 * var(--navigation-rail-space))}
+  .navigation-trigger .navigation-trigger-menu{display:none}
+  .navigation-trigger .navigation-trigger-rail{display:block}
+  .navigation-trigger[aria-expanded=true] .navigation-trigger-rail{transform:rotate(180deg)}
+  .navigation-trigger:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .navigation-layer{right:auto;z-index:30;width:64px;overflow:visible;visibility:visible;pointer-events:auto;transition:none}
+  .navigation-layer[data-expanded=true]{width:260px}
   .navigation-backdrop{display:none}
   .navigation-drawer{width:100%;max-width:none;box-shadow:none;transform:none;transition:none}
+  .navigation-layer[data-expanded=true] .navigation-drawer{box-shadow:6px 0 24px color-mix(in srgb,var(--ink) 8%,transparent)}
   .navigation-row:focus-visible,.navigation-legal a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-  /* Collapsed: one 44 px target per item, the current one marked as in the drawer; names, tags and group titles stay for assistive technology. */
-  .navigation-layer[data-expanded=false] .navigation-drawer{padding:12px 10px}
-  .navigation-layer[data-expanded=false] .navigation-content{overflow-x:hidden;scrollbar-width:none}
-  .navigation-layer[data-expanded=false] :is(.navigation-drawer nav,.navigation-drawer nav>[role=group],.navigation-footer){display:grid;justify-items:center;gap:4px}
-  .navigation-layer[data-expanded=false] .navigation-row{justify-content:center;width:44px;min-height:44px;padding:0;gap:0}
+  /* Collapsed: one 44 × 40 px target per item, the current one marked as in the drawer; names, tags and group titles stay for assistive
+     technology. A short window scrolls the list with a visible thin scrollbar; Log out, Terms and Privacy stay pinned below it. */
+  .navigation-layer[data-expanded=false] .navigation-drawer{padding:10px}
+  .navigation-layer[data-expanded=false] .navigation-content{overflow-x:hidden;scrollbar-width:thin}
+  .navigation-layer[data-expanded=false] :is(.navigation-drawer nav,.navigation-drawer nav>[role=group],.navigation-footer){display:grid;justify-items:center;gap:2px}
+  .navigation-layer[data-expanded=false] .navigation-row{justify-content:center;width:44px;min-height:40px;padding:0;gap:0}
   .navigation-layer[data-expanded=false] :is(.navigation-row-label,.navigation-status,.navigation-legal-label){position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-  .navigation-layer[data-expanded=false] .navigation-section-label{width:28px;height:1px;margin:6px auto;overflow:hidden;color:transparent;background:var(--line)}
-  .navigation-layer[data-expanded=false] .navigation-footer{margin-top:8px;padding-top:8px}
-  .navigation-layer[data-expanded=false] .navigation-legal{display:grid;justify-items:center;gap:2px;margin:2px 0 0}
-  .navigation-layer[data-expanded=false] .navigation-legal a{display:grid;place-items:center;width:36px;height:36px;border-radius:9px}
+  .navigation-layer[data-expanded=false] .navigation-section-label{width:28px;height:1px;margin:5px auto;overflow:hidden;color:transparent;background:var(--line)}
+  .navigation-layer[data-expanded=false] .navigation-footer{margin-top:6px;padding-top:6px}
+  .navigation-layer[data-expanded=false] .navigation-legal{display:grid;justify-items:center;gap:0;margin:0}
+  .navigation-layer[data-expanded=false] .navigation-legal a{display:grid;place-items:center;width:32px;height:32px;border-radius:9px}
   .navigation-layer[data-expanded=false] .navigation-legal a:hover{background:var(--soft);color:var(--ink)}
   .navigation-layer[data-expanded=false] .navigation-legal-separator{display:none}
   .navigation-layer[data-expanded=false] .navigation-legal-icon{display:block}
   /* The name beside a collapsed item, outside the rail's scrolling list so it is never clipped (the Canvas rail tooltip's look). */
   .navigation-layer .navigation-rail-tooltip{position:fixed;z-index:50}
+}
+@media(min-width:1360px){
+  .app-shell:has(>.top-bar .navigation-layer[data-expanded=true]){--navigation-rail-space:260px}
+  .navigation-layer[data-expanded=true] .navigation-drawer{box-shadow:none}
 }
 /* BUILD UX POLISH 004 (UXA-02): the chat scrolls on its own at every width — at its end the wheel no longer moves the page behind it (the Canvas
    side is CanvasWheelNavigation). A chat without overflow is not a scroller, so the page still scrolls there. */
@@ -795,7 +803,7 @@
   .app-shell:has(>.top-bar .navigation-layer){transition:padding-left 200ms ease-out}
   .app-shell:has(>.top-bar .navigation-layer)>.top-bar{transition:margin-left 200ms ease-out}
   .navigation-layer{transition:width 200ms ease-out}
-  .navigation-rail-toggle svg{transition:transform 200ms ease-out}
+  .navigation-trigger-rail{transition:transform 200ms ease-out}
 }
 
 /* Secondary product workspaces use the same shell, typography and semantic palette. */

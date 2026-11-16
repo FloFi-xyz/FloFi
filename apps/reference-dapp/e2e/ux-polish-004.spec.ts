@@ -13,7 +13,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { chooseLanguage } from './app-origin';
-import { closeNavigation, editorStep, expectChatSection, expectEditorSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openNavigation, railToggle } from './build-entry-navigation';
+import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openNavigation, openProductSection, railToggle } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => {
   // Cards may ask for a display estimate; none is needed here (and none may reach a provider).
@@ -36,11 +36,13 @@ async function addSwapCard(page: Page) {
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await expect(graph(page).locator('.react-flow__node')).toHaveCount(1);
 }
+/** The fields of a wheel event that tell its device apart (Chromium accepts the legacy `wheelDeltaY` in the event's init). */
+type WheelInit = { deltaMode?: number; deltaX?: number; deltaY?: number; wheelDeltaY?: number };
 /** A wheel event exactly as a browser reports it, at a point of the page (a trackpad's `wheelDeltaY` is −3 × deltaY on macOS). */
-async function wheelAt(page: Page, point: { x: number; y: number }, init: WheelEventInit & { wheelDeltaY?: number }) {
+async function wheelAt(page: Page, point: { x: number; y: number }, init: WheelInit) {
   return page.evaluate(({ point, init }) => {
     const target = document.elementFromPoint(point.x, point.y)!;
-    const event = new WheelEvent('wheel', { ...init, clientX: point.x, clientY: point.y, bubbles: true, cancelable: true, composed: true });
+    const event = new WheelEvent('wheel', { ...init, clientX: point.x, clientY: point.y, bubbles: true, cancelable: true, composed: true } as WheelEventInit);
     target.dispatchEvent(event);
     return { prevented: event.defaultPrevented, target: target.className };
   }, { point, init });
@@ -124,6 +126,77 @@ test.describe('UX-01 collapsible navigation rail', () => {
     expect(errors).toEqual([]);
   });
 
+  // Every section at 1024–1440 px in both themes and both rail states: no horizontal overflow, the header at full width, the rail under it with
+  // every item and Log out in view and the current one marked. From 1360 px the expanded rail moves the workspace aside; below, it floats over
+  // it (the workspace keeps the width it was designed for, giving up only the collapsed 64 px).
+  for (const theme of ['light', 'dark'] as const) {
+    test(`${theme} desktop rail keeps Build, Simulate, Execute and the Dashboard usable at 1024, 1280 and 1440 px`, async ({ page, networkGuard }) => {
+      test.setTimeout(240_000);
+      await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
+      // An empty workflow: every section opens (an unconfigured card would rightly keep Simulate and Execute closed).
+      await openBuilder(page);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      for (const width of [1024, 1280, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const expanded of [false, true]) {
+          if ((await rail(page).getAttribute('data-expanded')) !== String(expanded)) await railToggle(page).click();
+          await expect(rail(page)).toHaveAttribute('data-expanded', String(expanded));
+          // Every section with the default (collapsed) rail; the Editor's Canvas and the Dashboard with the names shown.
+          for (const section of expanded ? ['Build', 'Dashboard'] as const : ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
+            const label = `${theme} ${width}px ${expanded ? 'expanded' : 'collapsed'} ${section}`;
+            await openProductSection(page, section);
+            await expectProductSection(page, section);
+            await page.evaluate(() => window.scrollTo(0, 0));
+            const railWidth = expanded ? 260 : 64;
+            await expect.poll(async () => (await box(page.locator('.navigation-drawer'))).width, { message: label }).toBe(railWidth);
+            const header = await box(page.getByRole('banner')), drawer = await box(page.locator('.navigation-drawer')), workspace = await box(main(page));
+            expect(header.x, label).toBe(0); expect(header.width, label).toBe(width);
+            expect(drawer.x, label).toBe(0); expect(drawer.y, label).toBeCloseTo(header.y + header.height, 0);
+            expect(workspace.x, label).toBeGreaterThanOrEqual(expanded && width >= 1360 ? 260 : 64);
+            if (expanded && width < 1360) expect(workspace.x, label).toBeLessThan(260);
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), label).toBe(true);
+            for (const item of ['Chat', 'Editor', 'Dashboard', 'Your workflows', 'Automations', 'Credentials', 'Agents', 'Passkeys'] as const)
+              await expect(navigationLink(page, item), label).toBeInViewport();
+            await expect(page.locator('.navigation-drawer').getByRole('button', { name: 'Log out', exact: true }), label).toBeInViewport();
+            await expect(navigationDrawer(page).locator('[aria-current=page]'), label).toHaveCount(1);
+            await expect(navigationLink(page, section === 'Dashboard' ? 'Dashboard' : 'Editor'), label).toHaveAttribute('aria-current', 'page');
+            if (section === 'Build') {
+              // The Canvas, its action rail and navigator stay inside the workspace; the chat sits beside or below it.
+              const canvas = await box(page.locator('main .canvas').first()), chat = await box(page.locator('main .copilot').first());
+              expect(canvas.x, label).toBeGreaterThanOrEqual(workspace.x - 1);
+              for (const control of await graph(page).locator('.floating-toolbox button:visible, .canvas-navigator button').all()) {
+                const button = await box(control);
+                expect(button.x, label).toBeGreaterThanOrEqual(canvas.x - 1); expect(button.x + button.width, label).toBeLessThanOrEqual(canvas.x + canvas.width + 1);
+              }
+              expect(chat.x >= canvas.x + canvas.width - 1 || chat.y >= canvas.y + canvas.height - 1, label).toBe(true);
+            }
+          }
+        }
+        if (width === 1440) await page.screenshot({ path: test.info().outputPath(`rail-${theme}-${width}.png`) });
+      }
+      networkGuard.assertClean();
+    });
+  }
+
+  test('the docked Canvas toolbar keeps every action inside the Canvas at 1101–1280 px beside the collapsed rail', async ({ page, networkGuard }) => {
+    await page.addInitScript(() => localStorage.setItem('gryloo:toolbox-mode', 'top'));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openBuilder(page);
+    await expect(page.locator('.build-canvas-head .canvas-toolbar-row')).toBeVisible();
+    for (const width of [1101, 1180, 1280, 1360]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(rail(page)).toHaveAttribute('data-expanded', 'false');
+      const canvas = await box(page.locator('main .canvas').first());
+      for (const control of await page.locator('.build-canvas-head .canvas-toolbar-row .canvas-toolbox button').all()) {
+        const button = await box(control);
+        expect(button.x, `${width}px`).toBeGreaterThanOrEqual(canvas.x - 1);
+        expect(button.x + button.width, `${width}px`).toBeLessThanOrEqual(canvas.x + canvas.width + 1);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}px`).toBe(true);
+    }
+    networkGuard.assertClean();
+  });
+
   test('the transition is a short ease-out slide and reduced motion removes it', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -134,7 +207,7 @@ test.describe('UX-01 collapsible navigation rail', () => {
     await expect(rail(page)).toHaveCSS('transition-property', 'width');
     const widths = await page.evaluate(async () => {
       const layer = document.querySelector<HTMLElement>('.navigation-layer')!;
-      document.querySelector<HTMLButtonElement>('.navigation-rail-toggle')!.click();
+      document.querySelector<HTMLButtonElement>('.navigation-trigger')!.click();
       const samples: number[] = [];
       for (let frame = 0; frame < 24; frame++) { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); samples.push(layer.getBoundingClientRect().width); }
       return samples;
@@ -431,7 +504,7 @@ test.describe('UXA-02 Canvas zoom, pan and independent scrolling', () => {
     await page.evaluate(({ x, y }) => {
       const target = document.elementFromPoint(x, y)!;
       for (const init of [{ deltaY: 6, wheelDeltaY: -18 }, { deltaY: 100, wheelDeltaY: -120 }])
-        target.dispatchEvent(new WheelEvent('wheel', { ...init, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true }));
+        target.dispatchEvent(new WheelEvent('wheel', { ...init, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true } as WheelEventInit));
     }, point);
     expect((await viewport(page)).zoom).toBe(before.zoom);
     await pause(page);

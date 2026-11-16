@@ -117,6 +117,11 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
     if (range && element.value === text) { selectAfterFill.current = null; element.setSelectionRange(range.start, range.end); }
   }
   const refusal = refused?.message ? refused.language ? refused.message : tr(refused.message) : null;
+  /** UX-03: opens the Editor and moves focus to its workspace (this entry, and the focused link, leave the page). */
+  function openEditorWorkspace() {
+    openBuilder();
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('main#workspace')?.focus({ preventScroll: true }));
+  }
   return <section className={styles.root} aria-labelledby="build-entry-title" data-build-entry="">
     <div className={styles.content}>
       <div className={styles.mascot} aria-hidden="true">
@@ -156,7 +161,7 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
           a refusal and the drawer's Editor (no workflow, proposal or transaction is created by the click; no wallet is asked). Only the action is a
           link; while a request is being prepared it waits, like the suggestions. */}
       <p className={styles.manual}>{tr('Prefer the editor?')}{' '}
-        <Link href="/app" aria-disabled={busy || undefined} onClick={event => { event.preventDefault(); if (!busy) openBuilder(); }}>{tr('Build it manually')}</Link></p>
+        <Link href="/app" aria-disabled={busy || undefined} onClick={event => { event.preventDefault(); if (!busy) openEditorWorkspace(); }}>{tr('Build it manually')}</Link></p>
     </div>
   </section>;
 }

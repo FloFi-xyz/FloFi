@@ -6,9 +6,10 @@ import { useEffect } from 'react';
 import { Panel, useReactFlow, useStore, useStoreApi, type FitViewOptions, type PanelPosition, type ProOptions, type ReactFlowState, type Viewport } from '@xyflow/react';
 
 /**
- * Laptop-first canvas gestures, shared by every FloFi canvas. Two-finger trackpad movement (and a plain mouse wheel) pans
- * the viewport 1:1; a trackpad pinch (the browser's ctrl+wheel) or Ctrl/⌘ + wheel zooms. React Flow intercepts wheel
- * events only over the canvas pane, never over its `nowheel` controls, so the page keeps normal scrolling elsewhere.
+ * Laptop-first canvas gestures, shared by every FloFi canvas. Two-finger trackpad movement pans the viewport 1:1; a trackpad pinch (the
+ * browser's ctrl+wheel) or Ctrl/⌘ + wheel zooms. A plain mouse wheel pans the Simulate and Execute canvases too; on the Editor's Canvas
+ * `CanvasWheelNavigation` (below) makes it zoom at the cursor instead (BUILD UX POLISH 004). React Flow intercepts wheel events only over the
+ * canvas pane, never over its `nowheel` controls.
  */
 export const CANVAS_GESTURES = Object.freeze({ panOnScroll: true, panOnScrollSpeed: 1, zoomOnScroll: true, zoomOnPinch: true, preventScrolling: true });
 
@@ -50,6 +51,8 @@ export const WHEEL_GESTURE_GAP_MS = 200;
 /** The scrollable element between `target` and `boundary` that can still move in the wheel's direction (a card's token list, the rail). */
 export function scrollableAncestor(target: Element | null, boundary: Element, deltaX: number, deltaY: number): HTMLElement | null {
   const vertical = Math.abs(deltaY) >= Math.abs(deltaX), delta = vertical ? deltaY : deltaX;
+  // A focused number or range field would take the wheel as a value change: it never scrolls (the Canvas handles the wheel and cancels it).
+  if (target instanceof HTMLInputElement && (target.type === 'number' || target.type === 'range') && target === target.ownerDocument.activeElement) return null;
   for (let element = target; element && element !== boundary; element = element.parentElement) {
     if (!(element instanceof HTMLElement)) continue;
     const style = getComputedStyle(element), overflow = vertical ? style.overflowY : style.overflowX;
@@ -73,9 +76,10 @@ type WheelGesture = { readonly last: number; readonly kind: 'scroll' | 'zoom' | 
  */
 export function CanvasWheelNavigation() {
   const store = useStoreApi();
+  // Subscribed, so the listener attaches whenever React Flow has its root (never silently missing it).
+  const root = useStore((state: ReactFlowState) => state.domNode);
   const { getViewport, setViewport } = useReactFlow();
   useEffect(() => {
-    const root = store.getState().domNode;
     const surface = root?.closest<HTMLElement>('.flow-surface') ?? root;
     if (!root || !surface) return;
     let gesture: WheelGesture | null = null;
@@ -95,8 +99,9 @@ export function CanvasWheelNavigation() {
       }
       gesture = { last: now, kind, element };
       if (kind === 'pan') return;
-      // React Flow neither pans nor zooms for this event; the page never scrolls because of it.
-      event.stopPropagation();
+      // Over the graph React Flow would pan for this event: it is handled here instead (other wheel listeners in the Canvas are left alone).
+      if (target && root.contains(target) && !target.closest('.nowheel')) event.stopPropagation();
+      // From here on the page never scrolls because of this event.
       if (kind === 'scroll' && element && scrollableAncestor(target, surface, sample.deltaX, sample.deltaY) === element) return;
       event.preventDefault();
       if (kind !== 'zoom') return;
@@ -106,7 +111,7 @@ export function CanvasWheelNavigation() {
     };
     surface.addEventListener('wheel', listener, { capture: true, passive: false });
     return () => surface.removeEventListener('wheel', listener, { capture: true });
-  }, [store, getViewport, setViewport]);
+  }, [root, store, getViewport, setViewport]);
   return null;
 }
 /**
