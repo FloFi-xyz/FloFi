@@ -133,7 +133,7 @@ const DELEGATOR_IMPL = erc7710.DELEGATION_FRAMEWORK_V1_3.eip7702StatelessDeleGat
  * MetaMask redemption recorded in testdata logs the LimitedCalls enforcer's `IncreasedCount`). None of them moves funds; any fund movement
  * still has to be one of the swap's own, exactly accounted logs.
  */
-const RELAY_FRAMEWORK_LOGGERS: ReadonlySet<string> = new Set([DELEGATION_MANAGER, ...Object.values(erc7710.DELEGATION_FRAMEWORK_V1_3.enforcers)]);
+export const RELAY_FRAMEWORK_LOGGERS: ReadonlySet<string> = new Set([DELEGATION_MANAGER, ...Object.values(erc7710.DELEGATION_FRAMEWORK_V1_3.enforcers)]);
 /**
  * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a relayed redemption is accepted only when its delegation is single use, as in the real MetaMask
  * relay (testdata/metamask-delegated-depth1-approval.base-sepolia.json): the owner's root delegation carries the framework's LimitedCalls caveat
@@ -464,7 +464,8 @@ export async function verifyOwnerSubmission(rpc: Rpc, attempt: { readonly txHash
  * requests for the one-off duplicate checks before a receipt becomes evidence or a refused attempt is retried (~5.8 days on Arbitrum One,
  * ~9 months on Ethereum). A duplicate check that cannot cover the whole window never passes: the attempt stays pending.
  */
-const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40, RELAY_DUPLICATE_SCAN_REQUESTS = 400;
+const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40;
+export const RELAY_DUPLICATE_SCAN_REQUESTS = 400;
 /**
  * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: every relayed execution of an attempt's exact reviewed call by this owner since `fromBlock`. A relayed
  * redemption does not use the owner's nonce, so nonce discovery cannot see it; the Delegation Manager's `RedeemedDelegation` logs naming the
@@ -473,7 +474,7 @@ const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40, RELAY_DUPLICATE_SCAN_
  * not canonical yet (or its receipt is not served yet), so the answer is not final. The scan is bounded (RELAY_SCAN_REQUESTS × RELAY_SCAN_BLOCKS
  * blocks): `complete` is false when it stopped before the head, and nothing is then assumed about the rest.
  */
-async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicAttempt, 'account' | 'tx'>, fromBlock: number,
+export async function relayedExecutions(rpc: Rpc, P: { readonly chainId: number; readonly l1DataFee: boolean }, attempt: { readonly account: string; readonly tx: Pick<Tx, 'to' | 'data' | 'value'> }, fromBlock: number,
   claimedElsewhere: (txHash: string) => Promise<boolean>, maxRequests = RELAY_SCAN_REQUESTS):
   Promise<{ readonly verified: readonly string[]; readonly unclassified: readonly string[]; readonly waiting: boolean; readonly complete: boolean }> {
   const head = Number(quantity(await rpc('eth_blockNumber', [])));
@@ -504,7 +505,10 @@ async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicA
       if (!(cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH')) throw cause;
       // Not the reconcilable shape, but a successful owner-rooted redemption whose input still carries the reviewed call's exact bytes (for
       // example the call batched with a fee payment) may have executed it: never ignored, never reconciled.
-      if (Number(quantity(raw.status)) === 1 && isObject(tx) && hex(tx.input).includes(attempt.tx.data.toLowerCase().slice(2))) unclassified.push(txHash);
+      // BUILD-FLOFI-7702-TRANSFER-001: a call without calldata (a native ETH transfer) is matched by its target followed by its value word, as
+      // both the single (packed) and the batch (ABI) execution encodings carry them; an empty calldata never matches every redemption.
+      const call = attempt.tx.data === '0x' ? address(attempt.tx.to).slice(2) + word(BigInt(attempt.tx.value || '0x0')) : attempt.tx.data.toLowerCase().slice(2);
+      if (Number(quantity(raw.status)) === 1 && isObject(tx) && hex(tx.input).includes(call)) unclassified.push(txHash);
       continue;
     }
     verified.push(txHash);
@@ -529,7 +533,7 @@ type Persistence = { readonly save: (run: PublicRun) => PublicRun | Promise<Publ
   readonly claims: { readonly claim: (chainId: number, txHash: string, holder: TransactionClaim) => Promise<boolean>;
     readonly holder: (chainId: number, txHash: string) => Promise<TransactionClaim | null> } };
 type TransactionClaim = { readonly id: string; readonly attemptId: string };
-function transactionClaims(storage: ExecutionStorage): Persistence['claims'] {
+export function transactionClaims(storage: ExecutionStorage): Persistence['claims'] {
   const name = (chainId: number, txHash: string) => { if (!HASH.test(txHash)) fail('TX_HASH_INVALID'); return `claim-${chainId}-${txHash}.tx`; };
   const parse = (bytes: Uint8Array): TransactionClaim => {
     const value = JSON.parse(utf8(bytes)) as unknown;

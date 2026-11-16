@@ -224,7 +224,8 @@ CI-IMAGE: the browser baselines (§3b). **None of this is mainnet execution evid
      a verified on-chain read.
 2. **Smart Account transfers (outstanding).** EIP-7702 accounts are accepted for **swaps** only, and only for the reviewed MetaMask DeleGator.
    Native/token **transfers** keep the EOA-only rule (their reconciliation proves balances by exact deltas, and a delegated owner's code can run on
-   a self-transfer); a delegated MetaMask account gets an accurate transfer-specific message. Not resolved here.
+   a self-transfer); a delegated MetaMask account gets an accurate transfer-specific message. Not resolved here. **Follow-up:** resolved for
+   mainnet transfer profiles by `BUILD-FLOFI-7702-TRANSFER-001.md` (direct and relayed submissions, same relay rules as swaps).
 3. **Safe / ERC-4337 (outstanding).** Contract wallets remain unsupported: FloFi's flows ask the connected account to originate the reviewed
    transaction; ERC-1271/4337 execution is not implemented.
 4. **Base / Robinhood wallet reconnection (outstanding).** Reviews without a bound owner (Base and Robinhood swaps, which are not owner-bound)

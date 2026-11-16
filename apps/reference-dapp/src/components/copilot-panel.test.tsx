@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CopilotPanel } from './copilot-panel';
 import { EditorOverviewPanel } from './editor-overview-panel';
@@ -181,5 +182,46 @@ describe('chat messages follow the current interface language', () => {
     const model: ChatMessage = { id: 3, role: 'ai', text: 'Simulate again', options: ['Base'] };
     expect(page('PT', [model])).toContain(translate('PT', 'Simulate again'));
     expect(shownMessage(model, 'PT')).toBe(model);
+  });
+});
+
+// FloFi's suggested answers: FloFi's next step is the primary blue CTA, a choice stays neutral, an undo/discard/delete takes the danger tone —
+// the same component and classes for deterministic (question/Review) and AI replies. Presentation only: each button still sends its own answer.
+describe('chat answers carry a presentational variant', () => {
+  const variants = (html: string) => [...html.matchAll(/<button type="button" class="chat-action" data-variant="([a-z]+)"[^>]*>([^<]+)<\/button>/g)].map(match => [match[2], match[1]]);
+  const page = (language: 'EN' | 'PT', messages: ChatMessage[], busy = false) => renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language,
+    children: createElement(CopilotPanel, { conversation: { ...conversation(true, messages), busy } as FlofiConversation }) }));
+  for (const language of ['EN', 'PT'] as const) {
+    const c = conversationCopy(language);
+    it(`${language}: a FloFi question (deterministic) shows Add another action and Review workflow as primary, Undo as destructive`, () => {
+      const html = page(language, [{ id: 1, role: 'flofi', language, text: c.added('Swap', '1 USDC'), question: c.nextQuestion, options: [c.addAnother, c.review, c.undo] }]);
+      expect(variants(html)).toEqual([[c.addAnother, 'primary'], [c.review, 'primary'], [c.undo, 'destructive']]);
+      expect(html).not.toContain('class="quiet"');
+    });
+    it(`${language}: Yes, I confirm is primary and No stays a secondary choice`, () => {
+      const html = page(language, [{ id: 1, role: 'flofi', language, text: c.reviewReady, question: c.confirmWorkflow, options: [c.confirmYes, c.confirmNo] }]);
+      expect(variants(html)).toEqual([[c.confirmYes, 'primary'], [c.confirmNo, 'secondary']]);
+    });
+    it(`${language}: an AI reply uses the same buttons: its lifecycle answers primary, its clarification answers secondary`, () => {
+      expect(variants(page(language, [{ id: 1, role: 'ai', language, text: c.added('Swap', '1 USDC'), options: [c.addAnother, c.review, c.undo] }])))
+        .toEqual([[c.addAnother, 'primary'], [c.review, 'primary'], [c.undo, 'destructive']]);
+      expect(variants(page(language, [{ id: 1, role: 'ai', text: 'Which token should Flofi supply?', options: ['USDC', 'WETH', 'WBTC'] }])))
+        .toEqual([['USDC', 'secondary'], ['WETH', 'secondary'], ['WBTC', 'secondary']]);
+    });
+  }
+  it('the user’s own saved names are always choices, even when one reads like an action', () => {
+    expect(variants(page('EN', [{ id: 1, role: 'ai', text: 'Which saved recipient?', options: ['Review workflow', 'Alice'], verbatim: true }])))
+      .toEqual([['Review workflow', 'secondary'], ['Alice', 'secondary']]);
+  });
+  it('while FloFi is answering every answer is disabled (never blue-active) and the group is busy; clicking still sends the same answer', () => {
+    const busy = page('EN', [{ id: 1, role: 'flofi', language: 'EN', text: 'x', question: 'q', options: ['Review workflow', 'No'] }], true);
+    expect(busy).toContain('<div class="copilot-options" role="group" aria-label="Suggested answers" aria-busy="true">');
+    expect(busy.match(/<button type="button" class="chat-action" data-variant="[a-z]+" disabled="">/g)).toHaveLength(2);
+    const idle = page('EN', [{ id: 1, role: 'flofi', language: 'EN', text: 'x', question: 'q', options: ['Review workflow'] }]);
+    expect(idle).not.toContain('aria-busy'); expect(idle).toContain('<button type="button" class="chat-action" data-variant="primary">Review workflow</button>');
+    const css = readFileSync(new URL('../app/approved-ux-editor.css', import.meta.url), 'utf8');
+    expect(css).toContain('.copilot-options .chat-action[data-variant="primary"]{border-color:var(--primary);background:var(--primary);color:var(--on-accent)}');
+    expect(css).toContain('.copilot-options .chat-action:disabled{border-color:var(--line);background:var(--soft);color:var(--muted)}');
+    expect(css).toContain('.copilot-options .chat-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}');
   });
 });

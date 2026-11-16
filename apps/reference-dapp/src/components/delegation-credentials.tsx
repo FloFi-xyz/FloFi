@@ -6,7 +6,7 @@
  * delegation for EVM, an SPL token delegation for Solana) to a session signer dedicated to that grant. Enrollment and revocation signatures
  * belong to the Credential lifecycle — never to a workflow or an execution.
  */
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { credentialComplete, credentialPrepare, credentialReverify, credentialRevocationComplete, credentialRevoke, delegationEnabled, delegationOverview, passkeyOptions,
   passkeyRegister, passkeyRevoke } from '../app/delegation-action';
 import type { DelegationOverviewView, GrantView, PasskeyView } from '../delegation/views';
@@ -17,9 +17,14 @@ import { DELEGATION_ERROR_TEXT } from './delegated-automations';
 import { useWalletAuthorityEpoch } from './wallet-authority-epoch';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useJupiter } from '../state/jupiter-store';
-import { WalletProof, useWalletProof } from './wallet-proof';
+import { WalletProof, sameWallet, useWalletProof } from './wallet-proof';
 
 export type DelegationAccess = { readonly owner: WorkflowOwner | null; readonly proof: ReturnType<typeof useWalletProof> };
+/**
+ * Whether the shell's proof is the server-verified, unexpired session of exactly this owner's connected wallet (EVM addresses case-insensitive,
+ * Solana exact). A connection alone never is. The server re-verifies the session (and the signed-in account) on every delegation action.
+ */
+const provenOwner = (access: DelegationAccess) => Boolean(access.owner && sameWallet(access.owner.namespace, access.proof.proven, access.owner.address));
 const ERROR_TEXT: Readonly<Record<string, string>> = { ...DELEGATION_ERROR_TEXT, EVM_ACCOUNT_NOT_UPGRADED: 'This account is not a MetaMask smart account yet. Switch it to a smart account in MetaMask, then verify again.',
   ENROLLMENT_SIGNER_MISMATCH: 'The signature came from another account.', ENROLLMENT_SIGNATURE_INVALID: 'The wallet signature is invalid.',
   SOLANA_DELEGATION_NOT_CONFIRMED: 'The delegation is not visible on-chain yet. Verify again in a moment.', WALLET_SESSION_REQUIRED: 'Prove ownership of this wallet first.',
@@ -39,12 +44,16 @@ function useEnabled(): boolean | null {
 }
 function useOverview(owner: WorkflowOwner | null, proven: boolean) {
   const [overview, setOverview] = useState<DelegationOverviewView | null>(null), [code, setCode] = useState<string | null>(null);
+  // Keyed on the owner's identity (the shell builds a new owner object every render) and the proof: an answer for an earlier wallet never applies.
+  const namespace = owner?.namespace ?? null, address = owner?.address ?? null, key = namespace && address && proven ? `${namespace}:${address}` : null;
+  const latest = useRef(key); latest.current = key;
   const refresh = useCallback(async () => {
-    if (!owner || !proven) return;
-    const r = await delegationOverview(owner).catch(() => ({ ok: false as const, code: 'DELEGATION_UNAVAILABLE' }));
+    if (!namespace || !address || !key) return;
+    const r = await delegationOverview({ namespace, address }).catch(() => ({ ok: false as const, code: 'DELEGATION_UNAVAILABLE' }));
+    if (latest.current !== key) return;
     if (r.ok) { setOverview(r.value); setCode(null); } else { setOverview(null); setCode(r.code); }
-  }, [owner, proven]);
-  useEffect(() => { void refresh(); }, [refresh]);
+  }, [namespace, address, key]);
+  useEffect(() => { setOverview(null); setCode(null); void refresh(); }, [refresh]);
   return { overview, code, refresh };
 }
 function useRunner(refresh: () => Promise<void>) {
@@ -66,15 +75,21 @@ export function PasskeysPanel({ access, placeholder }: { access: DelegationAcces
   return access ? <PasskeysManager access={access} placeholder={placeholder}/> : <>{placeholder}</>;
 }
 function PasskeysManager({ access, placeholder }: { access: DelegationAccess; placeholder: ReactNode }) {
-  const { t } = useLocale(), owner = access.owner, proven = Boolean(owner && access.proof.proven === owner.address);
+  const { t } = useLocale(), owner = access.owner, proven = provenOwner(access);
   const { overview, code, refresh } = useOverview(owner, proven), { busy, run, messages } = useRunner(refresh);
   const [label, setLabel] = useState('This device');
   const enabled = useEnabled();
-  // P0 approved UX (board 15): while availability is still being read, no "Coming soon" is claimed for a deployment that may serve passkeys.
-  if (enabled === null && owner) return <div className="ux-page passkeys"><header className="ux-page-head"><div><h1>{t('Passkeys')}</h1></div></header>
+  // The shell is still reading back a remembered wallet: it may be the owner, so no "Coming soon" yet.
+  const evm = useBuild009Wallet(), solana = useJupiter(), restoring = !owner && Boolean(evm.restoring || solana.restoring);
+  const checking = <div className="ux-page passkeys"><header className="ux-page-head"><div><h1>{t('Passkeys')}</h1></div></header>
     <p className="muted" role="status">{t('Checking passkeys…')}</p></div>;
+  // P0 approved UX (board 15): while availability is still being read, no "Coming soon" is claimed for a deployment that may serve passkeys.
+  if (enabled === null && (owner || restoring) || enabled && restoring) return checking;
   // Without delegated execution on this deployment (or without a connected wallet) the workspace shows the placeholder (board 15: "Coming soon").
   if (!enabled || !owner || code === 'DELEGATION_NOT_ENABLED') return <>{placeholder}</>;
+  // The connected wallet's server-verified session is still being read: neither the manager nor the proof button (a click there would ask the
+  // wallet to sign again although a valid session may exist). A session read for another wallet or account never answers for this one.
+  if (!proven && access.proof.checking) return checking;
   if (!proven) return <div className="ux-page passkeys"><header className="ux-page-head"><div><h1>{t('Passkeys')}</h1><p>{t('A passkey is how you authorize automatic workflows: once per workflow, on this device.')}</p></div></header>
     <div className="ux-panel ux-list-empty"><p>{t('Verify wallet ownership to manage passkeys.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div></div>;
   async function add(event: FormEvent) {
@@ -144,7 +159,7 @@ export function ExecutionCredentials({ access }: { access: DelegationAccess | un
   return access ? <ExecutionCredentialsPanel access={access}/> : null;
 }
 function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
-  const { t } = useLocale(), owner = access.owner, proven = Boolean(owner && access.proof.proven === owner.address);
+  const { t } = useLocale(), owner = access.owner, proven = provenOwner(access);
   const { overview, code, refresh } = useOverview(owner, proven), { busy, run, messages } = useRunner(refresh);
   const solanaProof = useWalletProof(owner ? 'solana' : null);
   const [network, setNetwork] = useState<'base-sepolia' | 'ethereum-sepolia' | 'solana-devnet' | 'arbitrum-one'>('base-sepolia'), [cap, setCap] = useState('100'), [calls, setCalls] = useState('40');
@@ -191,7 +206,9 @@ function ExecutionCredentialsPanel({ access }: { access: DelegationAccess }) {
       <span className="ux-count">{overview?.credentials.reduce((n, c) => n + c.grants.filter(g => g.state === 'ACTIVE').length, 0) ?? 0}</span></div></div>
     {!retired && <p className="muted">{t('Enroll a wallet once to let FloFi execute workflows you authorize, inside the limits it signs here. Each enrollment is one wallet signature per network; workflows never ask the wallet again.')}</p>}
     {messages}
-    {!proven ? <div className="workspace-empty"><p>{t('Verify wallet ownership to manage automatic execution.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div> : <>
+    {/* The same session reuse as Passkeys: a valid server-verified session of this wallet opens the section without a click or signature. */}
+    {!proven && access.proof.checking ? <p className="muted" role="status">{t('Checking wallet ownership…')}</p>
+      : !proven ? <div className="workspace-empty"><p>{t('Verify wallet ownership to manage automatic execution.')}</p><WalletProof namespace={owner.namespace} proof={{ ...access.proof, proven: null }}/></div> : <>
       <p className="muted">{t('Enrollment is retired: FloFi no longer executes from its own account and never pays your network fees. Existing Credentials can still be revoked.')}</p>
       {!passkey && !retired && <p className="error-banner" role="note">{t('Register a passkey first (Passkeys). Every Credential is bound to the passkey that will authorize your workflows.')}</p>}
       <ul className="automation-list">{(overview?.credentials ?? []).flatMap(c => c.grants).map(g => <GrantCard key={g.grantId} g={g} owner={owner} busy={busy} run={run}/>)}</ul>

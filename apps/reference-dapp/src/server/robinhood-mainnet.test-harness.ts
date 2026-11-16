@@ -244,6 +244,11 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       gasUsed: '0x' + state.gasUsed.toString(16), effectiveGasPrice: '0x' + state.gasPrice.toString(16), ...base ? { l1Fee: '0x' + state.l1Fee.toString(16) } : { gasUsedForL1: '0x0' }, logs: [] });
     return hash;
   }
+  /** BUILD-FLOFI-7702-TRANSFER-001: a relayed redemption included in the CURRENT head block (beside a transaction `apply` just included there). */
+  function relayInBlock(tx: MockTx, options: MockRelay): string {
+    if (!state.code.has(MOCK_DELEGATION_MANAGER)) state.code.set(MOCK_DELEGATION_MANAGER, '0x600b600b');
+    return include(tx, options);
+  }
   /** Plays the owner's wallet broadcasting without inclusion: the hash is known, the transaction waits in the mempool. */
   function queue(tx: MockTx): string {
     const from = tx.from.toLowerCase();
@@ -362,7 +367,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   }
   /** Advances the head by `n` empty blocks (confirmations), keeping historical reads exact. */
   const mine = (n = 1) => { for (let i = 0; i < n; i++) { snapshot(); state.head += 1; state.blockTime.set(state.head, Math.floor(options.now() / 1000)); } };
-  return { rpc, state, addPool, apply, relay, queue, mineQueued, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
+  return { rpc, state, addPool, apply, relay, relayInBlock, queue, mineQueued, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
     fundNative: (owner: string, amount: bigint) => state.native.set(owner.toLowerCase(), amount), balance: (token: string, owner: string) => state.balances.get(key(token, owner)) ?? 0n };
 }
 export type RobinhoodMockChain = ReturnType<typeof createRobinhoodMockChain>;

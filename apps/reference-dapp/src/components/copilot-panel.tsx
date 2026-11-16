@@ -9,7 +9,7 @@ import type { FormEvent, ReactNode } from 'react';
 import type { FlofiConversation } from '../state/flofi-conversation';
 import { shownMessage } from '../domain/chat-message';
 import { ConversationReviewCard, NetworkChoices, networkChoiceOptions } from './conversation-cards';
-import { CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
+import { ChatActions, CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
 import { CopilotAutomationManager } from './copilot-automation-manager';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
 
@@ -60,8 +60,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
           {message.review && !reviewInPanel && <ConversationReviewCard review={message.review} language={message.language ?? language}/>}
           {message.review && message.notes && message.notes.length > 0 && <ul className="copilot-notes">{message.notes.map((note, at) => <li key={at}>{tr(note)}</li>)}</ul>}
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
-          {(message.review || message.question) && options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-            {options.map(option => <button key={option} type="button" className="quiet" disabled={busy} onClick={() => send(message.verbatim ? option : tr(option))}>{message.verbatim ? option : tr(option)}</button>)}</div>}
+          {(message.review || message.question) && options && options.length > 0 && <ChatActions options={options} verbatim={message.verbatim} busy={busy} onPick={send}/>}
           {networks && <NetworkChoices options={networks} disabled={busy} onPick={send}/>}
         </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text, ...message.params ?? [])}</p>}
       </div>);

@@ -32,8 +32,6 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
   'Your current debt is lower than this repayment. Reduce the amount and simulate again.': 'A sua dívida atual é inferior a este reembolso. Reduza o valor e simule novamente.',
   'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified, and that code could act on funds this workflow sends to it. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.':
     'Esta conta foi atualizada para uma conta inteligente (EIP-7702) cujo código a FloFi não verificou, e esse código pode agir sobre os fundos que este fluxo lhe envia. Use uma conta normal ou uma MetaMask Smart Account. Nada foi simulado nem enviado.',
-  'Transfers need a standard wallet account. This account carries smart-account code (a contract wallet, or an EIP-7702 upgrade such as a MetaMask Smart Account), which FloFi does not use for transfers yet. Nothing was simulated or sent.':
-    'As transferências precisam de uma conta de carteira normal. Esta conta tem código de conta inteligente (uma carteira de contrato ou uma atualização EIP-7702, como uma MetaMask Smart Account), que a FloFi ainda não usa em transferências. Nada foi simulado nem enviado.',
   'This address is a smart contract wallet (for example a Safe), so it cannot sign this transaction itself. Use a standard account or a MetaMask Smart Account. Nothing was simulated or sent.':
     'Este endereço é uma carteira de contrato inteligente (por exemplo, uma Safe), por isso não pode assinar esta transação. Use uma conta normal ou uma MetaMask Smart Account. Nada foi simulado nem enviado.',
   'This action is not available on this FloFi server right now. Nothing was simulated or sent.':

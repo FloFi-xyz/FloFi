@@ -135,7 +135,11 @@ describe('RH-DEMO-001 simulation and Review', () => {
   it('refuses a wrong chain, a code-bearing owner, a stale head and insufficient test ETH; a queued transaction only moves the reviewed nonce', async () => {
     const run = (options: Record<string, unknown>) => simulateNativeTransfer(workflow(), owner, (createRobinhoodTransferChain(options) as Chain).rpc);
     await expect(run({ chain: '0x1237' })).rejects.toThrow('TRANSFER_WRONG_CHAIN');
-    await expect(run({ code: '0xef0100' + '1'.repeat(40) })).rejects.toThrow('TRANSFER_OWNER_NOT_EOA');
+    // BUILD-FLOFI-7702-TRANSFER-001: an EIP-7702 delegation to an unreviewed delegate and a contract wallet stay refused, each with its own code.
+    await expect(run({ code: '0xef0100' + '1'.repeat(40) })).rejects.toThrow('TRANSFER_OWNER_DELEGATION_UNVERIFIED');
+    await expect(run({ code: '0x6080604052' })).rejects.toThrow('TRANSFER_OWNER_NOT_EOA');
+    // A verified MetaMask Smart Account transfers on mainnet profiles only (this test network's read client cannot scan for relays).
+    await expect(run({ code: '0xef0100' + '63c0c19a282a1b52b07dd5a65b58948a07dae32b' })).rejects.toThrow('TRANSFER_SMART_ACCOUNT_NETWORK_UNSUPPORTED');
     // HOTFIX-WORKFLOW-CONCURRENCY-001: the wallet's pending transaction (nonce 7) never blocks; the Review binds the next nonce, 8.
     expect((await run({ queued: 1 })).nonce).toBe('8');
     expect((await run({})).nonce).toBe('7');
