@@ -302,9 +302,12 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     remember(key, thread.messages);
   }, [thread]);
   // Approval surfaces: a new owner (another wallet identity) starts a new conversation; a late answer of the previous one is dropped.
-  // The Editor keeps its conversation, but what FloFi would do by itself for the previous wallet ends: the Copilot's working state (its
-  // transcript and learned wording belong to that wallet's turns), automatic re-quotes and continuations, and a Review or resume in flight. Any
-  // open confirmation is retired by its own binding (the wallet changed), as before. A disconnect and reconnect of the same wallet changes nothing.
+  // The Editor keeps its conversation, but everything FloFi would do by itself for the previous wallet ends, as before this hotfix: the
+  // Copilot's working state (its transcript and learned wording belong to that wallet's turns), the follow-up of that wallet's run (its
+  // automatic re-quotes, continuations and step hand-over would otherwise simulate — and on some runtimes ask a sign-in — for the new wallet),
+  // a Review or resume in flight, and the last Review a fresh quote would be compared with. The run itself stays tracked in Execute and the
+  // Dashboard ("check status" follows it again). Any open confirmation is retired by its own binding (the wallet changed), as before. A
+  // disconnect and reconnect of the same wallet changes nothing.
   const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null, lastOwner = useRef(ownerKey), lastWorkflow = useRef(workflowId);
   useEffect(() => {
     const changed = ownerKey !== null && lastOwner.current !== null && ownerKey !== lastOwner.current;
@@ -312,8 +315,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (changed && !direct) open(conversationKey, null, true);
     else if (changed) {
       copilot.clear();
-      if (watch.current) watch.current.auto = false;
-      reviewLock.current = null; resume.current = null; handover.current = null; requote.current = null;
+      watch.current = null; reviewLock.current = null; resume.current = null; handover.current = null; requote.current = null; lastReview.current = null;
     }
   }, [ownerKey]);
   useEffect(() => {

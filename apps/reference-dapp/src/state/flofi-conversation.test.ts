@@ -1033,4 +1033,28 @@ describe('HOTFIX-P1 conversation identity and recovery', () => {
     expect(texts(view(page, { owner: solana }))).toEqual(shown);
     expect(f.clears).toBe(1);
   });
+
+  it('after the reviewing wallet changes, the previous wallet\'s run never makes FloFi simulate by itself (no step hand-over, no re-quote)', async () => {
+    const page = new HookHarness();
+    const ask = async (text: string) => { view(page).send(text); await flush(); store(); lifecycle(reviewedPatch); return view(page); };
+    await ask('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const sequence = { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: false };
+    reviewedPatch = { sequence }; lifecycle(reviewedPatch);
+    await ask('Review workflow');
+    reviewedPatch = { ...reviewed(), sequence }; lifecycle(reviewedPatch); view(page);
+    await ask('Yes, I confirm'); await ask('Yes, execute');
+    expect(controls.authorize).toHaveBeenCalledTimes(1); expect(simulate).toHaveBeenCalledTimes(1);
+    const shown = texts(view(page)).length;
+    // The reviewing wallet changes (e.g. to the Solana session); then step 1's run completes and step 2 becomes current.
+    const other = () => view(page, { owner: solana });
+    other(); controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); other(); await flush(); other();
+    const next = { ...sequence, current: 2, steps: [{ ...SEQUENCE_STEPS[0]!, state: 'COMPLETED' as const, delivered: '0.0042 WETH' },
+      { ...SEQUENCE_STEPS[1]!, state: 'CURRENT' as const, funding: { from: 1, cap: '0.001 WETH', bound: '0.001 WETH' } }] };
+    reviewedPatch = { sequence: next }; lifecycle(reviewedPatch); other(); await flush();
+    const chat = other();
+    // Nothing is simulated, authorized or requested for the new wallet by FloFi itself; the owner asks for a Review when ready.
+    expect(simulate).toHaveBeenCalledTimes(1); expect(controls.authorize).toHaveBeenCalledTimes(1); expect(controls.request).not.toHaveBeenCalled();
+    expect(texts(chat).length).toBeGreaterThanOrEqual(shown);
+  });
 });

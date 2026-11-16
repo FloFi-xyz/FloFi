@@ -45,9 +45,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 800
     await openBuilder(page);
     const styles = await page.locator('head link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
     await page.route('**/__chat-review-acceptance.js', route => route.fulfill({ contentType: 'application/javascript; charset=utf-8', body: bundle }));
-    // The Simulate / Execute stage beside the Assistant (app-shell wrapStage), in a fresh document.
+    // The Simulate / Execute stage beside the Assistant (app-shell wrapStage: the panel is the grid's direct child, so the product's own
+    // `.stage-with-chat>.copilot` width, margins and height apply), in a fresh document.
     await page.route('**/__chat-review-acceptance', route => route.fulfill({ contentType: 'text/html; charset=utf-8',
-      body: `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${styles}</head><body><main class="main"><div class="stage-with-chat"><section aria-label="Stage"></section><div id="acceptance-root" style="display:contents"></div></div></main><script src="/__chat-review-acceptance.js"></script></body></html>` }));
+      body: `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${styles}</head><body><main class="main"><div class="stage-with-chat" id="acceptance-root"></div></main><script src="/__chat-review-acceptance.js"></script></body></html>` }));
     await page.goto('/__chat-review-acceptance');
     await page.evaluate(() => (window as unknown as { FloFiChatReviewAcceptance: { mount(element: HTMLElement): void } }).FloFiChatReviewAcceptance.mount(document.getElementById('acceptance-root')!));
     const panel = page.getByRole('complementary', { name: 'FloFi Assistant' }), card = panel.getByRole('region', { name: 'Workflow review' });

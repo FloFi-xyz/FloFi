@@ -40,6 +40,7 @@ const conversation = { messages, input: '', setInput: () => undefined, send: () 
   question: 'CONFIRM_WORKFLOW', copilot: { enabled: true, mode: 'live', busy: false }, automation: null, manage: null, dismissAutomation: () => undefined,
   dismissManage: () => undefined } as unknown as FlofiConversation;
 
+/** Mounts into the Simulate / Execute stage container (app-shell `wrapStage`): the stage, then the Assistant as its direct child. */
 export function mount(element: HTMLElement): void {
-  createRoot(element).render(<LocaleProvider initialLanguage="EN"><CopilotPanel conversation={conversation}/></LocaleProvider>);
+  createRoot(element).render(<LocaleProvider initialLanguage="EN"><section aria-label="Stage"/><CopilotPanel conversation={conversation}/></LocaleProvider>);
 }

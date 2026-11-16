@@ -408,14 +408,15 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     else if (checks) void checkAccess();
   }, []); // Only on arrival.
 
-  const board = (event: FormEvent) => {
-    event.preventDefault();
+  /** "Board now": the hero's button and (HOTFIX-P1-FLIGHT-ACCESS) the one offered after a second-email refusal behave the same. */
+  const boardNow = () => {
     report('board_click');
     const text = prompt.trim();
     if (text) { report('prompt_submit'); storage()?.setItem(FLIGHT_DRAFT_KEY, text.slice(0, 500)); }
     else storage()?.removeItem(FLIGHT_DRAFT_KEY); // A route picked and then cleared is not carried to /app.
     void checkAccess();
   };
+  const board = (event: FormEvent) => { event.preventDefault(); boardNow(); };
 
   const phase = state?.phase ?? null;
   // Founding seats closed: a yes/no from the server, never a count.
@@ -510,7 +511,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       {/* On the list with another email, or on another device: a link and a code by email, or the code typed here (signed in or not). */}
       {!pass && !accessNotice && <p className={styles.small}><button type="button" className={styles.linkButton} aria-expanded={showAccess}
         onClick={() => setShowAccess(value => !value)}>{copy.access.otherEmail}</button></p>}
-      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed} onBoard={() => void checkAccess()} intro={false}/>}
+      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed} onBoard={boardNow} intro={false}/>}
     </div>;
   }
 
