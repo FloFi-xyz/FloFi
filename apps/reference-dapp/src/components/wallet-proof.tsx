@@ -12,8 +12,14 @@
  * connection, and a wallet connected here is the one simulation and signing use. A proof never infers ownership from an address:
  * the connected wallet still signs the server's sign-in message. Outside the product shell (`/connections`) there is no operational
  * session: the proof connects the chosen wallet directly, as before, and that connection is never reused for signing.
+ *
+ * Session reuse: a page that opens with a wallet already connected reads the server-verified session of exactly that wallet (`refresh`)
+ * before it offers the proof. Until that read answers for the current wallet and FloFi account (`checking`), no proof is exposed and
+ * consumers show a neutral state instead of the proof button, so a valid session is never re-proven by a hurried click. A read for a
+ * wallet or account that is no longer the current one never applies. The server stays the authority for every action.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFloFiPrivy } from '../accounts/privy-context';
 import { solanaSessionStatus, solanaSignIn, solanaSignInChallenge, walletSessionStatus, walletSignIn, walletSignInChallenge } from '../app/wallet-session-action';
 import { chooseEvmWallet, injected, type EvmProvider } from '../wallet/evm-discovery';
 import { connectSolanaWallet, signSolanaMessage, type SolanaSession, type SolanaWalletChain } from '../wallet/solana-wallet';
@@ -47,6 +53,16 @@ function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string })
 const codeOf = (cause: unknown) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message
   : (cause as { code?: unknown } | null)?.code === 4001 || cause instanceof Error && /reject|declin|denied|cancel/i.test(cause.message + cause.name) ? 'WALLET_REQUEST_REJECTED'
   : 'WALLET_REQUEST_FAILED';
+/**
+ * Whether two addresses name the same wallet of `namespace`: EVM addresses compare case-insensitively (a checksummed address is its lowercase
+ * form), Solana base58 addresses exactly. A missing address never matches.
+ */
+export function sameWallet(namespace: Namespace | null, a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return namespace === 'eip155' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+/** The longest a first session read keeps consumers neutral; after it they offer the explicit proof (a late answer still applies). */
+export const PROOF_CHECK_TIMEOUT_MS = 10_000;
 
 export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletChain = defaultProofChain()) {
   const [proven, setProven] = useState<string | null>(null);
@@ -62,14 +78,30 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   const origin = useRef<object>({});
   const embedded = typeof window !== 'undefined' && window.location?.pathname === '/mcp/approve';
   const proofContext: [boolean?] = embedded ? [true] : [];
-  const selector = useWalletSelector(), solana = useOptionalJupiter(), evm = useOptionalBuild009Wallet();
+  const selector = useWalletSelector(), solana = useOptionalJupiter(), evm = useOptionalBuild009Wallet(), privy = useFloFiPrivy();
   /** Connection is a selection guard, never ownership proof. A switched wallet immediately stops exposing the previous proof. */
   const connected = namespace === 'solana' ? solana?.session?.chain === chain ? solana.session.account.address : null : namespace === 'eip155' ? evm?.account ?? null : null;
-  const scope = `${namespace}:${connected ?? ''}:${chain}`, scopeRef = useRef(scope), connectedRef = useRef(connected), epoch = useRef(0);
-  scopeRef.current = scope; connectedRef.current = connected;
-  const matches = (account: string, selected: string | null) => !selected || (namespace === 'eip155' ? account.toLowerCase() === selected.toLowerCase() : account === selected);
+  // Another Solana wallet holding the same address is still another wallet: its session is read again (EVM wallet changes pass through no account).
+  const walletName = namespace === 'solana' && connected ? solana?.session?.wallet.name ?? '' : '';
+  // The signed-in FloFi account as this page observes it ('' signed out; null while unknown: Privy loading or absent). The first known value is
+  // adopted; any later change (sign-in, sign-out, another account from another tab) is a new generation, so the session is read again.
+  const accountKey = privy?.ready ? privy.userId ?? '' : null;
+  const [observed, setObserved] = useState<{ readonly key: string | null; readonly generation: number }>({ key: accountKey, generation: 0 });
+  const accountGeneration = accountKey === null || accountKey === observed.key || observed.key === null ? observed.generation : observed.generation + 1;
+  if (accountKey !== null && accountKey !== observed.key) setObserved({ key: accountKey, generation: accountGeneration });
+  // The scope names the wallet canonically (an EVM address in lowercase, a Solana address exactly), so a case-only change of the same EVM
+  // address (a checksummed form) neither restarts the session read nor withdraws the proof; `matches` compares the same way.
+  const scope = `${namespace}:${namespace === 'eip155' ? connected?.toLowerCase() ?? '' : connected ?? ''}:${chain}:${walletName}:${accountGeneration}`;
+  const scopeRef = useRef(scope), connectedRef = useRef(connected), epoch = useRef(0);
+  const accountRef = useRef(accountGeneration);
+  scopeRef.current = scope; connectedRef.current = connected; accountRef.current = accountGeneration;
+  /** The scope whose server session read has answered (or timed out). Until then this scope is `checking` and exposes no proof. */
+  const [checked, setChecked] = useState<string | null>(null), checkedRef = useRef<string | null>(null);
+  const checking = namespace !== null && checked !== scope;
+  const matches = (account: string, selected: string | null) => !selected || sameWallet(namespace, account, selected);
   const refresh = useCallback(async () => {
     const current = ++epoch.current;
+    const bound = setTimeout(() => { if (scopeRef.current === scope) { checkedRef.current = scope; setChecked(scope); } }, PROOF_CHECK_TIMEOUT_MS);
     try {
       const session = namespace === 'solana' ? await solanaSessionStatus() : namespace === 'eip155' ? await walletSessionStatus() : null;
       if (scopeRef.current !== scope || epoch.current !== current) return;
@@ -77,10 +109,12 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
       setProvenNamespace(namespace);
       const expiry = session?.expiresAt ? Date.parse(session.expiresAt) : NaN;
       setExpiresAt(Number.isFinite(expiry) ? expiry : null);
+      checkedRef.current = scope; setChecked(scope);
     } catch {
-      if (scopeRef.current === scope && epoch.current === current) { setProven(null); setExpiresAt(null); }
-    }
+      if (scopeRef.current === scope && epoch.current === current) { setProven(null); setExpiresAt(null); checkedRef.current = scope; setChecked(scope); }
+    } finally { clearTimeout(bound); }
   }, [namespace, scope]);
+  const refreshRef = useRef(refresh); refreshRef.current = refresh;
   useEffect(() => { setProven(null); setExpiresAt(null); void refresh(); }, [refresh]);
   useEffect(() => {
     const focused = () => { void refresh(); };
@@ -106,24 +140,30 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
    */
   async function run(action: () => Promise<string | null>): Promise<ProofOutcome> {
     if (requestLock.current) return { account: null, error: null, wallet: null }; requestLock.current = true; setBusy(true); setError(null);
-    const requestedNamespace = namespace;
+    const requestedNamespace = namespace, requestedAccount = accountRef.current;
     ++epoch.current;
     walletRef.current = null;
     try {
       const account = await action();
+      // A proof finished after the FloFi account changed in this page is not shown for the new account (the server still decides every action).
+      const accepted = account && namespaceRef.current === requestedNamespace && accountRef.current === requestedAccount && matches(account, connectedRef.current) ? account : null;
       // BUILD-CHAT-LEARNING-002: a newly proven wallet changes whose Copilot memory applies; the Copilot reloads its learning context.
-      if (account && namespaceRef.current === requestedNamespace && matches(account, connectedRef.current)) {
+      if (accepted) {
         ++epoch.current;
-        setProven(account); setProvenNamespace(requestedNamespace); window.dispatchEvent(new Event(LEARNING_CHANGED));
+        setProven(accepted); setProvenNamespace(requestedNamespace); checkedRef.current = scopeRef.current; setChecked(scopeRef.current);
+        window.dispatchEvent(new Event(LEARNING_CHANGED));
         window.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: requestedNamespace, origin: origin.current } }));
       }
-      const accepted = account && namespaceRef.current === requestedNamespace && matches(account, connectedRef.current) ? account : null;
       return { account: accepted, error: null, wallet: accepted ? walletRef.current : null };
     } catch (cause) {
       const code = codeOf(cause);
       if (namespaceRef.current === requestedNamespace) setError(code);
       return { account: null, error: code, wallet: null };
-    } finally { requestLock.current = false; setBusy(false); }
+    } finally {
+      requestLock.current = false; setBusy(false);
+      // This attempt superseded a first session read still in flight (or the scope moved meanwhile): read again, so no scope stays `checking`.
+      if (checkedRef.current !== scopeRef.current) void refreshRef.current();
+    }
   }
   /** `another`: the owner asked to prove a different wallet, so the selector opens even when one is connected. */
   const proveEvm = (another = false) => run(async () => {
@@ -174,9 +214,11 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
     if (embedded && (await solanaSessionStatus())?.account !== verified.account) throw new Error('EMBEDDED_WALLET_SESSION_UNAVAILABLE');
     return verified.account;
   });
+  // Exposed only once this scope's own server read answered: never an earlier wallet's or account's proof, never an expired one.
   /** The connected operational account of this namespace, if any (connection only: never treated as proof). */
-  const valid = proven && provenNamespace === namespace && matches(proven, connected) && (expiresAt === null || expiresAt > Date.now()) ? proven : null;
-  return { proven: valid, busy, error, connected, wallet, proveEvm, proveSolana, refresh };
+  const valid = !checking && proven && provenNamespace === namespace && matches(proven, connected) && (expiresAt === null || expiresAt > Date.now()) ? proven : null;
+  /** `checking`: the server-verified session of the current wallet and account has not answered yet (show neither the proof nor what it unlocks). */
+  return { proven: valid, checking, busy, error, connected, wallet, proveEvm, proveSolana, refresh };
 }
 
 /** The proof buttons for one namespace, or the proven account. */

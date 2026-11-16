@@ -1410,6 +1410,26 @@
       "path": "apps/reference-dapp/e2e/admin-login-layout.spec.ts",
       "stage": "browser"
     },
+    "app.server.smart-account-transfer": {
+      "path": "apps/reference-dapp/src/server/smart-account-transfer.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.chat-action-variant": {
+      "path": "apps/reference-dapp/src/domain/chat-action-variant.test.ts",
+      "stage": "unit"
+    },
+    "app.components.delegation-credentials": {
+      "path": "apps/reference-dapp/src/components/delegation-credentials.test.ts",
+      "stage": "unit"
+    },
+    "app.components.wallet-proof": {
+      "path": "apps/reference-dapp/src/components/wallet-proof.test.ts",
+      "stage": "unit"
+    },
+    "app.components.robinhood-transfer-panel": {
+      "path": "apps/reference-dapp/src/components/robinhood-transfer-panel.test.tsx",
+      "stage": "unit"
+    },
     "app.domain.bridge-costs": {
       "path": "apps/reference-dapp/src/domain/bridge-costs.test.ts",
       "stage": "unit"
@@ -3587,7 +3607,8 @@
         "app.mcp.oauth.foundation",
         "app.server.card-origin",
         "app.state.review-authorization",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "app.components.delegation-credentials"
       ],
       "gaps": [
         "Adversarial fixtures and isolation tests are not a penetration test or proof against all attacks."
@@ -3640,7 +3661,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.components.robinhood-transfer-panel"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -3672,7 +3694,8 @@
         "app.wallet.solana-wallet",
         "reference-executor.recovery",
         "reference-executor.restart.fork",
-        "reference-reconciler.evidence"
+        "reference-reconciler.evidence",
+        "app.components.wallet-proof"
       ],
       "gaps": [
         "Injected test wallets do not certify browser extension hardware/user ceremonies or real signatures; production delegated signing is unavailable.",
@@ -4028,7 +4051,8 @@
         "apps/reference-dapp/src/domain/proposal.ts",
         "apps/reference-dapp/src/domain/privacy-notice.ts",
         "apps/reference-dapp/src/domain/chat-message.ts",
-        "apps/reference-dapp/src/domain/token-fee.ts"
+        "apps/reference-dapp/src/domain/token-fee.ts",
+        "apps/reference-dapp/src/domain/chat-action-variant.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -4050,7 +4074,8 @@
         "app.domain.privacy-notice",
         "app.domain.approved-ux",
         "app.domain.kora-presentation",
-        "app.domain.token-fee"
+        "app.domain.token-fee",
+        "app.domain.chat-action-variant"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -4640,6 +4665,7 @@
         "apps/reference-dapp/src/i18n/pt-gas-circle.ts",
         "apps/reference-dapp/src/i18n/pt-gas-kora.ts",
         "apps/reference-dapp/src/i18n/pt-gas-zerox.ts",
+        "apps/reference-dapp/src/i18n/pt-smart-account-transfer.ts",
         "apps/reference-dapp/src/i18n/pt-execution-reliability.ts"
       ],
       "suites": [
@@ -5636,7 +5662,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.server.smart-account-transfer"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -6347,7 +6374,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.server.smart-account-transfer"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."
@@ -6835,7 +6863,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.server.smart-account-transfer"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."

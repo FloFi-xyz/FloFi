@@ -35,6 +35,7 @@ import { useSupply } from '../state/supply-store';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { useWorkflow } from '../state/workflow-store';
 import { useProductBootstrap } from '../state/product-bootstrap';
+import { chatActionVariant } from '../domain/chat-action-variant';
 
 /**
  * BUILD-COPILOT-001: AI interpretation for the Copilot panel, kept apart from the panel itself. Text the exact grammar
@@ -355,9 +356,20 @@ export function CopilotMessage({ text, notes, options, link, verbatim, disabled,
     <p>{tr(text)}</p>
     {notes && notes.length > 0 && <ul className="copilot-notes">{notes.map((note, index) => <li key={index}>{tr(note)}</li>)}</ul>}
     {link && /^\/(?:app|connections)(?:\/[a-z-]+)*$/.test(link.path) && <p className="copilot-link"><a href={link.path}>{tr(link.label)} →</a></p>}
-    {options && options.length > 0 && <div className="copilot-options" role="group" aria-label={tr("Suggested answers")}>
-      {options.map(option => <button key={option} type="button" className="quiet" disabled={disabled} onClick={() => onPick(verbatim ? option : tr(option))}>{verbatim ? option : tr(option)}</button>)}</div>}
+    {options && options.length > 0 && <ChatActions options={options} verbatim={verbatim} busy={disabled} onPick={onPick}/>}
   </>;
+}
+/**
+ * FloFi's suggested answers as buttons: one component for its deterministic lifecycle replies and the Copilot's replies. Each button sends
+ * exactly the answer it shows, as before. `chatActionVariant` only decides how it looks (`data-variant`): FloFi's next step in the primary blue,
+ * a choice neutral, an undo/discard/delete in the danger tone; the user's own saved names are always choices. While FloFi is answering every
+ * answer is disabled and the group is marked busy.
+ */
+export function ChatActions({ options, verbatim, busy, onPick }: { options: readonly string[]; verbatim?: boolean | undefined; busy: boolean; onPick(option: string): void }) {
+  const { t: tr } = useLocale();
+  return <div className="copilot-options" role="group" aria-label={tr("Suggested answers")} aria-busy={busy || undefined}>
+    {options.map(option => <button key={option} type="button" className="chat-action" data-variant={verbatim ? 'secondary' : chatActionVariant(option)} disabled={busy}
+      onClick={() => onPick(verbatim ? option : tr(option))}>{verbatim ? option : tr(option)}</button>)}</div>;
 }
 /** Shown inside the existing proposal box when the pending proposal came from the Copilot. */
 export function CopilotProposalNotice({ sentence }: { sentence: string }) {

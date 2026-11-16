@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import real from './testdata/metamask-delegated-depth1-approval.base-sepolia.json' with { type: 'json' };
 import { erc7710 } from '@defi-workflow-engine/reference-compiler';
-import { singleUseRelayedDelegation, verifyOwnerSubmission, type Rpc } from './public-testnet-service';
+import { redemptionExecutions, redemptionMayExecute, singleUseRelayedDelegation, verifyOwnerSubmission, type Rpc } from './public-testnet-service';
 import { encodeSingleRedemption } from '../../e2e/uniswap-liquidity-harness';
 
 const MANAGER = '0xdb9b1e94b5b69df7e401ddbede43491141047db3';
@@ -102,5 +102,56 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 single-use relayed delegation,
     const hash = erc7710.delegationHash({ delegate, delegator, authority, salt, caveats: two.map(([enforcer, terms, args]) => ({ enforcer, terms, args })) });
     expect(singleUseRelayedDelegation([{ ...counted, topics: [...counted.topics.slice(0, 3), hash], data: '0x' + '0'.repeat(63) + '2' + '0'.repeat(63) + '1' },
       logs[1], { ...redeemed, data }], owner, relayer)).toBe(false);
+  });
+});
+
+describe('BUILD-FLOFI-7702-TRANSFER-001 redemptionExecutions (exact decoding for the relay scans)', () => {
+  const usdc = real.reviewedCall.target.toLowerCase(), other = '0x' + '7'.repeat(40);
+  const redeem = (mode: string, execution: string, context = '0x' + '00'.repeat(64)) => erc7710.REDEEM_DELEGATIONS_SELECTOR + erc7710.hexOf(erc7710.abiEncode(
+    [{ array: 'bytes' }, { array: 'bytes32' }, { array: 'bytes' }], [[context], [mode], [execution]])).slice(2);
+  const SINGLE = '0x' + '00'.repeat(32), BATCH = '0x01' + '00'.repeat(31);
+  const batch = (calls: [string, bigint, string][]) => erc7710.hexOf(erc7710.abiEncode([{ array: { tuple: ['address', 'uint256', 'bytes'] } }], [calls]));
+  it('decodes the real MetaMask relay to exactly its one reviewed call (single mode, value 0)', () => {
+    expect(redemptionExecutions(real.transaction.input)).toEqual([{ target: usdc, value: 0n, data: real.reviewedCall.data.toLowerCase() }]);
+    // The same call with another amount, token or recipient decodes to a different execution (exact comparison, not a byte search).
+    expect(redemptionExecutions(redeem(SINGLE, other + '0'.repeat(64) + real.reviewedCall.data.slice(2)))).toEqual([{ target: other, value: 0n, data: real.reviewedCall.data.toLowerCase() }]);
+  });
+  it('decodes a batch (the call plus a fee transfer), a native value and a nested redemption', () => {
+    const fee = '0xa9059cbb' + '0'.repeat(24) + other.slice(2) + (5n).toString(16).padStart(64, '0');
+    expect(redemptionExecutions(redeem(BATCH, batch([[usdc, 0n, real.reviewedCall.data], [usdc, 0n, fee]])))).toEqual([
+      { target: usdc, value: 0n, data: real.reviewedCall.data.toLowerCase() }, { target: usdc, value: 0n, data: fee }]);
+    expect(redemptionExecutions(redeem(SINGLE, other + (10n ** 16n).toString(16).padStart(64, '0')))).toEqual([{ target: other, value: 10n ** 16n, data: '0x' }]);
+    const inner = redeem(SINGLE, usdc + '0'.repeat(64) + real.reviewedCall.data.slice(2));
+    const nested = redemptionExecutions(redeem(SINGLE, MANAGER + '0'.repeat(64) + inner.slice(2)));
+    expect(nested).toEqual([{ target: MANAGER, value: 0n, data: inner.toLowerCase(), wraps: true }, { target: usdc, value: 0n, data: real.reviewedCall.data.toLowerCase() }]);
+  });
+  it('returns null for anything it cannot decode strictly (another selector, a delegatecall mode, a malformed batch, non-canonical bytes)', () => {
+    expect(redemptionExecutions('0xa9059cbb' + '00'.repeat(64))).toBeNull();
+    expect(redemptionExecutions(redeem('0xff' + '00'.repeat(31), usdc + '0'.repeat(64)))).toBeNull();
+    expect(redemptionExecutions(redeem(BATCH, usdc + '0'.repeat(64) + real.reviewedCall.data.slice(2)))).toBeNull();
+    expect(redemptionExecutions(real.transaction.input + '00')).toBeNull();
+  });
+  it('expands an account executing as itself (execute(bytes32,bytes), single and batch) and matches the reviewed call inside it exactly', () => {
+    const call = { to: usdc, data: real.reviewedCall.data, value: '0x0' };
+    const execute = (mode: string, calldata: string) => erc7710.selectorOf('execute(bytes32,bytes)') + erc7710.hexOf(erc7710.abiEncode(['bytes32', 'bytes'], [mode, calldata])).slice(2);
+    const single = redeem(SINGLE, owner.toLowerCase() + '0'.repeat(64) + execute(SINGLE, usdc + '0'.repeat(64) + real.reviewedCall.data.slice(2)).slice(2));
+    expect(redemptionExecutions(single)?.at(-1)).toEqual({ target: usdc, value: 0n, data: real.reviewedCall.data.toLowerCase() });
+    expect(redemptionMayExecute(single, call)).toBe(true);
+    const batched = redeem(SINGLE, owner.toLowerCase() + '0'.repeat(64) + execute(BATCH, batch([[other, 5n, '0x'], [usdc, 0n, real.reviewedCall.data]])).slice(2));
+    expect(redemptionMayExecute(batched, call)).toBe(true);
+    // The same calldata on another token, or another amount, is never this call — top level or inside execute().
+    expect(redemptionMayExecute(redeem(SINGLE, other + '0'.repeat(64) + real.reviewedCall.data.slice(2)), call)).toBe(false);
+    expect(redemptionMayExecute(redeem(SINGLE, owner.toLowerCase() + '0'.repeat(64) + execute(SINGLE, other + '0'.repeat(64) + real.reviewedCall.data.slice(2)).slice(2)), call)).toBe(false);
+  });
+  it('an intermediary contract that embeds a redemption of the reviewed call gets the conservative match (fail-closed), an unrelated one does not', () => {
+    const call = { to: usdc, data: real.reviewedCall.data, value: '0x0' };
+    const embedded = redeem(SINGLE, usdc + '0'.repeat(64) + real.reviewedCall.data.slice(2));
+    const multicall = '0x82ad56cb' + '00'.repeat(32) + embedded.slice(2); // an opaque wrapper carrying the redemption bytes
+    expect(redemptionMayExecute(redeem(SINGLE, other + '0'.repeat(64) + multicall.slice(2)), call)).toBe(true);
+    const unrelated = '0x82ad56cb' + '00'.repeat(32) + redeem(SINGLE, other + '0'.repeat(64) + real.reviewedCall.data.slice(2)).slice(2);
+    expect(redemptionMayExecute(redeem(SINGLE, other + '0'.repeat(64) + unrelated.slice(2)), call)).toBe(false);
+    // An input that cannot be decoded at all still needs the token in the match, not the calldata alone.
+    expect(redemptionMayExecute(real.transaction.input + '00', call)).toBe(true);
+    expect(redemptionMayExecute(real.transaction.input.toLowerCase().replaceAll(usdc.slice(2), other.slice(2)) + '00', call)).toBe(false);
   });
 });

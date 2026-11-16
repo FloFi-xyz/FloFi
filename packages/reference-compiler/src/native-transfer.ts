@@ -12,6 +12,15 @@
  * its upper bound from the GasPriceOracle predeploy (`getL1FeeUpperBound`) into the fee budget, and the wallet request carries the
  * network's suggested priority fee. BUILD-FLOFI-UX-FIX-003: Ethereum mainnet (L1) also offers the suggested priority fee (a zero-tip L1 request is
  * refused or never mined). Arbitrum Nitro/Orbit profiles and the engineering Ethereum Sepolia profile keep their Reviews and transactions byte-identical.
+ *
+ * BUILD-FLOFI-7702-TRANSFER-001: the owner account is classified by `ownerAccountCode` (the rule owner-bound swaps already use). A standard
+ * account (no code) keeps its Review byte-identical. A MetaMask Smart Account (an EIP-7702 delegated EOA whose delegate is a reviewed
+ * implementation, `VERIFIED_EIP7702_DELEGATES`) is accepted: its own key still signs this ordinary transaction, the exact call is simulated with
+ * its delegate code at the pinned block (a native self-transfer runs that delegate's `receive()`, which accepts ETH and does nothing else), and
+ * the delegate is bound into the Review (`state.ownerDelegation`, part of the commitment and the manifest); a change of the account's code
+ * before the wallet request needs a new Review. An unreviewed delegate (`TRANSFER_OWNER_DELEGATION_UNVERIFIED`) and contract wallets
+ * (`TRANSFER_OWNER_NOT_EOA`) stay refused, and Smart Accounts are accepted on mainnet transfer profiles only
+ * (`TRANSFER_SMART_ACCOUNT_NETWORK_UNSUPPORTED`). Recipient rules are unchanged.
  */
 import { nativeTransferProfile, transferAllowsRecipients, transferAllowsContractRecipients, transferAllowsTokens, transferEnvironment, transferL1FeeOracle, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
 export { ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, NATIVE_TRANSFER_PROFILES, nativeTransferProfile,
@@ -19,6 +28,7 @@ export { ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNE
 import { readTransferNode, supplyAddress, hashSupplyValue, TRANSFER_ACTION, type SemanticWorkflow, type ArtifactSet, type TransferFields,
   type SimulationBundle, type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 import { rpcRecord, rpcHex, rpcUint, rpcHash, supplyHex, supplyHash, supplyArtifactHash } from './supply.js';
+import { ownerAccountCode } from './account-code.js';
 
 export type TransferRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 /** The exact request a wallet receives. The wallet assigns the nonce; it must equal the reviewed nonce. The priority fee is 0 except on OP Stack and Ethereum mainnet. */
@@ -33,7 +43,12 @@ export type TransferState = { block: number; blockHash: string; blockTimestamp: 
   /** Token transfers only: the owner's token balance and (Stock Token) multiplier state at the same block. */
   tokenBalance?: string; multiplierWad?: string; scheduledMultiplierWad?: string; scheduledEffectiveAt?: number;
   /** Native sends only, on profiles that support contract recipients. Absence preserves existing profile commitments. */
-  recipientCodeHash?: string };
+  recipientCodeHash?: string;
+  /**
+   * BUILD-FLOFI-7702-TRANSFER-001, EIP-7702 owners only: the reviewed delegate the owner account designates at `block` (a MetaMask Smart
+   * Account's DeleGator). Absent: the owner had no code, and the Review is exactly what it was before.
+   */
+  ownerDelegation?: string };
 export type NativeTransferReview = { format: 'gryloo.native-transfer-review.v1'; workflow: SemanticWorkflow; chain: string; chainId: number;
   account: string; recipient: string; value: string; nonce: string; transaction: NativeTransferTransaction;
   gasEstimate: string; gasLimit: string; gasPrice: string; maxFeePerGas: string; expectedFee: string; feeBudget: string;
@@ -59,8 +74,14 @@ export async function readTransferState(rpc: TransferRpc, profile: NativeTransfe
   const [balance, nonce, pendingNonce, gasPrice, code] = await Promise.all([
     rpc('eth_getBalance', [account, tag]), rpc('eth_getTransactionCount', [account, tag]),
     rpc('eth_getTransactionCount', [account, 'pending']), rpc('eth_gasPrice', []), rpc('eth_getCode', [account, tag])]);
-  // A code-bearing owner (contract or EIP-7702 delegation) would execute code on a self-transfer.
-  if (rpcHexOrEmpty(code) !== '0x') throw new Error('TRANSFER_OWNER_NOT_EOA');
+  // BUILD-FLOFI-7702-TRANSFER-001: a contract wallet cannot originate the transaction and an unreviewed EIP-7702 delegate could act on ETH the
+  // account receives (a self-transfer runs it), so both are refused; a reviewed delegate (MetaMask Smart Account) is bound into the state.
+  const owned = ownerAccountCode(rpcHexOrEmpty(code));
+  if (owned.kind === 'CONTRACT') throw new Error('TRANSFER_OWNER_NOT_EOA');
+  if (owned.kind === 'EIP7702' && !owned.verified) throw new Error('TRANSFER_OWNER_DELEGATION_UNVERIFIED');
+  // Mainnet transfer profiles only: proving a Smart Account's transfer executed once needs relay scans (`eth_getLogs`), which the engineering
+  // test-network read clients do not serve. Refused before any Review, never stuck after the owner signed.
+  if (owned.kind === 'EIP7702' && transferEnvironment(profile) !== 'MAINNET') throw new Error('TRANSFER_SMART_ACCOUNT_NETWORK_UNSUPPORTED');
   const tokenFacts: Pick<TransferState, 'tokenBalance' | 'multiplierWad' | 'scheduledMultiplierWad' | 'scheduledEffectiveAt'> = {};
   if (token) {
     if (rpcHexOrEmpty(await rpc('eth_getCode', [token.address, tag])) === '0x') throw new Error('TRANSFER_TOKEN_CODE_MISSING');
@@ -78,7 +99,7 @@ export async function readTransferState(rpc: TransferRpc, profile: NativeTransfe
   const baseFee = block.baseFeePerGas === undefined ? 0n : rpcUint(block.baseFeePerGas);
   return { block: number, blockHash, blockTimestamp: timestamp, account, balance: rpcUint(balance).toString(), nonce: rpcUint(nonce).toString(),
     pendingNonce: rpcUint(pendingNonce).toString(), gasPrice: rpcUint(gasPrice).toString(), baseFee: baseFee.toString(), observedAt: new Date(now).toISOString(),
-    ...tokenFacts, ...recipientFacts };
+    ...tokenFacts, ...recipientFacts, ...owned.kind === 'EIP7702' ? { ownerDelegation: owned.delegate } : {} };
 }
 function rpcHexOrEmpty(value: unknown): string { return value === '0x' ? '0x' : rpcHex(value); }
 /**
@@ -253,6 +274,8 @@ export function assertNativeTransferReview(review: NativeTransferReview, workflo
   if (state.account !== review.account || transferNextNonce(state) !== review.nonce || state.block < review.state.block ||
       BigInt(state.gasPrice) > BigInt(review.maxFeePerGas) || BigInt(state.balance) < value + BigInt(review.feeBudget)) throw new Error('TRANSFER_AUTHORIZATION_STALE');
   if (review.state.recipientCodeHash !== state.recipientCodeHash) throw new Error('TRANSFER_RECIPIENT_CODE_CHANGED_REVIEW_REQUIRED');
+  // BUILD-FLOFI-7702-TRANSFER-001: the owner account must still be what was reviewed (a standard account, or the same reviewed delegation).
+  assertTransferOwnerAccount(review, state);
   if (review.asset) {
     if (state.tokenBalance === undefined || BigInt(state.tokenBalance) < BigInt(review.value)) throw new Error('TRANSFER_AUTHORIZATION_STALE');
     // A Stock Token multiplier that moved since Review changes what the reviewed amount represents.
@@ -262,4 +285,11 @@ export function assertNativeTransferReview(review: NativeTransferReview, workflo
   if ((review.l1FeeUpperBound !== undefined) !== Boolean(transferL1FeeOracle(profile))) throw new Error('TRANSFER_AUTHORIZATION_INVALID');
   if (JSON.stringify(compileNativeTransfer(workflow, owner, review.gasLimit, review.maxFeePerGas, BigInt(review.transaction.maxPriorityFeePerGas).toString())) !==
       JSON.stringify(review.transaction)) throw new Error('TRANSFER_AUTHORIZATION_INVALID');
+}
+/**
+ * BUILD-FLOFI-7702-TRANSFER-001: the owner account's code is still what the Review bound: no code for a standard account, the same reviewed
+ * EIP-7702 delegate for a Smart Account. An upgrade, a removed delegation or another delegate needs a new Review before any wallet request.
+ */
+export function assertTransferOwnerAccount(review: Pick<NativeTransferReview, 'state'>, state: Pick<TransferState, 'ownerDelegation'>): void {
+  if (review.state.ownerDelegation !== state.ownerDelegation) throw new Error('TRANSFER_OWNER_ACCOUNT_CHANGED_REVIEW_REQUIRED');
 }
