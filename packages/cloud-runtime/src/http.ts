@@ -37,10 +37,10 @@ async function readBody(request: IncomingMessage, limit: number): Promise<unknow
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'BODY_INVALID'); }
 }
-function send(response: ServerResponse, status: number, body: unknown, requestId: string): void {
+function send(response: ServerResponse, status: number, body: unknown, requestId: string, draining: boolean): void {
   const text = JSON.stringify(body);
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
-    'x-request-id': requestId, 'content-length': Buffer.byteLength(text) });
+    'x-request-id': requestId, 'content-length': Buffer.byteLength(text), ...draining ? { connection: 'close' } : {} });
   response.end(text);
 }
 
@@ -48,11 +48,19 @@ export type HttpServerOptions = { readonly routes: readonly Route[]; readonly lo
   readonly maxBodyBytes?: number; readonly ready?: () => Promise<boolean> };
 export function createHttpServer(options: HttpServerOptions): Server {
   const limit = options.maxBodyBytes ?? 1_048_576, expected = options.authToken ? digest(options.authToken) : null;
-  return createServer((request, response) => {
+  /**
+   * BUILD-INFRA-API-FAILOVER-CERT-001: once `server.close()` was called (the API's SIGTERM drain) the server no longer listens, so new
+   * connections already reach another replica — but Node keeps serving NEW requests on connections kept alive, and a reverse proxy reuses
+   * its pooled ones. While draining, every answer (including one to a request that arrived before) closes its connection, and readiness
+   * reports false. The in-flight work completes, the server closes as soon as it has, and no new work starts on the draining replica.
+   */
+  const reply = (response: ServerResponse, status: number, body: unknown, requestId: string) => send(response, status, body, requestId, !server.listening);
+  const server = createServer((request, response) => {
     const requestId = randomUUID(), url = new URL(request.url ?? '/', 'http://internal'), method = request.method ?? 'GET';
-    if (method === 'GET' && url.pathname === '/healthz') { send(response, 200, { ok: true }, requestId); return; }
+    if (method === 'GET' && url.pathname === '/healthz') { reply(response, 200, { ok: true }, requestId); return; }
     if (method === 'GET' && url.pathname === '/readyz') {
-      (options.ready?.() ?? Promise.resolve(true)).then(ok => send(response, ok ? 200 : 503, { ok }, requestId), () => send(response, 503, { ok: false }, requestId));
+      (options.ready?.() ?? Promise.resolve(true)).then(ok => { const ready = ok && server.listening; reply(response, ready ? 200 : 503, { ok: ready }, requestId); },
+        () => reply(response, 503, { ok: false }, requestId));
       return;
     }
     const route = options.routes.find(r => r.method === method && r.pattern.test(url.pathname));
@@ -70,14 +78,15 @@ export function createHttpServer(options: HttpServerOptions): Server {
         const body = await readBody(request, limit);
         const result = await route.handler({ method, path: url.pathname, query: url.searchParams, headers: request.headers, body, requestId,
           signal: disconnected.signal }, match);
-        send(response, result.status, result.body, requestId);
+        reply(response, result.status, result.body, requestId);
         // The span sees the answer, so a refusal answered as `{ ok: false, code }` is logged as refused (telemetry.ts), never as ok.
         return result;
       } catch (error) {
-        if (error instanceof HttpError) { send(response, error.status, { ok: false, code: CODE.test(error.message) ? error.message : 'REQUEST_INVALID' }, requestId); throw error; }
-        send(response, 500, { ok: false, code: 'INTERNAL_ERROR' }, requestId);
+        if (error instanceof HttpError) { reply(response, error.status, { ok: false, code: CODE.test(error.message) ? error.message : 'REQUEST_INVALID' }, requestId); throw error; }
+        reply(response, 500, { ok: false, code: 'INTERNAL_ERROR' }, requestId);
         throw error;
       }
     }, parseTraceparent(typeof request.headers.traceparent === 'string' ? request.headers.traceparent : null)).catch(() => undefined);
   });
+  return server;
 }

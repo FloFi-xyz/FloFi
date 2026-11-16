@@ -140,7 +140,10 @@ async function main(): Promise<void> {
       ready: async () => { await db.query('SELECT 1'); return true; } });
     server.keepAliveTimeout = 65_000;
     server.listen(config.port, config.host, () => logger.info('api.listening', { port: config.port }));
-    const shutdown = () => { logger.info('api.stopping'); server.close(() => { db.close().finally(() => process.exit(0)); }); setTimeout(() => process.exit(0), 25_000).unref(); };
+    // Draining closes every connection after its answer (http.ts), so the server closes once in-flight requests end. The 25 s cap stays below
+    // Railway's drainingSeconds (30) and is logged when reached: whatever was still running is cut (its claim and lease expire; nothing is lost).
+    const shutdown = () => { logger.info('api.stopping'); server.close(() => { db.close().finally(() => process.exit(0)); });
+      setTimeout(() => { logger.warn('api.stop_timeout'); process.exit(0); }, 25_000).unref(); };
     process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
     return;
   }
