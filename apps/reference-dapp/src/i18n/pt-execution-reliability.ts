@@ -10,6 +10,8 @@ export const portugueseExecutionReliability: Readonly<Record<string, string>> = 
   'This run reached its limit of wallet attempts, so nothing more was sent. Simulate again to start a fresh run of the same workflow.':
     'Esta execução atingiu o limite de tentativas na carteira, então nada mais foi enviado. Simule de novo para iniciar uma nova execução do mesmo fluxo.',
   'Refresh & review': 'Atualizar e revisar',
+  'Your wallet did not report a readable transaction number, so nothing was sent by FloFi. Reconnect your wallet, then refresh and review this step again.':
+    'Sua carteira não informou um número de transação legível, então a FloFi não enviou nada. Reconecte sua carteira, depois atualize e revise esta etapa de novo.',
   'Add funds for the network fee, then simulate again. This swap pays its network fee in ETH on this network; paying it in USDC is not available for a single swap yet, so nothing was signed.':
     'Adicione fundos para a taxa de rede e simule novamente. Esta troca paga a taxa de rede em ETH nesta rede; pagar em USDC ainda não está disponível para uma troca única, então nada foi assinado.',
   'Part of the fees included in the quote.': 'Parte das taxas incluídas na cotação.',

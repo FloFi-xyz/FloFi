@@ -33,7 +33,8 @@ export type WalletNonceEvidence = { readonly reviewed: string; readonly wallet: 
  */
 export function walletNonceQuantity(value: unknown): bigint | null {
   if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
-  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{1,16}$/.test(value)) return null;
+  // Canonical only (no leading zeros), exactly as the flows' own parsers accepted before (wallet-execution review).
+  if (typeof value !== 'string' || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/.test(value)) return null;
   return BigInt(value);
 }
 
@@ -92,8 +93,28 @@ export const WALLET_NONCE_COPY = {
   BEHIND: 'Your wallet reported an older transaction number than the network, so nothing was sent by FloFi. Wait a moment, then refresh and review this step again.',
   AHEAD: 'Your wallet shows a pending transaction that FloFi does not see on the network yet, so nothing was sent by FloFi. Check pending transactions in your wallet, then refresh and review this step again.',
   MISMATCH: 'Your wallet and the network reported different transaction numbers. No transaction was sent by FloFi. Check pending wallet transactions, then refresh and review this step again.',
+  INVALID: 'Your wallet did not report a readable transaction number, so nothing was sent by FloFi. Reconnect your wallet, then refresh and review this step again.',
 } as const;
 export function walletNonceMessage(code: string): string | null {
   if (!WALLET_NONCE_REFUSAL.test(code)) return null;
-  return code.endsWith('_BEHIND') ? WALLET_NONCE_COPY.BEHIND : code.endsWith('_AHEAD') ? WALLET_NONCE_COPY.AHEAD : WALLET_NONCE_COPY.MISMATCH;
+  return code.endsWith('_BEHIND') ? WALLET_NONCE_COPY.BEHIND : code.endsWith('_AHEAD') ? WALLET_NONCE_COPY.AHEAD : code.endsWith('_RESPONSE_INVALID') ? WALLET_NONCE_COPY.INVALID
+    : WALLET_NONCE_COPY.MISMATCH;
+}
+
+/**
+ * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (security review): the note a server records for a proven wallet refusal (EIP-1193 4001 user rejected,
+ * 4100 unauthorized, anything else in the accepted refusal set: method unsupported), derived from the refusal code itself — the same names the
+ * stores already send — so a client label can never turn a refusal into a pre-wallet reason.
+ */
+export function refusalNote(prefix: string, rejectionCode: number): string {
+  return `${prefix}_${rejectionCode === 4001 ? 'REJECTED' : rejectionCode === 4100 ? 'WALLET_UNAUTHORIZED' : 'WALLET_METHOD_UNSUPPORTED'}`;
+}
+
+/**
+ * Wallet-execution review: flows that compare the wallet with the nonce recorded at REVIEW time (Aave supply, Robinhood transfer) cannot tell a
+ * pending wallet transaction from a Review the chain has since moved past (another transaction, or a MetaMask Smart Account's own nonce use), so
+ * a higher wallet count is worded neutrally there (MISMATCH), never as "a pending transaction FloFi does not see". A lower count still re-reads.
+ */
+export function reviewNonceRefusal(prefix: string, evidence: Pick<WalletNonceEvidence, 'relation'>, invalid: 'MISMATCH' | 'RESPONSE_INVALID' = 'MISMATCH'): string | null {
+  return walletNonceRefusal(prefix, evidence.relation === 'WALLET_AHEAD' ? { relation: 'INVALID' } : evidence, evidence.relation === 'WALLET_AHEAD' ? 'MISMATCH' : invalid);
 }

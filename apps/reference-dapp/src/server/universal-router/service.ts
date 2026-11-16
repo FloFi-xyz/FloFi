@@ -39,7 +39,7 @@ import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from '../evm-
 import * as sol from './solana-chain.ts';
 import type { ProviderStatusHint, UniversalProviderAdapter, UniversalQuoteRequest } from './relay-provider.ts';
 import { feeObligationFor, flofiFeePolicy } from './fee-obligation.ts';
-import { WALLET_NONCE_REFUSAL } from '../../domain/wallet-nonce.ts';
+import { refusalNote, WALLET_NONCE_REFUSAL } from '../../domain/wallet-nonce.ts';
 import { chainRelationOf, type WalletNonceCheck } from './nonce-check.ts';
 import { assertUnwrapEffects, unwrapCall, wrappedNativeOf } from './wrapped-native.ts';
 import { UNIVERSAL_ACTIVE, UNIVERSAL_OBSERVABLE, UNIVERSAL_RUN_ID, UNIVERSAL_SETTLING, UNIVERSAL_TERMINAL, type DestinationDelivery, type EvmReviewSource, type EvmTx,
@@ -999,7 +999,9 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       // browser read it, FloFi's own latest/pending reads now), so support can tell a lagging wallet view from a real pending transaction.
       const nonceCheck = !diagnostic.invoked && WALLET_NONCE_REFUSAL.test(diagnostic.code)
         ? await nonceCheckOf(record, attempt as UniversalEvmAttempt, diagnostic.nonce) : undefined;
-      return save(replaceAttempt(deauthorized(record, diagnostic.code), { ...attempt!, state: 'CANCELLED', note: diagnostic.code, ...nonceCheck ? { nonceCheck } : {} }));
+      // A wallet refusal is named by the server from its refusal code (security review), never by a client label that could claim a pre-wallet reason.
+      const note = refused ? refusalNote('UNIVERSAL', error!.code as number) : diagnostic.code;
+      return save(replaceAttempt(deauthorized(record, note), { ...attempt!, state: 'CANCELLED', note, ...nonceCheck ? { nonceCheck } : {} }));
     }); },
     /** Observation never sends, even when a wallet response or an earlier worker was lost. */
     async observe(id: string): Promise<UniversalRecord> { return locked(id, async () => {

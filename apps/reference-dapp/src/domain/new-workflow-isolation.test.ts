@@ -60,18 +60,27 @@ describe('New workflow state isolation', () => {
     expect(projectExecutionResult(projectExecutionLifecycle(b, fixture.context, runSource('CONFIRMED', HASH), { freshWorkflow: true }))).not.toBeNull();
   });
 
-  it('refresh after New workflow keeps the new identity marked fresh; authoring on it drops the marker', () => {
+  it('refresh after New workflow keeps the new identity marked fresh, empty or authored; the visit’s own draft is never marked', () => {
     const data = new Map<string, string>(), storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
     persistEditor(storage, fresh('workflow-new-9'), true);
     expect(readPersistedEditor(storage)).toEqual({ workflowId: 'workflow-new-9', workflow: null, fresh: true });
     // The visit's own untouched draft (no explicit New workflow) is remembered exactly as before: no marker.
     persistEditor(storage, fresh('workflow-initial'), false);
     expect(readPersistedEditor(storage)).toEqual({ workflowId: 'workflow-initial', workflow: null });
-    // A workflow with actions is remembered as itself; "fresh" never applies to it.
+    // Review F1: once the new workflow has actions, a reload still knows it was explicitly created (no other workflow's run re-attaches).
     persistEditor(storage, fixture.workflow, true);
+    expect(readPersistedEditor(storage)).toMatchObject({ workflowId: fixture.workflow.workflowId, fresh: true });
+    expect(readPersistedEditor(storage)?.workflow).not.toBeNull();
+    // A workflow not created that way is remembered without the marker, exactly as before.
+    persistEditor(storage, fixture.workflow, false);
     expect(readPersistedEditor(storage)?.fresh).toBeUndefined();
-    // A tampered marker on a stored workflow is ignored (only the empty draft can be fresh).
-    data.set('flofi:editor-workflow:v1', JSON.stringify({ ...JSON.parse(data.get('flofi:editor-workflow:v1')!), fresh: true }));
+    // Only `true` is a marker; anything else is ignored.
+    data.set('flofi:editor-workflow:v1', JSON.stringify({ ...JSON.parse(data.get('flofi:editor-workflow:v1')!), fresh: 'yes' }));
     expect(readPersistedEditor(storage)?.fresh).toBeUndefined();
+  });
+  it('review F1: after New workflow, authoring and a reload, another identity’s unresolved run stays detached', () => {
+    const authored = { ...fixture.workflow, workflowId: 'workflow-new-authored' } as Workflow;
+    const onReload = projectExecutionLifecycle(authored, fixture.context, runSource('PENDING', HASH), { freshWorkflow: true });
+    expect(onReload.detached).toBe(true); expect(currentExecution(onReload)).toBeNull();
   });
 });

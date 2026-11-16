@@ -405,7 +405,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }
   }
   const solanaReview = solanaLiquidity.record?.review;
-  const simulateRuntime = simulationSource.kind === 'universal' ? () => refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired) ? universal.refresh() : universal.simulate()
+  // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (review): a run at its 16-attempt limit is never refreshed in place again (begin would refuse it); a fresh run starts.
+  const simulateRuntime = simulationSource.kind === 'universal' ? () => refreshBridgeAfterApproval(universal.record, runtimeWorkflow, universal.retired) && (universal.record?.attempts.length ?? 0) < 16 ? universal.refresh() : universal.simulate()
     : simulationSource.kind === 'router' ? () => refreshBridgeAfterApproval(routerState.record, runtimeWorkflow, routerState.retired) ? routerState.refresh() : routerState.simulate()
     : simulationSource.kind === 'solana-transfer' ? solanaTransfer.simulate
     : simulationSource.kind === 'transfer' ? transfer.simulate
@@ -577,7 +578,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   function startNewChatWorkflow() {
     // Already a clean workspace (untouched Canvas, no run on it, no proposal, no conversation): nothing to reset — repeated clicks never mint
     // identities, and a request the owner is still typing in Chat stays.
-    if (isPristineDraft(state.workflow) && !currentExecution(executionProgress) && !executionProgress.started && !proposal && conversation.messages.length === 0) { setTab(BUILD_ENTRY); return; }
+    if (!canvasRestoring && isPristineDraft(state.workflow) && !currentExecution(executionProgress) && !executionProgress.started && !proposal && conversation.messages.length === 0) { setTab(BUILD_ENTRY); return; }
     resetForNewWorkflow(); setTab(BUILD_ENTRY); setEntryDraft('');
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
@@ -794,7 +795,6 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} groupedRun={groupedPrimary} reviewBlock={reviewBlock}
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         workflowProgress={workflowProgress} continuation={groupedPrimary ? null : executeContinuation} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        refreshAndReview={() => { setTab('Simulate'); void simulateAgain(); }}
         workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?

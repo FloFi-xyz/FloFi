@@ -798,6 +798,15 @@ describe('BUILD-P0-MAINNET-EXECUTION-RELIABILITY: pre-send wallet nonce refusals
     expect((forged.attempts.at(-1) as { nonceCheck?: unknown }).nonceCheck).toMatchObject({ reviewed: begun.attempt.nonce, wallet: null, walletRelation: 'INVALID', reads: 1 });
   });
 
+  it('a proven wallet refusal is named by the server from its refusal code, never by the client label (security review)', async () => {
+    const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id);
+    const refused = await c.service.walletFailure(run.id, { invoked: true, attemptId: begun.attempt.attemptId, rejectionCode: 4001, code: 'UNIVERSAL_WALLET_NONCE_AHEAD',
+      calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    expect(refused.attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNIVERSAL_REJECTED' });
+    expect((refused.attempts.at(-1) as { nonceCheck?: unknown }).nonceCheck).toBeUndefined();
+  });
   it('a submitted request can never be recorded as a pre-send nonce refusal', async () => {
     const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER);
     const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.attempt.ecosystem !== 'EVM') throw Error('EVM');

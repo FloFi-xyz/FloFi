@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from 'vitest';
-import { classifyWalletNonce, observeWalletNonce, WALLET_NONCE_MAX_READS, WALLET_NONCE_REFUSAL, walletNonceMessage, walletNonceQuantity, walletNonceRefusal } from './wallet-nonce';
+import { classifyWalletNonce, observeWalletNonce, refusalNote, reviewNonceRefusal, WALLET_NONCE_COPY, WALLET_NONCE_MAX_READS, WALLET_NONCE_REFUSAL, walletNonceMessage, walletNonceQuantity, walletNonceRefusal } from './wallet-nonce';
 import { simulationError } from './simulation-presentation';
 import { translate } from '../i18n/locale';
 
@@ -12,7 +12,7 @@ describe('wallet nonce classification (Incident A)', () => {
     expect(walletNonceQuantity('0x10')).toBe(16n);
     expect(walletNonceQuantity('0x0')).toBe(0n);
     expect(walletNonceQuantity(17)).toBe(17n);
-    for (const bad of ['16', '0x', '0xzz', '0x' + 'f'.repeat(17), -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, undefined, {}, ['0x1']]) expect(walletNonceQuantity(bad)).toBeNull();
+    for (const bad of ['16', '0x', '0xzz', '0x0010', '0x00', '0x' + 'f'.repeat(17), -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, undefined, {}, ['0x1']]) expect(walletNonceQuantity(bad)).toBeNull();
   });
   it('classifies aligned, lagging, ahead and unreadable wallet answers against the reviewed nonce', () => {
     expect(classifyWalletNonce(16n, '0x10')).toEqual({ relation: 'ALIGNED', wallet: 16n });
@@ -71,6 +71,15 @@ describe('wallet nonce classification (Incident A)', () => {
     expect(simulationError('UNIVERSAL_WALLET_NONCE_MISMATCH')).toBe('Your wallet and the network reported different transaction numbers. No transaction was sent by FloFi. Check pending wallet transactions, then refresh and review this step again.');
     expect(simulationError('UNIVERSAL_NONCE_CHANGED')).toMatch(/Another transaction from this wallet took the next transaction slot/);
     expect(walletNonceMessage('UNIVERSAL_NONCE_CHANGED')).toBeNull();
+  });
+  it('review fixes: unreadable answers have their own sentence; Review-nonce flows word a higher count neutrally; refusals are named from their code', () => {
+    expect(walletNonceMessage('TRANSFER_WALLET_NONCE_RESPONSE_INVALID')).toBe(WALLET_NONCE_COPY.INVALID);
+    expect(translate('PT', WALLET_NONCE_COPY.INVALID)).not.toBe(WALLET_NONCE_COPY.INVALID);
+    expect(reviewNonceRefusal('TRANSFER', { relation: 'WALLET_AHEAD' }, 'RESPONSE_INVALID')).toBe('TRANSFER_WALLET_NONCE_MISMATCH');
+    expect(reviewNonceRefusal('TRANSFER', { relation: 'INVALID' }, 'RESPONSE_INVALID')).toBe('TRANSFER_WALLET_NONCE_RESPONSE_INVALID');
+    expect(reviewNonceRefusal('SUPPLY', { relation: 'WALLET_BEHIND' })).toBe('SUPPLY_WALLET_NONCE_BEHIND');
+    expect(reviewNonceRefusal('SUPPLY', { relation: 'ALIGNED' })).toBeNull();
+    expect([refusalNote('ROUTER', 4001), refusalNote('UNIVERSAL', 4100), refusalNote('UNIVERSAL', 4200)]).toEqual(['ROUTER_REJECTED', 'UNIVERSAL_WALLET_UNAUTHORIZED', 'UNIVERSAL_WALLET_METHOD_UNSUPPORTED']);
   });
   it('Incident B: a single swap short of ETH says the real limitation (no USDC fee for a single swap yet) and keeps the Insufficient balance title', async () => {
     const { simulationStatusPresentation } = await import('./simulation-presentation');

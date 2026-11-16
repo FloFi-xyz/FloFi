@@ -86,7 +86,8 @@ export function currentExecution(progress: ExecutionLifecycle | null | undefined
 
 /**
  * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident D): a final run whose remaining wallet request was refused before submission (recorded as not
- * submitted: no hash, a pre-wallet refusal), with at most confirmed preparatory requests (a token approval, an unwrap) before it. Nothing of the
+ * submitted: no hash, a pre-wallet refusal), with at most confirmed token approvals before it (a landed unwrap is excluded: its in-place re-quote needs the reconciled
+ * unwrap, which this projection cannot see, and a fresh run would quote from WETH the owner no longer holds). Nothing of the
  * refused request reached the network, so the SAME workflow can be prepared and reviewed again in place — a bridge whose approval landed is
  * re-quoted on its own run, otherwise a fresh simulation starts — without rebuilding the Canvas. Confirmed requests stay recorded and are never
  * sent again. An unresolved, uncertain or submitted request never qualifies.
@@ -96,5 +97,5 @@ export function refreshableAfterNothingSent(progress: ExecutionLifecycle | null 
   const touched = progress.steps.flatMap(step => step.operations).filter(operation => operation.state !== 'waiting');
   const refused = touched.filter(operation => operation.state === 'not-submitted' && !operation.hash);
   return refused.length > 0 && touched.every(operation => operation.state === 'not-submitted' && !operation.hash
-    || operation.state === 'confirmed' && (operation.approval || operation.id === 'UNWRAP'));
+    || operation.state === 'confirmed' && operation.approval);
 }

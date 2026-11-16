@@ -265,9 +265,13 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       if (typeof chain !== 'string' || chain.toLowerCase() !== source) throw new Error('ROUTER_WRONG_CHAIN');
       // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: the wallet's pending count must equal the reviewed nonce; a lagging wallet view is re-read (bounded).
       if (nonce !== null) {
-        const evidence = await observeWalletNonce({ reviewed: BigInt(nonce), read: () => request('eth_getTransactionCount', [record.owner, 'pending']), stillCurrent: () => {
+        const evidence = await observeWalletNonce({ reviewed: BigInt(nonce), read: () => request('eth_getTransactionCount', [record.owner, 'pending']), stillCurrent: async () => {
           if (latest.current !== editing) throw new Error('ROUTER_SEMANTIC_REVISION_CHANGED');
           if (injected() !== provider) throw new Error('ROUTER_WALLET_PROVIDER_CHANGED');
+          // The owner and network are read again from the wallet before every re-read (wallet-execution review).
+          const accounts = await request('eth_accounts'), chain = await request('eth_chainId');
+          if (!Array.isArray(accounts) || typeof accounts[0] !== 'string' || accounts[0].toLowerCase() !== record.owner) throw new Error('ROUTER_WRONG_OWNER');
+          if (typeof chain !== 'string' || chain.toLowerCase() !== source) throw new Error('ROUTER_WRONG_CHAIN');
         } });
         const refusal = walletNonceRefusal('ROUTER', evidence, 'RESPONSE_INVALID'); if (refusal) throw new Error(refusal);
       }

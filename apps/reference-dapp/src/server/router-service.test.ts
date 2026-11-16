@@ -578,6 +578,19 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     await expect(service.walletFailure(run.id, { invoked: true, calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: -32000 } }], code: 'ROUTER_SUBMISSION_UNKNOWN' }))
       .rejects.toThrow('ROUTER_DIAGNOSTIC_NOT_PRE_SUBMISSION');
   });
+  it('BUILD-P0-MAINNET-EXECUTION-RELIABILITY (security review): after an unknown wallet outcome a "never invoked" report is refused; a refusal is named by the server', async () => {
+    const { service } = await setup(), w = workflow(), run = await reviewed(service, w);
+    await service.begin(run.id, ROUTER_OWNER, w);
+    await service.handoff(run.id);
+    await service.report(run.id, { kind: 'UNKNOWN', code: 'ROUTER_SUBMISSION_UNKNOWN' });
+    // A wallet that may have sent stays uncertain: no client claim of a pre-wallet reason can turn it into "not submitted".
+    await expect(service.walletFailure(run.id, { invoked: false, calls: [], code: 'ROUTER_WALLET_PROVIDER_CHANGED' })).rejects.toThrow('ROUTER_DIAGNOSTIC_NOT_PRE_SUBMISSION');
+    expect((await service.load(run.id)).attempts.at(-1)).toMatchObject({ state: 'SUBMISSION_RESULT_UNKNOWN' });
+    // A proven refusal still concludes it, under the server's own name for the refusal code, whatever label the client sent.
+    const refused = await service.walletFailure(run.id, { invoked: true, calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }],
+      code: 'ROUTER_NONCE_CHANGED', rejectionCode: 4001 });
+    expect(refused.attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'ROUTER_REJECTED' });
+  });
   it('P0 hotfix: an identical re-report of an EARLIER attempt\'s recorded hash is a no-op that returns the record; any other report for it is refused', async () => {
     // Production 2026-11-12: the browser's outbox re-delivered the approval's hash after the deposit began (ROUTER_ATTEMPT_ID_MISMATCH ×7).
     const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
