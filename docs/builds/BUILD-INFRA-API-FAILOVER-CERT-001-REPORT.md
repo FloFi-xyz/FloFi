@@ -2,7 +2,8 @@
 
 Date: 2026-11-16. Branch `claude/peaceful-keller-dtdi1t`, base `origin/main` `b41ee5d` (last verified production commit).
 
-**Recommendation: READY_FOR_2_REPLICAS once this change is merged and deployed — owner action required to merge, deploy and scale.**
+**Recommendation: READY_FOR_2_REPLICAS once this change is merged and deployed, confirmed by the edge check in rollout step 4 — owner
+action required to merge, deploy and scale.**
 Nothing in production was changed: no replica count, domain, secret, variable, migration, restart or deployment. Production facts
 below were read only (service settings, variable *names*, deployment logs). No transaction was signed or broadcast; every chain in the
 evidence is the repository's MOCKED loopback chain, and every result is local unless labelled as a production observation.
@@ -34,7 +35,8 @@ breaking workflows, sessions or financial operations, and stay available when on
   route handlers and exposes `drained()`. An unparseable request-target is answered `400 REQUEST_INVALID` (before authentication, as
   `/healthz` is; nothing is routed and the target is not echoed).
 - `apps/reference-dapp/backend/main.ts`: the pool closes after the server closed **and** `drained()` resolved; repeated signals are
-  ignored (one drain); the unchanged 25 s cap is armed first and logs `api.stop_timeout` before exiting (exit code unchanged).
+  ignored (one drain); the unchanged 25 s cap is armed first and logs `api.stop_timeout` with `active_handlers` (0 means only idle
+  connections were left, nothing was cut) before exiting (exit code unchanged).
 
 ## Evidence (local, isolated)
 
@@ -88,8 +90,8 @@ absolute-form, `OPTIONS *` and odd query strings behave as before, auth included
 
 The import closure of `backend/app.ts`, `automation-api.ts` and `delegation-api.ts` (515 modules) was searched for module- and
 factory-level state and every hit read; the specialists re-checked the main claims. No state on the hosted API path is
-correctness-relevant across replicas: every mutating flow method runs under the PostgreSQL fenced lease, and every log write re-checks
-it and compare-and-sets the log version; owner nonces, transaction hashes, Solana messages/signatures and payout orders are create-once
+correctness-relevant across replicas: methods that change an existing run run under its PostgreSQL fenced lease, and every log write
+made under a lease re-checks it; run creation (e.g. `simulate`) uses a fresh random id; every log write compare-and-sets the log version; owner nonces, transaction hashes, Solana messages/signatures and payout orders are create-once
 rows; Flight/beta sessions and grants, passkey challenges (consumed once), Telegram link codes and rate limits and approval handoffs
 live in PostgreSQL. Per-process state is pacing (RPC queues), memoization and TTL read caches (catalog loaders 30–300 s) whose staleness
 can only refuse or reproduce the reviewed bytes, because Review bindings are durable and `begin` re-reads under the lease.
@@ -127,7 +129,7 @@ the pooler (or direct) limit at the minimum compute size.
 | --- | --- | --- |
 | Replicas | 2, same region (`us-east4`) | the tested topology (two processes, one database; loopback); one region keeps database latency unchanged |
 | `drainingSeconds` | 30 (unchanged) | above the API's 25 s cap |
-| `overlapSeconds` | 15 (unchanged) | new replicas pass `/readyz` before the old ones get SIGTERM |
+| `overlapSeconds` | 15 (unchanged) | the healthcheck gates the switch; the overlap keeps the old replicas serving 15 s after it, so edge routing and in-flight requests settle before SIGTERM |
 | `healthcheckPath` | `/readyz` (unchanged) | checks the database |
 | `DATABASE_POOL_MAX` | unset (10) or explicit 10 | see the budget above |
 | `flofi-worker` | unchanged (1 replica, `drainingSeconds` 130 > its 120 s cap) | the worker is already replica-safe |
@@ -139,12 +141,17 @@ worker uses 130 (the worker's own cap is 120 s). Live values differing from the 
 
 ## Rollout and rollback
 
-1. Merge this PR; the deploy (still one replica) replaces a replica that runs the previous code, so it proves nothing about the new
-   drain. Then redeploy once (still one replica): the replaced replica now runs this code. Check its logs for `api.stopping` and no
-   `api.stop_timeout`, with a light read load through the product meanwhile and no HTTP 5xx.
-2. Scale `flofi-api` to 2. Watch: HTTP 5xx, `api.stop_timeout`, `IDEMPOTENCY_IN_PROGRESS` and `*_BUSY` refusals, Neon connections,
-   RPC 429s (each replica paces its own RPC reads, so the aggregate read rate doubles).
-3. Rollback: set replicas back to 1 first; no schema, data or protocol depends on the replica count. Reverting the code while two
+1. Merge this PR (owner). CircleCI `certification` must pass for the merged `main` commit that Railway deploys, not only for the PR head.
+2. That deploy (still one replica) replaces a replica running the previous code, so it proves nothing about the new drain. Redeploy once
+   (still one replica): the replaced replica now runs this code. Its logs should show `api.stopping` and no `api.stop_timeout` (or one
+   with `active_handlers: 0`, meaning only idle connections were left), with a light read load through the product and no HTTP 5xx.
+3. Before scaling, confirm that `flofi-api`'s and `flofi-worker`'s `DATABASE_URL` host is the Neon `-pooler` host (look at the host name
+   only, never the credentials); the pool margin above depends on it.
+4. Scale `flofi-api` to 2, then redeploy once more under a light read load and watch, during the drain: HTTP 5xx,
+   `CLOUD_API_UNAVAILABLE` in the product, `api.stop_timeout`, `IDEMPOTENCY_IN_PROGRESS` and `*_BUSY` refusals, Neon connections, RPC
+   429s (each replica paces its own RPC reads, so the aggregate read rate doubles). This is the first observation of the edge's
+   behaviour with a draining replica.
+5. Rollback: set replicas back to 1 first; no schema, data or protocol depends on the replica count. Reverting the code while two
    replicas run brings back defects 1–4 — no worse than today's single-replica deploys, but not the certified state — so revert the code,
    if needed, after scaling back.
 

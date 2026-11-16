@@ -63,10 +63,10 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: a draining HTTP server finishes its
       let isDrained = false;
       const drained = server.drained().then(() => { isDrained = true; });
       await new Promise(resolve => setTimeout(resolve, 100));
-      expect([finished, isDrained]).toEqual([false, false]);
+      expect([finished, isDrained, server.activeHandlers()]).toEqual([false, false, 1]);
       release();
       await drained;
-      expect(finished).toBe(true);
+      expect([finished, server.activeHandlers()]).toEqual([true, 0]);
       expect(await server.drained()).toBeUndefined();                      // idle: resolves immediately
     } finally { release(); if (server.listening) server.close(); }
   });

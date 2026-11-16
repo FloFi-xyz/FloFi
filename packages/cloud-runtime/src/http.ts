@@ -49,6 +49,8 @@ export type HttpServerOptions = { readonly routes: readonly Route[]; readonly lo
 export type HttpServer = Server & {
   /** Resolves once no route handler is running, including one whose caller already disconnected (a mutation keeps going; see `signal`). */
   readonly drained: () => Promise<void>;
+  /** Route handlers running now (what a forced stop would cut). */
+  readonly activeHandlers: () => number;
 };
 export function createHttpServer(options: HttpServerOptions): HttpServer {
   const limit = options.maxBodyBytes ?? 1_048_576, expected = options.authToken ? digest(options.authToken) : null;
@@ -105,5 +107,5 @@ export function createHttpServer(options: HttpServerOptions): HttpServer {
       }
     }, parseTraceparent(typeof request.headers.traceparent === 'string' ? request.headers.traceparent : null)).catch(() => undefined).finally(settled);
   });
-  return Object.assign(server, { drained });
+  return Object.assign(server, { drained, activeHandlers: () => active });
 }

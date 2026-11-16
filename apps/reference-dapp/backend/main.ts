@@ -148,7 +148,8 @@ async function main(): Promise<void> {
       if (stopping) return;                     // a repeated SIGTERM or SIGINT: one drain, never a second close or the default kill
       stopping = true;
       logger.info('api.stopping');
-      setTimeout(() => { logger.warn('api.stop_timeout'); process.exit(0); }, 25_000).unref();      // armed first: the exit is always bounded
+      // Armed first: the exit is always bounded. active_handlers 0 means only idle connections were left (nothing was cut).
+      setTimeout(() => { logger.warn('api.stop_timeout', { active_handlers: server.activeHandlers() }); process.exit(0); }, 25_000).unref();
       server.close(() => { server.drained().then(() => db.close()).finally(() => process.exit(0)); });
     };
     process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
