@@ -55,9 +55,16 @@ describe('Board now answers "eligible" only for an account the product layout ad
     const answer = await response.json();
     expect(answer).toMatchObject({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
     expect(boardOutcome(answer)).toEqual({ kind: 'REFUSED', code: 'BETA_WALLET_NOT_LINKED' });
-    // A failure to check is reported as such, never as a decision about the person and never with its internal text.
-    harness.product.mockRejectedValue(new Error('connection refused: secret detail'));
-    expect(await (await handleBoard(request())).json()).toMatchObject({ ok: false, code: 'BETA_ACCESS_UNAVAILABLE' });
+    // A failure to check is reported as such (the real check wraps any failure as BETA_UNAVAILABLE), never as a decision about the person and
+    // never with its internal text; anything else that is not a BETA_* code is BETA_ACCESS_UNAVAILABLE.
+    harness.product.mockRejectedValue(new Error('BETA_UNAVAILABLE'));
+    expect(await (await handleBoard(request())).json()).toMatchObject({ ok: false, code: 'BETA_UNAVAILABLE' });
+    for (const failure of [new Error('connection refused: secret detail'), 'not an error']) {
+      harness.product.mockRejectedValue(failure);
+      const answer = await (await handleBoard(request())).json();
+      expect(answer).toMatchObject({ ok: false, code: 'BETA_ACCESS_UNAVAILABLE' });
+      expect(JSON.stringify(answer)).not.toContain('secret detail');
+    }
   });
   it('a refused grant (revoked, absent, closed group) is answered before the product is asked; nothing else is granted', async () => {
     for (const code of ['BETA_ACCESS_REVOKED', 'BETA_ACCESS_DENIED', 'BETA_NOT_OPEN', 'BETA_WALLET_REQUIRED']) {
@@ -67,6 +74,14 @@ describe('Board now answers "eligible" only for an account the product layout ad
       expect(boardOutcome(answer).kind).not.toBe('APP');
     }
     expect(harness.product).not.toHaveBeenCalled();
+  });
+  it('a refusal also ends a pending browser access session, so it never holds back the later /board?board=1 → /app hand-off', async () => {
+    harness.cookie = 'a'.repeat(43); harness.product.mockRejectedValue(new Error('BETA_WALLET_NOT_LINKED'));
+    const response = await handleBoard(request());
+    expect(response.status).toBe(403);
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
+    harness.cookie = null;
+    expect((await handleBoard(request())).headers.get('set-cookie')).toBeNull();
   });
   it('a pending proof of a second list email that this account cannot hold is a notice, not a loss of its own access', async () => {
     harness.cookie = 'a'.repeat(43); harness.bind.mockResolvedValue('ACCOUNT_HAS_OTHER_ENTRY');

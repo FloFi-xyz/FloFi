@@ -142,13 +142,20 @@ export async function handleBoard(request: Request): Promise<Response> {
       ? await store.claimVerifiedEntry({ ...person, now }) : pendingBound;
     const state = await store.account({ ...person, now }), detail = accessResultDetail(state.access);
     if (betaAccessMode(process.env) === 'beta') {
+      // HOTFIX-P1-FLIGHT-ACCESS: a refusal also ends the pending browser session (its row is already gone), so it never holds back the
+      // server's /board?board=1 → /app hand-off afterwards.
+      const refused = (code: string) => {
+        const response = json(403, { ok: false, code, flight: state });
+        if (pending) response.headers.append('set-cookie', sessionCookie(request, null));
+        return response;
+      };
       const grant = await createBetaAccessStore(await platformStateHost(), store.calendar).grant(person.accountId, now);
-      if (!grant.ok) return json(403, { ok: false, code: grant.code, flight: state });
+      if (!grant.ok) return refused(grant.code);
       // HOTFIX-P1-FLIGHT-ACCESS: "eligible" sends the browser to /app, so it is answered only when the product layout's own check
       // (requireFlightProductAccess, read-only) admits this account too: a refusal is shown here with its reason, never an /app ↔ /board loop.
       const product = await requireFlightProductAccess().then(() => null,
         (error: unknown) => error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message) ? error.message : 'BETA_ACCESS_UNAVAILABLE');
-      if (product) return json(403, { ok: false, code: product, flight: state });
+      if (product) return refused(product);
     }
     const origin: FlightOrigin | null = state.access.kind === 'eligible' ? state.access.origin : null;
     if (detail) await store.recordEvent('access_result', detail, origin, now);
