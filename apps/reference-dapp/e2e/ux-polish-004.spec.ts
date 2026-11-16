@@ -425,10 +425,14 @@ test.describe('UXA-02 Canvas zoom, pan and independent scrolling', () => {
     await wheelAt(page, point, { deltaX: 12, deltaY: 8, wheelDeltaY: -24 });
     await expect.poll(async () => (await viewport(page)).x).toBeCloseTo(before.x - 12, 0);
     expect((await viewport(page)).zoom).toBe(before.zoom);
-    // One gesture keeps its device: a stray whole notch inside a trackpad swipe does not zoom.
+    // One gesture keeps its device: a stray whole notch inside a trackpad swipe does not zoom. Both events are dispatched in the same task, so
+    // they are always closer than one gesture gap, however slow the machine.
     before = await viewport(page);
-    await wheelAt(page, point, { deltaY: 6, wheelDeltaY: -18 });
-    await wheelAt(page, point, { deltaY: 100, wheelDeltaY: -120 });
+    await page.evaluate(({ x, y }) => {
+      const target = document.elementFromPoint(x, y)!;
+      for (const init of [{ deltaY: 6, wheelDeltaY: -18 }, { deltaY: 100, wheelDeltaY: -120 }])
+        target.dispatchEvent(new WheelEvent('wheel', { ...init, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true }));
+    }, point);
     expect((await viewport(page)).zoom).toBe(before.zoom);
     await pause(page);
     // A notched mouse wheel in Firefox (lines) zooms.
@@ -486,15 +490,15 @@ test.describe('UXA-02 Canvas zoom, pan and independent scrolling', () => {
     await page.mouse.move(controls.x + 4, controls.y + controls.height / 2); await page.mouse.wheel(0, 200); await pause(page);
     expect(await page.evaluate(() => scrollY)).toBe(scrolled);
     expect(await viewport(page)).toEqual(view);
+    // The Canvas's floating action rail (the default toolbox layout at this width) scrolls itself, then holds the wheel at its end.
     const toolbox = graph(page).locator('.floating-toolbox');
-    if (await toolbox.count()) {
-      const railBox = await box(toolbox);
-      await page.mouse.move(railBox.x + railBox.width / 2, railBox.y + 40);
-      for (let step = 0; step < 4; step++) { await page.mouse.wheel(0, 400); await pause(page); }
-      await expect.poll(() => toolbox.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1)).toBe(true);
-      expect(await page.evaluate(() => scrollY)).toBe(scrolled);
-      expect(await viewport(page)).toEqual(view);
-    }
+    await expect(toolbox).toHaveCount(1);
+    const railBox = await box(toolbox);
+    await page.mouse.move(railBox.x + railBox.width / 2, railBox.y + 40);
+    for (let step = 0; step < 4; step++) { await page.mouse.wheel(0, 400); await pause(page); }
+    await expect.poll(() => toolbox.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 1)).toBe(true);
+    expect(await page.evaluate(() => scrollY)).toBe(scrolled);
+    expect(await viewport(page)).toEqual(view);
     // Outside the Canvas the page scrolls normally (the footer).
     const footer = await box(page.locator('.summary-bar'));
     await page.mouse.move(footer.x + footer.width / 2, footer.y + footer.height / 2); await page.mouse.wheel(0, -200); await pause(page);
