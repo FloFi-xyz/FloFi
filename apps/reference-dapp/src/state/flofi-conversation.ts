@@ -28,7 +28,7 @@ import { STEPS_COMPLETED } from '../domain/workflow-progress';
 import { requotedMessage, simulationError } from '../domain/simulation-presentation';
 import { translate } from '../i18n/locale';
 import type { ExecutionControls } from './execution-controls';
-import { conversationStorage, forgetConversations, historical, readConversation, writeConversation } from '../domain/conversation-persistence';
+import { conversationStorage, forgetConversations, historical, pruneConversations, readConversation, writeConversation } from '../domain/conversation-persistence';
 import { conversationCopy } from '../domain/conversation-copy';
 import type { ChatContent, ChatMessage, Rendering } from '../domain/chat-message';
 import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
@@ -271,6 +271,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const fresh = lastEpoch.current !== epoch;
     lastEpoch.current = epoch;
     if (!fresh && threadKey.current === conversationKey) return;
+    if (keep) pruneConversations(conversationStorage(), scope, Date.now());
     if (fresh) { cache.current.delete(conversationKey); if (keep) forgetConversations(conversationStorage(), { scope, workflowId }); }
     // This page's own copy first (reopening a workflow seen in this visit), else this tab's stored history (a reload): both read-only history.
     const history = fresh ? null : cache.current.get(conversationKey)?.map(historical) ?? (keep ? readConversation(conversationStorage(), scope, workflowId, Date.now()) : null);

@@ -2,7 +2,7 @@
 /** HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001: what this tab keeps of the FloFi chat, for whom and for how long. A memory Storage only. */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ChatMessage } from './chat-message';
-import { CONVERSATION_LIMITS, CONVERSATION_STORAGE_PREFIX, conversationStorageKey, forgetConversations, historical, readConversation, writeConversation } from './conversation-persistence';
+import { CONVERSATION_LIMITS, CONVERSATION_STORAGE_PREFIX, conversationStorageKey, forgetConversations, historical, mayHoldSecret, pruneConversations, readConversation, writeConversation } from './conversation-persistence';
 import { conversationScopeOf } from '../server/conversation-scope';
 
 let map: Map<string, string>;
@@ -59,6 +59,25 @@ describe('what is kept', () => {
     for (const secret of secrets) expect(stored).not.toContain(secret);
     expect(readConversation(storage(), A, 'workflow-1', NOW)!.map(message => message.text)).toEqual([intro.text, asked.text]);
   });
+  it('also never writes the other shapes a wallet exports: a Solana secret key, a keypair byte array, a capitalised or numbered phrase', () => {
+    const phrase = 'abandon ability able about above absent absorb abstract absurd abuse access accident'.split(' ');
+    const secrets = [
+      phrase.map((word, index) => index === 0 ? 'Abandon' : word).join(' ') + '.',
+      phrase.map((word, index) => `${index + 1}. ${word}`).join(' '),
+      phrase.join(', '),
+      '5'.repeat(1) + 'Kd3NBUAdUnhyzenEwVLy9pBKxSwXvE9FMPyEUJ5o9dFXJ8wK4NC2gk3s5x2CMqoMz9U3yW2RfcGmGx6bTnqrTqJh'.slice(0, 87),
+      `[${Array.from({ length: 64 }, (_, index) => index * 3 % 256).join(',')}]`,
+    ];
+    for (const secret of secrets) expect(mayHoldSecret(secret), secret).toBe(true);
+    // Ordinary requests, addresses and amounts are kept.
+    for (const text of ['Swap 0.5 USDC to SOL on Solana', 'send 1 SOL to Fx7DkP2qWv9LbS3mRt8NcZ4yHj6Ue5Ag1oKiBhXwQrTs', 'what is a seed?',
+      'please swap half my usdc to sol and send it to my main wallet']) expect(mayHoldSecret(text), text).toBe(false);
+    writeConversation(storage(), A, 'workflow-1', [intro, ...secrets.map((text, index) => ({ id: index + 1, role: 'you' as const, text })), { ...asked, id: 9 },
+      { id: 10, role: 'ai', text: `Interpreted as “import ${secrets[3]}”.` }], NOW);
+    const stored = [...map.values()].join('');
+    for (const secret of secrets) expect(stored).not.toContain(secret);
+    expect(readConversation(storage(), A, 'workflow-1', NOW)!.map(message => message.text)).toEqual([intro.text, asked.text]);
+  });
   it('refuses malformed or foreign records instead of repairing them', () => {
     const key = conversationStorageKey(A, 'workflow-1')!;
     for (const value of ['not json', 'null', '[]', JSON.stringify({ format: 'other', scope: A, workflowId: 'workflow-1', savedAt: NOW, messages: [intro] }),
@@ -78,13 +97,31 @@ describe('how long and how much', () => {
     expect(readConversation(storage(), A, 'workflow-1', NOW + CONVERSATION_LIMITS.retentionMs + 1)).toBeNull();
     expect(map.size).toBe(0);
   });
+  it('a reload that reopens a conversation unchanged keeps its original time: the 24 hours count from the last new message', () => {
+    writeConversation(storage(), A, 'workflow-1', [intro, asked], NOW);
+    const later = NOW + CONVERSATION_LIMITS.retentionMs - 1000, restored = readConversation(storage(), A, 'workflow-1', later)!;
+    writeConversation(storage(), A, 'workflow-1', restored, later);
+    expect(readConversation(storage(), A, 'workflow-1', NOW + CONVERSATION_LIMITS.retentionMs + 1)).toBeNull();
+    writeConversation(storage(), A, 'workflow-2', [intro, asked], NOW);
+    writeConversation(storage(), A, 'workflow-2', [intro, asked, { id: 2, role: 'you', text: 'explain' }], later);
+    expect(readConversation(storage(), A, 'workflow-2', NOW + CONVERSATION_LIMITS.retentionMs + 1)).not.toBeNull();
+  });
+  it('opening an account\'s conversation removes another account\'s and expired ones at once, before anything is typed', () => {
+    writeConversation(storage(), B, 'workflow-b', [intro, asked], NOW);
+    writeConversation(storage(), A, 'workflow-old', [intro, asked], NOW - CONVERSATION_LIMITS.retentionMs - 1);
+    pruneConversations(storage(), A, NOW);
+    expect(map.size).toBe(0);
+    writeConversation(storage(), A, 'workflow-1', [intro, asked], NOW);
+    pruneConversations(storage(), null, NOW);
+    expect(map.size).toBe(1);
+  });
   it('keeps the newest messages within the message and size limits', () => {
     const many = Array.from({ length: CONVERSATION_LIMITS.messages + 50 }, (_, id) => ({ id, role: 'you' as const, text: `message ${id}` }));
     writeConversation(storage(), A, 'workflow-1', many, NOW);
     const kept = readConversation(storage(), A, 'workflow-1', NOW)!;
     expect(kept).toHaveLength(CONVERSATION_LIMITS.messages);
     expect(kept.at(-1)!.text).toBe(`message ${CONVERSATION_LIMITS.messages + 49}`);
-    const large = Array.from({ length: 40 }, (_, id) => ({ id, role: 'you' as const, text: 'x'.repeat(20_000) }));
+    const large = Array.from({ length: 40 }, (_, id) => ({ id, role: 'you' as const, text: 'swap 1 usdc '.repeat(1_700) }));
     writeConversation(storage(), A, 'workflow-2', large, NOW);
     expect(map.get(conversationStorageKey(A, 'workflow-2')!)!.length).toBeLessThanOrEqual(CONVERSATION_LIMITS.bytes);
     expect(readConversation(storage(), A, 'workflow-2', NOW)!.at(-1)!.id).toBe(39);

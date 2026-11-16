@@ -30,10 +30,11 @@ export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null
   leaving = true;
   // BUILD-FLOFI-UNIFIED-COPILOT-001: this account's saved recipients leave the page's memory first (the next session never sees them).
   invalidateSavedRecipients();
-  // HOTFIX-P1-CHAT-RECOVERY: this tab's kept FloFi conversations belong to the account that is signing out: removed, never shown to the next one.
-  forgetConversations(conversationStorage());
   // The session ends below; the product's gate then hands off to /board unless the page is already leaving for sign-in (src/accounts/page-exit.ts).
   beginPageExit();
+  // HOTFIX-P1-CHAT-RECOVERY: this tab's kept FloFi conversations belong to the account that is signing out: removed, never shown to the next
+  // one. The leaving page writes none again (`writeConversation` stops once `beginPageExit` ran).
+  forgetConversations(conversationStorage());
   await bounded(() => closeWallet?.());
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a remembered FloFi wallet (this account's) is forgotten too, so the next person never inherits it.
   const remembered = walletPreference();
@@ -43,5 +44,7 @@ export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null
   forgetAccountWalletReconnect('evm', 'solana');
   const next = await accountSignOut().then(result => result.next, () => '/login');
   await bounded(() => privy?.logout());
+  // Once more as the page leaves: nothing the page did while signing out (a late answer, a retired question) stays kept for the next session.
+  forgetConversations(conversationStorage());
   window.location.replace(next);
 }

@@ -12,12 +12,14 @@
  * - at most `CONVERSATION_LIMITS` (messages, bytes, conversations, 24 hours); older ones are dropped, never invented again.
  *
  * Only what the chat showed is kept (text, notes, the Review summary it displayed). Never a question's answer buttons or an open question:
- * a restored conversation is read-only history, and every confirmation is asked again against a fresh Review. A message the owner typed that
- * looks like a private key or seed phrase (`looksSecret`, refused by the chat itself) is never written. No wallet signature, token, credential,
- * quote, authorization or execution payload is part of a chat message.
+ * a restored conversation is read-only history, and every confirmation is asked again against a fresh Review. A message the owner typed (or
+ * a model reply) that FloFi recognises as a possible private key, secret key or recovery phrase (`mayHoldSecret`) is not written. No wallet
+ * signature, token, credential, quote, authorization or execution payload is part of a chat message. Nothing is written once the page is
+ * leaving through sign-out or account deletion (`pageExitInProgress`), which remove what this tab kept.
  */
 import type { ChatContent, ChatMessage } from './chat-message';
 import { looksSecret } from './copilot-conversation';
+import { pageExitInProgress } from '../accounts/page-exit';
 
 export const CONVERSATION_STORAGE_PREFIX = 'flofi:conversation:v1:';
 const FORMAT = 'flofi.conversation.v1';
@@ -35,6 +37,20 @@ export function conversationStorage(): WriteStorage {
 /** The storage key of one account's conversation about one workflow, or null when either identity is not usable. */
 export function conversationStorageKey(scope: string | null | undefined, workflowId: string): string | null {
   return scope && SCOPE.test(scope) && WORKFLOW_ID.test(workflowId) ? `${CONVERSATION_STORAGE_PREFIX}${scope}:${workflowId}` : null;
+}
+
+const BASE58_RUN = /[1-9A-HJ-NP-Za-km-z]{64,}/;
+const BYTE_ARRAY = /\[\s*(?:\d{1,3}\s*,\s*){31,}\d{1,3}\s*\]/;
+const PHRASE = /^(?:[a-z]{3,8} ){11,23}[a-z]{3,8}$/;
+/**
+ * The chat's own refusal (`looksSecret`: words that name a key or phrase, a 64-hex secret, a lowercase phrase) and, for this tab's storage only,
+ * the other shapes a wallet exports: a Solana secret key (base58, far longer than an address), a keypair file's byte array, and a recovery
+ * phrase written with capitals, numbering or punctuation. Erring towards not keeping a message only means it is not restored after a reload.
+ */
+export function mayHoldSecret(text: string): boolean {
+  if (looksSecret(text) || BASE58_RUN.test(text) || BYTE_ARRAY.test(text)) return true;
+  const words = text.toLowerCase().replace(/\b\d{1,2}\s*[.):-]/g, ' ').replace(/[,.;:!?"'“”()[\]-]/g, ' ').replace(/\s+/g, ' ').trim();
+  return PHRASE.test(words);
 }
 
 /** A message as history: its answer buttons and open question are not restored (the question it asked is no longer open). */
@@ -113,21 +129,37 @@ function storedKeys(storage: NonNullable<WriteStorage>): { key: string; scope: s
  */
 export function writeConversation(storage: WriteStorage, scope: string | null | undefined, workflowId: string, messages: readonly ChatMessage[], now: number): void {
   const key = conversationStorageKey(scope, workflowId);
-  if (!storage || !key || !messages.some(message => message.role === 'you')) return;
+  if (!storage || !key || pageExitInProgress() || !messages.some(message => message.role === 'you')) return;
   try {
-    let kept = messages.filter(message => !(message.role === 'you' && looksSecret(message.text))).map(historical).slice(-CONVERSATION_LIMITS.messages);
+    // FloFi's own deterministic messages carry public addresses and hashes, never what the owner typed; the owner's and the model's text is checked.
+    let kept = messages.filter(message => !((message.role === 'you' || message.role === 'ai') && mayHoldSecret(message.text))).map(historical)
+      .slice(-CONVERSATION_LIMITS.messages);
     let body = JSON.stringify({ format: FORMAT, scope, workflowId, savedAt: now, messages: kept });
     while (body.length > CONVERSATION_LIMITS.bytes && kept.length > 1) {
       kept = kept.slice(Math.ceil(kept.length / 4));
       body = JSON.stringify({ format: FORMAT, scope, workflowId, savedAt: now, messages: kept });
     }
     if (body.length > CONVERSATION_LIMITS.bytes) return;
-    const others = storedKeys(storage).filter(entry => entry.key !== key);
-    for (const entry of others) if (entry.scope !== scope || now - entry.savedAt > CONVERSATION_LIMITS.retentionMs) storage.removeItem(entry.key);
-    const same = others.filter(entry => entry.scope === scope && now - entry.savedAt <= CONVERSATION_LIMITS.retentionMs).sort((a, b) => b.savedAt - a.savedAt);
+    pruneConversations(storage, scope, now);
+    const same = storedKeys(storage).filter(entry => entry.key !== key).sort((a, b) => b.savedAt - a.savedAt);
     for (const entry of same.slice(CONVERSATION_LIMITS.conversations - 1)) storage.removeItem(entry.key);
+    // Reopening a conversation unchanged (a reload) keeps its original time: the retention period counts from its last new message.
+    const stored = JSON.parse(storage.getItem(key) ?? 'null') as { scope?: unknown; workflowId?: unknown; savedAt?: unknown; messages?: unknown } | null;
+    if (stored?.scope === scope && stored.workflowId === workflowId && Number.isSafeInteger(stored.savedAt) && now - (stored.savedAt as number) <= CONVERSATION_LIMITS.retentionMs
+      && JSON.stringify(stored.messages) === JSON.stringify(kept)) return;
     storage.setItem(key, body);
   } catch { /* storage is optional (quota, private mode): the conversation stays in memory this visit */ }
+}
+
+/**
+ * Removes what this tab keeps for anyone else or for too long: every conversation of another account (or unreadable) and every expired one.
+ * Run when a signed-in account opens its conversation and before each write, so a previous account's chat never waits for this one to type.
+ */
+export function pruneConversations(storage: WriteStorage, scope: string | null | undefined, now: number): void {
+  if (!storage || !scope) return;
+  try {
+    for (const entry of storedKeys(storage)) if (entry.scope !== scope || now - entry.savedAt > CONVERSATION_LIMITS.retentionMs) storage.removeItem(entry.key);
+  } catch { /* storage is optional */ }
 }
 
 /** Removes one conversation (an explicit New workflow over a stored identity) or, without a key, every conversation of this tab (sign-out). */
