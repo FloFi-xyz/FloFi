@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
 import { BUILD_ENTRY_SUGGESTIONS, buildEntryOutcome, firstPlaceholder, type BuildEntryOutcome, type BuildEntrySnapshot, type BuildEntrySuggestion } from '../domain/build-entry';
@@ -144,13 +145,18 @@ export function BuildEntry({ conversation, workflow, proposal, actions, draft, s
         <div><button type="button" onClick={() => void submit()} disabled={!draft.trim() || busy}>{tr('Try again')}</button>
           <button type="button" onClick={openBuilder}>{tr('Build manually')}</button></div>
       </div>}
-      {/* The Editor is reached from the ☰ drawer (board 03: no duplicate Editor link); the note still says where a new request goes. */}
+      {/* The note says where a new request goes; the Editor is also reached from navigation and the link below the suggestions (UX-03). */}
       {actions > 0 && !refused && <p className={styles.context} role="note">{tr(actions === 1 ? 'Your workflow already has 1 step. A new request is added to it.' : 'Your workflow already has {0} steps. A new request is added to it.', actions)}</p>}
 
       <div className={styles.suggestions} role="group" aria-label={tr('Example requests')}>
         {BUILD_ENTRY_SUGGESTIONS.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => suggest(item)}>
           <Icon className={styles.chipIcon}>{icons[item.icon]}</Icon>{tr(item.label)}</button>)}
       </div>
+      {/* BUILD UX POLISH 004 (UX-03): a direct way into the Editor for owners who build by hand — the same `openBuilder` as "Build manually" after
+          a refusal and the drawer's Editor (no workflow, proposal or transaction is created by the click; no wallet is asked). Only the action is a
+          link; while a request is being prepared it waits, like the suggestions. */}
+      <p className={styles.manual}>{tr('Prefer the editor?')}{' '}
+        <Link href="/app" aria-disabled={busy || undefined} onClick={event => { event.preventDefault(); if (!busy) openBuilder(); }}>{tr('Build it manually')}</Link></p>
     </div>
   </section>;
 }

@@ -203,6 +203,8 @@ export const portuguese: Readonly<Record<string, string>> = {
   'Workflow stages': 'Etapas do fluxo', 'Skip to workspace': 'Ir para a área de trabalho',
   'Workflow workspace': 'Área do fluxo', 'Simulation workspace': 'Área de simulação', 'Execution workspace': 'Área de execução',
   'Navigation': 'Navegação', 'Open navigation': 'Abrir navegação', 'Close navigation': 'Fechar navegação', 'Log out': 'Sair',
+  // BUILD UX POLISH 004: the desktop rail's chevron (UX-01) and the logo's destination (UX-02).
+  'Expand navigation': 'Expandir navegação', 'Collapse navigation': 'Recolher navegação', 'FloFi — go to the Dashboard': 'FloFi — ir para o Painel',
   'Switch networks before execution': 'Mude de rede antes de executar', 'Workflow network:': 'Rede do fluxo:',
   'Technical connection details': 'Detalhes técnicos da conexão', 'Clear this app’s wallet connection. Wallet permissions are managed in your wallet.': 'Desconectar a carteira deste app. As permissões são gerenciadas na carteira.',
   'Current language:': 'Idioma atual:', 'Current theme:': 'Tema atual:', 'Switch to Português': 'Mudar para português', 'Switch to English': 'Mudar para inglês',

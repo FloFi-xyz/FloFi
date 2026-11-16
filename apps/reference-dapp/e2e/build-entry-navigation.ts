@@ -3,11 +3,16 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { EDITOR_WORKFLOW_STORAGE_KEY } from '../src/domain/editor-persistence';
 
 /**
- * P0 approved UX (board 03b): navigation lives only in the ☰ drawer — "New workflow" (the Chat entry, where offered), "Editor", "Dashboard",
- * then Library (Your workflows, Automations) and Access (Credentials, Agents, Passkeys). The drawer is aria-hidden and inert while closed, so
- * these open it first, exactly as an owner does. Nothing is simulated, accepted or signed by this navigation.
+ * P0 approved UX (board 03b): navigation lives only in the shell's navigation — "New workflow" (the Chat entry, where offered), "Editor",
+ * "Dashboard", then Library (Your workflows, Automations) and Access (Credentials, Agents, Passkeys). Nothing is simulated, accepted or signed by
+ * this navigation.
+ * BUILD UX POLISH 004 (UX-01, intentional change): above 800 px it is a persistent rail (icons until its chevron shows the names), always in view,
+ * so there is nothing to open; at 800 px and below it is the ☰ drawer, aria-hidden and inert while closed, so these open it first, exactly as an
+ * owner does. The trigger is the header control that reveals navigation: ☰ on a phone, the rail's chevron on a desktop.
  */
-export const NAVIGATION_TRIGGER = /^(Open navigation|Abrir navegação)$/;
+export const NAVIGATION_TRIGGER = /^(Open navigation|Abrir navegação|Expand navigation|Expandir navegação|Collapse navigation|Recolher navegação)$/;
+/** UX-01: the desktop rail's chevron (names shown or hidden), never present on a phone or on the compact /approve header. */
+export const railToggle = (page: Page) => page.getByRole('button', { name: /^(Expand navigation|Expandir navegação|Collapse navigation|Recolher navegação)$/ });
 export const navigationTrigger = (page: Page) => page.getByRole('button', { name: NAVIGATION_TRIGGER });
 export const navigationDrawer = (page: Page) => page.getByRole('navigation', { name: /^(FloFi navigation|Navegação (da )?FloFi)$/ });
 export const NAVIGATION_ITEMS = {
@@ -19,17 +24,18 @@ export type NavigationItem = keyof typeof NAVIGATION_ITEMS;
 /** The drawer's link for an item (its name starts with the item's label; a status tag such as "In testing" may follow it). */
 export const navigationLink = (page: Page, item: NavigationItem) =>
   navigationDrawer(page).getByRole('link', { name: new RegExp(NAVIGATION_ITEMS[item].source.replace(/\$$/, '')) }).first();
-/** Opens the ☰ drawer (a no-op when it is already open) and returns its navigation. */
+/** Opens the ☰ drawer on a phone (a no-op when it is already open, and on a desktop, where the rail is always in view) and returns its navigation. */
 export async function openNavigation(page: Page): Promise<Locator> {
   const drawer = navigationDrawer(page);
   if (!(await drawer.isVisible())) await navigationTrigger(page).click();
   await expect(drawer).toBeVisible();
   return drawer;
 }
-/** Closes the drawer with Escape (as an owner does); a no-op when it is closed. */
+/** Closes the phone drawer with Escape (as an owner does); a no-op when it is closed. The desktop rail has no overlay to close. */
 export async function closeNavigation(page: Page): Promise<void> {
-  if (await navigationDrawer(page).isVisible()) await page.keyboard.press('Escape');
-  await expect(navigationDrawer(page)).toHaveCount(0);
+  const overlay = page.locator('.navigation-layer[data-open="true"]');
+  if (await overlay.count()) await page.keyboard.press('Escape');
+  await expect(overlay).toHaveCount(0);
 }
 /**
  * P0 approved UX (board 03b): "Log out" lives once, in the drawer's footer (Settings keeps Disconnect only on the compact /approve surface). It
@@ -65,8 +71,7 @@ export async function expectChatSection(page: Page): Promise<void> {
 
 /**
  * BUILD0-UX-001: a fresh /app visit opens on Build 0, the intent entry (Chat). Suites that exercise the existing builder (the Editor: Canvas and
- * chat) and the stages after it continue exactly as an owner does — the drawer's "Editor" (the former "Prefer the editor? Build manually") — never
- * by bypassing the entry. A visit whose workflow or run was restored already moved past the entry by itself; then there is nothing to click.
+ * chat) and the stages after it continue exactly as an owner does — navigation's "Editor" — never by bypassing the entry. A visit whose workflow or run was restored already moved past the entry by itself; then there is nothing to click.
  */
 export async function continueToBuilder(page: Page): Promise<void> {
   const shell = page.locator('.app-shell').first(), entry = chatWorkspace(page);

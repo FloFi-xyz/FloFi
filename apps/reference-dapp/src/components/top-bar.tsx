@@ -31,6 +31,7 @@ import { useWalletConnection } from '../state/wallet-connection';
 import { WalletMark } from './wallet-selector';
 import { BUILD_ENTRY, type BuildEntrySection } from '../domain/build-entry';
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 
 export type Tab = WorkflowStage;
 /**
@@ -113,7 +114,10 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const walletProviderError = Boolean(!solanaActive && !build009.account && build009.providerError);
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
     <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? newWorkflow ?? (() => setTab(BUILD_ENTRY)) : undefined}
-      onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
+      onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}
+      {/* BUILD UX POLISH 004 (UX-02): the symbol and name open the Dashboard — the drawer's own route, a client navigation inside this persistent
+          workspace (the Canvas, the chat and the session stay). The compact /approve signing header keeps the logo inert: it has no navigation. */}
+      {compact ? <FloFiLogo/> : <Link href="/app/dashboard" className="flofi-logo-link" aria-label={tr('FloFi — go to the Dashboard')}><FloFiLogo/></Link>}</div>
     {!compact && <div className="top-bar-center">{center}</div>}
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>

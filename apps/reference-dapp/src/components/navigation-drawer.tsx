@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
 import { SECONDARY_WORKSPACES as items, secondaryWorkspaceRoute, type SecondaryWorkspace } from '../domain/secondary-workspaces';
 import { dashboardRoute } from '../lib/dashboard/routes';
@@ -27,9 +27,46 @@ function NavigationIcon({ item }: { item: NavigationItem }) {
         : <><circle cx="8" cy="9" r="4"/><path d="m11 12 9 9m-3-3 3-3m-6 0 3-3"/></>}
   </svg>;
 }
+/** BUILD UX POLISH 004 (UX-01): Terms and Privacy as icons in the collapsed rail; the expanded rail and the mobile drawer keep the text line. */
+function LegalIcon({ item }: { item: 'terms' | 'privacy' }) {
+  return <svg className="navigation-legal-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {item === 'terms' ? <><path d="M6 3h9l4 4v14H6Z"/><path d="M14 3v5h5M9 12h7M9 16h5"/></> : <><path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/></>}
+  </svg>;
+}
 
 /**
- * All navigation uses the existing overlay and persistent product shell. BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar —
+ * BUILD UX POLISH 004 (UX-01): above the shell's compact breakpoint (the 800 px the Canvas rail and the mobile layout already use) navigation is a
+ * persistent rail: icon-only by default, expanded to the names and groups with the chevron next to the logo. At or below it, the ☰ drawer
+ * overlays the workspace exactly as before. The server renders the desktop markup; CSS keeps the drawer closed on a narrow screen until the
+ * client knows it (`inert`/`aria-hidden` follow then).
+ */
+const COMPACT_NAVIGATION_QUERY = '(max-width: 800px)';
+function useCompactNavigation() {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    let query: MediaQueryList;
+    try { query = window.matchMedia(COMPACT_NAVIGATION_QUERY); } catch { return; }
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+  return compact;
+}
+/**
+ * Whether the desktop rail shows names. One value for the page, so a section change (which remounts the top bar) keeps the owner's choice; a
+ * new page load starts collapsed again (nothing is stored). The server always renders the collapsed rail.
+ */
+let railExpanded = false;
+const railListeners = new Set<() => void>();
+const subscribeRail = (listener: () => void) => { railListeners.add(listener); return () => { railListeners.delete(listener); }; };
+function setRailExpanded(value: boolean) { railExpanded = value; for (const listener of railListeners) listener(); }
+const useRailExpanded = () => useSyncExternalStore(subscribeRail, () => railExpanded, () => false);
+/** Test seam: the next render starts from the collapsed default. */
+export function resetNavigationRail() { setRailExpanded(false); }
+
+/**
+ * All navigation uses the persistent product shell (the desktop rail or the mobile overlay). BUILD-FLOFI-CHAT-EDITOR-UX-001: the drawer agrees with the top bar —
  * Chat (offered only where the top bar offers it, `onChat`) is current on the intent entry, and the Editor on each of its sections (the Canvas,
  * the simulation and Review, the execution). The click targets are the top bar's: Chat opens the entry, the Editor opens the Canvas.
  */
@@ -38,20 +75,29 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   onDisconnect: () => void; disconnectDisabled: boolean;
 }) {
   const { t: tr, language } = useLocale();
+  // `open`: the mobile overlay. `expanded`: the desktop rail's names (UX-01). Only one of them applies at a time.
   const [open, setOpen] = useState(false);
-  // Accurate availability tags, read once the drawer is first opened (the same server answers the pages themselves use; nothing is enabled here).
+  const compact = useCompactNavigation();
+  const expanded = useRailExpanded();
+  // The rail's names and tags are visible (or about to be): only then are the availability tags read.
+  const [engaged, setEngaged] = useState(false);
+  // Accurate availability tags, read once navigation is first opened, expanded or explored (the same server answers the pages themselves use;
+  // nothing is enabled here).
   const [status, setStatus] = useState<{ readonly automations: ItemStatus; readonly passkeys: ItemStatus } | null>(null);
   useEffect(() => {
-    if (!open || status) return;
+    if (!(open || expanded || engaged) || status) return;
     let live = true;
     void Promise.all([automationsAvailability().then(r => r.enabled, () => null), delegationEnabled().then(r => r.enabled, () => null)])
       .then(([automations, passkeys]) => { if (live) setStatus({ automations: automations === false ? 'Coming soon' : null, passkeys: passkeys === false ? 'Coming soon' : null }); });
     return () => { live = false; };
-  }, [open, status]);
+  }, [open, expanded, engaged, status]);
   const itemStatus = (id: SecondaryWorkspace['id']): ItemStatus => id === 'agents' ? 'In testing' : id === 'automations' ? status?.automations ?? null
     : id === 'passkeys' ? status?.passkeys ?? null : null;
-  const row = (item: typeof items[number]) => <Link key={item.id} href={item.href} className="navigation-row" aria-current={selected === item.id ? 'page' : undefined} onClick={() => close(true)}>
-    <NavigationIcon item={item.id}/><span>{tr(item.label)}</span>
+  /** The name a collapsed rail shows beside an item (its status tag included). */
+  const tipOf = (label: string, state: ItemStatus = null) => state ? `${tr(label)} · ${tr(state)}` : tr(label);
+  const row = (item: typeof items[number]) => <Link key={item.id} href={item.href} className="navigation-row" aria-current={selected === item.id ? 'page' : undefined}
+    data-navigation-tip={tipOf(item.label, itemStatus(item.id))} onClick={() => dismiss()}>
+    <NavigationIcon item={item.id}/><span className="navigation-row-label">{tr(item.label)}</span>
     {itemStatus(item.id) && <span className="navigation-status" data-status={itemStatus(item.id) === 'In testing' ? 'testing' : 'soon'}>{tr(itemStatus(item.id)!)}</span>}
   </Link>;
   const workspace = !pathname || pathname === '/app';
@@ -70,6 +116,48 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
     setOpen(false);
     if (returnFocus) trigger.current?.focus({ preventScroll: true });
   }, []);
+  /** After choosing an item: the mobile overlay closes and returns focus to ☰; the desktop rail stays as the owner left it. */
+  const dismiss = () => { if (open) close(true); };
+  // A window widened past the breakpoint while the overlay was open: the rail takes over and the overlay's listeners end.
+  useEffect(() => { if (!compact) setOpen(false); }, [compact]);
+
+  // UX-01: the collapsed rail names each item beside it — after 300 ms on hover, at once on keyboard focus; leaving, Escape or scrolling hides
+  // it. The same timing and look as the Canvas rail's tooltip; presentation only (every item keeps its accessible name).
+  const tips = !compact && !expanded;
+  const [tip, setTip] = useState<{ label: string; top: number; left: number } | null>(null);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTip = useCallback(() => {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    tipTimer.current = null; setTip(null);
+  }, []);
+  useEffect(() => () => { if (tipTimer.current) clearTimeout(tipTimer.current); }, []);
+  useEffect(() => { if (!tips) hideTip(); }, [tips, hideTip]);
+  function showTip(target: EventTarget | null, delay: number) {
+    const item = target instanceof Element ? target.closest<HTMLElement>('[data-navigation-tip]') : null;
+    if (!tips || !item || !drawer.current?.contains(item)) return;
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    const label = item.dataset.navigationTip ?? '';
+    const place = () => {
+      if (!item.isConnected) return;
+      const box = item.getBoundingClientRect();
+      setTip({ label, top: box.top + box.height / 2, left: box.right + 8 });
+    };
+    if (delay > 0) tipTimer.current = setTimeout(place, delay); else place();
+  }
+  const tipHandlers = {
+    onPointerOver: (event: ReactPointerEvent<HTMLElement>) => { setEngaged(true); if (event.pointerType === 'mouse') showTip(event.target, 300); },
+    onPointerOut: (event: ReactPointerEvent<HTMLElement>) => {
+      const next = event.relatedTarget instanceof Element ? event.relatedTarget.closest('[data-navigation-tip]') : null;
+      if (next !== (event.target instanceof Element ? event.target.closest('[data-navigation-tip]') : null)) hideTip();
+    },
+    onFocus: (event: ReactFocusEvent<HTMLElement>) => {
+      setEngaged(true);
+      let keyboard = true; try { keyboard = (event.target as Element).matches(':focus-visible'); } catch { /* older engines */ }
+      if (keyboard) showTip(event.target, 0); else hideTip();
+    },
+    onBlur: hideTip,
+    onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Escape') hideTip(); },
+  };
 
   useEffect(() => {
     const header = trigger.current?.closest('header');
@@ -120,27 +208,35 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
     };
   }, [open, close]);
 
+  const closed = compact && !open;
+  const rail = expanded ? 'Collapse navigation' : 'Expand navigation';
   return <div className="navigation-control" ref={container}>
-    <button ref={trigger} type="button" className="navigation-trigger" aria-label={tr(open ? 'Close navigation' : 'Open navigation')}
+    {/* Mobile (≤ 800 px): ☰ opens the overlay drawer, as before. CSS shows exactly one of these two controls. */}
+    <button ref={trigger} type="button" className="navigation-trigger navigation-menu-trigger" aria-label={tr(open ? 'Close navigation' : 'Open navigation')}
       aria-expanded={open} aria-controls={drawerId} onClick={() => { if (open) close(true); else { setOpen(true); } }}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
-    <div ref={layer} className="navigation-layer" data-open={open} aria-hidden={!open} inert={!open}>
+    {/* Desktop: the chevron shows or hides the rail's names, like the Canvas rail's own toggle (it points right while collapsed). */}
+    <button type="button" className="navigation-trigger navigation-rail-toggle" aria-label={tr(rail)} title={tr(rail)} aria-expanded={expanded} aria-controls={drawerId}
+      onClick={() => { hideTip(); setRailExpanded(!expanded); }}>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+    </button>
+    <div ref={layer} className="navigation-layer" data-open={open} data-expanded={expanded} aria-hidden={closed || undefined} inert={closed}>
       <div className="navigation-backdrop" aria-hidden="true" onClick={() => close(true)}/>
-      <aside ref={drawer} id={drawerId} className="navigation-drawer" aria-label={tr("FloFi navigation")}>
-        <div ref={navigation} className="navigation-content">
+      <aside ref={drawer} id={drawerId} className="navigation-drawer" aria-label={tr("FloFi navigation")} {...tipHandlers}>
+        <div ref={navigation} className="navigation-content" onScroll={hideTip}>
           {/* P0 approved UX (board 03b): New workflow (the Chat entry), Editor, Dashboard; Library; Access. The only place navigation lives. */}
           <nav aria-label={tr("FloFi navigation")}>
-            {onChat && <Link ref={firstItem} href="/app" className="navigation-row" aria-current={selected === 'chat' ? 'page' : undefined}
-              onClick={event => { event.preventDefault(); onChat(); close(true); }}>
-              <NavigationIcon item="chat"/><span>{tr("New workflow")}</span>
+            {onChat && <Link ref={firstItem} href="/app" className="navigation-row" aria-current={selected === 'chat' ? 'page' : undefined} data-navigation-tip={tipOf('New workflow')}
+              onClick={event => { event.preventDefault(); onChat(); dismiss(); }}>
+              <NavigationIcon item="chat"/><span className="navigation-row-label">{tr("New workflow")}</span>
             </Link>}
-            <Link ref={onChat ? undefined : firstItem} href="/app" className="navigation-row" aria-current={selected === 'build' ? 'page' : undefined}
-              onClick={event => { event.preventDefault(); onBuild(); close(true); }}>
-              <NavigationIcon item="build"/><span>{tr("Editor")}</span>
+            <Link ref={onChat ? undefined : firstItem} href="/app" className="navigation-row" aria-current={selected === 'build' ? 'page' : undefined} data-navigation-tip={tipOf('Editor')}
+              onClick={event => { event.preventDefault(); onBuild(); dismiss(); }}>
+              <NavigationIcon item="build"/><span className="navigation-row-label">{tr("Editor")}</span>
             </Link>
-            <Link href="/app/dashboard" className="navigation-row" aria-current={selected === 'dashboard' ? 'page' : undefined} onClick={() => close(true)}>
-              <NavigationIcon item="dashboard"/><span>{tr("Dashboard")}</span>
+            <Link href="/app/dashboard" className="navigation-row" aria-current={selected === 'dashboard' ? 'page' : undefined} data-navigation-tip={tipOf('Dashboard')} onClick={() => dismiss()}>
+              <NavigationIcon item="dashboard"/><span className="navigation-row-label">{tr("Dashboard")}</span>
             </Link>
             <p className="navigation-section-label" id={`${drawerId}-library`}>{tr("Library")}</p>
             <div role="group" aria-labelledby={`${drawerId}-library`}>{items.filter(item => item.id === 'workflows' || item.id === 'automations').map(row)}</div>
@@ -149,11 +245,16 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
           </nav>
         </div>
         <div className="navigation-footer">
-          <button type="button" className="navigation-row" disabled={disconnectDisabled}
-            onClick={() => { onDisconnect(); close(true); }}><NavigationIcon item="logout"/><span>{tr("Log out")}</span></button>
-          <p className="navigation-legal"><a href="/terms">{language === 'PT' ? 'Termos' : 'Terms'}</a><span aria-hidden="true"> · </span><a href="/privacy">{language === 'PT' ? 'Privacidade' : 'Privacy'}</a></p>
+          <button type="button" className="navigation-row" disabled={disconnectDisabled} data-navigation-tip={tipOf('Log out')}
+            onClick={() => { onDisconnect(); dismiss(); }}><NavigationIcon item="logout"/><span className="navigation-row-label">{tr("Log out")}</span></button>
+          <p className="navigation-legal">
+            <a href="/terms" data-navigation-tip={language === 'PT' ? 'Termos' : 'Terms'}><LegalIcon item="terms"/><span className="navigation-legal-label">{language === 'PT' ? 'Termos' : 'Terms'}</span></a>
+            <span className="navigation-legal-separator" aria-hidden="true"> · </span>
+            <a href="/privacy" data-navigation-tip={language === 'PT' ? 'Privacidade' : 'Privacy'}><LegalIcon item="privacy"/><span className="navigation-legal-label">{language === 'PT' ? 'Privacidade' : 'Privacy'}</span></a>
+          </p>
         </div>
       </aside>
+      {tip && tips && <span className="canvas-rail-tooltip navigation-rail-tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>{tip.label}</span>}
     </div>
   </div>;
 }

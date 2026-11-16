@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
+import { CANVAS_GESTURES, CanvasNavigator, WHEEL_GESTURE_GAP_MS, wheelSource, wheelZoomFactor, zoomAtPoint } from './canvas-navigator';
 
 const viewport = vi.hoisted(() => ({ transform: [0, 0, 1], minZoom: .35, maxZoom: 1.4, width: 1044 }));
 vi.mock('@xyflow/react', async () => {
@@ -11,6 +11,7 @@ vi.mock('@xyflow/react', async () => {
     Panel: ({ position, ...props }: { position: string }) => React.createElement('div', { ...props, 'data-position': position }),
     useStore: (select: (state: typeof viewport) => unknown) => select(viewport),
     useReactFlow: () => ({ fitView: vi.fn(), zoomTo: vi.fn() }),
+    useStoreApi: () => ({ getState: () => viewport }),
   };
 });
 beforeEach(() => { Object.assign(viewport, { transform: [0, 0, 1], minZoom: .35, maxZoom: 1.4, width: 1044 }); });
@@ -54,5 +55,68 @@ describe('shared canvas gestures', () => {
     expect(Object.isFrozen(CANVAS_GESTURES)).toBe(true);
     // The navigator itself opts out of canvas wheel/drag handling, so page scrolling over it is untouched.
     expect(renderToStaticMarkup(createElement(CanvasNavigator))).toContain('class="canvas-navigator nodrag nopan nowheel"');
+  });
+});
+
+// BUILD UX POLISH 004 (UXA-02): the Editor's Canvas tells a notched mouse wheel (zoom at the cursor) from a trackpad (the shared pan above).
+describe('Canvas wheel device and cursor-anchored zoom', () => {
+  it.each([
+    // Firefox reports a notched wheel in lines (or pages).
+    [{ deltaMode: 1, deltaX: 0, deltaY: 3 }, 'mouse'],
+    [{ deltaMode: 2, deltaX: 0, deltaY: 1 }, 'mouse'],
+    // Chromium on Windows/Linux and the browser's own wheel: whole 120-unit notches on one axis.
+    [{ deltaMode: 0, deltaX: 0, deltaY: 100, wheelDeltaY: -120 }, 'mouse'],
+    [{ deltaMode: 0, deltaX: 0, deltaY: -240, wheelDeltaY: 240 }, 'mouse'],
+    [{ deltaMode: 0, deltaX: 0, deltaY: 53, wheelDeltaY: -120 }, 'mouse'],
+    // macOS trackpads (Chromium and Safari) report exactly −3 × deltaY; other trackpads report fractions of a notch.
+    [{ deltaMode: 0, deltaX: 0, deltaY: 4, wheelDeltaY: -12 }, 'trackpad'],
+    [{ deltaMode: 0, deltaX: 0, deltaY: 40, wheelDeltaY: -120 }, 'trackpad'],
+    [{ deltaMode: 0, deltaX: 0, deltaY: 7.5, wheelDeltaY: -9 }, 'trackpad'],
+    // Two-axis movement, Shift + wheel (horizontal) and a pixel delta without the legacy value keep the existing pan.
+    [{ deltaMode: 0, deltaX: 3, deltaY: 12, wheelDeltaY: -120 }, 'trackpad'],
+    [{ deltaMode: 0, deltaX: 100, deltaY: 0, wheelDeltaY: 0 }, 'trackpad'],
+    [{ deltaMode: 0, deltaX: 0, deltaY: 12 }, 'trackpad'],
+    [{ deltaMode: 0, deltaX: 0, deltaY: 0, wheelDeltaY: 0 }, 'trackpad'],
+  ] as const)('classifies %o as %s', (sample, source) => {
+    expect(wheelSource(sample)).toBe(source);
+  });
+
+  it('reads the device mode before the deltas (Firefox reports lines only to a page that asks for the mode first)', () => {
+    const reads: string[] = [];
+    const sample = new Proxy({ deltaMode: 1, deltaX: 0, deltaY: 3 }, { get: (target, key: 'deltaMode' | 'deltaX' | 'deltaY') => { reads.push(key); return target[key]; } });
+    expect(wheelSource(sample)).toBe('mouse');
+    expect(reads[0]).toBe('deltaMode');
+  });
+
+  it('zooms one notch by React Flow\'s own wheel curve, in both directions and every delta mode', () => {
+    expect(wheelZoomFactor({ deltaMode: 0, deltaY: 100 })).toBeCloseTo(2 ** -0.2, 10);
+    expect(wheelZoomFactor({ deltaMode: 0, deltaY: -100 })).toBeCloseTo(2 ** 0.2, 10);
+    expect(wheelZoomFactor({ deltaMode: 1, deltaY: 3 })).toBeCloseTo(2 ** -0.15, 10);
+    expect(wheelZoomFactor({ deltaMode: 2, deltaY: -1 })).toBe(2);
+    expect(wheelZoomFactor({ deltaMode: 0, deltaY: 0 })).toBe(1);
+  });
+
+  it('keeps the flow point under the cursor fixed while zooming, within the canvas limits', () => {
+    const viewport = { x: 40, y: -25, zoom: 1 }, point = { x: 300, y: 180 };
+    const flow = (v: typeof viewport) => ({ x: (point.x - v.x) / v.zoom, y: (point.y - v.y) / v.zoom });
+    for (const factor of [2 ** 0.2, 2 ** -0.2, 1.31]) {
+      const next = zoomAtPoint(viewport, point, factor, .35, 1.4);
+      expect(next.zoom).toBeCloseTo(Math.min(1.4, Math.max(.35, factor)), 10);
+      expect(flow(next).x).toBeCloseTo(flow(viewport).x, 9); expect(flow(next).y).toBeCloseTo(flow(viewport).y, 9);
+    }
+    // Clamped at the limit: zoom stops there and the anchor still holds.
+    const clamped = zoomAtPoint({ x: 0, y: 0, zoom: 1.3 }, point, 2, .35, 1.4);
+    expect(clamped.zoom).toBe(1.4);
+    expect((point.x - clamped.x) / clamped.zoom).toBeCloseTo(point.x / 1.3, 9);
+    // Already at a limit, or no change: the very same viewport, so nothing moves or re-renders.
+    const max = { x: 12, y: 8, zoom: 1.4 };
+    expect(zoomAtPoint(max, point, 1.5, .35, 1.4)).toBe(max);
+    expect(zoomAtPoint(viewport, point, 1, .35, 1.4)).toBe(viewport);
+    expect(zoomAtPoint(viewport, point, Number.NaN, .35, 1.4)).toBe(viewport);
+  });
+
+  it('treats wheel events closer than one gesture gap as one gesture', () => {
+    expect(WHEEL_GESTURE_GAP_MS).toBeGreaterThanOrEqual(100);
+    expect(WHEEL_GESTURE_GAP_MS).toBeLessThanOrEqual(300);
   });
 });

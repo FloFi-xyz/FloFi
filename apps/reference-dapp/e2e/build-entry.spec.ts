@@ -7,7 +7,8 @@
  * opens Build 1. No network selector exists, and nothing is simulated, signed or sent.
  * P0 approved UX (board 03 / 03b): navigation lives only in the ☰ drawer (New workflow = Chat, Editor, Dashboard; no stage tabs in the top bar);
  * the entry is a heading, one request field, one "Create workflow" button and five intent chips that fill an editable sentence template. The
- * former "Prefer the editor? Build manually" link and trust block are gone: the Editor is reached through the drawer.
+ * former "Prefer the editor? Build manually" link and trust block are gone: the Editor is reached through navigation (and, since BUILD UX
+ * POLISH 004, the small "Build it manually" link under the suggestions).
  */
 import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
@@ -49,8 +50,11 @@ test('a fresh visit opens on Build 0 without a wallet, with the reference compos
   await expect(create(page)).toBeDisabled();
   await expect(entry(page).getByRole('button')).toHaveCount(6);
   await expect(entry(page).getByRole('group', { name: 'Example requests' }).getByRole('button')).toHaveText(['Swap tokens', 'Earn yield', 'Provide liquidity', 'Use as collateral', 'Multi-step workflow']);
-  // Board 03: the Editor is reached from the drawer only (no duplicate "Build manually" link) and the trust block is gone.
+  // Board 03: no "Build manually" button and the trust block is gone. BUILD UX POLISH 004 (UX-03, intentional change): the Editor is also one
+  // small link under the suggestions ("Prefer the editor? Build it manually", only the action is the link; ux-polish-004.spec.ts follows it),
+  // so the entry still has exactly the six buttons counted above.
   await expect(entry(page).getByRole('button', { name: 'Prefer the editor? Build manually', exact: true })).toHaveCount(0);
+  await expect(entry(page).getByRole('link', { name: 'Build it manually', exact: true })).toBeVisible();
   await expect(entry(page)).not.toContainText('Nothing executes without your review and authorization.');
   await expect(entry(page).locator('img[src="/brand/flofi-droplet-wave.svg"]')).toBeVisible();
   await expect(page.locator('.wallet-connection')).toHaveText('Wallet not connected');

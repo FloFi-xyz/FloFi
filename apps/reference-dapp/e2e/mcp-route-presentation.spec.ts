@@ -45,6 +45,8 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       const html = await response.text();
       expect(html).toContain('mcp-route-state');
       expect(html).not.toContain('aria-label="Open navigation"');
+      // BUILD UX POLISH 004 (UX-01): nor the desktop rail's chevron.
+      expect(html).not.toContain('aria-label="Expand navigation"');
       expect(html).not.toContain('aria-label="Editor steps"');
       expect(html).not.toContain('MCP_OAUTH_NOT_ENABLED');
     }

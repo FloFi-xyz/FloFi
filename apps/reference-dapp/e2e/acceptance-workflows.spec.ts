@@ -10,7 +10,7 @@ import { createBackend, type FlowResult } from '../backend/app';
 import type { RouterBegin, RouterRecord } from '../src/server/router-service';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { installJourneyWallet, resetJourneyHarness, journeySends, switchAccount, walletRequests, setWalletChain } from './journey-fixtures';
-import { chooseWorkflowMenuItem, continueToBuilder, type EditorSection, openBuilder, openDashboard, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
+import { chooseWorkflowMenuItem, continueToBuilder, type EditorSection, openBuilder, openDashboard, openEditorSection, openNavigation, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
 
 const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 async function author(page: Page) {
@@ -25,7 +25,8 @@ async function savedCanonical(owner: string) {
 }
 async function libraryWorkspace(page: Page, language: 'EN' | 'PT' = 'EN') {
   const label = language === 'PT' ? 'Seus fluxos' : 'Your workflows';
-  await page.getByRole('button', { name: language === 'PT' ? 'Abrir navegação' : 'Open navigation' }).click();
+  // BUILD UX POLISH 004 (UX-01): on a desktop the navigation is a persistent rail (nothing to open); a phone opens the ☰ drawer first.
+  await openNavigation(page);
   const sidebar = page.getByRole('complementary', { name: language === 'PT' ? 'Navegação da FloFi' : 'FloFi navigation' });
   await expect(sidebar.getByRole('link', { name: label, exact: true })).toBeVisible();
   for (const text of ['Refresh', 'Loading', 'temporarily unavailable', 'Save workflow', 'No workflows yet.', 'Ainda não há workflows.']) await expect(sidebar).not.toContainText(text);
