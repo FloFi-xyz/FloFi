@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Page, Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { editorSteps, navigationDrawer, navigationLink, openBuilder, openEditorSection, openNavigation, openProductSection } from './build-entry-navigation';
+import { closeNavigation, editorSteps, navigationDrawer, navigationLink, openBuilder, openEditorSection, openNavigation, openProductSection } from './build-entry-navigation';
 
 const widths = [1440, 1024, 768, 375, 320];
 async function dark(page: Page) {
@@ -69,8 +69,8 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
         await expect(selected).toHaveAttribute('aria-current', 'page');
         await readable(selected);
         await expect(navigationDrawer(page).locator('.stage-number')).toHaveCount(0);
-        await page.keyboard.press('Escape');
-        await expect(navigationDrawer(page)).toHaveCount(0);
+        // BUILD UX POLISH 004 (UX-01): a phone closes its drawer; a desktop rail stays in view.
+        await closeNavigation(page);
       } else {
         const selected = editorSteps(page).locator('li[data-step-look="current"] button');
         await expect(selected).toHaveCSS('background-color', 'rgb(26, 35, 80)');
