@@ -19,7 +19,7 @@ import { sessionCookieName } from '../server/session-cookie';
 import type { AccountFlight, FlightStore } from './store';
 import { betaAccessMode, createBetaAccessStore } from './beta-access';
 import { platformStateHost } from '../server/platform-state-host';
-import { requireFlightAccess } from '../server/flight-access';
+import { requireFlightAccess, requireFlightProductAccess } from '../server/flight-access';
 
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: HEADERS });
@@ -144,6 +144,11 @@ export async function handleBoard(request: Request): Promise<Response> {
     if (betaAccessMode(process.env) === 'beta') {
       const grant = await createBetaAccessStore(await platformStateHost(), store.calendar).grant(person.accountId, now);
       if (!grant.ok) return json(403, { ok: false, code: grant.code, flight: state });
+      // HOTFIX-P1-FLIGHT-ACCESS: "eligible" sends the browser to /app, so it is answered only when the product layout's own check
+      // (requireFlightProductAccess, read-only) admits this account too: a refusal is shown here with its reason, never an /app ↔ /board loop.
+      const product = await requireFlightProductAccess().then(() => null,
+        (error: unknown) => error instanceof Error && /^BETA_[A-Z_]+$/.test(error.message) ? error.message : 'BETA_ACCESS_UNAVAILABLE');
+      if (product) return json(403, { ok: false, code: product, flight: state });
     }
     const origin: FlightOrigin | null = state.access.kind === 'eligible' ? state.access.origin : null;
     if (detail) await store.recordEvent('access_result', detail, origin, now);

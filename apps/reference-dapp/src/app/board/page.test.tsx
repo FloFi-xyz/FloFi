@@ -9,7 +9,7 @@ import type { ReactElement } from 'react';
 import type { FlightState } from '../../flight/http';
 
 const h = vi.hoisted(() => ({
-  requireFlightAccess: vi.fn(), redirect: vi.fn((path: string) => { throw Object.assign(new Error('NEXT_REDIRECT'), { path }); }),
+  requireFlightProductAccess: vi.fn(), redirect: vi.fn((path: string) => { throw Object.assign(new Error('NEXT_REDIRECT'), { path }); }),
   headers: new Headers(), state: null as unknown,
 }));
 vi.mock('next/server', () => ({ connection: async () => undefined }));
@@ -18,7 +18,7 @@ vi.mock('next/headers', () => ({ headers: async () => h.headers, cookies: async 
 vi.mock('../../components/site/site-language', () => ({ siteLanguage: async () => 'EN' }));
 vi.mock('../../flight/http', () => ({ flightState: async () => h.state }));
 vi.mock('../../flight/host', () => ({ flightCalendar: () => null }));
-vi.mock('../../server/flight-access', () => ({ requireFlightAccess: h.requireFlightAccess }));
+vi.mock('../../server/flight-access', () => ({ requireFlightProductAccess: h.requireFlightProductAccess }));
 import Page from './page';
 import { BoardPage } from '../../components/flight/board-page';
 import { FlightHandoff } from '../../components/flight/flight-transition';
@@ -33,7 +33,7 @@ beforeEach(() => {
   vi.stubEnv('FLOFI_BETA_ACCESS', 'beta');
   h.headers = new Headers({ 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' });
   h.state = flight('eligible');
-  h.requireFlightAccess.mockResolvedValue({ accountId: 'acct_a', sessionId: 's' });
+  h.requireFlightProductAccess.mockResolvedValue({ accountId: 'acct_a', sessionId: 's' });
 });
 afterEach(() => { vi.unstubAllEnvs(); });
 
@@ -41,8 +41,8 @@ describe('/board arrival', () => {
   it('redirects an admitted closed-beta arrival to /app before anything renders', async () => {
     await expect(page()).rejects.toMatchObject({ message: 'NEXT_REDIRECT', path: '/app' });
     await expect(page({ invite: '1' })).rejects.toMatchObject({ path: '/app' });
-    expect(h.requireFlightAccess).toHaveBeenCalledTimes(2);
-    expect(h.requireFlightAccess).toHaveBeenCalledWith();
+    expect(h.requireFlightProductAccess).toHaveBeenCalledTimes(2);
+    expect(h.requireFlightProductAccess).toHaveBeenCalledWith();
   });
   it('hands a client-router request off to /app with a full navigation, never a redirect inside the board document', async () => {
     h.headers = new Headers({ 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' });
@@ -52,11 +52,11 @@ describe('/board arrival', () => {
     expect(h.redirect).not.toHaveBeenCalled();
   });
   it('keeps a candidate the product gate refuses on the board, which then runs its own check', async () => {
-    h.requireFlightAccess.mockRejectedValue(new Error('BETA_ACCESS_DENIED'));
+    h.requireFlightProductAccess.mockRejectedValue(new Error('BETA_ACCESS_DENIED'));
     const element = await page();
     expect(element.type).toBe(BoardPage);
     expect(element.props).toMatchObject({ arrival: 'BOARD', state: h.state });
-    h.requireFlightAccess.mockRejectedValue(new Error('BETA_UNAVAILABLE'));
+    h.requireFlightProductAccess.mockRejectedValue(new Error('BETA_UNAVAILABLE'));
     expect((await page()).type).toBe(BoardPage);
     expect(h.redirect).not.toHaveBeenCalled();
   });
@@ -80,7 +80,7 @@ describe('/board arrival', () => {
       expect(element.type, name).toBe(BoardPage);
       expect(element.props.state, name).toBe(h.state);
     }
-    expect(h.requireFlightAccess).not.toHaveBeenCalled();
+    expect(h.requireFlightProductAccess).not.toHaveBeenCalled();
     expect(h.redirect).not.toHaveBeenCalled();
   });
   it('passes the arrival to the board, which opens on its checking state when it checks', async () => {

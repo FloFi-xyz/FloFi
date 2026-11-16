@@ -1441,6 +1441,22 @@
     "app.domain.new-workflow-isolation": {
       "path": "apps/reference-dapp/src/domain/new-workflow-isolation.test.ts",
       "stage": "unit"
+    },
+    "app.domain.conversation-persistence": {
+      "path": "apps/reference-dapp/src/domain/conversation-persistence.test.ts",
+      "stage": "unit"
+    },
+    "app.server.conversation-scope": {
+      "path": "apps/reference-dapp/src/server/conversation-scope.test.ts",
+      "stage": "unit"
+    },
+    "app.flight.board-access-http": {
+      "path": "apps/reference-dapp/src/flight/board-access-http.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.chat-review-overflow": {
+      "path": "apps/reference-dapp/e2e/chat-review-overflow.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -1558,7 +1574,10 @@
     "app.server.nonce-conflict",
     "app.server.evm-submission-discovery",
     "app.backend.load-failure",
-    "app.backend.plain-node-closure"
+    "app.backend.plain-node-closure",
+    "app.domain.conversation-persistence",
+    "app.server.conversation-scope",
+    "app.flight.board-access-http"
   ],
   "modules": [
     {
@@ -2377,7 +2396,8 @@
         "app.e2e.site",
         "app.e2e.editor-redesign",
         "app.e2e.flight",
-        "app.legal.privacy"
+        "app.legal.privacy",
+        "app.e2e.chat-review-overflow"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -3302,7 +3322,8 @@
         "app.domain.intelligence.unified-copilot",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
-        "app.state.flofi-conversation"
+        "app.state.flofi-conversation",
+        "app.e2e.chat-review-overflow"
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity."
@@ -4052,7 +4073,8 @@
         "apps/reference-dapp/src/domain/privacy-notice.ts",
         "apps/reference-dapp/src/domain/chat-message.ts",
         "apps/reference-dapp/src/domain/token-fee.ts",
-        "apps/reference-dapp/src/domain/chat-action-variant.ts"
+        "apps/reference-dapp/src/domain/chat-action-variant.ts",
+        "apps/reference-dapp/src/domain/conversation-persistence.ts"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -4075,7 +4097,8 @@
         "app.domain.approved-ux",
         "app.domain.kora-presentation",
         "app.domain.token-fee",
-        "app.domain.chat-action-variant"
+        "app.domain.chat-action-variant",
+        "app.domain.conversation-persistence"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -4529,7 +4552,8 @@
         "app.e2e.flight",
         "app.flight.identity-http",
         "app.flight.email.templates",
-        "app.backend.flight-admin.pg"
+        "app.backend.flight-admin.pg",
+        "app.flight.board-access-http"
       ],
       "gaps": [
         "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
@@ -6605,7 +6629,8 @@
         "apps/reference-dapp/src/server/copilot-providers.ts",
         "apps/reference-dapp/src/server/copilot-runtime.ts",
         "apps/reference-dapp/src/server/copilot-service.ts",
-        "apps/reference-dapp/src/server/copilot-toolkit.ts"
+        "apps/reference-dapp/src/server/copilot-toolkit.ts",
+        "apps/reference-dapp/src/server/conversation-scope.ts"
       ],
       "suites": [
         "app.domain.copilot-context",
@@ -6613,7 +6638,8 @@
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.server.copilot-orchestration",
-        "app.state.flofi-conversation"
+        "app.state.flofi-conversation",
+        "app.server.conversation-scope"
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity.",
@@ -7067,7 +7093,8 @@
         "app.domain.copilot-conversation",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
-        "app.state.flofi-conversation"
+        "app.state.flofi-conversation",
+        "app.domain.conversation-persistence"
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity."
@@ -7845,7 +7872,8 @@
         "app.server.flight-access",
         "app.server.execution-guard",
         "app.backend.beta-access.pg",
-        "app.domain.flight-refusal"
+        "app.domain.flight-refusal",
+        "app.flight.board-access-http"
       ],
       "gaps": [
         "Temporary team policy is tested in the required beta-access unit/PostgreSQL suites and guarded flight-team-early-access browser profile. Its e2e/flight-team-clock.mjs preload is an engineering-only fixture excluded from the maintained production source inventory; no hosted-clock or real-wallet acceptance is established.",

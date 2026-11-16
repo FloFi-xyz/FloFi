@@ -9,14 +9,15 @@ import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const h = vi.hoisted(() => ({
-  requireFlightAccess: vi.fn(), redirect: vi.fn((path: string) => { throw Object.assign(new Error('NEXT_REDIRECT'), { path }); }),
+  requireFlightProductAccess: vi.fn(), redirect: vi.fn((path: string) => { throw Object.assign(new Error('NEXT_REDIRECT'), { path }); }),
   headers: new Headers(), cookies: vi.fn(), copilotConfiguredMode: vi.fn(() => 'replay'), workspace: vi.fn(() => null),
 }));
 vi.mock('next/server', () => ({ connection: async () => undefined }));
 vi.mock('next/navigation', () => ({ redirect: h.redirect }));
 vi.mock('next/headers', () => ({ headers: async () => h.headers, cookies: async () => h.cookies() }));
-vi.mock('../../server/flight-access', () => ({ requireFlightAccess: h.requireFlightAccess }));
+vi.mock('../../server/flight-access', () => ({ requireFlightProductAccess: h.requireFlightProductAccess }));
 vi.mock('../../server/engineering-ui', () => ({ engineeringUiAllowed: async () => false }));
+vi.mock('../../server/conversation-scope', () => ({ currentConversationScope: async () => null }));
 vi.mock('../../server/network-scope', () => ({ networkScope: () => 'PUBLIC_MAINNET' }));
 // BUILD-ADMIN-AI-PROVIDERS-001: the layout reads the configured mode through the provider module (an Anthropic-only live Copilot reads live).
 vi.mock('../../server/copilot-providers', () => ({ copilotConfiguredMode: h.copilotConfiguredMode }));
@@ -28,12 +29,12 @@ import ProductLayout from './layout';
 import { FlightGateScreen } from '../../components/flight/flight-transition';
 
 const layout = () => ProductLayout({ children: <p>page</p> }) as Promise<ReactElement<{ response?: string }>>;
-const refuse = (code: string) => h.requireFlightAccess.mockRejectedValue(new Error(code));
+const refuse = (code: string) => h.requireFlightProductAccess.mockRejectedValue(new Error(code));
 beforeEach(() => {
   vi.clearAllMocks();
   h.headers = new Headers({ 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' });
   h.cookies.mockReturnValue({ get: () => undefined });
-  h.requireFlightAccess.mockResolvedValue(null);
+  h.requireFlightProductAccess.mockResolvedValue(null);
 });
 
 describe('product layout Flight gate', () => {

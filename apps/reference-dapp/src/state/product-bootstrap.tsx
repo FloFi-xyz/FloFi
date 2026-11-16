@@ -14,7 +14,12 @@ export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosyst
   /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: this browser's answer to the Privacy & Memory notice, as the server read it (absent: unknown, not shown). */
   readonly privacyNotice?: PrivacyNoticeChoice | 'UNANSWERED' | undefined;
   /** BUILD-FLOFI-UX-FIX-003: the deployment's learning tier (configuration, no database read), so Settings knows its rows at first paint. */
-  readonly learningTier?: 'OFF' | 'SESSION' | 'ENABLED' | undefined };
+  readonly learningTier?: 'OFF' | 'SESSION' | 'ENABLED' | undefined;
+  /**
+   * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001: an opaque digest of the tenant and the signed-in FloFi account (`server/conversation-scope.ts`)
+   * under which this tab keeps the FloFi chat; null or absent: no account session, the chat stays in memory only. Not authority for anything.
+   */
+  readonly conversationScope?: string | null | undefined };
 const NONE: ProductBootstrap = Object.freeze({ walletHint: Object.freeze([]), copilotMode: null });
 const Context = createContext<ProductBootstrap>(NONE);
 export function ProductBootstrapProvider({ value, children }: { value: ProductBootstrap; children: ReactNode }) {

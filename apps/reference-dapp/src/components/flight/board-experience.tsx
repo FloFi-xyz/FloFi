@@ -182,9 +182,11 @@ function InviteForm({ copy, now, opensAt, onRedeemed }: { copy: FlightCopy; now:
  * "On the list with another email?": a link and a 6-digit code go to that address if it is on the beta list and its group is boarding (the
  * answer never says whether it is); the code typed here proves the address on this device (another device than the email's, too).
  */
-function AccessForms({ copy, language, onClaimed, intro = true }: { copy: FlightCopy; language: Language; onClaimed: (notice: string) => void; intro?: boolean }) {
+function AccessForms({ copy, language, onClaimed, onBoard, intro = true }: { copy: FlightCopy; language: Language; onClaimed: (notice: string) => void;
+  /** HOTFIX-P1-FLIGHT-ACCESS: the board's own "Board now" check, offered when this account already boards with another list email. */
+  onBoard?: () => void; intro?: boolean }) {
   const t = copy.access, [email, setEmail] = useState(''), [code, setCode] = useState(''), [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [message, setMessage] = useState<{ ok: boolean; text: string; code?: string } | null>(null);
   async function request(event: FormEvent) {
     event.preventDefault();
     setBusy(true); setMessage(null);
@@ -199,8 +201,10 @@ function AccessForms({ copy, language, onClaimed, intro = true }: { copy: Flight
     setBusy(false);
     // The confirmation moves to the hero (this form leaves the page when the person's state changes).
     if (answer.ok) onClaimed(answer.status === 'SESSION' ? t.pendingSignIn : t.claimed);
-    else setMessage({ ok: false, text: errorText(copy, answer.code) });
+    else setMessage({ ok: false, text: errorText(copy, answer.code), ...answer.code ? { code: answer.code } : {} });
   }
+  // The account's own grant is unchanged by this refusal (one list email per account): continue with it, nothing else is claimed.
+  const continueWithAccess = message?.code === 'ACCESS_ACCOUNT_HAS_OTHER_ENTRY' && onBoard;
   return <div className={styles.accessForms}>
     {intro && <p className={styles.small}>{t.otherEmail}</p>}
     <form onSubmit={request} className={styles.inviteForm} noValidate>
@@ -218,6 +222,8 @@ function AccessForms({ copy, language, onClaimed, intro = true }: { copy: Flight
     <p id="flight-access-code-hint" className={styles.small}>{t.codeHint}</p>
     <p className={message?.ok ? styles.status : styles.srOnly} role="status">{message?.ok ? message.text : ''}</p>
     {message && !message.ok && <p className={styles.error} role="alert">{message.text}</p>}
+    {continueWithAccess && <div className={styles.ctaRow}><button type="button" className={`${styles.btn} ${styles.btnNavy}`} onClick={onBoard}>
+      {copy.boarding.board} <span aria-hidden="true">→</span></button></div>}
   </div>;
 }
 
@@ -504,7 +510,7 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       {/* On the list with another email, or on another device: a link and a code by email, or the code typed here (signed in or not). */}
       {!pass && !accessNotice && <p className={styles.small}><button type="button" className={styles.linkButton} aria-expanded={showAccess}
         onClick={() => setShowAccess(value => !value)}>{copy.access.otherEmail}</button></p>}
-      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed} intro={false}/>}
+      {showAccess && !pass && <AccessForms copy={copy} language={language} onClaimed={claimed} onBoard={() => void checkAccess()} intro={false}/>}
     </div>;
   }
 

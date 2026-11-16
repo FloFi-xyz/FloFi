@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
-import { HookHarness } from '../test-utils/hook-harness';
+import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { reviewFixture, reviewNow, reviewOwner } from '../test-utils/review-fixture';
 import { editorReducer, initialEditor, type EditorState } from '../domain/editor';
 import type { Command } from '../domain/commands';
@@ -858,5 +858,127 @@ describe('P0 hotfix (execution continuity): the Assistant while the workflow exe
     const portuguese = () => harness.render(() => useFlofiConversation({ owner: { namespace: 'eip155', address: reviewOwner }, epoch: 0, bridge, direct, interfaceLanguage: 'PT' }));
     portuguese().send('continuar'); await flush();
     expect(portuguese().messages.at(-1)!.text).toBe('Este fluxo está em execução: 1 de 2 etapas concluídas · Etapa 2 (Trocar): Não iniciado. Confirme ou recuse o pedido na sua carteira. A FloFi nunca assina por você.');
+  });
+});
+
+/**
+ * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): the chat built a Solana Jupiter swap, the connected wallet identity
+ * changed from the EVM wallet to the Solana session the swap needs, and the whole conversation was replaced by the welcome message while the
+ * Canvas kept the swap. The conversation now belongs to the signed-in account (its opaque scope) and the workflow; this tab keeps it as read-only
+ * history through a reload. Test doubles only: a memory sessionStorage, no wallet, signature, provider or network.
+ */
+describe('HOTFIX-P1 conversation identity and recovery', () => {
+  const ACCOUNT_A = 'A'.repeat(32), ACCOUNT_B = 'B'.repeat(32), SOLANA = 'So1anaOwner1111111111111111111111111111111';
+  const evm = { namespace: 'eip155' as const, address: reviewOwner }, solana = { namespace: 'solana' as const, address: SOLANA };
+  let storage: Map<string, string>;
+  const memory = () => ({ get length() { return storage.size; }, key: (index: number) => [...storage.keys()][index] ?? null, getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); }, clear: () => storage.clear() });
+  type Options = { owner?: typeof evm | typeof solana | null; epoch?: number; scope?: string | null; persist?: boolean; direct?: boolean };
+  /** A page of the Editor: its own React state (`page`), this tab's storage shared by every page (a reload is a new page). */
+  const view = (page: HookHarness, options: Options = {}) => page.render(() => useFlofiConversation({ owner: options.owner === undefined ? evm : options.owner, epoch: options.epoch ?? 0,
+    bridge, direct: options.direct ?? true, interfaceLanguage: 'EN', persist: options.persist ?? true, accountScope: options.scope === undefined ? ACCOUNT_A : options.scope }));
+  const texts = (chat: FlofiConversation) => chat.messages.map(message => message.text);
+  const workflow = (workflowId: string) => { editor = { ...editor, workflow: { ...editor.workflow, workflowId } }; store(); lifecycle(reviewedPatch); };
+  async function author(page: HookHarness, options: Options = {}) {
+    view(page, options).send('swap 10 USDC to WETH on Base Sepolia slippage 100 bps'); await flush(); store(); lifecycle(reviewedPatch);
+    return view(page, options);
+  }
+  beforeEach(() => { storage = new Map(); vi.stubGlobal('window', { sessionStorage: memory() }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('authoring through the chat keeps the conversation when the wallet changes ecosystem, disconnects and reconnects', async () => {
+    const page = new HookHarness();
+    let chat = await author(page);
+    const conversation = texts(chat);
+    expect(conversation).toEqual([expect.any(String), 'swap 10 USDC to WETH on Base Sepolia slippage 100 bps', expect.stringMatching(/^Swap added to your workflow/)]);
+    // The Canvas now holds the workflow; the review wallet becomes the Solana session (the incident), then the wallet disconnects and reconnects.
+    for (const owner of [solana, null, solana, evm]) { chat = view(page, { owner }); expect(texts(chat), String(owner?.namespace)).toEqual(conversation); }
+    expect(last(chat).options).toEqual(['Add another action', 'Review workflow', 'Undo this change']);
+    page.unmount();
+  });
+
+  it('the same account and workflow get their conversation back after a reload, as read-only history (no stale answer buttons)', async () => {
+    const before = new HookHarness(), chat = await author(before), shown = texts(chat);
+    before.unmount();
+    const reloaded = view(new HookHarness());
+    expect(texts(reloaded)).toEqual(shown);
+    expect(reloaded.messages.every(message => !message.options && !message.question)).toBe(true);
+    expect(reloaded.messages.every(message => !message.variants || (!message.variants.EN.options && !message.variants.PT.options))).toBe(true);
+    // A new message continues the restored conversation (ids keep increasing) and is kept again.
+    const page = new HookHarness(); view(page); view(page).send('explain'); await flush();
+    const continued = view(page);
+    expect(texts(continued)).toEqual([...shown, 'explain', expect.any(String)]);
+    expect(texts(continued).slice(0, shown.length)).toEqual(shown);
+    expect(new Set(continued.messages.map(message => message.id)).size).toBe(continued.messages.length);
+    expect(texts(view(new HookHarness())).length).toBe(continued.messages.length);
+  });
+
+  it('another account, a signed-out page or another workflow never receives this conversation', async () => {
+    const shown = texts(await author(new HookHarness()));
+    expect(texts(view(new HookHarness(), { scope: ACCOUNT_B }))).toHaveLength(1);
+    expect(texts(view(new HookHarness(), { scope: null }))).toHaveLength(1);
+    expect(texts(view(new HookHarness(), { persist: false }))).toHaveLength(1);
+    workflow('workflow-another');
+    expect(texts(view(new HookHarness()))).toHaveLength(1);
+    // Account B writing in this tab removes account A's kept conversations (never two accounts' messages side by side).
+    await author(new HookHarness(), { scope: ACCOUNT_B });
+    expect([...storage.keys()].some(key => key.includes(ACCOUNT_A))).toBe(false);
+    expect(shown.length).toBeGreaterThan(1);
+  });
+
+  it('explicit New workflow opens a distinct, empty conversation; reopening the earlier workflow restores its own', async () => {
+    const page = new HookHarness(), first = editor.workflow.workflowId, shown = texts(await author(page));
+    // New workflow: a fresh identity and the epoch together (app-shell resetForNewWorkflow).
+    workflow('workflow-new'); let chat = view(page, { epoch: 1 });
+    expect(texts(chat)).toHaveLength(1);
+    expect(chat.question).toBeNull();
+    // Reopening the earlier workflow (a saved workflow or the restored Canvas) brings back its own conversation, read-only.
+    workflow(first); chat = view(page, { epoch: 1 });
+    expect(texts(chat)).toEqual(shown);
+    expect(chat.messages.some(message => message.options)).toBe(false);
+    // The new workflow's conversation stayed separate.
+    workflow('workflow-new'); expect(texts(view(page, { epoch: 1 }))).toHaveLength(1);
+    // New workflow again over a stored identity: its stored conversation is not restored.
+    workflow(first); chat = view(page, { epoch: 2 });
+    expect(texts(chat)).toHaveLength(1);
+    expect(texts(view(new HookHarness(), { epoch: 2 }))).toHaveLength(1);
+  });
+
+  it('a late Copilot answer of the previous workflow never lands in the next workflow or changes it', async () => {
+    const answer = deferred<unknown>(); f.respond = () => answer.promise;
+    const page = new HookHarness();
+    view(page).send('make something nice'); await flush();
+    expect(texts(view(page))).toContain('make something nice');
+    workflow('workflow-next');
+    const next = view(page, { epoch: 1 });
+    expect(texts(next)).toHaveLength(1);
+    const revision = editor.workflow.revision;
+    answer.resolve({ text: 'Interpreted.', notes: [], command: { type: 'ADD_SWAP' } });
+    await flush(); store(); lifecycle(reviewedPatch);
+    expect(texts(view(page, { epoch: 1 }))).toHaveLength(1);
+    expect(editor.workflow.revision).toBe(revision);
+    expect(f.propose).toEqual([]);
+  });
+
+  it('never keeps a typed private key or seed phrase, and keeps nothing for a conversation the owner has not joined', async () => {
+    const page = new HookHarness(); view(page); await flush();
+    expect(storage.size).toBe(0);
+    view(page).send(`my private key is 0x${'ab'.repeat(32)}`); await flush();
+    view(page).send('explain'); await flush(); view(page);
+    const kept = [...storage.values()].join('');
+    expect(kept).not.toContain('ab'.repeat(32));
+    expect(kept).not.toMatch(/private key is/);
+    expect(kept).toContain('"text":"explain"');
+    // This visit still shows what was typed; only this tab's kept copy leaves it out.
+    expect(texts(view(page))).toContain(`my private key is 0x${'ab'.repeat(32)}`);
+  });
+
+  it('the approval surfaces keep their previous behaviour: one conversation per page, a new owner starts it again', async () => {
+    direct = false;
+    const page = new HookHarness();
+    view(page, { direct: false }).send('swap 10 USDC to WETH on Base Sepolia slippage 100 bps'); await flush(); store(); lifecycle(reviewedPatch);
+    expect(texts(view(page, { direct: false })).length).toBeGreaterThan(1);
+    expect(texts(view(page, { direct: false, owner: solana }))).toEqual(['Review each proposed change before applying it.']);
+    expect(storage.size).toBe(0);
   });
 });

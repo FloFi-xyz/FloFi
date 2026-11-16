@@ -24,7 +24,7 @@ const definitions = [
     'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'site.spec.ts', 'build-entry.spec.ts', 'privacy-notice.spec.ts', 'editor-redesign.spec.ts',
     'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts',
     'simulate-canvas-controls.spec.ts', 'editor-layout-hotfix.spec.ts', 'editor-header-new-workflow.spec.ts'], {}],
-  ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
+  ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts', 'chat-review-overflow.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],

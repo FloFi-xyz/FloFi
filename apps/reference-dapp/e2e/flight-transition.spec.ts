@@ -14,7 +14,7 @@
  * simulates or moves funds; no public network is reached (every other origin is refused). Paints are recorded in the page itself.
  */
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -60,6 +60,26 @@ function solanaAddress(): string {
   while (value > 0n) { text = BASE58[Number(value % 58n)]! + text; value /= 58n; }
   for (const byte of raw) { if (byte !== 0) break; text = `1${text}`; }
   return text;
+}
+/**
+ * HOTFIX-P1-FLIGHT-ACCESS: a throwaway Solana wallet this browser proves with the app's own Sign-In With Solana (the Server Actions behind
+ * "Connect wallet"). The Ed25519 key lives only in this test's memory: it signs one SIWS message (no transaction) and is never written.
+ */
+async function proveSolanaWallet(page: Page): Promise<{ address: string; body: string }> {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519'), raw = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
+  let value = BigInt(`0x${raw.toString('hex')}`), address = '';
+  while (value > 0n) { address = BASE58[Number(value % 58n)]! + address; value /= 58n; }
+  for (const byte of raw) { if (byte !== 0) break; address = `1${address}`; }
+  const call = (name: string, args: unknown[]) => page.evaluate(async ({ id, args }) => (await fetch('/app', { method: 'POST',
+    headers: { 'next-action': id, accept: 'text/x-component', 'content-type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(args) })).text(),
+  { id: serverAction(name, 'wallet-session-action'), args });
+  const challenge = await call('solanaSignInChallenge', [address]);
+  const quoted = /"message":("(?:[^"\\]|\\.)*")/.exec(challenge)?.[1];
+  expect(quoted, challenge.slice(0, 400)).toBeTruthy();
+  const signature = sign(null, Buffer.from(JSON.parse(quoted!) as string, 'utf8'), privateKey).toString('base64');
+  const body = await call('solanaSignIn', [address, signature]);
+  expect(body).toContain(`"account":"${address}"`);
+  return { address, body };
 }
 /** The MOCKED Privy stand-in for this context and the wallet a sign-in will use. */
 async function privy(page: Page, address: string) {
@@ -241,6 +261,32 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') {
     await expect(page.locator('.app-shell')).toBeVisible();
   });
 
+  test('closed beta protects an eligible account whose browser proved an unlinked wallet: /app and Credentials stay open, that wallet stays refused, Board now never loops', async ({ page }) => {
+    // HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): a Solana wallet connected for a swap, not linked to the account,
+    // sent every /app page — Credentials included, where the refusal says to link it — to /board, and Board now sent the person back.
+    const { account } = await person(page, { board: true });
+    await page.goto('/app');
+    await expect(page.locator('.app-shell')).toBeVisible();
+    const proof = await proveSolanaWallet(page);
+    // The Server Action's own re-render of /app (it set the wallet cookie) keeps the product: no hand-off to /board.
+    expect(proof.body).not.toContain('"response":"HANDOFF"');
+    for (const path of ['/app', '/app/credentials']) {
+      await page.goto(path);
+      await expect(page, path).toHaveURL(path);
+      await expect(page.locator('.app-shell')).toBeVisible();
+    }
+    // Every operation still checks every wallet this browser proved: the unlinked wallet is refused, and nothing was quoted for it.
+    const refused = await post(page, '/api/build-estimate', {});
+    expect(refused.status).toBe(403);
+    expect(refused.body).toMatchObject({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    // Board now admits the account (the product layout's own decision) and binds nothing the account never proved.
+    const boarded = await post(page, '/api/board/board', {});
+    expect(boarded).toMatchObject({ status: 200, body: { ok: true, flight: { access: { kind: 'eligible' } } } });
+    expect(await query(`SELECT 1 FROM flight_beta_wallets WHERE account_id = $1 AND address = $2`, [account, proof.address])).toEqual([]);
+    await page.goto('/board?board=1');
+    await expect(page).toHaveURL('/app');
+    await expect(page.locator('.app-shell')).toBeVisible();
+  });
   test('closed beta protects the Flight transition: a re-render of /app that loses access loads /board as its own document, never inside the product', async ({ page }) => {
     const { account } = await person(page, { board: true });
     const paints = await recordPaints(page);

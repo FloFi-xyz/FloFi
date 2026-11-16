@@ -28,6 +28,7 @@ import { STEPS_COMPLETED } from '../domain/workflow-progress';
 import { requotedMessage, simulationError } from '../domain/simulation-presentation';
 import { translate } from '../i18n/locale';
 import type { ExecutionControls } from './execution-controls';
+import { conversationStorage, forgetConversations, historical, readConversation, writeConversation } from '../domain/conversation-persistence';
 import { conversationCopy } from '../domain/conversation-copy';
 import type { ChatContent, ChatMessage, Rendering } from '../domain/chat-message';
 import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
@@ -35,8 +36,13 @@ import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continu
 
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: the FloFi chat's state, owned by the workspace shell (above the stage switch) so navigating Build, Simulate and
- * Execute never discards the conversation or its open question. Nothing is persisted: a reload starts a new conversation, and the execution status
- * the chat then shows comes from the existing durable records.
+ * Execute never discards the conversation or its open question. The execution status the chat shows after a reload comes from the existing
+ * durable records.
+ *
+ * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): the Editor's conversation belongs to the signed-in FloFi account and the
+ * workflow (`persist`): a different connected wallet (an EVM wallet → the Solana session of a Jupiter swap) no longer replaces it with the welcome
+ * message. Another workflow (reopened, restored or New workflow) opens its own conversation — never the previous one's messages, open question
+ * or late answers — and this tab keeps each one through a reload as read-only history (`domain/conversation-persistence.ts`).
  *
  * Authoring: an explicit, valid request is committed to the canonical workflow at once (`commitChatCommand`: editor validation, base revision,
  * test-network refusal, undoable history), and FloFi confirms what the stored workflow now holds. A change that would drop a step the owner did
@@ -117,8 +123,12 @@ function requotedOf(state: unknown): { readonly code: string; readonly runId?: s
   return value && typeof value === 'object' && typeof (value as { code?: unknown }).code === 'string' ? value as { readonly code: string; readonly runId?: string } : null;
 }
 
-export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLanguage }: {
+export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLanguage, persist = false, accountScope = null }: {
   owner: WorkflowOwner | null; epoch: number; bridge: ConversationBridge; direct: boolean; interfaceLanguage: ConversationLanguage;
+  /** HOTFIX-P1-CHAT-RECOVERY: the product Editor (/app) keeps the signed-in account's conversation per workflow in this tab. */
+  persist?: boolean;
+  /** The opaque scope of the signed-in FloFi account the server verified for this page (`server/conversation-scope.ts`); null: none. */
+  accountScope?: string | null;
 }) {
   const workflow = useWorkflow();
   const { state, context, propose, dismissProposal, commitChatCommand, undoChatCommit } = workflow;
@@ -141,7 +151,17 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const copilot = useCopilotInterpreter({ direct, interfaceLanguage });
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant's short welcome (the panel shows the Copilot mode's own variant when one is configured).
   const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? FLOFI_WELCOME_COMMANDS : 'Review each proposed change before applying it.' });
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [intro()]);
+  /**
+   * HOTFIX-P1-CHAT-RECOVERY: the conversation shown and the conversation it is (`key`: account scope and workflow; null until the first is
+   * opened). Messages are only ever appended to the conversation that is still open, so a late answer never lands in another one.
+   */
+  const [thread, setThread] = useState<{ readonly key: string | null; readonly messages: ChatMessage[] }>(() => ({ key: null, messages: [intro()] }));
+  const messages = thread.messages;
+  // The account scope the server verified for this page. Once known it is kept for the page (a re-render that could not verify the session
+  // never switches the conversation away); another account's scope opens that account's conversations. Sign-out leaves the page.
+  const knownScope = useRef(accountScope);
+  if (accountScope !== null) knownScope.current = accountScope;
+  const scope = knownScope.current;
   const [input, setInput] = useState('');
   const [automation, setAutomation] = useState<AutomationInput | null>(null);
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: an automation-management request the chat shows as the owner's own automations (read, then confirm). */
@@ -200,9 +220,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   /** BUILD-FLOFI-E2E-RELIABILITY-001: continuations (run + next request) the owner declined in this conversation: never re-offered by FloFi itself. */
   const declined = useRef<Set<string>>(new Set());
   const setQuestion = (next: Question | null) => { questionRef.current = next; setQuestionState(next); };
+  const threadKey = useRef<string | null>(null);
   const append = (scope: number, ...list: Omit<ChatMessage, 'id'>[]) => {
     if (scope !== session.current) return;
-    setMessages(old => [...old, ...list.map(message => ({ ...message, id: ids.current++ }) as ChatMessage)]);
+    const key = threadKey.current, added = list.map(message => ({ ...message, id: ids.current++ }) as ChatMessage);
+    setThread(old => old.key === key ? { key, messages: [...old.messages, ...added] } : old);
   };
   /**
    * A deterministic FloFi message, rendered from its copy key and values in both languages (`build` is called once per language with that
@@ -221,27 +243,58 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     return Boolean(offer && [offer.label, translate('PT', offer.label), offer.labelIn?.('EN'), offer.labelIn?.('PT')].includes(text));
   };
 
-  // A new owner (another wallet identity) or a new workflow starts a new conversation; a late answer of the previous one is dropped.
-  const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null, lastOwner = useRef(ownerKey), lastEpoch = useRef(epoch), lastWorkflow = useRef(state.workflow.workflowId);
-  function reset() {
-    session.current += 1; ids.current = 1;
-    // BUILD-FLOFI-UNIFIED-COPILOT-001: the automation manager card belongs to the previous owner's conversation too.
-    setMessages([intro()]); setQuestion(null); setAutomation(null); setManage(null); setDestination(null); setInput('');
+  /**
+   * Opens the conversation `key` (`messages`: its history, or the welcome alone), ending the previous one: its open question, follow-ups and
+   * permissions never carry over, and a late answer of it is dropped (`session`). BUILD-FLOFI-UNIFIED-COPILOT-001: the automation cards too.
+   */
+  function open(key: string, history: readonly ChatMessage[] | null, clearInput: boolean) {
+    session.current += 1;
+    const next = history?.length ? [...history] : [intro()];
+    ids.current = Math.max(0, ...next.map(message => message.id)) + 1;
+    threadKey.current = key;
+    setThread({ key, messages: next });
+    setQuestion(null); setAutomation(null); setManage(null); setDestination(null);
+    if (clearInput) setInput('');
     copilot.clear(); pendingCommit.current = null; lastCommit.current = null; reviewLock.current = null; watch.current = null; restored.current = null;
     resume.current = null; handover.current = null; lastReview.current = null; requote.current = null; declined.current = new Set(); finished.current = null;
   }
+  /**
+   * HOTFIX-P1-CHAT-RECOVERY: the Editor's conversation is the signed-in account's (its opaque scope) about this workflow — never a wallet's. A
+   * wallet that connects, disconnects or changes ecosystem keeps it; another account or workflow opens its own; an explicit New workflow
+   * (`epoch`) opens a clean one. The approval surfaces (`direct` false) keep their previous behaviour: one conversation per page, a new owner
+   * starts it again.
+   */
+  const workflowId = state.workflow.workflowId, keep = direct && persist && scope !== null;
+  const conversationKey = direct ? `${keep ? scope : '-'}|${workflowId}` : 'approval';
+  const cache = useRef(new Map<string, readonly ChatMessage[]>()), lastEpoch = useRef(epoch);
+  useEffect(() => {
+    const fresh = lastEpoch.current !== epoch;
+    lastEpoch.current = epoch;
+    if (!fresh && threadKey.current === conversationKey) return;
+    if (fresh) { cache.current.delete(conversationKey); if (keep) forgetConversations(conversationStorage(), { scope, workflowId }); }
+    // This page's own copy first (reopening a workflow seen in this visit), else this tab's stored history (a reload): both read-only history.
+    const history = fresh ? null : cache.current.get(conversationKey)?.map(historical) ?? (keep ? readConversation(conversationStorage(), scope, workflowId, Date.now()) : null);
+    open(conversationKey, history, fresh);
+  }, [conversationKey, epoch]);
+  useEffect(() => {
+    const key = thread.key;
+    if (key === null || key !== threadKey.current) return;
+    cache.current.set(key, thread.messages);
+    if (key.startsWith(`${scope}|`) && keep) writeConversation(conversationStorage(), scope, key.slice(scope!.length + 1), thread.messages, Date.now());
+  }, [thread]);
+  // Approval surfaces only: a new owner (another wallet identity) starts a new conversation; a late answer of the previous one is dropped.
+  const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null, lastOwner = useRef(ownerKey), lastWorkflow = useRef(workflowId);
   useEffect(() => {
     const changed = ownerKey !== null && lastOwner.current !== null && ownerKey !== lastOwner.current;
     if (ownerKey !== null) lastOwner.current = ownerKey;
-    if (changed) reset();
+    if (changed && !direct) open(conversationKey, null, true);
   }, [ownerKey]);
-  useEffect(() => { if (lastEpoch.current !== epoch) { lastEpoch.current = epoch; reset(); } }, [epoch]);
   useEffect(() => {
-    // A reopened workflow keeps the conversation, but no open question of the previous workflow.
+    // Approval surfaces: a reopened workflow keeps the conversation, but no open question of the previous workflow.
     // BUILD-FLOFI-E2E-RELIABILITY-001: the previous workflow's follow-up (and its permission to re-quote by itself) does not carry over either.
-    if (lastWorkflow.current !== state.workflow.workflowId) { lastWorkflow.current = state.workflow.workflowId; setQuestion(null); pendingCommit.current = null; lastCommit.current = null;
+    if (lastWorkflow.current !== workflowId) { lastWorkflow.current = workflowId; if (direct) return; setQuestion(null); pendingCommit.current = null; lastCommit.current = null;
       watch.current = null; reviewLock.current = null; requote.current = null; resume.current = null; handover.current = null; finished.current = null; }
-  }, [state.workflow.workflowId]);
+  }, [workflowId]);
 
   // A committed chat change is confirmed from the stored workflow once it lands; a refused or superseded commit says so.
   useEffect(() => {

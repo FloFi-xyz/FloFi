@@ -16,6 +16,7 @@ import { isFloFiWalletKey } from '../wallet/evm-discovery';
 import { forgetAccountWalletReconnect } from '../wallet/sign-in-wallet';
 import { beginPageExit } from './page-exit';
 import { invalidateSavedRecipients } from '../state/saved-recipients-store';
+import { conversationStorage, forgetConversations } from '../domain/conversation-persistence';
 import type { FloFiPrivy } from './privy-context';
 
 /** How long Disconnect waits for each browser-side step (wallet close, Privy logout) before moving on. */
@@ -29,6 +30,8 @@ export async function disconnectToLogin(privy: Pick<FloFiPrivy, 'logout'> | null
   leaving = true;
   // BUILD-FLOFI-UNIFIED-COPILOT-001: this account's saved recipients leave the page's memory first (the next session never sees them).
   invalidateSavedRecipients();
+  // HOTFIX-P1-CHAT-RECOVERY: this tab's kept FloFi conversations belong to the account that is signing out: removed, never shown to the next one.
+  forgetConversations(conversationStorage());
   // The session ends below; the product's gate then hands off to /board unless the page is already leaving for sign-in (src/accounts/page-exit.ts).
   beginPageExit();
   await bounded(() => closeWallet?.());

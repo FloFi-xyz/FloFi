@@ -32,7 +32,7 @@ import { walletChainRef } from '../wallet/evm-networks';
 import { shellChainLabel } from '../domain/product-shell';
 import { WorkflowMoreMenu, WorkflowName } from './workflow-name';
 import { DarkSpotlight } from './dark-spotlight';
-import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
+import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
 import { PanelRevealer, PanelRevealProvider } from './canvas-panel-reveal';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardDestination, type CardRecipient, type ComposerCardData } from './composer-card';
@@ -357,7 +357,7 @@ function ReadonlyWorkflowCanvas({ mode, workflowName, overlay, primaryAction }: 
     <div className="canvas-head"><div><h2>{workflowName}</h2></div><span className="revision">{tr(nodes.length)}{tr(" actions")}</span></div>
     <div className="flow-surface" role="region" aria-label={tr(mode === 'execute' ? 'Workflow overview graph' : 'Mocked outputs on the workflow graph')} data-viewport={viewportState}>
       <ReactFlow key={workflow.nodes.length} nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={SIMULATION_VIEWPORT.minZoom} maxZoom={SIMULATION_VIEWPORT.maxZoom}
-        nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} {...CANVAS_GESTURES}>
+        nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} {...CANVAS_GESTURES} proOptions={CANVAS_PRO_OPTIONS}>
         <SimulationViewport onState={setViewportState} />
         <Background gap={18} size={1} color="var(--grid)" /><CanvasNavigator/>
       </ReactFlow>
@@ -1053,7 +1053,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       {rail && <ActionRail id={railId} expanded={railWide} onToggle={toggleRail} onScroll={hideTip}>{toolbox}</ActionRail>}
       {tip && railTips && <span className="canvas-rail-tooltip" aria-hidden="true" style={{ top: tip.top, left: tip.left }}>{tip.label}</span>}
       <PanelRevealProvider><ReactFlow key={isLendingComposition(workflow)?'lending':'general'} nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={(changes: NodeChange<Node>[]) => onNodesChange(changes.filter(change => change.type !== 'select'))} fitViewOptions={{ padding: fitPadding }} minZoom={0.35} maxZoom={1.4}
-        nodesDraggable={!runActive} nodesConnectable={!runActive} deleteKeyCode={null} selectNodesOnDrag={false} panOnDrag={[1, 2]} {...CANVAS_GESTURES}
+        nodesDraggable={!runActive} nodesConnectable={!runActive} deleteKeyCode={null} selectNodesOnDrag={false} panOnDrag={[1, 2]} {...CANVAS_GESTURES} proOptions={CANVAS_PRO_OPTIONS}
         // BUILD-FIX-UX-001: an ordinary click never connects; a drag snaps to a nearby input; only a connection the workflow accepts is shown as valid.
         connectOnClick={false} connectionDragThreshold={4} connectionRadius={48}
         isValidConnection={connection => connection.sourceHandle === 'output' && connection.targetHandle === 'input' && checkConnection(state, context, connection.source, connection.target).ok}

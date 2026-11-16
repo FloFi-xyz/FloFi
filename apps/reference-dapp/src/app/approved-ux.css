@@ -171,7 +171,9 @@
 .bridge-requote s{color:var(--muted)}
 /* BUILD-FLOFI-MAINNET-EXEC-002: the compact chat Review — one short block per step; exact values and technical lines under a closed disclosure. */
 .conversation-review .conversation-review-compact{gap:2px;margin-top:4px}
-.conversation-review .conversation-review-compact dd{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* HOTFIX-P1-UI-OVERFLOW-AND-ATTRIBUTION-001: a compact value wraps within the chat panel instead of being cut with an ellipsis (an amount, fee or
+   address is never shown partially; its full value stays in the title and under Technical details). */
+.conversation-review .conversation-review-compact dd{font-variant-numeric:tabular-nums;white-space:normal;overflow-wrap:anywhere}
 .conversation-review .conversation-review-compact code{font-family:var(--font-ibm-plex-mono),monospace;font-size:12px}
 .conversation-review .conversation-review-extra{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
 .conversation-review .conversation-review-extra [data-permission] dd{white-space:normal}
@@ -185,6 +187,13 @@
 .conversation-review .conversation-review-technical[open]>summary{margin-bottom:6px}
 .conversation-review .conversation-review-technical code{font-size:11.5px;overflow-wrap:anywhere}
 .conversation-review .conversation-review-technical .conversation-review-lines:first-of-type{margin-top:6px!important}
+/* HOTFIX-P1-UI-OVERFLOW-AND-ATTRIBUTION-001: the Review stays inside the Assistant's message at every width. Its lists are grids and its rows
+   flex rows, whose items would otherwise keep their min-content width (a long address, route or amount) and push the card past the panel:
+   every track may shrink to the panel and every row item may wrap. Layout only: no value, label or control changes. */
+.message .conversation-review{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.conversation-review :is(dl,.conversation-review-steps,.conversation-review-steps>li){grid-template-columns:minmax(0,1fr);min-width:0;max-width:100%}
+.conversation-review :is(dl>div,.conversation-review-steps>li>*,.conversation-review-technical-step,.conversation-review-warnings>li){min-width:0;max-width:100%}
+.conversation-review :is(strong,code,time,.conversation-review-route){overflow-wrap:anywhere}
 /* BUILD-FLOFI-MAINNET-EXEC-002: a Bridge card's destination wallet (automatic, or a choice / a typed public address). */
 .composer-destination .composer-destination-note{color:var(--muted);font-size:10.5px;line-height:1.3;overflow-wrap:anywhere}
 .composer-destination .composer-destination-auto{color:var(--ink)}

@@ -125,6 +125,8 @@ import { editorOverview, EMPTY_EDITOR_OVERVIEW } from '../domain/editor-overview
 import { EditorOverviewPanel, focusCanvasStep } from './editor-overview-panel';
 import { EditorStepper } from './editor-stepper';
 import { isPristineDraft } from '../domain/initial-workflow';
+import { editorPersistencePath } from '../domain/editor-persistence';
+import { useProductBootstrap } from '../state/product-bootstrap';
 
 /** `approvalSlot`/`approvalGate` (BUILD-FLOFI-UX-UI-002, `/approve` only): where the proposal's notice renders, and whether Simulate and
  * Execute stay closed until the proposal is loaded for the proven wallet.
@@ -140,6 +142,7 @@ const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toL
 const shortAccount = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi }: ProductNavigation) {
   const { t: tr, language } = useLocale();
+  const { conversationScope = null } = useProductBootstrap();
   // Server HTML is visible before handlers and initial canvas preferences are ready.
   const [interactive, setInteractive] = useState(false);
   useEffect(() => { setInteractive(true); }, []);
@@ -670,6 +673,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     || liveExecution && !isFinalExecutionResult(liveExecution));
   const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
+    // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.
+    persist: editorPersistencePath(pathname), accountScope: conversationScope,
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,

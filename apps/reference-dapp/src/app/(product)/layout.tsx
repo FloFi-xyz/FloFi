@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { cookies, headers } from 'next/headers';
 import { connection } from 'next/server';
 import { redirect } from 'next/navigation';
-import { requireFlightAccess } from '../../server/flight-access';
+import { requireFlightProductAccess } from '../../server/flight-access';
+import { currentConversationScope } from '../../server/conversation-scope';
 import { flightGateOutcome, flightGateResponse, flightRequestKind, type FlightGateOutcome } from '../../server/flight-gate';
 import { FlightGateScreen } from '../../components/flight/flight-transition';
 import { engineeringUiAllowed } from '../../server/engineering-ui';
@@ -39,8 +40,10 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   // P0 hotfix (Flight transition, src/server/flight-gate.ts): a refusal leaves for /board (an HTTP redirect for a document, else a full-page
   // hand-off, never a client navigation that would draw /board inside this product document); a failure to check access shows "Try again",
   // never /board. Either way nothing of the workspace renders and none of its data is read.
+  // HOTFIX-P1-FLIGHT-ACCESS: the ACCOUNT's access opens the pages (src/server/flight-access.ts requireFlightProductAccess); a wallet this browser
+  // proved that is not linked to it is refused by every operation instead, so Credentials stays reachable to link it (no /app ↔ /board loop).
   let refused: FlightGateOutcome | null = null;
-  try { await requireFlightAccess(); } catch (error) { refused = flightGateOutcome(error); }
+  try { await requireFlightProductAccess(); } catch (error) { refused = flightGateOutcome(error); }
   if (refused) {
     const response = flightGateResponse(refused, flightRequestKind(await headers()));
     if (response === 'REDIRECT') redirect('/board');
@@ -50,6 +53,8 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const jar = await cookies();
   const configured = copilotConfiguredMode(process.env);
   const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured,
+    // HOTFIX-P1-CHAT-RECOVERY: the signed-in account's opaque chat scope (null: memory only), so a reload keeps this account's conversation.
+    conversationScope: await currentConversationScope(),
     privacyNotice: parsePrivacyNotice(jar.get(PRIVACY_NOTICE_COOKIE)?.value) ?? 'UNANSWERED' as const,
     // BUILD-FLOFI-UX-FIX-003: what `learningAvailability()` returns, known with the page instead of asked when Settings first opens.
     learningTier: learningConfig(process.env).enabled ? 'ENABLED' as const : sessionAdaptation(process.env) ? 'SESSION' as const : 'OFF' as const };

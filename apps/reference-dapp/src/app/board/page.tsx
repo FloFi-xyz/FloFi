@@ -11,7 +11,7 @@ import { betaAccessMode } from '../../flight/beta-access';
 import { boardArrival, boardArrivalCandidate, decideBoardArrival, type BoardArrivalFacts } from '../../flight/board-arrival';
 import { flightCalendar } from '../../flight/host';
 import { flightState } from '../../flight/http';
-import { requireFlightAccess } from '../../server/flight-access';
+import { requireFlightProductAccess } from '../../server/flight-access';
 import { flightRequestKind, fullNavigation } from '../../server/flight-gate';
 import { FLOFI_PRODUCTION_ORIGIN } from '../../platform/navigation';
 import './flight-document.css';
@@ -34,7 +34,8 @@ export default async function Page({ searchParams }: { searchParams: Search }) {
   // Read-only: the product gate is only asked (no grant, wallet link, claim or session is written); everyone else gets the board's own check.
   const facts: BoardArrivalFacts = { arrival, mode: betaAccessMode(), phase: state?.phase ?? null, signedIn: state?.me.signedIn ?? false,
     accessPending: state?.me.accessPending ?? false, access: state?.me.flight?.access.kind ?? null };
-  const productAccess = boardArrivalCandidate(facts) && await requireFlightAccess().then(() => true, () => false);
+  // The same account-level check the product layout makes (HOTFIX-P1-FLIGHT-ACCESS), so /app never sends the person straight back here.
+  const productAccess = boardArrivalCandidate(facts) && await requireFlightProductAccess().then(() => true, () => false);
   if (decideBoardArrival({ ...facts, productAccess }) === 'APP') {
     // A document request gets the HTTP redirect; a client-router request a full navigation, so /app never loads inside this document.
     if (fullNavigation(flightRequestKind(await headers())) === 'REDIRECT') redirect('/app');
