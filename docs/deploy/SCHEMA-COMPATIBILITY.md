@@ -966,3 +966,8 @@ worker) before any build that ships 0028 migrates. Release B then ships `package
 fixture's bytes, unchanged) and its `SHIPPED_MIGRATIONS` entry and migrates from the Railway API pre-deploy. Until Release B, saved recipients
 are unavailable in production (RECIPIENTS_UNAVAILABLE; the Credentials section says so). See
 [RELEASE-SAVED-RECIPIENTS-0028.md](./RELEASE-SAVED-RECIPIENTS-0028.md). No production migration or release was performed during engineering.
+
+**Release note (2026-11-15).** Release A was deployed as `67f4e84` (schema 27 in production). Release B ships
+`packages/cloud-runtime/migrations/0028_saved_recipients.sql` (byte-identical to the fixture, SHA-256 `ee73e909…a64f`) and its
+`SHIPPED_MIGRATIONS` entry. `packages/cloud-runtime/test/saved-recipients-migration.pg.test.ts` proves 27 → 28 and rehearses the documented
+controlled Neon procedure. Suites that assumed head 27 now use the v27 history. Neon is migrated by the owner before Release B merges.

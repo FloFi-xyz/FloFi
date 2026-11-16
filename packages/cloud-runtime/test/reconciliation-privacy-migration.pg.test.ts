@@ -59,8 +59,9 @@ describe('Reconciliation & privacy migration (0027)', () => {
         runs: (await t.db.query(`SELECT * FROM execution_runs ORDER BY run_id`)).rows });
       const data = await rows();
 
-      expect(await migrate(t.db, all)).toEqual([27]);
-      expect(await migrate(t.db, all)).toEqual([]);
+      // The v27 history (0028 ships on top in Release B and is proven by saved-recipients-migration.pg.test.ts).
+      expect(await migrate(t.db, all.slice(0, 27))).toEqual([27]);
+      expect(await migrate(t.db, all.slice(0, 27))).toEqual([]);
       const after = await catalog(t.db);
       for (const key of Object.keys(before) as (keyof typeof before)[]) {
         expect(after[key].filter(item => before[key].includes(item))).toEqual(before[key]);       // nothing removed or redefined
@@ -72,7 +73,7 @@ describe('Reconciliation & privacy migration (0027)', () => {
       expect(await assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS.slice(0, 26))).toMatchObject({ version: 27, application: 26 });
       await expect(assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS.slice(0, 26), [])).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
       await expect(assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 26))).rejects.toThrow();
-      expect(await assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS)).toMatchObject({ version: 27, application: 27, forward: [] });
+      expect(await assertSchemaCompatible(t.db, SHIPPED_MIGRATIONS.slice(0, 27))).toMatchObject({ version: 27, application: 27, forward: [] });
       // The audit skeleton stays append-only.
       await expect(t.db.query(`UPDATE admin_audit_events SET detail = '{}'`)).rejects.toThrow(/APPEND_ONLY_VIOLATION/);
       for (const table of NEW_TABLES.filter(n => n !== 'execution_nonce_conflicts'))
@@ -107,13 +108,13 @@ describe('Reconciliation & privacy migration (0027)', () => {
         // A long writer transaction holding an exclusive lock on execution_runs (the new foreign key needs a SHARE ROW EXCLUSIVE lock).
         await blocker.transaction(async tx => {
           await tx.query('LOCK TABLE execution_runs IN ACCESS EXCLUSIVE MODE');
-          await expect(migrate(t.db, all)).rejects.toThrow();
+          await expect(migrate(t.db, all.slice(0, 27))).rejects.toThrow();
         });
       } finally { await blocker.close(); }
       expect((await t.db.query('SELECT max(version)::int AS version FROM schema_migrations')).rows).toEqual([{ version: 26 }]);
       expect((await t.db.query(`SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1::text[])`, [NEW_TABLES])).rows).toEqual([{ n: 0 }]);
       expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 26))).toBe(26);
-      expect(await migrate(t.db, all)).toEqual([27]);
+      expect(await migrate(t.db, all.slice(0, 27))).toEqual([27]);
     } finally { await t.drop(); }
   }, 30_000);
 });

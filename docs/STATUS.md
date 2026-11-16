@@ -7,6 +7,13 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-UNIFIED-COPILOT-001 Release B — ships migration 0028 (saved recipients)
+
+**Status: PR prepared for owner review. Not merged, and Neon has not been migrated.** Release A (PR #199, `67f4e84`) is deployed, and
+production is at schema 27. Release B ships the certified 0028 bytes and its shipped entry. It rehearses the documented controlled Neon
+procedure on disposable PostgreSQL. Order: the owner applies 0028 to Neon (after a snapshot), verifies, then merges Release B. See
+[RELEASE-SAVED-RECIPIENTS-0028.md](deploy/RELEASE-SAVED-RECIPIENTS-0028.md).
+
 ## BUILD-FLOFI-UNIFIED-COPILOT-001 — Anthropic fix, conversational Copilot, automations, saved recipients, MCP
 
 **Status: PR FOR OWNER REVIEW on `claude/eloquent-carson-ioqmgc` (from main `f54eb5f`). Evidence: unit, disposable-PostgreSQL and CI. The

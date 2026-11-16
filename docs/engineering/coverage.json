@@ -1034,6 +1034,10 @@
       "path": "packages/cloud-runtime/test/privy-accounts-migration.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.saved-recipients-migration.pg": {
+      "path": "packages/cloud-runtime/test/saved-recipients-migration.pg.test.ts",
+      "stage": "postgres"
+    },
     "cloud-runtime.storage.pg": {
       "path": "packages/cloud-runtime/test/storage.pg.test.ts",
       "stage": "postgres"
@@ -3019,6 +3023,7 @@
         "packages/cloud-runtime/migrations/0023_user_funded_groups.sql",
         "packages/cloud-runtime/migrations/0025_flight_gate.sql",
         "packages/cloud-runtime/migrations/0026_flight_early_list.sql",
+        "packages/cloud-runtime/migrations/0028_saved_recipients.sql",
         "packages/cloud-runtime/src/owner-history.ts",
         "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql"
       ],
@@ -3031,6 +3036,7 @@
         "cloud-runtime.copilot-metrics-migration.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
+        "cloud-runtime.saved-recipients-migration.pg",
         "cloud-runtime.tenancy.pg",
         "cloud-runtime.editor-requester-migration.pg",
         "cloud-runtime.user-funded-groups-migration.pg",
@@ -7989,6 +7995,7 @@
     "cloud-runtime.flight-gate-migration.pg",
     "cloud-runtime.flight-launch-migration.pg",
     "cloud-runtime.forward-compatibility.pg",
+    "cloud-runtime.saved-recipients-migration.pg",
     "cloud-runtime.storage.pg",
     "cloud-runtime.tenancy.pg",
     "cloud-runtime.user-funded-groups-migration.pg",

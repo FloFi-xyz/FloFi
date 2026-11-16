@@ -32,7 +32,11 @@ const accounts = (tenant = 'default') => createAccountStore(t.db, tenant);
 beforeAll(async () => {
   t = await createTestDatabase();
   await ensureTenant(t.db, 'other-tenant');
-  expect(await migrate(t.db, [...await loadMigrations(), await certified0028()])).toEqual([28]);
+  // Release A applies the certified 0028 on top of the shipped v27 history; from Release B the harness already applied the shipped 0028
+  // (the same certified bytes).
+  const all = await loadMigrations(), certified = await certified0028();
+  if (all.at(-1)!.version === 28) expect(all.at(-1)!.sha256).toBe(certified.sha256);
+  else expect(await migrate(t.db, [...all, certified])).toEqual([28]);
 });
 afterAll(async () => t?.drop());
 beforeEach(async () => { await t.db.query('TRUNCATE flofi_accounts CASCADE'); });
@@ -148,8 +152,10 @@ describe('Saved Recipients store (PostgreSQL, certified 0028)', () => {
 
 describe('Saved Recipients store without the certified 0028 (production until Release B)', () => {
   it('is unavailable on a v27 database and on a ledger whose 0028 is not the certified one; it never creates its table', async () => {
-    const v27 = await createTestDatabase();
+    // Exactly the v27 history (from Release B the harness default would apply the shipped 0028).
+    const v27 = await createTestDatabase({ migrated: false });
     try {
+      expect(await migrate(v27.db, (await loadMigrations()).slice(0, 27))).toHaveLength(27);
       const { accountId } = await createAccountStore(v27.db, 'default').signIn(ana);
       const store = createRecipientStore(v27.db, 'default');
       expect(await store.available()).toBe(false);
