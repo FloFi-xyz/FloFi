@@ -111,6 +111,23 @@ record, observation and reconciliation continue and it stays in the Dashboard an
 keeps that state. Settings shows **Log out** (the existing `disconnectToLogin` flow: server revocation, cookie, Privy, wallet connection) when
 a FloFi session exists and **Disconnect** (wallet only) otherwise. No on-chain permission is revoked and no run is touched.
 
+## Integration and specialist review
+
+Merged `origin/main` through PR #201 (MetaMask Smart Account transfers, `0de23d81`) with a normal merge: source files merged cleanly; only the
+generated coverage files conflicted (re-applied and regenerated). #201's relayed transfers do not change `robinhood-transfer-store.tsx`; every
+transfer still passes the pre-send equality check. Read-only specialist reviews (security, wallet execution, workflow) found no P0/P1; fixed:
+
+- Router and Uniswap servers refused nothing when a client reported "never invoked" after an unknown wallet outcome
+  (`SUBMISSION_RESULT_UNKNOWN`); with the new NOT_SUBMITTED mapping that would have re-offered a possibly sent request. Now refused; only a
+  proven wallet refusal concludes it, and a refusal's note is derived by the server from its EIP-1193 code (`refusalNote`), never a client label.
+- Router, Uniswap, Aave supply and transfer re-read accounts and chain before every nonce re-read; supply/transfer (compared with the Review's
+  nonce) word a higher wallet count neutrally; canonical wallet counts only; an unreadable answer has its own sentence.
+- The New workflow marker survives authoring and reload; a landed unwrap and a run at its attempt limit are not offered an in-place refresh; one
+  Refresh & review button; New workflow is never a no-op while a recovered Canvas is still being read.
+
+Reported, not changed (pre-existing): the Simulate view can show a same-runtime store's previous error before the new workflow is simulated
+(workflow review F5).
+
 ## Not changed
 
 No schema migration, environment variable, provider configuration, fee recipient, fee model (0.1 %), authorization, delegation or signing rule.
