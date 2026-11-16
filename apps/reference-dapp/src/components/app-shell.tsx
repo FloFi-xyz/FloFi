@@ -576,9 +576,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
    * opening on Chat with an empty request. It cancels nothing: a run already submitted keeps being observed and stays in the Dashboard/History.
    */
   function startNewChatWorkflow() {
-    // Already a clean workspace (untouched Canvas, no run on it, no proposal, no conversation): nothing to reset — repeated clicks never mint
+    // Already a clean workspace (untouched Canvas, no run on it, no proposal, nothing the owner said — the conversation always opens with FloFi's
+    // own introduction): nothing to reset — repeated clicks never mint
     // identities, and a request the owner is still typing in Chat stays.
-    if (!canvasRestoring && isPristineDraft(state.workflow) && !currentExecution(executionProgress) && !executionProgress.started && !proposal && conversation.messages.length === 0) { setTab(BUILD_ENTRY); return; }
+    if (!canvasRestoring && isPristineDraft(state.workflow) && !currentExecution(executionProgress) && !executionProgress.started && !proposal && !conversation.messages.some(message => message.role === 'you')) { setTab(BUILD_ENTRY); return; }
     resetForNewWorkflow(); setTab(BUILD_ENTRY); setEntryDraft('');
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
