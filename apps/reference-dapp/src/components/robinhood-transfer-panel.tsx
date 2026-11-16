@@ -89,7 +89,22 @@ const messages: Record<string, string> = {
   TRANSFER_STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED: 'A corporate action changed the shares per token. Simulate and review again.',
   STOCK_REGISTRY_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Try again later.',
   TRANSFER_WRONG_CHAIN: 'Switch your wallet to Robinhood Chain Testnet.', TRANSFER_WRONG_ACCOUNT: 'Select the owner wallet shown in Review.',
-  TRANSFER_INSUFFICIENT_TEST_ETH: 'The owner wallet needs Robinhood Testnet ETH from the faucet.', TRANSFER_OWNER_NOT_EOA: 'The owner account has code (for example a smart-account delegation). Use a plain EOA account.',
+  TRANSFER_INSUFFICIENT_TEST_ETH: 'The owner wallet needs Robinhood Testnet ETH from the faucet.', TRANSFER_OWNER_NOT_EOA: 'This address is a smart contract wallet (for example a Safe), so it cannot send this transfer itself. Use a standard account or a MetaMask Smart Account.',
+  // BUILD-FLOFI-7702-TRANSFER-001: MetaMask Smart Account (EIP-7702) owners, sent directly or relayed by MetaMask.
+  TRANSFER_OWNER_DELEGATION_UNVERIFIED: 'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified. Use a standard account or a MetaMask Smart Account. Nothing was sent.',
+  TRANSFER_OWNER_ACCOUNT_CHANGED_REVIEW_REQUIRED: 'This wallet\'s account type changed since Review. Simulate and review again. Nothing was sent.',
+  TRANSFER_OWNER_ACCOUNT_CODE_MISMATCH: 'The account\'s smart-account code was not the reviewed one when this transfer landed, so FloFi cannot confirm the result. It is recorded for review; nothing will be sent again.',
+  TRANSFER_RELAYED_EXECUTION_PENDING: 'MetaMask may still relay this transfer. FloFi keeps checking the network and never sends it again; a new request for it is possible a few minutes after your wallet answered.',
+  TRANSFER_RELAYED_DUPLICATE_EXECUTION: 'This transfer was executed more than once on the network. It is recorded for review; FloFi will not send anything again.',
+  TRANSFER_RELAYED_EXECUTION_UNSUPPORTED_SHAPE: 'MetaMask relayed this transfer in a form FloFi cannot verify (for example together with a fee payment). It is recorded for review; nothing will be sent again.',
+  TRANSFER_RELAYED_NATIVE_UNSUPPORTED: 'MetaMask relayed this ETH transfer, which FloFi cannot verify. It is recorded for review; nothing will be sent again.',
+  TRANSFER_RELAYED_SUBMISSION_REVERTED: 'The relayed transfer failed on the network, and its authorization may still be used by the relayer. Check your wallet activity before trying again. It is recorded for review; FloFi will not send it again.',
+  TRANSFER_SMART_ACCOUNT_NETWORK_UNSUPPORTED: 'MetaMask Smart Accounts can send transfers on supported mainnets. This test network does not support them; use a standard account here. Nothing was sent.',
+  TRANSFER_NONCE_USED_RELAY_NOT_FOUND: 'Your wallet used this transfer\'s transaction slot (nonce) for a different transaction, and no relayed execution of this transfer was found. A relayed transfer can still appear: check your wallet activity before trying again.',
+  TRANSFER_RELAYED_DELEGATION_NOT_SINGLE_USE: 'The relayed transfer used an authorization that could be used again, which FloFi does not accept. It is recorded for review; nothing will be sent again.',
+  TRANSFER_RELAYED_TRANSACTION_ALREADY_CLAIMED: 'This network transaction already belongs to another FloFi transfer. It is recorded for review; nothing will be sent again.',
+  TRANSFER_SUBMISSION_UNSUPPORTED: 'The wallet submitted this transfer in a form FloFi cannot verify. It is recorded for review; nothing will be sent again.',
+  TRANSFER_REJECTED_ATTEMPT_EXECUTED: 'The wallet reported this transfer as declined, but it was executed on the network. It is recorded for review; FloFi will not send it again.',
   TRANSFER_NONCE_ALREADY_RESERVED: 'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.',
   TRANSFER_REVIEW_EXPIRED: 'Review expired. Simulate and review again.', TRANSFER_AUTHORIZATION_STALE: 'Wallet state changed since Review. Simulate and review again.',
   TRANSFER_WALLET_NONCE_MISMATCH: 'The wallet would use a different nonce than the Review. Simulate and review again.',
@@ -150,14 +165,18 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
         <button type="button" disabled={run.busy} onClick={() => void run.switchNetwork()}>{tr("Switch to ")}{network}</button></div>}
       {record && !record.authorization && !attempt && !run.retired && record.verdict === 'PENDING' && <button type="button" disabled={run.busy} onClick={() => void run.review()}>{tr("Accept transfer review")}</button>}
       {record?.authorization && !run.retired && !attempt && record.verdict === 'PENDING' && <button type="button" className="primary" disabled={run.busy} onClick={() => void run.execute()}>{tr("Execute")}</button>}
-      {attempt && <p>{tr("Transfer: ")}{tr(attempt.reconciled ? 'Reconciled from public chain state' : record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))}
+      {attempt && <p>{tr("Transfer: ")}{tr(attempt.reconciled ? 'Reconciled from public chain state' : record?.notSubmitted && record.verdict === 'PENDING' ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))}
         {attempt.transactionHash && <> <a href={`${profile.explorer}/tx/${attempt.transactionHash}`} target="_blank" rel="noreferrer">{tr("View transaction")}</a></>}</p>}
       {observing && <button type="button" disabled={run.busy} onClick={() => void run.observe()}>{tr("Observe existing transaction")}</button>}
       {record?.notSubmitted && record.verdict === 'PENDING' && !run.retired && <><p>{tr("The wallet request was not submitted. Prepare a fresh explicit owner Review.")}</p>
         <button type="button" disabled={run.busy} onClick={() => void run.recoverReview()}>{tr("Prepare fresh review")}</button></>}
       {attempt && !record?.evidence && <a download="flofi-rh-demo-001-execution-record.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record, null, 2))}>{tr("Download execution record")}</a>}
-      {record?.evidence && observation?.facts && <><p>{tr("Transfer reconciled. Exactly one owner-signed transaction, nonce ")}{tr(observation.facts.nonceBefore)} → {tr(observation.facts.nonceAfter)}{tr(", block ")}{tr(observation.facts.blockNumber)}{tr("; network cost ")}{tr(formatEth(observation.facts.fee))}{tr(" ETH; balance ")}{tr(formatEth(observation.facts.balanceBefore))} → {tr(formatEth(observation.facts.balanceAfter))}{tr(" ETH.")}</p>
-        <a download="flofi-rh-demo-001-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></>}
+      {/* BUILD-FLOFI-7702-TRANSFER-001: a relayed transfer was sent and paid for by MetaMask's relayer; the owner paid no network fee. */}
+      {record?.evidence && observation?.facts?.submission === 'RELAYED' && <p>{tr("Transfer reconciled. MetaMask relayed it for your Smart Account: the relayer {0} paid the network fee ({1} ETH); you paid no network fee and this transfer did not use your nonce.",
+        observation.facts.gasPayer ?? '', formatEth(observation.facts.networkFee ?? '0'))}</p>}
+      {record?.evidence && observation?.facts && observation.facts.submission !== 'RELAYED' && <p>{tr("Transfer reconciled. Exactly one owner-signed transaction, nonce ")}{tr(observation.facts.nonceBefore)} → {tr(observation.facts.nonceAfter)}{tr(", block ")}{tr(observation.facts.blockNumber)}{tr("; network cost ")}{tr(formatEth(observation.facts.fee))}{tr(" ETH; balance ")}{tr(formatEth(observation.facts.balanceBefore))} → {tr(formatEth(observation.facts.balanceAfter))}{tr(" ETH.")}</p>}
+      {/* Every reconciled transfer, direct or relayed, offers its Evidence Bundle. */}
+      {record?.evidence && observation?.facts && <a download="flofi-rh-demo-001-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a>}
     </>}
     {info && <p role="status">{tr(transferCopy(messages[info] ?? 'The transfer needs attention. Inspect technical details and observe any existing transaction.', network))}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({ error: info, attempt, observations: record?.observations, walletDiagnostic: record?.walletDiagnostic,

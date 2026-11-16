@@ -112,7 +112,6 @@ export const portugueseLocaleContract: Readonly<Record<string, string>> = {
   'The official asset registry no longer matches this workflow\'s asset. Build it again.': 'O registro oficial de ativos não corresponde mais ao ativo deste fluxo. Monte-o novamente.',
   'The official registry does not allow depositing this Stock Token right now. Nothing was signed.': 'O registro oficial não permite depositar este Stock Token agora. Nada foi assinado.',
   'The original approval was not found. Prepare a fresh review for the same approval and nonce.': 'A aprovação original não foi encontrada. Prepare uma nova revisão para a mesma aprovação e nonce.',
-  'The owner account has code (for example a smart-account delegation). Use a plain EOA account.': 'A conta do titular tem código (por exemplo, uma delegação de smart account). Use uma conta EOA comum.',
   'The owner needs enough Base Sepolia ETH for the whole fee budget.': 'O titular precisa de ETH da Base Sepolia suficiente para todo o orçamento de taxas.',
   'The owner needs the exact Aave USDC collateral amount.': 'O titular precisa do valor exato de garantia em USDC da Aave.',
   'The owner wallet does not hold enough of this asset.': 'A carteira do titular não tem o suficiente deste ativo.',

@@ -46,12 +46,12 @@ const EXACT_EXECUTION = '0x146713078d39ecc1f5338309c28405ccf85abfbb', ANY_DELEGA
 const DELEGATION_ABI: erc7710.AbiType = { tuple: ['address', 'address', 'bytes32', { array: { tuple: ['address', 'bytes', 'bytes'] } }, 'uint256', 'bytes'] };
 const REDEEMED_TOPIC = '0x40dadaa36c6c2e3d7317e24757451ffb2d603d875f0ad5e92c5dd156573b1873';
 /** `redeemDelegations(bytes[] contexts, bytes32[] modes, bytes[] executionCallDatas)` of one single-call (default mode) execution of `target.data`. */
-export function encodeSingleRedemption(context: string, target: string, data: string, mode = '0'.repeat(64)): string {
+export function encodeSingleRedemption(context: string, target: string, data: string, mode = '0'.repeat(64), value = 0n): string {
   const w = (n: bigint) => n.toString(16).padStart(64, '0');
   const pad = (hex: string) => hex + '0'.repeat((64 - (hex.length % 64)) % 64);
   const bytesArray = (hex: string) => w(1n) + w(32n) + w(BigInt(hex.length / 2)) + pad(hex);
   const contexts = bytesArray(context.slice(2)), modeOffset = 96 + contexts.length / 2;
-  return '0xcef6d209' + w(96n) + w(BigInt(modeOffset)) + w(BigInt(modeOffset + 64)) + contexts + w(1n) + mode + bytesArray(target.slice(2).toLowerCase() + w(0n) + data.slice(2));
+  return '0xcef6d209' + w(96n) + w(BigInt(modeOffset)) + w(BigInt(modeOffset + 64)) + contexts + w(1n) + mode + bytesArray(target.slice(2).toLowerCase() + w(value) + data.slice(2));
 }
 export type MockRelay = { readonly relayer: string; /** Logs of another contract the relayed transaction also emits (a shape FloFi must refuse). */ readonly extraLogs?: readonly Record<string, unknown>[];
   /** false: the owner's delegation has no LimitedCalls(1) caveat, so the relay could redeem it again (a shape FloFi must refuse). */ readonly singleUse?: boolean;
@@ -244,6 +244,11 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       gasUsed: '0x' + state.gasUsed.toString(16), effectiveGasPrice: '0x' + state.gasPrice.toString(16), ...base ? { l1Fee: '0x' + state.l1Fee.toString(16) } : { gasUsedForL1: '0x0' }, logs: [] });
     return hash;
   }
+  /** BUILD-FLOFI-7702-TRANSFER-001: a relayed redemption included in the CURRENT head block (beside a transaction `apply` just included there). */
+  function relayInBlock(tx: MockTx, options: MockRelay): string {
+    if (!state.code.has(MOCK_DELEGATION_MANAGER)) state.code.set(MOCK_DELEGATION_MANAGER, '0x600b600b');
+    return include(tx, options);
+  }
   /** Plays the owner's wallet broadcasting without inclusion: the hash is known, the transaction waits in the mempool. */
   function queue(tx: MockTx): string {
     const from = tx.from.toLowerCase();
@@ -257,7 +262,13 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     const from = tx.from.toLowerCase(), to = tx.to.toLowerCase(), data = innerData(tx), selector = data.slice(0, 10);
     const relayer = relayed?.relayer.toLowerCase(), sender = relayer ?? from;
     if (relayed && (state.codeOverride.get(from) ?? '0x') !== '0xef0100' + MOCK_DELEGATOR_IMPL.slice(2)) throw new Error('execution reverted: not a DeleGator account');
-    const outer = relayed ? encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data, relayed.batch ? '01' + '0'.repeat(62) : undefined) : tx.data;
+    // BUILD-FLOFI-7702-TRANSFER-001: a batched relay is a real CALLTYPE_BATCH redemption, abi.encode(Execution[]): the call plus a fee
+    // transfer of one unit of the same token to the relayer (the shape MetaMask uses to charge its fee in a token).
+    const outer = !relayed ? tx.data : relayed.batch
+      ? erc7710.REDEEM_DELEGATIONS_SELECTOR + erc7710.hexOf(erc7710.abiEncode([{ array: 'bytes' }, { array: 'bytes32' }, { array: 'bytes' }], [['0x' + '00'.repeat(64)],
+        ['0x01' + '00'.repeat(31)], [erc7710.hexOf(erc7710.abiEncode([{ array: { tuple: ['address', 'uint256', 'bytes'] } }], [[[to, BigInt(tx.value || '0x0'), tx.data],
+          [to, 0n, '0xa9059cbb' + relayed.relayer.slice(2).toLowerCase().padStart(64, '0') + (1n).toString(16).padStart(64, '0')]]]))]])).slice(2)
+      : encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data, undefined, BigInt(tx.value || '0x0'));
     const nonce = state.nonces.get(sender) ?? 0, hash = relayed ? hashOf(sender, nonce, outer) : hashOf(from, nonce, data);
     const logs: Record<string, unknown>[] = [];
     const delegation = relayed ? relayedDelegation(from, to, tx.data, BigInt(nonce) + 1n, relayed.singleUse !== false) : null;
@@ -362,7 +373,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   }
   /** Advances the head by `n` empty blocks (confirmations), keeping historical reads exact. */
   const mine = (n = 1) => { for (let i = 0; i < n; i++) { snapshot(); state.head += 1; state.blockTime.set(state.head, Math.floor(options.now() / 1000)); } };
-  return { rpc, state, addPool, apply, relay, queue, mineQueued, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
+  return { rpc, state, addPool, apply, relay, relayInBlock, queue, mineQueued, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
     fundNative: (owner: string, amount: bigint) => state.native.set(owner.toLowerCase(), amount), balance: (token: string, owner: string) => state.balances.get(key(token, owner)) ?? 0n };
 }
 export type RobinhoodMockChain = ReturnType<typeof createRobinhoodMockChain>;

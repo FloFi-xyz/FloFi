@@ -110,6 +110,10 @@ export const portugueseDelegation: Readonly<Record<string, string>> = {
   'Enroll a wallet once to let FloFi execute workflows you authorize, inside the limits it signs here. Each enrollment is one wallet signature per network; workflows never ask the wallet again.':
     'Registe uma carteira uma vez para permitir que o FloFi execute os fluxos que autorizar, dentro dos limites que ela assina aqui. Cada registro é uma assinatura da carteira por rede; os fluxos nunca voltam a pedir a carteira.',
   'Verify wallet ownership to manage automatic execution.': 'Verifique a titularidade da carteira para gerenciar a execução automática.',
+  'Checking wallet ownership…': 'Verificando a titularidade da carteira…',
+  // The passkeys and Credentials read: neutral while it runs, its failure shown with "Try again" (never an empty list).
+  'Checking your Credentials…': 'Verificando suas Credenciais…',
+  'FloFi could not load your passkeys and Credentials ({0}). Nothing was changed.': 'A FloFi não conseguiu carregar suas passkeys e Credenciais ({0}). Nada foi alterado.',
   'Register a passkey first (Passkeys). Every Credential is bound to the passkey that will authorize your workflows.':
     'Registe primeiro uma chave de acesso (Chaves de acesso). Cada Credencial fica associada à chave de acesso que vai autorizar os seus fluxos.',
   'Credential {0} on {1}': 'Credencial {0} na {1}', 'MetaMask delegation (ERC-7710)': 'Delegação MetaMask (ERC-7710)', 'SPL token delegation': 'Delegação de token SPL',

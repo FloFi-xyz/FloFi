@@ -315,7 +315,12 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 account-specific owner refusal
   it('names the actual account kind instead of calling every code-bearing account a smart contract account', () => {
     expect(simulationError('OWNER_NOT_EOA')).toMatch(/smart contract wallet \(for example a Safe\).*MetaMask Smart Account/);
     expect(simulationError('OWNER_DELEGATION_UNVERIFIED')).toMatch(/EIP-7702.*not verified/);
-    expect(simulationError('TRANSFER_OWNER_NOT_EOA')).toMatch(/^Transfers need a standard wallet account/);
-    for (const code of ['OWNER_NOT_EOA', 'OWNER_DELEGATION_UNVERIFIED', 'TRANSFER_OWNER_NOT_EOA']) expect(simulationError(code)).toMatch(/Nothing was simulated or sent\.$/);
+    // BUILD-FLOFI-7702-TRANSFER-001: MetaMask Smart Accounts transfer; a transfer refusal now names only contract wallets and unverified delegates.
+    expect(simulationError('TRANSFER_OWNER_NOT_EOA')).toMatch(/^This address is a smart contract wallet \(for example a Safe\), so it cannot send this transfer itself\..*MetaMask Smart Account/);
+    expect(simulationError('TRANSFER_OWNER_NOT_EOA')).not.toMatch(/does not use for transfers yet/);
+    expect(simulationError('TRANSFER_OWNER_DELEGATION_UNVERIFIED')).toMatch(/EIP-7702.*not verified/);
+    for (const code of ['OWNER_NOT_EOA', 'OWNER_DELEGATION_UNVERIFIED', 'TRANSFER_OWNER_NOT_EOA', 'TRANSFER_OWNER_DELEGATION_UNVERIFIED']) expect(simulationError(code)).toMatch(/Nothing was simulated or sent\.$/);
+    expect(simulationError('TRANSFER_SMART_ACCOUNT_NETWORK_UNSUPPORTED')).toMatch(/^MetaMask Smart Accounts can send transfers on supported mainnets\..*Nothing was simulated or sent\.$/);
+    expect(simulationError('TRANSFER_OWNER_ACCOUNT_CHANGED_REVIEW_REQUIRED')).toMatch(/account type changed since your Review.*nothing was sent\. Simulate and review again\.$/);
   });
 });

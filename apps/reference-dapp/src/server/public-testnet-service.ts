@@ -133,7 +133,7 @@ const DELEGATOR_IMPL = erc7710.DELEGATION_FRAMEWORK_V1_3.eip7702StatelessDeleGat
  * MetaMask redemption recorded in testdata logs the LimitedCalls enforcer's `IncreasedCount`). None of them moves funds; any fund movement
  * still has to be one of the swap's own, exactly accounted logs.
  */
-const RELAY_FRAMEWORK_LOGGERS: ReadonlySet<string> = new Set([DELEGATION_MANAGER, ...Object.values(erc7710.DELEGATION_FRAMEWORK_V1_3.enforcers)]);
+export const RELAY_FRAMEWORK_LOGGERS: ReadonlySet<string> = new Set([DELEGATION_MANAGER, ...Object.values(erc7710.DELEGATION_FRAMEWORK_V1_3.enforcers)]);
 /**
  * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a relayed redemption is accepted only when its delegation is single use, as in the real MetaMask
  * relay (testdata/metamask-delegated-depth1-approval.base-sepolia.json): the owner's root delegation carries the framework's LimitedCalls caveat
@@ -464,7 +464,8 @@ export async function verifyOwnerSubmission(rpc: Rpc, attempt: { readonly txHash
  * requests for the one-off duplicate checks before a receipt becomes evidence or a refused attempt is retried (~5.8 days on Arbitrum One,
  * ~9 months on Ethereum). A duplicate check that cannot cover the whole window never passes: the attempt stays pending.
  */
-const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40, RELAY_DUPLICATE_SCAN_REQUESTS = 400;
+const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40;
+export const RELAY_DUPLICATE_SCAN_REQUESTS = 400;
 /**
  * BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: every relayed execution of an attempt's exact reviewed call by this owner since `fromBlock`. A relayed
  * redemption does not use the owner's nonce, so nonce discovery cannot see it; the Delegation Manager's `RedeemedDelegation` logs naming the
@@ -473,7 +474,7 @@ const RELAY_SCAN_BLOCKS = 5_000, RELAY_SCAN_REQUESTS = 40, RELAY_DUPLICATE_SCAN_
  * not canonical yet (or its receipt is not served yet), so the answer is not final. The scan is bounded (RELAY_SCAN_REQUESTS × RELAY_SCAN_BLOCKS
  * blocks): `complete` is false when it stopped before the head, and nothing is then assumed about the rest.
  */
-async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicAttempt, 'account' | 'tx'>, fromBlock: number,
+export async function relayedExecutions(rpc: Rpc, P: { readonly chainId: number; readonly l1DataFee: boolean }, attempt: { readonly account: string; readonly tx: Pick<Tx, 'to' | 'data' | 'value'> }, fromBlock: number,
   claimedElsewhere: (txHash: string) => Promise<boolean>, maxRequests = RELAY_SCAN_REQUESTS):
   Promise<{ readonly verified: readonly string[]; readonly unclassified: readonly string[]; readonly waiting: boolean; readonly complete: boolean }> {
   const head = Number(quantity(await rpc('eth_blockNumber', [])));
@@ -494,7 +495,9 @@ async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicA
   let waiting = false;
   for (const txHash of candidates) {
     const [tx, raw] = await Promise.all([rpc('eth_getTransactionByHash', [txHash]), rpc('eth_getTransactionReceipt', [txHash])]);
-    if (!isObject(raw)) { waiting = true; continue; }
+    // BUILD-FLOFI-7702-TRANSFER-001: a node that serves the receipt but not yet the transaction (or the reverse) is not consistent yet: the
+    // candidate keeps the answer pending, never silently dropped from a scan that would otherwise call itself complete.
+    if (!isObject(raw) || !isObject(tx)) { waiting = true; continue; }
     if (await claimedElsewhere(txHash)) continue;
     try {
       await verifyOwnerSubmission(rpc, { txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data, preBlock: fromBlock,
@@ -504,12 +507,90 @@ async function relayedExecutions(rpc: Rpc, P: SwapProfile, attempt: Pick<PublicA
       if (!(cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH')) throw cause;
       // Not the reconcilable shape, but a successful owner-rooted redemption whose input still carries the reviewed call's exact bytes (for
       // example the call batched with a fee payment) may have executed it: never ignored, never reconciled.
-      if (Number(quantity(raw.status)) === 1 && isObject(tx) && hex(tx.input).includes(attempt.tx.data.toLowerCase().slice(2))) unclassified.push(txHash);
+      // BUILD-FLOFI-7702-TRANSFER-001: the redemption's executions are decoded (single and batch modes, nested redemptions) and compared with
+      // the reviewed call exactly — target, value and calldata — so another token, amount or recipient is never this call. Only an input
+      // that cannot be decoded falls back to the conservative byte match (the calldata, or for a call without calldata its target followed
+      // by its value word); an empty calldata never matches every redemption.
+      if (Number(quantity(raw.status)) === 1 && redemptionMayExecute(hex(tx.input), attempt.tx)) unclassified.push(txHash);
       continue;
     }
     verified.push(txHash);
   }
   return { verified, unclassified, waiting, complete: from > head };
+}
+/**
+ * BUILD-FLOFI-7702-TRANSFER-001: the executions a Delegation Manager `redeemDelegations(bytes[], bytes32[], bytes[])` input carries, decoded
+ * strictly (canonical ABI): per ModeCode, CALLTYPE_SINGLE (`target ‖ value ‖ calldata`, packed) or CALLTYPE_BATCH (`(address,uint256,bytes)[]`),
+ * either exec type. An execution that is itself a redemption on the manager, or a DeleGator `execute(bytes32,bytes)` /
+ * `executeFromExecutor(bytes32,bytes)` (an account running calls as itself), is expanded (bounded depth) and marked `wraps`. Null when the
+ * input is anything else.
+ */
+type DecodedExecution = { readonly target: string; readonly value: bigint; readonly data: string; readonly wraps?: true };
+const EXECUTION_BATCH_ABI: erc7710.AbiType = { array: { tuple: ['address', 'uint256', 'bytes'] } };
+const ACCOUNT_EXECUTE_SELECTORS = [erc7710.selectorOf('execute(bytes32,bytes)'), erc7710.selectorOf('executeFromExecutor(bytes32,bytes)')];
+/** Every way a call can run from a DeleGator account: a redemption, or the account executing as itself (ERC-7579 modes, or the legacy tuple). */
+const ACCOUNT_ENTRY_SELECTORS = [REDEEM_SELECTOR, ...ACCOUNT_EXECUTE_SELECTORS, erc7710.selectorOf('execute((address,uint256,bytes))')];
+function modeExecutions(mode: string, call: string): DecodedExecution[] | null {
+  const callType = mode.slice(2, 4), execType = mode.slice(4, 6);
+  if (!['00', '01'].includes(execType)) return null;
+  if (callType === '00') {
+    if (call.length < 2 + (20 + 32) * 2) return null;
+    return [{ target: address('0x' + call.slice(2, 42)), value: BigInt('0x' + call.slice(42, 106)), data: '0x' + call.slice(106) }];
+  }
+  if (callType !== '01') return null;
+  const [batch] = erc7710.abiDecode([EXECUTION_BATCH_ABI], erc7710.bytesOf(call)) as [[string, bigint, string][]];
+  return batch.map(([target, value, data]) => ({ target: address(target), value, data: data.toLowerCase() }));
+}
+function expandExecutions(executions: readonly DecodedExecution[], depth: number): DecodedExecution[] | null {
+  const out: DecodedExecution[] = [];
+  for (const execution of executions) {
+    const selector = execution.data.slice(0, 10);
+    let inner: DecodedExecution[] | null;
+    if (execution.target === DELEGATION_MANAGER && selector === REDEEM_SELECTOR) inner = redemptionExecutions(execution.data, depth + 1);
+    else if (ACCOUNT_EXECUTE_SELECTORS.includes(selector)) {
+      const [mode, call] = erc7710.abiDecode(['bytes32', 'bytes'], erc7710.bytesOf('0x' + execution.data.slice(10))) as [string, string];
+      const decoded = depth < 3 ? modeExecutions(mode, call.toLowerCase()) : null;
+      inner = decoded && expandExecutions(decoded, depth + 1);
+    } else { out.push(execution); continue; }
+    if (!inner) return null;
+    out.push({ ...execution, wraps: true }, ...inner);
+  }
+  return out;
+}
+export function redemptionExecutions(input: string, depth = 0): DecodedExecution[] | null {
+  try {
+    if (depth > 3 || !input.toLowerCase().startsWith(REDEEM_SELECTOR)) return null;
+    const [, modes, calls] = erc7710.abiDecode([{ array: 'bytes' }, { array: 'bytes32' }, { array: 'bytes' }], erc7710.bytesOf('0x' + input.slice(10))) as [string[], string[], string[]];
+    if (modes.length !== calls.length || !modes.length) return null;
+    const out: DecodedExecution[] = [];
+    for (const [index, mode] of modes.entries()) {
+      const decoded = modeExecutions(mode, calls[index]!.toLowerCase()), expanded = decoded && expandExecutions(decoded, depth);
+      if (!expanded) return null;
+      out.push(...expanded);
+    }
+    return out;
+  } catch { return null; }
+}
+/**
+ * Whether `hex` carries `call` as an encoded execution: packed (`target ‖ value ‖ calldata`, a single-mode execution), or as an ABI execution
+ * tuple (padded target and value, with the calldata, a batch). The token or recipient is always part of the match, never the calldata alone.
+ */
+function embedsCall(hex: string, call: DecodedExecution): boolean {
+  const target = call.target.slice(2), value = word(call.value), data = call.data.slice(2);
+  return hex.includes(target + value + data) || hex.includes('0'.repeat(24) + target + value) && (data === '' || hex.includes(data));
+}
+/**
+ * Whether a successful owner-rooted redemption may have executed exactly `call`. A call runs from the owner's account only through a
+ * redemption or the account executing as itself, so: decoded executions are compared exactly (target, value, calldata — another token,
+ * amount or recipient is never this call); an execution that still carries one of those entry points without being decodable here (e.g. an
+ * intermediary contract re-wrapping the owner's delegation), or an input that cannot be decoded at all, gets the conservative match.
+ */
+export function redemptionMayExecute(input: string, call: Pick<Tx, 'to' | 'data' | 'value'>): boolean {
+  const reviewed: DecodedExecution = { target: address(call.to), value: BigInt(call.value || '0x0'), data: call.data.toLowerCase() };
+  const executions = redemptionExecutions(input);
+  if (!executions) return embedsCall(input.toLowerCase(), reviewed);
+  return executions.some(e => !e.wraps && e.target === reviewed.target && e.value === reviewed.value && e.data === reviewed.data ||
+    !e.wraps && ACCOUNT_ENTRY_SELECTORS.some(selector => e.data.includes(selector.slice(2))) && embedsCall(e.data, reviewed));
 }
 function signed(value: bigint): bigint { return value >= 1n << 255n ? value - (1n << 256n) : value; }
 export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -529,7 +610,7 @@ type Persistence = { readonly save: (run: PublicRun) => PublicRun | Promise<Publ
   readonly claims: { readonly claim: (chainId: number, txHash: string, holder: TransactionClaim) => Promise<boolean>;
     readonly holder: (chainId: number, txHash: string) => Promise<TransactionClaim | null> } };
 type TransactionClaim = { readonly id: string; readonly attemptId: string };
-function transactionClaims(storage: ExecutionStorage): Persistence['claims'] {
+export function transactionClaims(storage: ExecutionStorage): Persistence['claims'] {
   const name = (chainId: number, txHash: string) => { if (!HASH.test(txHash)) fail('TX_HASH_INVALID'); return `claim-${chainId}-${txHash}.tx`; };
   const parse = (bytes: Uint8Array): TransactionClaim => {
     const value = JSON.parse(utf8(bytes)) as unknown;
