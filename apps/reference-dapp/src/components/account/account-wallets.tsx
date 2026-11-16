@@ -19,6 +19,8 @@ import { syncFloFiWallets } from '../../wallet/flofi-wallet-sync';
 import { exportActions, isLegacyWallet, shortAddress, type AccountWallet } from '../../accounts/account-model';
 import { useFloFiPrivy } from '../../accounts/privy-client';
 import { invalidateSavedRecipients } from '../../state/saved-recipients-store';
+import { beginPageExit } from '../../accounts/page-exit';
+import { conversationStorage, forgetConversations } from '../../domain/conversation-persistence';
 import { useFloFiWallet } from '../flofi-wallet-continue';
 import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
@@ -95,6 +97,8 @@ export function DeleteAccount({ state }: { state: AccountState }) {
     const result = await deleteFloFiAccount().catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
     if (!result.ok) { setError(result.code); return; }
     invalidateSavedRecipients();
+    // HOTFIX-P1-CHAT-RECOVERY: the deleted account's FloFi conversations kept in this tab go with it; the leaving page keeps none again.
+    beginPageExit(); forgetConversations(conversationStorage());
     window.location.assign('/login');
   }
   return <div className="workspace-inline-form" role="group" aria-label={t('Delete FloFi account')}>

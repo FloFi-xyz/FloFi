@@ -8,7 +8,7 @@ vi.mock('../flight/host.ts', () => ({ flightCalendar: () => ({ listClosesAt: 1, 
 vi.mock('./platform-state-host.ts', () => ({ platformStateHost: () => h.host() }));
 vi.mock('../flight/beta-access.ts', async importOriginal => ({ ...await importOriginal<typeof import('../flight/beta-access.ts')>(),
   createBetaAccessStore: () => ({ require: h.require }) }));
-import { flightWalletRefusal, isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, walletPrincipalOf, withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from './flight-access';
+import { flightWalletRefusal, isFlightRecoveryMethod, requireFlightAccess, requireFlightOwner, requireFlightProductAccess, walletPrincipalOf, withFlightAccess, withFlightGroupAnswerAccess, withFlightOwner } from './flight-access';
 import { currentBetaIdentity } from '../flight/beta-context';
 beforeEach(() => { vi.clearAllMocks(); h.session = null; h.wallets = []; h.host.mockResolvedValue({}); h.require.mockResolvedValue({ ok: true }); });
 describe('server request authorization before private work', () => {
@@ -130,5 +130,47 @@ describe('Flight decision for the signing wallet, as a value', () => {
     expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'closed' })).toBe('BETA_ACCESS_CLOSED');
     h.session = { accountId: 'acct_a', sessionId: 'session_a' }; h.require.mockRejectedValue(new Error('database exploded: secret detail'));
     expect(await flightWalletRefusal(metaMask, { FLOFI_BETA_ACCESS: 'beta' })).toBe('BETA_UNAVAILABLE');
+  });
+});
+
+/**
+ * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): an eligible account whose browser also proved a wallet that is not linked
+ * to it was sent from every /app page — Credentials included, where that wallet is linked — to /board, and "Board now" sent it back. Opening the
+ * product's pages is decided for the ACCOUNT; every operation still checks every wallet this browser proved.
+ */
+describe('opening the product is the account\'s decision; every operation still checks every browser wallet', () => {
+  const beta = { FLOFI_BETA_ACCESS: 'beta' };
+  const phantom = { namespace: 'solana' as const, address: 'P'.repeat(32) };
+  it('admits an account with a valid grant and a bound wallet although this browser also proved an unlinked wallet', async () => {
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' };
+    h.wallets = [phantom];
+    h.require.mockImplementation(async input => input.principal ? { ok: false, code: 'BETA_WALLET_NOT_LINKED' } : { ok: true });
+    expect(await requireFlightProductAccess(beta)).toEqual(h.session);
+    // The account-level decision only: no browser wallet is named (the store still requires one proven wallet bound to the grant).
+    expect(h.require).toHaveBeenCalledExactlyOnceWith({ ...h.session, now: 3, sessionNow: expect.any(Number) });
+    // The same request's operations keep refusing that wallet.
+    await expect(requireFlightAccess(undefined, beta)).rejects.toThrow('BETA_WALLET_NOT_LINKED');
+    expect(await flightWalletRefusal(phantom.address, beta)).toBe('BETA_WALLET_NOT_LINKED');
+  });
+  it('still refuses no session, no grant, a revoked grant, a closed gate and an unbound login wallet; open rollout stays inert', async () => {
+    expect(await requireFlightProductAccess({})).toBeNull();
+    await expect(requireFlightProductAccess({ FLOFI_BETA_ACCESS: 'closed' })).rejects.toThrow('BETA_ACCESS_CLOSED');
+    await expect(requireFlightProductAccess(beta)).rejects.toThrow('BETA_SIGN_IN_REQUIRED');
+    h.session = { accountId: 'acct_a', sessionId: 'session_a' };
+    for (const code of ['BETA_ACCESS_DENIED', 'BETA_ACCESS_REVOKED', 'BETA_WALLET_REQUIRED', 'BETA_SESSION_REQUIRED', 'BETA_NOT_OPEN']) {
+      h.require.mockResolvedValueOnce({ ok: false, code });
+      await expect(requireFlightProductAccess(beta), code).rejects.toThrow(code);
+    }
+    // A wallet sign-in is the account's own login wallet: it must be bound, exactly as for operations.
+    const loginWallet = '0x' + 'a'.repeat(40);
+    h.session = { accountId: 'acct_a', sessionId: 'session_a', method: 'eip155' };
+    await expect(requireFlightProductAccess(beta)).rejects.toThrow('BETA_WALLET_REQUIRED');
+    h.session = { ...h.session, loginWallet };
+    h.require.mockResolvedValueOnce({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    await expect(requireFlightProductAccess(beta)).rejects.toThrow('BETA_WALLET_NOT_LINKED');
+    expect(h.require).toHaveBeenLastCalledWith({ accountId: 'acct_a', sessionId: 'session_a', now: 3, sessionNow: expect.any(Number),
+      principal: { namespace: 'eip155', address: loginWallet } });
+    h.require.mockRejectedValueOnce(new Error('database exploded: secret detail'));
+    await expect(requireFlightProductAccess(beta)).rejects.toThrow('BETA_UNAVAILABLE');
   });
 });

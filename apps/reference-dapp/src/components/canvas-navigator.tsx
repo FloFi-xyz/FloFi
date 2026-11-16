@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { Panel, useReactFlow, useStore, type FitViewOptions, type PanelPosition, type ReactFlowState } from '@xyflow/react';
+import { Panel, useReactFlow, useStore, type FitViewOptions, type PanelPosition, type ProOptions, type ReactFlowState } from '@xyflow/react';
 
 /**
  * Laptop-first canvas gestures, shared by every FloFi canvas. Two-finger trackpad movement (and a plain mouse wheel) pans
@@ -10,6 +10,12 @@ import { Panel, useReactFlow, useStore, type FitViewOptions, type PanelPosition,
  * events only over the canvas pane, never over its `nowheel` controls, so the page keeps normal scrolling elsewhere.
  */
 export const CANVAS_GESTURES = Object.freeze({ panOnScroll: true, panOnScrollSpeed: 1, zoomOnScroll: true, zoomOnPinch: true, preventScrolling: true });
+/**
+ * HOTFIX-P1-UI-OVERFLOW-AND-ATTRIBUTION-001: every FloFi canvas hides React Flow's corner attribution link through the library's own supported
+ * option (`proOptions.hideAttribution`, @xyflow/react 12, MIT licensed: the attribution is a request of its authors, not a license term; the
+ * license notice ships with the package). Nothing else of the canvas changes: no CSS hides it and no other element is removed.
+ */
+export const CANVAS_PRO_OPTIONS: ProOptions = Object.freeze({ hideAttribution: true });
 
 /** React Flow owns the viewport, including zoom changes from gestures and automatic fitting.
  * P0 approved UX (board 04): the same three controls on every canvas, bottom right — Fit, zoom out (−) and zoom in (+); the zoom slider and the

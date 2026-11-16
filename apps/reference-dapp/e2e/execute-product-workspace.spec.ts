@@ -200,13 +200,15 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
       const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
       const back = [...element.querySelectorAll('button')].find(b => b.textContent === 'Back to the Canvas')!;
       const execute = [...element.querySelectorAll('button')].find(b => b.textContent === 'Authorize in wallet')!;
-      return { back: rect(back), execute: rect(execute), surface: rect(element.querySelector('.flow-surface')!), controls: rect(element.querySelector('.canvas-navigator')!), footer: rect(element.querySelector('.canvas-foot')!), attribution: rect(element.querySelector('.react-flow__attribution')!) };
+      return { back: rect(back), execute: rect(execute), surface: rect(element.querySelector('.flow-surface')!), controls: rect(element.querySelector('.canvas-navigator')!), footer: rect(element.querySelector('.canvas-foot')!), attributions: element.querySelectorAll('.react-flow__attribution').length };
     });
     expect(boxes.back.left).toBeLessThan(boxes.execute.left); expect(boxes.back.right).toBeLessThanOrEqual(boxes.execute.left);
     expect(Math.abs(boxes.back.top - boxes.execute.top)).toBeLessThan(2);
     expect(boxes.controls.right <= boxes.back.left || boxes.controls.bottom <= boxes.back.top, JSON.stringify({ width, boxes })).toBe(true);
     expect(boxes.back.left).toBeGreaterThan(boxes.surface.left);
-    expect(boxes.execute.bottom).toBeLessThan(boxes.footer.top); expect(boxes.execute.bottom).toBeLessThan(boxes.attribution.top);
+    expect(boxes.execute.bottom).toBeLessThan(boxes.footer.top);
+    // HOTFIX-P1-UI-OVERFLOW-AND-ATTRIBUTION-001: no React Flow attribution can sit over the canvas's actions any more (`proOptions.hideAttribution`).
+    expect(boxes.attributions).toBe(0);
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({ path: `.tmp/ux005e-canvas-${theme}.png`, fullPage: true });

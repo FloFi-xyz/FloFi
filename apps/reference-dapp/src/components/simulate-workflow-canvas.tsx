@@ -11,7 +11,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useEstimateOwners } from '../state/estimate-owners';
 import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
-import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
+import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 
 const FIT_PADDING = { top: '32px', bottom: '136px', left: '32px', right: '32px' } as const;
@@ -141,7 +141,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     <div className="flow-surface simulate-flow-surface" style={surfaceStyle} role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
-        deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES}>
+        deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES} proOptions={CANVAS_PRO_OPTIONS}>
         <InspectionViewport onState={setViewport} padding={padding}/>
         <Background gap={18} size={1} color="var(--grid)"/>
         <DarkSpotlight/>

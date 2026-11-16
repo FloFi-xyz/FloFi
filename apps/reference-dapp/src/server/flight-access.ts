@@ -23,6 +23,23 @@ export const isFlightRecoveryMethod = (method: string): boolean => FLIGHT_RECOVE
 
 /** Re-read the grant and the unrevoked account session for every operation, including direct Server Action calls. */
 export async function requireFlightAccess(principal?: WalletPrincipal, env: Readonly<Record<string, string | undefined>> = process.env): Promise<BetaRequestIdentity | null> {
+  return flightAccess(principal, env, true);
+}
+/**
+ * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001: whether the signed-in ACCOUNT may open the product's pages (the product layout and /board's
+ * hand-off to /app). Same live session, calendar, grant (source still valid, not revoked) and login-wallet checks as `requireFlightAccess`,
+ * and at least one proven wallet bound to that grant — but not every wallet this browser proved.
+ *
+ * Production 2026-11-16: an eligible account whose browser also proved a wallet not linked to it (a Solana wallet connected for a swap) was
+ * sent from every /app page to /board, including Credentials, the page the refusal itself names for linking that wallet; "Board now" admitted
+ * the account and sent it back to /app, which refused it again. Opening a page authorizes nothing financial: every Server Action and API
+ * operation still runs `requireFlightAccess` (or the API's per-owner check), which keeps refusing an unlinked or another account's wallet
+ * (BETA_WALLET_NOT_LINKED). Read-only: it creates no grant, wallet binding, claim or session.
+ */
+export async function requireFlightProductAccess(env: Readonly<Record<string, string | undefined>> = process.env): Promise<BetaRequestIdentity | null> {
+  return flightAccess(undefined, env, false);
+}
+async function flightAccess(principal: WalletPrincipal | undefined, env: Readonly<Record<string, string | undefined>>, browserWallets: boolean): Promise<BetaRequestIdentity | null> {
   const mode = betaAccessMode(env);
   if (mode === 'open') return null; // Rollout is deliberately inert until an operator enables it.
   if (mode !== 'beta') throw new Error('BETA_ACCESS_CLOSED');
@@ -45,7 +62,7 @@ export async function requireFlightAccess(principal?: WalletPrincipal, env: Read
     if (!result.ok) throw new Error(result.code);
     // Local execution and private authoring share this boundary. A stale wallet cookie from another account must not
     // borrow the signed-in account's access, even when the operation does not explicitly select a wallet yet.
-    const wallets = principal ? login ? [principal] : [] : await currentWalletPrincipals();
+    const wallets = principal ? login ? [principal] : [] : browserWallets ? await currentWalletPrincipals() : [];
     for (const wallet of wallets) {
       if (wallet.namespace === login?.namespace && wallet.address === login.address) continue;
       const bound = await gate.require({ ...identity, principal: wallet });

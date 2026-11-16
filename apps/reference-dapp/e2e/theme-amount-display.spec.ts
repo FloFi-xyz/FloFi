@@ -57,7 +57,8 @@ test('theme defaults to light, covers product surfaces, persists and returns to 
   await expect.poll(async () => surfaces.evaluateAll(elements => elements.every(element => ['rgb(21, 24, 31)', 'rgb(28, 32, 41)'].includes(getComputedStyle(element).backgroundColor)))).toBe(true);
   const canvas = await page.locator('.flow-surface').evaluate(element => getComputedStyle(element).backgroundImage);
   expect(canvas).toContain('rgb(28, 32, 41)');
-  expect(await page.locator('.react-flow__attribution').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(21, 24, 31)');
+  // HOTFIX-P1-UI-OVERFLOW-AND-ATTRIBUTION-001: the canvas shows no React Flow attribution in either theme (`proOptions.hideAttribution`).
+  await expect(page.locator('.react-flow__attribution')).toHaveCount(0);
   expect(await page.locator('.canvas-navigator').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(28, 32, 41)');
   const contrast = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);

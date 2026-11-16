@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
-import { HookHarness } from '../test-utils/hook-harness';
+import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { reviewFixture, reviewNow, reviewOwner } from '../test-utils/review-fixture';
 import { editorReducer, initialEditor, type EditorState } from '../domain/editor';
 import type { Command } from '../domain/commands';
@@ -11,6 +11,7 @@ import { shownMessage } from '../domain/chat-message';
 import { setActiveNetworkScope } from '../domain/network-scope';
 import { translate } from '../i18n/translate';
 import { portuguese } from '../i18n/pt';
+import { conversationCopy } from '../domain/conversation-copy';
 
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: the chat's lifecycle over the real editor reducer, the real Review projections and the real Canvas lifecycle
@@ -18,7 +19,7 @@ import { portuguese } from '../i18n/pt';
  */
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({ store: null as unknown as Record<string, unknown>, propose: [] as unknown[], respond: null as null | ((text: string) => Promise<unknown>),
-  floFi: false, canSign: true }));
+  floFi: false, canSign: true, clears: 0 }));
 // BUILD-FLOFI-EXECUTION-PERFORMANCE-001: the person's FloFi wallet (Privy) readiness, as the Canvas Authorize reads it.
 vi.mock('../wallet/flofi-wallet-channel', () => ({ usesFloFiWallet: () => f.floFi }));
 vi.mock('../accounts/privy-context', () => ({ useFloFiPrivy: () => ({ ready: true, authenticated: true, embedded: [], canSign: () => f.canSign }),
@@ -28,7 +29,7 @@ vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({ account:
 vi.mock('./asset-catalog-store', () => ({ ensureNetworkCatalog: async () => undefined }));
 vi.mock('../app/solana-asset-catalog-action', () => ({ loadSolanaAuthoringAssetCatalog: async () => ({ ok: false }) }));
 vi.mock('../components/copilot-ai', () => ({ copilotHelp: () => null,
-  useCopilotInterpreter: () => ({ mode: f.respond ? 'replay' : 'off', enabled: Boolean(f.respond), busy: false, mayInterpret: Boolean(f.respond), reset: () => undefined, clear: () => undefined,
+  useCopilotInterpreter: () => ({ mode: f.respond ? 'replay' : 'off', enabled: Boolean(f.respond), busy: false, mayInterpret: Boolean(f.respond), reset: () => undefined, clear: () => { f.clears += 1; },
     committed: () => undefined, language: () => 'EN', drafting: () => false, respond: (text: string) => f.respond!(text) }) }));
 const { useFlofiConversation } = await import('./flofi-conversation');
 
@@ -858,5 +859,202 @@ describe('P0 hotfix (execution continuity): the Assistant while the workflow exe
     const portuguese = () => harness.render(() => useFlofiConversation({ owner: { namespace: 'eip155', address: reviewOwner }, epoch: 0, bridge, direct, interfaceLanguage: 'PT' }));
     portuguese().send('continuar'); await flush();
     expect(portuguese().messages.at(-1)!.text).toBe('Este fluxo está em execução: 1 de 2 etapas concluídas · Etapa 2 (Trocar): Não iniciado. Confirme ou recuse o pedido na sua carteira. A FloFi nunca assina por você.');
+  });
+});
+
+/**
+ * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): the chat built a Solana Jupiter swap, the connected wallet identity
+ * changed from the EVM wallet to the Solana session the swap needs, and the whole conversation was replaced by the welcome message while the
+ * Canvas kept the swap. The conversation now belongs to the signed-in account (its opaque scope) and the workflow; this tab keeps it as read-only
+ * history through a reload. Test doubles only: a memory sessionStorage, no wallet, signature, provider or network.
+ */
+describe('HOTFIX-P1 conversation identity and recovery', () => {
+  const ACCOUNT_A = 'A'.repeat(32), ACCOUNT_B = 'B'.repeat(32), SOLANA = 'So1anaOwner1111111111111111111111111111111';
+  const evm = { namespace: 'eip155' as const, address: reviewOwner }, solana = { namespace: 'solana' as const, address: SOLANA };
+  let storage: Map<string, string>;
+  const memory = () => ({ get length() { return storage.size; }, key: (index: number) => [...storage.keys()][index] ?? null, getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); }, clear: () => storage.clear() });
+  type Options = { owner?: typeof evm | typeof solana | null; epoch?: number; scope?: string | null; persist?: boolean; direct?: boolean };
+  /** A page of the Editor: its own React state (`page`), this tab's storage shared by every page (a reload is a new page). */
+  const view = (page: HookHarness, options: Options = {}) => page.render(() => useFlofiConversation({ owner: options.owner === undefined ? evm : options.owner, epoch: options.epoch ?? 0,
+    bridge, direct: options.direct ?? true, interfaceLanguage: 'EN', persist: options.persist ?? true, accountScope: options.scope === undefined ? ACCOUNT_A : options.scope }));
+  const texts = (chat: FlofiConversation) => chat.messages.map(message => message.text);
+  const workflow = (workflowId: string) => { editor = { ...editor, workflow: { ...editor.workflow, workflowId } }; store(); lifecycle(reviewedPatch); };
+  async function author(page: HookHarness, options: Options = {}) {
+    view(page, options).send('swap 10 USDC to WETH on Base Sepolia slippage 100 bps'); await flush(); store(); lifecycle(reviewedPatch);
+    return view(page, options);
+  }
+  beforeEach(() => { storage = new Map(); vi.stubGlobal('window', { sessionStorage: memory() }); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('authoring through the chat keeps the conversation when the wallet changes ecosystem, disconnects and reconnects', async () => {
+    const page = new HookHarness();
+    let chat = await author(page);
+    const conversation = texts(chat);
+    expect(conversation).toEqual([expect.any(String), 'swap 10 USDC to WETH on Base Sepolia slippage 100 bps', expect.stringMatching(/^Swap added to your workflow/)]);
+    // The Canvas now holds the workflow; the review wallet becomes the Solana session (the incident), then the wallet disconnects and reconnects.
+    for (const owner of [solana, null, solana, evm]) { chat = view(page, { owner }); expect(texts(chat), String(owner?.namespace)).toEqual(conversation); }
+    expect(last(chat).options).toEqual(['Add another action', 'Review workflow', 'Undo this change']);
+    page.unmount();
+  });
+
+  it('the same account and workflow get their conversation back after a reload, as read-only history (no stale answer buttons)', async () => {
+    const before = new HookHarness(), chat = await author(before), shown = texts(chat);
+    before.unmount();
+    const reloaded = view(new HookHarness());
+    expect(texts(reloaded)).toEqual(shown);
+    expect(reloaded.messages.every(message => !message.options && !message.question)).toBe(true);
+    expect(reloaded.messages.every(message => !message.variants || (!message.variants.EN.options && !message.variants.PT.options))).toBe(true);
+    // A new message continues the restored conversation (ids keep increasing) and is kept again.
+    const page = new HookHarness(); view(page); view(page).send('explain'); await flush();
+    const continued = view(page);
+    expect(texts(continued)).toEqual([...shown, 'explain', expect.any(String)]);
+    expect(texts(continued).slice(0, shown.length)).toEqual(shown);
+    expect(new Set(continued.messages.map(message => message.id)).size).toBe(continued.messages.length);
+    expect(texts(view(new HookHarness())).length).toBe(continued.messages.length);
+  });
+
+  it('another account, a signed-out page or another workflow never receives this conversation', async () => {
+    const shown = texts(await author(new HookHarness()));
+    expect(texts(view(new HookHarness(), { scope: ACCOUNT_B }))).toHaveLength(1);
+    expect(texts(view(new HookHarness(), { scope: null }))).toHaveLength(1);
+    expect(texts(view(new HookHarness(), { persist: false }))).toHaveLength(1);
+    workflow('workflow-another');
+    expect(texts(view(new HookHarness()))).toHaveLength(1);
+    // Account B writing in this tab removes account A's kept conversations (never two accounts' messages side by side).
+    await author(new HookHarness(), { scope: ACCOUNT_B });
+    expect([...storage.keys()].some(key => key.includes(ACCOUNT_A))).toBe(false);
+    expect(shown.length).toBeGreaterThan(1);
+  });
+
+  it('explicit New workflow opens a distinct, empty conversation; reopening the earlier workflow restores its own', async () => {
+    const page = new HookHarness(), first = editor.workflow.workflowId, shown = texts(await author(page));
+    // New workflow: a fresh identity and the epoch together (app-shell resetForNewWorkflow).
+    workflow('workflow-new'); let chat = view(page, { epoch: 1 });
+    expect(texts(chat)).toHaveLength(1);
+    expect(chat.question).toBeNull();
+    // Reopening the earlier workflow (a saved workflow or the restored Canvas) brings back its own conversation, read-only.
+    workflow(first); chat = view(page, { epoch: 1 });
+    expect(texts(chat)).toEqual(shown);
+    expect(chat.messages.some(message => message.options)).toBe(false);
+    // The new workflow's conversation stayed separate.
+    workflow('workflow-new'); expect(texts(view(page, { epoch: 1 }))).toHaveLength(1);
+    // New workflow again over a stored identity: its stored conversation is not restored.
+    workflow(first); chat = view(page, { epoch: 2 });
+    expect(texts(chat)).toHaveLength(1);
+    expect(texts(view(new HookHarness(), { epoch: 2 }))).toHaveLength(1);
+  });
+
+  it('a late Copilot answer of the previous workflow never lands in the next workflow or changes it', async () => {
+    const answer = deferred<unknown>(); f.respond = () => answer.promise;
+    const page = new HookHarness();
+    view(page).send('make something nice'); await flush();
+    expect(texts(view(page))).toContain('make something nice');
+    workflow('workflow-next');
+    const next = view(page, { epoch: 1 });
+    expect(texts(next)).toHaveLength(1);
+    const revision = editor.workflow.revision;
+    answer.resolve({ text: 'Interpreted.', notes: [], command: { type: 'ADD_SWAP' } });
+    await flush(); store(); lifecycle(reviewedPatch);
+    expect(texts(view(page, { epoch: 1 }))).toHaveLength(1);
+    expect(editor.workflow.revision).toBe(revision);
+    expect(f.propose).toEqual([]);
+  });
+
+  it('never keeps a typed private key or seed phrase, and keeps nothing for a conversation the owner has not joined', async () => {
+    const page = new HookHarness(); view(page); await flush();
+    expect(storage.size).toBe(0);
+    view(page).send(`my private key is 0x${'ab'.repeat(32)}`); await flush();
+    view(page).send('explain'); await flush(); view(page);
+    const kept = [...storage.values()].join('');
+    expect(kept).not.toContain('ab'.repeat(32));
+    expect(kept).not.toMatch(/private key is/);
+    expect(kept).toContain('"text":"explain"');
+    // This visit still shows what was typed; only this tab's kept copy leaves it out.
+    expect(texts(view(page))).toContain(`my private key is 0x${'ab'.repeat(32)}`);
+  });
+
+  it('the approval surfaces keep their previous behaviour: one conversation per page, a new owner starts it again', async () => {
+    direct = false;
+    const page = new HookHarness();
+    view(page, { direct: false }).send('swap 10 USDC to WETH on Base Sepolia slippage 100 bps'); await flush(); store(); lifecycle(reviewedPatch);
+    expect(texts(view(page, { direct: false })).length).toBeGreaterThan(1);
+    expect(texts(view(page, { direct: false, owner: solana }))).toEqual(['Review each proposed change before applying it.']);
+    expect(storage.size).toBe(0);
+  });
+
+  it('a Copilot answer whose conversation ended while it was interpreted says nothing (no empty message)', async () => {
+    f.respond = async () => ({ kind: 'FAILED', code: 'COPILOT_CONVERSATION_ENDED', text: '', notes: [], options: [] });
+    const page = new HookHarness();
+    view(page).send('make something nice'); await flush();
+    expect(texts(view(page))).toEqual([expect.any(String), 'make something nice']);
+  });
+
+  it('the earlier conversation keeps the answer that started New workflow from the chat (same update as the switch)', async () => {
+    const page = new HookHarness(), first = editor.workflow.workflowId;
+    let epoch = 0;
+    const options = () => ({ epoch });
+    await author(page, options());
+    bridge = { ...bridge, startNewWorkflow: () => { epoch += 1; workflow('workflow-new'); bridge = { ...bridge, startNewWorkflow: bridge.startNewWorkflow }; } };
+    const startNew = conversationCopy('EN').startNew;
+    view(page, options()).send(startNew); await flush();
+    expect(texts(view(page, options()))).toHaveLength(1);
+    workflow(first);
+    expect(texts(view(page, options())).at(-1)).toBe(startNew);
+    expect(texts(view(new HookHarness(), options())).at(-1)).toBe(startNew);
+  });
+
+  it('the account becoming known for the same workflow keeps the conversation on screen, then keeps it for this tab', async () => {
+    const page = new HookHarness();
+    view(page, { scope: null }).send('explain'); await flush();
+    const before = texts(view(page, { scope: null }));
+    expect(before).toContain('explain');
+    expect(texts(view(page, { scope: ACCOUNT_A }))).toEqual(before);
+    expect(texts(view(new HookHarness()))).toEqual(before);
+  });
+
+  it('a conversation begun on the untouched draft continues on the workflow that replaces it (restored Canvas, recovered run)', async () => {
+    const page = new HookHarness();
+    view(page).send('explain'); await flush();
+    const before = texts(view(page));
+    workflow('workflow-recovered');
+    expect(texts(view(page))).toEqual(before);
+    // An authored workflow is never carried into another: reopening one with no history shows the welcome alone.
+    await author(page);
+    workflow('workflow-other');
+    expect(texts(view(page))).toHaveLength(1);
+  });
+
+  it('a different reviewing wallet ends what FloFi would do by itself for the previous one, never the conversation; a reconnect changes nothing', async () => {
+    const page = new HookHarness(), shown = texts(await author(page));
+    f.clears = 0;
+    for (const owner of [null, evm]) view(page, { owner });
+    expect(f.clears).toBe(0);
+    expect(texts(view(page, { owner: solana }))).toEqual(shown);
+    expect(f.clears).toBe(1);
+  });
+
+  it('after the reviewing wallet changes, the previous wallet\'s run never makes FloFi simulate by itself (no step hand-over, no re-quote)', async () => {
+    const page = new HookHarness();
+    const ask = async (text: string) => { view(page).send(text); await flush(); store(); lifecycle(reviewedPatch); return view(page); };
+    await ask('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const sequence = { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: false };
+    reviewedPatch = { sequence }; lifecycle(reviewedPatch);
+    await ask('Review workflow');
+    reviewedPatch = { ...reviewed(), sequence }; lifecycle(reviewedPatch); view(page);
+    await ask('Yes, I confirm'); await ask('Yes, execute');
+    expect(controls.authorize).toHaveBeenCalledTimes(1); expect(simulate).toHaveBeenCalledTimes(1);
+    const shown = texts(view(page)).length;
+    // The reviewing wallet changes (e.g. to the Solana session); then step 1's run completes and step 2 becomes current.
+    const other = () => view(page, { owner: solana });
+    other(); controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); other(); await flush(); other();
+    const next = { ...sequence, current: 2, steps: [{ ...SEQUENCE_STEPS[0]!, state: 'COMPLETED' as const, delivered: '0.0042 WETH' },
+      { ...SEQUENCE_STEPS[1]!, state: 'CURRENT' as const, funding: { from: 1, cap: '0.001 WETH', bound: '0.001 WETH' } }] };
+    reviewedPatch = { sequence: next }; lifecycle(reviewedPatch); other(); await flush();
+    const chat = other();
+    // Nothing is simulated, authorized or requested for the new wallet by FloFi itself; the owner asks for a Review when ready.
+    expect(simulate).toHaveBeenCalledTimes(1); expect(controls.authorize).toHaveBeenCalledTimes(1); expect(controls.request).not.toHaveBeenCalled();
+    expect(texts(chat).length).toBeGreaterThanOrEqual(shown);
   });
 });

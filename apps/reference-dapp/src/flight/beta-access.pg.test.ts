@@ -3,7 +3,9 @@
 import { randomBytes } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { createBetaAccessStore, type BetaAccessStore, type BetaPrincipal } from './beta-access';
+import { BETA_EARLY_ACCESS_END, createBetaAccessStore, type BetaAccessStore, type BetaPrincipal } from './beta-access';
+import { createAccessStore } from './access-store';
+import { codeFor } from './access';
 import { FLIGHT_DEFAULT_CALENDAR } from './campaign';
 
 const CAL = FLIGHT_DEFAULT_CALENDAR, OPEN = CAL.boardingOpensAt, hex = (n: number) => randomBytes(n).toString('hex');
@@ -277,5 +279,92 @@ describe('temporary team access without campaign entitlements', () => {
     expect(await postponed.require({ ...p, now: OPEN })).toEqual({ ok: false, code: 'BETA_NOT_OPEN' });
     expect(await g.require(normal)).toEqual({ ok: true, accountId: normal.accountId });
     expect(await g.requireWallet(p.principal, OPEN)).toMatchObject({ ok: false });
+  });
+});
+
+/**
+ * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001 (production 2026-11-16): an account with a valid LIST grant was sent away from /app because its
+ * browser also proved a Solana wallet that was not linked to it, then refused when proving its beta-list email ("already boards with another
+ * email"). The account's own access never changed; these are the persisted decisions the product layout (account level) and every operation
+ * (each wallet) rely on. Fixture accounts, wallets and codes only.
+ */
+describe('an eligible account keeps its access; a second list email or an unlinked wallet never removes or extends it', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+  const SECRET = randomBytes(32).toString('base64url');
+  const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const solana = (): BetaPrincipal => ({ namespace: 'solana', address: Array.from(randomBytes(44), b => BASE58[b % 58]).join('') });
+  const accountLevel = (p: { accountId: string; sessionId: string }, now = OPEN) => ({ accountId: p.accountId, sessionId: p.sessionId, now });
+  const bound = async (accountId: string) => (await t.db.query<{ address: string }>(`SELECT address FROM flight_beta_wallets WHERE tenant_id = 'default'
+    AND account_id = $1 ORDER BY address`, [accountId])).rows.map(row => row.address);
+  const grantRow = async (accountId: string) => (await t.db.query(`SELECT source, source_ref, granted_at, revoked_at FROM flight_beta_grants
+    WHERE tenant_id = 'default' AND account_id = $1`, [accountId])).rows;
+
+  it('admits the account while refusing its browser\'s unlinked wallet; only an explicit link plus Board now binds that wallet', async () => {
+    const p = await account(), entry = await listed(p.accountId), phantom = solana();
+    expect(await gate.grant(p.accountId, OPEN)).toEqual({ ok: true, accountId: p.accountId });
+    const granted = await grantRow(p.accountId);
+    // The product's pages (account level) stay open; operations that name the unlinked wallet are refused.
+    expect(await gate.require(accountLevel(p))).toEqual({ ok: true, accountId: p.accountId });
+    expect(await gate.require({ ...accountLevel(p), principal: phantom })).toEqual({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    // Board now cannot bind a wallet the account never proved.
+    expect(await gate.grant(p.accountId, OPEN)).toEqual({ ok: true, accountId: p.accountId });
+    expect(await bound(p.accountId)).toEqual([p.principal.address]);
+    // Credentials' explicit link writes the account's proven wallet (a signature, recorded by the account service): still not Flight-bound by itself.
+    await t.db.query(`INSERT INTO flofi_account_wallets (tenant_id, account_id, ecosystem, address, origin, provider, provider_name, export, label)
+      VALUES ('default', $1, 'SOLANA', $2, 'EXTERNAL', 'fixture', 'Fixture wallet', 'NONE', 'Fixture wallet')`, [p.accountId, phantom.address]);
+    expect(await gate.require({ ...accountLevel(p), principal: phantom })).toEqual({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    // The owner's Board now binds it, under the same grant and source.
+    expect(await gate.grant(p.accountId, OPEN + 1000)).toEqual({ ok: true, accountId: p.accountId });
+    expect(await gate.require({ ...accountLevel(p), principal: phantom })).toEqual({ ok: true, accountId: p.accountId });
+    expect(await grantRow(p.accountId)).toEqual(granted);
+    expect(granted).toMatchObject([{ source: 'LIST', source_ref: entry.entryId, revoked_at: null }]);
+  });
+
+  it('a wallet held by another account is never bound or admitted for this one, even after Board now', async () => {
+    const p = await account(), other = await account(), shared = solana();
+    await listed(p.accountId); await gate.grant(p.accountId, OPEN);
+    await t.db.query(`INSERT INTO flofi_account_identities (tenant_id, account_id, kind, subject, label) VALUES ('default', $1, 'SOLANA', $2, 'Fixture')`,
+      [other.accountId, shared.address]);
+    expect(await gate.grant(p.accountId, OPEN)).toEqual({ ok: true, accountId: p.accountId });
+    expect(await gate.require({ ...accountLevel(p), principal: shared })).toEqual({ ok: false, code: 'BETA_WALLET_NOT_LINKED' });
+    expect(await bound(p.accountId)).toEqual([p.principal.address]);
+  });
+
+  it('proving a second beta-list email is refused without touching the account\'s claim, grant or access, and the entry is never reassigned', async () => {
+    const access = createAccessStore({ db: t.db, tenantId: 'default' }, SECRET);
+    const p = await account(), first = await listed(p.accountId); await gate.grant(p.accountId, OPEN);
+    const second = await listed(p.accountId, { claim: false }), emailId = `fem_${hex(16)}`, before = await grantRow(p.accountId);
+    await access.issueToken({ emailId, entryId: second.entryId, codeMs: 15 * 60_000, now: OPEN });
+    expect(await access.consumeCode({ email: second.email, code: codeFor(SECRET, emailId), accountId: p.accountId, client: null, now: OPEN + 1000 }))
+      .toEqual({ status: 'ACCOUNT_HAS_OTHER_ENTRY' });
+    expect((await t.db.query(`SELECT entry_id FROM flight_access_claims WHERE tenant_id = 'default' AND account_id = $1`, [p.accountId])).rows)
+      .toEqual([{ entry_id: first.entryId }]);
+    expect((await t.db.query(`SELECT 1 FROM flight_access_claims WHERE tenant_id = 'default' AND entry_id = $1`, [second.entryId])).rowCount).toBe(0);
+    expect((await t.db.query(`SELECT consumed_at FROM flight_access_tokens WHERE tenant_id = 'default' AND entry_id = $1`, [second.entryId])).rows)
+      .toEqual([{ consumed_at: null }]);
+    expect(await grantRow(p.accountId)).toEqual(before);
+    expect(await gate.require(accountLevel(p))).toEqual({ ok: true, accountId: p.accountId });
+    // One account per entry: the unclaimed entry still belongs to whoever proves it next, never silently to this account.
+    const owner = await account();
+    expect(await access.consumeCode({ email: second.email, code: codeFor(SECRET, emailId), accountId: owner.accountId, client: null, now: OPEN + 2000 }))
+      .toEqual({ status: 'CLAIMED' });
+    expect(await gate.require(accountLevel(p))).toEqual({ ok: true, accountId: p.accountId });
+  });
+
+  it('absent and revoked grants stay denied, and the expired temporary team access stays expired', async () => {
+    const none = await account();
+    expect(await gate.require(accountLevel(none))).toEqual({ ok: false, code: 'BETA_ACCESS_DENIED' });
+    expect(await gate.grant(none.accountId, OPEN)).toEqual({ ok: false, code: 'BETA_ACCESS_DENIED' });
+    const revoked = await account(); await listed(revoked.accountId); await gate.grant(revoked.accountId, OPEN);
+    expect(await gate.revoke(revoked.accountId, OPEN + 1)).toBe(true);
+    expect(await gate.require(accountLevel(revoked))).toEqual({ ok: false, code: 'BETA_ACCESS_REVOKED' });
+    expect(await gate.grant(revoked.accountId, OPEN + 2)).toEqual({ ok: false, code: 'BETA_ACCESS_REVOKED' });
+    // The fixed cutoff is unchanged; on the incident day a configured team account without a grant is an ordinary, ungranted account.
+    expect(BETA_EARLY_ACCESS_END).toBe(Date.parse('2026-11-12T12:00:00Z'));
+    const incident = Date.parse('2026-11-16T13:15:00Z'); vi.spyOn(Date, 'now').mockReturnValue(incident);
+    const team = await account();
+    const g = createBetaAccessStore({ db: t.db, tenantId: 'default' }, CAL, { FLOFI_BETA_ACCESS: 'beta', FLOFI_BETA_EARLY_ACCESS_TENANT: 'default',
+      FLOFI_BETA_EARLY_ACCESS_ACCOUNTS: team.accountId });
+    expect(await g.require({ ...accountLevel(team, incident), sessionNow: OPEN })).toEqual({ ok: false, code: 'BETA_ACCESS_DENIED' });
   });
 });
