@@ -102,6 +102,26 @@ no path to RECONCILED, a released reservation or a second wallet request. Fixed,
 | Evidence wording (ERC-20 self-transfer, contract-recipient caveat) and the PT copy (pt-BR forms; "você não pagou") | Corrected. |
 | UI: Passkeys showed "No passkeys yet" while the overview loaded or after it failed (frontend-ux, medium); "Switch to …" prefix styled primary; touch height; relayed result without evidence download | See §2/§3 (UI fixes in the same commit). |
 
+**Final adversarial round** (three independent agents with test access, one lens each, on `f890a83`). Two medium findings, both fixed with
+regression tests that fail without the fix:
+
+| Finding | Fix |
+| --- | --- |
+| Fail-open introduced by the exact decoding: a reviewed call wrapped in the owner's own `execute(bytes32,bytes)`, or embedded by an intermediary contract inside another redemption, decoded as "not this call", so a relayed refusal or a duplicate was missed (reproduced: second wallet request, recipient paid twice) | A call runs from the owner's account only through a redemption or the account executing as itself. `execute(bytes32,bytes)` / `executeFromExecutor(bytes32,bytes)` executions are decoded and expanded like nested redemptions; any execution that still carries one of those entry points without being decodable, and any undecodable input, get the conservative match — which now always includes the token/recipient (packed or ABI execution form), never the calldata alone. Top-level exact comparison is unchanged (USDT/USDC, WETH/ETH stay distinct). |
+| A Smart Account refusal was trusted before MetaMask's relay could have landed: a late relay of the refused call after the recovery run reconciled went unseen (paid twice) | Recovery of a relay-capable owner's refusal waits the 10-minute settle window with a complete scan finding nothing (a relay already on chain is still reported at once as `TRANSFER_REJECTED_ATTEMPT_EXECUTED`); the recovery run's `begin` scans again just before it reserves. |
+
+Also corrected: the "no Delegation Manager log in a direct receipt" rule applies to Smart Account owners only, so EOA reconciliation is
+exactly as before (the round-2 version had also changed it for EOAs); the harness's batched relay is a real `abi.encode(Execution[])` (with
+a fee transfer), so the decoded-batch path of the fix is covered end to end.
+
+Documented, not changed (low, fail-closed or pre-existing; the owner asked to correct release blockers only): a direct Smart Account receipt
+whose balance change is unexplained while the provider's log index lags is a permanent mismatch (a relayed receipt stays inconclusive); a
+relayed receipt with a decreasing owner nonce (an inconsistent provider) is proven in transaction scope from its receipt; executions from every permission context of a redemption are attributed to the
+owner (an identical call by another delegator in the same transaction makes a genuine refusal divergent); one inconsistent canonical-block
+read is a terminal `TRANSFER_REORG` (EOA behaviour unchanged); an unrelated payment to the same recipient in the same block is a balance
+mismatch (design: "an unexplained difference is a mismatch"); uppercase-hex topics from non-standard gateways are compared exactly in
+pre-existing checks.
+
 Documented, not changed: relay scans see only Delegation Manager redemptions (not ERC-4337 EntryPoint execution); duplicate detection runs
 for the reviewed DeleGator only (the only verified delegate); "Undo this change" keeps the danger tone (owner's mapping).
 
@@ -145,6 +165,8 @@ still `TRANSFER_OWNER_NOT_EOA`) and `simulation-presentation.test.ts` (messages)
   with `TRANSFER_NONCE_ALREADY_RESERVED` until the account sends any transaction itself (which moves the nonce). Fail-closed; no in-app release.
 - Evidence of a Smart Account transfer cannot be checked by the independent archive verifier (`robinhood-transfer-verifier.ts`, EOA signer
   recovery by design).
+- A Smart Account whose wallet refused a transfer can prepare a new request for it only after the 10-minute settle window (MetaMask could
+  still relay the refused call); a relay landing later than that and after the new request reconciled is not detected.
 - A refusal older than the duplicate-scan window (about 5.8 days on Arbitrum One) cannot be recovered in-app: the check cannot cover the
   window, so recovery stays `TRANSFER_RELAYED_EXECUTION_PENDING` (fail-closed).
 - Limits inherited from the swap's relay rules (BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 §4.1): the DeleGator allowlist is address-based;

@@ -452,7 +452,9 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
             relayedExecutions: [...scan.verified, ...scan.unclassified] });
           throw new Error('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
         }
-        if (scan.waiting || !scan.complete) throw new Error('TRANSFER_RELAYED_EXECUTION_PENDING');
+        // MetaMask can still relay a call its wallet reported as refused for a while: no new request before the settle window has passed with
+        // a complete scan finding nothing (the recovery run's own begin scans again just before it reserves).
+        if (scan.waiting || !scan.complete || now() - preparedAt(record) < RELAY_SETTLE_MS) throw new Error('TRANSFER_RELAYED_EXECUTION_PENDING');
       }
       return fresh(record.review.workflow, record.review.account, { id, nonce: attempt.nonce, scanFrom });
     }); },

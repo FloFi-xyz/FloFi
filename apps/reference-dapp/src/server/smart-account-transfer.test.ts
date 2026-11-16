@@ -41,6 +41,8 @@ async function prepared(s: Service, w: SemanticWorkflow) {
   await s.handoff(run.id);
   return { id: run.id, run, transaction: begun.transaction };
 }
+/** MetaMask's relay settle window has passed (a fresh head block keeps chain reads current). */
+const settle = () => { now += 11 * 60_000; chain.mine(1); };
 const intents = (path: string, nonce = 0) => readFileSync(join(path, `eip155-42161-${owner}-${nonce}.intent`), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
 const limitations = (record: TransferRecord) => record.evidence!.bundle.reconciliation.limitations.join('\n');
 
@@ -345,6 +347,9 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
     await s.begin(run.id, owner, token()); await s.handoff(run.id);
     const send = { method: 'eth_sendTransaction', submission: true, error: { code: 4001 } };
     await s.walletFailure(run.id, { invoked: true, rejectionCode: 4001, code: 'TRANSFER_REJECTED', calls: [send] });
+    // MetaMask could still relay the refused call for a while: no new request before the settle window.
+    await expect(s.recoverReview(run.id)).rejects.toThrow('TRANSFER_RELAYED_EXECUTION_PENDING');
+    settle();
     const fresh = await s.recoverReview(run.id);
     expect(fresh).toMatchObject({ recoveryOf: run.id, review: { nonce: '0', state: { ownerDelegation: MOCK_DELEGATOR_IMPL } } });
   });
@@ -354,6 +359,7 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
     await s.begin(run.id, owner, native()); await s.handoff(run.id);
     await s.walletFailure(run.id, { invoked: true, rejectionCode: 4001, code: 'TRANSFER_REJECTED', calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
     chain.relay({ from: owner, to: UNI.usdc, value: '0x0', data: '0xa9059cbb' + relayer.slice(2).padStart(64, '0') + (7n).toString(16).padStart(64, '0') }, { relayer }); chain.mine(2);
+    settle();
     expect(await s.recoverReview(run.id)).toMatchObject({ recoveryOf: run.id });
   });
   it('a refused transfer relayed only after its recovery Review is found again before the recovery run reserves or asks the wallet', async () => {
@@ -361,6 +367,7 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
     await s.review(run.id, run.review.commitment, token());
     const begun = await s.begin(run.id, owner, token()); await s.handoff(run.id);
     await s.walletFailure(run.id, { invoked: true, rejectionCode: 4001, code: 'TRANSFER_REJECTED', calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    settle();
     const fresh = await s.recoverReview(run.id);
     chain.relay(begun.transaction, { relayer }); chain.mine(3);
     await s.review(fresh.id, fresh.review.commitment, token());
@@ -375,6 +382,7 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
     await s.review(run.id, run.review.commitment, token());
     const begun = await s.begin(run.id, owner, token()); await s.handoff(run.id);
     await s.walletFailure(run.id, { invoked: true, rejectionCode: 4001, code: 'TRANSFER_REJECTED', calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    settle();
     const fresh = await s.recoverReview(run.id);
     await s.review(fresh.id, fresh.review.commitment, token());
     const next = await s.begin(fresh.id, owner, token()); await s.handoff(fresh.id);
@@ -487,6 +495,38 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
       '0x' + owner.slice(2).padStart(64, '0'), '0x' + recipient.slice(2).padStart(64, '0')], data: '0x' }] });
     await s.report(id, { kind: 'HASH', hash }); chain.mine(2);
     expect(await s.observe(id)).toMatchObject({ verdict: 'DIVERGENT', error: 'TRANSFER_LOGS_MISMATCH', evidence: null });
+  });
+  // Final adversarial round.
+  const wrapInOwnerExecute = (hash: string, transaction: { to: string; data: string; value: string }) => {
+    // The same relay, but its execution calls the owner's own execute(bytes32,bytes) with the reviewed call inside (receipt unchanged).
+    const inner = erc7710.selectorOf('execute(bytes32,bytes)') + erc7710.hexOf(erc7710.abiEncode(['bytes32', 'bytes'], ['0x' + '00'.repeat(32),
+      transaction.to.toLowerCase() + BigInt(transaction.value || '0x0').toString(16).padStart(64, '0') + transaction.data.slice(2)])).slice(2);
+    const input = erc7710.REDEEM_DELEGATIONS_SELECTOR + erc7710.hexOf(erc7710.abiEncode([{ array: 'bytes' }, { array: 'bytes32' }, { array: 'bytes' }],
+      [['0x' + '00'.repeat(64)], ['0x' + '00'.repeat(32)], [owner + '0'.repeat(64) + inner.slice(2)]])).slice(2);
+    chain.state.transactions.set(hash, { ...chain.state.transactions.get(hash)!, input });
+  };
+  it.each([['ERC-20', token], ['native', native]] as const)('a refused %s transfer whose relay wrapped the call in the owner\'s own execute() is found (never a second wallet request)', async (_, make) => {
+    const s = service(), run = await s.simulate(make(), owner);
+    await s.review(run.id, run.review.commitment, make());
+    const begun = await s.begin(run.id, owner, make()); await s.handoff(run.id);
+    await s.walletFailure(run.id, fail4001);
+    wrapInOwnerExecute(chain.relay(begun.transaction, { relayer }), begun.transaction); chain.mine(2);
+    await expect(s.recoverReview(run.id)).rejects.toThrow('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
+  });
+  it('a direct transfer whose call was also relayed wrapped in the owner\'s execute() is a duplicate', async () => {
+    const s = service(), { id, transaction } = await prepared(s, token());
+    wrapInOwnerExecute(chain.relay(transaction, { relayer }), transaction);
+    await s.report(id, { kind: 'HASH', hash: chain.apply(transaction) }); chain.mine(2);
+    expect(await s.observe(id)).toMatchObject({ verdict: 'DIVERGENT', error: 'TRANSFER_RELAYED_DUPLICATE_EXECUTION', evidence: null });
+  });
+  it('a refused call relayed within the settle window after a first empty scan is still found before the recovery Review', async () => {
+    const s = service(), run = await s.simulate(token(), owner);
+    await s.review(run.id, run.review.commitment, token());
+    const begun = await s.begin(run.id, owner, token()); await s.handoff(run.id);
+    await s.walletFailure(run.id, fail4001);
+    await expect(s.recoverReview(run.id)).rejects.toThrow('TRANSFER_RELAYED_EXECUTION_PENDING'); // nothing yet, but the window is open
+    chain.relay(begun.transaction, { relayer }); settle();
+    await expect(s.recoverReview(run.id)).rejects.toThrow('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
   });
   it('no relay scan or claim for a standard account (EOA) transfer: its reconciliation is unchanged', async () => {
     chain.state.codeOverride.delete(owner);

@@ -262,7 +262,13 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     const from = tx.from.toLowerCase(), to = tx.to.toLowerCase(), data = innerData(tx), selector = data.slice(0, 10);
     const relayer = relayed?.relayer.toLowerCase(), sender = relayer ?? from;
     if (relayed && (state.codeOverride.get(from) ?? '0x') !== '0xef0100' + MOCK_DELEGATOR_IMPL.slice(2)) throw new Error('execution reverted: not a DeleGator account');
-    const outer = relayed ? encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data, relayed.batch ? '01' + '0'.repeat(62) : undefined, BigInt(tx.value || '0x0')) : tx.data;
+    // BUILD-FLOFI-7702-TRANSFER-001: a batched relay is a real CALLTYPE_BATCH redemption, abi.encode(Execution[]): the call plus a fee
+    // transfer of one unit of the same token to the relayer (the shape MetaMask uses to charge its fee in a token).
+    const outer = !relayed ? tx.data : relayed.batch
+      ? erc7710.REDEEM_DELEGATIONS_SELECTOR + erc7710.hexOf(erc7710.abiEncode([{ array: 'bytes' }, { array: 'bytes32' }, { array: 'bytes' }], [['0x' + '00'.repeat(64)],
+        ['0x01' + '00'.repeat(31)], [erc7710.hexOf(erc7710.abiEncode([{ array: { tuple: ['address', 'uint256', 'bytes'] } }], [[[to, BigInt(tx.value || '0x0'), tx.data],
+          [to, 0n, '0xa9059cbb' + relayed.relayer.slice(2).toLowerCase().padStart(64, '0') + (1n).toString(16).padStart(64, '0')]]]))]])).slice(2)
+      : encodeSingleRedemption('0x' + '00'.repeat(64), to, tx.data, undefined, BigInt(tx.value || '0x0'));
     const nonce = state.nonces.get(sender) ?? 0, hash = relayed ? hashOf(sender, nonce, outer) : hashOf(from, nonce, data);
     const logs: Record<string, unknown>[] = [];
     const delegation = relayed ? relayedDelegation(from, to, tx.data, BigInt(nonce) + 1n, relayed.singleUse !== false) : null;

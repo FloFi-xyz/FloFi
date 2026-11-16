@@ -94,7 +94,7 @@ const messages: Record<string, string> = {
   TRANSFER_OWNER_DELEGATION_UNVERIFIED: 'This account is upgraded to a smart account (EIP-7702) whose code FloFi has not verified. Use a standard account or a MetaMask Smart Account. Nothing was sent.',
   TRANSFER_OWNER_ACCOUNT_CHANGED_REVIEW_REQUIRED: 'This wallet\'s account type changed since Review. Simulate and review again. Nothing was sent.',
   TRANSFER_OWNER_ACCOUNT_CODE_MISMATCH: 'The account\'s smart-account code was not the reviewed one when this transfer landed, so FloFi cannot confirm the result. It is recorded for review; nothing will be sent again.',
-  TRANSFER_RELAYED_EXECUTION_PENDING: 'MetaMask may have relayed this transfer. FloFi is still checking the network for it and will never send it again.',
+  TRANSFER_RELAYED_EXECUTION_PENDING: 'MetaMask may still relay this transfer. FloFi keeps checking the network and never sends it again; a new request for it is possible a few minutes after your wallet answered.',
   TRANSFER_RELAYED_DUPLICATE_EXECUTION: 'This transfer was executed more than once on the network. It is recorded for review; FloFi will not send anything again.',
   TRANSFER_RELAYED_EXECUTION_UNSUPPORTED_SHAPE: 'MetaMask relayed this transfer in a form FloFi cannot verify (for example together with a fee payment). It is recorded for review; nothing will be sent again.',
   TRANSFER_RELAYED_NATIVE_UNSUPPORTED: 'MetaMask relayed this ETH transfer, which FloFi cannot verify. It is recorded for review; nothing will be sent again.',

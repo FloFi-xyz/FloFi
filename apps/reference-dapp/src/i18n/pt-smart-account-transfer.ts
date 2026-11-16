@@ -13,8 +13,8 @@ export const portugueseSmartAccountTransfer: Readonly<Record<string, string>> = 
     'O tipo de conta desta carteira mudou desde a Revisão. Simule e revise novamente. Nada foi enviado.',
   'The account\'s smart-account code was not the reviewed one when this transfer landed, so FloFi cannot confirm the result. It is recorded for review; nothing will be sent again.':
     'O código de conta inteligente desta conta não era o revisado quando esta transferência foi incluída em um bloco, então a FloFi não consegue confirmar o resultado. Ela foi registrada para análise; nada será enviado novamente.',
-  'MetaMask may have relayed this transfer. FloFi is still checking the network for it and will never send it again.':
-    'A MetaMask pode ter retransmitido esta transferência. A FloFi ainda está procurando por ela na rede e nunca vai enviá-la novamente.',
+  'MetaMask may still relay this transfer. FloFi keeps checking the network and never sends it again; a new request for it is possible a few minutes after your wallet answered.':
+    'A MetaMask ainda pode retransmitir esta transferência. A FloFi continua verificando a rede e nunca a envia novamente; um novo pedido para ela será possível alguns minutos depois da resposta da sua carteira.',
   'This transfer was executed more than once on the network. It is recorded for review; FloFi will not send anything again.':
     'Esta transferência foi executada mais de uma vez na rede. Ela foi registrada para análise; a FloFi não vai enviar mais nada.',
   'MetaMask relayed this transfer in a form FloFi cannot verify (for example together with a fee payment). It is recorded for review; nothing will be sent again.':

@@ -521,10 +521,42 @@ export async function relayedExecutions(rpc: Rpc, P: { readonly chainId: number;
 /**
  * BUILD-FLOFI-7702-TRANSFER-001: the executions a Delegation Manager `redeemDelegations(bytes[], bytes32[], bytes[])` input carries, decoded
  * strictly (canonical ABI): per ModeCode, CALLTYPE_SINGLE (`target ‖ value ‖ calldata`, packed) or CALLTYPE_BATCH (`(address,uint256,bytes)[]`),
- * either exec type; an execution that is itself a redemption on the manager is expanded (bounded depth). Null when the input is anything else.
+ * either exec type. An execution that is itself a redemption on the manager, or a DeleGator `execute(bytes32,bytes)` /
+ * `executeFromExecutor(bytes32,bytes)` (an account running calls as itself), is expanded (bounded depth) and marked `wraps`. Null when the
+ * input is anything else.
  */
-type DecodedExecution = { readonly target: string; readonly value: bigint; readonly data: string };
+type DecodedExecution = { readonly target: string; readonly value: bigint; readonly data: string; readonly wraps?: true };
 const EXECUTION_BATCH_ABI: erc7710.AbiType = { array: { tuple: ['address', 'uint256', 'bytes'] } };
+const ACCOUNT_EXECUTE_SELECTORS = [erc7710.selectorOf('execute(bytes32,bytes)'), erc7710.selectorOf('executeFromExecutor(bytes32,bytes)')];
+/** Every way a call can run from a DeleGator account: a redemption, or the account executing as itself (ERC-7579 modes, or the legacy tuple). */
+const ACCOUNT_ENTRY_SELECTORS = [REDEEM_SELECTOR, ...ACCOUNT_EXECUTE_SELECTORS, erc7710.selectorOf('execute((address,uint256,bytes))')];
+function modeExecutions(mode: string, call: string): DecodedExecution[] | null {
+  const callType = mode.slice(2, 4), execType = mode.slice(4, 6);
+  if (!['00', '01'].includes(execType)) return null;
+  if (callType === '00') {
+    if (call.length < 2 + (20 + 32) * 2) return null;
+    return [{ target: address('0x' + call.slice(2, 42)), value: BigInt('0x' + call.slice(42, 106)), data: '0x' + call.slice(106) }];
+  }
+  if (callType !== '01') return null;
+  const [batch] = erc7710.abiDecode([EXECUTION_BATCH_ABI], erc7710.bytesOf(call)) as [[string, bigint, string][]];
+  return batch.map(([target, value, data]) => ({ target: address(target), value, data: data.toLowerCase() }));
+}
+function expandExecutions(executions: readonly DecodedExecution[], depth: number): DecodedExecution[] | null {
+  const out: DecodedExecution[] = [];
+  for (const execution of executions) {
+    const selector = execution.data.slice(0, 10);
+    let inner: DecodedExecution[] | null;
+    if (execution.target === DELEGATION_MANAGER && selector === REDEEM_SELECTOR) inner = redemptionExecutions(execution.data, depth + 1);
+    else if (ACCOUNT_EXECUTE_SELECTORS.includes(selector)) {
+      const [mode, call] = erc7710.abiDecode(['bytes32', 'bytes'], erc7710.bytesOf('0x' + execution.data.slice(10))) as [string, string];
+      const decoded = depth < 3 ? modeExecutions(mode, call.toLowerCase()) : null;
+      inner = decoded && expandExecutions(decoded, depth + 1);
+    } else { out.push(execution); continue; }
+    if (!inner) return null;
+    out.push({ ...execution, wraps: true }, ...inner);
+  }
+  return out;
+}
 export function redemptionExecutions(input: string, depth = 0): DecodedExecution[] | null {
   try {
     if (depth > 3 || !input.toLowerCase().startsWith(REDEEM_SELECTOR)) return null;
@@ -532,35 +564,33 @@ export function redemptionExecutions(input: string, depth = 0): DecodedExecution
     if (modes.length !== calls.length || !modes.length) return null;
     const out: DecodedExecution[] = [];
     for (const [index, mode] of modes.entries()) {
-      const callType = mode.slice(2, 4), execType = mode.slice(4, 6), call = calls[index]!.toLowerCase();
-      if (!['00', '01'].includes(execType)) return null;
-      let executions: DecodedExecution[];
-      if (callType === '00') {
-        if (call.length < 2 + (20 + 32) * 2) return null;
-        executions = [{ target: address('0x' + call.slice(2, 42)), value: BigInt('0x' + call.slice(42, 106)), data: '0x' + call.slice(106) }];
-      } else if (callType === '01') {
-        const [batch] = erc7710.abiDecode([EXECUTION_BATCH_ABI], erc7710.bytesOf(call)) as [[string, bigint, string][]];
-        executions = batch.map(([target, value, data]) => ({ target: address(target), value, data: data.toLowerCase() }));
-      } else return null;
-      for (const execution of executions) {
-        out.push(execution);
-        if (execution.target === DELEGATION_MANAGER && execution.data.startsWith(REDEEM_SELECTOR)) {
-          const nested = redemptionExecutions(execution.data, depth + 1);
-          if (!nested) return null;
-          out.push(...nested);
-        }
-      }
+      const decoded = modeExecutions(mode, calls[index]!.toLowerCase()), expanded = decoded && expandExecutions(decoded, depth);
+      if (!expanded) return null;
+      out.push(...expanded);
     }
     return out;
   } catch { return null; }
 }
-/** Whether a successful owner-rooted redemption may have executed exactly `call` (decoded and compared, or a conservative byte match if undecodable). */
-function redemptionMayExecute(input: string, call: Pick<Tx, 'to' | 'data' | 'value'>): boolean {
-  const target = address(call.to), value = BigInt(call.value || '0x0'), data = call.data.toLowerCase();
+/**
+ * Whether `hex` carries `call` as an encoded execution: packed (`target ‖ value ‖ calldata`, a single-mode execution), or as an ABI execution
+ * tuple (padded target and value, with the calldata, a batch). The token or recipient is always part of the match, never the calldata alone.
+ */
+function embedsCall(hex: string, call: DecodedExecution): boolean {
+  const target = call.target.slice(2), value = word(call.value), data = call.data.slice(2);
+  return hex.includes(target + value + data) || hex.includes('0'.repeat(24) + target + value) && (data === '' || hex.includes(data));
+}
+/**
+ * Whether a successful owner-rooted redemption may have executed exactly `call`. A call runs from the owner's account only through a
+ * redemption or the account executing as itself, so: decoded executions are compared exactly (target, value, calldata — another token,
+ * amount or recipient is never this call); an execution that still carries one of those entry points without being decodable here (e.g. an
+ * intermediary contract re-wrapping the owner's delegation), or an input that cannot be decoded at all, gets the conservative match.
+ */
+export function redemptionMayExecute(input: string, call: Pick<Tx, 'to' | 'data' | 'value'>): boolean {
+  const reviewed: DecodedExecution = { target: address(call.to), value: BigInt(call.value || '0x0'), data: call.data.toLowerCase() };
   const executions = redemptionExecutions(input);
-  if (executions) return executions.some(e => e.target === target && e.value === value && e.data === data);
-  const needle = data === '0x' ? target.slice(2) + word(value) : data.slice(2);
-  return input.toLowerCase().includes(needle);
+  if (!executions) return embedsCall(input.toLowerCase(), reviewed);
+  return executions.some(e => !e.wraps && e.target === reviewed.target && e.value === reviewed.value && e.data === reviewed.data ||
+    !e.wraps && ACCOUNT_ENTRY_SELECTORS.some(selector => e.data.includes(selector.slice(2))) && embedsCall(e.data, reviewed));
 }
 function signed(value: bigint): bigint { return value >= 1n << 255n ? value - (1n << 256n) : value; }
 export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {

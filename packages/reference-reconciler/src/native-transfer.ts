@@ -134,7 +134,7 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
     let logs: unknown[] = receipt.logs;
     // A direct transfer never redeems a delegation: a Delegation Manager log inside it (e.g. a contract recipient redeeming one the owner
     // granted) is an effect the Review did not show.
-    if (!relay && logs.some(log => String(rpcRecord(log).address).toLowerCase() === DELEGATION_MANAGER)) throw new Error('TRANSFER_LOGS_MISMATCH');
+    if (delegation && !relay && logs.some(log => String(rpcRecord(log).address).toLowerCase() === DELEGATION_MANAGER)) throw new Error('TRANSFER_LOGS_MISMATCH');
     if (relay) {
       if (relay.status !== 1) throw new Error('TRANSFER_TRANSACTION_MISMATCH');
       if (!relay.singleUse) throw new Error('TRANSFER_RELAYED_DELEGATION_NOT_SINGLE_USE');
