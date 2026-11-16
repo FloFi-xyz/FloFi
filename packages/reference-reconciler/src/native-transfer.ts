@@ -56,11 +56,19 @@ const DELEGATION_MANAGER = erc7710.DELEGATION_FRAMEWORK_V1_3.delegationManager;
  * BUILD-FLOFI-7702-TRANSFER-001: whether another transaction in `block` redeemed a delegation rooted at the owner (a relay that moves the owner's
  * funds without its nonce): positive evidence that the block's balance changes are not this transfer's alone.
  */
-async function ownerRedemptionElsewhere(rpc: TransferRpc, owner: string, block: number, hash: string): Promise<boolean> {
-  const logs = await rpc('eth_getLogs', [{ address: DELEGATION_MANAGER, topics: [erc7710.REDEEMED_DELEGATION_TOPIC, '0x' + owner.slice(2).padStart(64, '0')],
+async function ownerRedemptionElsewhere(rpc: TransferRpc, owner: string, block: number, blockHash: string, hash: string, ownLogExpected: boolean): Promise<boolean> {
+  const ownerTopic = '0x' + owner.slice(2).padStart(64, '0');
+  const answer = await rpc('eth_getLogs', [{ address: DELEGATION_MANAGER, topics: [erc7710.REDEEMED_DELEGATION_TOPIC, ownerTopic],
     fromBlock: supplyHex(block), toBlock: supplyHex(block) }]);
-  if (!Array.isArray(logs)) throw new Error('TRANSFER_RPC_INVALID');
-  return logs.map(rpcRecord).some(log => log.removed !== true && typeof log.transactionHash === 'string' && log.transactionHash.toLowerCase() !== hash);
+  if (!Array.isArray(answer)) throw new Error('TRANSFER_RPC_INVALID');
+  // Every log must be exactly what was asked for, in exactly the inclusion block; anything else is a provider answer FloFi cannot use.
+  const logs = answer.map(rpcRecord).filter(log => log.removed !== true);
+  if (logs.some(log => typeof log.address !== 'string' || log.address.toLowerCase() !== DELEGATION_MANAGER || !Array.isArray(log.topics) ||
+      String(log.topics[0]).toLowerCase() !== erc7710.REDEEMED_DELEGATION_TOPIC || String(log.topics[1]).toLowerCase() !== ownerTopic ||
+      typeof log.transactionHash !== 'string' || rpcHash(log.blockHash) !== blockHash || strict(log.blockNumber) !== BigInt(block))) throw new Error('TRANSFER_RPC_INVALID');
+  // A relayed transfer's own redemption must be in the answer: without it the provider's log index has not caught up, and nothing is decided.
+  if (ownLogExpected && !logs.some(log => String(log.transactionHash).toLowerCase() === hash)) throw new Error('TRANSFER_RPC_INVALID');
+  return logs.some(log => String(log.transactionHash).toLowerCase() !== hash);
 }
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 /** ERC-8056 `TransferWithScaledUI(address,address,uint256,uint256)`, emitted by Robinhood Stock Tokens next to `Transfer`. */
@@ -124,6 +132,9 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
     // A relayed redemption also logs the reviewed framework's bookkeeping (the manager's RedeemedDelegation, LimitedCalls' IncreasedCount),
     // already proven by the relay verifier; the authorization must be single use, so the relay can never execute the reviewed call again.
     let logs: unknown[] = receipt.logs;
+    // A direct transfer never redeems a delegation: a Delegation Manager log inside it (e.g. a contract recipient redeeming one the owner
+    // granted) is an effect the Review did not show.
+    if (!relay && logs.some(log => String(rpcRecord(log).address).toLowerCase() === DELEGATION_MANAGER)) throw new Error('TRANSFER_LOGS_MISMATCH');
     if (relay) {
       if (relay.status !== 1) throw new Error('TRANSFER_TRANSACTION_MISMATCH');
       if (!relay.singleUse) throw new Error('TRANSFER_RELAYED_DELEGATION_NOT_SINGLE_USE');
@@ -205,7 +216,7 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
       const nonceExact = relay ? nonceAfter === nonceBefore : nonceBefore === reviewed && nonceAfter === nonceBefore + 1n;
       const deltas = token ? await tokenDeltas() : null;
       shared = !(nonceExact && balanceBefore - balanceAfter === fee + valueOut && (!deltas || deltas.exact));
-      if (shared && nonceExact && !await ownerRedemptionElsewhere(rpc, owner, blockNumber, attempt.transactionHash))
+      if (shared && nonceExact && !await ownerRedemptionElsewhere(rpc, owner, blockNumber, rpcHash(receipt.blockHash), attempt.transactionHash, Boolean(relay)))
         throw new Error(deltas && !deltas.exact ? 'TRANSFER_TOKEN_BALANCE_MISMATCH' : 'TRANSFER_BALANCE_MISMATCH');
       if (deltas && !shared) tokenFacts = deltas.facts;
     }
@@ -288,9 +299,11 @@ function delegatedLimitations(review: NativeTransferReview, facts: NonNullable<T
         : self || review.state.recipientCodeHash === undefined || review.state.recipientCodeHash === supplyHash('0x') ? ', no logs' : '') + ').'],
     opStack || profile.settlement === 'L2' ? `Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`
       : `Inclusion is verified on ${profile.network} (L1) after ${profile.minimumConfirmations} confirmations; finalized-checkpoint status is not claimed.`,
-    review.asset ? 'Token transfer: exact transfer(recipient, amount) call and its transfer log(s)' + (blockLevel ? '; both token balances moved by exactly the amount' : '') + '.'
+    review.asset ? 'Token transfer: exact transfer(recipient, amount) call and its transfer log(s)' + (!blockLevel ? '' : self ? '; the owner\'s token balance is unchanged (self-transfer)'
+        : '; both token balances moved by exactly the amount') + '.'
       : self ? 'Self-transfer: the value leg nets to zero; the reviewed delegate\'s receive() ran and logged nothing.'
-      : 'Native transfer to an explicit recipient: the exact value-only call' + (blockLevel ? ' and the owner debit (value plus fee)' : '') + ' are verified.',
+      : 'Native transfer to an explicit recipient: the exact value-only call' + (blockLevel ? ' and the owner debit (value plus fee) are' : ' is') + ' verified' +
+        (review.state.recipientCodeHash !== undefined && review.state.recipientCodeHash !== supplyHash('0x') ? '; the contract recipient may execute its receive/fallback code.' : '.'),
     (relayed ? 'The relayer\'s network fee is ' : 'The network fee is ') + (opStack ? 'gasUsed × effectiveGasPrice plus the OP Stack L1 data fee (l1Fee) of the receipt.'
       : profile.settlement === 'L1' ? 'gasUsed × effectiveGasPrice.' : 'gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.')];
 }

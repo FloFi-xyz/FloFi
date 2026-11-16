@@ -204,6 +204,8 @@
   /* BUILD-FLOFI-MAINNET-EXEC-002 review round 2: the editor title's New workflow and rename controls keep 44 px targets on any touch screen width. */
   .build-canvas-head .canvas-name .workflow-new{width:44px;height:44px}
   .build-canvas-head .canvas-name .workflow-rename{min-height:44px}
+  /* FloFi's suggested answers keep 44 px touch targets on any touch screen width (their desktop size is unchanged). */
+  .copilot-options .chat-action{min-width:44px;min-height:44px}
   .copilot .chat-form .chat-input{height:56px}
   /* 16 px keeps mobile browsers from zooming into the field on focus. */
   .copilot .chat-form .chat-input input,:root[data-theme="dark"] .copilot .chat-form .chat-input input{font-size:16px}
@@ -217,6 +219,7 @@
   .build-flow-surface:has(.floating-toolbox[data-rail-expanded="true"]) .canvas-empty{padding-left:76px}
   .build-canvas-head .workflow-name-text{max-width:52vw}
   .build-canvas-head .canvas-name .workflow-new{width:44px;height:44px}
+  .copilot-options .chat-action{min-height:44px}
 }
 @media(max-width:700px){
   .build-workspace .build-canvas-head{padding:8px 10px 8px 14px}

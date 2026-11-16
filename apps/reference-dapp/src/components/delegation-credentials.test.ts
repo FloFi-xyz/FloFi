@@ -148,3 +148,83 @@ describe('Credentials → Automatic execution reuses the same session', () => {
     nothingAsked();
   });
 });
+
+/**
+ * Second-round review: the passkeys and Credentials read (`useOverview`) is explicit about loading and failure. Until it answers for exactly this
+ * wallet nothing is claimed empty and no passkey can be added (an owner who has passkeys is never offered a blind duplicate); a failure is shown with
+ * "Try again", never as an empty list or a count of 0; a missing server session re-reads the proof so the explicit proof returns. Nothing in these
+ * paths registers, revokes or signs anything.
+ */
+describe('the passkeys and Credentials read is explicit about loading and failure', () => {
+  const button = (tree: ReactNode, label: string) => nodes(tree).find(e => e.type === 'button' && textOf(e.props.children) === label);
+  const count = (tree: ReactNode) => nodes(tree).find(e => e.props.className === 'ux-count');
+  type Read = { ok: true; value: DelegationOverviewView } | { ok: false; code: string };
+  /** The session answers, then the overview read it starts answers (one render each). */
+  const settle = async (workspace: 'passkeys' | 'credentials') => { page(workspace); await flush(); page(workspace); await flush(); return page(workspace); };
+  beforeEach(() => { w.evmStatus.mockResolvedValue({ account: A, expiresAt: later() }); });
+
+  it('Passkeys: while the read is pending it says so, never "No passkeys yet", and Add a passkey stays disabled', async () => {
+    const read = deferred<Read>(); w.overview.mockReturnValueOnce(read.promise);
+    page('passkeys'); await flush(); let view = page('passkeys');
+    expect(manager(view.tree)).toBe(true); expect(view.text).toContain('Checking passkeys…');
+    expect(view.text).not.toContain('No passkeys yet'); expect(button(view.tree, 'Add a passkey')?.props.disabled).toBe(true);
+    read.resolve({ ok: true, value: { ...overview, passkeys: [] } }); await flush(); view = page('passkeys');
+    expect(view.text).not.toContain('Checking passkeys…'); expect(view.text).toContain('No passkeys yet. Add one to get started.');
+    expect(button(view.tree, 'Add a passkey')?.props.disabled).toBe(false); nothingAsked();
+  });
+  it('Passkeys: a failed read shows the error with Try again (no empty state, Add disabled); Try again reads again', async () => {
+    w.overview.mockResolvedValueOnce({ ok: false, code: 'DELEGATION_UNAVAILABLE' });
+    let view = await settle('passkeys');
+    expect(view.text).toContain('FloFi could not load your passkeys and Credentials (DELEGATION_UNAVAILABLE). Nothing was changed.');
+    expect(view.text).not.toContain('No passkeys yet'); expect(button(view.tree, 'Add a passkey')?.props.disabled).toBe(true);
+    const again = deferred<Read>(); w.overview.mockReturnValueOnce(again.promise);
+    (button(view.tree, 'Try again')!.props.onClick as () => void)(); view = page('passkeys');
+    expect(w.overview).toHaveBeenCalledTimes(2); expect(view.text).toContain('Checking passkeys…'); expect(button(view.tree, 'Try again')).toBeUndefined();
+    again.resolve({ ok: true, value: overview }); await flush(); view = page('passkeys');
+    expect(view.text).toContain('Laptop'); expect(view.text).not.toContain('could not load'); expect(button(view.tree, 'Add a passkey')?.props.disabled).toBe(false);
+    nothingAsked();
+  });
+  it('a missing server session (WALLET_SESSION_REQUIRED) re-reads the proof, so the explicit proof returns', async () => {
+    w.overview.mockResolvedValueOnce({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
+    page('passkeys'); await flush(); page('passkeys'); const reads = w.evmStatus.mock.calls.length;
+    // The server no longer holds the session: the proof's own session read now finds none.
+    w.evmStatus.mockResolvedValue(null); await flush(); expect(w.evmStatus.mock.calls.length).toBe(reads + 1);
+    page('passkeys'); await flush(); const view = page('passkeys'); expect(proveButton(view.tree)).toBe(true); expect(manager(view.tree)).toBe(false);
+    expect(view.text).toContain('Verify wallet ownership to manage passkeys.'); nothingAsked();
+  });
+  it('an older read for the same wallet (FloFi account switched meanwhile) answering last is ignored', async () => {
+    w.privy = { ready: true, userId: 'did:privy:alice' }; w.evmStatus.mockResolvedValue({ account: A, expiresAt: later() });
+    const first = deferred<Read>(); w.overview.mockReturnValueOnce(first.promise);
+    page('passkeys'); await flush(); page('passkeys'); await flush(); expect(page('passkeys').text).toContain('Checking passkeys…');
+    w.privy = { ready: true, userId: 'did:privy:bob' }; page('passkeys'); await flush(); page('passkeys'); await flush();
+    let view = page('passkeys'); expect(w.overview).toHaveBeenCalledTimes(2); expect(view.text).toContain('Laptop');
+    first.resolve({ ok: false, code: 'DELEGATION_UNAVAILABLE' }); await flush(); view = page('passkeys');
+    expect(view.text).toContain('Laptop'); expect(view.text).not.toContain('could not load'); nothingAsked();
+  });
+  it('a server that refuses the session while the client still holds one offers the explicit proof, never a "Try again" dead end', async () => {
+    w.overview.mockResolvedValue({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
+    const view = await settle('passkeys');
+    expect(manager(view.tree)).toBe(true); expect(proveButton(view.tree)).toBe(true); expect(button(view.tree, 'Try again')).toBeDefined();
+    expect(button(view.tree, 'Add a passkey')?.props.disabled).toBe(true); nothingAsked();
+    // The overview read asks the server with the canonical (lowercase) EVM address the session is matched on.
+    expect(w.overview.mock.calls.every(([owner]) => owner.address === owner.address.toLowerCase())).toBe(true);
+  });
+  it('Credentials: pending and failed reads show no count and no empty list; Try again reads again; no Solana session read while enrollment is retired', async () => {
+    const read = deferred<Read>(); w.overview.mockReturnValueOnce(read.promise);
+    page('credentials'); await flush(); let view = page('credentials');
+    expect(view.text).toContain('Checking your Credentials…'); expect(count(view.tree)).toBeUndefined();
+    expect(nodes(view.tree).some(e => e.props.className === 'automation-list')).toBe(false);
+    read.resolve({ ok: false, code: 'DELEGATION_UNAVAILABLE' }); await flush(); view = page('credentials');
+    expect(view.text).toContain('FloFi could not load your passkeys and Credentials (DELEGATION_UNAVAILABLE). Nothing was changed.');
+    expect(count(view.tree)).toBeUndefined(); expect(nodes(view.tree).some(e => e.props.className === 'automation-list')).toBe(false);
+    (button(view.tree, 'Try again')!.props.onClick as () => void)(); await flush(); view = page('credentials');
+    expect(w.overview).toHaveBeenCalledTimes(2); expect(textOf(count(view.tree)?.props.children)).toBe('0');
+    expect(nodes(view.tree).some(e => e.props.className === 'automation-list')).toBe(true);
+    expect(w.solanaStatus).not.toHaveBeenCalled(); nothingAsked();
+  });
+  it('a case-only change of the owner\'s EVM address does not read the overview again', async () => {
+    expect(manager((await settle('passkeys')).tree)).toBe(true); expect(w.overview).toHaveBeenCalledOnce();
+    w.evm.account = CHECKSUMMED; await flush(); const view = page('passkeys');
+    expect(manager(view.tree)).toBe(true); expect(view.text).toContain('Laptop'); expect(w.overview).toHaveBeenCalledOnce(); nothingAsked();
+  });
+});

@@ -38,7 +38,14 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 export type TransferWalletDiagnostic = { invoked: boolean; rejectionCode?: number; code: string;
   calls: { method: string; submission?: boolean; result?: unknown; error?: unknown }[] };
 export type TransferRecord = TransferRun & { observations: TransferObservation[]; evidence: NativeTransferEvidence | null; error: string | null;
-  notSubmitted?: boolean; recoveryOf?: string; walletDiagnostic?: TransferWalletDiagnostic };
+  notSubmitted?: boolean; recoveryOf?: string; walletDiagnostic?: TransferWalletDiagnostic;
+  /**
+   * BUILD-FLOFI-7702-TRANSFER-001, recovery runs of a Smart Account only: the prepared block of the first attempt of the same call (the refused
+   * runs this one recovers), fixed when the recovery Review is created. Duplicate and refusal checks scan from it.
+   */
+  relayScanFrom?: number;
+  /** BUILD-FLOFI-7702-TRANSFER-001: the relayed transactions a scan found when it recorded a divergence (for review and audit). */
+  relayedExecutions?: string[] };
 export type TransferBegin = { record: TransferRecord; transaction: NativeTransferTransaction };
 /** Wallet error codes that prove the request was refused before any broadcast. */
 const REFUSALS = [4001, 4100, 4200];
@@ -160,7 +167,7 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
         if (record.id !== prior.id || record.review.commitment !== prior.review.commitment || record.recoveryOf !== prior.recoveryOf ||
             !prefix(prior.journal.entries, record.journal.entries) || !prefix(prior.observations, record.observations) ||
             prior.ownerInitiated && !record.ownerInitiated || prior.verdict !== 'PENDING' && record.verdict !== prior.verdict ||
-            prior.notSubmitted && !record.notSubmitted || prior.evidence && !same(prior.evidence, record.evidence) ||
+            prior.notSubmitted && !record.notSubmitted || prior.evidence && !same(prior.evidence, record.evidence) || prior.relayScanFrom !== record.relayScanFrom ||
             a && (!b || a.nonce !== b.nonce || a.preparedAtBlock !== b.preparedAtBlock || !same(a.transaction, b.transaction) ||
               a.transactionHash && a.transactionHash !== b.transactionHash || a.reconciled && !b.reconciled)) throw new Error('TRANSFER_STORE_CORRUPT');
       }
@@ -188,32 +195,42 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       return holder !== null && holder.id !== record.id;
     }, requests);
   /**
-   * BUILD-FLOFI-7702-TRANSFER-001: the first block from which this run's reviewed call could have executed: its own attempt and every earlier
-   * attempt of the refused runs it recovers (the same workflow, owner and call), so no relay landing between them escapes a scan.
+   * BUILD-FLOFI-7702-TRANSFER-001: the first block from which this run's reviewed call could have executed: its own attempt, or the first attempt
+   * of the refused runs it recovers (the same workflow, owner and call; recorded once in the recovery Review), so no relay landing between
+   * them escapes a duplicate or refusal check.
    */
-  const sameCallFrom = async (record: TransferRecord, own = record.attempt?.preparedAtBlock ?? Number.MAX_SAFE_INTEGER): Promise<number> => {
-    let from = own, current = record;
-    for (let depth = 0; current.recoveryOf && depth < 64; depth++) {
-      current = await load(current.recoveryOf);
-      if (current.attempt) from = Math.min(from, current.attempt.preparedAtBlock);
-    }
-    return from;
-  };
-  /** BUILD-FLOFI-7702-TRANSFER-001: an EIP-7702 authorization also moves the account nonce without a transaction of its own: a different use of it. */
+  const sameCallFrom = (record: TransferRecord): number =>
+    Math.min(record.attempt?.preparedAtBlock ?? Number.MAX_SAFE_INTEGER, record.relayScanFrom ?? Number.MAX_SAFE_INTEGER);
+  /**
+   * BUILD-FLOFI-7702-TRANSFER-001: the nonce discovery of a relay-capable owner. Its nonce can also move without a transaction of its own (an
+   * EIP-7702 authorization), which discovery reports as inconsistent: the answer is then not final either way (`inconsistent`), never a verdict.
+   */
   const nonceUse = async (attempt: NonNullable<TransferRecord['attempt']>, review: NativeTransferReview) => {
-    try { return await discoverTransferByNonce(attempt, rpcFor(review.chain)); }
+    try { return { ...await discoverTransferByNonce(attempt, rpcFor(review.chain)), inconsistent: false }; }
     catch (cause) {
-      if (relayCapable(review) && cause instanceof Error && cause.message === 'TRANSFER_DISCOVERY_INCONSISTENT') return { hash: null, mismatch: true, consumed: true };
+      if (relayCapable(review) && cause instanceof Error && cause.message === 'TRANSFER_DISCOVERY_INCONSISTENT') return { hash: null, mismatch: false, consumed: true, inconsistent: true };
       throw cause;
     }
   };
+  /** How long after preparation a relay may still be submitted by MetaMask before "the nonce went elsewhere and no relay exists" is final. */
+  const RELAY_SETTLE_MS = 10 * 60_000;
+  const preparedAt = (record: TransferRecord): number => {
+    const entry = [...record.journal.entries].reverse().find(e => e.level === 'attempt' && e.toState === 'PREPARED');
+    return entry ? Date.parse(entry.recordedAt) : Number.NaN;
+  };
   /** Records an observation-only error once (polling never appends the same line again). */
   const note = (record: TransferRecord, error: string) => record.error === error ? record : save({ ...record, error });
-  /** A terminal divergence of the run's attempt, recorded with the observation that established it (when there is one). */
-  const diverge = (record: TransferRecord, reason: string, observation?: TransferObservation) => {
-    const terminal = transferTransition(record, 'RECONCILIATION_REQUIRED', at());
-    return save({ ...record, ...terminal, verdict: 'DIVERGENT', error: reason,
-      observations: observation ? [...record.observations, { ...observation, verdict: 'DIVERGENT', reason }] : record.observations });
+  /**
+   * A terminal divergence of the run's attempt, recorded with the observation that established it (when there is one) and the relayed
+   * transactions a scan found. An attempt still SUBMITTING (the browser never reported) first becomes SUBMISSION_RESULT_UNKNOWN.
+   */
+  const diverge = (record: TransferRecord, reason: string, observation?: TransferObservation, relayed: readonly string[] = []) => {
+    let next = record;
+    if (next.attempt?.state === 'SUBMITTING') next = { ...next, ...transferTransition(next, 'SUBMISSION_RESULT_UNKNOWN', at()) };
+    const terminal = transferTransition(next, 'RECONCILIATION_REQUIRED', at());
+    return save({ ...next, ...terminal, verdict: 'DIVERGENT', error: reason,
+      observations: observation ? [...next.observations, { ...observation, verdict: 'DIVERGENT', reason }] : next.observations,
+      ...relayed.length ? { relayedExecutions: [...new Set(relayed)] } : {} });
   };
   /** Permanent economic identity of (owner, nonce). Only a proven pre-broadcast refusal lets a fresh Review reuse it. */
   async function reserveNonce(record: TransferRecord): Promise<void> {
@@ -228,7 +245,8 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       } else {
         const last = intentLines(existing!).at(-1)!;
         let line = entry;
-        if (!record.recoveryOf || last.id !== record.recoveryOf || !(await load(record.recoveryOf)).notSubmitted) {
+        const recovered = record.recoveryOf && last.id === record.recoveryOf ? await load(record.recoveryOf) : null;
+        if (!recovered?.notSubmitted || recovered.verdict !== 'PENDING') {
           // BUILD-FLOFI-7702-TRANSFER-001: a holder whose reviewed transfer was relayed never used this nonce; its evidence hands the reservation over.
           const holder = await load(last.id).catch(() => null), release = holder ? relayedTransferNonceRelease(holder, record.review) : null;
           if (!release || record.recoveryOf) throw new Error('TRANSFER_NONCE_ALREADY_RESERVED');
@@ -238,7 +256,7 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       }
     });
   }
-  const fresh = async (workflowInput: unknown, account: string, recoveryOf?: { id: string; nonce: string }): Promise<TransferRecord> => {
+  const fresh = async (workflowInput: unknown, account: string, recoveryOf?: { id: string; nonce: string; scanFrom?: number }): Promise<TransferRecord> => {
     const workflow = validateAuthoringWorkflow(workflowInput, createBaseSepoliaReviewContext());
     const chain = workflow.nodes.find(node => node.actionType === 'asset.transfer')?.chainId;
     if (!chain) throw new Error('TRANSFER_ISOLATED_ONLY');
@@ -250,7 +268,8 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
     // A fresh Review may only re-authorize the SAME unconsumed nonce; anything else means the chain moved on.
     if (recoveryOf && review.nonce !== recoveryOf.nonce) throw new Error('TRANSFER_RECOVERY_STATE_CHANGED_OBSERVE_EXISTING');
     const record: TransferRecord = { ...createTransferRun(idPrefix + '-' + randomBytes(16).toString('hex'), review, input.provenance, at()),
-      observations: [], evidence: null, error: null, ...recoveryOf ? { recoveryOf: recoveryOf.id } : {} };
+      observations: [], evidence: null, error: null, ...recoveryOf ? { recoveryOf: recoveryOf.id } : {},
+      ...recoveryOf?.scanFrom !== undefined && relayCapable(review) ? { relayScanFrom: recoveryOf.scanFrom } : {} };
     return save(record);
   };
   return {
@@ -290,8 +309,12 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       // BUILD-FLOFI-7702-TRANSFER-001: a recovery Review of a Smart Account's refused transfer checks again, just before it reserves, that no
       // earlier attempt of the same call was relayed in the meantime (a relay leaves the owner nonce unchanged, so `begin` cannot see it).
       if (relayCapable(record.review) && record.recoveryOf) {
-        const scan = await relayScan(record, await sameCallFrom(record), RELAY_DUPLICATE_SCAN_REQUESTS);
-        if (scan.verified.length || scan.unclassified.length) throw new Error('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
+        const scan = await relayScan(record, sameCallFrom(record), RELAY_DUPLICATE_SCAN_REQUESTS);
+        if (scan.verified.length || scan.unclassified.length) {
+          // Recorded on this Review (no longer authorized), so a repeated Execute never scans again or reaches the wallet.
+          await save({ ...record, authorization: null, error: 'TRANSFER_REJECTED_ATTEMPT_EXECUTED', relayedExecutions: [...scan.verified, ...scan.unclassified] });
+          throw new Error('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
+        }
         if (scan.waiting || !scan.complete) throw new Error('TRANSFER_RELAYED_EXECUTION_PENDING');
       }
       await reserveNonce(record);
@@ -360,16 +383,20 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
         // BUILD-FLOFI-7702-TRANSFER-001: a Smart Account's wallet may have had the call relayed (its nonce unused, or later used by another of its
         // transactions): a verified relayed execution is this attempt's submission. A relayed and a direct execution, or two relayed ones, are a
         // duplicate; a relayed execution in a shape FloFi does not reconcile (e.g. batched with a fee) is recorded, never adopted or ignored.
-        const scan = relayCapable(record.review) ? await relayScan(record, await sameCallFrom(record)) : null;
+        // This run's own submission cannot precede its own preparation: discovery scans from there (duplicates are checked from the first
+        // attempt of the call below, once a submission is known).
+        const scan = relayCapable(record.review) ? await relayScan(record, attempt.preparedAtBlock) : null;
         if (scan?.waiting) return note(record, 'TRANSFER_RELAYED_EXECUTION_PENDING');
-        if (scan?.unclassified.length) return diverge(record, 'TRANSFER_RELAYED_EXECUTION_UNSUPPORTED_SHAPE');
+        if (scan?.unclassified.length) return diverge(record, 'TRANSFER_RELAYED_EXECUTION_UNSUPPORTED_SHAPE', undefined, scan.unclassified);
         if (scan && (scan.verified.length > 1 || scan.verified.length === 1 && found.consumed && found.hash && !found.mismatch))
-          return diverge(record, 'TRANSFER_RELAYED_DUPLICATE_EXECUTION');
-        const relayedHash = scan?.verified[0] ?? null;
-        if (!relayedHash && scan && found.consumed && found.mismatch) {
+          return diverge(record, 'TRANSFER_RELAYED_DUPLICATE_EXECUTION', undefined, [...scan.verified, ...found.hash ? [found.hash] : []]);
+        const relayedHash = scan?.verified[0] ?? null, settled = now() - preparedAt(record) >= RELAY_SETTLE_MS;
+        // An inconsistent nonce read (an EIP-7702 authorization, or a provider that has not caught up) decides nothing while it may be transient.
+        if (!relayedHash && found.inconsistent && !settled) return note(record, 'TRANSFER_RELAYED_EXECUTION_PENDING');
+        if (!relayedHash && scan && found.consumed && (found.mismatch || found.inconsistent)) {
           // The owner's nonce went to something else, but a relay needs no nonce: the reviewed transfer may still land. Kept observable until the
-          // scan covered its whole window, then recorded without claiming it can never execute.
-          return scan.complete ? diverge(record, 'TRANSFER_NONCE_USED_RELAY_NOT_FOUND') : note(record, 'TRANSFER_RELAYED_EXECUTION_PENDING');
+          // scan covered its whole window and MetaMask had time to relay, then recorded without claiming it can never execute.
+          return scan.complete && settled ? diverge(record, 'TRANSFER_NONCE_USED_RELAY_NOT_FOUND') : note(record, 'TRANSFER_RELAYED_EXECUTION_PENDING');
         }
         if (!relayedHash && (!found.consumed || !found.hash)) return note(record, 'TRANSFER_TRANSACTION_NOT_OBSERVED');
         record = { ...record, attempt: { ...attempt, transactionHash: relayedHash ?? found.hash } };
@@ -382,7 +409,7 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       }
       const current = record.attempt!, rpc = rpcFor(record.review.chain);
       const observation = await reconcileNativeTransfer(record.review, current, rpc, relayCapable(record.review) ? { relayed: relayVerifier(rpc) } : {});
-      if (observation.verdict === 'INCONCLUSIVE') return save({ ...record, error: observation.reason });
+      if (observation.verdict === 'INCONCLUSIVE') return note(record, observation.reason);
       const observations = [...record.observations, observation];
       if (observation.verdict === 'DIVERGENT') {
         const terminal = transferTransition(record, observation.reason === 'TRANSFER_REVERTED' ? 'REVERTED' : 'RECONCILIATION_REQUIRED', at());
@@ -392,15 +419,19 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
         // BUILD-FLOFI-7702-TRANSFER-001: one relayed transaction is credited to one run (it carries no owner nonce).
         if (observation.facts?.submission === 'RELAYED' &&
             !await claims.claim(relayChain(record.review).chainId, current.transactionHash!, { id: record.id, attemptId: `${record.id}.TRANSFER` }))
-          return diverge(record, 'TRANSFER_RELAYED_TRANSACTION_ALREADY_CLAIMED', observation);
+          return diverge(record, 'TRANSFER_RELAYED_TRANSACTION_ALREADY_CLAIMED', observation, [current.transactionHash!]);
         // No second execution of the same reviewed transfer: for an owner that can relay, its nonce cannot prove it. Every verified relayed
         // execution since preparation, and (for a relayed receipt) a direct one at the reviewed nonce, are looked for before this receipt
         // becomes evidence; a scan that is not final or cannot cover the whole window keeps the attempt pending.
-        const scan = await relayScan(record, await sameCallFrom(record), RELAY_DUPLICATE_SCAN_REQUESTS);
+        const scan = await relayScan(record, sameCallFrom(record), RELAY_DUPLICATE_SCAN_REQUESTS);
         if (scan.waiting || !scan.complete) return note(record, 'TRANSFER_RELAYED_EXECUTION_PENDING');
         const direct = observation.facts?.submission === 'RELAYED' ? await nonceUse({ ...current, transactionHash: null }, record.review) : null;
-        if (scan.verified.some(hash => hash !== current.transactionHash) || scan.unclassified.some(hash => hash !== current.transactionHash) ||
-            direct?.consumed && direct.hash && !direct.mismatch) return diverge(record, 'TRANSFER_RELAYED_DUPLICATE_EXECUTION', observation);
+        // An inconsistent read of the owner's nonce is retried until it has persisted past the settle window (then it is not a transaction of
+        // the owner at that nonce, e.g. an EIP-7702 authorization): never a final "no direct duplicate" from one possibly stale answer.
+        if (direct?.inconsistent && now() - preparedAt(record) < RELAY_SETTLE_MS) return note(record, 'TRANSFER_RELAYED_EXECUTION_PENDING');
+        const others = [...scan.verified, ...scan.unclassified].filter(hash => hash !== current.transactionHash);
+        if (others.length || direct?.consumed && direct.hash && !direct.mismatch)
+          return diverge(record, 'TRANSFER_RELAYED_DUPLICATE_EXECUTION', observation, [current.transactionHash!, ...others, ...direct?.hash ? [direct.hash] : []]);
       }
       const confirmed = transferTransition(record, 'CONFIRMED', at());
       const reconciled: TransferRecord = { ...record, ...confirmed, attempt: { ...confirmed.attempt!, reconciled: true }, observations, verdict: 'RECONCILED', error: null };
@@ -413,15 +444,17 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       if (!record.notSubmitted || record.verdict !== 'PENDING' || !attempt || attempt.transactionHash) throw new Error('TRANSFER_RECOVERY_OBSERVE_ONLY');
       // BUILD-FLOFI-7702-TRANSFER-001: a wallet refusal is trusted for a new Review only after checking that the refused call was not relayed (a
       // relay leaves the owner nonce unchanged, so the same-nonce rule cannot see it): never a second authorization of an executed transfer.
+      const scanFrom = sameCallFrom(record);
       if (relayCapable(record.review)) {
-        const scan = await relayScan(record, await sameCallFrom(record), RELAY_DUPLICATE_SCAN_REQUESTS);
+        const scan = await relayScan(record, scanFrom, RELAY_DUPLICATE_SCAN_REQUESTS);
         if (scan.verified.length || scan.unclassified.length) {
-          await save({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'TRANSFER_REJECTED_ATTEMPT_EXECUTED' });
+          await save({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'TRANSFER_REJECTED_ATTEMPT_EXECUTED',
+            relayedExecutions: [...scan.verified, ...scan.unclassified] });
           throw new Error('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
         }
         if (scan.waiting || !scan.complete) throw new Error('TRANSFER_RELAYED_EXECUTION_PENDING');
       }
-      return fresh(record.review.workflow, record.review.account, { id, nonce: attempt.nonce });
+      return fresh(record.review.workflow, record.review.account, { id, nonce: attempt.nonce, scanFrom });
     }); },
   };
 }

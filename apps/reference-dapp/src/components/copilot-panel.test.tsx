@@ -224,4 +224,15 @@ describe('chat answers carry a presentational variant', () => {
     expect(css).toContain('.copilot-options .chat-action:disabled{border-color:var(--line);background:var(--soft);color:var(--muted)}');
     expect(css).toContain('.copilot-options .chat-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}');
   });
+  it('FloFi\'s answers are 44 px touch targets on touch screens and at ≤ 800 px; the desktop chip keeps its size', () => {
+    const css = readFileSync(new URL('../app/approved-ux-editor.css', import.meta.url), 'utf8');
+    const block = (start: string) => { const from = css.indexOf(start); let depth = 0;
+      for (let i = from; i < css.length; i++) { if (css[i] === '{') depth++; else if (css[i] === '}' && --depth === 0) return css.slice(from, i + 1); } return ''; };
+    expect(block('@media(pointer:coarse){')).toContain('.copilot-options .chat-action{min-width:44px;min-height:44px}');
+    expect(block('@media(max-width:800px){')).toContain('.copilot-options .chat-action{min-height:44px}');
+    // Outside those blocks the answer chip sets no height of its own (the globals' 32 px minimum stays on desktop).
+    const desktop = css.replace(block('@media(pointer:coarse){'), '').replace(block('@media(max-width:800px){'), '');
+    expect(desktop.match(/\.copilot-options \.chat-action\{[^}]*\}/)?.[0]).toBe('.copilot-options .chat-action{max-width:100%;padding:6px 10px;border:1px solid var(--line);background:var(--soft);color:var(--ink);text-align:center;overflow-wrap:anywhere}');
+    expect(desktop).not.toMatch(/\.chat-action[^{]*\{[^}]*(?:min-)?height/);
+  });
 });

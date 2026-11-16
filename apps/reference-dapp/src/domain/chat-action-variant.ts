@@ -11,6 +11,8 @@ import { ASSIST_COPY } from './copilot-assist';
 import { learningCopy } from './copilot-learning-copy';
 import type { ConversationLanguage } from './conversation-lifecycle';
 import { translate } from '../i18n/translate';
+import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
+import { NETWORKS, networkIdentity } from './network-registry';
 
 export type ChatActionVariant = 'primary' | 'secondary' | 'destructive';
 
@@ -24,12 +26,18 @@ const PRIMARY = new Set(LANGUAGES.flatMap(language => {
 /** Answers that undo, discard or delete something. */
 const DESTRUCTIVE = new Set(LANGUAGES.flatMap(language => [conversationCopy(language).undo, conversationCopy(language).discardEdit,
   learningCopy(language).forgetAllOptions[0]]));
-/** The wallet network switch FloFi offers in the chat ("Switch to Base" / "Mudar para Base", `app-shell.tsx`): its fixed prefix. */
-const SWITCH_NETWORK = LANGUAGES.map(language => translate(language, 'Switch to {0}', ''));
+/**
+ * The wallet network switches FloFi itself offers in the chat ("Switch to Base" / "Trocar para Base", `app-shell.tsx`): exactly the labels of the
+ * destinations `walletNetworkTarget` can name (a switchable EVM wallet network by its registry name, else its wallet label; Solana and Solana Devnet),
+ * in either language. Any other "Switch to …" (for example one a model wrote) is a secondary choice.
+ */
+const SWITCH_TARGETS = [...EVM_WALLET_NETWORKS.filter(network => network.switchable).map(network => networkIdentity(network.chain)?.name ?? network.label),
+  ...['solana', 'solana-devnet'].flatMap(key => NETWORKS.filter(network => network.key === key).map(network => network.name))];
+const SWITCH_NETWORK = new Set(LANGUAGES.flatMap(language => SWITCH_TARGETS.map(name => translate(language, 'Switch to {0}', name))));
 
 export function chatActionVariant(option: string): ChatActionVariant {
   const label = option.trim();
   if (DESTRUCTIVE.has(label)) return 'destructive';
-  if (PRIMARY.has(label) || SWITCH_NETWORK.some(prefix => label.length > prefix.length && label.startsWith(prefix))) return 'primary';
+  if (PRIMARY.has(label) || SWITCH_NETWORK.has(label)) return 'primary';
   return 'secondary';
 }

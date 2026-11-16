@@ -189,6 +189,22 @@ describe('reusing the server-verified session of the connected wallet', () => {
     expect(sameWallet('solana', owner, owner.toLowerCase())).toBe(false); expect(sameWallet('solana', owner, owner)).toBe(true);
     expect(sameWallet('eip155', null, A)).toBe(false); nothingAsked();
   });
+  it('a case-only change of the same EVM address neither restarts the session read nor withdraws the proof (Solana stays exact)', async () => {
+    const first = deferred<{ account: string; expiresAt: string } | null>(); f.evmAccount = A; f.evmStatus.mockReturnValueOnce(first.promise);
+    expect(shell()).toMatchObject({ checking: true, proven: null });
+    // The checksummed form of the same address while the first read is in flight: still that read, no second one.
+    f.evmAccount = '0x52908400098527886E0F7030069857D2E4169EE7'; expect(shell()).toMatchObject({ checking: true, proven: null });
+    first.resolve({ account: A, expiresAt: later() }); await flush();
+    expect(shell()).toMatchObject({ checking: false, proven: A }); expect(f.evmStatus).toHaveBeenCalledOnce();
+    f.evmAccount = A; expect(shell()).toMatchObject({ checking: false, proven: A }); await flush(); expect(f.evmStatus).toHaveBeenCalledOnce();
+    // Solana base58 is case-sensitive: another casing is another wallet, read again and never proven by the first session.
+    host.unmount(); host = new HookHarness(); f.evmAccount = null; f.session = session('solana:mainnet');
+    f.status.mockResolvedValue({ account: owner, expiresAt: later() }); read(); await flush(); expect(read().proven).toBe(owner);
+    const reads = f.status.mock.calls.length, lower = owner.toLowerCase();
+    f.session = { ...session('solana:mainnet'), account: { ...session('solana:mainnet').account, address: lower } };
+    expect(read()).toMatchObject({ checking: true, proven: null }); await flush();
+    expect(f.status.mock.calls.length).toBe(reads + 1); expect(read().proven).toBeNull(); nothingAsked();
+  });
   it('a slow read for wallet A that answers after the switch to wallet B never unlocks B', async () => {
     const forA = deferred<{ account: string; expiresAt: string } | null>(), forB = deferred<{ account: string; expiresAt: string } | null>();
     f.evmAccount = A; f.evmStatus.mockReturnValueOnce(forA.promise).mockReturnValueOnce(forB.promise); shell();

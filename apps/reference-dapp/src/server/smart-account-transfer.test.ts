@@ -365,7 +365,9 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
     chain.relay(begun.transaction, { relayer }); chain.mine(3);
     await s.review(fresh.id, fresh.review.commitment, token());
     await expect(s.begin(fresh.id, owner, token())).rejects.toThrow('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
-    expect((await s.load(fresh.id)).attempt).toBeNull();
+    // Recorded on the recovery Review: no longer authorized, so a repeated Execute never scans again or reaches the wallet.
+    expect(await s.load(fresh.id)).toMatchObject({ attempt: null, authorization: null, error: 'TRANSFER_REJECTED_ATTEMPT_EXECUTED', relayedExecutions: [expect.any(String)] });
+    await expect(s.begin(fresh.id, owner, token())).rejects.toThrow('TRANSFER_REVIEW_REQUIRED');
     expect(intents(path)).toHaveLength(1);
   });
   it('a refused transfer relayed after the recovery run began is a duplicate of the recovery run\'s own execution (scans start at the first attempt)', async () => {
@@ -385,6 +387,9 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
     await s.report(id, { kind: 'UNKNOWN' });
     // The owner's wallet uses nonce 0 for something else; no relay of the reviewed call exists.
     chain.apply({ from: owner, to: recipient, value: '0x1', data: '0x' }); chain.mine(2);
+    // MetaMask may still relay shortly after: within the settle window the run stays observable.
+    expect(await s.observe(id)).toMatchObject({ verdict: 'PENDING', error: 'TRANSFER_RELAYED_EXECUTION_PENDING' });
+    now += 11 * 60_000;
     expect(await s.observe(id)).toMatchObject({ verdict: 'DIVERGENT', error: 'TRANSFER_NONCE_USED_RELAY_NOT_FOUND', evidence: null });
   });
   it('a reported relay hash mined before preparation is a mismatch, never a provider error that keeps the nonce forever', async () => {
@@ -403,6 +408,85 @@ describe('BUILD-FLOFI-7702-TRANSFER-001 MetaMask-relayed submissions (Delegation
   });
   it('the reconciler looks for other redemptions with the Delegation Manager\'s real RedeemedDelegation topic', () => {
     expect(erc7710.REDEEMED_DELEGATION_TOPIC).toBe('0x40dadaa36c6c2e3d7317e24757451ffb2d603d875f0ad5e92c5dd156573b1873');
+  });
+  // Second review round.
+  const fail4001 = { invoked: true, rejectionCode: 4001, code: 'TRANSFER_REJECTED', calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] };
+  const wethTransfer = (to: string, amount: bigint) => ({ from: owner, to: UNI.weth, value: '0x0', data: '0xa9059cbb' + to.slice(2).padStart(64, '0') + amount.toString(16).padStart(64, '0') });
+  it('a divergence found while the browser never reported (attempt still SUBMITTING) is recorded, never an invalid transition', async () => {
+    const s = service(), { id, transaction } = await prepared(s, token());
+    expect((await s.load(id)).attempt?.state).toBe('SUBMITTING');
+    chain.relay(transaction, { relayer, batch: true }); chain.mine(2);
+    const done = await s.observe(id);
+    expect(done).toMatchObject({ verdict: 'DIVERGENT', error: 'TRANSFER_RELAYED_EXECUTION_UNSUPPORTED_SHAPE', attempt: { state: 'RECONCILIATION_REQUIRED' } });
+    expect(done.relayedExecutions).toHaveLength(1);
+  });
+  it('another token or a WETH transfer to the same recipient and amount is never taken for the reviewed call (exact decoding)', async () => {
+    chain.fund(UNI.weth, owner, 10n ** 18n);
+    const s = service(), token1 = await prepared(s, token());
+    chain.relay(wethTransfer(recipient, 1_000_000n), { relayer });
+    await s.report(token1.id, { kind: 'HASH', hash: chain.apply(token1.transaction) }); chain.mine(2);
+    expect(await s.observe(token1.id)).toMatchObject({ verdict: 'RECONCILED', error: null });
+    const eth = await prepared(s, native());
+    chain.relay(wethTransfer(recipient, 10_000_000_000_000_000n), { relayer });
+    await s.report(eth.id, { kind: 'HASH', hash: chain.apply(eth.transaction) }); chain.mine(2);
+    expect(await s.observe(eth.id)).toMatchObject({ verdict: 'RECONCILED', error: null });
+  });
+  it.each([[false], [true]] as const)('a lost native transfer that MetaMask relayed (batch mode: %s) is found by the scan and recorded, never ignored', async batch => {
+    const s = service(), { id, transaction } = await prepared(s, native());
+    await s.report(id, { kind: 'UNKNOWN' });
+    chain.relay(transaction, { relayer, batch }); chain.mine(2);
+    expect(await s.observe(id)).toMatchObject({ verdict: 'DIVERGENT', error: 'TRANSFER_RELAYED_EXECUTION_UNSUPPORTED_SHAPE', evidence: null });
+  });
+  it('a refusal that was relayed is found for a native transfer too, before any new Review', async () => {
+    const s = service(), run = await s.simulate(native(), owner);
+    await s.review(run.id, run.review.commitment, native());
+    const begun = await s.begin(run.id, owner, native()); await s.handoff(run.id);
+    await s.walletFailure(run.id, fail4001);
+    chain.relay(begun.transaction, { relayer }); chain.mine(2);
+    await expect(s.recoverReview(run.id)).rejects.toThrow('TRANSFER_REJECTED_ATTEMPT_EXECUTED');
+    expect((await s.load(run.id)).relayedExecutions).toHaveLength(1);
+  });
+  it('a node that serves the receipt but not the transaction keeps the scan pending, never "complete and empty"', async () => {
+    let hide: string | null = null;
+    const rpc: typeof chain.rpc = async (method, params) => method === 'eth_getTransactionByHash' && params[0] === hide ? null : chain.rpc(method, params);
+    const s = createRobinhoodTransferService({ rpcs: { [chainId]: rpc }, idPrefix: 'art', journalDir: dir(), now: () => now, provenance: 'MOCKED',
+      catalogFor: async () => catalog, executionEnabled: true });
+    const { id, transaction } = await prepared(s, token());
+    await s.report(id, { kind: 'UNKNOWN' });
+    hide = chain.relay(transaction, { relayer }); chain.mine(2);
+    expect(await s.observe(id)).toMatchObject({ verdict: 'PENDING', error: 'TRANSFER_RELAYED_EXECUTION_PENDING' });
+    hide = null;
+    expect(await s.observe(id)).toMatchObject({ verdict: 'RECONCILED' });
+  });
+  it('a provider whose log index lags (no RedeemedDelegation for the relay itself) decides nothing about the balance proof', async () => {
+    let lag = false;
+    const rpc: typeof chain.rpc = async (method, params) => lag && method === 'eth_getLogs' && (params[0] as { fromBlock?: string; toBlock?: string }).fromBlock === (params[0] as { toBlock?: string }).toBlock ? [] : chain.rpc(method, params);
+    const s = createRobinhoodTransferService({ rpcs: { [chainId]: rpc }, idPrefix: 'art', journalDir: dir(), now: () => now, provenance: 'MOCKED',
+      catalogFor: async () => catalog, executionEnabled: true });
+    const { id, transaction } = await prepared(s, token());
+    const hash = chain.relay(transaction, { relayer });
+    chain.state.balances.set(`${UNI.usdc}:${owner}`, chain.balance(UNI.usdc, owner) - 7n); // not exactly this transfer's balance change
+    await s.report(id, { kind: 'HASH', hash }); chain.mine(2);
+    lag = true;
+    expect(await s.observe(id)).toMatchObject({ verdict: 'PENDING', error: 'TRANSFER_RPC_INVALID' });
+  });
+  it('an inconsistent owner nonce (moved without a transaction of the owner) is retried, then treated as another use after the settle window', async () => {
+    const s = service(), { id, transaction } = await prepared(s, token());
+    await s.report(id, { kind: 'UNKNOWN' });
+    chain.mine(1); chain.state.nonces.set(owner, 1); chain.mine(2); // e.g. an EIP-7702 authorization of the account
+    expect(await s.observe(id)).toMatchObject({ verdict: 'PENDING', error: 'TRANSFER_RELAYED_EXECUTION_PENDING' });
+    const hash = chain.relay(transaction, { relayer }); chain.mine(2);
+    // The relay is found; its duplicate check waits out the settle window before trusting the inconsistent nonce read.
+    expect(await s.observe(id)).toMatchObject({ verdict: 'PENDING', attempt: { transactionHash: hash }, error: 'TRANSFER_RELAYED_EXECUTION_PENDING' });
+    now += 11 * 60_000;
+    expect(await s.observe(id)).toMatchObject({ verdict: 'RECONCILED' });
+  });
+  it('a direct native transfer whose receipt carries a Delegation Manager redemption (a contract recipient redeeming the owner) is never reconciled', async () => {
+    const s = service(), { id, transaction } = await prepared(s, native());
+    const hash = chain.apply(transaction, { extraLogs: [{ address: MOCK_DELEGATION_MANAGER, topics: ['0x40dadaa36c6c2e3d7317e24757451ffb2d603d875f0ad5e92c5dd156573b1873',
+      '0x' + owner.slice(2).padStart(64, '0'), '0x' + recipient.slice(2).padStart(64, '0')], data: '0x' }] });
+    await s.report(id, { kind: 'HASH', hash }); chain.mine(2);
+    expect(await s.observe(id)).toMatchObject({ verdict: 'DIVERGENT', error: 'TRANSFER_LOGS_MISMATCH', evidence: null });
   });
   it('no relay scan or claim for a standard account (EOA) transfer: its reconciliation is unchanged', async () => {
     chain.state.codeOverride.delete(owner);

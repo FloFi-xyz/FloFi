@@ -89,7 +89,10 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   const [observed, setObserved] = useState<{ readonly key: string | null; readonly generation: number }>({ key: accountKey, generation: 0 });
   const accountGeneration = accountKey === null || accountKey === observed.key || observed.key === null ? observed.generation : observed.generation + 1;
   if (accountKey !== null && accountKey !== observed.key) setObserved({ key: accountKey, generation: accountGeneration });
-  const scope = `${namespace}:${connected ?? ''}:${chain}:${walletName}:${accountGeneration}`, scopeRef = useRef(scope), connectedRef = useRef(connected), epoch = useRef(0);
+  // The scope names the wallet canonically (an EVM address in lowercase, a Solana address exactly), so a case-only change of the same EVM
+  // address (a checksummed form) neither restarts the session read nor withdraws the proof; `matches` compares the same way.
+  const scope = `${namespace}:${namespace === 'eip155' ? connected?.toLowerCase() ?? '' : connected ?? ''}:${chain}:${walletName}:${accountGeneration}`;
+  const scopeRef = useRef(scope), connectedRef = useRef(connected), epoch = useRef(0);
   const accountRef = useRef(accountGeneration);
   scopeRef.current = scope; connectedRef.current = connected; accountRef.current = accountGeneration;
   /** The scope whose server session read has answered (or timed out). Until then this scope is `checking` and exposes no proof. */

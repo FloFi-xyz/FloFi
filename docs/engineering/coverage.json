@@ -1425,6 +1425,10 @@
     "app.components.wallet-proof": {
       "path": "apps/reference-dapp/src/components/wallet-proof.test.ts",
       "stage": "unit"
+    },
+    "app.components.robinhood-transfer-panel": {
+      "path": "apps/reference-dapp/src/components/robinhood-transfer-panel.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -3645,7 +3649,8 @@
         "app.backend.pix-payment-flow",
         "app.server.solana-transfer-service",
         "reference-compiler.solana-transfer",
-        "workflow-contracts.native-transfer"
+        "workflow-contracts.native-transfer",
+        "app.components.robinhood-transfer-panel"
       ],
       "gaps": [
         "Real recipient settlement and provider availability require separate acceptance; draft contracts do not establish executable destinations."

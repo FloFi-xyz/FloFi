@@ -86,6 +86,25 @@ Evidence levels: **CODE** = reproduced deterministically in code/tests; **MOCKED
 | flofi-wallet-execution | 2 medium, 3 low | Fixed: native empty-calldata match (M1); recovery re-scan in `begin` and scans from the first attempt (M2); honest code after a lost result with a used nonce (L2); block bound checked before the relay verifier and receipt-shape failures classed as mismatches (L3). Documented: nonce reservation kept by divergent relayed holders (L1); "not submitted" no longer shown for a divergent run. |
 | flofi-security | 3 medium, 4 low | Fixed: native empty-calldata match (M1); contract-recipient debit and log wording via the positive-evidence rule (M2); used-nonce lost result (M3); error classification (L1); a non-redemption sender is a plain mismatch (L2). Documented: identical concurrent calls — first claim wins (L3, same as swaps); locked nonce after a divergent relay (L4). |
 
+**Second round** (same five-plus domains, read-only, on the fixed code at `5de7ddd`; flofi-swap and flofi-frontend-ux added). No high finding;
+no path to RECONCILED, a released reservation or a second wallet request. Fixed, each with a regression test that fails without the fix:
+
+| Finding | Fix |
+| --- | --- |
+| Shared relay scan dropped a candidate whose receipt was served without its transaction, and still reported itself complete (security, swap — pre-existing for swaps) | Such a candidate keeps the scan pending (`waiting`). |
+| Fallback match ignored the token/target: an unrelated relay (USDT vs USDC, WETH vs ETH, same recipient and amount) was "executed"/"duplicate" (transfer-payments, security, wallet-execution, swap) | `redemptionExecutions` decodes `redeemDelegations` strictly (single and batch ModeCodes, nested redemptions; canonical ABI) and compares target, value and calldata exactly; only an undecodable input falls back to the conservative byte match. Unit-tested against the real recorded MetaMask relay. |
+| A divergence found while the attempt was still SUBMITTING (browser never reported) hit an invalid journal transition (wallet-execution) | `diverge` goes through SUBMISSION_RESULT_UNKNOWN, and records the relayed hashes it found (`relayedExecutions`). |
+| A recovery run's lost-result discovery scanned from the oldest refused attempt with a bounded window, so it could miss its own relay (wallet-execution) | Discovery scans from the run's own preparation; duplicate and refusal checks scan from `relayScanFrom`, fixed once in the recovery record (no ancestor reloads). |
+| An inconsistent nonce read was final (security, wallet-execution); "nonce used, relay not found" could be decided on the first poll (wallet-execution) | Inconsistent reads and that verdict wait a 10-minute settle window and a complete scan. |
+| `begin`'s recovery re-scan saved nothing (wallet-execution) | The recovery Review is de-authorized with `TRANSFER_REJECTED_ATTEMPT_EXECUTED` and the hashes. |
+| Positive-evidence logs were not validated; a lagging log index looked like "no other redemption" (security, transfer-payments) | Each log must be the manager's `RedeemedDelegation(owner)` in the receipt's block hash and number; for a relay, its own log must be present, else INCONCLUSIVE. A direct receipt with any Delegation Manager log is a mismatch. |
+| Inconclusive polls appended a full journal line each time; the recovery branch accepted a non-pending predecessor (wallet-execution) | `note()` for inconclusive results; the predecessor must still be PENDING. |
+| Evidence wording (ERC-20 self-transfer, contract-recipient caveat) and the PT copy (pt-BR forms; "você não pagou") | Corrected. |
+| UI: Passkeys showed "No passkeys yet" while the overview loaded or after it failed (frontend-ux, medium); "Switch to …" prefix styled primary; touch height; relayed result without evidence download | See §2/§3 (UI fixes in the same commit). |
+
+Documented, not changed: relay scans see only Delegation Manager redemptions (not ERC-4337 EntryPoint execution); duplicate detection runs
+for the reviewed DeleGator only (the only verified delegate); "Undo this change" keeps the danger tone (owner's mapping).
+
 Every reviewer confirmed: EOA Reviews have no new field; the delegate is bound and re-checked at Review, begin, handoff and reconciliation;
 unverified delegates, contract wallets, value-carrying, batched, depth-2, type-4, non-single-use and reverted relays never reach RECONCILED;
 recipient rules are unchanged; nothing signs or adds a send path.
@@ -126,6 +145,8 @@ still `TRANSFER_OWNER_NOT_EOA`) and `simulation-presentation.test.ts` (messages)
   with `TRANSFER_NONCE_ALREADY_RESERVED` until the account sends any transaction itself (which moves the nonce). Fail-closed; no in-app release.
 - Evidence of a Smart Account transfer cannot be checked by the independent archive verifier (`robinhood-transfer-verifier.ts`, EOA signer
   recovery by design).
+- A refusal older than the duplicate-scan window (about 5.8 days on Arbitrum One) cannot be recovered in-app: the check cannot cover the
+  window, so recovery stays `TRANSFER_RELAYED_EXECUTION_PENDING` (fail-closed).
 - Limits inherited from the swap's relay rules (BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 §4.1): the DeleGator allowlist is address-based;
   relay scans use `eth_getLogs` in 5,000-block windows (lost-hash discovery 40 windows per observation, duplicate check 400 windows, about
   5.8 days on Arbitrum One — a receipt observed later stays pending); a divergent relay keeps the nonce reservation until the owner sends any

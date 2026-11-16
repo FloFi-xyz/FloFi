@@ -495,7 +495,9 @@ export async function relayedExecutions(rpc: Rpc, P: { readonly chainId: number;
   let waiting = false;
   for (const txHash of candidates) {
     const [tx, raw] = await Promise.all([rpc('eth_getTransactionByHash', [txHash]), rpc('eth_getTransactionReceipt', [txHash])]);
-    if (!isObject(raw)) { waiting = true; continue; }
+    // BUILD-FLOFI-7702-TRANSFER-001: a node that serves the receipt but not yet the transaction (or the reverse) is not consistent yet: the
+    // candidate keeps the answer pending, never silently dropped from a scan that would otherwise call itself complete.
+    if (!isObject(raw) || !isObject(tx)) { waiting = true; continue; }
     if (await claimedElsewhere(txHash)) continue;
     try {
       await verifyOwnerSubmission(rpc, { txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data, preBlock: fromBlock,
@@ -505,15 +507,60 @@ export async function relayedExecutions(rpc: Rpc, P: { readonly chainId: number;
       if (!(cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH')) throw cause;
       // Not the reconcilable shape, but a successful owner-rooted redemption whose input still carries the reviewed call's exact bytes (for
       // example the call batched with a fee payment) may have executed it: never ignored, never reconciled.
-      // BUILD-FLOFI-7702-TRANSFER-001: a call without calldata (a native ETH transfer) is matched by its target followed by its value word, as
-      // both the single (packed) and the batch (ABI) execution encodings carry them; an empty calldata never matches every redemption.
-      const call = attempt.tx.data === '0x' ? address(attempt.tx.to).slice(2) + word(BigInt(attempt.tx.value || '0x0')) : attempt.tx.data.toLowerCase().slice(2);
-      if (Number(quantity(raw.status)) === 1 && isObject(tx) && hex(tx.input).includes(call)) unclassified.push(txHash);
+      // BUILD-FLOFI-7702-TRANSFER-001: the redemption's executions are decoded (single and batch modes, nested redemptions) and compared with
+      // the reviewed call exactly — target, value and calldata — so another token, amount or recipient is never this call. Only an input
+      // that cannot be decoded falls back to the conservative byte match (the calldata, or for a call without calldata its target followed
+      // by its value word); an empty calldata never matches every redemption.
+      if (Number(quantity(raw.status)) === 1 && redemptionMayExecute(hex(tx.input), attempt.tx)) unclassified.push(txHash);
       continue;
     }
     verified.push(txHash);
   }
   return { verified, unclassified, waiting, complete: from > head };
+}
+/**
+ * BUILD-FLOFI-7702-TRANSFER-001: the executions a Delegation Manager `redeemDelegations(bytes[], bytes32[], bytes[])` input carries, decoded
+ * strictly (canonical ABI): per ModeCode, CALLTYPE_SINGLE (`target ‖ value ‖ calldata`, packed) or CALLTYPE_BATCH (`(address,uint256,bytes)[]`),
+ * either exec type; an execution that is itself a redemption on the manager is expanded (bounded depth). Null when the input is anything else.
+ */
+type DecodedExecution = { readonly target: string; readonly value: bigint; readonly data: string };
+const EXECUTION_BATCH_ABI: erc7710.AbiType = { array: { tuple: ['address', 'uint256', 'bytes'] } };
+export function redemptionExecutions(input: string, depth = 0): DecodedExecution[] | null {
+  try {
+    if (depth > 3 || !input.toLowerCase().startsWith(REDEEM_SELECTOR)) return null;
+    const [, modes, calls] = erc7710.abiDecode([{ array: 'bytes' }, { array: 'bytes32' }, { array: 'bytes' }], erc7710.bytesOf('0x' + input.slice(10))) as [string[], string[], string[]];
+    if (modes.length !== calls.length || !modes.length) return null;
+    const out: DecodedExecution[] = [];
+    for (const [index, mode] of modes.entries()) {
+      const callType = mode.slice(2, 4), execType = mode.slice(4, 6), call = calls[index]!.toLowerCase();
+      if (!['00', '01'].includes(execType)) return null;
+      let executions: DecodedExecution[];
+      if (callType === '00') {
+        if (call.length < 2 + (20 + 32) * 2) return null;
+        executions = [{ target: address('0x' + call.slice(2, 42)), value: BigInt('0x' + call.slice(42, 106)), data: '0x' + call.slice(106) }];
+      } else if (callType === '01') {
+        const [batch] = erc7710.abiDecode([EXECUTION_BATCH_ABI], erc7710.bytesOf(call)) as [[string, bigint, string][]];
+        executions = batch.map(([target, value, data]) => ({ target: address(target), value, data: data.toLowerCase() }));
+      } else return null;
+      for (const execution of executions) {
+        out.push(execution);
+        if (execution.target === DELEGATION_MANAGER && execution.data.startsWith(REDEEM_SELECTOR)) {
+          const nested = redemptionExecutions(execution.data, depth + 1);
+          if (!nested) return null;
+          out.push(...nested);
+        }
+      }
+    }
+    return out;
+  } catch { return null; }
+}
+/** Whether a successful owner-rooted redemption may have executed exactly `call` (decoded and compared, or a conservative byte match if undecodable). */
+function redemptionMayExecute(input: string, call: Pick<Tx, 'to' | 'data' | 'value'>): boolean {
+  const target = address(call.to), value = BigInt(call.value || '0x0'), data = call.data.toLowerCase();
+  const executions = redemptionExecutions(input);
+  if (executions) return executions.some(e => e.target === target && e.value === value && e.data === data);
+  const needle = data === '0x' ? target.slice(2) + word(value) : data.slice(2);
+  return input.toLowerCase().includes(needle);
 }
 function signed(value: bigint): bigint { return value >= 1n << 255n ? value - (1n << 256n) : value; }
 export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {
