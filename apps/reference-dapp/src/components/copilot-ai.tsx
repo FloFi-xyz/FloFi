@@ -232,8 +232,14 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     if (exact) conversation.current = recordProposal(conversation.current, environmentNow(), command);
     committing.current = { command, expected: JSON.stringify(expected) };
   }, [environmentNow]);
+  /**
+   * HOTFIX-P1-CHAT-RECOVERY: which conversation a turn belongs to. `clear` starts another one; a turn that began before (its model answer, catalog
+   * or saved-name read still in flight) then writes nothing into it — no transcript, open clarification, language or referent — and has no effect.
+   */
+  const generation = useRef(0);
   /** BUILD-FLOFI-CONVERSATIONAL-001: a new owner or workflow starts a new conversation; nothing of the previous one carries over. */
   const clear = useCallback(() => {
+    generation.current += 1;
     conversation.current = emptyConversation(); committing.current = null; watched.current = null; appliedWorkflow.current = null;
     conversationKey.current = null; fetched.current = { owner: null, price: null, positions: null };
   }, []);
@@ -280,6 +286,9 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   }, [refreshLearning, report, deliver]);
   const interpret = useCallback(async (text: string): Promise<CopilotReply> => {
     setBusy(true);
+    const turn = generation.current, ended = () => generation.current !== turn;
+    // The conversation this turn was written in has ended: its answer is not shown (the chat drops it) and changes nothing.
+    const dropped: CopilotReply = { kind: 'FAILED', code: 'COPILOT_CONVERSATION_ENDED', text: '', notes: [], options: [] };
     try {
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
@@ -289,11 +298,13 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       // The account's saved names, read again when stale (signed out or not available: none, and nothing is offered).
       // Never more than a moment: a slow read leaves the turn with the list already known.
       await Promise.race([loadSavedRecipients({ ifStale: true }).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 2500))]);
+      if (ended()) return dropped;
       const before = conversation.current, start = startTurn(before, text, { ...sent, ...recipientsNow() });
       // BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (counters and codes only), best effort and never awaited by the chat.
       const measure = (reply: CopilotReply, next: CopilotConversation, interpreted: string | null) =>
         void copilotTurnReport(turnMetrics(before, reply, next, interpreted, 'WEB')).catch(() => undefined);
       if (start.kind === 'LOCAL') {
+        if (ended()) return dropped;
         conversation.current = start.next;
         measure(start.reply, start.next, 'LOCAL');
         return show(await settle(start.reply));
@@ -305,6 +316,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
       if (result.ok) await Promise.all([ensureCopilotCatalogs(start.turn.state.segment.join('\n'), result.intent), loadVerified(result.intent)]);
       const finished = finishTurn(start.turn, result, environmentNow());
+      if (ended()) return dropped;
       conversation.current = finished.next;
       measure(finished.reply, finished.next, result.ok ? String((result.intent as { kind?: unknown } | null)?.kind ?? '') || null : null);
       return show(await settle(finished.reply));

@@ -267,28 +267,54 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const workflowId = state.workflow.workflowId, keep = direct && persist && scope !== null;
   const conversationKey = direct ? `${keep ? scope : '-'}|${workflowId}` : 'approval';
   const cache = useRef(new Map<string, readonly ChatMessage[]>()), lastEpoch = useRef(epoch);
+  /** Keeps a conversation's latest messages under its own key: in this page, and in this tab when it is the signed-in account's. */
+  const remember = (key: string, list: readonly ChatMessage[]) => {
+    cache.current.set(key, list);
+    const bar = key.indexOf('|'), owned = key.slice(0, bar);
+    if (keep && owned === scope) writeConversation(conversationStorage(), scope, key.slice(bar + 1), list, Date.now());
+  };
+  /** The conversation shown at the previous commit and whether its workflow was still the untouched draft (no action yet). */
+  const shown = useRef<{ readonly key: string; readonly untouched: boolean } | null>(null);
   useEffect(() => {
-    const fresh = lastEpoch.current !== epoch;
+    const fresh = lastEpoch.current !== epoch, previous = threadKey.current;
     lastEpoch.current = epoch;
-    if (!fresh && threadKey.current === conversationKey) return;
+    if (!fresh && previous === conversationKey) return;
     if (keep) pruneConversations(conversationStorage(), scope, Date.now());
     if (fresh) { cache.current.delete(conversationKey); if (keep) forgetConversations(conversationStorage(), { scope, workflowId }); }
     // This page's own copy first (reopening a workflow seen in this visit), else this tab's stored history (a reload): both read-only history.
     const history = fresh ? null : cache.current.get(conversationKey)?.map(historical) ?? (keep ? readConversation(conversationStorage(), scope, workflowId, Date.now()) : null);
+    // The same conversation under a better-known identity is carried on as it is (its open question, follow-ups and answers still due): the
+    // signed-in account became known for the same workflow, or the untouched draft it began on became a workflow with no conversation of its
+    // own (a restored Canvas or a recovered run). Never another account's, never over a workflow's own history, never after New workflow.
+    const [before, beforeWorkflow] = previous ? [previous.slice(0, previous.indexOf('|')), previous.slice(previous.indexOf('|') + 1)] : ['', ''];
+    const after = conversationKey.slice(0, conversationKey.indexOf('|'));
+    const carried = direct && !fresh && previous !== null && thread.key === previous && !history?.length
+      && (beforeWorkflow === workflowId && before === '-' && after !== '-' || before === after && beforeWorkflow !== workflowId && shown.current?.key === previous && shown.current.untouched);
+    if (carried) { threadKey.current = conversationKey; setThread(old => old.key === previous ? { key: conversationKey, messages: old.messages } : old); return; }
+    // What the previous conversation said last (even in the same update as this switch, e.g. its own "Create new workflow") stays with it.
+    if (previous !== null && thread.key === previous && previous !== conversationKey) remember(previous, thread.messages);
     open(conversationKey, history, fresh);
   }, [conversationKey, epoch]);
+  useEffect(() => { shown.current = { key: conversationKey, untouched: !actionable(state.workflow) }; });
   useEffect(() => {
     const key = thread.key;
     if (key === null || key !== threadKey.current) return;
-    cache.current.set(key, thread.messages);
-    if (key.startsWith(`${scope}|`) && keep) writeConversation(conversationStorage(), scope, key.slice(scope!.length + 1), thread.messages, Date.now());
+    remember(key, thread.messages);
   }, [thread]);
-  // Approval surfaces only: a new owner (another wallet identity) starts a new conversation; a late answer of the previous one is dropped.
+  // Approval surfaces: a new owner (another wallet identity) starts a new conversation; a late answer of the previous one is dropped.
+  // The Editor keeps its conversation, but what FloFi would do by itself for the previous wallet ends: the Copilot's working state (its
+  // transcript and learned wording belong to that wallet's turns), automatic re-quotes and continuations, and a Review or resume in flight. Any
+  // open confirmation is retired by its own binding (the wallet changed), as before. A disconnect and reconnect of the same wallet changes nothing.
   const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null, lastOwner = useRef(ownerKey), lastWorkflow = useRef(workflowId);
   useEffect(() => {
     const changed = ownerKey !== null && lastOwner.current !== null && ownerKey !== lastOwner.current;
     if (ownerKey !== null) lastOwner.current = ownerKey;
     if (changed && !direct) open(conversationKey, null, true);
+    else if (changed) {
+      copilot.clear();
+      if (watch.current) watch.current.auto = false;
+      reviewLock.current = null; resume.current = null; handover.current = null; requote.current = null;
+    }
   }, [ownerKey]);
   useEffect(() => {
     // Approval surfaces: a reopened workflow keeps the conversation, but no open question of the previous workflow.
@@ -1011,7 +1037,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // BUILD-COPILOT-002: the Copilot keeps the pending proposal visible while it interprets ("make it 2", questions about it).
       if (copilot.mayInterpret) {
         const reply = await copilot.respond(text);
-        if (scope !== session.current) return;
+        // The conversation (or the wallet's Copilot state) this message was written in ended while it was interpreted: nothing is said or done.
+        if (scope !== session.current || reply?.code === 'COPILOT_CONVERSATION_ENDED') return;
         if (reply?.automation) setAutomation(reply.automation);
         if (reply?.manage) setManage(reply.manage);
         if (!reply) { append(scope, { role: 'system', text: guidance }); return; }

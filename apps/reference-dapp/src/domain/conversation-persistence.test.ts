@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { ChatMessage } from './chat-message';
 import { CONVERSATION_LIMITS, CONVERSATION_STORAGE_PREFIX, conversationStorageKey, forgetConversations, historical, mayHoldSecret, pruneConversations, readConversation, writeConversation } from './conversation-persistence';
 import { conversationScopeOf } from '../server/conversation-scope';
+const KEY = new Uint8Array(32).fill(7);
 
 let map: Map<string, string>;
 const storage = () => ({ get length() { return map.size; }, key: (index: number) => [...map.keys()][index] ?? null, getItem: (key: string) => map.get(key) ?? null,
@@ -18,11 +19,12 @@ beforeEach(() => { map = new Map(); });
 
 describe('conversation scope and keys', () => {
   it('derives one opaque scope per tenant and account, never the account id itself', () => {
-    const scope = conversationScopeOf('default', 'acct_0123456789abcdef0123456789abcdef');
+    const scope = conversationScopeOf(KEY, 'default', 'acct_0123456789abcdef0123456789abcdef');
     expect(scope).toMatch(/^[A-Za-z0-9_-]{32}$/);
-    expect(scope).toBe(conversationScopeOf('default', 'acct_0123456789abcdef0123456789abcdef'));
-    expect(scope).not.toBe(conversationScopeOf('other-tenant', 'acct_0123456789abcdef0123456789abcdef'));
-    expect(scope).not.toBe(conversationScopeOf('default', 'acct_ffffffffffffffffffffffffffffffff'));
+    expect(scope).toBe(conversationScopeOf(KEY, 'default', 'acct_0123456789abcdef0123456789abcdef'));
+    expect(scope).not.toBe(conversationScopeOf(KEY, 'other-tenant', 'acct_0123456789abcdef0123456789abcdef'));
+    expect(scope).not.toBe(conversationScopeOf(KEY, 'default', 'acct_ffffffffffffffffffffffffffffffff'));
+    expect(scope).not.toBe(conversationScopeOf(new Uint8Array(32).fill(8), 'default', 'acct_0123456789abcdef0123456789abcdef'));
     expect(scope).not.toContain('acct_');
     expect(conversationStorageKey(scope, 'workflow-1')).toBe(`${CONVERSATION_STORAGE_PREFIX}${scope}:workflow-1`);
     for (const bad of [null, undefined, '', 'short', 'has space'.repeat(4), '0x1111111111111111111111111111111111111111']) expect(conversationStorageKey(bad, 'workflow-1')).toBeNull();
@@ -147,5 +149,32 @@ describe('how long and how much', () => {
     expect(() => writeConversation(full, A, 'workflow-1', [intro, asked], NOW)).not.toThrow();
     const blocked = { ...storage(), getItem: () => { throw new Error('SecurityError'); } };
     expect(readConversation(blocked, A, 'workflow-1', NOW)).toBeNull();
+  });
+  it('FloFi\'s welcome stays first when older messages are dropped', () => {
+    const many = [intro, ...Array.from({ length: CONVERSATION_LIMITS.messages + 20 }, (_, index) => ({ id: index + 1, role: 'you' as const, text: `message ${index + 1}` }))];
+    writeConversation(storage(), A, 'workflow-1', many, NOW);
+    const kept = readConversation(storage(), A, 'workflow-1', NOW)!;
+    expect(kept).toHaveLength(CONVERSATION_LIMITS.messages);
+    expect(kept[0]).toEqual(intro);
+    expect(kept.at(-1)!.text).toBe(`message ${CONVERSATION_LIMITS.messages + 20}`);
+  });
+});
+
+describe('restored Review summaries', () => {
+  const review = { status: 'READY', label: 'Review ready', message: 'ok', canConfirm: true, steps: [{ number: 1, action: 'Swap', input: '0.5 USDC', pair: null, networks: 'Solana',
+    provider: 'Jupiter', result: '0.007 SOL', resultLabel: 'Estimated output', minimum: null, slippage: null, priceImpact: null, details: [], destination: null }],
+    fees: [{ label: 'Network fee', value: '0.000005 SOL' }], limits: [], warnings: [], approvals: [], walletRequests: ['Swap'], providerSteps: [], account: null, network: 'Solana',
+    expiresAt: null, unknown: [], simulationProblem: null, sequence: null, totals: { additional: [], ceilings: [], excludes: [] }, flofiFee: { value: '0', note: 'none', recorded: false } };
+  it('a Review summary the card can read is shown again; one kept by an earlier shape is restored as its text alone', () => {
+    const shown = { id: 2, role: 'flofi' as const, text: 'Your workflow Review is ready.', review: review as never, variants: { EN: { text: 'Ready.', review: review as never }, PT: { text: 'Pronto.', review: review as never } } };
+    writeConversation(storage(), A, 'workflow-1', [intro, asked, shown], NOW);
+    expect(readConversation(storage(), A, 'workflow-1', NOW)![2]).toEqual(shown);
+    const { flofiFee: _fee, ...older } = review; void _fee;
+    const old = { ...shown, review: older as never, variants: { EN: { text: 'Ready.', review: older as never }, PT: { text: 'Pronto.', review: { steps: 'no' } as never } } };
+    writeConversation(storage(), A, 'workflow-2', [intro, asked, old], NOW);
+    const restored = readConversation(storage(), A, 'workflow-2', NOW)![2]!;
+    expect(restored.text).toBe('Your workflow Review is ready.');
+    expect(restored).not.toHaveProperty('review');
+    expect(restored.variants).toEqual({ EN: { text: 'Ready.' }, PT: { text: 'Pronto.' } });
   });
 });

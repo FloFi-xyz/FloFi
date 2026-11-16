@@ -9,7 +9,8 @@
  *   state, as the privacy notice describes it, made to outlive a reload of the same tab;
  * - only for a signed-in FloFi account, under an opaque digest of its tenant and account the server supplies (`server/conversation-scope.ts`),
  *   and per workflow identity: another account, tenant or workflow never reads or receives these messages; signing out removes them;
- * - at most `CONVERSATION_LIMITS` (messages, bytes, conversations, 24 hours); older ones are dropped, never invented again.
+ * - at most `CONVERSATION_LIMITS` (messages, bytes, conversations, 24 hours from the last new message); older ones are dropped, never invented
+ *   again (FloFi's welcome stays first).
  *
  * Only what the chat showed is kept (text, notes, the Review summary it displayed). Never a question's answer buttons or an open question:
  * a restored conversation is read-only history, and every confirmation is asked again against a fresh Review. A message the owner typed (or
@@ -23,7 +24,8 @@ import { pageExitInProgress } from '../accounts/page-exit';
 
 export const CONVERSATION_STORAGE_PREFIX = 'flofi:conversation:v1:';
 const FORMAT = 'flofi.conversation.v1';
-export const CONVERSATION_LIMITS = Object.freeze({ messages: 200, bytes: 300_000, conversations: 20, retentionMs: 24 * 60 * 60_000 });
+// At most about 2 million characters for the whole tab (10 × 200 000), well inside the browser's sessionStorage quota for this origin.
+export const CONVERSATION_LIMITS = Object.freeze({ messages: 200, bytes: 200_000, conversations: 10, retentionMs: 24 * 60 * 60_000 });
 const SCOPE = /^[A-Za-z0-9_-]{32}$/; // `server/conversation-scope.ts` conversationScopeOf: 32 base64url characters.
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const ROLES: ReadonlySet<string> = new Set(['you', 'system', 'ai', 'flofi']);
@@ -63,6 +65,30 @@ export function historical(message: ChatMessage): ChatMessage {
 }
 
 const strings = (value: unknown): value is readonly string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
+const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const lines = (value: unknown) => Array.isArray(value) && value.every(line => record(line) && typeof line.label === 'string' && typeof line.value === 'string');
+/**
+ * Every part of a Review summary the chat's Review card reads (`components/conversation-cards.tsx`), checked before it is shown again: a record
+ * kept by an earlier version of FloFi that no longer has this shape is restored as its text alone, never rendered half-read.
+ */
+function reviewShape(value: unknown): boolean {
+  if (!record(value) || !strings(value.walletRequests) || !strings(value.providerSteps) || !strings(value.unknown) || !lines(value.fees) || !lines(value.limits)) return false;
+  if (!Array.isArray(value.warnings) || !value.warnings.every(warning => record(warning) && typeof warning.message === 'string')) return false;
+  if (!Array.isArray(value.approvals) || !value.approvals.every(approval => record(approval) && ['symbol', 'value', 'spender', 'network'].every(field => typeof approval[field] === 'string'))) return false;
+  const totals = value.totals, fee = value.flofiFee, sequence = value.sequence;
+  if (!record(totals) || !strings(totals.additional) || !strings(totals.ceilings) || !Array.isArray(totals.excludes)
+    || !totals.excludes.every(item => record(item) && typeof item.text === 'string' && Array.isArray(item.parameters))) return false;
+  if (!record(fee) || typeof fee.value !== 'string' || typeof fee.note !== 'string' || typeof fee.recorded !== 'boolean') return false;
+  if (sequence !== null && (!record(sequence) || !Array.isArray(sequence.steps) || !Number.isSafeInteger(sequence.total))) return false;
+  return Array.isArray(value.steps) && value.steps.length > 0 && value.steps.every(step => record(step) && Number.isSafeInteger(step.number)
+    && typeof step.action === 'string' && typeof step.input === 'string' && typeof step.resultLabel === 'string' && lines(step.details));
+}
+/** A content rendering whose Review is not readable any more keeps its text, notes and everything else. */
+function withReadableReview<T extends { review?: unknown }>(value: T): T {
+  if (value.review === undefined || reviewShape(value.review)) return value;
+  const { review: _review, ...rest } = value; void _review;
+  return rest as T;
+}
 /** Structural check of a stored message: anything unexpected makes the whole record unusable (nothing is guessed or repaired). */
 function storedMessage(value: unknown): ChatMessage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -73,7 +99,6 @@ function storedMessage(value: unknown): ChatMessage | null {
   if (message.language !== undefined && message.language !== 'EN' && message.language !== 'PT') return null;
   if (message.verbatim !== undefined && typeof message.verbatim !== 'boolean') return null;
   if (message.link !== undefined && (!message.link || typeof (message.link as { path?: unknown }).path !== 'string' || typeof (message.link as { label?: unknown }).label !== 'string')) return null;
-  if (message.review !== undefined && (!message.review || typeof message.review !== 'object' || !Array.isArray((message.review as { steps?: unknown }).steps))) return null;
   if (message.variants !== undefined) {
     const variants = message.variants as Record<string, unknown> | null;
     if (!variants || typeof variants !== 'object') return null;
@@ -82,7 +107,8 @@ function storedMessage(value: unknown): ChatMessage | null {
       if (!variant || typeof variant.text !== 'string' || (variant.notes !== undefined && !strings(variant.notes))) return null;
     }
   }
-  return historical(message as unknown as ChatMessage);
+  const restored = withReadableReview(historical(message as unknown as ChatMessage));
+  return restored.variants ? { ...restored, variants: { EN: withReadableReview(restored.variants.EN), PT: withReadableReview(restored.variants.PT) } } : restored;
 }
 
 /**
@@ -106,18 +132,21 @@ export function readConversation(storage: ReadStorage & Partial<Pick<Storage, 'r
   return messages.length && messages.every(message => message !== null) ? messages as ChatMessage[] : null;
 }
 
-/** Every stored conversation key of this tab, with its scope and age (unreadable records count as expired). */
+/**
+ * A kept record's scope and time, read from its fixed opening (`writeConversation` always writes these fields first, in this order) without
+ * parsing the messages: cheap enough to run on every message. Anything else reads as unknown (scope null, time 0: removed first).
+ */
+const HEADER = /^\{"format":"flofi\.conversation\.v1","scope":"([A-Za-z0-9_-]{32})","workflowId":"[A-Za-z0-9._:-]{1,128}","savedAt":(\d{1,16}),/;
+function headerOf(value: string | null): { scope: string | null; savedAt: number } {
+  const match = value ? HEADER.exec(value.slice(0, 256)) : null;
+  return match ? { scope: match[1]!, savedAt: Number(match[2]) } : { scope: null, savedAt: 0 };
+}
+/** Every stored conversation key of this tab, with its scope and age. */
 function storedKeys(storage: NonNullable<WriteStorage>): { key: string; scope: string | null; savedAt: number }[] {
   const out: { key: string; scope: string | null; savedAt: number }[] = [];
   for (let index = 0; index < storage.length; index++) {
     const key = storage.key(index);
-    if (!key?.startsWith(CONVERSATION_STORAGE_PREFIX)) continue;
-    let savedAt = 0, scope: string | null = null;
-    try {
-      const record = JSON.parse(storage.getItem(key) ?? 'null') as { savedAt?: unknown; scope?: unknown } | null;
-      savedAt = Number.isSafeInteger(record?.savedAt) ? record!.savedAt as number : 0; scope = typeof record?.scope === 'string' ? record.scope : null;
-    } catch { /* unreadable: removed first */ }
-    out.push({ key, scope, savedAt });
+    if (key?.startsWith(CONVERSATION_STORAGE_PREFIX)) out.push({ key, ...headerOf(storage.getItem(key)) });
   }
   return out;
 }
@@ -132,21 +161,20 @@ export function writeConversation(storage: WriteStorage, scope: string | null | 
   if (!storage || !key || pageExitInProgress() || !messages.some(message => message.role === 'you')) return;
   try {
     // FloFi's own deterministic messages carry public addresses and hashes, never what the owner typed; the owner's and the model's text is checked.
-    let kept = messages.filter(message => !((message.role === 'you' || message.role === 'ai') && mayHoldSecret(message.text))).map(historical)
-      .slice(-CONVERSATION_LIMITS.messages);
-    let body = JSON.stringify({ format: FORMAT, scope, workflowId, savedAt: now, messages: kept });
-    while (body.length > CONVERSATION_LIMITS.bytes && kept.length > 1) {
-      kept = kept.slice(Math.ceil(kept.length / 4));
-      body = JSON.stringify({ format: FORMAT, scope, workflowId, savedAt: now, messages: kept });
-    }
+    const safe = messages.filter(message => !((message.role === 'you' || message.role === 'ai') && mayHoldSecret(message.text))).map(historical);
+    // FloFi's welcome stays first (the panel renders the first message as the welcome); the newest of the rest fit the limits.
+    const head = safe[0]?.id === 0 ? [safe[0]] : [];
+    let rest = safe.slice(head.length).slice(-(CONVERSATION_LIMITS.messages - head.length));
+    const bodyOf = (savedAt: number) => JSON.stringify({ format: FORMAT, scope, workflowId, savedAt, messages: [...head, ...rest] });
+    let body = bodyOf(now);
+    while (body.length > CONVERSATION_LIMITS.bytes && rest.length > 1) { rest = rest.slice(Math.ceil(rest.length / 4)); body = bodyOf(now); }
     if (body.length > CONVERSATION_LIMITS.bytes) return;
     pruneConversations(storage, scope, now);
-    const same = storedKeys(storage).filter(entry => entry.key !== key).sort((a, b) => b.savedAt - a.savedAt);
-    for (const entry of same.slice(CONVERSATION_LIMITS.conversations - 1)) storage.removeItem(entry.key);
+    const others = storedKeys(storage).filter(entry => entry.key !== key).sort((a, b) => b.savedAt - a.savedAt);
+    for (const entry of others.slice(CONVERSATION_LIMITS.conversations - 1)) storage.removeItem(entry.key);
     // Reopening a conversation unchanged (a reload) keeps its original time: the retention period counts from its last new message.
-    const stored = JSON.parse(storage.getItem(key) ?? 'null') as { scope?: unknown; workflowId?: unknown; savedAt?: unknown; messages?: unknown } | null;
-    if (stored?.scope === scope && stored.workflowId === workflowId && Number.isSafeInteger(stored.savedAt) && now - (stored.savedAt as number) <= CONVERSATION_LIMITS.retentionMs
-      && JSON.stringify(stored.messages) === JSON.stringify(kept)) return;
+    const stored = storage.getItem(key), header = headerOf(stored);
+    if (header.scope === scope && now - header.savedAt <= CONVERSATION_LIMITS.retentionMs && stored === bodyOf(header.savedAt)) return;
     storage.setItem(key, body);
   } catch { /* storage is optional (quota, private mode): the conversation stays in memory this visit */ }
 }
