@@ -46,19 +46,29 @@ function send(response: ServerResponse, status: number, body: unknown, requestId
 
 export type HttpServerOptions = { readonly routes: readonly Route[]; readonly logger: Logger; readonly authToken: string | null;
   readonly maxBodyBytes?: number; readonly ready?: () => Promise<boolean> };
-export function createHttpServer(options: HttpServerOptions): Server {
+export type HttpServer = Server & {
+  /** Resolves once no route handler is running, including one whose caller already disconnected (a mutation keeps going; see `signal`). */
+  readonly drained: () => Promise<void>;
+};
+export function createHttpServer(options: HttpServerOptions): HttpServer {
   const limit = options.maxBodyBytes ?? 1_048_576, expected = options.authToken ? digest(options.authToken) : null;
   /**
    * BUILD-INFRA-API-FAILOVER-CERT-001: once `server.close()` was called (the API's SIGTERM drain) the server no longer listens, so new
    * connections already reach another replica — but Node keeps serving NEW requests on connections kept alive, and a reverse proxy reuses
    * its pooled ones. While draining, every answer (including one to a request that arrived before) closes its connection, and readiness
-   * reports false. The in-flight work completes, the server closes as soon as it has, and no new work starts on the draining replica.
+   * reports false: no new work starts on the draining replica and the server closes once its last answer is written. `drained()` then
+   * covers handlers whose caller left before its answer, so the database is closed only after every handler ended.
    */
   const reply = (response: ServerResponse, status: number, body: unknown, requestId: string) => send(response, status, body, requestId, !server.listening);
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const drained = () => active === 0 ? Promise.resolve() : new Promise<void>(resolve => { waiting.push(resolve); });
+  const settled = () => { if (--active === 0) for (const resolve of waiting.splice(0)) resolve(); };
   const server = createServer((request, response) => {
     const requestId = randomUUID(), url = new URL(request.url ?? '/', 'http://internal'), method = request.method ?? 'GET';
     if (method === 'GET' && url.pathname === '/healthz') { reply(response, 200, { ok: true }, requestId); return; }
     if (method === 'GET' && url.pathname === '/readyz') {
+      if (!server.listening) { reply(response, 503, { ok: false }, requestId); return; }
       (options.ready?.() ?? Promise.resolve(true)).then(ok => { const ready = ok && server.listening; reply(response, ready ? 200 : 503, { ok: ready }, requestId); },
         () => reply(response, 503, { ok: false }, requestId));
       return;
@@ -67,6 +77,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
     const match = route ? route.pattern.exec(url.pathname)! : null;
     const disconnected = new AbortController();
     response.once('close', () => { if (!response.writableFinished) disconnected.abort(); });
+    active++;
     void withSpan(options.logger, 'http.request', { http_method: method, http_route: route?.name ?? 'unmatched', request_id: requestId }, async () => {
       try {
         if (expected) {
@@ -86,7 +97,7 @@ export function createHttpServer(options: HttpServerOptions): Server {
         reply(response, 500, { ok: false, code: 'INTERNAL_ERROR' }, requestId);
         throw error;
       }
-    }, parseTraceparent(typeof request.headers.traceparent === 'string' ? request.headers.traceparent : null)).catch(() => undefined);
+    }, parseTraceparent(typeof request.headers.traceparent === 'string' ? request.headers.traceparent : null)).catch(() => undefined).finally(settled);
   });
-  return server;
+  return Object.assign(server, { drained });
 }

@@ -16,11 +16,12 @@ const call = (port: number, agent: Agent | false, method: 'GET' | 'POST', path: 
 
 describe('BUILD-INFRA-API-FAILOVER-CERT-001: a draining HTTP server finishes its work and takes no new work', () => {
   it('after close(): in-flight answers close their kept-alive connection, readiness reports false, new connections are refused, close completes', async () => {
-    let release!: () => void, holdReadiness = false, releaseReadiness!: () => void;
+    let release!: () => void, holdReadiness = false, releaseReadiness!: () => void, slowArrived!: () => void, probeArrived!: () => void;
     const work = new Promise<void>(resolve => { release = resolve; }), readiness = new Promise<void>(resolve => { releaseReadiness = resolve; });
+    const arrived = Promise.all([new Promise<void>(resolve => { slowArrived = resolve; }), new Promise<void>(resolve => { probeArrived = resolve; })]);
     const server = createHttpServer({ logger: createLogger({ service: 'test', sink: () => undefined }), authToken: null,
-      ready: async () => { if (holdReadiness) await readiness; return true; },
-      routes: [{ method: 'POST', name: 'slow', pattern: /^\/slow$/, handler: async () => { await work; return { status: 200, body: { ok: true } }; } }] });
+      ready: async () => { if (holdReadiness) { probeArrived(); await readiness; } return true; },
+      routes: [{ method: 'POST', name: 'slow', pattern: /^\/slow$/, handler: async () => { slowArrived(); await work; return { status: 200, body: { ok: true } }; } }] });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port, agent = new Agent({ keepAlive: true }); // as a reverse proxy pools its connections
     try {
@@ -28,7 +29,7 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: a draining HTTP server finishes its
       // A request and a readiness probe are in flight when the drain starts.
       holdReadiness = true;
       const slow = call(port, agent, 'POST', '/slow'), probe = call(port, agent, 'GET', '/readyz');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await arrived;                                                       // both are inside the server, not merely sent
       let closed = false;
       server.close(() => { closed = true; });
       await expect(call(port, false, 'GET', '/healthz')).rejects.toThrow('ECONNREFUSED');
@@ -39,5 +40,34 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: a draining HTTP server finishes its
       for (const deadline = Date.now() + 2_000; !closed && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 20));
       expect(closed).toBe(true);
     } finally { agent.destroy(); server.close(); }
+  });
+
+  it('drained() waits for a handler whose caller already left, after the server itself has closed', async () => {
+    let release!: () => void, finished = false, started!: () => void;
+    const work = new Promise<void>(resolve => { release = resolve; }), running = new Promise<void>(resolve => { started = resolve; });
+    const server = createHttpServer({ logger: createLogger({ service: 'test', sink: () => undefined }), authToken: null,
+      routes: [{ method: 'POST', name: 'mutation', pattern: /^\/mutation$/, handler: async () => {
+        started(); await work; finished = true; return { status: 200, body: { ok: true } };
+      } }] });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      // The caller (a BFF whose own deadline passed) disconnects; the mutation keeps running on the server.
+      const caller = request({ host: '127.0.0.1', port, method: 'POST', path: '/mutation', agent: false, headers: { 'content-type': 'application/json' } });
+      caller.on('error', () => undefined);
+      caller.end('{}');
+      await running;
+      caller.destroy();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise<void>(resolve => server.close(() => resolve()));   // no connection is left: the server closes at once
+      let isDrained = false;
+      const drained = server.drained().then(() => { isDrained = true; });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect([finished, isDrained]).toEqual([false, false]);
+      release();
+      await drained;
+      expect(finished).toBe(true);
+      expect(await server.drained()).toBeUndefined();                      // idle: resolves immediately
+    } finally { release(); if (server.listening) server.close(); }
   });
 });

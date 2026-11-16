@@ -7,13 +7,15 @@
  *
  *  1. Either replica serves any step of one owner run; the same idempotent request sent to both replicas at once executes once.
  *  2. SIGTERM on a replica with requests in flight: they complete, the draining replica takes no new work (its kept-alive connections are closed
- *     after their response, as a reverse proxy pools them), the other replica serves throughout, and the stopped one exits 0 long before the
- *     25 s cap (Railway sends SIGKILL after drainingSeconds=30).
- *  3. A replica killed mid-mutation (SIGKILL) loses nothing: its idempotency claim (120 s) and run lease (30 s) block only that run until they expire;
- *     then the other replica completes the same request exactly once (fenced takeover).
+ *     after their response, as a reverse proxy pools them; this client then retries on the other replica, as the BFF does), the other replica
+ *     serves throughout, and the stopped one exits 0 long before the 25 s cap (Railway sends SIGKILL after drainingSeconds=30).
+ *  2b. A mutation whose caller already disconnected (its own deadline passed) still finishes before the stopping replica closes its database.
+ *  3. A replica killed (SIGKILL) during `begin`'s chain read — before its first write — loses nothing: its idempotency claim (120 s) and run lease
+ *     (30 s) block only that run until they expire; then the other replica completes the same request exactly once (fenced takeover).
  *  4. After every API replica restarted, the worker reconciles the owner-signed attempt and a fresh replica reports it RECONCILED: one transaction.
  *
- * The pool bound (replicas × DATABASE_POOL_MAX) is sampled from pg_stat_activity throughout.
+ * The pool bound (replicas × DATABASE_POOL_MAX) is sampled from pg_stat_activity throughout. Not exercised here: Railway's edge proxy (routing, retries),
+ * Flight/beta mode with wallet principals, and hosted-only guards (these processes are not "hosted").
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -22,7 +24,7 @@ import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createRobinhoodTransferChain, TRANSFER_OWNER as owner } from '../e2e/robinhood-transfer-harness.mjs';
 import { createTestDatabase, type TestDatabase } from '../../../packages/cloud-runtime/test/pg-harness.ts';
@@ -49,7 +51,11 @@ function serveChain(): Promise<void> {
     try { res.end(JSON.stringify({ jsonrpc: '2.0', id, result: await chain.rpc(method, params) }, (_, v: unknown) => typeof v === 'bigint' ? v.toString() : v)); }
     catch { res.statusCode = 400; res.end(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32000, message: 'MOCK_RPC_DENIED' } })); }
   });
-  return new Promise((resolve, reject) => { chainServer.once('error', reject); chainServer.listen(8553, '127.0.0.1', () => resolve()); });
+  return new Promise((resolve, reject) => {
+    // The harness transport's address is fixed (robinhood-rpc.ts): a leftover `robinhood-transfer-harness.mjs --serve` must be stopped first.
+    chainServer.once('error', error => reject((error as { code?: string }).code === 'EADDRINUSE' ? new Error('MOCKED_CHAIN_PORT_8553_IN_USE') : error));
+    chainServer.listen(8553, '127.0.0.1', () => resolve());
+  });
 }
 
 type Exit = { readonly code: number | null; readonly signal: NodeJS.Signals | null; readonly at: number };
@@ -73,7 +79,10 @@ function launch(name: string, role: 'api' | 'worker', env: Record<string, string
     }
   });
   child.stderr!.resume();
-  const exited = new Promise<Exit>(resolve => child.once('exit', (code, signal) => resolve({ code, signal, at: Date.now() })));
+  // 'close' follows 'exit' once stdout is drained, so the last log line (e.g. api.stop_timeout) is already in `records`; `at` is the exit time.
+  let exitAt = 0;
+  child.once('exit', () => { exitAt = Date.now(); });
+  const exited = new Promise<Exit>(resolve => child.once('close', (code, signal) => resolve({ code, signal, at: exitAt || Date.now() })));
   const proc = { name, child, records, exited };
   procs.push(proc);
   return proc;
@@ -137,6 +146,8 @@ beforeAll(async () => {
   await serveChain();
   [a, b] = await Promise.all([startApi('a'), startApi('b')]);
 }, 120_000);
+// A failed scenario never leaves chain latency behind for the next one.
+afterEach(() => { delays.clear(); });
 afterAll(async () => {
   try {
     for (const proc of procs) if (proc.child.exitCode === null && proc.child.signalCode === null) proc.child.kill('SIGKILL');
@@ -186,71 +197,109 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: two API replicas (main.ts api, plai
     const runsBefore = await count('execution_runs');
     // The other replica answers status reads all along (a fresh connection each, as new proxy connections would).
     let served = 0, failed = 0, polling = true;
-    const poll = (async () => {
-      while (polling) {
-        await send(b, 'POST', '/v1/flows/robinhood-transfer/status', { args: [runOne.id] }, { fresh: true })
-          .then(r => { if (r.status === 200 && r.body.ok) served++; else failed++; }, () => { failed++; });
-        await sampleConnections();
-        await sleep(100);
+    try {
+      const poll = (async () => {
+        while (polling) {
+          await send(b, 'POST', '/v1/flows/robinhood-transfer/status', { args: [runOne.id] }, { fresh: true })
+            .then(r => { if (r.status === 200 && r.body.ok) served++; else failed++; }, () => { failed++; });
+          await sampleConnections();
+          await sleep(100);
+        }
+      })();
+      // Three owner requests are in flight on replica A (held by the chain read) when it receives SIGTERM.
+      delays.set('eth_getTransactionCount', 800);
+      const before = calls.get('eth_getTransactionCount') ?? 0;
+      const inflightKeys = [key('inflight'), key('inflight'), key('inflight')];
+      const inflight = inflightKeys.map(k => flow(a, 'simulate', [workflow, owner], k));
+      // All three are inside their handlers (each holds its idempotency claim) and the chain read holds them.
+      const claimed = () => t.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM api_idempotency WHERE idempotency_key = ANY($1) AND state = 'IN_PROGRESS'`,
+        [inflightKeys]).then(r => r.rows[0]!.n);
+      for (const deadline = Date.now() + 10_000; await claimed() < 3 || (calls.get('eth_getTransactionCount') ?? 0) === before;) {
+        if (Date.now() > deadline) throw new Error('SIMULATE_NOT_IN_FLIGHT');
+        await sleep(25);
       }
-    })();
-    // Three owner requests are in flight on replica A (held by the chain read) when it receives SIGTERM.
-    delays.set('eth_getTransactionCount', 800);
-    const before = calls.get('eth_getTransactionCount') ?? 0;
-    const inflightKeys = [key('inflight'), key('inflight'), key('inflight')];
-    const inflight = inflightKeys.map(k => flow(a, 'simulate', [workflow, owner], k));
-    for (const deadline = Date.now() + 10_000; (calls.get('eth_getTransactionCount') ?? 0) === before;) {
-      if (Date.now() > deadline) throw new Error('SIMULATE_NOT_IN_FLIGHT');
-      await sleep(25);
-    }
-    const stoppedAt = Date.now();
-    a.child.kill('SIGTERM');
-    const answered = await Promise.all(inflight);
-    delays.clear();
-    // Every request that was in flight completes normally.
-    for (const reply of answered) expect([reply.status, reply.body.ok]).toEqual([200, true]);
-    // Draining: each kept-alive connection is closed after its answer, so the proxy's next request on its pooled connections cannot reach
-    // the draining replica (its listener is closed) and fails over to the other one.
-    expect.soft(answered.map(r => r.headers.connection)).toEqual(['close', 'close', 'close']);
-    const next = key('failover');
-    expect.soft(await flow(a, 'simulate', [workflow, owner], next).then(() => 'SERVED_BY_DRAINING_REPLICA', (error: Error) => error.message))
-      .toMatch(/^(ECONNREFUSED|ECONNRESET)$/);
-    const failedOver = await ok<TransferRecord>(flow(b, 'simulate', [workflow, owner], next));
-    const exit = await a.exited;
-    polling = false; await poll;
-    expect({ code: exit.code, signal: exit.signal }).toEqual({ code: 0, signal: null });
-    // A clean stop as soon as the in-flight work ended — not the forced exit at 25 s.
-    expect.soft(exit.at - stoppedAt).toBeLessThan(15_000);
-    expect(events(a)).toContain('api.stopping');
-    expect.soft(events(a)).not.toContain('api.stop_timeout');
-    expect({ served: served > 0, failed }).toEqual({ served: true, failed: 0 });
+      const stoppedAt = Date.now();
+      a.child.kill('SIGTERM');
+      const answered = await Promise.all(inflight);
+      delays.clear();
+      // Every request that was in flight completes normally.
+      for (const reply of answered) expect([reply.status, reply.body.ok]).toEqual([200, true]);
+      // Draining: each kept-alive connection is closed after its answer, so the proxy's next request on its pooled connections cannot reach
+      // the draining replica (its listener is closed); this client then retries on the other replica, as the BFF does.
+      expect.soft(answered.map(r => r.headers.connection)).toEqual(['close', 'close', 'close']);
+      const next = key('failover');
+      expect.soft(await flow(a, 'simulate', [workflow, owner], next).then(() => 'SERVED_BY_DRAINING_REPLICA', (error: Error) => error.message))
+        .toMatch(/^(ECONNREFUSED|ECONNRESET)$/);
+      const failedOver = await ok<TransferRecord>(flow(b, 'simulate', [workflow, owner], next));
+      const exit = await a.exited;
+      polling = false; await poll;
+      expect({ code: exit.code, signal: exit.signal }).toEqual({ code: 0, signal: null });
+      // A clean stop as soon as the in-flight work ended — not the forced exit at 25 s.
+      expect.soft(exit.at - stoppedAt).toBeLessThan(15_000);
+      expect(events(a)).toContain('api.stopping');
+      expect.soft(events(a)).not.toContain('api.stop_timeout');
+      expect({ served: served > 0, failed }).toEqual({ served: true, failed: 0 });
 
-    // Nothing was lost or left half-done: four new runs, each readable on the surviving replica, every claim completed, no lease held.
-    expect(await count('execution_runs')).toBe(runsBefore + 4);
-    for (const reply of [...answered.map(r => r.body.value as TransferRecord), failedOver])
-      expect(await ok<TransferRecord>(flow(b, 'status', [reply.id]))).toMatchObject({ id: reply.id, verdict: reply.verdict });
-    for (const k of [...inflightKeys, next]) expect(await claim(k)).toMatchObject({ state: 'COMPLETED' });
-    expect(await liveLeases()).toEqual([]);
-    // Two replicas never held more PostgreSQL connections than replicas × DATABASE_POOL_MAX.
-    expect(peakApiConnections).toBeGreaterThan(0);
-    expect(peakApiConnections).toBeLessThanOrEqual(2 * POOL_MAX);
+      // Nothing was lost or left half-done: four new runs, each readable on the surviving replica, every claim completed, no lease held.
+      expect(await count('execution_runs')).toBe(runsBefore + 4);
+      for (const reply of [...answered.map(r => r.body.value as TransferRecord), failedOver])
+        expect(await ok<TransferRecord>(flow(b, 'status', [reply.id]))).toMatchObject({ id: reply.id, verdict: reply.verdict });
+      for (const k of [...inflightKeys, next]) expect(await claim(k)).toMatchObject({ state: 'COMPLETED' });
+      expect(await liveLeases()).toEqual([]);
+      // Two replicas never held more PostgreSQL connections than replicas × DATABASE_POOL_MAX.
+      expect(peakApiConnections).toBeGreaterThan(0);
+      expect(peakApiConnections).toBeLessThanOrEqual(2 * POOL_MAX);
+    } finally { polling = false; delays.clear(); }
   }, 90_000);
 
-  it('3: a replica killed mid-mutation loses nothing: its claim and lease block only that run until they expire; the other replica then completes it once', async () => {
-    const a2 = await startApi('a2');                                     // the replaced replica (a restart on the same database)
-    const record = await reviewed(a2);
-    const k = key('crash-begin');
-    delays.set('eth_getTransactionCount', 30_000);
-    const before = calls.get('eth_getTransactionCount') ?? 0;
-    const pending = flow(a2, 'begin', [record.id, owner, workflow], k).then(() => 'ANSWERED', (error: Error) => error.message);
-    for (const deadline = Date.now() + 10_000; (calls.get('eth_getTransactionCount') ?? 0) === before;) {
-      if (Date.now() > deadline) throw new Error('BEGIN_NOT_IN_FLIGHT');
+  it('2b: a mutation whose caller already left finishes before the stopping replica closes its database', async () => {
+    const a2 = await startApi('a2'), runsBefore = await count('execution_runs'), k = key('orphan');
+    // The BFF's own deadline passed: it disconnects while its simulate is held by the chain read. The handler keeps running.
+    delays.set('eth_getTransactionCount', 1_500);
+    const text = JSON.stringify({ args: [workflow, owner] });
+    const orphan = request({ host: '127.0.0.1', port: a2.port, method: 'POST', path: '/v1/flows/robinhood-transfer/simulate', agent: false,
+      headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), 'idempotency-key': k } });
+    orphan.on('error', () => undefined);
+    orphan.end(text);
+    for (const deadline = Date.now() + 10_000; (await claim(k))?.state !== 'IN_PROGRESS';) {
+      if (Date.now() > deadline) throw new Error('ORPHAN_NOT_STARTED');
       await sleep(25);
     }
-    a2.child.kill('SIGKILL');                                            // a crash (or Railway's SIGKILL after drainingSeconds)
-    expect(await a2.exited).toMatchObject({ code: null, signal: 'SIGKILL' });
-    expect(await pending).toMatch(/^(ECONNRESET|REQUEST_FAILED)$/);
+    orphan.destroy();
+    await sleep(100);
+    // No connection is left, so the server closes at once; the database must stay open until the orphaned handler ended.
+    const stoppedAt = Date.now();
+    a2.child.kill('SIGTERM');
+    const exit = await a2.exited;
     delays.clear();
+    expect({ code: exit.code, signal: exit.signal }).toEqual({ code: 0, signal: null });
+    expect(exit.at - stoppedAt).toBeLessThan(15_000);
+    expect(events(a2)).not.toContain('api.stop_timeout');
+    // The mutation completed and stored its answer: the BFF's later retry (same key) on the other replica is a replay, not IN_PROGRESS.
+    expect(await claim(k)).toMatchObject({ state: 'COMPLETED' });
+    expect(await count('execution_runs')).toBe(runsBefore + 1);
+    const replay = await ok<TransferRecord>(flow(b, 'simulate', [workflow, owner], k));
+    expect(await ok<TransferRecord>(flow(b, 'status', [replay.id]))).toMatchObject({ id: replay.id });
+    expect(await count('execution_runs')).toBe(runsBefore + 1);
+    expect(await liveLeases()).toEqual([]);
+  }, 90_000);
+
+  it('3: a replica killed during begin\'s chain read loses nothing: its claim and lease block only that run until they expire; the other replica then completes it once', async () => {
+    const a3 = await startApi('a3');                                     // the replaced replica (a restart on the same database)
+    const record = await reviewed(a3);
+    const k = key('crash-begin');
+    delays.set('eth_getTransactionCount', 30_000);
+    try {
+      const before = calls.get('eth_getTransactionCount') ?? 0;
+      const pending = flow(a3, 'begin', [record.id, owner, workflow], k).then(() => 'ANSWERED', (error: Error) => error.message);
+      for (const deadline = Date.now() + 10_000; (calls.get('eth_getTransactionCount') ?? 0) === before;) {
+        if (Date.now() > deadline) throw new Error('BEGIN_NOT_IN_FLIGHT');
+        await sleep(25);
+      }
+      a3.child.kill('SIGKILL');                                          // a crash (or Railway's SIGKILL after drainingSeconds)
+      expect(await a3.exited).toMatchObject({ code: null, signal: 'SIGKILL' });
+      expect(await pending).toMatch(/^(ECONNRESET|REQUEST_FAILED)$/);
+    } finally { delays.clear(); }
 
     // What the crash left: an IN_PROGRESS claim (expires within 120 s) and the run's lease (expires within 30 s); no attempt, no transaction.
     const left = await claim(k);
@@ -275,7 +324,7 @@ describe('BUILD-INFRA-API-FAILOVER-CERT-001: two API replicas (main.ts api, plai
     expect(await claim(k)).toMatchObject({ state: 'COMPLETED' });
     // The takeover is fenced: the run's lease fence advanced past the crashed holder's.
     const fence = await t.db.query<{ fence: string }>(`SELECT fence::text AS fence FROM execution_leases WHERE lease_key = $1`, [record.id]);
-    expect(BigInt(fence.rows[0]!.fence)).toBeGreaterThanOrEqual(2n);
+    expect(BigInt(fence.rows[0]!.fence)).toBeGreaterThan(BigInt(leases[0]!.fence));
     expect(chain.transactions).toHaveLength(1);
   }, 90_000);
 
