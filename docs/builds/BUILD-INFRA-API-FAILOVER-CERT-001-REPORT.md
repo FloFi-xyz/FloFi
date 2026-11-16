@@ -1,6 +1,8 @@
 # BUILD-INFRA-API-FAILOVER-CERT-001 — Report
 
-Date: 2026-11-16. Branch `claude/peaceful-keller-dtdi1t`, base `origin/main` `b41ee5d` (last verified production commit).
+Date: 2026-11-16. Branch `claude/peaceful-keller-dtdi1t`, started from `origin/main` `b41ee5d` (then the production commit), then
+synced with `origin/main` `d49f80a` (PR #204: UX and Next.js 16.4.6, no API/worker change; production since 23:00 UTC) and re-certified
+on the merged head: every gate and the failover suite were run again there.
 
 **Recommendation: READY_FOR_2_REPLICAS once this change is merged and deployed, confirmed by the edge check in rollout step 4 — owner
 action required to merge, deploy and scale.**
@@ -69,7 +71,8 @@ test opens), not by timing. The numbers are from single runs of the final test (
 PostgreSQL connections were sampled throughout: the observed peak for both replicas together was 4 (an observation of this load, not a
 proof of the pool bound, which is `pg.Pool`'s `max`). Each regression was confirmed by mutation: removing `Connection: close` fails
 scenario 2, removing the `drained()` wait or restoring `process.once` fails scenario 2b. Stability: with the fix, every run of every
-version of the suite passed; the final version passed 6/6 consecutive runs plus the full PostgreSQL stage, about 12 s per run.
+version of the suite passed; the final version passed 6/6 consecutive runs plus the full PostgreSQL stage, and 3/3 plus the full stage
+again on the head synced with `d49f80a`, about 12 s per run.
 
 Unit stage: `packages/cloud-runtime/test/http-drain.test.ts` (after `close()` an in-flight answer and an in-flight readiness probe close
 their connection, readiness 503, a new connection is refused, the server closes without waiting for the client's kept-alive sockets,
@@ -136,8 +139,9 @@ the pooler (or direct) limit at the minimum compute size.
 
 Drift for the owner to decide (no action taken; editing these files could change production on the next deploy if the services read
 them): `deploy/railway/api.railway.json` has no `drainingSeconds`, `overlapSeconds` or replica count, so a service recreated from it
-would get Railway's defaults; `deploy/railway/worker.railway.json` and `docs/deploy/CLOUD.md` say `drainingSeconds: 90` while the live
-worker uses 130 (the worker's own cap is 120 s). Live values differing from the files suggest the services do not read them.
+would get Railway's defaults; `deploy/railway/worker.railway.json` says `drainingSeconds: 90`, below the worker's own 120 s cap, while
+the live worker uses 130 (`docs/deploy/CLOUD.md` said 90 too and is corrected in this change). Live values differing from the files
+suggest the services do not read them.
 
 ## Rollout and rollback
 
