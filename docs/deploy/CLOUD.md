@@ -24,7 +24,7 @@ All values are secrets or configuration supplied by the hosting platform. Never 
 | --- | --- | --- |
 | `DATABASE_URL` | yes | PostgreSQL URL used at runtime. Neon: the **pooled** connection string with `sslmode=require`. |
 | `DATABASE_MIGRATION_URL` | recommended | Direct (unpooled) URL used only by `migrate`. Defaults to `DATABASE_URL`. |
-| `DATABASE_POOL_MAX` | no | Connections per process (default 10). Keep `replicas × pool` under the database limit. |
+| `DATABASE_POOL_MAX` | no | Connections per process (default 10). Budget for deploy overlaps: `(2 × API replicas + 2 × worker replicas) × pool + 1 (migrate) + Vercel instances × their pool` under the pooler (or direct) limit at the minimum compute size ([BUILD-INFRA-API-FAILOVER-CERT-001](../builds/BUILD-INFRA-API-FAILOVER-CERT-001-REPORT.md)). |
 | `API_AUTH_TOKEN` | API, yes in production | Bearer token the BFF presents. ≥32 characters (`openssl rand -hex 32`). The API refuses to start in production without it. |
 | `NODE_ENV` | yes | `production` (set by the Docker image). |
 | `PORT`, `HOST` | no | Listener (Railway injects `PORT`; default `0.0.0.0:8080`). |
@@ -236,8 +236,11 @@ These steps need the owner's accounts. The repository already contains everythin
   and rollback limits: [SCHEMA-COMPATIBILITY.md](SCHEMA-COMPATIBILITY.md). Use the direct URL for migrations behind a
   transaction pooler.
 * **Scaling**: add API or worker replicas freely. Workers claim with `SKIP LOCKED`; runs are protected by fenced
-  leases; API instances share nothing but the database.
-* **Restarts**: SIGTERM stops claiming and drains in-flight items (Railway `drainingSeconds` 90). A killed worker's
+  leases; API instances share nothing but the database. An API replica that receives SIGTERM stops listening, closes every kept-alive
+  connection after its current answer, answers `/readyz` 503, finishes its running handlers and exits; the 25 s cap (logged as
+  `api.stop_timeout`) stays under Railway's `drainingSeconds` (30).
+* **Restarts**: SIGTERM stops claiming and drains in-flight items (the worker's own cap is 120 s, so Railway's `drainingSeconds` must be
+  above it: production uses 130). A killed worker's
   items are reclaimed after their lease (60 s); its run leases expire after 30 s.
 * **Attention**: an item that exhausts its observation budget (500 deliveries or 7 days) becomes `DEAD` and sets
   `execution_runs.attention_required`; it is never resubmitted. Query:

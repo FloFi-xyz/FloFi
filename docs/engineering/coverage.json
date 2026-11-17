@@ -170,6 +170,10 @@
       "path": "apps/reference-dapp/src/automations/scheduler.pg.test.ts",
       "stage": "postgres"
     },
+    "app.backend.api-failover.pg": {
+      "path": "apps/reference-dapp/backend/api-failover.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.backend.automation-production.pg": {
       "path": "apps/reference-dapp/backend/automation-production.pg.test.ts",
       "stage": "postgres"
@@ -1030,6 +1034,14 @@
       "path": "packages/cloud-runtime/test/forward-compatibility.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.http-drain": {
+      "path": "packages/cloud-runtime/test/http-drain.test.ts",
+      "stage": "unit"
+    },
+    "cloud-runtime.http-request-target": {
+      "path": "packages/cloud-runtime/test/http-request-target.test.ts",
+      "stage": "unit"
+    },
     "cloud-runtime.migration-manifest": {
       "path": "packages/cloud-runtime/test/migration-manifest.test.ts",
       "stage": "unit"
@@ -1527,6 +1539,8 @@
     "app.user-funded.solana-nonce-codec",
     "app.workflow-runs.execution-groups",
     "app.workflow-runs.received-amounts",
+    "cloud-runtime.http-drain",
+    "cloud-runtime.http-request-target",
     "cloud-runtime.migration-manifest",
     "developer-sdk.webhooks",
     "reference-compiler.bridge",
@@ -2936,6 +2950,7 @@
       ],
       "suites": [
         "action-registry.engineering-regression",
+        "app.backend.api-failover.pg",
         "app.backend.load-failure",
         "app.backend.plain-node-closure",
         "app.backend.workflow-run-worker-startup.pg",
@@ -3154,10 +3169,13 @@
       ],
       "suites": [
         "action-registry.engineering-regression",
+        "app.backend.api-failover.pg",
         "app.platform.engineering-continuity",
         "app.platform.parity",
         "cloud-runtime.dispatch.pg",
         "cloud-runtime.evidence-telemetry",
+        "cloud-runtime.http-drain",
+        "cloud-runtime.http-request-target",
         "cloud-runtime.storage.pg",
         "cloud-runtime.tenancy.pg",
         "reference-compiler.review",
@@ -8022,6 +8040,7 @@
     "app.automations.remote.pg",
     "app.automations.replace.pg",
     "app.automations.scheduler.pg",
+    "app.backend.api-failover.pg",
     "app.backend.automation-production.pg",
     "app.backend.beta-access.pg",
     "app.backend.flight-admin.pg",
