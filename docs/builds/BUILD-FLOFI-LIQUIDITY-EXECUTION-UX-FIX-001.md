@@ -125,6 +125,29 @@ Review and re-checked before each request).
 
 Nothing in this build claims these capabilities as available.
 
+## Specialist review
+
+Nine read-only specialists (liquidity, security, wallet-execution, workflow, lending, bridge, frontend-ux, chat, infrastructure-ci; at most
+three at once) reviewed the branch. No P0/P1 defect in the financial core; applied:
+- begin clears an expired Review's authorization; a run at its 16-attempt limit is refused before the nonce is reserved;
+- expiry wording only for `*_REVIEW_EXPIRED` (and legacy records that prove it); neutral copy that never claims confirmed steps;
+  the Dashboard chip says "The Review expired before the wallet request", never "Wallet confirmation was declined";
+- the store's `review()` refreshes in place when the server refuses a last-seconds authorization; `started` counts only current attempts;
+  "Simulate again" never refreshes a run that attempted its mint (the duplicate-position guard is unchanged);
+- chat (medium, both fixed with regressions): the store no longer shows the interim cancelled record while it refreshes in place (it ended
+  the chat's follow-up before the updated Review arrived), and `uniswap-pool` offers "Refresh & review" after a pre-send refusal on the
+  Canvas and in the Execute workspace (the incident's run after a reload no longer shows a disabled "Execution needs attention");
+- lending: the margin also in supply `review()` and after the EIP-7702 proof reads;
+- frontend: "Needs you" actions wrap like every row action; the responsive test uses the CSS's real 10rem (140 px) and checks that no row
+  button or tag spills, on the Dashboard and in Your workflows.
+
+## Integration with PR #209 (BUILD-FLOFI-CI-ARCHITECTURE-002)
+
+`origin/main` d153f22 was merged into this branch (no rebase or force-push). The new CI architecture is kept as merged: eight browser
+shards placed by the balancer (`uniswap-continuation` is placed automatically, with no manual shard or invented timing), the split
+`default-product-1..2` / `execution-continuity-1..3` profiles, the supersede guard, DEC-0058 and the CI runbook. The only overlap was the
+profile count in `scripts/test_ci_gcp_orchestration.py`: 58 on `main` + `uniswap-continuation` = 59.
+
 ## Tests
 
 - Unit: `server/base-liquidity.test.ts` (incident reproduction, hand-off at entry and after reads, same-run continuation through mint with

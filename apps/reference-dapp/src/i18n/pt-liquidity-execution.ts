@@ -16,4 +16,5 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
     'Sua revisão expirou antes de a FloFi pedir à sua carteira, então nada foi enviado. Simule de novo para atualizar a revisão da mesma execução e autorize-a para continuar. O que já foi confirmado continua registrado e não se repete.',
   'An earlier wallet request was not sent and the Review was refreshed. Check the updated Review and authorize it again.':
     'Um pedido anterior à carteira não foi enviado e a revisão foi atualizada. Confira a revisão atualizada e autorize-a de novo.',
+  'The Review expired before the wallet request': 'A revisão expirou antes do pedido à carteira',
 };

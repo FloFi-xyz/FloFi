@@ -31,8 +31,9 @@
 .ux-page .ux-list{margin:0;padding:0;list-style:none}
 .ux-page .ux-list>li+li{border-top:1px solid var(--line)}
 /* BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (UX-01): a row wraps by the width it actually has (a narrow card in the split Dashboard, zoom), not
-   only below a 700 px viewport. The name keeps at least 10rem, else the whole width beside the icon, before the status and actions move to
-   their own line (right-aligned, as on one line); the actions never squeeze the name into a one-character column. */
+   only below a 700 px viewport. The name keeps at least 10rem (140 px at the 14 px root), else the whole width beside the icon, before the
+   status and actions move to their own line (right-aligned, as on one line; below 700 px the approved mobile rule aligns them under the
+   name); the actions never squeeze the name into a one-character column. */
 .ux-page .ux-row{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;min-width:0;padding:12px 0}
 .ux-page .ux-row-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;border:0;border-radius:12px;background:var(--surface-raised);color:var(--accent)}
 .ux-page .ux-row-icon svg{width:20px;height:20px}

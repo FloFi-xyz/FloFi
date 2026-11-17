@@ -66,13 +66,21 @@ let host: HookHarness, store: ReturnType<typeof useUniswapLiquidity>, chain: Uni
 const sent: { to: string; data: string }[] = [];
 /** `slowSessionRead`: seconds the owner's wallet takes to answer its nonce read between the prepare and the hand-off (once). */
 const wallet = { slowSessionRead: 0 };
-function Probe() { store = useUniswapLiquidity(); return null; }
+/** Every record the store presented, in order (to prove no interim record is shown while a run is refreshed in place). */
+const shown: { commitment: string; states: string[] }[] = [];
+function Probe() {
+  store = useUniswapLiquidity();
+  const r = store.record;
+  if (r && JSON.stringify(shown.at(-1)) !== JSON.stringify({ commitment: r.review.commitment, states: r.attempts.map(a => a.state) }))
+    shown.push({ commitment: r.review.commitment, states: r.attempts.map(a => a.state) });
+  return null;
+}
 const read = () => host.render(() => renderToStaticMarkup(<UniswapLiquidityProvider><Probe/></UniswapLiquidityProvider>));
 async function settle() { for (let i = 0; i < 20; i++) { await new Promise(resolve => setTimeout(resolve, 0)); read(); } }
 async function act(action: () => Promise<void>) { const done = action(); await settle(); await done; await settle(); }
 
 beforeEach(async () => {
-  host = new HookHarness(); sent.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0;
+  host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0;
   chain = createUniswapLiquidityChain();
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unilp-store-'));
   f.service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: chain.rpc, provenance: 'MOCKED',
@@ -146,6 +154,9 @@ describe('EXEC-01: the store continues the same run after its Review expired bet
     // The prepared WETH request is recorded as never sent, because its Review expired (not as a refusal or a cancellation by the owner).
     expect(store.record?.attempts.map(a => [a.step, a.state, a.note])).toEqual([['APPROVE_TOKEN0', 'CONFIRMED', null], ['APPROVE_TOKEN1', 'CANCELLED', 'UNISWAP_REVIEW_EXPIRED']]);
     expect(f.failures).toEqual(['UNISWAP_REVIEW_EXPIRED']);
+    // The cancelled attempt was never presented under the expired Review (the chat would have read the run as finished): the store went from
+    // the authorized run straight to the refreshed one.
+    expect(shown.some(r => r.commitment === first.review.commitment && r.states.includes('CANCELLED'))).toBe(false);
     await act(() => store.review());
     await act(() => store.execute());
     await act(() => store.execute());
@@ -181,4 +192,3 @@ describe('EXEC-01: the store continues the same run after its Review expired bet
     expect(sent).toHaveLength(0);
   });
 });
-

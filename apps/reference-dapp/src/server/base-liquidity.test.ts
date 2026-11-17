@@ -29,6 +29,7 @@ import { financialAttemptState } from '../domain/financial-run-status';
 import { requotedMessage, simulationError } from '../domain/simulation-presentation';
 import { currentUniswapAttempts, UNISWAP_REFRESH_IN_PLACE, uniswapRefreshInPlace, uniswapReviewAuthorizable, uniswapRunResumable } from '../domain/uniswap-liquidity-continuation';
 import { translate } from '../i18n/translate';
+import { projectDashboardRun } from '../lib/dashboard/run-mapping';
 import type { Rpc } from './public-testnet-service';
 
 const context = createBaseSepoliaReviewContext();
@@ -415,5 +416,21 @@ describe('EXEC-01 Review expiry between sequential wallet requests (MOCKED Base 
     expect((await s.service.begin(fresh.id, UNI_OWNER, w)).attempt.step).toBe('APPROVE_TOKEN0');
     expect(s.chain.counters.sends).toBe(0);
   });
-});
 
+  it('the Dashboard never calls a request stopped by an expired Review "declined"', async () => {
+    const s = await incident(), w = incidentWorkflow();
+    const simulated = await s.service.simulate(w, UNI_OWNER);
+    await s.service.review(simulated.id, simulated.review.commitment, w);
+    await s.service.begin(simulated.id, UNI_OWNER, w);
+    s.chain.advance(secondsLeft(s, simulated) + 1);
+    await expect(s.service.handoff(simulated.id)).rejects.toThrow('UNISWAP_REVIEW_EXPIRED');
+    const record = await s.service.load(simulated.id);
+    const run = { runId: record.id, workflowId: 'w', flow: 'base-liquidity', status: 'NOT_SUBMITTED', ownerAccount: UNI_OWNER, provenance: 'MOCKED', hasEvidence: false,
+      errorCode: 'UNISWAP_REVIEW_EXPIRED', needsObservation: false, attentionRequired: false, createdAt: null, updatedAt: null };
+    const view = projectDashboardRun(run, lifecycle(record));
+    expect(view.status).toBe('Transaction not submitted');
+    expect(view.attention).toEqual(['The Review expired before the wallet request']);
+    expect(view.attention).not.toContain('Wallet confirmation was declined');
+    expect(s.chain.counters.sends).toBe(0);
+  });
+});

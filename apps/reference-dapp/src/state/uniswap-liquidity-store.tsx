@@ -150,15 +150,19 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       // Review — only the requests still needed — waits for the owner's explicit authorization. Never a silent extension, never a new run.
       const code = cause instanceof Error ? cause.message : '';
       if (reviewed && UNISWAP_REFRESH_IN_PLACE.test(code)) {
+        // No interim record is shown while the run is refreshed: its concluded attempt would read "partially completed" and end the chat's
+        // follow-up before the updated Review arrives (as the universal bridge store does). Only the refreshed run, else the latest record.
+        const interim = (cause as { interim?: UniswapLiquidityRecord | null }).interim ?? null;
         const current = await uniswapLiquidityStatus(reviewed.id).catch(() => null);
-        if (current?.ok) accept(current.value);
-        if (current?.ok && uniswapRunResumable(current.value)) {
-          const refreshed = await uniswapLiquidityRefresh(reviewed.id);
-          if (refreshed.ok) {
+        const latestRecord = current?.ok ? current.value : interim;
+        if (latestRecord && uniswapRunResumable(latestRecord)) {
+          const refreshed = await uniswapLiquidityRefresh(reviewed.id).catch(() => null);
+          if (refreshed?.ok) {
             accept(refreshed.value); setRequoted({ code, runId: reviewed.id });
             throw new Error('UNISWAP_REFRESHED_REVIEW_REQUIRED', { cause });
           }
         }
+        if (latestRecord) accept(latestRecord);
       }
       throw cause;
     }
@@ -221,7 +225,10 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
       diagnostic.code = refused ? 'UNISWAP_REJECTED' : !diagnostic.invoked ? (cause instanceof Error && /^UNISWAP_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'UNISWAP_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'UNISWAP_SUBMISSION_UNKNOWN';
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await uniswapLiquidityWalletFailure(id, diagnostic); if (failure.ok) accept(failure.value);
+        const failure = await uniswapLiquidityWalletFailure(id, diagnostic);
+        // A refusal that execute() refreshes in place hands its record over instead of showing it (see execute()).
+        if (!diagnostic.invoked && UNISWAP_REFRESH_IN_PLACE.test(diagnostic.code)) throw Object.assign(new Error(diagnostic.code, { cause }), { interim: failure.ok ? failure.value : null });
+        if (failure.ok) accept(failure.value);
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
@@ -229,7 +236,8 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
         const report = await uniswapLiquidityReport(id, { kind: 'UNKNOWN', code: diagnostic.code }); if (report.ok) accept(report.value);
         throw new Error('UNISWAP_SUBMISSION_UNKNOWN_OBSERVE_EXISTING', { cause });
       }
-      if (cause instanceof Error && /STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message)) {
+      // A refusal that execute() refreshes in place is not shown on its own (see execute()); any other stale-state refusal shows the latest record.
+      if (cause instanceof Error && /STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message) && !UNISWAP_REFRESH_IN_PLACE.test(cause.message)) {
         const current = await uniswapLiquidityStatus(id); if (current.ok) accept(current.value);
       }
       throw cause;

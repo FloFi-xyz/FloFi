@@ -36,7 +36,8 @@ const pageSends = (page: Page) => page.evaluate(() => (window as unknown as { un
 /** The service the app's server actions run (MOCKED harness mode): same journal, same loopback chain, same harness clock. */
 function ownerService(): UniswapLiquidityService {
   const journal = process.env.GRYLOO_UNISWAP_LIQUIDITY_JOURNAL!;
-  const offset = () => { try { return Number(readFileSync(`${journal}.clock`, 'utf8')) || 0; } catch { return 0; } };
+  // The same bounded offset the app's harness clock accepts (0–24 h).
+  const offset = () => { try { const value = Number(readFileSync(`${journal}.clock`, 'utf8')); return Number.isSafeInteger(value) && value >= 0 && value <= 86_400_000 ? value : 0; } catch { return 0; } };
   const now = () => new Date(Date.now() + offset());
   return createUniswapLiquidityService({ storage: createFileExecutionStorage(journal, 'UNISWAP_LIQUIDITY_BUSY'),
     // The owner-side requests also re-estimate gas (begin); the Base Sepolia read list alone does not include it.

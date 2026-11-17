@@ -202,7 +202,8 @@ test('the Current execution card keeps its name and network readable and its act
     });
     const { card: c, row, column, name, meta } = layout;
     // The name and its network line keep a readable column (never a character per line) and wrap in at most a few lines.
-    expect(column!.width, `name column ${at}`).toBeGreaterThanOrEqual(Math.min(150, row!.width - 60));
+    // 10rem at the app's 14 px root (the CSS minimum before the actions wrap), else the width beside the icon.
+    expect(column!.width, `name column ${at}`).toBeGreaterThanOrEqual(Math.min(140, row!.width - 60));
     expect(name!.width, `name width ${at}`).toBeGreaterThan(80);
     expect(Math.round(name!.height / layout.nameLine), `name lines ${at}`).toBeLessThanOrEqual(3);
     expect(Math.round(meta!.height / layout.metaLine), `network lines ${at}`).toBeLessThanOrEqual(3);
@@ -220,4 +221,31 @@ test('the Current execution card keeps its name and network readable and its act
   }
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.screenshot({ path: '.tmp/ux01-current-execution-1280-125.png', fullPage: true });
+});
+
+/** UX-01: no row label spills out of its button or tag, on the Dashboard ("Needs you" and Current execution) and in Your workflows. */
+test('row buttons and status tags keep their text inside at every width and zoom, on the Dashboard and in Your workflows', async ({ page }) => {
+  await page.evaluate(() => window.flofiDashboardAcceptance.mode('partial-current'));
+  for (const view of ['dashboard', 'records'] as const) {
+    await page.evaluate(value => window.flofiDashboardAcceptance.view(value), view);
+    // In the product, Your workflows is a `ux-page` section; the shared harness frame is not, so this check gives the records the product's page.
+    if (view === 'records') await page.evaluate(() => document.querySelector('#acceptance-root .dashboard-workspace')?.classList.add('ux-page', 'saved-workflows'));
+    for (const width of [320, 375, 768, 1280]) for (const zoom of [1, 1.25]) {
+      const at = `${view} ${width}px at ${zoom * 100}%`;
+      await page.setViewportSize({ width: Math.round(width / zoom), height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), at).toBe(true);
+      const rows = await page.locator('.ux-page .ux-row').evaluateAll(elements => elements.filter(row => (row as HTMLElement).offsetParent).map(row => {
+        const main = row.querySelector('.ux-row-main'), box = row.getBoundingClientRect();
+        const spill = [...row.querySelectorAll('.ux-row-actions .ux-button, .ux-row-actions .ux-tag')]
+          .filter(item => (item as HTMLElement).scrollWidth > (item as HTMLElement).clientWidth + 1 || item.getBoundingClientRect().right > box.right + 1)
+          .map(item => item.textContent);
+        return { text: row.textContent?.slice(0, 40), main: main ? main.getBoundingClientRect().width : null, width: box.width, spill };
+      }));
+      expect(rows.length, at).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.spill, `${at}: ${row.text}`).toEqual([]);
+        if (row.main !== null) expect(row.main, `${at}: ${row.text}`).toBeGreaterThanOrEqual(Math.min(140, row.width - 60));
+      }
+    }
+  }
 });
