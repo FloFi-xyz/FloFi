@@ -272,9 +272,26 @@ small supply-chain job (~60 s, ~5 credits) the complete certification comes to *
 After this run the timings were refreshed from its own medium reports (`scripts/ci_timings.py`): the eight shards went from a measured
 478–531 s to an estimated 501–502 s each.
 
-### 7.4 CircleCI: second run (warm cache, rebalanced shards, supply-chain job)
+### 7.4 CircleCI: second run (pipeline `e8e4b4d6`, revision `f4cbc7a`, warm cache, rebalanced shards, supply-chain job)
 
-Pending: results are added when the run completes.
+| Job | Runner | Seconds | Ends after pipeline start | Credits |
+| --- | --- | ---: | ---: | ---: |
+| governance | small | 66.9 | 1.1 min | 5.6 |
+| certification-build | large | 226.2 | 3.8 min | 75.4 |
+| certification-supply-chain (advisory) | small | 70.5 | 2.4 min | 5.9 |
+| certification-checks | large | 607.5 | 11.3 min | 202.5 |
+| certification-unit | large | 581.9 | 10.9 min | 194.0 |
+| certification-browser-1 … -8 | medium | 524.7 – 601.2 (mean 564.2) | 12.6 – 13.9 min | 752.3 |
+
+- Every job passed except `certification-supply-chain`, which stopped only on the upstream advisory (§7.5); `certification` therefore
+  did not run, as designed. With the gates in their own job, `certification-checks` ran completely this time: typecheck 111.3 s, lint
+  54.7 s, schema drift 1.9 s, PostgreSQL 346.0 s, anvil 3.3 s, forks 40.8 s (audited means 114.5 / 49.7 / 1.5 / 343.4 / 3.4 / 41.0 s).
+- All 58 browser profiles passed again on medium; shard totals 455–507 s, shard 1 + critical tier 540 s (the critical tier took 368 s,
+  340 s in the first run). After this run the timings were refreshed from both medium runs (median): eight shards of 500–501 s.
+- Warm cache: Node and pnpm came from the archive cache (`Archive cache HIT`), toolchain bootstrap 6.75 s against 7.0 s cold — the cache
+  still saves under a second per job; nothing else is cached.
+- **Wall clock: 13.9 min to the last job** (fan-in ~15 s more: ~14.2 min). **Credits: 1236** for the jobs that ran; a
+  passing supply-chain job adds ~3 s and the fan-in ~1.3 credits.
 
 ### 7.5 Blocker outside this build: GHSA-fc5q-39xc-vjpf (picomatch ≤ 4.0.7, high)
 
@@ -289,10 +306,11 @@ stays blocked, as it must.
 
 | Metric | Before (10 green runs) | After (first run; complete-run projection) | Change |
 | --- | ---: | ---: | ---: |
-| Wall clock | 32.7 min mean, 35.9 max | 13.8 min to the last job (~14.1 with the fan-in) | −57% |
-| Critical path | `certification-checks` 31.1 min | `certification-browser-2` 10.3 min after a 3.4-min build | |
-| Runner compute | 87.1 large-min | ~62.5 large-min equivalent (browser jobs at half rate) | −28% |
-| Credits | 1,749 | ~1,250 | −28.5% |
+| Wall clock | 32.7 min mean (30.3–35.9) | 13.8 min (cold) and 13.9 min (warm) to the last job, ~14.1–14.2 min with the fan-in | **−57%** |
+| Critical path | `certification-checks` 31.1 min | build 3.4–3.8 min, then the longest browser job 10.0–10.3 min | |
+| Runner compute | 87.1 large-min | ~62 large-min equivalent (browser jobs at half rate) | −29% |
+| Credits per certification | 1,749 | ~1,240 (second run measured 1236 + fan-in) | **−29%** |
+| Cold vs warm cache | 7.0 vs 6.8 s toolchain bootstrap | 7.0 vs 6.75 s | no material effect (by design: only digest-verified tool archives are cached) |
 | Production builds per certification | 3 | 1 | −2 |
 | Browser profiles | 55 + composition | 58 + composition (same specs, each once) | parts |
 | Tests | unchanged | unchanged (every former spec and suite runs) | 0 |
@@ -300,4 +318,34 @@ stays blocked, as it must.
 
 ## 8. Rollback
 
-See [docs/engineering/CI.md § Rollback](../engineering/CI.md#rollback).
+See [docs/engineering/CI.md § Rollback](../engineering/CI.md#rollback). Nothing persistent depends on this build: no schema, cache key,
+project setting or status context was removed (new contexts were added), so reverting the merge restores the three-runner topology at once.
+Single parts roll back with one line each (browser runner class, supersede guard).
+
+## 9. Reviews, open items and owner decisions
+
+**Specialist reviews** (read-only; `agent_guard.py impact` selected all 19 domains because shared CI files changed; three were run, with
+the others skipped because no product, wallet, chat, channel or provider code changed and every browser profile still runs exactly once):
+
+| Reviewer | Result | Disposition |
+| --- | --- | --- |
+| flofi-workflow | no findings: no spec of the split profiles depends on another spec's state; noted residual first-on-a-fresh-server risk for `conversational-workflow` and `build-entry` | Both ran first in their parts locally and twice on CircleCI, green |
+| flofi-security | 3 low: writes through an archive link, build before governance, fork pull requests in the guard | All fixed with tests (§5.4; governance-lite in the build job; forks skipped) |
+| flofi-infrastructure-ci | 1 medium (medium-runner memory unproven), 8 low | Medium answered by two CircleCI runs (peak 3.2 GiB of 4); lows fixed (shard-order test, shard bounds, hard links refused at pack, cache saved before records, empty timings) or already addressed (missing report, candidate-baseline hook); a delta review covers the fixes |
+
+**Open items**
+
+1. *Upstream advisory GHSA-fc5q-39xc-vjpf* (§7.5): no revision of any branch can certify until picomatch 4.0.8 exists. Then the
+   `certification` fan-in of this PR runs for the first time; its result is the final evidence of the new topology end to end.
+2. *Auto-cancel redundant workflows* (owner setting, recommended). The repository guard was observed reading the branch head on
+   CircleCI; a real supersede (exit 75) is covered by tests, not yet observed live.
+3. *Flaky tests* found by CircleCI (not changed here): `flight › board.spec.ts` "Now boarding…" (2 flakes), `flight-closed-beta ›
+   flight-transition.spec.ts`, `channel-approve › telegram-approve.spec.ts`; they caused 4 of 30 audited failures and 3 reruns.
+4. *Status contexts*: existing names are kept; if branch protection should list the new jobs, that is an owner setting
+   (`certification` already requires all of them).
+
+**Owner decisions requested**
+
+1. Browser jobs on `medium` (−29% credits, +10.6% per-profile time, measured). Rollback is one line.
+2. The build starting beside governance (it runs governance-lite itself first).
+3. Candidate baselines after screenshot failures (diagnostic artifacts; the only change under `apps/` is the gated config hook).
