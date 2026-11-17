@@ -19,6 +19,8 @@ import { ownerHistoryOperation } from '../../../../server/owner-history';
  * CORS preflight this route never grants — and a browser fetch from another origin (`Sec-Fetch-Site` other than `same-origin`) is refused.
  */
 export const dynamic = 'force-dynamic';
+// The same budget as the Dashboard pages whose Server Actions these reads replace (a history page reads up to ~25 records).
+export const maxDuration = 300;
 const NO_STORE = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } as const;
 const ACCOUNT = /^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
 const refuse = (code: string, status: number) => Response.json({ ok: false, code }, { status, headers: NO_STORE });
