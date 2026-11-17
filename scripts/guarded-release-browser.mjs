@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
@@ -16,12 +16,18 @@ if (args.filter(arg => arg === '--collect-failures').length > 1) throw new Error
 const rest = args.filter(arg => arg !== '--collect-failures');
 if (phase === 'list' && collectFailures) throw new Error(usage);
 const boundary = 'release-financial-provenance.spec.ts';
+const executionContinuity = { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY',
+  TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' };
 const definitions = [
-  ['default-product', ['brand-ux-001.spec.ts', 'base-observation.spec.ts', 'build-roundtrip.spec.ts', 'build009.spec.ts', 'across.spec.ts',
+  // BUILD-FLOFI-CI-ARCHITECTURE-002: the default product suite (34 specs, ~530 s on CircleCI) runs as two parts of its spec list, in its
+  // order, with the same (empty) settings: each part is its own profile with its own app server and synthetic fork, so CI can place them
+  // in different browser jobs. Together they run exactly the former default-product list (scripts/test_ci_optimization.py checks it).
+  ['default-product-1', ['brand-ux-001.spec.ts', 'base-observation.spec.ts', 'build-roundtrip.spec.ts', 'build009.spec.ts', 'across.spec.ts',
     'canvas-keyboard.spec.ts', 'canvas-ux.spec.ts', 'contextual-proposals.spec.ts', 'cross-chain-liquidity-recovery.spec.ts',
     'cross-chain-liquidity.spec.ts', 'execution-capabilities.spec.ts', 'interface-honesty.spec.ts', 'mock-artifact-chain.spec.ts',
     'network-isolation.spec.ts', 'public-testnet.spec.ts', 'robinhood-network.spec.ts', 'swap-authoring.spec.ts', 'visual-shell.spec.ts', 'credentials.spec.ts',
-    'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'site.spec.ts', 'build-entry.spec.ts', 'privacy-notice.spec.ts', 'editor-redesign.spec.ts',
+    'build-fix-ux.spec.ts', 'beta-ui.spec.ts'], {}],
+  ['default-product-2', ['site.spec.ts', 'build-entry.spec.ts', 'privacy-notice.spec.ts', 'editor-redesign.spec.ts',
     'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts',
     'simulate-canvas-controls.spec.ts', 'editor-layout-hotfix.spec.ts', 'editor-header-new-workflow.spec.ts', 'ux-polish-004.spec.ts',
     // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (UX-01): the owner's chat bubbles keep short messages on one line at every zoom, width and theme.
@@ -35,7 +41,11 @@ const definitions = [
   // BUILD-FLOFI-CONVERSATIONAL-001: the same harness drives the whole workflow from the FloFi chat (review, two confirmations, wallet, reconciliation).
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a multi-action workflow run from the chat as a sequence of one-action steps (funded Swap → Swap reconciled step by
   // step, an unapplied Canvas amount, the wallet network switch, a missing quote and a balance too low), on the same loopback harness.
-  ['execution-continuity', ['execution-continuity.spec.ts', 'workflow-ux-execution.spec.ts', 'conversational-workflow.spec.ts', 'chat-sequence.spec.ts', 'chat-assistant.spec.ts', 'locale-journey.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-FLOFI-CI-ARCHITECTURE-002: the six files (~740 s on CircleCI, mostly waiting on the loopback lifecycle) run as three parts with the
+  // same harness settings, each on its own disposable database and servers; together they run exactly the former execution-continuity list.
+  ['execution-continuity-1', ['chat-sequence.spec.ts'], executionContinuity],
+  ['execution-continuity-2', ['workflow-ux-execution.spec.ts', 'chat-assistant.spec.ts'], executionContinuity],
+  ['execution-continuity-3', ['execution-continuity.spec.ts', 'conversational-workflow.spec.ts', 'locale-journey.spec.ts'], executionContinuity],
   // BUILD-AUTOMATION-001: Automations (fixture price source, test clock) into the owner's /approve → Simulate → Review; never a transaction.
   ['automations', ['e2e/automations.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', GRYLOO_AUTOMATION_E2E: 'FIXTURE_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['canvas-automation-ux', ['canvas-automation-ux.spec.ts', 'canvas-cta.spec.ts'], { GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
@@ -147,24 +157,60 @@ const composition = [['composition-provenance', ['release-composition-provenance
 // PostgreSQL and fork suites; CircleCI: at the head of browser job 1): Copilot learning and wallet isolation, Canvas basics, the P0
 // wallet refusal and the financial Review/Execute boundaries.
 const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components', 'solana-transfer-ux'];
-// The other product profiles in three shards, balanced on the mean measured profile seconds of three CircleCI certifications
-// (main b8126a6, PR #150 822d2ef, main 3769eff; BUILD-FLOFI-CI-ARCHITECTURE-001): shard 1 follows critical (~300s) in browser
-// job 1 (~860s), shard 2 precedes composition in browser job 2 (~1150s; execution-continuity alone ~555s), shard 3 closes
-// certification-checks after its unit, PostgreSQL and fork suites and a production build (~340s). Each container has its own
-// loopback ports and PostgreSQL. Each list runs shortest first, so fast financial boundaries report before long suites.
-// GitHub Actions (one job) and Cloud Build run the three shards in one place.
-const shards = [
-  ['unsafe-lending-simulations', 'router-provenance', 'devnet-provenance', 'uniswap-provenance', 'transfer-provenance',
-    'robinhood-mainnet-authoring', 'mcp-routes-oauth-disabled', 'card-provider-loopback', 'delegated-execution', 'workflow-ux-authoring',
-    'channel-approve', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'auth-wallets', 'approve-workflow-run',
-    'default-product'],
-  ['admin-console', 'jupiter-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance', 'synthetic-fork-provenance',
-    'copilot-solana', 'mcp-embedded-signing', 'swap-read-acceptance', 'workflow-acceptance', 'cow-loopback', 'chat-automations', 'copilot',
-    'owner-history', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
-  ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'copilot-pool-dialogue', 'developer-journey', 'base-mainnet-authoring',
-    'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight-team-early-access', 'flight-closed-beta', 'flight',
-    'editor-wallet-batch', 'universal-bridge'],
-];
+// BUILD-FLOFI-CI-ARCHITECTURE-002: the other product profiles are placed in BROWSER_SHARDS shards (CircleCI runs one per browser job,
+// certification-browser-1 … -N) by a deterministic balancer over the measured profile seconds in scripts/ci-browser-timings.json
+// (scripts/ci_timings.py refreshes it from CircleCI's guarded reports). Shard 1 also carries the critical tier (browser job 1 runs it
+// first) and the last shard the composition step, so both count as fixed load there. A profile without a measurement counts as the
+// median measured profile, so a new profile needs no manual placement. Every extended profile lands in exactly one shard, and each
+// shard runs shortest first, so fast financial boundaries report before long suites. GitHub Actions and Cloud Build run every shard.
+const BROWSER_SHARDS = 8;
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const timings = JSON.parse(readFileSync(join(root, 'scripts/ci-browser-timings.json'), 'utf8'));
+if (timings.kind !== 'flofi-browser-profile-timings' || timings.version !== 1 || !timings.profiles || typeof timings.profiles !== 'object'
+  || Array.isArray(timings.profiles) || !Object.keys(timings.profiles).length
+  || !Object.values(timings.profiles).every(value => Number.isFinite(value) && value > 0)
+  || !Number.isFinite(timings.fixedShardSeconds?.composition) || timings.fixedShardSeconds.composition < 0) {
+  throw new Error('scripts/ci-browser-timings.json must hold positive measured seconds per profile');
+}
+const measured = Object.values(timings.profiles).sort((a, b) => a - b);
+const typical = measured[Math.floor(measured.length / 2)];
+const estimate = name => timings.profiles[name] ?? typical;
+const byTime = (a, b) => estimate(a) - estimate(b) || (a < b ? -1 : a > b ? 1 : 0);
+function balance(profiles, count, fixed) {
+  const loads = fixed.slice(), bins = loads.map(() => []);
+  for (const name of [...profiles].sort((a, b) => byTime(b, a))) {
+    const target = loads.indexOf(Math.min(...loads));
+    bins[target].push(name);
+    loads[target] += estimate(name);
+  }
+  // Move or swap a profile off the most loaded shard while that strictly lowers its load and keeps the other shard below it.
+  for (let round = 0; round < 10000; round++) {
+    const top = loads.indexOf(Math.max(...loads)), limit = loads[top] - 1e-9;
+    let change = null;
+    search: for (const name of [...bins[top]].sort(byTime)) {
+      for (let other = 0; other < count && !change; other++) {
+        if (other === top) continue;
+        if (loads[other] + estimate(name) < limit) { change = [name, other, null]; break search; }
+        for (const swap of [...bins[other]].sort(byTime)) {
+          const delta = estimate(name) - estimate(swap);
+          if (delta > 0 && loads[other] + delta < limit) { change = [name, other, swap]; break search; }
+        }
+      }
+    }
+    if (!change) break;
+    const [name, other, swap] = change, delta = estimate(name) - (swap ? estimate(swap) : 0);
+    bins[top].splice(bins[top].indexOf(name), 1);
+    bins[other].push(name);
+    if (swap) { bins[other].splice(bins[other].indexOf(swap), 1); bins[top].push(swap); }
+    loads[top] -= delta;
+    loads[other] += delta;
+  }
+  return bins.map(bin => bin.sort(byTime));
+}
+const extendedProfiles = definitions.map(([name]) => name).filter(name => !critical.includes(name));
+const fixedLoad = Array.from({ length: BROWSER_SHARDS }, (_, index) => (index === 0 ? critical.reduce((sum, name) => sum + estimate(name), 0) : 0)
+  + (index === BROWSER_SHARDS - 1 ? timings.fixedShardSeconds.composition : 0));
+const shards = balance(extendedProfiles, BROWSER_SHARDS, fixedLoad);
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
 if (new Set(names).size !== names.length || planned.length !== names.length || new Set(planned).size !== planned.length
@@ -187,12 +233,12 @@ else if (phase === 'list' && !rest.length) {
   // The plan only (no command runs); the database URL is shown as a placeholder.
   const profiles = Object.fromEntries([...byName.values()].map(([name, specs, settings]) => [name, { specs, settings: Object.fromEntries(
     Object.entries(settings).map(([key, value]) => [key, key === 'TEST_DATABASE_URL' ? '<TEST_DATABASE_URL>' : value])) }]));
-  console.log(JSON.stringify({ critical, shards, extended, product: [...critical, ...extended], composition: composition.map(([name]) => name), profiles }, null, 2));
+  const shardSeconds = shards.map((bin, index) => Math.round(fixedLoad[index] + bin.reduce((sum, name) => sum + estimate(name), 0)));
+  console.log(JSON.stringify({ critical, shards, shardSeconds, extended, product: [...critical, ...extended], composition: composition.map(([name]) => name), profiles }, null, 2));
   process.exit(0);
 } else throw new Error(usage);
 const label = shard ? `${phase}-shard-${shard.replace('/', '-of-')}` : phase === 'profile' ? `profile-${rest[0]}` : phase;
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const results = join(root, 'apps/reference-dapp/test-results');
 // The ledger accepts only reports of the revision it certifies (scripts/ci-observe.py verify).
 const revision = [process.env.FLOFI_CI_REVISION, process.env.CIRCLE_SHA1, process.env.GITHUB_SHA].find(value => /^[0-9a-f]{40}$/.test(value ?? ''))
@@ -214,13 +260,24 @@ writeReport();
 console.log(`Guarded release ${label}: ${selection.length} profiles: ${selection.join(', ')}`);
 
 for (const [index, name] of selection.entries()) {
+  // BUILD-FLOFI-CI-ARCHITECTURE-002: on CircleCI (FLOFI_CI_SUPERSEDE_CHECK=1) a revision that a newer push of its pull-request branch
+  // superseded stops between profiles (scripts/ci_supersede.py; never on main). The report stays SUPERSEDED with the remaining profiles
+  // NOT_RUN, so the certification ledger can never count it.
+  if (index && process.env.FLOFI_CI_SUPERSEDE_CHECK === '1'
+    && spawnSync('python3', [join(root, 'scripts/ci_supersede.py')], { stdio: 'inherit' }).status === 75) {
+    report.status = 'SUPERSEDED';
+    writeReport();
+    printTimings();
+    console.error(`Guarded release ${label}: SUPERSEDED before profile ${name}; not run (never counted as passes): ${report.profiles.filter(other => other.status === 'NOT_RUN').map(other => other.name).join(', ')}`);
+    process.exit(75);
+  }
   const [, specs, settings] = byName.get(name), row = report.profiles[index];
   const env = { ...process.env, GRYLOO_MODE_A_E2E: 'synthetic' };
   for (const key of ['FLOFI_COPILOT', 'FLOFI_RELEASE_PROVENANCE_PROFILE', 'GRYLOO_SUPPLY_E2E', 'GRYLOO_LENDING_E2E',
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
     'FLOFI_FLIGHT_TEAM_E2E', 'FLOFI_FLIGHT_TEAM_CLOCK', 'FLOFI_FLIGHT_TEAM_ACCOUNTS', 'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS', 'FLOFI_E2E_NETWORK_SCOPE', 'FLOFI_NETWORK_SCOPE',
-    'FLOFI_USER_FUNDED_E2E']) delete env[key];
+    'FLOFI_USER_FUNDED_E2E', 'FLOFI_CANDIDATE_BASELINES']) delete env[key];
   Object.assign(env, settings);
   // Each profile keeps its own artifacts (a later profile never wipes them) and its own JUnit file for the CI test report.
   const output = join(results, name), junit = join(results, 'junit', `${name}.xml`);
@@ -287,6 +344,20 @@ function diagnose(name, specs, env, output) {
   const rerun = spawnSync('pnpm', ['--filter', '@defi-workflow-engine/reference-dapp', 'exec', 'playwright', 'test', ...specs, '--last-failed', '--last-failed-file', lastRun,
     '--trace', 'on', '--output', traces, '--max-failures', '3', '--global-timeout', '300000'], { env, stdio: 'inherit' });
   console.error(`  Diagnostic trace rerun ${rerun.status === 0 ? 'passed: the failure is intermittent; the profile stays FAILED' : 'failed again'}; traces in ${rel(traces)} (open with \`pnpm exec playwright show-trace <trace.zip>\`).`);
-  report.profiles.find(row => row.name === name).diagnostic = { rerunExitCode: rerun.status, traces: rel(traces) };
+  const diagnostic = report.profiles.find(row => row.name === name).diagnostic = { rerunExitCode: rerun.status, traces: rel(traces) };
+  writeReport();
+  // BUILD-FLOFI-CI-ARCHITECTURE-002: a screenshot difference stops its test, so the test's later screenshots only render after the first
+  // one matches (one audited pull request needed seven certifications for that). After a difference, the failed tests run once more with
+  // every snapshot redirected into an empty candidate directory (FLOFI_CANDIDATE_BASELINES, read only by playwright.config.ts): each
+  // screenshot is written instead of compared, so one run stores CI's renders of all of them as artifacts. The committed baselines are
+  // neither read nor written, the result is never a pass, and certifying runs never set the variable.
+  if (!readdirSync(output, { recursive: true }).some(file => String(file).endsWith('-diff.png'))) return;
+  const candidates = `${output}-candidate-baselines`;
+  const render = spawnSync('pnpm', ['--filter', '@defi-workflow-engine/reference-dapp', 'exec', 'playwright', 'test', ...specs, '--last-failed', '--last-failed-file', lastRun,
+    '--update-snapshots=all', '--output', `${output}-candidate-run`, '--max-failures', '3', '--global-timeout', '300000'],
+    { env: { ...env, FLOFI_CANDIDATE_BASELINES: candidates }, stdio: 'inherit' });
+  console.error(`  Candidate baselines: every screenshot of the failed tests as rendered here, in ${rel(candidates)} (same layout as e2e/; review and`
+    + ` copy only intended changes; never compared, never a pass; render exit ${render.status}).`);
+  Object.assign(diagnostic, { candidateBaselines: rel(candidates), candidateExitCode: render.status });
   writeReport();
 }

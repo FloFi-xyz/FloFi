@@ -7,8 +7,12 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import time
 import uuid
+
+import ci_supersede
+from ci_supersede import SUPERSEDED
 
 # Every certification stage (the `source scripts/ci-observe.sh '<label>'` labels in .circleci/config.yml and
 # .github/workflows/contracts.yml) must have completed successfully in some job before certification passes.
@@ -48,11 +52,27 @@ def root():
     return path
 
 
+def outcome(status):
+    """A stage's recorded outcome; only exit 0 is a success (75: a newer push superseded the revision, scripts/ci_supersede.py)."""
+    if status == 0:
+        return 'success'
+    if status in {130, 143}:
+        return 'cancelled/interrupted'
+    return 'superseded' if status == SUPERSEDED else 'failure'
+
+
 def begin(name):
     identity = uuid.uuid4().hex
     record = {'name': name, 'job': os.environ.get('CIRCLE_JOB') or os.environ.get('GITHUB_JOB') or 'local', 'revision': revision(),
               'start': time.monotonic(), 'before': resources(), 'outcome': 'incomplete'}
     (root() / (identity + '.json')).write_text(json.dumps(record))
+    # BUILD-FLOFI-CI-ARCHITECTURE-002: on CircleCI a stage does not start for a revision a newer push of its pull-request branch
+    # superseded. The record stays (outcome superseded), so the ledger can never count it; the stage exits 75.
+    if ci_supersede.check() == SUPERSEDED:
+        record.update(duration=0.0, after=record['before'], outcome='superseded', exit_code=SUPERSEDED)
+        (root() / (identity + '.json')).write_text(json.dumps(record))
+        print(f"CI stage: {name}: superseded (not started)", file=sys.stderr, flush=True)
+        raise SystemExit(SUPERSEDED)
     return identity
 
 
@@ -61,9 +81,7 @@ def finish(identity, status):
         raise ValueError('Invalid stage identity')
     path = root() / (identity + '.json')
     record = json.loads(path.read_text())
-    record.update(duration=time.monotonic() - record['start'], after=resources(),
-                  outcome='success' if status == 0 else ('cancelled/interrupted' if status in {130, 143} else 'failure'),
-                  exit_code=status)
+    record.update(duration=time.monotonic() - record['start'], after=resources(), outcome=outcome(status), exit_code=status)
     path.write_text(json.dumps(record))
     print(f"CI stage: {record['name']}: {record['outcome']} ({record['duration']:.2f}s)", flush=True)
 

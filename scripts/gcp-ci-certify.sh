@@ -26,12 +26,9 @@ export FLOFI_BROWSER_FAILURE_TRACE=off
 run_stage 'Critical browser regressions' <<'STAGE'
 node scripts/guarded-release-browser.mjs critical --collect-failures
 STAGE
+# Every extended profile in one collecting run (CircleCI spreads the same plan over its browser jobs; the ledger needs each once).
 run_stage 'Guarded browser suites' <<'STAGE'
-browser_status=0
-node scripts/guarded-release-browser.mjs extended --shard 1/3 --collect-failures || browser_status=$?
-node scripts/guarded-release-browser.mjs extended --shard 2/3 --collect-failures || browser_status=$?
-node scripts/guarded-release-browser.mjs extended --shard 3/3 --collect-failures || browser_status=$?
-exit "$browser_status"
+node scripts/guarded-release-browser.mjs extended --collect-failures
 STAGE
 
 run_required 'Composition fork and browser' bash scripts/gcp-ci-composition.sh

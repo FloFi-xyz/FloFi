@@ -2,13 +2,20 @@
 # Mirror source: .github/workflows/governance.yml and contracts.yml, which run the same commands in one sequential job.
 # scripts/test_ci_optimization.py keeps both at equal coverage; refresh this file when the Actions contracts workflow changes.
 #
-# After governance, certification fans out into three jobs of about equal duration (BUILD-FLOFI-CI-ARCHITECTURE-001 balanced
-# them on measured stage and profile seconds), each in its own container with its own loopback ports, disposable PostgreSQL
-# and build: static, dependency-security and unit checks with the PostgreSQL and fork suites, then browser shard 3; browser job
-# 1 (critical regressions first, then shard 1); browser job 2 (shard 2, then composition). It fans in at `certification`,
-# which runs only when all three passed and then verifies the ledger: every required stage and every planned browser profile
-# (each exactly once) succeeded for this revision. When any job fails, `certification` never runs, so its required status is
-# not reported and a merge stays blocked.
+# BUILD-FLOFI-CI-ARCHITECTURE-002 (measured topology, docs/builds/BUILD-FLOFI-CI-ARCHITECTURE-002.md):
+# - `governance` and `certification-build` start together. The build job makes the one production build of this revision and
+#   hands it to the browser jobs through the workflow workspace (scripts/ci_build_artifact.py: bound to this revision and lockfile,
+#   digest-verified, extracted only into build-output paths). A workspace never crosses workflows, and no cache is involved.
+# - After governance: `certification-checks` (dependency security, audit, SBOM, typecheck, lint, schema drift, PostgreSQL and fork
+#   suites) and `certification-unit` (its own package build, then the unit and contract suites), on large runners.
+# - After governance and the build: eight browser jobs on medium runners (the browser suites wait on loopback lifecycles and use under
+#   half of a large runner's CPU). Job 1 runs the critical tier first. The shards come from scripts/guarded-release-browser.mjs, which
+#   balances every profile on measured seconds (scripts/ci-browser-timings.json); job 8 also runs the composition step.
+# - Each container has its own loopback ports and disposable PostgreSQL. A job of a pull-request revision that a newer push of the same
+#   branch superseded stops (scripts/ci_supersede.py, never on main) and never counts as a pass.
+# It fans in at `certification`, which runs only when every job passed and then verifies the ledger: every required stage and every
+# planned browser profile (each exactly once) succeeded for this revision. When any job fails, `certification` never runs, so its
+# required status is not reported and a merge stays blocked.
 version: 2.1
 executors:
   certification:
@@ -19,7 +26,7 @@ executors:
           POSTGRES_USER: flofi
           POSTGRES_HOST_AUTH_METHOD: trust
     resource_class: large
-    environment:
+    environment: &certification-environment
       RUNNER_TEMP: /tmp/flofi-ci
       FLOFI_CI_ARCHIVE_CACHE: /tmp/flofi-ci/archives
       GITHUB_PATH: /tmp/flofi-ci/github-path
@@ -35,22 +42,42 @@ executors:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       FLOFI_E2E_APP_PORT: "3100"
+      FLOFI_CI_SUPERSEDE_CHECK: "1"
+  # The production build and the unit suites need no database.
+  certification-no-database:
+    docker:
+      - image: cimg/node:24.21.0-browsers
+    resource_class: large
+    environment: *certification-environment
+  # Browser suites: measured at 1.1-1.7 of a large runner's 4 CPUs, 2-4 GiB (BUILD-FLOFI-CI-ARCHITECTURE-002 §3). Rollback: large.
+  certification-browser:
+    docker:
+      - image: cimg/node:24.21.0-browsers
+      - image: postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
+        environment:
+          POSTGRES_USER: flofi
+          POSTGRES_HOST_AUTH_METHOD: trust
+    resource_class: medium
+    environment: *certification-environment
 commands:
   prepare-certification:
-    description: "Disposable workspace, loopback PostgreSQL, the exact approved Node and pnpm, and the frozen install"
+    description: "Disposable workspace, the exact approved Node and pnpm, and the frozen install"
+    steps:
+      - prepare-workspace
+      - install-toolchain
+  prepare-workspace:
+    description: "This revision's checkout and the disposable workspace"
     steps:
       - checkout
       - run:
-          name: "Prepare disposable workspace and PostgreSQL"
+          name: "Prepare disposable workspace"
           command: |
             set -euo pipefail
             mkdir -p "$RUNNER_TEMP" "$FLOFI_CI_ARCHIVE_CACHE"
             touch "$GITHUB_PATH" "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
-            for attempt in $(seq 1 60); do
-              if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
-              sleep 1
-            done
-            (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL unavailable' >&2; exit 1; }
+  install-toolchain:
+    description: "The exact approved Node and pnpm, and the frozen install"
+    steps:
       # Raw tool archives only (Node, pnpm, anvil, headless shell), digest-verified before use (scripts/ci_archive_cache.py).
       # A restored cache is a tarball that can write any path the job user can write, so the key is exact (no prefix
       # fallback) and scoped to this branch: another branch can never supply main's (or this PR's) cache.
@@ -89,8 +116,20 @@ commands:
             set -euo pipefail
             source scripts/ci-observe.sh 'Frozen dependency install'
             pnpm install --frozen-lockfile --ignore-scripts
+  wait-for-postgres:
+    description: "The job's own disposable loopback PostgreSQL"
+    steps:
+      - run:
+          name: "Wait for disposable PostgreSQL"
+          command: |
+            set -euo pipefail
+            for attempt in $(seq 1 60); do
+              if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+            (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL unavailable' >&2; exit 1; }
   production-build:
-    description: "Production build of this revision in this container (not shared between jobs; see the build report)"
+    description: "The production build of this revision (certification-build; the browser jobs receive it as a verified artifact)"
     steps:
       - run:
           name: "Production build"
@@ -119,9 +158,17 @@ commands:
             export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
             python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
   prepare-browser:
-    description: "Production build and the exact approved anvil and headless shell"
+    description: "This workflow's verified production build and the exact approved anvil and headless shell"
     steps:
-      - production-build
+      # The build job's workspace goes beside this job's own ledger records, never into them (no workspace layer conflicts).
+      - attach_workspace:
+          at: /tmp/flofi-ci/upstream
+      - run:
+          name: "Verify and unpack this revision's production build"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Build artifact'
+            python3 scripts/ci_build_artifact.py unpack /tmp/flofi-ci/upstream
       - bootstrap-anvil
       - bootstrap-browser
   browser-results:
@@ -180,10 +227,35 @@ jobs:
             # A push build of a branch sees only its last commit as HEAD^1 HEAD; check every commit the branch adds to main.
             git fetch --no-tags origin main
             git diff --check "$(git merge-base FETCH_HEAD HEAD)" HEAD
+  certification-build:
+    executor: certification-no-database
+    steps:
+      - prepare-workspace
+      # The build starts beside governance, so it applies the repository safety controls itself before installing anything.
+      - run:
+          name: "Repository safety controls before the build (governance-lite)"
+          command: |
+            set -euo pipefail
+            export GOVERNANCE_BRANCH="${CIRCLE_BRANCH:-circleci-project-setup}"
+            export GOVERNANCE_EVENT=push
+            python3 scripts/governance_lite.py
+      - install-toolchain
+      - production-build
+      - run:
+          name: "Package this revision's production build for the browser jobs"
+          command: |
+            set -euo pipefail
+            python3 scripts/ci_build_artifact.py pack
+      - persist_to_workspace:
+          root: /tmp/flofi-ci
+          paths:
+            - flofi-build
+      - record-certification
   certification-checks:
     executor: certification
     steps:
       - prepare-certification
+      - wait-for-postgres
       - run:
           name: "Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)"
           command: |
@@ -227,18 +299,6 @@ jobs:
             source scripts/ci-observe.sh 'Schema drift'
             pnpm schemas:check
       - run:
-          name: "Unit and contract tests and exported API checks"
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Unit and contract tests'
-            python3 scripts/agent_guard.py check
-            pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"
-            python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"
-            python3 scripts/summarize-screenshot-diffs.py --self-test
-            test -f packages/reference-linter/dist/index.js
-            test -f packages/reference-linter/dist/index.d.ts
-            pnpm --filter @defi-workflow-engine/reference-linter exec node --input-type=module -e "const m = await import('@defi-workflow-engine/reference-linter'); for (const key of ['lintWorkflow','validateAuthoringWorkflow','createReviewContext','digestArtifact','digestRawResponse','digestSelfCheck','reviewMockedArtifactChain','mockedSwapOutputs','mockedFixtureBytes','collectBaseTranscript','deriveBaseObservation','reviewBaseObservation']) if (typeof m[key] !== 'function') throw new Error('Missing linter export: '+key); if (!Object.isFrozen(m.MOCKED_CHAIN_PROFILE)) throw new Error('Mocked chain profile must be frozen'); if (!Object.isFrozen(m.BASE_OBSERVATION_PROFILE)) throw new Error('Base observation profile must be frozen'); await m.digestSelfCheck()"
-      - run:
           name: "PostgreSQL durability, concurrency, recovery and tenant-isolation suites (disposable loopback database)"
           command: |
             set -euo pipefail
@@ -250,26 +310,35 @@ jobs:
       - run:
           name: "Offline compatibility gate and fork suite"
           command: bash .circleci/scripts/ci-fork.sh
-      # Browser shard 3 closes this job (its other work is ~15 min, the browser jobs ~22): no extra runner is added.
-      - production-build
-      - bootstrap-browser
-      - run:
-          name: "Run guarded browser suite, part 3 of 3"
-          no_output_timeout: 30m
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Guarded browser suites'
-            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
-            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
-            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
-            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-            node scripts/guarded-release-browser.mjs extended --shard 3/3
-      - browser-results
       - record-certification
-  certification-browser-1:
-    executor: certification
+  certification-unit:
+    executor: certification-no-database
     steps:
       - prepare-certification
+      - run:
+          name: "Build the workspace packages the unit suites import"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Package build'
+            pnpm exec turbo run build --filter='./packages/*'
+      - run:
+          name: "Unit and contract tests and exported API checks"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Unit and contract tests'
+            python3 scripts/agent_guard.py check
+            pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"
+            python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"
+            python3 scripts/summarize-screenshot-diffs.py --self-test
+            test -f packages/reference-linter/dist/index.js
+            test -f packages/reference-linter/dist/index.d.ts
+            pnpm --filter @defi-workflow-engine/reference-linter exec node --input-type=module -e "const m = await import('@defi-workflow-engine/reference-linter'); for (const key of ['lintWorkflow','validateAuthoringWorkflow','createReviewContext','digestArtifact','digestRawResponse','digestSelfCheck','reviewMockedArtifactChain','mockedSwapOutputs','mockedFixtureBytes','collectBaseTranscript','deriveBaseObservation','reviewBaseObservation']) if (typeof m[key] !== 'function') throw new Error('Missing linter export: '+key); if (!Object.isFrozen(m.MOCKED_CHAIN_PROFILE)) throw new Error('Mocked chain profile must be frozen'); if (!Object.isFrozen(m.BASE_OBSERVATION_PROFILE)) throw new Error('Base observation profile must be frozen'); await m.digestSelfCheck()"
+      - record-certification
+  certification-browser-1:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
       - prepare-browser
       - run:
           name: "Critical browser regressions first (Copilot learning, wallet isolation, Canvas basics, financial Review)"
@@ -283,7 +352,7 @@ jobs:
             export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
             node scripts/guarded-release-browser.mjs critical
       - run:
-          name: "Run guarded browser suite, part 1 of 3"
+          name: "Run guarded browser suite, part 1 of 8"
           no_output_timeout: 30m
           command: |
             set -euo pipefail
@@ -292,20 +361,22 @@ jobs:
             export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
             export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
             export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-            node scripts/guarded-release-browser.mjs extended --shard 1/3
+            node scripts/guarded-release-browser.mjs extended --shard 1/8
+      # The archive cache before the ledger records: a failed save never leaves records a rerun would persist again.
       - browser-results
-      - record-certification
       - save_cache:
           key: flofi-circleci-archives-v3-linux-x64-{{ .Branch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
           paths:
             - /tmp/flofi-ci/archives
+      - record-certification
   certification-browser-2:
-    executor: certification
+    executor: certification-browser
     steps:
       - prepare-certification
+      - wait-for-postgres
       - prepare-browser
       - run:
-          name: "Run guarded browser suite, part 2 of 3"
+          name: "Run guarded browser suite, part 2 of 8"
           no_output_timeout: 30m
           command: |
             set -euo pipefail
@@ -314,17 +385,132 @@ jobs:
             export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
             export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
             export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-            node scripts/guarded-release-browser.mjs extended --shard 2/3
+            node scripts/guarded-release-browser.mjs extended --shard 2/8
+      # The archive cache before the ledger records: a failed save never leaves records a rerun would persist again.
+      - browser-results
+      - save_cache:
+          key: flofi-circleci-archives-v3-linux-x64-{{ .Branch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
+          paths:
+            - /tmp/flofi-ci/archives
+      - record-certification
+  certification-browser-3:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 3 of 8"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 3/8
+      - browser-results
+      - record-certification
+  certification-browser-4:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 4 of 8"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 4/8
+      - browser-results
+      - record-certification
+  certification-browser-5:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 5 of 8"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 5/8
+      - browser-results
+      - record-certification
+  certification-browser-6:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 6 of 8"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 6/8
+      - browser-results
+      - record-certification
+  certification-browser-7:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 7 of 8"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 7/8
+      - browser-results
+      - record-certification
+  certification-browser-8:
+    executor: certification-browser
+    steps:
+      - prepare-certification
+      - wait-for-postgres
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 8 of 8"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 8/8
       - run:
           name: "Composition fork and browser suites"
           no_output_timeout: 30m
           command: bash .circleci/scripts/ci-composition.sh
       - browser-results
       - record-certification
-      - save_cache:
-          key: flofi-circleci-archives-v3-linux-x64-{{ .Branch }}-{{ checksum "scripts/bootstrap-ci.py" }}-{{ checksum "scripts/bootstrap-anvil.py" }}-{{ checksum "scripts/bootstrap-playwright.py" }}-{{ checksum "scripts/ci_archive_cache.py" }}
-          paths:
-            - /tmp/flofi-ci/archives
   certification:
     docker:
       - image: cimg/node:24.21.0
@@ -346,17 +532,56 @@ workflows:
   manual-backup-certification:
     jobs:
       - governance
+      # Starts with governance: its ~4 large-runner minutes are the only work spent when governance fails.
+      - certification-build
       - certification-checks:
+          requires:
+            - governance
+      - certification-unit:
           requires:
             - governance
       - certification-browser-1:
           requires:
             - governance
+            - certification-build
       - certification-browser-2:
           requires:
             - governance
+            - certification-build
+      - certification-browser-3:
+          requires:
+            - governance
+            - certification-build
+      - certification-browser-4:
+          requires:
+            - governance
+            - certification-build
+      - certification-browser-5:
+          requires:
+            - governance
+            - certification-build
+      - certification-browser-6:
+          requires:
+            - governance
+            - certification-build
+      - certification-browser-7:
+          requires:
+            - governance
+            - certification-build
+      - certification-browser-8:
+          requires:
+            - governance
+            - certification-build
       - certification:
           requires:
+            - certification-build
             - certification-checks
+            - certification-unit
             - certification-browser-1
             - certification-browser-2
+            - certification-browser-3
+            - certification-browser-4
+            - certification-browser-5
+            - certification-browser-6
+            - certification-browser-7
+            - certification-browser-8

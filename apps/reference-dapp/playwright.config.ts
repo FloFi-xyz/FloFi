@@ -258,12 +258,19 @@ if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw ne
 // BUILD-FLOFI-SITE-001: the owner-approved site replaced Landing 07 at `/` and the previous Docs; the specs that described those removed pages
 // were removed with them. The site is covered by site.spec.ts; the entry, Docs and sign-in assertions live there and in brand-ux-001, beta-ui
 // and auth-wallets.
+// BUILD-FLOFI-CI-ARCHITECTURE-002: only the guarded runner's diagnostic render after a screenshot difference sets FLOFI_CANDIDATE_BASELINES.
+// Snapshots then live under that empty directory with the e2e/ layout, so every screenshot of the failed tests is written instead of
+// compared and the committed baselines are neither read nor written. Certifying runs never set it (scripts/guarded-release-browser.mjs).
+const candidateBaselines = process.env.FLOFI_CANDIDATE_BASELINES;
+if (candidateBaselines !== undefined && !candidateBaselines.startsWith('/')) throw new Error('FLOFI_CANDIDATE_BASELINES must be absolute');
+
 const RETIRED_SPECS = ['wallet-environment', 'brand-icon-colors', 'bridge-network-picker', 'crypto-action-picker', 'global-product-polish',
   'header-controls', 'product-typography-logo'].map(name => `**/${name}.spec.ts`);
 
 export default defineConfig({
   testDir: './e2e',
   testIgnore: RETIRED_SPECS,
+  ...(candidateBaselines ? { snapshotPathTemplate: `${candidateBaselines}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{-snapshotSuffix}{ext}` } : {}),
   ...(cloudRuntime || mcpHarness || adminHarness || learningHarness ? { globalSetup: './e2e/cloud-runtime-setup.ts' } : {}),
   workers: 1,
   fullyParallel: false,

@@ -506,6 +506,10 @@ MAIN_SEPARATE_SUITES = {
     'channel-approve': (['whatsapp-approve.spec.ts', 'telegram-approve.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY',
                         'GRYLOO_CHANNEL_E2E': 'FIXTURE_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
 }
+# BUILD-FLOFI-CI-ARCHITECTURE-002 (intentional change): these two profiles of main run as parts, each its own profile with the same harness
+# settings, so CI can place them in different browser jobs. Together the parts run exactly the former spec list, each spec once, in its order.
+SPLIT_PROFILES = {'default-product': ['default-product-1', 'default-product-2'],
+                  'execution-continuity': ['execution-continuity-1', 'execution-continuity-2', 'execution-continuity-3']}
 CRITICAL = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components', 'solana-transfer-ux']
 
 
@@ -557,9 +561,21 @@ class BrowserPlan(unittest.TestCase):
         profiles = self.plan['profiles']
         for name, (specs, settings) in {**MAIN_PROFILES, **MAIN_SEPARATE_SUITES}.items():
             with self.subTest(profile=name):
+                if name in SPLIT_PROFILES:
+                    self.assertNotIn(name, profiles)
+                    parts = [profiles[part] for part in SPLIT_PROFILES[name]]
+                    joined = [spec for part in parts for spec in part['specs']]
+                    self.assertEqual(sorted(joined), sorted(specs))  # every former spec, exactly once
+                    for part in parts:
+                        self.assertEqual(part['settings'], settings)
+                        self.assertEqual(part['specs'], [spec for spec in specs if spec in part['specs']])  # the former order
+                    continue
                 self.assertIn(name, profiles)
                 self.assertEqual(profiles[name]['specs'], specs)
                 self.assertEqual(profiles[name]['settings'], settings)
+        planned = {name for names in SPLIT_PROFILES.values() for name in names} | set(MAIN_PROFILES) | set(MAIN_SEPARATE_SUITES)
+        # Profiles added after main 65c929e are listed in their own builds; nothing of main disappears.
+        self.assertFalse({name for name in planned if name not in SPLIT_PROFILES} - set(profiles))
         # The OAuth-disabled route presentation is a distinct mode of the same spec, not a duplicate run.
         self.assertNotIn('GRYLOO_MCP_E2E', profiles['mcp-routes-oauth-disabled']['settings'])
 
@@ -668,10 +684,16 @@ class CiParity(unittest.TestCase):
         workflow = self.circle.split('\nworkflows:\n', 1)[1]
         requires = {match.group(1): re.findall(r'(?m)^            - ([\w-]+)$', match.group(2) or '')
                     for match in re.finditer(r'(?m)^      - ([\w-]+)(?::\n((?:        .*\n)*))?', workflow)}
+        browsers = [f'certification-browser-{index}' for index in range(1, len(self.plan['shards']) + 1)]
         self.assertEqual(set(requires), {'governance', 'certification', *self.certification})
-        self.assertEqual(set(self.certification), {'certification-checks', 'certification-browser-1', 'certification-browser-2'})
-        for job in self.certification:
+        self.assertEqual(set(self.certification), {'certification-build', 'certification-checks', 'certification-unit', *browsers})
+        # BUILD-FLOFI-CI-ARCHITECTURE-002: the build starts with governance (when governance fails, only the build's own minutes are
+        # spent); every other job waits for governance, and each browser job also for the build whose artifact it verifies.
+        self.assertEqual(requires['certification-build'], [])
+        for job in ('certification-checks', 'certification-unit'):
             self.assertEqual(requires[job], ['governance'])
+        for job in browsers:
+            self.assertEqual(requires[job], ['governance', 'certification-build'])
         self.assertEqual(sorted(requires['certification']), sorted(self.certification))
         verify = [lines for _, _, lines in self.jobs['certification'] if 'python3 scripts/ci-observe.py verify' in lines]
         self.assertEqual(verify, [['set -euo pipefail', 'test "$(node --version)" = "v24.21.0"', 'python3 scripts/ci-observe.py verify']])
@@ -722,7 +744,26 @@ class CiParity(unittest.TestCase):
         restores = re.findall(r'(?m)^      - restore_cache:\n          keys:\n((?:            - .+\n)+)', self.circle)
         self.assertEqual(len(restores), 1)
         self.assertEqual([line.strip()[2:] for line in restores[0].splitlines()], [saves[0][0]])  # no prefix fallback
-        self.assertNotRegex(self.circle, r'node_modules|\.next/cache|\.turbo|pnpm-store|persist_to_workspace:\n          root: /tmp/flofi-ci\n          paths:\n            - (?!flofi-ci-metrics)')
+        self.assertNotRegex(self.circle, r'node_modules|\.next/cache|\.turbo|pnpm-store')
+        # The workspace carries each job's ledger records and, from certification-build only, this revision's build artifact
+        # (scripts/ci_build_artifact.py: revision- and lockfile-bound, digest-verified); never a cache, a store or node_modules.
+        persists = re.findall(r'(?m)^      - persist_to_workspace:\n          root: (.+)\n          paths:\n((?:            - .+\n)+)', self.circle)
+        self.assertEqual(sorted((root, paths.split()) for root, paths in persists),
+                         [('/tmp/flofi-ci', ['-', 'flofi-build']), ('/tmp/flofi-ci', ['-', 'flofi-ci-metrics'])])
+        builders = [job for job, steps in self.jobs.items() for name, step, _ in steps if name == 'persist_to_workspace' and 'flofi-build' in step]
+        self.assertEqual(builders, ['certification-build'])
+        # Consumers attach the build beside their own records (no workspace layer is persisted twice); the fan-in sees every record.
+        for job, steps in self.jobs.items():
+            attaches = [step for name, step, _ in steps if name == 'attach_workspace']
+            if job.startswith('certification-browser-'):
+                self.assertEqual([re.search(r'at: (.+)', step).group(1) for step in attaches], ['/tmp/flofi-ci/upstream'], job)
+                lines = [line for _, _, lines in steps for line in lines]
+                self.assertLess(lines.index('python3 scripts/ci_build_artifact.py unpack /tmp/flofi-ci/upstream'),
+                                next(index for index, line in enumerate(lines) if line.startswith('node scripts/guarded-release-browser.mjs')))
+            elif job == 'certification':
+                self.assertEqual([re.search(r'at: (.+)', step).group(1) for step in attaches], ['/tmp/flofi-ci'])
+            else:
+                self.assertFalse(attaches, job)
 
     def test_critical_browser_regressions_run_before_the_slow_suites(self):
         def position(command):
@@ -732,17 +773,21 @@ class CiParity(unittest.TestCase):
                       'pnpm test:postgres --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-postgres.json"',
                       'pnpm test:fork --testTimeout=30000', 'node scripts/guarded-release-browser.mjs extended']:
             self.assertLess(position('node scripts/guarded-release-browser.mjs critical'), position(later), later)
-        browser = [lines for _, _, lines in self.jobs['certification-browser-1'] if any(line.startswith('node scripts/guarded-release-browser.mjs') for line in lines)]
-        self.assertEqual([line for lines in browser for line in lines if line.startswith('node scripts/')],
-                         ['node scripts/guarded-release-browser.mjs critical', 'node scripts/guarded-release-browser.mjs extended --shard 1/3'])
-        # Shard 3 closes certification-checks, after its unit, PostgreSQL and fork suites (no extra runner).
-        checks = [line for _, _, lines in self.jobs['certification-checks'] for line in lines]
-        self.assertEqual([line for line in checks if line.startswith('node scripts/guarded-release-browser.mjs')],
-                         ['node scripts/guarded-release-browser.mjs extended --shard 3/3'])
-        self.assertLess(checks.index('pnpm test:fork --testTimeout=30000'), checks.index('node scripts/guarded-release-browser.mjs extended --shard 3/3'))
+        def runner_lines(job):
+            return [line for _, _, lines in self.jobs[job] for line in lines if line.startswith('node scripts/guarded-release-browser.mjs')]
+        total = len(self.plan['shards'])
+        self.assertEqual(runner_lines('certification-browser-1'),
+                         ['node scripts/guarded-release-browser.mjs critical', f'node scripts/guarded-release-browser.mjs extended --shard 1/{total}'])
+        # BUILD-FLOFI-CI-ARCHITECTURE-002: each other browser job runs exactly its own shard (the last one then the composition step);
+        # the build, checks and unit jobs run no browser profile.
+        for index in range(2, total + 1):
+            self.assertEqual(runner_lines(f'certification-browser-{index}'), [f'node scripts/guarded-release-browser.mjs extended --shard {index}/{total}']
+                             + (['node scripts/guarded-release-browser.mjs composition'] if index == total else []))
+        for job in ('certification-build', 'certification-checks', 'certification-unit'):
+            self.assertEqual(runner_lines(job), [], job)
 
     def test_failure_artifacts_test_reports_and_timings_are_kept(self):
-        for job in ['certification-checks', 'certification-browser-1', 'certification-browser-2']:
+        for job in [name for name in self.certification if name.startswith('certification-browser-')]:
             names = [name for name, _, _ in self.jobs[job]]
             self.assertIn('store_test_results', names)
             self.assertIn('store_artifacts', names)
@@ -763,9 +808,10 @@ class CiParity(unittest.TestCase):
 FAKE_PNPM = r"""#!/usr/bin/env bash
 # Stand-in for `pnpm --filter … exec playwright test …`: records the call, fails the configured spec.
 printf '%s\t%s\n' "$*" "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" >> "$FAKE_LOG"
+if [ -n "${FLOFI_CANDIDATE_BASELINES:-}" ]; then printf '%s\t%s\n' "$FLOFI_CANDIDATE_BASELINES" "$*" >> "$FAKE_LOG.candidates"; fi
 out=""; prev=""
 for arg in "$@"; do [ "$prev" = "--output" ] && out="$arg"; prev="$arg"; done
-mkdir -p "$out"
+rm -rf "$out"; mkdir -p "$out"  # Playwright empties its output directory first
 if [ -n "${FAKE_JUNIT:-}" ] && [ -n "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" ]; then
   mkdir -p "$(dirname "$PLAYWRIGHT_JUNIT_OUTPUT_FILE")"; printf '%s' "$FAKE_JUNIT" > "$PLAYWRIGHT_JUNIT_OUTPUT_FILE"
 fi
@@ -774,6 +820,7 @@ for spec in "${FAKE_FAIL:-}" "${FAKE_FAIL_2:-}" "${FAKE_FAIL_3:-}" "${FAKE_FAIL_
 if [ -n "$spec" ] && [[ " $* " == *" $spec "* ]]; then
   tests='["t1"]'; [ -n "${FAKE_NO_TESTS:-}" ] && tests='[]'
   printf '{"status":"failed","failedTests":%s}\n' "$tests" > "$out/.last-run.json"
+  if [ -n "${FAKE_VISUAL:-}" ]; then mkdir -p "$out/t1"; printf 'png' > "$out/t1/shot-diff.png"; fi
   exit "${FAKE_STATUS:-1}"
 fi
 done
@@ -788,7 +835,8 @@ class GuardedRunner(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.root = Path(scratch.name)
         (self.root / 'scripts').mkdir()
-        shutil.copy(ROOT / RUNNER, self.root / RUNNER)
+        for name in (RUNNER, 'scripts/ci-browser-timings.json', 'scripts/ci_supersede.py'):
+            shutil.copy(ROOT / name, self.root / name)
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
         (bin_dir / 'pnpm').write_text(FAKE_PNPM)
@@ -856,6 +904,33 @@ class GuardedRunner(unittest.TestCase):
         self.assertEqual([row['status'] for row in report['profiles']], ['PASS', 'FAIL', 'NOT_RUN', 'NOT_RUN', 'NOT_RUN', 'NOT_RUN'])
         self.assertEqual(report['profiles'][1]['diagnostic']['rerunExitCode'], 0)
 
+    def test_screenshot_failure_renders_candidate_baselines_and_stays_failed(self):
+        candidates = Path(str(self.log) + '.candidates')
+        result = self.run_phase('profile', 'default-product-1', FAKE_FAIL='visual-shell.spec.ts', FAKE_VISUAL='1', FAKE_RERUN_STATUS='0',
+                                FLOFI_CANDIDATE_BASELINES='/tmp/inherited-never-used')
+        self.assertEqual(result.returncode, 1)
+        calls = [args for args, _ in self.calls()]
+        self.assertEqual(len(calls), 3)  # the certifying run, the trace rerun and the candidate render
+        self.assertNotIn('--update-snapshots', calls[0] + calls[1])
+        self.assertIn('--last-failed', calls[2])
+        self.assertIn('--update-snapshots=all', calls[2])
+        renders = [line.split('\t') for line in candidates.read_text().splitlines()]
+        expected = str(self.root / 'apps/reference-dapp/test-results/default-product-1-candidate-baselines')
+        self.assertEqual([(where, '--update-snapshots=all' in args) for where, args in renders], [(expected, True)])  # inherited value dropped
+        row = self.report('profile-default-product-1')['profiles'][0]
+        self.assertEqual(row['status'], 'FAIL')
+        self.assertEqual(row['diagnostic']['candidateBaselines'], 'apps/reference-dapp/test-results/default-product-1-candidate-baselines')
+        self.assertIn('Candidate baselines: every screenshot of the failed tests', result.stderr)
+        # Without a screenshot difference, or with diagnostics off, nothing is rendered.
+        candidates.unlink()
+        self.assertEqual(self.run_phase('profile', 'default-product-1', FAKE_FAIL='visual-shell.spec.ts', FAKE_RERUN_STATUS='0').returncode, 1)
+        self.assertEqual(self.run_phase('profile', 'default-product-1', FAKE_FAIL='visual-shell.spec.ts', FAKE_VISUAL='1',
+                                        FLOFI_BROWSER_FAILURE_TRACE='off').returncode, 1)
+        self.assertFalse(candidates.exists())
+        config = (ROOT / 'apps/reference-dapp/playwright.config.ts').read_text()
+        self.assertIn("...(candidateBaselines ? { snapshotPathTemplate: `${candidateBaselines}/{testFileDir}/{testFileName}-snapshots/{arg}"
+                      "{-projectName}{-snapshotSuffix}{ext}` } : {}),", config)
+
     def test_failure_outside_a_test_and_disabled_trace_still_fail(self):
         result = self.run_phase('profile', 'copilot-learning', FAKE_FAIL='copilot-learning-memory.spec.ts', FAKE_NO_TESTS='1')
         self.assertEqual(result.returncode, 1)
@@ -889,15 +964,18 @@ class GuardedRunner(unittest.TestCase):
         result = self.run_phase('critical', PATH='/nonexistent')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.report('critical')['status'], 'FAIL')
-        for args in [[], ['product', 'extra'], ['extended', '--shard', '4/3'], ['extended', '--shard', '1/2'], ['extended', '--shard', '0/3'],
-                     ['profile', 'unknown'], ['all']]:
+        total = len(browser_plan()['shards'])
+        for args in [[], ['product', 'extra'], ['extended', '--shard', f'{total + 1}/{total}'], ['extended', '--shard', f'0/{total}'],
+                     ['extended', '--shard', f'1/{total + 1}'], ['extended', '--shard', '1/2'], ['profile', 'unknown'], ['all']]:
             with self.subTest(args=args):
                 self.assertNotEqual(self.run_phase(*args).returncode, 0)
         self.assertFalse(self.calls())
 
     def test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run(self):
         source = (self.root / RUNNER).read_text()
-        for broken in [source.replace(", 'universal-bridge'],", "],", 1), source.replace('const critical = [', "const critical = ['copilot', ", 1)]:
+        for broken in [source.replace('const critical = [', "const critical = ['no-such-profile', ", 1),
+                       source.replace('const critical = [', "const critical = ['copilot-learning', ", 1),
+                       source.replace("  ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],", "  ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],\n  ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],", 1)]:
             with self.subTest():
                 self.assertNotEqual(broken, source)
                 (self.root / RUNNER).write_text(broken)
@@ -945,15 +1023,15 @@ class CertificationLedger(unittest.TestCase):
         self.assertIn('Certification ledger: PASS', output)
 
     def test_missing_failed_or_incomplete_stage_fails(self):
-        for mutation in ['missing', 'failure', 'incomplete']:
+        for mutation in ['missing', 'failure', 'incomplete', 'superseded', 'cancelled/interrupted']:
             with self.subTest(mutation=mutation):
                 path = self.metrics / f'{9:032x}.json'
                 saved = path.read_text()
                 record = json.loads(saved)
                 if mutation == 'missing':
                     path.unlink()
-                elif mutation == 'failure':
-                    path.write_text(json.dumps({**record, 'outcome': 'failure'}))
+                elif mutation in ('failure', 'superseded', 'cancelled/interrupted'):
+                    path.write_text(json.dumps({**record, 'outcome': mutation}))
                 else:
                     path.write_text(json.dumps({key: value for key, value in record.items() if key != 'duration'} | {'outcome': 'incomplete'}))
                 status, output = self.verify()
@@ -972,11 +1050,12 @@ class CertificationLedger(unittest.TestCase):
 
     def test_q_browser_report_of_another_revision_is_rejected(self):
         plan = browser_plan()
-        self.write_report('extended-1-3', 'extended', '1/3', plan['shards'][0], revision=OTHER_REVISION)
+        total = len(plan['shards'])
+        self.write_report(f'extended-1-{total}', 'extended', f'1/{total}', plan['shards'][0], revision=OTHER_REVISION)
         status, output = self.verify()
         self.assertEqual(status, 1)
         self.assertIn('extended browser profiles never ran', output)
-        self.write_report('extended-1-3', 'extended', '1/3', plan['shards'][0])
+        self.write_report(f'extended-1-{total}', 'extended', f'1/{total}', plan['shards'][0])
         self.assertEqual(self.verify()[0], 0)
         with patch.object(self.observe, 'revision', return_value='UNKNOWN'):
             status, output = self.verify()
@@ -1012,6 +1091,295 @@ class CertificationLedger(unittest.TestCase):
                         path.unlink()
                 for path, text in saved.items():
                     path.write_text(text)
+
+
+class BuildArtifact(unittest.TestCase):
+    """BUILD-FLOFI-CI-ARCHITECTURE-002: one build per workflow; a consumer refuses any artifact that is not exactly this revision's."""
+    artifact = load_script('ci_build_artifact')
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        base = Path(scratch.name)
+        self.builder, self.consumer, self.out = base / 'builder', base / 'consumer', base / 'workspace' / 'flofi-build'
+        for root in (self.builder, self.consumer):
+            (root / 'node_modules/.pnpm/pg/node_modules/pg').mkdir(parents=True)
+            (root / 'pnpm-lock.yaml').write_text('lockfileVersion: 9.0\n')
+        files = {'packages/a/dist/index.js': 'export {}\n', 'apps/web/.next/BUILD_ID': 'id\n', 'apps/web/.next/server/page.js': 'page\n',
+                 'apps/web/.next/cache/webpack/huge.pack': 'compiler cache\n'}
+        for name, text in files.items():
+            (self.builder / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.builder / name).write_text(text)
+        (self.builder / 'apps/web/.next/node_modules').mkdir()
+        (self.builder / 'apps/web/.next/node_modules/pg-1').symlink_to('../../../../node_modules/.pnpm/pg/node_modules/pg')
+        self.env = patch.dict(os.environ, {'FLOFI_CI_REVISION': REVISION})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        with redirect_stdout(io.StringIO()):
+            self.artifact.pack(self.builder, self.out)
+        self.manifest = json.loads((self.out / 'manifest.json').read_text())
+
+    def unpack(self):
+        with redirect_stdout(io.StringIO()), patch('sys.stderr', new_callable=io.StringIO) as errors:
+            return self.artifact.unpack(self.consumer, self.out.parent), errors.getvalue()
+
+    def rewrite(self, add):
+        """Replace the archive with one that also holds `add` (a TarInfo hook) and re-seal the manifest, as a forger would."""
+        archive = self.out / 'build.tar'
+        with tarfile.open(archive, 'a') as tar:
+            add(tar)
+        with tarfile.open(archive) as tar:
+            members = len(tar.getmembers())
+        self.manifest.update(sha256=hashlib.sha256(archive.read_bytes()).hexdigest(), members=members)
+        (self.out / 'manifest.json').write_text(json.dumps(self.manifest))
+
+    def test_round_trip_extracts_only_runtime_outputs(self):
+        self.assertEqual(self.manifest['revision'], REVISION)
+        self.assertEqual(self.manifest['roots'], ['packages/a/dist', 'apps/web/.next'])
+        status, errors = self.unpack()
+        self.assertEqual(status, 0, errors)
+        self.assertEqual((self.consumer / 'apps/web/.next/server/page.js').read_text(), 'page\n')
+        self.assertEqual((self.consumer / 'packages/a/dist/index.js').read_text(), 'export {}\n')
+        self.assertFalse((self.consumer / 'apps/web/.next/cache').exists())  # the compiler cache never travels
+        self.assertTrue((self.consumer / 'apps/web/.next/node_modules/pg-1').resolve().samefile(self.consumer / 'node_modules/.pnpm/pg/node_modules/pg'))
+        self.assertEqual(self.unpack()[0], 1)  # outputs already present: never mixed or overwritten
+
+    def test_another_revision_lockfile_or_digest_is_refused_before_writing(self):
+        with patch.dict(os.environ, {'FLOFI_CI_REVISION': OTHER_REVISION}):
+            status, errors = self.unpack()
+        self.assertEqual(status, 1)
+        self.assertIn('is not this revision', errors)
+        (self.consumer / 'pnpm-lock.yaml').write_text('lockfileVersion: 9.0\nchanged: true\n')
+        status, errors = self.unpack()
+        self.assertEqual(status, 1)
+        self.assertIn('another pnpm-lock.yaml', errors)
+        (self.consumer / 'pnpm-lock.yaml').write_text('lockfileVersion: 9.0\n')
+        with open(self.out / 'build.tar', 'ab') as stream:
+            stream.write(b'\0' * 512)
+        status, errors = self.unpack()
+        self.assertEqual(status, 1)
+        self.assertIn('digest does not match', errors)
+        self.assertFalse((self.consumer / 'apps').exists())
+        self.assertFalse((self.consumer / 'packages').exists())
+
+    def test_members_outside_build_outputs_or_escaping_links_are_refused(self):
+        def outside(tar):
+            data = b'#!/bin/sh\n'
+            info = tarfile.TarInfo('scripts/governance_lite.py')
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        def escaping(tar):
+            info = tarfile.TarInfo('packages/a/dist/secret')
+            info.type, info.linkname = tarfile.SYMTYPE, '../../../../../etc/passwd'
+            tar.addfile(info)
+        for forge, message in [(outside, 'outside the build outputs'), (escaping, 'is not inside node_modules/')]:
+            with self.subTest(message=message):
+                self.setUp()
+                self.rewrite(forge)
+                status, errors = self.unpack()
+                self.assertEqual(status, 1)
+                self.assertIn(message, errors)
+                self.assertFalse((self.consumer / 'scripts').exists())
+                self.assertFalse((self.consumer / 'packages').exists())
+
+    def test_writes_through_links_and_links_outside_node_modules_are_refused(self):
+        def beneath(tar):
+            data = b'forged\n'
+            info = tarfile.TarInfo('apps/web/.next/node_modules/pg-1/index.js')
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        def chain(tar):
+            first = tarfile.TarInfo('apps/web/.next/a')
+            first.type, first.linkname = tarfile.SYMTYPE, '.'
+            tar.addfile(first)
+            second = tarfile.TarInfo('apps/web/.next/a/b')
+            second.type, second.linkname = tarfile.SYMTYPE, '../../..'
+            tar.addfile(second)
+        def scripts(tar):
+            info = tarfile.TarInfo('apps/web/.next/tools')
+            info.type, info.linkname = tarfile.SYMTYPE, '../../../scripts'
+            tar.addfile(info)
+        def hardlink(tar):
+            info = tarfile.TarInfo('packages/a/dist/copy.js')
+            info.type, info.linkname = tarfile.LNKTYPE, 'packages/a/dist/index.js'
+            tar.addfile(info)
+        def compiler_cache(tar):
+            data = b'cache\n'
+            info = tarfile.TarInfo('apps/web/.next/cache/injected')
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        cases = [(beneath, 'below a link of the archive'), (chain, 'is not inside node_modules/'), (scripts, 'is not inside node_modules/'),
+                 (hardlink, 'unsupported member type'), (compiler_cache, 'outside the build outputs')]
+        for forge, message in cases:
+            with self.subTest(message=message, forge=forge.__name__):
+                self.setUp()
+                self.rewrite(forge)
+                status, errors = self.unpack()
+                self.assertEqual(status, 1)
+                self.assertIn(message, errors)
+                self.assertFalse((self.consumer / 'apps').exists())
+                self.assertFalse((self.consumer / 'node_modules/.pnpm/pg/node_modules/pg/index.js').exists())
+
+    def test_forged_roots_are_refused(self):
+        self.manifest['roots'] = ['scripts']
+        (self.out / 'manifest.json').write_text(json.dumps(self.manifest))
+        status, errors = self.unpack()
+        self.assertEqual(status, 1)
+        self.assertIn('artifact roots are not build outputs', errors)
+
+    def test_pack_refuses_hard_links_in_the_build_outputs(self):
+        os.link(self.builder / 'packages/a/dist/index.js', self.builder / 'packages/a/dist/again.js')
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as refused:
+            self.artifact.pack(self.builder, self.out)
+        self.assertIn('hard link', str(refused.exception))
+
+    def test_pack_refuses_without_build_outputs_or_revision(self):
+        with tempfile.TemporaryDirectory() as empty:
+            (Path(empty) / 'pnpm-lock.yaml').write_text('')
+            with self.assertRaises(SystemExit):
+                self.artifact.pack(Path(empty), Path(empty) / 'out')
+
+
+class SupersedeGuard(unittest.TestCase):
+    """BUILD-FLOFI-CI-ARCHITECTURE-002: a revision a newer push superseded stops its own job and is never certified; main never stops."""
+    guard = load_script('ci_supersede')
+    observe = load_script('ci-observe')
+
+    def check(self, read=lambda branch: OTHER_REVISION, now=lambda: 1000.0, **env):
+        calls = []
+        def reader(branch):
+            calls.append(branch)
+            return read(branch)
+        base = {'FLOFI_CI_SUPERSEDE_CHECK': '1', 'CIRCLE_BRANCH': 'claude/feature', 'CIRCLE_SHA1': REVISION}
+        with patch('sys.stderr', new_callable=io.StringIO):
+            return self.guard.check({**base, **env}, now=now, read=reader), calls
+
+    def test_only_a_moved_pull_request_branch_stops_the_job(self):
+        self.assertEqual(self.check(), (75, ['claude/feature']))
+        self.assertEqual(self.check(read=lambda branch: REVISION)[0], 0)
+        self.assertEqual(self.check(read=lambda branch: None)[0], 0)  # unreadable or deleted branch: keep certifying
+        for env in [{'FLOFI_CI_SUPERSEDE_CHECK': '0'}, {'CIRCLE_BRANCH': 'main'}, {'CIRCLE_BRANCH': ''}, {'CIRCLE_SHA1': 'abc'},
+                    {'CIRCLE_BRANCH': 'pull/12'}, {'CIRCLE_PR_USERNAME': 'someone'}, {'CIRCLE_PR_REPONAME': 'FloFi'}]:  # forks: never
+            with self.subTest(env=env):
+                self.assertEqual(self.check(**env), (0, []))
+
+    def test_remote_reads_are_throttled_per_job(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            first = self.check(read=lambda branch: REVISION, RUNNER_TEMP=scratch)
+            second = self.check(read=lambda branch: OTHER_REVISION, now=lambda: 1010.0, RUNNER_TEMP=scratch)
+            third = self.check(now=lambda: 1100.0, RUNNER_TEMP=scratch)
+        self.assertEqual(first, (0, ['claude/feature']))
+        self.assertEqual(second, (0, []))  # within the interval: no remote read
+        self.assertEqual(third, (75, ['claude/feature']))
+
+    def fake_git(self, scratch, head):
+        bin_dir = Path(scratch) / 'bin'
+        bin_dir.mkdir()
+        (bin_dir / 'git').write_text('#!/usr/bin/env bash\nif [ "$1" = ls-remote ]; then printf \'%s\\trefs/heads/%s\\n\' "' + head
+                                     + '" "${CIRCLE_BRANCH}"; exit 0; fi\nexec /usr/bin/git "$@"\n')
+        (bin_dir / 'git').chmod(0o755)
+        return f"{bin_dir}:{os.environ['PATH']}"
+
+    def test_a_superseded_stage_never_starts_and_the_ledger_refuses_it(self):
+        for branch, expected in [('claude/feature', 75), ('main', 0)]:
+            with self.subTest(branch=branch), tempfile.TemporaryDirectory() as scratch:
+                env = {**os.environ, 'RUNNER_TEMP': scratch, 'FLOFI_CI_SUPERSEDE_CHECK': '1', 'CIRCLE_BRANCH': branch, 'CIRCLE_SHA1': REVISION,
+                       'FLOFI_CI_REVISION': REVISION, 'PATH': self.fake_git(scratch, OTHER_REVISION)}
+                result = subprocess.run(['bash', '-c', "set -euo pipefail\nsource scripts/ci-observe.sh 'Typecheck'\ntouch \"$RUNNER_TEMP/ran\""],
+                                        cwd=ROOT, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual((Path(scratch) / 'ran').exists(), expected == 0)
+                row = json.loads(next((Path(scratch) / 'flofi-ci-metrics').glob('*.json')).read_text())
+                self.assertEqual(row['outcome'], 'superseded' if expected else 'success')
+                if expected:
+                    self.assertIn('SUPERSEDED: branch claude/feature', result.stderr)
+                    with redirect_stdout(io.StringIO()) as output, patch.dict(os.environ, {'FLOFI_CI_REVISION': REVISION}):
+                        self.assertEqual(self.observe.verify(Path(scratch) / 'flofi-ci-metrics'), 1)
+                    self.assertIn("did not succeed: superseded", output.getvalue())
+
+
+class SupersededBrowserRun(GuardedRunner):
+    """The guarded runner stops between profiles for a superseded revision; the report is never a pass."""
+    def setUp(self):
+        super().setUp()
+        bin_dir = self.root / 'bin'
+        (bin_dir / 'git').write_text('#!/usr/bin/env bash\nif [ "$1" = ls-remote ]; then printf \'%s\\trefs/heads/%s\\n\' "$FAKE_HEAD" "$CIRCLE_BRANCH"; exit 0; fi\n'
+                                     'exec /usr/bin/git "$@"\n')
+        (bin_dir / 'git').chmod(0o755)
+        # CircleCI sets CIRCLE_BRANCH for the governance job that runs these tests: the inherited GuardedRunner tests run as main
+        # (guard enabled, never acting); the supersede tests below choose their branch.
+        self.env.update(FLOFI_CI_SUPERSEDE_CHECK='1', FLOFI_CI_SUPERSEDE_INTERVAL='0', CIRCLE_SHA1=REVISION, FAKE_HEAD=OTHER_REVISION,
+                        CIRCLE_BRANCH='main')
+
+    def test_superseded_branch_stops_after_the_running_profile(self):
+        result = self.run_phase('critical', CIRCLE_BRANCH='claude/feature')
+        self.assertEqual(result.returncode, 75, result.stderr)
+        report = self.report('critical')
+        self.assertEqual(report['status'], 'SUPERSEDED')
+        self.assertEqual([row['status'] for row in report['profiles']], ['PASS'] + ['NOT_RUN'] * (len(CRITICAL) - 1))
+        self.assertEqual(len(self.calls()), 1)
+        self.assertIn('SUPERSEDED before profile canvas-corrections', result.stderr)
+
+    def test_main_and_an_unmoved_branch_run_every_profile(self):
+        for branch, head in [('main', OTHER_REVISION), ('claude/feature', REVISION)]:
+            with self.subTest(branch=branch):
+                result = self.run_phase('critical', CIRCLE_BRANCH=branch, FAKE_HEAD=head)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.report('critical')['status'], 'PASS')
+
+
+
+class ShardBalance(unittest.TestCase):
+    """The browser shards are computed from measured seconds: complete, disjoint, deterministic and balanced."""
+    def test_shards_partition_the_extended_profiles_for_every_browser_job(self):
+        plan = browser_plan()
+        self.assertEqual(plan, browser_plan())  # deterministic
+        self.assertEqual(sorted(name for shard in plan['shards'] for name in shard), sorted(plan['extended']))
+        self.assertEqual(len({name for shard in plan['shards'] for name in shard}), len(plan['extended']))
+        jobs = [name for name in circleci()[0] if name.startswith('certification-browser-')]
+        self.assertEqual(len(jobs), len(plan['shards']))
+        seconds = plan['shardSeconds']
+        self.assertLessEqual(max(seconds), 1.1 * sum(seconds) / len(seconds))  # within 10% of the mean on the committed measurements
+        timings = json.loads((ROOT / 'scripts/ci-browser-timings.json').read_text())['profiles']
+        median = sorted(timings.values())[len(timings) // 2]  # the runner's estimate for a profile without a measurement
+        for shard in plan['shards']:  # shortest first, so fast financial boundaries report early
+            self.assertEqual(shard, sorted(shard, key=lambda name: (timings.get(name, median), name)))
+
+    def test_unmeasured_profiles_are_placed_and_invalid_timings_refuse(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            (root / 'scripts').mkdir()
+            shutil.copy(ROOT / RUNNER, root / RUNNER)
+            timings = json.loads((ROOT / 'scripts/ci-browser-timings.json').read_text())
+            dropped = timings['profiles'].pop('automations')
+            self.assertGreater(dropped, 0)
+            (root / 'scripts/ci-browser-timings.json').write_text(json.dumps(timings))
+            plan = json.loads(subprocess.run([NODE, RUNNER, 'list'], cwd=root, check=True, capture_output=True, text=True).stdout)
+            self.assertEqual(sum(shard.count('automations') for shard in plan['shards']), 1)
+            for broken in [{**timings, 'profiles': {**timings['profiles'], 'copilot': 0}}, {**timings, 'kind': 'other'}, {**timings, 'profiles': {}},
+                           {key: value for key, value in timings.items() if key != 'fixedShardSeconds'}]:
+                (root / 'scripts/ci-browser-timings.json').write_text(json.dumps(broken))
+                result = subprocess.run([NODE, RUNNER, 'list'], cwd=root, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+
+
+class TimingsRefresh(unittest.TestCase):
+    timings = load_script('ci_timings')
+
+    def test_medians_of_passing_rows_only_for_planned_profiles(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            base = Path(scratch)
+            output = base / 'timings.json'
+            output.write_text(json.dumps({'kind': 'flofi-browser-profile-timings', 'version': 1, 'fixedShardSeconds': {'composition': 30.0},
+                                          'profiles': {'kept': 12.0, 'removed': 9.0}}))
+            for index, (seconds, status) in enumerate([(10.0, 'PASS'), (30.0, 'PASS'), (20.0, 'PASS'), (500.0, 'FAIL')]):
+                (base / f'guarded-{index}.json').write_text(json.dumps({'kind': 'guarded-browser', 'profiles': [
+                    {'name': 'measured', 'seconds': seconds, 'status': status}, {'name': 'removed', 'seconds': 1.0, 'status': 'PASS'}]}))
+            with redirect_stdout(io.StringIO()):
+                self.timings.update([str(base)], output, planned=['measured', 'kept', 'new'])
+            document = json.loads(output.read_text())
+            self.assertEqual(document['profiles'], {'kept': 12.0, 'measured': 20.0})
+            self.assertEqual(document['fixedShardSeconds'], {'composition': 30.0})
 
 
 if __name__ == '__main__':
