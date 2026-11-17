@@ -12,7 +12,7 @@
   const KEY = 'flofi-e2e-privy-token';
   const state = { ready: false, authenticated: false, userId: null, embedded: [] };
   let snapshot = Object.freeze({ ...state, embedded: Object.freeze([]) });
-  const listeners = new Set(), logins = new Set(), errors = new Set();
+  const listeners = new Set(), logins = new Set(), errors = new Set(), links = new Set();
   // Like FloFi's bridge, a login event with no listener yet is kept for the first one (Privy reports it while it initializes).
   let pendingLogin = null;
   const emitLogin = event => { if (!logins.size) { pendingLogin = event; return; } for (const listener of [...logins]) listener(event); };
@@ -22,7 +22,7 @@
   async function call(path, input = {}) {
     const response = await fetch(`/__privy-e2e/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: token(), ...input }) });
     const value = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(value.error || 'Privy request failed');
+    if (!response.ok) throw Object.assign(new Error(value.error || 'Privy request failed'), value.code ? { privyErrorCode: value.code } : {});
     return value;
   }
   const signedIn = user => { state.authenticated = true; state.userId = user.id; state.embedded = user.embedded; publish(); };
@@ -69,7 +69,7 @@
     onLoginError(listener) { errors.add(listener); return () => errors.delete(listener); },
     async loginWithOAuth(provider) {
       if (provider !== 'google' || !identity().google) throw new Error('OAuth sign-in failed');
-      await login({ method: 'google', subject: identity().google });
+      await login({ method: 'google', subject: identity().google, ...identity().googleEmail ? { email: identity().googleEmail } : {} });
     },
     async sendEmailCode(email) { await call('send-code', { email }); },
     async loginWithEmailCode(code) { await login({ method: 'email', email: identity().email, code }); },
@@ -100,6 +100,18 @@
       await confirm('solana-message', 'Sign a message', new TextDecoder().decode(message));
       return base64ToBytes((await call('sign/solana-message', { address, message: bytesToBase64(message) })).signature);
     },
+    // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: linking another sign-in method to the signed-in user (in place: the stand-in has no redirect). The
+    // identity to link comes from `window.__FLOFI_PRIVY_E2E_IDENTITY__.link` ({ google } or { email }), set by the test.
+    async linkWithOAuth(provider) {
+      const subject = (identity().link || {}).google;
+      if (provider !== 'google' || !subject) throw new Error('OAuth link failed');
+      // Privy's own link returns through a redirect (its outcome then arrives through `onLinkResult`); the stand-in resolves in place instead.
+      const { user } = await call('link', { method: 'google', subject, ...(identity().link || {}).googleEmail ? { email: identity().link.googleEmail } : {} });
+      signedIn(user);
+    },
+    async sendLinkEmailCode(email) { await call('send-code', { email }); },
+    async linkWithEmailCode(code) { const { user } = await call('link', { method: 'email', email: (identity().link || {}).email, code }); signedIn(user); },
+    onLinkResult(listener) { links.add(listener); return () => links.delete(listener); },
     async logout() {
       await call('logout').catch(() => undefined);
       try { localStorage.removeItem(KEY); } catch { /* nothing kept */ }

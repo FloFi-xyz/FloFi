@@ -16,7 +16,7 @@
  * - Wallet login is offered for injected browser wallets only; WalletConnect stays off (and is not shipped; pnpm-workspace.yaml).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { PrivyProvider, useCreateWallet, useExportWallet, useImportWallet, useLogin, useLoginWithEmail, useLoginWithOAuth, useLogout, usePrivy,
+import { PrivyProvider, useCreateWallet, useExportWallet, useImportWallet, useLinkEmail, useLinkWithOAuth, useLogin, useLoginWithEmail, useLoginWithOAuth, useLogout, usePrivy,
   useSign7702Authorization, useSignMessage, useSignTransaction, useSignTypedData, useWallets as useEvmWallets, type PrivyClientConfig, type User } from '@privy-io/react-auth';
 import { defaultSolanaRpcsPlugin, toSolanaWalletConnectors, useCreateWallet as useCreateSolanaWallet, useExportWallet as useExportSolanaWallet,
   useImportWallet as useImportSolanaWallet, useSignMessage as useSignSolanaMessage, useSignTransaction as useSignSolanaTransaction,
@@ -26,7 +26,7 @@ import { signerPolicy } from './signer-pages';
 import { PRIVY_WALLET_LIST } from './privy-hosts';
 import { usePathname } from 'next/navigation';
 import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyCanSign, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy,
-  type PrivyEmbedded, type PrivyLoginEvent, type PrivyReview } from './privy-context';
+  type PrivyEmbedded, type PrivyLinkResult, type PrivyLoginEvent, type PrivyReview } from './privy-context';
 export { currentFloFiPrivy, FloFiPrivyContext, privyErrorCode, useAccountsOffered, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyEvmTransaction,
   type PrivyLoginEvent, type PrivyReview } from './privy-context';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
@@ -83,7 +83,58 @@ export function privyOwnSolanaWallets<T extends { readonly standardWallet?: unkn
   return wallets.filter(wallet => (wallet.standardWallet as { readonly isPrivyWallet?: unknown } | undefined)?.isPrivyWallet === true);
 }
 
-function PrivyBridge({ children }: { children: ReactNode }) {
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: Privy finishes ANY headless OAuth return through one shared step that links when a Privy session exists
+ * and signs in (or signs up) otherwise. So exactly one completer is mounted per document: the login one on `/login` only, the link one on the
+ * Sign-in methods page only — and the link one only for the Privy user FloFi checked before the redirect (`LINK_MARKER`, set by
+ * `linkWithOAuth`). Any other return is stripped from the address, the Privy session ended, and nothing is linked or signed in.
+ */
+export const LINK_PAGE = '/account/sign-in-methods';
+const LINK_MARKER = 'flofi.privy-link';
+const OAUTH_RETURN = /[?&]privy_oauth_(?:code|state)=/;
+function readLinkMarker(): string | null {
+  try { const value = JSON.parse(sessionStorage.getItem(LINK_MARKER) ?? 'null') as { did?: unknown } | null; return typeof value?.did === 'string' ? value.did : null; }
+  catch { return null; }
+}
+function clearLinkMarker() { try { sessionStorage.removeItem(LINK_MARKER); } catch { /* nothing to clear */ } }
+function stripOAuthReturn() {
+  const url = new URL(window.location.href);
+  for (const key of [...url.searchParams.keys()]) if (key.startsWith('privy_oauth_')) url.searchParams.delete(key);
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+/** A buffered channel of link outcomes (the result of a return can arrive before the page subscribes). */
+function createLinkChannel() {
+  const listeners = new Set<(result: PrivyLinkResult) => void>();
+  let pending: PrivyLinkResult | null = null;
+  return {
+    emit(result: PrivyLinkResult) { if (!listeners.size) { pending = result; return; } for (const listener of [...listeners]) listener(result); },
+    subscribe(listener: (result: PrivyLinkResult) => void): () => void {
+      listeners.add(listener);
+      if (pending) { const result = pending; pending = null; queueMicrotask(() => { if (listeners.has(listener)) listener(result); }); }
+      return () => { listeners.delete(listener); };
+    },
+  };
+}
+type OAuthStart = (input: { provider: 'google' | 'apple' }) => Promise<void>;
+function LoginOAuthCompleter({ callbacks, start }: { callbacks: Parameters<typeof useLoginWithOAuth>[0]; start: { current: OAuthStart | null } }) {
+  const oauth = useLoginWithOAuth(callbacks);
+  useEffect(() => { start.current = oauth.initOAuth; return () => { start.current = null; }; }, [oauth.initOAuth, start]);
+  return null;
+}
+type EmailLink = { sendCode: (input: { email: string }) => Promise<void>; linkWithCode: (input: { code: string }) => Promise<unknown> };
+function LinkCompleter({ start, email, emit }: { start: { current: OAuthStart | null }; email: { current: EmailLink | null }; emit: (result: PrivyLinkResult) => void }) {
+  const oauth = useLinkWithOAuth(), linkEmail = useLinkEmail();
+  useEffect(() => { start.current = oauth.initOAuth as OAuthStart; return () => { start.current = null; }; }, [oauth.initOAuth, start]);
+  useEffect(() => { email.current = linkEmail as unknown as EmailLink; return () => { email.current = null; }; }, [linkEmail, email]);
+  const status = oauth.state.status;
+  useEffect(() => {
+    if (status === 'done') { clearLinkMarker(); emit({ status: 'linked' }); }
+    else if (status === 'error') { clearLinkMarker(); emit({ status: 'error', code: privyErrorCode((oauth.state as { error?: unknown }).error, 'ACCOUNT_LINK_FAILED') }); }
+  }, [status]); // Reports each terminal state once.
+  return null;
+}
+
+function PrivyBridge({ children, page }: { children: ReactNode; page: string }) {
   const privy = usePrivy();
   const logins = useRef(createLoginChannel()), errorListeners = useRef(new Set<(code: string) => void>());
   const emit = useCallback((event: PrivyLoginEvent) => logins.current.emit(event), []);
@@ -91,8 +142,20 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   const callbacks = useMemo(() => ({ onComplete: (params: { wasAlreadyAuthenticated: boolean }) => emit({ wasAlreadyAuthenticated: params.wasAlreadyAuthenticated }),
     onError: (cause: unknown) => emitError(cause) }), [emit, emitError]);
   const { login } = useLogin(callbacks);
-  const oauth = useLoginWithOAuth(callbacks);
+  const loginStart = useRef<OAuthStart | null>(null), linkStart = useRef<OAuthStart | null>(null), linkEmail = useRef<EmailLink | null>(null);
+  const links = useRef(createLinkChannel());
   const email = useLoginWithEmail(callbacks);
+  // The link completer runs only on the Sign-in methods page, signed in at Privy, and (for a return) as the Privy user FloFi checked.
+  const linkPage = page === LINK_PAGE, returning = typeof window !== 'undefined' && OAUTH_RETURN.test(window.location.search);
+  const expected = linkPage && returning ? readLinkMarker() : null;
+  const linkAllowed = linkPage && privy.ready && privy.authenticated && (!returning || (expected !== null && privy.user?.id === expected));
+  useEffect(() => {
+    if (!linkPage || !returning || !privy.ready || linkAllowed) return;
+    // A return FloFi did not start for this Privy user: never completed (it could link to someone else or sign up a new user).
+    stripOAuthReturn(); clearLinkMarker();
+    void logout().catch(() => undefined);
+    links.current.emit({ status: 'error', code: 'ACCOUNT_LINK_NOT_CONFIRMED' });
+  }, [linkPage, returning, privy.ready, linkAllowed]); // `logout` is stable.
   const { logout } = useLogout();
   const { createWallet: createEvm } = useCreateWallet();
   const { createWallet: createSolana } = useCreateSolanaWallet();
@@ -130,7 +193,15 @@ function PrivyBridge({ children }: { children: ReactNode }) {
       getAccessToken: () => privy.getAccessToken().catch(() => null),
       onLogin: listener => logins.current.subscribe(listener),
       onLoginError: listener => { errorListeners.current.add(listener); return () => { errorListeners.current.delete(listener); }; },
-      loginWithOAuth: provider => wrap(() => oauth.initOAuth({ provider }), 'PRIVY_SIGN_IN_FAILED'),
+      loginWithOAuth: provider => wrap(() => (loginStart.current ?? fail('PRIVY_UNAVAILABLE'))({ provider }), 'PRIVY_SIGN_IN_FAILED'),
+      linkWithOAuth: provider => wrap(async () => {
+        const start = linkStart.current ?? fail('PRIVY_UNAVAILABLE'), did = privy.user?.id ?? fail('PRIVY_SESSION_REQUIRED');
+        try { sessionStorage.setItem(LINK_MARKER, JSON.stringify({ did })); } catch { fail('PRIVY_UNAVAILABLE'); }
+        await start!({ provider });
+      }, 'ACCOUNT_LINK_FAILED'),
+      sendLinkEmailCode: address => wrap(() => (linkEmail.current ?? fail('PRIVY_UNAVAILABLE'))!.sendCode({ email: address }), 'PRIVY_EMAIL_CODE_FAILED'),
+      linkWithEmailCode: code => wrap(async () => { await (linkEmail.current ?? fail('PRIVY_UNAVAILABLE'))!.linkWithCode({ code }); }, 'PRIVY_EMAIL_CODE_INVALID'),
+      onLinkResult: listener => links.current.subscribe(listener),
       sendEmailCode: address => wrap(() => email.sendCode({ email: address }), 'PRIVY_EMAIL_CODE_FAILED'),
       loginWithEmailCode: code => wrap(() => email.loginWithCode({ code }), 'PRIVY_EMAIL_CODE_INVALID'),
       loginWithWallet: () => login({ loginMethods: ['wallet'], walletChainType: 'ethereum-and-solana' }),
@@ -176,9 +247,12 @@ function PrivyBridge({ children }: { children: ReactNode }) {
         'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       logout: () => logout().catch(() => undefined),
     };
-  }, [privy, oauth, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signEvmTyped, signEvm7702, signSolana,
+  }, [privy, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signEvmTyped, signEvm7702, signSolana,
     signSolanaText, solanaWallet, solanaWallets, solanaReady, evmWalletsReady]);
-  return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
+  return <Context.Provider value={value}><Registrar/>
+    {page === '/login' && <LoginOAuthCompleter callbacks={callbacks} start={loginStart}/>}
+    {linkAllowed && <LinkCompleter start={linkStart} email={linkEmail} emit={result => links.current.emit(result)}/>}
+    {children}</Context.Provider>;
 }
 
 /**
@@ -250,7 +324,12 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
       signEvmTransaction: wrap(driver.signEvmTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signEvmMessage: wrap(driver.signEvmMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       signEvmTypedData: driver.signEvmTypedData ? wrap(driver.signEvmTypedData, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') : async () => fail('PRIVY_UNAVAILABLE'),
       signEvmAuthorization: driver.signEvmAuthorization ? wrap(driver.signEvmAuthorization, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') : async () => fail('PRIVY_UNAVAILABLE'),
-      signSolanaTransaction: wrap(driver.signSolanaTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signSolanaMessage: wrap(driver.signSolanaMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') };
+      signSolanaTransaction: wrap(driver.signSolanaTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signSolanaMessage: wrap(driver.signSolanaMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
+      // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the stand-in links in place (no redirect); a stand-in without linking offers none.
+      ...driver.linkWithOAuth ? { linkWithOAuth: wrap(driver.linkWithOAuth, 'ACCOUNT_LINK_FAILED') } : {},
+      ...driver.sendLinkEmailCode ? { sendLinkEmailCode: wrap(driver.sendLinkEmailCode, 'PRIVY_EMAIL_CODE_FAILED') } : {},
+      ...driver.linkWithEmailCode ? { linkWithEmailCode: wrap(driver.linkWithEmailCode, 'PRIVY_EMAIL_CODE_INVALID') } : {},
+      ...driver.onLinkResult ? { onLinkResult: driver.onLinkResult } : {} };
   }, [driver, snapshot]);
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
@@ -299,7 +378,7 @@ export function FloFiPrivyProvider({ config, accounts = false, children }: { con
   useEffect(() => { if (reload) location.reload(); }, [reload]);
   const inner = reload ? null : !config || !settings || !mount ? <Context.Provider value={null}>{children}</Context.Provider>
     : config.e2e ? <EmulatedPrivy>{children}</EmulatedPrivy>
-      : <PrivyProvider appId={config.appId} config={settings}><PrivyBridge>{children}</PrivyBridge></PrivyProvider>;
+      : <PrivyProvider appId={config.appId} config={settings}><PrivyBridge page={pathname}>{children}</PrivyBridge></PrivyProvider>;
   return <AccountsContext.Provider value={accounts}>{inner}</AccountsContext.Provider>;
 }
 /** Re-renders when Privy finishes loading (for effects that must wait for `ready`). */

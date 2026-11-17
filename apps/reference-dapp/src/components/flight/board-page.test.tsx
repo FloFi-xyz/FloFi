@@ -40,3 +40,24 @@ describe('/board first paint', () => {
     expect(source).toContain('<a className={`${styles.btn} ${styles.btnBlue}`} href="/app">{t.open}</a>');
   });
 });
+
+describe('BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: signed in with another method than the one the person boarded with', () => {
+  const notListed = (boardedElsewhere: boolean): FlightState => ({ ok: true, now: 0, phase: 'BOARDING', closesAt: 0, boardingOpensAt: 0, foundingOpen: true, departures: [],
+    me: { signedIn: true, hasEmail: true, accessPending: false, flight: { access: { kind: 'not_listed' }, pass: null, invites: [], listed: null }, ...boardedElsewhere ? { boardedElsewhere } : {} } });
+  it('never says "Not on the list" to a person whose address boarded with another account, and offers the way back', () => {
+    const html = renderToStaticMarkup(<BoardPage language="EN" state={notListed(true)}/>);
+    expect(html).toContain('data-boarded-elsewhere="true"');
+    expect(html).toContain('You boarded with ');
+    expect(html).not.toContain('Not on the list.');
+    expect(html).toContain('href="/account/sign-in-methods"');
+    expect(html).toContain('Bring this sign-in to my boarded account');
+    expect(renderToStaticMarkup(<BoardPage language="PT" state={notListed(true)}/>)).toContain('Você embarcou com ');
+  });
+  it('keeps "Not on the list" otherwise, with a quiet link for a signed-in person who boarded another way', () => {
+    const html = renderToStaticMarkup(<BoardPage language="EN" state={notListed(false)}/>);
+    expect(html).toContain('Not on the list. ');
+    expect(html).not.toContain('data-boarded-elsewhere');
+    expect(html).toContain('Boarded with another sign-in method?');
+  });
+});
+

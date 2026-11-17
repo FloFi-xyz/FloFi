@@ -18,6 +18,28 @@ const MESSAGES: Readonly<Record<string, string>> = {
   ACCOUNT_WALLET_SAVE_FAILED: 'FloFi could not save that wallet to your account yet. Your wallet is safe with the provider; choose Check again.',
   ACCOUNT_IDENTITY_CONFLICT: 'This sign-in matches more than one FloFi account, so FloFi did not sign you in. Sign in with the method you used before.',
   ACCOUNT_PRIVY_USER_MISMATCH: 'This FloFi account belongs to another wallet-provider user. Nothing was signed in or changed.',
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (P0): sign-in methods, duplicate accounts and step-up.
+  ACCOUNT_SIGN_IN_METHOD_UNCONFIRMED: 'This sign-in method was never confirmed for your FloFi account, so it cannot open it. Sign in with a method you used before, then link this one in Sign-in methods.',
+  ACCOUNT_REAUTH_OTHER_ACCOUNT: 'That sign-in belongs to a different FloFi account. You are still signed in to your account; confirm it with one of its own methods.',
+  ACCOUNT_EXISTS_FOR_EMAIL: 'This email already belongs to a FloFi account.',
+  ACCOUNT_LINK_NOT_CONFIRMED: 'That link was not started from FloFi, or it took too long. Nothing was added. Start again.',
+  ACCOUNT_LINK_FAILED: 'FloFi could not link that sign-in method. Nothing changed. Try again.',
+  FLOFI_SIGN_IN_METHOD_HELD_ELSEWHERE: 'That sign-in method already opens another FloFi account. Nothing was linked, merged or moved.',
+  FLOFI_SIGN_IN_METHOD_ALREADY_LINKED: 'This account already has a sign-in method of that type.',
+  ACCOUNT_MOVE_IN_PROGRESS: 'This sign-in is being moved to another FloFi account. Try again in a few minutes.',
+  ACCOUNT_MOVE_EXPIRED: 'Moving this sign-in took too long, so nothing changed. Start again from the account you want to close.',
+  ACCOUNT_MOVE_USED: 'That move was already completed.',
+  ACCOUNT_MOVE_TARGET_UNKNOWN: 'That sign-in does not open a FloFi account yet. Sign in with a method of the account that keeps everything.',
+  ACCOUNT_MOVE_SAME_ACCOUNT: 'You signed in to the account you are closing. Sign in to the other FloFi account, the one that keeps everything.',
+  ACCOUNT_MOVE_INVALID: 'FloFi could not confirm this move, so nothing changed. Start again.',
+  ACCOUNT_MOVE_PRIVY_HELD: 'That sign-in also belongs to another FloFi account, so FloFi did not close anything.',
+  ACCOUNT_MOVE_PRIVY_PENDING: 'The wallet provider did not answer, so the move is not finished. Nothing was lost. Try again.',
+  ACCOUNT_MOVE_HAS_WALLET: 'This account has a wallet at the wallet provider, so FloFi will not close it: its funds would become unreachable. Keep using the sign-in method of your other account.',
+  ACCOUNT_MOVE_WALLET_SIGN_IN: 'This account signs in with a wallet, so FloFi will not close it: the wallet and its history stay with it.',
+  ACCOUNT_MOVE_PRIVY_HAS_MFA: 'This account uses a second factor at the wallet provider, so FloFi will not close it.',
+  ACCOUNT_MOVE_PRIVY_METHOD_UNSUPPORTED: 'This account has a sign-in method FloFi cannot move, so nothing was closed.',
+  ACCOUNT_MOVE_PRIVY_UNREADABLE: 'The wallet provider sent an answer FloFi could not read. Nothing was closed.',
+  ACCOUNT_MOVE_FAILED: 'FloFi could not complete that. Nothing was closed or moved. Try again.',
   // BUILD-FLOFI-PRIVY-UX-001: Privy (sign-in and wallets).
   PRIVY_NOT_CONFIGURED: "Sign-in isn't configured on this deployment yet.",
   PRIVY_UNAVAILABLE: 'The wallet provider could not be reached. Nothing changed. Try again in a moment.',
@@ -98,6 +120,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
 };
 export function accountMessage(code: string): string {
   if (MESSAGES[code]) return MESSAGES[code]!;
+  if (code.startsWith('ACCOUNT_MOVE_BLOCKED_')) return 'This account holds something of its own (a wallet, a boarding pass, saved recipients or history), so FloFi will not close it. Nothing was moved.';
   const wallet = code.startsWith('FLOFI_WALLET_') ? floFiWalletMessage(code) : null;
   if (wallet) return wallet;
   if (/^MANAGED_WALLETS_NEED_(GOOGLE|APPLE|EMAIL)_SIGN_IN$/.test(code)) return 'Your FloFi wallets are unlocked with the method you first used for them. Sign in with it to manage them.';

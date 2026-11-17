@@ -60,7 +60,12 @@ export async function flightNow(env: Env = process.env): Promise<number> {
 }
 
 /** The signed-in FloFi account and the addresses its identities prove (a Privy-verified email, Google's or Apple's email), or null. */
-export type FlightPerson = { readonly accountId: string; readonly emails: readonly string[] };
+export type FlightPerson = { readonly accountId: string; readonly emails: readonly string[];
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the addresses verified strongly enough for a hint about another account (an email-code identity, or a
+   * Google sign-in on Google's own mail domain). Hints only: never access, never a claim.
+   */
+  readonly strongEmails?: readonly string[] };
 export async function flightPerson(env: Env = process.env): Promise<FlightPerson | null> {
   // No account cookie, no account: answered before the account host (its database pool) is opened.
   const jar = await cookies();
@@ -73,7 +78,11 @@ export async function flightPerson(env: Env = process.env): Promise<FlightPerson
   // The list's own address rule (`normalizeEmail`), so an address matched or stored here is one the operator can also erase.
   const emails = [...new Set(view.identities.filter(identity => identity.kind === 'email' || identity.kind === 'google' || identity.kind === 'apple')
     .map(identity => normalizeEmail(identity.label)).filter((email): email is string => email !== null))];
-  return { accountId: view.accountId, emails };
+  const strongEmails = [...new Set(view.identities.flatMap(identity => {
+    const email = normalizeEmail(identity.label);
+    return email && (identity.kind === 'email' || (identity.kind === 'google' && /@(?:gmail|googlemail)\.com$/.test(email))) ? [email] : [];
+  }))];
+  return { accountId: view.accountId, emails, strongEmails };
 }
 
 /**

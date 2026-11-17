@@ -6,8 +6,12 @@
  * server-side and never stored or logged), wallet ids, addresses, labels and choices: never a key, phrase or code. None of these actions
  * signs, submits or authorizes a transaction, and none creates or imports a wallet: that happens in Privy, in the person's browser.
  */
-import { accountAvailability, accountHost, clearAccountCookie, currentAccountSession, nextPath, setAccountCookie, supersede, type AccountAvailability,
-  type AccountHost } from '../accounts/account-host';
+import { accountAvailability, accountHost, clearAccountCookie, clearMoveCookie, currentAccountSession, currentMoveIntent, nextPath, setAccountCookie, setMoveCookie,
+  supersede, type AccountAvailability, type AccountHost } from '../accounts/account-host';
+import { ExistingAccountFound, type MaskedMethod } from '../accounts/account-service';
+import type { IdentityKind } from '../accounts/account-model';
+import type { RetirementBlocker } from '../accounts/account-store';
+import { platformStateHost } from '../server/platform-state-host';
 import { safeReturnPath, type AccountSessionToken } from '../accounts/account-session';
 import { parseAccountWalletId, type AccountView, type AccountWallet } from '../accounts/account-model';
 import type { PrivyBrowserConfig } from '../accounts/privy-server';
@@ -71,16 +75,39 @@ export async function accountPresence(): Promise<AccountPresence> {
 /**
  * Completes a Privy sign-in (Google, email code or Web3 wallet): the server verifies the access token and reads the Privy user itself,
  * signs in to that person's one FloFi account and sets the session cookie. Returns where to continue.
+ *
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (P0):
+ * - A sign-in that would CREATE an account for an address another account already verified answers `ACCOUNT_EXISTS_FOR_EMAIL` with that
+ *   account's method kinds (nothing created, nothing merged); `allowNew` (the person chose a separate account) skips the question.
+ * - `mode: 'reauth'` (a step-up): only the account already signed in in this browser may be confirmed; any other account is refused and the
+ *   current session is kept. `mode: 'move'` (proving the account that keeps everything after starting to retire a duplicate): continues to
+ *   Sign-in methods, where the move is confirmed. A step-up or a move never detours through wallet onboarding.
  */
-export async function privySignIn(accessToken: string, returnTo = '/app'): Promise<Result<{ next: string; method: AccountSessionToken['method'] }>> {
+export async function privySignIn(accessToken: string, returnTo = '/app', options: { readonly allowNew?: boolean; readonly mode?: 'reauth' | 'move' } = {}):
+  Promise<Result<{ next: string; method: AccountSessionToken['method'] }> | { ok: false; code: 'ACCOUNT_EXISTS_FOR_EMAIL'; kinds: readonly IdentityKind[] }> {
   try {
     const h = await host(), previous = await currentAccountSession(h);
-    const outcome = await h.service.completePrivy(accessToken);
+    // A move sign-in needs this browser's own move intent (checked before anything is consumed).
+    const move = options.mode === 'move' ? await currentMoveIntent().catch(() => null) : null;
+    if (options.mode === 'move' && !move) return { ok: false, code: 'ACCOUNT_MOVE_EXPIRED' };
+    // A step-up or a move signs in to an existing account only: it never creates one the person did not ask for.
+    const outcome = await h.service.completePrivy(accessToken, { allowNew: options.allowNew === true, existingOnly: options.mode !== undefined }).catch((cause: unknown) => {
+      if (cause instanceof Error && cause.message === 'ACCOUNT_SIGN_IN_NO_ACCOUNT') throw new Error(options.mode === 'reauth' ? 'ACCOUNT_REAUTH_OTHER_ACCOUNT' : 'ACCOUNT_MOVE_TARGET_UNKNOWN');
+      throw cause;
+    });
+    if (options.mode === 'reauth' && (!previous || previous.accountId !== outcome.session.accountId)) {
+      await h.store.revokeSession(outcome.session).catch(() => undefined);
+      return { ok: false, code: 'ACCOUNT_REAUTH_OTHER_ACCOUNT' };
+    }
     await supersede(h, previous, outcome.session);
     await setAccountCookie(outcome.session);
+    // A move intent belongs to the move sign-in (and the keeper's step-up while confirming it): any other sign-in in this browser ends it.
+    if (!move && options.mode !== 'reauth') await clearMoveCookie();
+    const next = move ? '/account/sign-in-methods' : options.mode === 'reauth' ? safeReturnPath(returnTo) : nextPath(outcome, 'sign-in', safeReturnPath(returnTo));
     // `method` is the server-verified sign-in method (public): the browser uses it only to restore the wallet it just authenticated with.
-    return { ok: true, value: { next: nextPath(outcome, 'sign-in', safeReturnPath(returnTo)), method: outcome.session.method } };
+    return { ok: true, value: { next, method: outcome.session.method } };
   } catch (cause) {
+    if (cause instanceof ExistingAccountFound) return { ok: false, code: 'ACCOUNT_EXISTS_FOR_EMAIL', kinds: cause.kinds };
     const result = failure(cause, 'PRIVY_SIGN_IN_FAILED');
     // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: a failure without a FloFi code reached the person as the generic message with nothing in the logs.
     // Record its class only (never the token, the provider's text or an identity), so the failing step can be told apart.
@@ -88,6 +115,95 @@ export async function privySignIn(accessToken: string, returnTo = '/app'): Promi
       error: cause instanceof Error ? cause.name.slice(0, 40) : typeof cause }));
     return result;
   }
+}
+
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (P0): what the Sign-in methods page shows — the signed-in account's methods (masked), whether it signed
+ * in recently (linking needs it), whether it may be retired as an empty duplicate (and what blocks it), and the move this browser started.
+ */
+export type SignInMethodsState = { readonly signedIn: boolean; readonly methods: readonly MaskedMethod[]; readonly fresh: boolean; readonly privy: boolean;
+  readonly retirement: readonly RetirementBlocker[]; readonly move: { readonly methods: readonly MaskedMethod[]; readonly mine: boolean } | null;
+  readonly emailLink: boolean };
+export async function signInMethodsState(): Promise<SignInMethodsState> {
+  const move = await currentMoveIntent().catch(() => null);
+  let h: AccountHost | null;
+  try { h = await accountHost(); } catch { h = null; }
+  const session = await currentAccountSession(h);
+  const moving = move ? { methods: move.methods as readonly MaskedMethod[], mine: session?.accountId === move.retiring } : null;
+  // Privy's bot protection runs a captcha FloFi's link page cannot show: linking an email is then not offered (stated on the page).
+  const emailLink = !process.env.FLOFI_PRIVY_BOT_PROTECTION;
+  if (!h || !session) return { signedIn: false, methods: [], fresh: false, privy: false, retirement: [], move: moving, emailLink };
+  const view = await h.service.signInMethods(session);
+  return { signedIn: true, ...view, move: moving, emailLink };
+}
+/** Step-up before linking a sign-in method in Privy (see `AccountService.linkReadiness`). */
+export async function linkReadiness(accessToken: string): Promise<Result<null>> {
+  try {
+    const { host: h, session } = await signedIn();
+    await h.service.linkReadiness(session, accessToken);
+    return { ok: true, value: null };
+  } catch (cause) { return failure(cause, 'ACCOUNT_LINK_FAILED'); }
+}
+/** After a link FloFi confirmed: adopts the methods linked to this account's own Privy user (see `AccountService.syncLinkedIdentities`). */
+export async function syncSignInMethods(accessToken: string): Promise<Result<{ readonly added: number; readonly heldElsewhere: number; readonly unconfirmed: number;
+  readonly methods: readonly MaskedMethod[] }>> {
+  try {
+    const { host: h, session } = await signedIn();
+    return { ok: true, value: await h.service.syncLinkedIdentities(session, accessToken) };
+  } catch (cause) { return failure(cause, 'ACCOUNT_LINK_FAILED'); }
+}
+/**
+ * Starts retiring this EMPTY duplicate account: after the checks (`AccountService.startAccountMove`), seals the move intent into this browser,
+ * ends this session and sends the person to sign in to the account that keeps everything.
+ */
+export async function startAccountMove(): Promise<Result<{ readonly next: string }>> {
+  try {
+    const { host: h, session } = await signedIn();
+    const intent = await h.service.startAccountMove(session);
+    await setMoveCookie(intent);
+    await h.store.revokeSession(session).catch(() => undefined);
+    await clearAccountCookie();
+    await walletSignOut().catch(() => undefined);
+    await solanaSignOut().catch(() => undefined);
+    return { ok: true, value: { next: '/login?move=1' } };
+  } catch (cause) { return failure(cause, 'ACCOUNT_MOVE_FAILED'); }
+}
+/**
+ * The sign-in just completed at Privy would create a new account for an email another account already verified, and the person chose to bring
+ * this sign-in to that account: the new (empty) account is created and its move started at once (the same checks and proofs as
+ * `startAccountMove`; this login is the recent sign-in), so its method can be linked to the other account after signing in to it. Nothing else
+ * is created, merged or moved.
+ */
+export async function privyMoveToExisting(accessToken: string): Promise<Result<{ readonly next: string }>> {
+  try {
+    const h = await host();
+    const outcome = await h.service.completePrivy(accessToken, { allowNew: true });
+    try {
+      const intent = await h.service.startAccountMove(outcome.session);
+      await setMoveCookie(intent);
+    } catch (cause) {
+      // The person asked to bring this sign-in to another account, not for a new one: an account created just now that cannot move is discarded.
+      if (outcome.created) await h.store.discardEmptyAccount(outcome.session.accountId).catch(() => false);
+      throw cause;
+    } finally { await h.store.revokeSession(outcome.session).catch(() => undefined); }
+    return { ok: true, value: { next: '/login?move=1' } };
+  } catch (cause) { return failure(cause, 'ACCOUNT_MOVE_FAILED'); }
+}
+/** Signed in to the account that keeps everything: retires the duplicate this browser started to move (see `AccountService.completeAccountMove`). */
+export async function completeAccountMove(): Promise<Result<{ readonly kinds: readonly IdentityKind[] }>> {
+  try {
+    const { host: h, session } = await signedIn();
+    const intent = await currentMoveIntent() ?? fail('ACCOUNT_MOVE_EXPIRED');
+    const { tenantId } = await platformStateHost(process.env);
+    const result = await h.service.completeAccountMove(session, { ...intent!, methods: intent!.methods as readonly MaskedMethod[] }, tenantId);
+    await clearMoveCookie();
+    return { ok: true, value: result };
+  } catch (cause) { return failure(cause, 'ACCOUNT_MOVE_FAILED'); }
+}
+/** Stops a move this browser started (nothing was changed yet, or the person changed their mind). */
+export async function cancelAccountMove(): Promise<Result<null>> {
+  await clearMoveCookie();
+  return { ok: true, value: null };
 }
 /** Saves one wallet just created or imported in Privy, after Privy's API confirms this account's own Privy user holds it. */
 export async function savePrivyWallet(accessToken: string, ecosystem: 'evm' | 'solana', address: string, label?: string): Promise<Result<AccountWallet>> {
@@ -115,6 +231,7 @@ export async function accountSignOut(everywhere = false): Promise<{ readonly nex
     if (h && session) await (everywhere ? h.store.revokeAllSessions(session.accountId) : h.store.revokeSession(session));
   } catch { /* the cookies are cleared regardless */ }
   await clearAccountCookie();
+  await clearMoveCookie().catch(() => undefined);
   await walletSignOut().catch(() => undefined);
   await solanaSignOut().catch(() => undefined);
   return { next: await loginUrl() };

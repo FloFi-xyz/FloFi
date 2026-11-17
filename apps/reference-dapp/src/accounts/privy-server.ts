@@ -38,6 +38,11 @@ export type PrivyUser = { readonly id: string;
   /** The exact external wallet verified by this sign-in, when Privy identifies it unambiguously. */
   readonly loginWallet?: string;
   /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the identity of that most recently verified method (kind and subject), or null. A returning account
+   * signs in only with a method it already confirmed in FloFi (account-store.ts `signInPrivy`).
+   */
+  readonly login?: IdentityClaim | null;
+  /**
    * When Privy last verified one of those identities (Unix seconds), or null. A FloFi session is "recently authenticated" from this time,
    * not from the access token's: Privy refreshes access tokens silently, so a fresh token alone proves no new sign-in by the person.
    */
@@ -47,7 +52,17 @@ export type PrivyUser = { readonly id: string;
 export type PrivyApi = {
   readonly verifyAccessToken: (token: string) => Promise<{ app_id: string; user_id: string; session_id: string; issued_at: number; expiration: number }>;
   readonly getUser: (userId: string) => Promise<unknown>;
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001, retiring an EMPTY duplicate account only (account-service.ts `completeAccountMove`): block new logins and
+   * revoke the user's Privy sessions, undo that, and delete the user. Optional so a test double without them fails closed.
+   */
+  readonly freezeUser?: (userId: string) => Promise<unknown>;
+  readonly unfreezeUser?: (userId: string) => Promise<unknown>;
+  readonly deleteUser?: (userId: string) => Promise<unknown>;
 };
+/** Whether a Privy user may be retired with its duplicate FloFi account: only sign-in methods, nothing that holds or controls value. */
+export type PrivyRetirement = { readonly status: 'RETIRABLE'; readonly methods: readonly IdentityClaim[] } | { readonly status: 'GONE' }
+  | { readonly status: 'REFUSED'; readonly code: string };
 
 const APP_ID = /^[A-Za-z0-9]{10,64}$/, SECRET = /^[\x21-\x7e]{16,512}$/, JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const SUBJECT = /^[A-Za-z0-9._-]{1,255}$/, RESOURCE = /^[A-Za-z0-9-]{8,64}$/;
@@ -88,7 +103,8 @@ export function officialPrivyApi(config: PrivyServerConfig, transport?: typeof f
   if (cached) return cached;
   const client = new PrivyClient({ appId: config.appId, appSecret: config.appSecret, apiUrl: config.apiUrl, timeout: 15_000, maxRetries: 1,
     ...config.verificationKey ? { jwtVerificationKey: config.verificationKey } : {}, ...transport ? { fetch: transport } : {} });
-  const api: PrivyApi = { verifyAccessToken: token => client.utils().auth().verifyAccessToken(token), getUser: userId => client.users()._get(userId) };
+  const api: PrivyApi = { verifyAccessToken: token => client.utils().auth().verifyAccessToken(token), getUser: userId => client.users()._get(userId),
+    freezeUser: userId => client.users().freeze(userId), unfreezeUser: userId => client.users().unfreeze(userId), deleteUser: userId => client.users().delete(userId) };
   if (!transport) clients.set(cacheKey, api);
   return api;
 }
@@ -96,6 +112,8 @@ export function officialPrivyApi(config: PrivyServerConfig, transport?: typeof f
 const record = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {};
 const seconds = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 const METHOD_ORDER: readonly SessionMethod[] = ['google', 'email', 'apple', 'eip155', 'solana'];
+/** When Privy first verified a linked account (Unix seconds), or null. */
+const since = (account: Json): number | null => seconds(account.first_verified_at ?? account.verified_at) || null;
 
 /** The verified identities and embedded wallets of a Privy user object (strict: anything unexpected is ignored, never repaired). */
 export function readPrivyUser(value: unknown, userId: string, options: { readonly apple?: boolean } = {}): PrivyUser {
@@ -103,28 +121,31 @@ export function readPrivyUser(value: unknown, userId: string, options: { readonl
   if (user.id !== userId || !PRIVY_USER_ID.test(userId) || !Array.isArray(user.linked_accounts)) return fail('PRIVY_RESPONSE_INVALID');
   const identities: IdentityClaim[] = [], wallets: PrivyEmbeddedWallet[] = [];
   let method: SessionMethod | null = null, latest = -1;
-  let loginWallet: string | undefined;
+  let loginWallet: string | undefined, login: IdentityClaim | null = null;
   const seen = (kind: SessionMethod, at: unknown, address?: string) => {
-    const time = seconds(at);
+    const time = seconds(at), claim = identities.at(-1) ?? null;
     if (time > latest || (time === latest && method !== null && METHOD_ORDER.indexOf(kind) < METHOD_ORDER.indexOf(method))) {
       latest = time;
       method = kind;
       loginWallet = address;
-    } else if (time === latest && method === kind && address !== loginWallet) {
+      login = claim;
+    } else if (time === latest && method === kind && (address !== loginWallet || claim?.subject !== login?.subject)) {
+      // Two methods of the same kind verified at the same second: which one signed in is unknown (never guessed).
       loginWallet = undefined;
+      login = null;
     }
   };
   for (const entry of (user.linked_accounts as unknown[]).slice(0, 64)) {
     const account = record(entry), at = account.latest_verified_at ?? account.verified_at;
     if (account.type === 'email') {
       const email = normalizeEmail(account.address);
-      if (email) { identities.push({ kind: 'email', subject: email, label: email }); seen('email', at); }
+      if (email) { identities.push({ kind: 'email', subject: email, label: email, since: since(account) }); seen('email', at); }
     } else if (account.type === 'google_oauth' || (account.type === 'apple_oauth' && options.apple === true)) {
       // Apple counts only once this deployment enabled it (FloFi's own Apple Services ID in Privy): otherwise an Apple login enabled in the
       // Privy dashboard alone would create a second account for a person whose earlier Apple sign-in has another subject.
       const kind = account.type === 'google_oauth' ? 'google' : 'apple';
       if (typeof account.subject === 'string' && SUBJECT.test(account.subject)) {
-        identities.push({ kind, subject: account.subject, label: normalizeEmail(account.email) });
+        identities.push({ kind, subject: account.subject, label: normalizeEmail(account.email), since: since(account) });
         seen(kind, at);
       }
     } else if (account.type === 'wallet' && (account.chain_type === 'ethereum' || account.chain_type === 'solana')) {
@@ -136,13 +157,13 @@ export function readPrivyUser(value: unknown, userId: string, options: { readonl
       } else if (account.wallet_client_type !== 'privy' && account.connector_type !== 'embedded') {
         // An external wallet Privy linked after verifying its signature (SIWE / SIWS).
         const kind = ecosystem === 'evm' ? 'eip155' : 'solana';
-        identities.push({ kind, subject: address, label: null });
+        identities.push({ kind, subject: address, label: null, since: since(account) });
         seen(kind, at, address);
       }
     }
   }
   return { id: userId, identities, method, wallets, verifiedAt: method === null || latest <= 0 ? null : latest,
-    ...(loginWallet && latest > 0 ? { loginWallet } : {}) };
+    ...(loginWallet && latest > 0 ? { loginWallet } : {}), login: method === null || latest <= 0 ? null : login };
 }
 
 export function createPrivyServer(config: PrivyServerConfig, api: PrivyApi = officialPrivyApi(config), now = () => Date.now()) {
@@ -174,6 +195,47 @@ export function createPrivyServer(config: PrivyServerConfig, api: PrivyApi = off
       }
       return readPrivyUser(value, userId, { apple: config.apple });
     },
+    /**
+     * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: whether this Privy user may be retired with an empty duplicate FloFi account. Read from Privy's own
+     * record of the user (never the browser, never `readPrivyUser`, which ignores what FloFi does not use): every linked account must be a
+     * sign-in method FloFi can release (Google, Apple, email) and nothing may hold or control value or a second factor — any wallet (embedded,
+     * external, smart or cross-app), MFA, or any other account type refuses it.
+     */
+    async retirement(userId: string): Promise<PrivyRetirement> {
+      if (!PRIVY_USER_ID.test(userId)) return fail('PRIVY_TOKEN_INVALID');
+      let value: unknown;
+      try { value = await api.getUser(userId); }
+      catch (error) {
+        const status = record(error).status;
+        if (status === 404) return { status: 'GONE' };
+        throw new Error(status === 401 || status === 403 ? 'PRIVY_NOT_AUTHORIZED' : 'PRIVY_UNAVAILABLE', { cause: error });
+      }
+      const user = record(value);
+      if (user.id !== userId || !Array.isArray(user.linked_accounts) || user.linked_accounts.length > 64) return { status: 'REFUSED', code: 'ACCOUNT_MOVE_PRIVY_UNREADABLE' };
+      if (Array.isArray(user.mfa_methods) && user.mfa_methods.length) return { status: 'REFUSED', code: 'ACCOUNT_MOVE_PRIVY_HAS_MFA' };
+      for (const entry of user.linked_accounts as unknown[]) {
+        const account = record(entry);
+        if (account.type === 'google_oauth' || account.type === 'apple_oauth' || account.type === 'email') continue;
+        // Any wallet refuses it: an embedded one would become unreachable, and a sign-in wallet is a wallet the account holds.
+        return { status: 'REFUSED', code: account.type === 'wallet' && account.wallet_client_type !== 'privy' && account.connector_type !== 'embedded'
+          ? 'ACCOUNT_MOVE_WALLET_SIGN_IN' : account.type === 'wallet' || account.type === 'smart_wallet' || account.type === 'cross_app' ? 'ACCOUNT_MOVE_HAS_WALLET'
+            : 'ACCOUNT_MOVE_PRIVY_METHOD_UNSUPPORTED' };
+      }
+      return { status: 'RETIRABLE', methods: readPrivyUser(value, userId, { apple: true }).identities };
+    },
+    /** Blocks new logins of this Privy user and revokes its sessions (Privy `freeze`). A user already gone counts as done. */
+    async freeze(userId: string): Promise<void> { await gone(() => (api.freezeUser ?? fail('PRIVY_UNAVAILABLE'))(userId)); },
+    async unfreeze(userId: string): Promise<void> { await gone(() => (api.unfreezeUser ?? fail('PRIVY_UNAVAILABLE'))(userId)); },
+    /** Deletes the Privy user (irreversible). A user already gone (an earlier attempt succeeded) counts as done. */
+    async remove(userId: string): Promise<void> { await gone(() => (api.deleteUser ?? fail('PRIVY_UNAVAILABLE'))(userId)); },
   };
+  async function gone(run: () => Promise<unknown>): Promise<void> {
+    try { await run(); }
+    catch (error) {
+      const status = record(error).status;
+      if (status === 404) return;
+      throw new Error(status === 401 || status === 403 ? 'PRIVY_NOT_AUTHORIZED' : 'PRIVY_UNAVAILABLE', { cause: error });
+    }
+  }
 }
 export type PrivyServer = ReturnType<typeof createPrivyServer>;

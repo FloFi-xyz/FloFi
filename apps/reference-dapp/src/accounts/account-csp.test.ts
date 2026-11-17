@@ -43,7 +43,7 @@ describe('account page Content Security Policy', () => {
   it('applies to sign-in and wallet onboarding only', () => {
     for (const path of ['/login', '/onboarding', '/onboarding/wallets']) expect(isAccountPage(path)).toBe(true);
     for (const path of ['/', '/app', '/app/credentials', '/approve', '/mcp/approve', '/loginx', '/onboardingx', '/docs']) expect(isAccountPage(path)).toBe(false);
-    expect(ACCOUNT_PAGE_PATHS).toEqual(['/login', '/onboarding', '/onboarding/:path*']);
+    expect(ACCOUNT_PAGE_PATHS).toEqual(['/login', '/onboarding', '/onboarding/:path*', '/account/sign-in-methods']);
     // The proxy sees every request except Next.js's immutable build output, so the wallet host can refuse everything else (wallet-origin.test.ts).
     expect(config.matcher).toEqual(['/((?!_next/static|_next/image).*)']);
   });

@@ -70,7 +70,8 @@ async function at(context: BrowserContext, clock: number) {
   await context.addCookies([{ name: 'flofi_flight_clock', value: String(clock), url: E2E_APP_ORIGIN }]);
 }
 /** The MOCKED Privy stand-in for this context and the identity a sign-in will use. */
-async function privy(page: Page, identity: { email?: string; wallet?: { address: string; chain?: 'ethereum' | 'solana' } }) {
+async function privy(page: Page, identity: { email?: string; wallet?: { address: string; chain?: 'ethereum' | 'solana' }; google?: string; googleEmail?: string;
+  /** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the method a "Link Google" links to the signed-in user. */ link?: { google?: string; googleEmail?: string } }) {
   const context = page.context();
   await context.route(`${E2E_APP_ORIGIN}/__privy-e2e/**`, async route => {
     const path = new URL(route.request().url()).pathname.slice('/__privy-e2e/'.length);
@@ -511,18 +512,13 @@ test('a real simulation issues the boarding pass: Founding seat #001, the real r
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved.')).toBeVisible();
   await page.reload();
-  const departures = page.locator('section[aria-labelledby="departures-title"]');
-  await expect(departures.getByRole('img', { name: '@ana_flight' })).toBeVisible();
-  await expect(departures.getByRole('img', { name: '#001' })).toBeVisible();
-  await shot(page, 'founding-pass-and-departures-1440');
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-01): one public passenger (ten or fewer) shows no board at all, and the public state sends no row.
+  await expect(page.getByRole('heading', { name: /People are boarding/ })).toHaveCount(0);
+  await expect(page.locator('section[aria-labelledby="departures-title"]')).toHaveCount(0);
+  expect(await page.evaluate(async () => (await (await fetch('/api/board/state')).json() as { departures: unknown[] }).departures)).toEqual([]);
+  await shot(page, 'founding-pass-1440');
   await page.setViewportSize({ width: 390, height: 900 });
   await noOverflow(page);
-  // Phones get the departures stacked, every field inside the board's own width (no sideways scrolling).
-  const stacked = departures.getByRole('list', { name: 'Latest boarding passes' });
-  await expect(stacked.getByRole('img', { name: '@ana_flight' })).toBeVisible();
-  await expect(stacked.getByRole('img', { name: 'Seat: #001' })).toBeVisible();
-  expect(await departures.locator('[class*="departuresBoard"]').evaluate(board => board.scrollWidth <= board.clientWidth)).toBe(true);
-  await expect(departures.getByRole('table')).toBeHidden();
   await shot(page, 'founding-pass-390');
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(pass).toContainText('@ana_flight');
@@ -541,6 +537,43 @@ test('Founding full (state 5): after the 100th seat the banner shows and the nex
   await expect(hero(page)).toContainText('All 100 Founding seats are taken. You still board, as a passenger. You approve.');
   await noCounters(page);
   await shot(page, 'state-5-founding-full-1440');
+  // UX-01: the departures board appears only with MORE than ten public passengers. Nine seeded holders choose to be shown (older departures
+  // than Ana's): with Ana that is ten, still hidden everywhere; the eleventh shows it; moderation back to ten hides it again.
+  const departures = page.locator('section[aria-labelledby="departures-title"]');
+  const publicState = () => page.evaluate(async () => (await (await fetch('/api/board/state')).json() as { departures: { handle: string }[] }).departures);
+  // Their departures predate Ana's (whose pass carries the campaign clock's time), so hers stays the newest row once the board shows.
+  await query(`UPDATE flight_passes SET handle = 'seat_' || boarding_no, public = true, departed_at = timestamptz '2026-11-01T00:00:00Z' + boarding_no * interval '1 minute'
+    WHERE tenant_id = 'default' AND run_id = 'seeded' AND boarding_no BETWEEN 2 AND 10`);
+  await page.reload();
+  await expect(hero(page)).toBeVisible();
+  await expect(departures).toHaveCount(0);
+  await expect(page.getByText(/UPDATED \d\d:\d\d BRT/)).toHaveCount(0);
+  expect(await publicState()).toEqual([]);
+  expect(await (await page.request.get('/board')).text()).not.toContain('seat_2');
+  await query(`UPDATE flight_passes SET handle = 'seat_11', public = true, departed_at = timestamptz '2026-11-01T00:00:00Z' + 11 * interval '1 minute'
+    WHERE tenant_id = 'default' AND run_id = 'seeded' AND boarding_no = 11`);
+  await page.reload();
+  await expect(departures.getByRole('heading', { name: /People are boarding/ })).toBeVisible();
+  await expect(departures.getByText(/UPDATED \d\d:\d\d BRT/)).toBeVisible();
+  await expect(departures.getByRole('img', { name: '@ana_flight' })).toBeVisible();
+  await expect(departures.getByRole('img', { name: '#001' })).toBeVisible();
+  expect((await publicState()).map(row => row.handle)).toHaveLength(5);
+  await shot(page, 'departures-1440');
+  await page.setViewportSize({ width: 390, height: 900 });
+  await noOverflow(page);
+  // Phones get the departures stacked, every field inside the board's own width (no sideways scrolling).
+  const stacked = departures.getByRole('list', { name: 'Latest boarding passes' });
+  await expect(stacked.getByRole('img', { name: '@ana_flight' })).toBeVisible();
+  await expect(stacked.getByRole('img', { name: 'Seat: #001' })).toBeVisible();
+  expect(await departures.locator('[class*="departuresBoard"]').evaluate(board => board.scrollWidth <= board.clientWidth)).toBe(true);
+  await expect(departures.getByRole('table')).toBeHidden();
+  await shot(page, 'departures-390');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await query(`UPDATE flight_passes SET handle = NULL, public = false WHERE tenant_id = 'default' AND run_id = 'seeded' AND boarding_no = 11`);
+  await page.reload();
+  await expect(hero(page)).toBeVisible();
+  await expect(departures).toHaveCount(0);
+  expect(await publicState()).toEqual([]);
   // Bea's group is open now: her simulation issues a passenger pass (boarding number 101, the middle seat).
   await privy(page, { email: BEA });
   await signInFromBoard(page, BEA);
@@ -892,6 +925,94 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects direct 
     await later.goto('/app');
     await expect(later).toHaveURL('/board');
   } finally { await returning.close(); }
+});
+
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (P0), the reported incident, in closed beta: a person boarded with a Web3 wallet, later signed in with
+ * Google (same address) and reached an empty second account ("Not on the list. Yet.", no way back). Now: FloFi asks before creating that
+ * duplicate; the explicit move (proof of BOTH accounts) closes the empty one; Google is linked to the boarded account through the sign-in
+ * provider; and Google then opens it. A boarded address asking for a link gets its sign-in method by email, with the same public answer.
+ */
+if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects one account across sign-in methods: no silent duplicate, explicit move, linked Google, boarding recovery', async ({ page, context, browser }) => {
+  test.setTimeout(240_000);
+  const owner = `owner-${run}@gmail.com`, wallet = `0x${randomBytes(20).toString('hex')}`, google = `owner-g-${run}`;
+  const post = (p: Page, path: string, data: object) => p.evaluate(async ({ path, data }) => {
+    const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    return { status: response.status, body: await response.text() };
+  }, { path, data });
+  await at(context, BOARDING);
+  // The owner boards with a Web3 wallet: listed address, proven by an emailed code, Board now.
+  await query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice) VALUES ('default', $1, $2, 'FIRST', 'EN', '2026-11-05')`,
+    [`fle_${randomBytes(16).toString('hex')}`, owner]);
+  await privy(page, { wallet: { address: wallet } });
+  await page.goto('/login?returnTo=%2Fboard');
+  await page.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+  await expect(page).toHaveURL('/board');
+  const { code } = await accessEmail(owner);
+  expect((await post(page, '/api/board/access/code', { email: owner, code })).status).toBe(200);
+  expect((await post(page, '/api/board/board', {})).status).toBe(200);
+  const [main] = await query<{ account_id: string }>(`SELECT account_id FROM flofi_account_identities WHERE kind = 'EIP155' AND subject = $1`, [wallet]);
+
+  // Later, the same person signs in with Google (same address): FloFi asks instead of silently creating a second account.
+  const later = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) });
+  try {
+    await at(later, BOARDING);
+    const duplicate = await later.newPage();
+    await privy(duplicate, { google, googleEmail: owner, wallet: { address: wallet }, link: { google, googleEmail: owner } });
+    await duplicate.goto('/login?returnTo=%2Fboard');
+    await duplicate.getByRole('button', { name: 'Google', exact: true }).click();
+    const question = duplicate.locator('[data-existing-account="true"]');
+    await expect(question).toContainText('This email already belongs to a FloFi account.');
+    await expect(question).toContainText('Web3 wallet');
+    await expect(question).not.toContainText(wallet);
+    await shot(duplicate, 'identity-existing-account-question');
+    // Bring this Google sign-in to the boarded account: the (empty) duplicate is created and its move started, then the boarded account proves itself.
+    await question.getByRole('button', { name: 'Add this sign-in to that account' }).click();
+    await expect(duplicate).toHaveURL(/\/login\?move=1$/);
+    await expect(duplicate.locator('[data-sign-in-mode="move"]')).toContainText('Sign in to the account that keeps everything');
+    await duplicate.getByRole('button', { name: 'Web3 Wallet', exact: true }).click();
+    await expect(duplicate).toHaveURL('/account/sign-in-methods');
+    const confirm = duplicate.locator('[data-move-confirm="true"]');
+    await expect(confirm).toContainText('Close the duplicate account?');
+    await expect(confirm).toContainText('o***@gmail.com');
+    await shot(duplicate, 'identity-move-confirmation');
+    await confirm.getByRole('checkbox', { name: 'I understand the duplicate account will be closed for good.' }).check();
+    await confirm.getByRole('button', { name: 'Close it and continue' }).click();
+    await expect(duplicate.locator('[data-move-done="true"]')).toContainText('The duplicate account is closed.');
+    // No account holds the duplicate's Privy user any more; nothing moved to the boarded account; the closure is audited.
+    expect(await query(`SELECT count(*)::int AS n FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google])).toEqual([{ n: 0 }]);
+    expect(await query(`SELECT count(*)::int AS n FROM admin_audit_events WHERE kind = 'ACCOUNT_DUPLICATE_RETIRED' AND detail->>'kept' = $1`, [main!.account_id])).toEqual([{ n: 1 }]);
+    // Link Google to the boarded account (a recent sign-in; FloFi's server adopts what the provider linked).
+    await duplicate.getByRole('button', { name: 'Link Google' }).click();
+    await expect(duplicate.getByRole('status').filter({ hasText: 'Linked. You can now sign in with it.' })).toBeVisible();
+    await expect(duplicate.getByRole('list', { name: 'Sign-in methods' })).toContainText('Google');
+    await shot(duplicate, 'identity-google-linked');
+    expect(await query(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google])).toEqual([{ account_id: main!.account_id }]);
+  } finally { await later.close(); }
+
+  // Google now opens the boarded account, straight into the product.
+  const returning = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) });
+  try {
+    await at(returning, BOARDING);
+    const again = await returning.newPage();
+    await privy(again, { google, googleEmail: owner });
+    await again.goto('/login');
+    await again.getByRole('button', { name: 'Google', exact: true }).click();
+    await expect(again).toHaveURL('/app');
+    await expect(again.locator('.app-shell')).toBeVisible();
+    expect(await query(`SELECT account_id FROM flofi_account_sessions WHERE method = 'GOOGLE' AND account_id = $1 LIMIT 1`, [main!.account_id])).toEqual([{ account_id: main!.account_id }]);
+  } finally { await returning.close(); }
+
+  // A boarded (claimed) address asking for a link gets its sign-in method by email; the public answer is the same as for any address.
+  const unknown = await post(page, '/api/board/access/request', { email: `nobody-${run}@flofi-e2e.test`, language: 'EN' });
+  const listed = `listed-${run}@flofi-e2e.test`;
+  await query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice) VALUES ('default', $1, $2, 'FIRST', 'EN', '2026-11-05')`,
+    [`fle_${randomBytes(16).toString('hex')}`, listed]);
+  const waiting = await post(page, '/api/board/access/request', { email: listed, language: 'EN' });
+  const recovered = await post(page, '/api/board/access/request', { email: owner, language: 'EN' });
+  expect(new Set([unknown, waiting, recovered].map(answer => JSON.stringify(answer))).size).toBe(1);
+  expect(await query(`SELECT trigger, template_version FROM flight_emails WHERE recipient = $1 AND template = 'ACCESS_REQUESTED'`, [owner]))
+    .toEqual([{ trigger: 'access_recovery', template_version: 100 }]);
 });
 
 if (process.env.FLOFI_FLIGHT_TEAM_E2E === 'MOCKED_LOOPBACK_ONLY') test('temporary team access uses public login, protects APIs and expires without campaign records', async ({ page, context }) => {

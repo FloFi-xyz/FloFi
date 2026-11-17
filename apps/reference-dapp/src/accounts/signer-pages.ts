@@ -5,8 +5,10 @@
  * loaded as one of these pages, for example one reached by a client-side navigation from a page without that policy).
  */
 /** Account pages served by the account policy; the proxy matcher names the same paths. */
-export const ACCOUNT_PAGE_PATHS = ['/login', '/onboarding', '/onboarding/:path*'] as const;
-export const isAccountPage = (pathname: string) => pathname === '/login' || pathname === '/onboarding' || pathname.startsWith('/onboarding/');
+export const ACCOUNT_PAGE_PATHS = ['/login', '/onboarding', '/onboarding/:path*', '/account/sign-in-methods'] as const;
+export const isAccountPage = (pathname: string) => pathname === '/login' || pathname === '/onboarding' || pathname.startsWith('/onboarding/')
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: Sign-in methods links another method in Privy (an account page, the account policy).
+  || pathname === '/account/sign-in-methods';
 /** Product pages hosting the Privy signer (the `(product)` layout); the proxy serves them `productPagePolicy`. */
 export const isProductPage = (pathname: string) => pathname === '/app' || pathname.startsWith('/app/') || pathname === '/approve' || pathname === '/connections'
   || pathname === '/mcp/approve' || pathname === '/__engineering' || pathname === '/%5F_engineering';
