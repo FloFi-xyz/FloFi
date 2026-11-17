@@ -2743,7 +2743,9 @@
         "apps/reference-dapp/src/app/observation-action.ts",
         "apps/reference-dapp/src/app/public-testnet-action.ts",
         "apps/reference-dapp/src/app/solana-composition-action.ts",
-        "apps/reference-dapp/src/app/workflow-action.ts"
+        "apps/reference-dapp/src/app/workflow-action.ts",
+        "apps/reference-dapp/src/app/api/dashboard/history/route.ts",
+        "apps/reference-dapp/src/app/dashboard-reads.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -4461,7 +4463,8 @@
         "apps/reference-dapp/src/domain/editor-run.ts",
         "apps/reference-dapp/src/domain/editor-persistence.ts",
         "apps/reference-dapp/src/domain/workflow-progress.ts",
-        "apps/reference-dapp/src/domain/gas-payment.ts"
+        "apps/reference-dapp/src/domain/gas-payment.ts",
+        "apps/reference-dapp/src/domain/settlement-sync.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -4763,7 +4766,8 @@
         "apps/reference-dapp/src/i18n/pt-gas-kora.ts",
         "apps/reference-dapp/src/i18n/pt-gas-zerox.ts",
         "apps/reference-dapp/src/i18n/pt-smart-account-transfer.ts",
-        "apps/reference-dapp/src/i18n/pt-execution-reliability.ts"
+        "apps/reference-dapp/src/i18n/pt-execution-reliability.ts",
+        "apps/reference-dapp/src/i18n/pt-execution-ux-reliability.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -7137,7 +7141,8 @@
         "apps/reference-dapp/src/state/bridge-swap-store.tsx",
         "apps/reference-dapp/src/state/destination-wallets.ts",
         "apps/reference-dapp/src/state/router-store.tsx",
-        "apps/reference-dapp/src/state/universal-router-store.tsx"
+        "apps/reference-dapp/src/state/universal-router-store.tsx",
+        "apps/reference-dapp/src/state/settlement-sync.ts"
       ],
       "suites": [
         "app.server.router-service",
