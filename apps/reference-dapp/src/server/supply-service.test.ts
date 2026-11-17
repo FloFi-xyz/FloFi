@@ -250,4 +250,15 @@ describe('EXEC-01 audit: a Supply after a confirmed approval is never prepared u
      expect((await service.observe(next.id)).verdict).toBe('RECONCILED');expect(model.transactions).toHaveLength(2);
    }finally{now.mockRestore();await rm(dir,{recursive:true,force:true});}
  });
+ it('a Review too close to expiry to reach the wallet is not authorized',async()=>{
+   const dir=await mkdtemp(join(tmpdir(),'build012a-service-')),model=supplyModel();
+   let clock=Date.now();const now=vi.spyOn(Date,'now').mockImplementation(()=>clock);
+   const service=createSupplyService({rpc:model.rpc,journalDir:dir,provenance:'MOCKED'});
+   try{
+     const run=await service.simulate(workflow,SUPPLY_OWNER);clock=Date.parse(run.review.expiresAt)-5_000;
+     await expect(service.review(run.id,run.review.commitment,workflow)).rejects.toThrow('SUPPLY_AUTHORIZATION_STALE');
+     expect((await service.load(run.id)).authorization).toBeNull();
+   }finally{now.mockRestore();await rm(dir,{recursive:true,force:true});}
+ });
 });
+

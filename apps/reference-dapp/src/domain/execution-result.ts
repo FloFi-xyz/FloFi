@@ -17,6 +17,8 @@ export type ExecutionResult = {
 /** EXEC-01: a Review that expired before the next wallet request, after confirmed steps (kept) or before any (nothing sent). */
 export const REVIEW_EXPIRED_CONTINUE = 'Your Review expired before FloFi asked your wallet for the next request, so nothing more was sent. The confirmed steps stay recorded and are not repeated. Simulate again to refresh the Review of the same run, then authorize it to continue.';
 export const REVIEW_EXPIRED_NOTHING_SENT = 'Your Review expired before FloFi asked your wallet, so nothing was sent. Simulate again to refresh the Review, then authorize it to continue.';
+/** EXEC-01: the refusal itself, whatever the run already did: never claims confirmed steps that may not exist. */
+export const REVIEW_EXPIRED_REFRESH = 'Your Review expired before FloFi asked your wallet, so nothing was sent. Simulate again to refresh the Review of the same run, then authorize it to continue. Anything already confirmed stays recorded and is not repeated.';
 export function projectExecutionResult(progress: ExecutionLifecycle | null | undefined): ExecutionResult | null {
   if (!progress?.started || progress.state === 'idle' || progress.state === 'active') return null;
   const completed = progress.completed, total = progress.steps.length;
@@ -46,7 +48,7 @@ export function projectExecutionResult(progress: ExecutionLifecycle | null | und
   const nonceReason = incomplete.map(operation => operation.state === 'not-submitted' && !operation.hash && operation.reason ? walletNonceMessage(operation.reason) : null).find(Boolean) ?? null;
   // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a request stopped because its Review expired before the wallet was asked says exactly
   // that, and how to continue — never "declined" or "cancelled", which would describe something the owner did.
-  const expiredReview = incomplete.some(operation => operation.state === 'not-submitted' && !operation.hash && /_(?:REVIEW_EXPIRED|WALLET_HANDOFF_NOT_AUTHORIZED)$/.test(operation.reason ?? ''));
+  const expiredReview = incomplete.some(operation => operation.state === 'not-submitted' && !operation.hash && /_REVIEW_EXPIRED$/.test(operation.reason ?? ''));
   return {
     label: completed > 0 || confirmedActions || confirmedApproval ? 'Execution partially completed' : declined || nothingSent ? 'Transaction not submitted' : definitiveFailure ? 'Execution failed' : 'Execution needs attention',
     message: expiredReview ? (completed > 0 || confirmedActions || confirmedApproval ? REVIEW_EXPIRED_CONTINUE : REVIEW_EXPIRED_NOTHING_SENT)

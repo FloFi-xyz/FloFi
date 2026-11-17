@@ -257,7 +257,11 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       for (const step of steps) {
         const a = attempts.filter(a => a.step === step).at(-1), approval = step !== 'MINT';
         add(step, nodeId, approval ? `Approve ${step === 'APPROVE_TOKEN0' ? r.review.token0.symbol : r.review.token1.symbol}` : 'Add liquidity', chain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), approval, simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
-        notSubmittedReason(operations.at(-1)!, a);
+        // A record from before EXEC-01 (incident balp-ae7ef0ce…): the hand-off refused a request that had been prepared after its own Review
+        // expired. The record proves the expiry (the attempt's Review and its creation time), so the owner is told that, not a generic refusal.
+        const expiredBeforeHandoff = a?.state === 'CANCELLED' && a.note === 'UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED' && a.reviewCommitment === r.review.commitment &&
+          Date.parse(a.createdAt) >= Date.parse(r.review.expiresAt);
+        notSubmittedReason(operations.at(-1)!, expiredBeforeHandoff ? { ...a, note: 'UNISWAP_REVIEW_EXPIRED' } : a);
       } break;
     }
     case 'solana-swap': case 'solana-pool': case 'solana-transfer': {

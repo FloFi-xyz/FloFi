@@ -165,4 +165,20 @@ describe('EXEC-01: the store continues the same run after its Review expired bet
     blocked.mockRestore();
     expect(sent).toHaveLength(1);
   });
+
+  it('an authorization in the Review\'s last seconds is refused by the server and the same run is refreshed for a new authorization', async () => {
+    await act(() => store.simulate());
+    const first = store.record!;
+    chain.advance(Math.floor((Date.parse(first.review.expiresAt) - chain.clock().getTime()) / 1000) - 5);
+    await act(() => store.review());
+    expect(store.error).toBeNull();
+    expect(store.requoted).toEqual({ code: 'UNISWAP_REVIEW_EXPIRED', runId: first.id });
+    expect(store.record?.id).toBe(first.id);
+    expect(store.record?.review.commitment).not.toBe(first.review.commitment);
+    expect(store.record?.authorization).toBeNull();
+    await act(() => store.review());
+    expect(store.record?.authorization).toBe(store.record?.review.commitment);
+    expect(sent).toHaveLength(0);
+  });
 });
+

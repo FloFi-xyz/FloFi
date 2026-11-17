@@ -122,7 +122,15 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   async function refresh() { await operation(async () => { if (!record) throw new Error('UNISWAP_RUN_MISSING'); setRequoted(null); accept(unwrap(await uniswapLiquidityRefresh(record.id))); }); }
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error('UNISWAP_SIMULATION_REQUIRED');
-    accept(unwrap(await uniswapLiquidityReview(record.id, record.review.commitment, record.workflow)));
+    const result = await uniswapLiquidityReview(record.id, record.review.commitment, record.workflow);
+    // EXEC-01: a Review authorized in its last seconds (too close to expiry to reach the wallet) is refused by the server; the same run is then
+    // refreshed in place, as after Execute, and the owner authorizes the updated Review. Nothing is authorized by itself.
+    if (!result.ok && result.code === 'UNISWAP_REVIEW_EXPIRED' && uniswapRunResumable(record)) {
+      const refreshed = unwrap(await uniswapLiquidityRefresh(record.id));
+      accept(refreshed); setRequoted({ code: result.code, runId: record.id });
+      throw new Error('UNISWAP_REFRESHED_REVIEW_REQUIRED');
+    }
+    accept(unwrap(result));
     setRequoted(null);
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error('UNISWAP_RUN_MISSING'); accept(unwrap(await uniswapLiquidityObserve(record.id))); }); }

@@ -770,7 +770,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       // EXEC-01: the Review must still cover this prepare and the handoff after it, both now and (below) once the fresh public reads are done.
       // An expired Review is recorded on the run (the owner sees why it stopped) and never prepares another wallet request; confirmed steps stay.
       const expiring = () => now().getTime() >= Date.parse(record.review.expiresAt) - UNISWAP_REVIEW_HANDOFF_MARGIN_MS;
-      const expired = async (): Promise<never> => { if (record.error !== 'UNISWAP_REVIEW_EXPIRED') await save({ ...record, error: 'UNISWAP_REVIEW_EXPIRED' }); return fail('UNISWAP_REVIEW_EXPIRED'); };
+      const expired = async (): Promise<never> => {
+        // Like the router: the expired Review's authorization is cleared, so no surface still presents it as executable.
+        if (record.error !== 'UNISWAP_REVIEW_EXPIRED' || record.authorization !== null) await save({ ...record, authorization: null, error: 'UNISWAP_REVIEW_EXPIRED' });
+        return fail('UNISWAP_REVIEW_EXPIRED');
+      };
       if (expiring()) return expired();
       const R = runtimeOfRecord(record), profile = R.profile;
       const review = record.review;
@@ -811,6 +815,9 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       // EXEC-01 (incident balp-ae7ef0ce…): the reads above take seconds on a public network; the Review is checked again before anything is
       // reserved or persisted, so no wallet request is ever prepared under a Review that expired meanwhile.
       if (expiring()) return expired();
+      // A run holds at most 16 attempts: refuse before the owner's nonce is reserved, never after (a reservation whose attempt cannot be saved
+      // would hold that nonce for every later run of this owner).
+      if (record.attempts.length >= 16) fail('UNISWAP_ATTEMPT_LIMIT_SIMULATE_AGAIN');
       await R.reserveNonce(record, attemptId, nonce);
       const attempt: UniswapAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: nonce.toString(),
         preparedAtBlock: state.block.number, createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null,

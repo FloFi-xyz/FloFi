@@ -8,10 +8,12 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
     'Sua revisão expirou antes de a FloFi pedir o próximo pedido à sua carteira, então nada mais foi enviado. As etapas confirmadas continuam registradas e não são repetidas. Simule de novo para atualizar a revisão da mesma execução e autorize-a para continuar.',
   'Your Review expired before FloFi asked your wallet, so nothing was sent. Simulate again to refresh the Review, then authorize it to continue.':
     'Sua revisão expirou antes de a FloFi pedir à sua carteira, então nada foi enviado. Simule de novo para atualizar a revisão e autorize-a para continuar.',
-  'Your Review expired before FloFi asked your wallet for the next request, so nothing was sent. FloFi refreshed the simulation and Review of the same position; confirmed steps are kept and not repeated. Check it and authorize again to continue.':
-    'Sua revisão expirou antes de a FloFi pedir o próximo pedido à sua carteira, então nada foi enviado. A FloFi atualizou a simulação e a revisão da mesma posição; as etapas confirmadas são mantidas e não se repetem. Confira e autorize de novo para continuar.',
-  'The pool or the network fee changed after your Review, so nothing was sent. FloFi refreshed the simulation and Review of the same position; confirmed steps are kept and not repeated. Check it and authorize again to continue.':
-    'O pool ou a taxa de rede mudou depois da sua revisão, então nada foi enviado. A FloFi atualizou a simulação e a revisão da mesma posição; as etapas confirmadas são mantidas e não se repetem. Confira e autorize de novo para continuar.',
+  'Your Review expired before FloFi asked your wallet, so nothing was sent. FloFi refreshed the simulation and Review of the same position; anything already confirmed is kept and not repeated. Check it and authorize again to continue.':
+    'Sua revisão expirou antes de a FloFi pedir à sua carteira, então nada foi enviado. A FloFi atualizou a simulação e a revisão da mesma posição; o que já foi confirmado é mantido e não se repete. Confira e autorize de novo para continuar.',
+  'The pool or the network fee changed after your Review, so nothing was sent. FloFi refreshed the simulation and Review of the same position; anything already confirmed is kept and not repeated. Check it and authorize again to continue.':
+    'O pool ou a taxa de rede mudou depois da sua revisão, então nada foi enviado. A FloFi atualizou a simulação e a revisão da mesma posição; o que já foi confirmado é mantido e não se repete. Confira e autorize de novo para continuar.',
+  'Your Review expired before FloFi asked your wallet, so nothing was sent. Simulate again to refresh the Review of the same run, then authorize it to continue. Anything already confirmed stays recorded and is not repeated.':
+    'Sua revisão expirou antes de a FloFi pedir à sua carteira, então nada foi enviado. Simule de novo para atualizar a revisão da mesma execução e autorize-a para continuar. O que já foi confirmado continua registrado e não se repete.',
   'An earlier wallet request was not sent and the Review was refreshed. Check the updated Review and authorize it again.':
     'Um pedido anterior à carteira não foi enviado e a revisão foi atualizada. Confira a revisão atualizada e autorize-a de novo.',
 };

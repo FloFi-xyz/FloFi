@@ -27,9 +27,13 @@ export function uniswapRunResumable(record: Run | null | undefined): boolean {
   if (!record || record.verdict !== 'PENDING' || record.attempts.length > ATTEMPT_ROOM) return false;
   return record.attempts.every(a => confirmedApproval(a) || a.state === 'CANCELLED' && !a.transactionHash && !a.replacementHash);
 }
-/** "Simulate again" of a started run (an approval already landed) refreshes that run in place instead of starting a separate one. */
+/**
+ * "Simulate again" of a started run (an approval already landed) refreshes that run in place instead of starting a separate one. A run that
+ * already attempted its mint starts a new simulation, as before: its duplicate-position guard (never weakened) could otherwise keep the same
+ * run refusing once the owner's positions changed elsewhere.
+ */
 export function uniswapRefreshInPlace(record: Run | null | undefined, retired: boolean): boolean {
-  return Boolean(record && !retired && uniswapRunResumable(record) && record.attempts.some(confirmedApproval));
+  return Boolean(record && !retired && uniswapRunResumable(record) && record.attempts.some(confirmedApproval) && !record.attempts.some(a => a.step === 'MINT'));
 }
 /**
  * The run's current Review may be authorized: nothing was attempted yet, or every earlier request that did not land was made under an

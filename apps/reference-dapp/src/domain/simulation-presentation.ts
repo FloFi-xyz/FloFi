@@ -20,7 +20,7 @@ import type { useLiquidity } from '../state/liquidity-store';
 import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
-import { REVIEW_EXPIRED_CONTINUE } from './execution-result';
+import { REVIEW_EXPIRED_REFRESH } from './execution-result';
 import { boundRecipientOwned } from './destination-wallet';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
@@ -130,8 +130,8 @@ export const simulationProvider = (id: string) => providerNames[id] ?? null;
 export function requotedMessage(code: string): string {
   // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a Uniswap liquidity run refreshed in place (no quote: the pool and its Review).
   if (/^UNISWAP_/.test(code)) return /REVIEW_EXPIRED/.test(code)
-    ? 'Your Review expired before FloFi asked your wallet for the next request, so nothing was sent. FloFi refreshed the simulation and Review of the same position; confirmed steps are kept and not repeated. Check it and authorize again to continue.'
-    : 'The pool or the network fee changed after your Review, so nothing was sent. FloFi refreshed the simulation and Review of the same position; confirmed steps are kept and not repeated. Check it and authorize again to continue.';
+    ? 'Your Review expired before FloFi asked your wallet, so nothing was sent. FloFi refreshed the simulation and Review of the same position; anything already confirmed is kept and not repeated. Check it and authorize again to continue.'
+    : 'The pool or the network fee changed after your Review, so nothing was sent. FloFi refreshed the simulation and Review of the same position; anything already confirmed is kept and not repeated. Check it and authorize again to continue.';
   if (/L1_FEES_CHANGED|FEES_CHANGED|GAS_CHANGED/.test(code)) return 'The network fee moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
   if (/REVIEW_EXPIRED|QUOTE_EXPIRED/.test(code)) return 'Your Review expired before the wallet request, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
   return 'The quote moved after your Review, so nothing was sent. FloFi got a fresh quote for the same workflow: check what changed and authorize again.';
@@ -202,7 +202,8 @@ export function simulationError(error: string): string {
   if (/OWNER_REVIEW_MISMATCH/i.test(error)) return 'The connected wallet is not the wallet this Review was prepared for, so nothing was sent. Reconnect that wallet, or simulate again with this one.';
   if (/HANDOFF_NOT_AUTHORIZED/i.test(error)) return 'The reviewed request was no longer authorized when FloFi was about to open your wallet, so nothing was sent. Review it again.';
   // EXEC-01: an expired liquidity Review is refreshed in place (the run and its confirmed steps are kept), not a new simulation from scratch.
-  if (error === 'UNISWAP_REVIEW_EXPIRED') return REVIEW_EXPIRED_CONTINUE;
+  if (error === 'UNISWAP_REVIEW_EXPIRED') return REVIEW_EXPIRED_REFRESH;
+  if (/_ATTEMPT_LIMIT_SIMULATE_AGAIN$/.test(error)) return 'This run reached its limit of wallet attempts, so nothing more was sent. Simulate again to start a fresh run of the same workflow.';
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a wallet-side disagreement is worded as what it is (a lagging wallet view, a pending wallet transaction,
   // or two different counts); only FloFi's own chain reads (NONCE_CHANGED) say another transaction took the slot.
   const walletNonce = walletNonceMessage(error);

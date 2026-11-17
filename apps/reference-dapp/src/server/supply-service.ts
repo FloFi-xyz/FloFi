@@ -187,6 +187,8 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       const state=await readState(record.review,record.review.account);
       assertSupplyReview(record.review,workflow,record.review.account,state);
       if(record.priorApproval)await verifyPriorApproval(record);
+      // EXEC-01 audit: a Review that cannot reach the wallet before it expires is not authorized (begin would refuse it).
+      if(Date.now()>=Date.parse(record.review.expiresAt)-SUPPLY_REVIEW_HANDOFF_MARGIN_MS)throw new Error('SUPPLY_AUTHORIZATION_STALE');
       const updated={...record,authorization:commitment};await save(updated);return updated;
     });},
     async invalidate(id:string):Promise<SupplyRecord>{return locked(idCheck(id),async()=>{const record=await load(id);const next={...record,authorization:null,error:'SUPPLY_SEMANTIC_EDIT_REQUIRES_REVIEW'};await save(next);return next;});},
@@ -247,6 +249,8 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
             if(!continuingApproval&&priorRun.verdict!=='RECONCILED'||!(priorAttempt?.reconciled||continuingApproval&&recoveredRepayApproval(priorRun))||priorAttempt?.nonce!==attempt.nonce||JSON.stringify(priorAttempt.transaction)!==JSON.stringify(last.transaction))throw new Error('SUPPLY_NONCE_ALREADY_RESERVED');
             const proof=await reconcileSupplyAttempt(priorRun.review,priorAttempt,rpcOf(priorRun.review));
             if(proof.verdict!=='RECONCILED'||proof.walletEnvelope?.owner!==review.account||proof.walletEnvelope.ownerNonceAfter!==attempt.nonce)throw new Error('SUPPLY_NONCE_ALREADY_RESERVED');
+            // That proof read the network: the Review must still cover the hand-off before anything is reserved (EXEC-01 audit).
+            if(Date.now()>=Date.parse(review.expiresAt)-SUPPLY_REVIEW_HANDOFF_MARGIN_MS)throw new Error('SUPPLY_AUTHORIZATION_STALE');
             await reserveBorrowIntent();await reserveRepayIntent();
             await log.extend(lease,new TextEncoder().encode(prior+JSON.stringify(entry)+'\n'),bytes=>{
               const history=new TextDecoder('utf-8',{fatal:true}).decode(bytes).trimEnd().split('\n').map(line=>JSON.parse(line) as typeof entry);

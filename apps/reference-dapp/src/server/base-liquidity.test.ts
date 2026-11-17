@@ -24,7 +24,7 @@ import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type Uniswa
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import { createUniswapLiquidityService, type UniswapBegin, type UniswapLiquidityRecord } from './uniswap-liquidity-service';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from '../domain/execution-lifecycle';
-import { projectExecutionResult, REVIEW_EXPIRED_CONTINUE } from '../domain/execution-result';
+import { projectExecutionResult, REVIEW_EXPIRED_CONTINUE, REVIEW_EXPIRED_REFRESH } from '../domain/execution-result';
 import { financialAttemptState } from '../domain/financial-run-status';
 import { requotedMessage, simulationError } from '../domain/simulation-presentation';
 import { currentUniswapAttempts, UNISWAP_REFRESH_IN_PLACE, uniswapRefreshInPlace, uniswapReviewAuthorizable, uniswapRunResumable } from '../domain/uniswap-liquidity-continuation';
@@ -213,6 +213,8 @@ describe('EXEC-01 Review expiry between sequential wallet requests (MOCKED Base 
     // No USDC request was prepared with the expired Review; the confirmed WETH approval is untouched; nothing else was sent.
     expect(after.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'CONFIRMED']]);
     expect(after.error).toBe('UNISWAP_REVIEW_EXPIRED');
+    // The expired Review's authorization is cleared, so nothing presents it as executable any more.
+    expect(after.authorization).toBeNull();
     expect(s.chain.counters.sends).toBe(1);
   });
 
@@ -307,11 +309,19 @@ describe('EXEC-01 Review expiry between sequential wallet requests (MOCKED Base 
     expect(financialAttemptState(stopped.attempts[1])).toBe('NOT_SUBMITTED');
     expect(operations(stopped)).toEqual([['APPROVE_TOKEN0', 'confirmed', null], ['APPROVE_TOKEN1', 'not-submitted', 'UNISWAP_REVIEW_EXPIRED'], ['MINT', 'waiting', null]]);
     expect(projectExecutionResult(lifecycle(stopped))).toMatchObject({ label: 'Execution partially completed', message: REVIEW_EXPIRED_CONTINUE });
-    expect(simulationError('UNISWAP_REVIEW_EXPIRED')).toBe(REVIEW_EXPIRED_CONTINUE);
-    // The production record (cancelled by the browser with the hand-off's code before this fix) reads the same way.
-    const production = { ...stopped, attempts: [stopped.attempts[0]!, { ...stopped.attempts[1]!, note: 'UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED' }] } as UniswapLiquidityRecord;
+    expect(simulationError('UNISWAP_REVIEW_EXPIRED')).toBe(REVIEW_EXPIRED_REFRESH);
+    // The production record (USDC approval prepared 1.8 s after its Review expired, then cancelled by the browser with the hand-off's code before
+    // this fix) reads the same way: the record itself proves the expiry.
+    const lateAt = new Date(Date.parse(stopped.review.expiresAt) + 1_761).toISOString();
+    const production = { ...stopped, attempts: [stopped.attempts[0]!, { ...stopped.attempts[1]!, createdAt: lateAt, note: 'UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED' }] } as UniswapLiquidityRecord;
     expect(financialAttemptState(production.attempts[1])).toBe('NOT_SUBMITTED');
+    expect(operations(production)[1]).toEqual(['APPROVE_TOKEN1', 'not-submitted', 'UNISWAP_REVIEW_EXPIRED']);
     expect(projectExecutionResult(lifecycle(production))?.message).toBe(REVIEW_EXPIRED_CONTINUE);
+    // A hand-off refusal of a request prepared while its Review was valid (cleared authorization, execution disabled) is not called an expiry:
+    // still never "declined" or "cancelled by you", and nothing was sent.
+    const refused = { ...production, attempts: [production.attempts[0]!, { ...production.attempts[1]!, createdAt: stopped.attempts[1]!.createdAt }] } as UniswapLiquidityRecord;
+    expect(operations(refused)[1]).toEqual(['APPROVE_TOKEN1', 'not-submitted', 'UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED']);
+    expect(projectExecutionResult(lifecycle(refused))?.message).not.toBe(REVIEW_EXPIRED_CONTINUE);
     // "Simulate again" refreshes this same run in place; the expired Review itself is not authorized again.
     expect([uniswapRunResumable(stopped), uniswapRefreshInPlace(stopped, false), uniswapRefreshInPlace(stopped, true)]).toEqual([true, true, false]);
     expect(uniswapReviewAuthorizable(stopped)).toBe(false);
@@ -354,12 +364,15 @@ describe('EXEC-01 Review expiry between sequential wallet requests (MOCKED Base 
     expect(uniswapRunResumable({ ...base, attempts: Array.from({ length: 14 }, () => attempt({})) })).toBe(false);
     // Nothing landed yet: a separate new simulation, as before (the refresh in place continues only a started run).
     expect(uniswapRefreshInPlace({ ...base, attempts: [attempt({})] }, false)).toBe(false);
+    // A run that already attempted its mint starts a new simulation on "Simulate again" (its duplicate-position guard stays as it is).
+    expect(uniswapRefreshInPlace({ ...base, attempts: [weth, attempt({ step: 'APPROVE_TOKEN1', state: 'CONFIRMED', reconciled: true, transactionHash: '0x' + '6'.repeat(64) }),
+      attempt({ step: 'MINT' })] }, false)).toBe(false);
   });
 
   it('says why the Review was refreshed in place, in English and Portuguese', () => {
     for (const code of ['UNISWAP_REVIEW_EXPIRED', 'UNISWAP_STATE_CHANGED_REVIEW_REQUIRED']) {
       const text = requotedMessage(code);
-      expect(text).toMatch(/same position; confirmed steps are kept and not repeated/);
+      expect(text).toMatch(/same position; anything already confirmed is kept and not repeated/);
       expect(translate('PT', text)).not.toBe(text);
     }
     expect(translate('PT', REVIEW_EXPIRED_CONTINUE)).toMatch(/^Sua revisão expirou/);
@@ -381,6 +394,26 @@ describe('EXEC-01 Review expiry between sequential wallet requests (MOCKED Base 
       from: 'USDC', to: 'WETH' }, amount: '1', slippage: '50' } }, context);
     if (!swap.error) expect(editorHistoryReducer(initialEditorHistory(), { type: 'RESTORE_LIQUIDITY_CANVAS', workflow: swap.workflow as never }).editor.workflow.nodes
       .every(n => n.actionType.startsWith('mock-'))).toBe(true);
+  });
+
+  it('a run at its 16-attempt limit refuses before reserving the owner\'s nonce, so a new run can still use it', async () => {
+    const s = await incident(), w = incidentWorkflow();
+    let run = await s.service.simulate(w, UNI_OWNER);
+    // Sixteen requests that never reached the wallet (the browser stopped before each hand-off).
+    for (let i = 0; i < 16; i++) {
+      run = await s.service.review(run.id, run.review.commitment, w);
+      await s.service.begin(run.id, UNI_OWNER, w);
+      await s.service.observe(run.id);
+      run = await s.service.refresh(run.id);
+    }
+    expect(run.attempts).toHaveLength(16);
+    await s.service.review(run.id, run.review.commitment, w);
+    await expect(s.service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_ATTEMPT_LIMIT_SIMULATE_AGAIN');
+    expect(simulationError('UNISWAP_ATTEMPT_LIMIT_SIMULATE_AGAIN')).toMatch(/limit of wallet attempts/);
+    const fresh = await s.service.simulate(w, UNI_OWNER);
+    await s.service.review(fresh.id, fresh.review.commitment, w);
+    expect((await s.service.begin(fresh.id, UNI_OWNER, w)).attempt.step).toBe('APPROVE_TOKEN0');
+    expect(s.chain.counters.sends).toBe(0);
   });
 });
 

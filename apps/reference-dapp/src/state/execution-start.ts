@@ -98,7 +98,7 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       const pending = Boolean(last && r?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
       const confirmed = new Set(attempts.filter(a => a.state === 'CONFIRMED').map(a => a.step));
       const next = r?.review.calls.find(c => !confirmed.has(c.step));
-      attach(Boolean(r?.authorization && r.authorization === r.review.commitment && !uniswapPool.retired && !uniswapPool.busy && !pending && r.verdict === 'PENDING' && uniswapPool.executionEnabled && next), Boolean(r?.attempts.length), uniswapPool.execute);
+      attach(Boolean(r?.authorization && r.authorization === r.review.commitment && !uniswapPool.retired && !uniswapPool.busy && !pending && r.verdict === 'PENDING' && uniswapPool.executionEnabled && next), attempts.length > 0, uniswapPool.execute);
       if (!uniswapPool.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
     }
     case 'transfer': {
