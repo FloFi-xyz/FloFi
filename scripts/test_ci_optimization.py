@@ -686,11 +686,12 @@ class CiParity(unittest.TestCase):
                     for match in re.finditer(r'(?m)^      - ([\w-]+)(?::\n((?:        .*\n)*))?', workflow)}
         browsers = [f'certification-browser-{index}' for index in range(1, len(self.plan['shards']) + 1)]
         self.assertEqual(set(requires), {'governance', 'certification', *self.certification})
-        self.assertEqual(set(self.certification), {'certification-build', 'certification-checks', 'certification-unit', *browsers})
+        self.assertEqual(set(self.certification), {'certification-build', 'certification-checks', 'certification-unit', 'certification-supply-chain',
+                                                   *browsers})
         # BUILD-FLOFI-CI-ARCHITECTURE-002: the build starts with governance (when governance fails, only the build's own minutes are
         # spent); every other job waits for governance, and each browser job also for the build whose artifact it verifies.
         self.assertEqual(requires['certification-build'], [])
-        for job in ('certification-checks', 'certification-unit'):
+        for job in ('certification-checks', 'certification-unit', 'certification-supply-chain'):
             self.assertEqual(requires[job], ['governance'])
         for job in browsers:
             self.assertEqual(requires[job], ['governance', 'certification-build'])
@@ -724,9 +725,12 @@ class CiParity(unittest.TestCase):
         actions = [name for name, step in self.actions]
         self.assertLess(actions.index('Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)'),
                         actions.index('Validate and remove ephemeral CycloneDX 1.6 SBOM'))
-        checks = [name for name, _, _ in self.jobs['certification-checks']]
-        self.assertLess(checks.index('Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)'),
-                        checks.index('Validate and remove ephemeral CycloneDX 1.6 SBOM'))
+        # BUILD-FLOFI-CI-ARCHITECTURE-002: the supply-chain gates run in their own job, so an upstream advisory never hides other results.
+        supply = [name for name, _, _ in self.jobs['certification-supply-chain']]
+        self.assertLess(supply.index('Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)'),
+                        supply.index('Validate and remove ephemeral CycloneDX 1.6 SBOM'))
+        self.assertLess(supply.index('Frozen install without lifecycle scripts'),
+                        supply.index('Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)'))
         for source in ('scripts/bootstrap-ci.py', 'scripts/sbom_verify.py', 'scripts/dependency_security.py'):
             self.assertNotRegex((ROOT / source).read_text(), r'(?m)^[A-Z_]*COUNT\s*=\s*\d{3}|hexdigest\(\) != "[0-9a-f]{64}"', source)
 
@@ -783,7 +787,7 @@ class CiParity(unittest.TestCase):
         for index in range(2, total + 1):
             self.assertEqual(runner_lines(f'certification-browser-{index}'), [f'node scripts/guarded-release-browser.mjs extended --shard {index}/{total}']
                              + (['node scripts/guarded-release-browser.mjs composition'] if index == total else []))
-        for job in ('certification-build', 'certification-checks', 'certification-unit'):
+        for job in ('certification-build', 'certification-checks', 'certification-unit', 'certification-supply-chain'):
             self.assertEqual(runner_lines(job), [], job)
 
     def test_failure_artifacts_test_reports_and_timings_are_kept(self):

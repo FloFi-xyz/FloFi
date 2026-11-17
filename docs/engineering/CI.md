@@ -9,8 +9,9 @@ submits a source snapshot). This page describes the topology introduced by
 ```
 t=0      governance (small) ─────────┐            certification-build (large: install, pnpm build, function traces, pack)
                                      │                         │  workspace: build.tar + manifest (this revision only)
-after governance:                    ├─ certification-checks (large + PostgreSQL): dependency security, audit, SBOM,
-                                     │     typecheck, lint, schema drift, PostgreSQL suites, anvil + fork suite
+after governance:                    ├─ certification-supply-chain (small): dependency security, audit, SBOM
+                                     ├─ certification-checks (large + PostgreSQL): typecheck, lint, schema drift,
+                                     │     PostgreSQL suites, anvil + fork suite
                                      ├─ certification-unit (large): package build, unit and contract suites, exported API
 after governance + build:            └─ certification-browser-1 … -8 (medium + PostgreSQL): verify and unpack the build,
                                            anvil, headless shell; job 1 runs the critical tier first; job k runs shard k/8;
@@ -22,7 +23,8 @@ fan-in:  certification (small): `python3 scripts/ci-observe.py verify` (the ledg
 | --- | --- | --- |
 | `governance` | small | governance unit tests, CI tests, `governance_lite.py`, whitespace over every commit the branch adds |
 | `certification-build` | large, no database | the one production build of the revision; `scripts/ci_build_artifact.py pack` |
-| `certification-checks` | large + PostgreSQL | supply-chain gates, typecheck, lint, schema drift, PostgreSQL suites, fork suite |
+| `certification-supply-chain` | small | dependency security policy, audit, SBOM: a new upstream advisory blocks certification without hiding any other job's results |
+| `certification-checks` | large + PostgreSQL | typecheck, lint, schema drift, PostgreSQL suites, fork suite |
 | `certification-unit` | large, no database | `turbo run build` of the packages, then the unit and contract suites with their result guard |
 | `certification-browser-1..8` | medium + PostgreSQL | `ci_build_artifact.py unpack`, then the browser shards (critical tier first in job 1, composition last in job 8) |
 | `certification` | small | the ledger: every required stage and every planned browser profile, each exactly once, all for this revision |

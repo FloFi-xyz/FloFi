@@ -6,8 +6,9 @@
 # - `governance` and `certification-build` start together. The build job makes the one production build of this revision and
 #   hands it to the browser jobs through the workflow workspace (scripts/ci_build_artifact.py: bound to this revision and lockfile,
 #   digest-verified, extracted only into build-output paths). A workspace never crosses workflows, and no cache is involved.
-# - After governance: `certification-checks` (dependency security, audit, SBOM, typecheck, lint, schema drift, PostgreSQL and fork
-#   suites) and `certification-unit` (its own package build, then the unit and contract suites), on large runners.
+# - After governance: `certification-supply-chain` (dependency security, audit, SBOM; small runner), `certification-checks` (typecheck,
+#   lint, schema drift, PostgreSQL and fork suites) and `certification-unit` (its own package build, then the unit and contract suites),
+#   on large runners.
 # - After governance and the build: eight browser jobs on medium runners (the browser suites wait on loopback lifecycles and use under
 #   half of a large runner's CPU). Job 1 runs the critical tier first. The shards come from scripts/guarded-release-browser.mjs, which
 #   balances every profile on measured seconds (scripts/ci-browser-timings.json); job 8 also runs the composition step.
@@ -48,6 +49,12 @@ executors:
     docker:
       - image: cimg/node:24.21.0-browsers
     resource_class: large
+    environment: *certification-environment
+  # Supply-chain gates: network-bound registry, advisory and SBOM checks.
+  certification-light:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
     environment: *certification-environment
   # Browser suites: measured at 1.1-1.7 of a large runner's 4 CPUs, 2-4 GiB (BUILD-FLOFI-CI-ARCHITECTURE-002 §3). Rollback: large.
   certification-browser:
@@ -257,28 +264,6 @@ jobs:
       - prepare-certification
       - wait-for-postgres
       - run:
-          name: "Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)"
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Dependency security policy'
-            # Automatic PASS / REVIEW_REQUIRED / BLOCK per locked package (docs/security/dependency-policy.json); no release-age gate.
-            python3 scripts/dependency_security.py verify
-      - store_artifacts:
-          path: /tmp/flofi-ci/flofi-dependency-evidence.json
-          destination: dependency-security/flofi-dependency-evidence.json
-      - run:
-          name: "Dependency audit"
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Dependency audit'
-            pnpm audit --audit-level low
-      - run:
-          name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
-          command: |
-            set -euo pipefail
-            # The canonical gate shared with GitHub Actions and Cloud Build (scripts/sbom_verify.py).
-            bash scripts/ci-sbom.sh
-      - run:
           name: "Typecheck"
           command: |
             set -euo pipefail
@@ -310,6 +295,35 @@ jobs:
       - run:
           name: "Offline compatibility gate and fork suite"
           command: bash .circleci/scripts/ci-fork.sh
+      - record-certification
+  # The supply-chain verdict on its own runner: a new upstream advisory still blocks certification, and every other job's
+  # results still arrive in the same run (BUILD-FLOFI-CI-ARCHITECTURE-002).
+  certification-supply-chain:
+    executor: certification-light
+    steps:
+      - prepare-certification
+      - run:
+          name: "Dependency security policy (integrity, registry signatures, advisories, licenses, supply-chain risk)"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Dependency security policy'
+            # Automatic PASS / REVIEW_REQUIRED / BLOCK per locked package (docs/security/dependency-policy.json); no release-age gate.
+            python3 scripts/dependency_security.py verify
+      - store_artifacts:
+          path: /tmp/flofi-ci/flofi-dependency-evidence.json
+          destination: dependency-security/flofi-dependency-evidence.json
+      - run:
+          name: "Dependency audit"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Dependency audit'
+            pnpm audit --audit-level low
+      - run:
+          name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
+          command: |
+            set -euo pipefail
+            # The canonical gate shared with GitHub Actions and Cloud Build (scripts/sbom_verify.py).
+            bash scripts/ci-sbom.sh
       - record-certification
   certification-unit:
     executor: certification-no-database
@@ -540,6 +554,9 @@ workflows:
       - certification-unit:
           requires:
             - governance
+      - certification-supply-chain:
+          requires:
+            - governance
       - certification-browser-1:
           requires:
             - governance
@@ -577,6 +594,7 @@ workflows:
             - certification-build
             - certification-checks
             - certification-unit
+            - certification-supply-chain
             - certification-browser-1
             - certification-browser-2
             - certification-browser-3

@@ -118,7 +118,8 @@ The suite grew; the three-job layout stayed, so every job grew with it, and `cer
 
 ```
 t=0   governance (small, ~1 min) ─┐   certification-build (large, no DB): install, pnpm build, function traces, pack (~3.5 min)
-                                  ├─ certification-checks (large + PostgreSQL): supply chain, typecheck, lint, schema, PostgreSQL, fork
+                                  ├─ certification-supply-chain (small): dependency security, audit, SBOM
+                                  ├─ certification-checks (large + PostgreSQL): typecheck, lint, schema, PostgreSQL, fork
                                   ├─ certification-unit (large, no DB): package build, unit and contract suites
       governance + build ─────────┴─ certification-browser-1 … -8 (medium + PostgreSQL): verified build, critical tier (job 1),
                                      shard k/8, composition (job 8)
@@ -139,6 +140,7 @@ ports and disposable PostgreSQL; the ledger and its fail-closed rules are unchan
 | Visual-baseline loops (27.8% of the audited credits) | After a screenshot difference the runner renders every screenshot of the failed tests into `<profile>-candidate-baselines/` (artifact), so one run shows all baselines a change needs (§5.6). |
 | Flaky tests (`flight` board ×2, `flight-closed-beta`, `channel-approve`; 16.3% + 4.5% reruns) | Not changed here (test behaviour is out of scope); listed for owners with CircleCI's flaky-test evidence (§9). |
 | Separate docs-only pushes started full certifications while one was running | Rule: consolidate fixes and records into one push; a push supersedes the running certification. |
+| An upstream advisory stopped `certification-checks` at its first step (2 audited runs, and this PR's first run), hiding typecheck, lint, PostgreSQL and fork results | The supply-chain gates (dependency policy, audit, SBOM) run in their own small job, `certification-supply-chain`: the advisory still blocks certification, and every other result arrives in the same run. |
 
 Main certifications, other branches and other developers' pipelines are never cancelled by either mechanism.
 
@@ -152,7 +154,7 @@ Main certifications, other branches and other developers' pipelines are never ca
 | Build starts with governance | Governance 63.6 s mean; only 4 of 30 workflows failed there | ~1 min off the critical path; a governance failure wastes ≤ 1 build (~3.5 large-min) |
 | Unit suites in their own job, with their own package build | Unit 500 s CPU-bound; packages-only build 32 s locally; the clean-checkout unit run passes without `.next` (704 files, 9,179 tests) | Off the critical path; no dependency on the build job |
 | Checks job without browser shard and unit suite | 10.3 min of static, PostgreSQL and fork work | Ends ~11.4 min |
-| **Eight browser jobs on `medium`** | Browser phases use 1.1–1.7 of 4 cores; pinned to 2 CPUs locally: `review-execute-recovery-components` 134.5 → 152.3 s (+13%), `approve-workflow-run` 119.3 → 120.3 s (+0.8%), `flight` 88.0 → 101.8 s (+16%); memory 2–3.2 GiB | Half-price runners, eight lanes of ~7.6 min of profiles |
+| **Eight browser jobs on `medium`** | Browser phases use 1.1–1.7 of 4 cores; pinned to 2 CPUs locally: `review-execute-recovery-components` 134.5 → 152.3 s (+13%), `approve-workflow-run` 119.3 → 120.3 s (+0.8%), `flight` 88.0 → 101.8 s (+16%); measured on CircleCI medium: +10.6% median, 2.4–3.2 GiB of 4 GiB, all 58 profiles green (§7.3) | Half-price runners, eight lanes of ~8.4 min of profiles |
 | **Shards computed from measurements** (deterministic balancer, `scripts/ci-browser-timings.json`, `scripts/ci_timings.py`) | Median seconds of 12–18 green runs per profile; 8 shards of 453–454 s (shard 1 includes the critical tier, shard 8 composition) | No manual shard lists; a new profile is placed automatically |
 | **Two long profiles split into parts** | `execution-continuity` 718 s median (≈ 0.5 core, waiting), `default-product` 572 s; per-spec JUnit medians | Parts of 243–294 s with identical settings, each on its own servers and database; same specs exactly once |
 
@@ -215,6 +217,86 @@ stayed clean.
   artifact, the supersede guard, the balancer, the timings tool and the candidate baselines.
 
 ## 7. Phase 5 — validation and results
+
+### 7.1 Local validation (pinned Node 24.21.0, pnpm 11.22.0; evidence, not certification)
+
+| Check | Result |
+| --- | --- |
+| `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` | 282 tests OK (38 new or changed for this build) |
+| `test_governance_lite.py`, `governance_lite.py`, `agent_guard.py check`, `git diff --check`, eslint of the runner and Playwright config | PASS |
+| CircleCI `validate_config` on the exact final file | valid |
+| Unit job flow in a clean worktree (no `.next`; packages built by turbo) | 704 files / 9,179 tests passed, 2 env-gated skips (pre-existing); result guard PASS (122 required suites); 430 s |
+| Build artifact | pack 0.9 s, unpack 0.9 s (166 MiB, 3,780 entries); `.next/server` byte-identical after the round trip; second unpack refused |
+| Split browser parts, from the unpacked artifact in a clean worktree | `execution-continuity-1/2/3`: 12 + 16 + 10 = 38/38 (the former profile's 38); `default-product-2`: 92/92; `default-product-1`: 78 passed, 9 failed — the same 9 fail when their five spec files run without any split (7 local screenshot differences, the known local/CI rendering difference, and 2 `build009` bridge quotes this sandbox's network blocks) |
+| Candidate baselines | real Playwright: `visual-shell.spec.ts` wrote its 3 screenshots into the candidate directory (`e2e/` layout); checkout unchanged |
+| Two CPUs (`taskset`) | `review-execute-recovery-components` +13.2%, `approve-workflow-run` +0.8%, `flight` +15.6% |
+
+### 7.2 Ledger refusals (the real `ci-observe.py verify` on a complete synthetic ledger of the real plan, then one mutation each)
+
+| Case | Result |
+| --- | --- |
+| Complete | PASS (18 required stages over 11 jobs, 58 browser profiles each exactly once, all for the revision) |
+| Profile missing (`default-product-2` never ran) | FAIL: `extended browser profiles never ran: default-product-2` |
+| Profile duplicated (`execution-continuity-1` twice) | FAIL: `unplanned or repeated: execution-continuity-1` |
+| Browser run cancelled (report left `RUNNING`) | FAIL: `browser run composition did not pass: RUNNING` |
+| Browser run superseded | FAIL: `browser run extended-shard-3-of-8 did not pass: SUPERSEDED` |
+| Browser report of another SHA | FAIL: `belongs to revision 'ddd…', not ccc…` and its profiles `never ran` |
+| Stage cancelled/interrupted, stage superseded (exit 75), stage of another SHA, required stage missing | FAIL each, naming the stage |
+
+### 7.3 CircleCI: first run of the new topology (pipeline `a0752ae4`, revision `c6febbc`, cold archive cache)
+
+| Job | Runner | Seconds | Ends after pipeline start | Credits |
+| --- | --- | ---: | ---: | ---: |
+| governance | small | 84.5 | 1.5 min | 7.0 |
+| certification-build | large | 203.4 | 3.4 min | 67.8 |
+| certification-unit | large | 611.2 | 11.7 min | 203.7 |
+| certification-browser-1 … -8 | medium | 526.8 – 618.7 (mean 574.6) | 12.3 – 13.8 min | 87.8 – 103.1 (766.2 in all) |
+| certification-checks | large | 53.1 | stopped by the advisory (§7.5) | 17.7 |
+
+- **All eight browser jobs passed on medium on the first attempt**: 58 profiles, every one PASS. Memory peaked at 2.39–3.20 GiB of 4 GiB
+  (56–74%), CPU averaged 0.85–1.47 of 2 cores. Profiles ran a median 10.6% slower than their large-runner medians (×0.92 – ×1.47); the
+  local two-CPU estimate was 1–16%.
+- Build job: spin-up 11.4 s (no database), governance-lite 7.0 s, install 9.4 s, production build 150.2 s, pack 1.6 s, persist 7.8 s;
+  memory peak 4.6 GiB of 8. Each browser job then attached the workspace in 2.4–2.9 s and verified and unpacked the build in 2.1–2.7 s
+  instead of building for ~150 s.
+- Unit job: package build 30.4 s, unit suite 547.7 s (main's last run: 548.8 s), 3.68 of 4 cores — CPU-bound, so it stays on large.
+- The supersede guard read the branch head from CircleCI (`Supersede check: claude/hopeful-hypatia-9gjxig still points to this revision
+  (c6febbc9f87e)`); the image's Python is 3.12.3 (tarfile `data` filter present).
+- Cold cache: the first pipeline of the branch missed the archive cache (Node, pnpm, anvil, headless shell downloaded and verified):
+  toolchain 6.7–8.6 s, anvil 3.6–4.2 s, headless shell 2.5–3.7 s.
+
+**Wall clock: 13.8 min to the last job** (the fan-in adds ~15 s): **−58%** against the 32.7-min mean. Measured credits 1,062 with the
+checks job stopped early; with its typecheck, lint, PostgreSQL and fork stages (audited means: ~600 s on large, ~200 credits) and the
+small supply-chain job (~60 s, ~5 credits) the complete certification comes to **~1,250 credits (−28.5%)**.
+
+After this run the timings were refreshed from its own medium reports (`scripts/ci_timings.py`): the eight shards went from a measured
+478–531 s to an estimated 501–502 s each.
+
+### 7.4 CircleCI: second run (warm cache, rebalanced shards, supply-chain job)
+
+Pending: results are added when the run completes.
+
+### 7.5 Blocker outside this build: GHSA-fc5q-39xc-vjpf (picomatch ≤ 4.0.7, high)
+
+The dependency policy now blocks `picomatch@4.0.7` (ReDoS; dev-tooling paths through `typescript-eslint` → `tinyglobby`/`fdir`). The
+advisory names `>= 4.0.8` as patched, but npm's latest release is 4.0.7 and every 3.x release is in the vulnerable range, so no
+compliant version exists yet. By the owner's policy (DEC-0057) advisories block and cannot be excepted, so **no revision of any branch,
+`main` included, can certify until upstream publishes 4.0.8**. This build does not touch the policy or the lockfile. Because the
+supply-chain gates now run in their own job, every other job still reports its results while the advisory stands; `certification`
+stays blocked, as it must.
+
+### 7.6 Before / after
+
+| Metric | Before (10 green runs) | After (first run; complete-run projection) | Change |
+| --- | ---: | ---: | ---: |
+| Wall clock | 32.7 min mean, 35.9 max | 13.8 min to the last job (~14.1 with the fan-in) | −57% |
+| Critical path | `certification-checks` 31.1 min | `certification-browser-2` 10.3 min after a 3.4-min build | |
+| Runner compute | 87.1 large-min | ~62.5 large-min equivalent (browser jobs at half rate) | −28% |
+| Credits | 1,749 | ~1,250 | −28.5% |
+| Production builds per certification | 3 | 1 | −2 |
+| Browser profiles | 55 + composition | 58 + composition (same specs, each once) | parts |
+| Tests | unchanged | unchanged (every former spec and suite runs) | 0 |
+| Superseded pipelines left running | 4 in the audit (216 large-min) | stopped by the guard (and the CircleCI setting, once enabled) | |
 
 ## 8. Rollback
 
