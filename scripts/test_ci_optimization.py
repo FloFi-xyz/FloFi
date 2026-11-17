@@ -756,6 +756,15 @@ class CiParity(unittest.TestCase):
                          [('/tmp/flofi-ci', ['-', 'flofi-build']), ('/tmp/flofi-ci', ['-', 'flofi-ci-metrics'])])
         builders = [job for job, steps in self.jobs.items() for name, step, _ in steps if name == 'persist_to_workspace' and 'flofi-build' in step]
         self.assertEqual(builders, ['certification-build'])
+        # A cache save that fails never leaves ledger records a rerun would persist a second time.
+        for job, steps in self.jobs.items():
+            names = [name for name, _, _ in steps]
+            if 'save_cache' in names:
+                self.assertLess(names.index('save_cache'), names.index('persist_to_workspace'), job)
+        # The build starts beside governance, so it applies governance-lite itself before installing anything.
+        build = [line for _, _, lines in self.jobs['certification-build'] for line in lines]
+        self.assertLess(build.index('python3 scripts/governance_lite.py'), build.index('python3 scripts/bootstrap-ci.py'))
+        self.assertLess(build.index('python3 scripts/governance_lite.py'), build.index('pnpm install --frozen-lockfile --ignore-scripts'))
         # Consumers attach the build beside their own records (no workspace layer is persisted twice); the fan-in sees every record.
         for job, steps in self.jobs.items():
             attaches = [step for name, step, _ in steps if name == 'attach_workspace']
@@ -1212,8 +1221,21 @@ class BuildArtifact(unittest.TestCase):
             info = tarfile.TarInfo('apps/web/.next/cache/injected')
             info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
+        def noncanonical(tar):
+            link = tarfile.TarInfo('apps/web/.next/./x')
+            link.type, link.linkname = tarfile.SYMTYPE, '../../../node_modules/.pnpm/pg/node_modules/pg'
+            tar.addfile(link)
+            data = b'forged\n'
+            info = tarfile.TarInfo('apps/web/.next/x/index.js')
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        def trailing_slash(tar):
+            link = tarfile.TarInfo('apps/web/.next/y/')
+            link.type, link.linkname = tarfile.SYMTYPE, '../../../../node_modules/.pnpm/pg/node_modules/pg'
+            tar.addfile(link)
         cases = [(beneath, 'below a link of the archive'), (chain, 'is not inside node_modules/'), (scripts, 'is not inside node_modules/'),
-                 (hardlink, 'unsupported member type'), (compiler_cache, 'outside the build outputs')]
+                 (hardlink, 'unsupported member type'), (compiler_cache, 'outside the build outputs'), (noncanonical, 'not a canonical path'),
+                 (trailing_slash, 'not a canonical path')]
         for forge, message in cases:
             with self.subTest(message=message, forge=forge.__name__):
                 self.setUp()
@@ -1225,11 +1247,13 @@ class BuildArtifact(unittest.TestCase):
                 self.assertFalse((self.consumer / 'node_modules/.pnpm/pg/node_modules/pg/index.js').exists())
 
     def test_forged_roots_are_refused(self):
-        self.manifest['roots'] = ['scripts']
-        (self.out / 'manifest.json').write_text(json.dumps(self.manifest))
-        status, errors = self.unpack()
-        self.assertEqual(status, 1)
-        self.assertIn('artifact roots are not build outputs', errors)
+        for roots in (['scripts'], ['apps/./.next'], ['packages/../dist'], ['apps/web/.next/']):
+            with self.subTest(roots=roots):
+                self.manifest['roots'] = roots
+                (self.out / 'manifest.json').write_text(json.dumps(self.manifest))
+                status, errors = self.unpack()
+                self.assertEqual(status, 1)
+                self.assertIn('artifact roots are not build outputs', errors)
 
     def test_pack_refuses_hard_links_in_the_build_outputs(self):
         os.link(self.builder / 'packages/a/dist/index.js', self.builder / 'packages/a/dist/again.js')

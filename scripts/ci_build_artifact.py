@@ -66,6 +66,12 @@ def allowed(name):
                                               for index in range(1, len(path.parts))) for pattern in OUTPUT_ROOTS)
 
 
+def canonical(name):
+    """pack() writes only canonical relative names: no `.`/`..` segment, no doubled or trailing slash."""
+    return bool(name) and name == posixpath.normpath(name) and not name.startswith('/') and not any(
+        part in {'.', '..', ''} for part in name.split('/'))
+
+
 def refusals(members, roots):
     """Every member must be a file, directory or link inside one declared output root. Nothing may be written through a link of the
     archive (no member below a link member), and a link may only point, lexically, into the checkout's node_modules/ (the
@@ -74,6 +80,9 @@ def refusals(members, roots):
     bad = []
     for member in members:
         name = member.name
+        if not canonical(name):  # `./`, `//`, a trailing `/` or a `.`/`..` segment would dodge the link and root checks below
+            bad.append(f'{name}: not a canonical path')
+            continue
         parents = [PurePosixPath(*PurePosixPath(name).parts[:index]).as_posix() for index in range(1, len(PurePosixPath(name).parts))]
         if not allowed(name) or not any(name == root or name.startswith(root + '/') for root in roots):
             bad.append(f'{name}: outside the build outputs')
@@ -139,7 +148,8 @@ def unpack(root, workspace):
     if not archive.is_file() or archive.is_symlink():
         errors.append('artifact archive is missing')
     roots = manifest.get('roots') if isinstance(manifest.get('roots'), list) else []
-    if not roots or not all(isinstance(name, str) and any(pattern.fullmatch(name) for pattern in OUTPUT_ROOTS) for name in roots):
+    if not roots or not all(isinstance(name, str) and canonical(name) and any(pattern.fullmatch(name) for pattern in OUTPUT_ROOTS)
+                            for name in roots):
         errors.append('artifact roots are not build outputs')
     errors += [f'{name} already exists in the checkout' for name in roots if isinstance(name, str) and (root / name).exists()]
     if not hasattr(tarfile, 'data_filter'):
@@ -147,7 +157,7 @@ def unpack(root, workspace):
     if errors:
         print('Build artifact: REFUSED', *('  ' + error for error in errors), sep='\n', file=sys.stderr, flush=True)
         return 1
-    # One open file: the bytes whose digest matches the manifest are the bytes extracted.
+    # One open file for the digest and the extraction (no path swap between them; nothing else writes in the job).
     with open(archive, 'rb') as stream:
         digest = hashlib.sha256()
         for block in iter(lambda: stream.read(1 << 20), b''):

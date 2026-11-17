@@ -14,7 +14,7 @@
 | Previous architecture | BUILD-FLOFI-CI-ARCHITECTURE-001 (PR #151): governance, then three large jobs (`certification-checks` with browser shard 3, `certification-browser-1` critical + shard 1, `certification-browser-2` shard 2 + composition), each building the app, then the `certification` ledger fan-in |
 | Toolchain | Node 24.21.0, pnpm 11.22.0, Anvil 1.8.3, headless shell 1243 (unchanged) |
 | Suites at base | 55 guarded browser profiles + composition; 706 unit files / 9,181 unit tests (2 env-gated skips, pre-existing); 131 PostgreSQL files; fork and offline suites |
-| Rates used for cost | CircleCI Docker credits per minute, billed per second: small 5, medium 10, large 20 (CircleCI's published resource-class rates; confirm on the plan's pricing page). "Large-minutes" = credits ÷ 20 |
+| Rates used for cost | CircleCI Docker credits per minute, billed per second: small 5, medium 10, large 20 (CircleCI's published resource-class rates; confirm on the plan's pricing page). "Large-min" in the audit = minutes on large runners; after the change, "large-minute equivalents" = credits ÷ 20 (credits are the comparable figure) |
 
 ## 2. Phase 1 — audit of 27 pipelines (30 workflows)
 
@@ -154,8 +154,8 @@ Main certifications, other branches and other developers' pipelines are never ca
 | Build starts with governance | Governance 63.6 s mean; only 4 of 30 workflows failed there | ~1 min off the critical path; a governance failure wastes ≤ 1 build (~3.5 large-min) |
 | Unit suites in their own job, with their own package build | Unit 500 s CPU-bound; packages-only build 32 s locally; the clean-checkout unit run passes without `.next` (704 files, 9,179 tests) | Off the critical path; no dependency on the build job |
 | Checks job without browser shard and unit suite | 10.3 min of static, PostgreSQL and fork work | Ends ~11.4 min |
-| **Eight browser jobs on `medium`** | Browser phases use 1.1–1.7 of 4 cores; pinned to 2 CPUs locally: `review-execute-recovery-components` 134.5 → 152.3 s (+13%), `approve-workflow-run` 119.3 → 120.3 s (+0.8%), `flight` 88.0 → 101.8 s (+16%); measured on CircleCI medium: +10.6% median, 2.4–3.2 GiB of 4 GiB, all 58 profiles green (§7.3) | Half-price runners, eight lanes of ~8.4 min of profiles |
-| **Shards computed from measurements** (deterministic balancer, `scripts/ci-browser-timings.json`, `scripts/ci_timings.py`) | Median seconds of 12–18 green runs per profile; 8 shards of 453–454 s (shard 1 includes the critical tier, shard 8 composition) | No manual shard lists; a new profile is placed automatically |
+| **Eight browser jobs on `medium`** | Browser phases use 1.1–1.7 of 4 cores; pinned to 2 CPUs locally: `review-execute-recovery-components` 134.5 → 152.3 s (+13%), `approve-workflow-run` 119.3 → 120.3 s (+0.8%), `flight` 88.0 → 101.8 s (+16%); measured on CircleCI medium: +10.6% median, peak 2.23–2.98 GiB of 4 GiB, all 58 profiles green twice (§7.3–7.4) | Half-price runners, eight lanes of ~8.4 min of profiles |
+| **Shards computed from measurements** (deterministic balancer, `scripts/ci-browser-timings.json`, `scripts/ci_timings.py`) | First from the median of 12–18 green large-runner runs per profile (8 shards of 453–454 s); now from the median of the two medium-runner runs of this PR (8 shards of 500–501 s; shard 1 includes the critical tier, shard 8 composition) | No manual shard lists; a new profile is placed automatically |
 | **Two long profiles split into parts** | `execution-continuity` 718 s median (≈ 0.5 core, waiting), `default-product` 572 s; per-spec JUnit medians | Parts of 243–294 s with identical settings, each on its own servers and database; same specs exactly once |
 
 ### 5.2 Investigated, not adopted
@@ -235,7 +235,7 @@ stayed clean.
 
 | Case | Result |
 | --- | --- |
-| Complete | PASS (18 required stages over 11 jobs, 58 browser profiles each exactly once, all for the revision) |
+| Complete | PASS (18 required stages over 12 jobs, 58 browser profiles each exactly once, all for the revision) |
 | Profile missing (`default-product-2` never ran) | FAIL: `extended browser profiles never ran: default-product-2` |
 | Profile duplicated (`execution-continuity-1` twice) | FAIL: `unplanned or repeated: execution-continuity-1` |
 | Browser run cancelled (report left `RUNNING`) | FAIL: `browser run composition did not pass: RUNNING` |
@@ -253,11 +253,11 @@ stayed clean.
 | certification-browser-1 … -8 | medium | 526.8 – 618.7 (mean 574.6) | 12.3 – 13.8 min | 87.8 – 103.1 (766.2 in all) |
 | certification-checks | large | 53.1 | stopped by the advisory (§7.5) | 17.7 |
 
-- **All eight browser jobs passed on medium on the first attempt**: 58 profiles, every one PASS. Memory peaked at 2.39–3.20 GiB of 4 GiB
-  (56–74%), CPU averaged 0.85–1.47 of 2 cores. Profiles ran a median 10.6% slower than their large-runner medians (×0.92 – ×1.47); the
+- **All eight browser jobs passed on medium on the first attempt**: 58 profiles, every one PASS. Memory peaked at 2.23–2.98 GiB
+  (2.39–3.20 GB) of 4 GiB (56–74%; at least ~1 GiB free), CPU averaged 0.85–1.47 of 2 cores. Profiles ran a median 10.6% slower than their large-runner medians (×0.92 – ×1.47); the
   local two-CPU estimate was 1–16%.
 - Build job: spin-up 11.4 s (no database), governance-lite 7.0 s, install 9.4 s, production build 150.2 s, pack 1.6 s, persist 7.8 s;
-  memory peak 4.6 GiB of 8. Each browser job then attached the workspace in 2.4–2.9 s and verified and unpacked the build in 2.1–2.7 s
+  memory peak 4.3 GiB of 8. Each browser job then attached the workspace in 2.4–2.9 s and verified and unpacked the build in 2.1–2.7 s
   instead of building for ~150 s.
 - Unit job: package build 30.4 s, unit suite 547.7 s (main's last run: 548.8 s), 3.68 of 4 cores — CPU-bound, so it stays on large.
 - The supersede guard read the branch head from CircleCI (`Supersede check: claude/hopeful-hypatia-9gjxig still points to this revision
@@ -291,7 +291,7 @@ After this run the timings were refreshed from its own medium reports (`scripts/
 - Warm cache: Node and pnpm came from the archive cache (`Archive cache HIT`), toolchain bootstrap 6.75 s against 7.0 s cold — the cache
   still saves under a second per job; nothing else is cached.
 - **Wall clock: 13.9 min to the last job** (fan-in ~15 s more: ~14.2 min). **Credits: 1236** for the jobs that ran; a
-  passing supply-chain job adds ~3 s and the fan-in ~1.3 credits.
+  passing supply-chain job runs ~3 s longer (audit and SBOM, ~0.3 credits) and the fan-in costs ~1.3 credits.
 
 ### 7.5 Blocker outside this build: GHSA-fc5q-39xc-vjpf (picomatch ≤ 4.0.7, high)
 
@@ -308,13 +308,13 @@ stays blocked, as it must.
 | --- | ---: | ---: | ---: |
 | Wall clock | 32.7 min mean (30.3–35.9) | 13.8 min (cold) and 13.9 min (warm) to the last job, ~14.1–14.2 min with the fan-in | **−57%** |
 | Critical path | `certification-checks` 31.1 min | build 3.4–3.8 min, then the longest browser job 10.0–10.3 min | |
-| Runner compute | 87.1 large-min | ~62 large-min equivalent (browser jobs at half rate) | −29% |
+| Runner compute | 87.1 large-runner min (1,749 credits ÷ 20 = 87.5) | ~62 large-minute equivalents (credits ÷ 20; browser jobs at half rate) | −29% |
 | Credits per certification | 1,749 | ~1,240 (second run measured 1236 + fan-in) | **−29%** |
 | Cold vs warm cache | 7.0 vs 6.8 s toolchain bootstrap | 7.0 vs 6.75 s | no material effect (by design: only digest-verified tool archives are cached) |
 | Production builds per certification | 3 | 1 | −2 |
 | Browser profiles | 55 + composition | 58 + composition (same specs, each once) | parts |
 | Tests | unchanged | unchanged (every former spec and suite runs) | 0 |
-| Superseded pipelines left running | 4 in the audit (216 large-min) | stopped by the guard (and the CircleCI setting, once enabled) | |
+| Superseded pipelines left running | 4 in the audit (216 large-min) | stopped by the guard (tested; live branch-head reads observed, a live supersede not yet) and by the CircleCI setting once enabled | |
 
 ## 8. Rollback
 
@@ -331,17 +331,20 @@ the others skipped because no product, wallet, chat, channel or provider code ch
 | --- | --- | --- |
 | flofi-workflow | no findings: no spec of the split profiles depends on another spec's state; noted residual first-on-a-fresh-server risk for `conversational-workflow` and `build-entry` | Both ran first in their parts locally and twice on CircleCI, green |
 | flofi-security | 3 low: writes through an archive link, build before governance, fork pull requests in the guard | All fixed with tests (§5.4; governance-lite in the build job; forks skipped) |
-| flofi-infrastructure-ci | 1 medium (medium-runner memory unproven), 8 low | Medium answered by two CircleCI runs (peak 3.2 GiB of 4); lows fixed (shard-order test, shard bounds, hard links refused at pack, cache saved before records, empty timings) or already addressed (missing report, candidate-baseline hook); a delta review covers the fixes |
+| flofi-infrastructure-ci | 1 medium (medium-runner memory unproven), 8 low | Medium answered by two CircleCI runs (16 medium jobs, all green, peak 2.98 GiB of 4 GiB); lows fixed (shard-order test, shard bounds, hard links refused at pack, cache saved before records, empty timings, writes through archive links — with flofi-security) or already addressed (missing report, candidate-baseline hook) |
+| Delta reviews of the fixes (flofi-security, flofi-infrastructure-ci, at `312a840`) | security: 1 low (non-canonical member names such as `./x` or `x/` dodged the link rule); infrastructure: 5 low (two fixes without a regression test, audit and SBOM not yet run on the small runner, memory units, stale figures) | Non-canonical names and roots refused, with tests; tests added for the cache-save order and governance-lite before install; the ls-remote cleanup is bounded; figures corrected; the small-runner item is listed below |
 
 **Open items**
 
 1. *Upstream advisory GHSA-fc5q-39xc-vjpf* (§7.5): no revision of any branch can certify until picomatch 4.0.8 exists. Then the
    `certification` fan-in of this PR runs for the first time; its result is the final evidence of the new topology end to end.
-2. *Auto-cancel redundant workflows* (owner setting, recommended). The repository guard was observed reading the branch head on
+2. *Supply-chain job on the small runner*: its install and dependency policy ran on CircleCI (blocked by the advisory); `pnpm audit` and
+   the SBOM gate have not run there yet. A failure there blocks certification (fail-closed); rollback is `resource_class: medium`.
+3. *Auto-cancel redundant workflows* (owner setting, recommended). The repository guard was observed reading the branch head on
    CircleCI; a real supersede (exit 75) is covered by tests, not yet observed live.
-3. *Flaky tests* found by CircleCI (not changed here): `flight › board.spec.ts` "Now boarding…" (2 flakes), `flight-closed-beta ›
+4. *Flaky tests* found by CircleCI (not changed here): `flight › board.spec.ts` "Now boarding…" (2 flakes), `flight-closed-beta ›
    flight-transition.spec.ts`, `channel-approve › telegram-approve.spec.ts`; they caused 4 of 30 audited failures and 3 reruns.
-4. *Status contexts*: existing names are kept; if branch protection should list the new jobs, that is an owner setting
+5. *Status contexts*: existing names are kept; if branch protection should list the new jobs, that is an owner setting
    (`certification` already requires all of them).
 
 **Owner decisions requested**

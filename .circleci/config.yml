@@ -56,7 +56,7 @@ executors:
       - image: cimg/node:24.21.0
     resource_class: small
     environment: *certification-environment
-  # Browser suites: measured at 1.1-1.7 of a large runner's 4 CPUs, 2-4 GiB (BUILD-FLOFI-CI-ARCHITECTURE-002 §3). Rollback: large.
+  # Browser suites: 1.1-1.7 of a large runner's 4 CPUs; on medium 2.2-3.0 GiB of 4 GiB (BUILD-FLOFI-CI-ARCHITECTURE-002 §7.3). Rollback: large.
   certification-browser:
     docker:
       - image: cimg/node:24.21.0-browsers

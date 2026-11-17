@@ -31,7 +31,8 @@ def remote_head(branch, timeout=20):
     ref = 'refs/heads/' + branch
     try:
         # Its own process group, so a timeout also stops an ssh child that would otherwise keep the pipes open.
-        process = subprocess.Popen(['git', 'ls-remote', '--heads', 'origin', ref], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        process = subprocess.Popen(['git', 'ls-remote', '--heads', 'origin', ref], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, text=True,
                                    cwd=Path(__file__).resolve().parents[1], start_new_session=True,
                                    env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
     except OSError as error:
@@ -44,7 +45,10 @@ def remote_head(branch, timeout=20):
             os.killpg(process.pid, signal.SIGKILL)
         except OSError:
             pass
-        process.communicate()
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
         print('Supersede check skipped: the remote did not answer in time.', file=sys.stderr, flush=True)
         return None
     if process.returncode != 0:
