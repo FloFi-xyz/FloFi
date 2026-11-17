@@ -60,4 +60,3 @@ describe('BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: signed in with another method th
     expect(html).toContain('Boarded with another sign-in method?');
   });
 });
-
