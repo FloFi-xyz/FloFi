@@ -35,7 +35,7 @@ function errorValue(value: unknown): unknown {
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
 
 export function UniswapLiquidityProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow(), wallet = useBuild009Wallet();
+  const { state, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<UniswapLiquidityRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   // BUILD-RH-002: the testnet pools and each catalog network (real funds: Robinhood Chain, BUILD-BASE-001 Base) are enabled separately; the
   // authored position (else the run) selects one.
@@ -77,11 +77,17 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
         // A hash saved before the browser closed reaches the server first; it is never resent to a wallet.
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
           await uniswapLiquidityReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
-        return uniswapLiquidityStatus(pointer.id as string);
-      })().then(result => { if (mounted && result.ok) { setRecord(result.value); setRecovered(true); } }).catch(() => undefined);
+        return trackCanvasRestoration(uniswapLiquidityStatus(pointer.id as string));
+      })().then(result => {
+        if (!mounted || !result.ok) return;
+        setRecord(result.value); setRecovered(true);
+        // EXEC-01: a started run that still needs the owner (a confirmed approval, the rest not sent) shows its own workflow on the untouched
+        // Canvas again, so the owner can refresh its Review and continue it after a reload. Finished runs stay in the Dashboard.
+        if (result.value.verdict === 'PENDING' && result.value.attempts.length > 0) restoreLiquidityCanvas(result.value.workflow);
+      }).catch(() => undefined);
     } catch { setError('UNISWAP_RECOVERY_POINTER_INVALID'); }
     return () => { mounted = false; };
-  }, []);
+  }, [restoreLiquidityCanvas, trackCanvasRestoration]);
   useEffect(() => {
     if (record && retired && record.authorization) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
   }, [record, retired]);

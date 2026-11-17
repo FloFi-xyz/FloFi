@@ -52,7 +52,7 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
    * Returns the validation message, or null once applied.
    */
   commitCanvasAmount(id: string): string | null;
-  restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreSolanaCompositionCanvas(workflow: SemanticWorkflow): void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
+  restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreSolanaCompositionCanvas(workflow: SemanticWorkflow): void; restoreLiquidityCanvas(workflow: SemanticWorkflow): void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
   /**
    * BUILD-FLOFI-PRODUCT-UX-001: a run persisted in this browser that may put its workflow back on the untouched Canvas is being read. Until it
    * settles the Canvas shows a neutral surface, never the empty "Start your workflow" state it would replace a moment later.
@@ -174,6 +174,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   }, [context]);
   const restoreLendingCanvas=useCallback((workflow:SemanticWorkflow)=>dispatchHistory({type:'RESTORE_LENDING_CANVAS',workflow}),[]);
   const restoreSolanaCompositionCanvas = useCallback((workflow: SemanticWorkflow) => dispatchHistory({ type: 'RESTORE_SOLANA_COMPOSITION_CANVAS', workflow }), []);
+  const restoreLiquidityCanvas = useCallback((workflow: SemanticWorkflow) => dispatchHistory({ type: 'RESTORE_LIQUIDITY_CANVAS', workflow }), []);
   const addCanvasCommand = useCallback((command: Command, position: { x: number; y: number }) => {
     const preview = editorReducer(editorRef.current, command, context);
     if (!preview.error && testNetworksIntroduced(editorRef.current.workflow, preview.workflow).length) return;
@@ -523,7 +524,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (!checkChainAccess(chainRef.current, workflowRef.current, Date.now(), performance.now()).ok) { accessCheck(); return; }
     generateArtifacts();
   }, [accessCheck, generateArtifacts]);
-  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
+  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
     canvasRestoring: pendingRestorations > 0, trackCanvasRestoration,
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,

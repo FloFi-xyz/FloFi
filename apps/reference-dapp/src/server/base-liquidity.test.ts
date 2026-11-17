@@ -366,5 +366,21 @@ describe('EXEC-01 Review expiry between sequential wallet requests (MOCKED Base 
     // A bridge keeps its own re-quote wording.
     expect(requotedMessage('UNIVERSAL_REVIEW_EXPIRED')).toMatch(/fresh quote/);
   });
+
+  it('after a reload, a started run that still needs the owner is restored on the untouched Canvas only, with no authority', () => {
+    const w = incidentWorkflow();
+    const restored = editorHistoryReducer(initialEditorHistory(), { type: 'RESTORE_LIQUIDITY_CANVAS', workflow: w });
+    expect(JSON.stringify(restored.editor.workflow)).toBe(JSON.stringify(w));
+    expect([restored.past.length, restored.future.length]).toEqual([0, 0]);
+    // Never over an owner's own edits, and never a workflow that is not one liquidity position.
+    const edited = editorHistoryReducer(initialEditorHistory(), { type: 'START_ACTION_SETUP', action: 'pool', position: { x: 10, y: 20 } });
+    expect(editorHistoryReducer(edited, { type: 'RESTORE_LIQUIDITY_CANVAS', workflow: w })).toBe(edited);
+    const authored = { ...initialEditorHistory(), editor: { workflow: workflow() as never, error: null } };
+    expect(editorHistoryReducer(authored, { type: 'RESTORE_LIQUIDITY_CANVAS', workflow: w })).toBe(authored);
+    const swap = editorReducer(initialEditor(), { type: 'ADD_CRYPTO_ACTION', source: 'CANVAS', baseRevision: 0, input: { selection: { action: 'swap', network: 'Base',
+      from: 'USDC', to: 'WETH' }, amount: '1', slippage: '50' } }, context);
+    if (!swap.error) expect(editorHistoryReducer(initialEditorHistory(), { type: 'RESTORE_LIQUIDITY_CANVAS', workflow: swap.workflow as never }).editor.workflow.nodes
+      .every(n => n.actionType.startsWith('mock-'))).toBe(true);
+  });
 });
 
