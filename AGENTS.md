@@ -32,7 +32,10 @@ New maintained source files must be assigned explicitly to a module in coverage.
 with a primary domain, dependencies and relevant suites or an honest coverage gap.
 Do not regenerate ownership blindly or remove tests/gates to make checks pass.
 Run focused suites, normal repository gates and applicable PostgreSQL/fork/browser
-checks. CircleCI's existing certification ledger remains authoritative.
+checks. CircleCI's existing certification ledger remains authoritative. Follow the
+CI lifecycle rules in [the CI guide](docs/engineering/CI.md): consolidate fixes
+from every failing job before pushing, no manual pipelines for a revision that
+already has one, and at most one rerun of failed jobs (same SHA, proven transient).
 
 Preserve mainnet-first public UX, optional Canvas, chat/MCP workflow continuity,
 tenant/wallet isolation and explicit applicable wallet authorization. Registry

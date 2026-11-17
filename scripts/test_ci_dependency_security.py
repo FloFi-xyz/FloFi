@@ -190,12 +190,21 @@ class Harness(unittest.TestCase):
                                  prior.get("published", "2020-01-01T00:00:00.000Z"), integrity_of(name + prior["version"])))
             releases.append((version, {**package, "publisher": package.get("publisher", "maintainer")},
                              package.get("published", "2021-01-01T00:00:00.000Z"), package.get("registry_integrity", package["integrity"])))
+            for extra, flags in (package.get("extra_releases") or {}).items():  # later releases the lockfile does not use
+                document["versions"][extra] = {"name": name, "version": extra, "license": "MIT", **flags,
+                                               "dist": {"integrity": integrity_of(name + extra),
+                                                        "tarball": f"https://registry.npmjs.org/{name}/-/{name.rsplit('/', 1)[-1]}-{extra}.tgz"}}
+                document["time"][extra] = "2026-10-01T00:00:00.000Z"
+            if package.get("dist_tags"):
+                document["dist-tags"] = dict(package["dist_tags"])
             for release, details, published, integrity in releases:
                 body = {"name": details.get("registry_name", name), "version": release, "_npmUser": {"name": details["publisher"]},
                         # The published manifest requests exactly what the fixture lockfile resolves (unless a test says otherwise).
                         "dependencies": details.get("declared", {n: "^" + v for n, v in (package.get("deps") or {}).items()
                                                                  if not str(v).startswith("link:")}),
                         "optionalDependencies": {n: v for n, v in (package.get("optional_deps") or {}).items()},
+                        **({"peerDependencies": details["peer_ranges"],
+                            "peerDependenciesMeta": {n: {"optional": True} for n in details["peer_ranges"]}} if details.get("peer_ranges") else {}),
                         **({"peerDependenciesMeta": {n: {"optional": True} for n in (package.get("deps") or {})}} if details.get("peer_meta") else {}),
                         "dist": {"integrity": integrity, "tarball": details.get(
                             "tarball", f"https://registry.npmjs.org/{name}/-/{name.rsplit('/', 1)[-1]}-{release}.tgz")}}
@@ -805,6 +814,266 @@ class ReviewHardening(Harness):
                  ("2.0.0-0", "^1.0.0", False), ("0.5.9", "> 0.5", False), ("1.3.0", "<=1.2", False), ("0.1.0", "^0.0.x", False),
                  ("5.0.0", "*", True), ("1.0.0", "", True), ("2.0.0", "<*", False)]
         self.assertEqual([c for c in cases if ds.satisfies(c[0], c[1]) != c[2]], [])
+
+
+class AdvisoryContainment(Harness):
+    """DEC-0058: a development/CI-only advisory with no compatible fix is CONTAINED by one exact record, re-proved every run."""
+
+    GHSA = "GHSA-9f9f-9f9f-9f9f"
+    RELEASE = "glob-lib@1.0.4"
+
+    def setUp(self):
+        super().setUp()
+        self.add(self.RELEASE, parent="tool-kit@2.0.0")  # tool-kit is a root devDependency: development/CI only
+        self.advise()
+        self.record = {"advisory": self.GHSA, "identity": self.RELEASE, "integrity": integrity_of("archive:" + self.RELEASE),
+                       "dependents": ["tool-kit"], "record": "docs/security/ADVISORY-test.md",
+                       "exposure": "Fixture: glob patterns come from committed configuration only."}
+        self.policy["contained_advisories"] = [self.record]
+
+    def advise(self, severity="high", identity=None, patched=">=1.0.5", vulnerable="<=1.0.4", ghsa=None):
+        name, version = ds.split_identity(identity or self.RELEASE)
+        self.audit = {"advisories": {"9": {"id": 9, "module_name": name, "severity": severity, "github_advisory_id": ghsa or self.GHSA,
+                                           "title": "ReDoS", "vulnerable_versions": vulnerable, "patched_versions": patched,
+                                           "findings": [{"version": version, "paths": [".>tool-kit>" + name]}]}}}
+
+    # Production code of the fixture: a backend entry point that imports only the production dependency. Tests replace or
+    # add files here; they are written after every repository rewrite.
+    ENTRY = {"apps/web/backend/main.ts": "import { serve } from './server.ts';\nimport type { Tool } from 'tool-kit';\nserve();\n",
+             "apps/web/backend/server.ts": "import { pad } from 'left-pad';\nexport const serve = () => pad('x', 2);\n"}
+
+    def write_repository(self):
+        super().write_repository()
+        shutil.rmtree(self.root / "apps", ignore_errors=True)
+        (self.root / "docs/security").mkdir(parents=True, exist_ok=True)
+        (self.root / "docs/security/ADVISORY-test.md").write_text("# Fixture assessment\n")
+        for path, text in {**self.ENTRY, **self.sources}.items():
+            if text is not None:
+                (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+                (self.root / path).write_text(text)
+
+    @property
+    def sources(self):
+        return self.__dict__.setdefault("_sources", {})
+
+    def vulnerability(self, evidence, identity=None):
+        record = next(r for r in evidence["packages"] if r["identity"] == (identity or self.RELEASE))
+        return record, next(f for f in record["findings"] if f["code"] == "vulnerability")
+
+    def assert_blocked(self, why, identity=None):
+        evidence = self.run_gate()
+        self.assertEqual(evidence["decision"], ds.BLOCK)
+        record, finding = self.vulnerability(evidence, identity)
+        self.assertEqual((record["decision"], finding["decision"]), (ds.BLOCK, ds.BLOCK))
+        self.assertTrue(any(why in reason for reason in finding["containment_refused"]), finding)
+        return evidence, finding
+
+    def test_contained_without_expiry_and_accepted_by_the_sbom_gate(self):
+        evidence = self.run_gate()
+        self.assertEqual(evidence["decision"], ds.CONTAINED)
+        self.assertEqual(ds.EXIT[evidence["decision"]], 0)
+        record, finding = self.vulnerability(evidence)
+        self.assertEqual((record["decision"], record["exposure"], finding["decision"]), (ds.CONTAINED, "development", ds.CONTAINED))
+        self.assertEqual(finding["contained_by"], {"advisory": self.GHSA, "record": "docs/security/ADVISORY-test.md"})
+        self.assertEqual(evidence["summary"]["contained"], [{"advisory": self.GHSA, "identity": self.RELEASE, "severity": "high",
+                                                              "record": "docs/security/ADVISORY-test.md"}])
+        self.assertEqual(evidence["summary"]["decisions"][ds.CONTAINED], 1)
+        self.assertIn(f"CONTAINED {self.RELEASE}: vulnerability: {self.GHSA}", self.output)
+        self.assertEqual(self.validate_sbom()[0], 0)
+        # Same evidence a year later: still contained, nothing to renew.
+        with patch.object(ds, "run_audit", return_value=self.audit):
+            self.write_repository()
+            documents = self.registry()
+            with patch.object(ds, "baseline", return_value=(None, False)), redirect_stdout(io.StringIO()):
+                again = ds.verify(self.root, self.temp / ds.EVIDENCE_NAME, base_ref=None, fetch=self.fetch_from(documents),
+                                  now=NOW + datetime.timedelta(days=400))
+        self.assertEqual(again["decision"], ds.CONTAINED)
+
+    def test_new_advisory_blocks_and_prints_the_one_record_to_add(self):
+        self.policy["contained_advisories"] = []
+        _, finding = self.assert_blocked(ds.CONTAINMENT_MISSING)
+        self.assertEqual(finding["containment_refused"], [ds.CONTAINMENT_MISSING])
+        suggested = finding["containment_record"]
+        self.assertEqual({k: suggested[k] for k in ("advisory", "identity", "integrity", "dependents")},
+                         {k: self.record[k] for k in ("advisory", "identity", "integrity", "dependents")})
+        self.assertIn("contain it with this record", self.output)
+        # Another advisory on the same release is a new risk: the record names one advisory only.
+        self.policy["contained_advisories"] = [self.record]
+        self.advise(ghsa="GHSA-2222-3333-4444")
+        self.assert_blocked(ds.CONTAINMENT_MISSING)
+
+    def test_production_reachability_blocks(self):
+        self.package("left-pad@1.3.0")["deps"] = {"glob-lib": "1.0.4"}
+        self.record["dependents"] = ["left-pad", "tool-kit"]
+        _, finding = self.assert_blocked("reachable from production dependencies: <importer:packages/a> > left-pad@1.3.0 > glob-lib@1.0.4")
+        self.assertNotIn("containment_record", finding)
+        # A production dependency itself is never contained either.
+        self.policy["contained_advisories"] = [{**self.record, "identity": "left-pad@1.3.0",
+                                                "integrity": integrity_of("archive:left-pad@1.3.0"), "dependents": ["<importer:packages/a>"]}]
+        self.advise(identity="left-pad@1.3.0")
+        self.assert_blocked("reachable from production dependencies", identity="left-pad@1.3.0")
+
+    def test_critical_advisories_are_never_contained(self):
+        self.advise(severity="critical")
+        _, finding = self.assert_blocked("critical advisories are never contained")
+        self.assertNotIn("containment_record", finding)
+
+    def test_another_archive_or_a_new_dependent_blocks(self):
+        self.record["integrity"] = integrity_of("a different archive")
+        self.assert_blocked("the locked archive (integrity) is not the one assessed")
+        self.record["integrity"] = integrity_of("archive:" + self.RELEASE)
+        self.add("bundler@3.0.0", parent="tool-kit@2.0.0", deps={"glob-lib": "1.0.4"})
+        self.assert_blocked("new dependents not covered by the assessment: bundler")
+        # A dependent that disappears narrows the exposure: still contained.
+        self.record["dependents"] = ["bundler", "tool-kit", "old-tool"]
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)
+
+    def test_a_compatible_official_fix_must_be_taken(self):
+        self.package(self.RELEASE)["extra_releases"] = {"1.0.5": {}}
+        self.assert_blocked("a compatible official fix exists (tool-kit@2.0.0 accepts 1.0.5): update")
+
+    def test_incompatible_deprecated_prerelease_or_still_vulnerable_releases_are_not_fixes(self):
+        self.package(self.RELEASE)["extra_releases"] = {"2.0.0": {}, "1.0.6": {"deprecated": "broken release"},
+                                                        "1.0.7-beta.1": {}, "1.0.3": {}}
+        self.advise(vulnerable="<=1.0.4 || >=2.0.0 <2.0.1", patched=">=1.0.5 <2.0.0 || >=2.0.1")
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)
+        self.advise(patched="<0.0.0", vulnerable="*")  # npm's "no fix exists"
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)
+        self.advise(patched=None, vulnerable=None)
+        self.assert_blocked("needed to prove there is no compatible fix are unavailable")
+
+    def test_direct_development_dependency_follows_its_compatible_line(self):
+        self.world["importers"]["."]["devDependencies"]["glob-lib"] = "1.0.4"
+        self.record["dependents"] = ["<importer:.>", "tool-kit"]
+        self.package(self.RELEASE)["extra_releases"] = {"2.0.0": {}}
+        self.advise(patched=">=2.0.0", vulnerable="<2.0.0")
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)
+        self.package(self.RELEASE)["extra_releases"] = {"1.9.0": {}, "2.0.0": {}}
+        self.advise(patched=">=1.9.0", vulnerable="<1.9.0")
+        self.assert_blocked("<importer:.> accepts 1.9.0")
+
+    def test_optional_peer_metadata_does_not_widen_a_declared_peer_range(self):
+        # fdir's shape: peerDependencies {picomatch: ^3 || ^4} plus peerDependenciesMeta {picomatch: optional}.
+        self.package("tool-kit@2.0.0")["declared"] = {"tiny-helper": "^1.1.0"}
+        self.package("tool-kit@2.0.0")["peer_ranges"] = {"glob-lib": "^1.0.0"}
+        self.package(self.RELEASE)["extra_releases"] = {"2.0.0": {}}
+        self.advise(patched=">=2.0.0", vulnerable="<2.0.0")
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)
+
+    def test_dist_tag_admits_only_its_current_target(self):
+        self.package("tool-kit@2.0.0")["declared"] = {"tiny-helper": "^1.1.0", "glob-lib": "latest"}
+        self.package(self.RELEASE)["extra_releases"] = {"1.0.5": {}}
+        self.package(self.RELEASE)["dist_tags"] = {"latest": "1.0.4"}
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)
+        self.package(self.RELEASE)["dist_tags"] = {"latest": "1.0.5"}
+        self.assert_blocked("tool-kit@2.0.0 accepts 1.0.5")
+
+    def test_a_dependent_update_that_takes_the_fix_or_drops_the_package_must_be_taken(self):
+        self.package("tool-kit@2.0.0")["declared"] = {"tiny-helper": "^1.1.0", "glob-lib": "1.0.4"}  # exact pin
+        self.package(self.RELEASE)["extra_releases"] = {"1.0.5": {}}
+        self.package("tool-kit@2.0.0")["extra_releases"] = {"3.0.0": {"dependencies": {"glob-lib": "^1.0.5"}}}
+        self.assertEqual(self.run_gate()["decision"], ds.CONTAINED)  # 3.0.0 is outside the root's ^2.0.0 line
+        self.package("tool-kit@2.0.0")["extra_releases"]["2.0.1"] = {"dependencies": {"glob-lib": "1.0.5"}}
+        self.assert_blocked("tool-kit@2.0.0 updates to tool-kit@2.0.1, which accepts 1.0.5")
+        self.package("tool-kit@2.0.0")["extra_releases"] = {"2.1.0": {"dependencies": {"tiny-helper": "^1.1.0"}}}
+        self.package(self.RELEASE)["extra_releases"] = {}
+        self.assert_blocked("tool-kit@2.0.0 updates to tool-kit@2.1.0, which no longer depends on glob-lib")
+
+    def test_production_code_that_imports_the_development_tool_blocks(self):
+        for label, files in {
+            "static import": {"apps/web/backend/server.ts": "import { make } from 'tool-kit';\nexport const serve = make;\n"},
+            "dynamic import": {"apps/web/backend/server.ts": "export const serve = () => import('tool-kit/sub');\n"},
+            "require": {"apps/web/backend/server.ts": "const kit = require('tool-kit');\nexport const serve = kit;\n"},
+            "re-export": {"apps/web/backend/server.ts": "export { make as serve } from 'tool-kit';\n"},
+            "through a workspace package": {"apps/web/backend/server.ts": "export { serve } from '@defi-workflow-engine/a';\n",
+                                            "packages/a/src/index.ts": "export * from './serve.js';\n",
+                                            "packages/a/src/serve.ts": "import { make } from 'tool-kit';\nexport const serve = make;\n"},
+            "app route": {"apps/web/src/app/api/route.ts": "import { make } from 'tool-kit';\nexport const GET = make;\n"},
+        }.items():
+            with self.subTest(label):
+                self.sources.clear()
+                self.sources.update(files)
+                _, finding = self.assert_blocked("production code imports tool-kit@2.0.0")
+                self.assertNotIn("containment_record", finding)
+
+    def test_test_only_helpers_and_type_imports_do_not_count(self):
+        self.sources.update({
+            "apps/web/src/test-utils/session.ts": "import { vi } from 'tool-kit';\nexport const fake = vi;\n",
+            "apps/web/backend/server.test.ts": "import { make } from 'tool-kit';\n",
+            "apps/web/backend/server.ts": "import type { Make } from 'tool-kit';\nexport type { Kit } from 'tool-kit';\n"
+                                          "import { pad } from 'left-pad';\nexport const serve = () => pad('x', 2);\n"})
+        evidence = self.run_gate()
+        self.assertEqual(evidence["decision"], ds.CONTAINED)
+        self.assertEqual(evidence["summary"]["production_import_walk"], {"entries": 1, "modules": 2})
+
+    def test_no_production_entry_point_cannot_prove_containment(self):
+        self.sources.update({path: None for path in self.ENTRY})
+        self.ENTRY = {}
+        self.assert_blocked("no production entry point")
+
+    def test_the_whole_graph_audit_command_is_pinned(self):
+        calls = []
+
+        def run(arguments, **_):
+            calls.append(arguments)
+            return subprocess.CompletedProcess(arguments, 0, stdout=json.dumps({"advisories": {}}), stderr="")
+        with patch.object(ds.subprocess, "run", run):
+            ds.run_audit(self.root, pnpm="pnpm")
+        self.assertEqual(calls, [["pnpm", "audit", "--json", "--registry", "https://registry.npmjs.org/"]])
+
+    def test_missing_assessment_document_blocks(self):
+        self.record["record"] = "docs/security/ADVISORY-missing.md"
+        self.assert_blocked("assessment document docs/security/ADVISORY-missing.md is missing")
+
+    def test_unused_record_is_reported_never_blocking(self):
+        self.audit = {"advisories": {}}
+        evidence = self.run_gate()
+        self.assert_pass(evidence)
+        self.assertEqual(evidence["summary"]["containment_records_unused"], [f"{self.GHSA} {self.RELEASE}"])
+
+    def test_records_are_exact_and_cannot_widen(self):
+        good = copy.deepcopy(self.policy)
+        self.assertEqual(ds.policy_errors(good), [])
+        mutations = {
+            "expiry field": lambda r: r.update(expires="2027-01-01"),
+            "approval field": lambda r: r.update(approved_by="Owner"),
+            "missing exposure": lambda r: r.pop("exposure"),
+            "range identity": lambda r: r.update(identity="glob-lib@^1.0.0"),
+            "name only": lambda r: r.update(identity="glob-lib"),
+            "not sha512": lambda r: r.update(integrity="sha1-AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            "no dependents": lambda r: r.update(dependents=[]),
+            "glob dependent": lambda r: r.update(dependents=["tool-*"]),
+            "duplicate dependent": lambda r: r.update(dependents=["tool-kit", "tool-kit"]),
+            "not a GHSA": lambda r: r.update(advisory="CVE-2026-112366"),
+            "short exposure": lambda r: r.update(exposure="dev only"),
+            "record outside docs": lambda r: r.update(record="/etc/passwd.md"),
+            "record escapes docs": lambda r: r.update(record="docs/../SECRET.md"),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label):
+                bad = copy.deepcopy(good)
+                mutate(bad["contained_advisories"][0])
+                self.assertTrue(ds.policy_errors(bad), label)
+        duplicate = copy.deepcopy(good)
+        duplicate["contained_advisories"].append(copy.deepcopy(self.record))
+        self.assertTrue(any("duplicate record" in e for e in ds.policy_errors(duplicate)))
+        not_a_list = copy.deepcopy(good)
+        not_a_list["contained_advisories"] = {"glob-lib": True}
+        self.assertTrue(ds.policy_errors(not_a_list))
+        # The license/supply-chain exception mechanism still cannot touch an advisory.
+        hidden = copy.deepcopy(good)
+        hidden["exceptions"].append({**hidden["exceptions"][0], "id": "hide-advisory", "resolves": ["vulnerability"]})
+        self.assertTrue(any("mandatory control" in e for e in ds.policy_errors(hidden)))
+
+    def test_repository_records_are_exact_and_assessed(self):
+        policy = json.loads((ROOT / ds.POLICY_PATH).read_text())
+        graph = ds.Graph((ROOT / "pnpm-lock.yaml").read_bytes())
+        for entry in policy.get("contained_advisories") or []:
+            with self.subTest(entry["advisory"]):
+                self.assertTrue((ROOT / entry["record"]).is_file())
+                if entry["identity"] in graph.packages:  # a record left behind after an upgrade is inert, never a failure
+                    self.assertEqual(entry["integrity"], graph.integrity(entry["identity"]))
+                    self.assertNotIn(entry["identity"], ds.production_paths(graph))
 
 
 class SbomGate(Harness):
