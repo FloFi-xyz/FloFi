@@ -64,6 +64,8 @@ test('a token balance gives exact, rounded-down amounts; a pick only writes that
   expect(await picks(page)).toEqual(['1.25']);
   // Rounded down at the token's six decimals, never up: 75% of 0.000003 USDC is 0.000002.
   await set(page, { asset: 'SOL', units: '3' }); // another asset remounts the shortcuts (a new question)
+  // Wait for that question to render before the next one: two updates in a row may be batched into one render (same key: no remount).
+  await expect(note(page)).toContainText('Max keeps 0.01 SOL for network fees.');
   await set(page, { asset: 'USDC' });
   await expect(shortcut(page, '25')).toBeDisabled();
   await expect(shortcut(page, '75')).toHaveAccessibleName('Use 75% of your balance: 0.000002 USDC');
@@ -77,7 +79,10 @@ test('a native SOL Max keeps the network fee reserve, and below it nothing is of
   await expect(note(page)).toContainText('Max keeps 0.01 SOL for network fees.');
   await shortcut(page, 'MAX').click();
   expect(await picks(page)).toEqual(['0.99']);
-  await set(page, { asset: 'USDC' }); await set(page, { asset: 'SOL', units: '5000000' });
+  // A new question in between (rendered before the next: back-to-back updates may batch into one render, so no remount).
+  await set(page, { asset: 'USDC' });
+  await expect(shortcut(page, 'MAX')).toHaveAccessibleName(/USDC$/);
+  await set(page, { asset: 'SOL', units: '5000000' });
   await expect(note(page)).toContainText('0.005 SOL');
   for (const key of ['25', '50', '75', 'MAX']) await expect(shortcut(page, key)).toBeDisabled();
 });
