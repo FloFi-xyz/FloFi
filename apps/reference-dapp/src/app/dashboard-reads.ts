@@ -9,8 +9,10 @@ import type { HistoryDisposition } from '@defi-workflow-engine/cloud-runtime';
  * needs (another record opened, the wallet changed). Any failure rejects; the caller shows the record as unavailable.
  */
 async function read<T>(account: string, view: 'list' | 'detail' | 'disposition', target: { runId?: string; cursor?: string | null }, signal?: AbortSignal): Promise<T> {
-  const query = new URLSearchParams({ account, view, ...target.runId ? { runId: target.runId } : {}, ...target.cursor ? { cursor: target.cursor } : {} });
-  const response = await fetch(`/api/dashboard/history?${query}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin', ...signal ? { signal } : {} });
+  const query = new URLSearchParams({ view, ...target.runId ? { runId: target.runId } : {}, ...target.cursor ? { cursor: target.cursor } : {} });
+  // The expected wallet is a header (never in the URL or access logs); the route requires it and a same-origin fetch.
+  const response = await fetch(`/api/dashboard/history?${query}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin',
+    headers: { 'x-flofi-account': account }, ...signal ? { signal } : {} });
   const body = await response.json() as { ok?: unknown; value?: unknown };
   if (!response.ok || body.ok !== true) throw new Error('DASHBOARD_READ_UNAVAILABLE');
   return body.value as T;

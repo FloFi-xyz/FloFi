@@ -652,7 +652,7 @@ describe('BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 destination observed, finalit
     const failing = createRouterService({ storage: createFileExecutionStorage(dir, 'ROUTER_BUSY'), sourceRpc: h.baseRpc, providers: h.providers, provenance: 'MOCKED',
       destinationRpc: async (method, params) => { if (method === 'eth_getBlockByNumber' && params[0] === 'safe') throw Error('PUBLIC_RPC_UNAVAILABLE'); return h.arbitrumRpc(method, params); },
       executionEnabled: true, now: h.clock, mockedCodePins: ROUTER_MOCK_CODE_PINS });
-    await failing.observe(run.id).catch(() => undefined);
+    expect(await failing.observe(run.id)).toMatchObject({ phase: 'DESTINATION_OBSERVED', observation: { outcome: 'TEMPORARY_FAILURE', reason: 'PUBLIC_RPC_UNAVAILABLE' } });
     const after = await service.load(run.id);
     expect(after).toMatchObject({ phase: 'DESTINATION_OBSERVED', verdict: 'PENDING', evidence: null });
     expect(after.destination!.transactionHash).toBe(observed.destination!.transactionHash);

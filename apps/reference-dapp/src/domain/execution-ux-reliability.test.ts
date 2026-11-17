@@ -78,6 +78,18 @@ describe('EXEC-02: settlement sync re-reads only a settling run and never adopts
     expect(adoptSettlementRead({ ...base, phase: 'RECOVERY_REQUIRED' }, { ...base, phase: 'REFUNDED', verdict: 'REFUNDED' })).toBe(true);
     expect(adoptSettlementRead(observed, observed)).toBe(true);
   });
+  it('always adopts a terminal record, even one whose facts changed (divergent after a reorg, refunded)', () => {
+    const observed = { ...base, phase: 'DESTINATION_OBSERVED', destination: { safe: true } };
+    expect(adoptSettlementRead(observed, { ...observed, phase: 'RECONCILIATION_REQUIRED', verdict: 'DIVERGENT', destination: { safe: false } })).toBe(true);
+    expect(adoptSettlementRead(observed, { ...base, phase: 'REFUNDED', verdict: 'REFUNDED', destination: null })).toBe(true);
+  });
+  it('adopts a fill verified after the deadline (RECOVERY_REQUIRED → DESTINATION_OBSERVED) and a universal side becoming final', () => {
+    expect(adoptSettlementRead({ ...base, phase: 'RECOVERY_REQUIRED' }, { ...base, phase: 'DESTINATION_OBSERVED', destination: { safe: false } })).toBe(true);
+    expect(adoptSettlementRead({ ...base, phase: 'DESTINATION_OBSERVED', destination: { safe: false } }, { ...base, phase: 'RECOVERY_REQUIRED' })).toBe(false);
+    const universal = { ...base, phase: 'DESTINATION_OBSERVED', source: { final: true }, destination: { final: false } };
+    expect(adoptSettlementRead(universal, { ...universal, destination: { final: true } })).toBe(true);
+    expect(adoptSettlementRead(universal, { ...universal, source: { final: false } })).toBe(false);
+  });
   it('refuses a late answer that would move the run back, and another run', () => {
     const observed = { ...base, phase: 'DESTINATION_OBSERVED', destination: { safe: false } };
     expect(adoptSettlementRead(observed, base)).toBe(false);
@@ -116,6 +128,22 @@ describe('CHAT-01: status questions about the current execution', () => {
     const inFlight = view(lifecycle({ phase: 'IN_FLIGHT', destination: null }));
     const received = executionStatusAnswer(inFlight, 'RECEIVED', 'PT')!.text;
     expect(received).toContain('A entrega ainda não foi observada na rede de destino'); expect(received).toContain('0 de 1 etapas concluídas');
+  });
+  it('a run whose requests confirmed but whose steps are not reconciled yet is "confirmed, still reconciling", never "yes"', () => {
+    const confirmed = lifecycle({ phase: 'RECONCILED', verdict: 'RECONCILED', destination: { transactionHash: fill, safe: true } });
+    const unreconciled = { ...confirmed, stepEvidence: Object.fromEntries(confirmed.steps.map(step => [step.id, { reconciled: false }])) } as unknown as ExecutionLifecycle;
+    expect(executionStatusAnswer({ progress: unreconciled, workflowProgress: null } as unknown as LifecycleView, 'OUTCOME', 'EN')!.text)
+      .toBe('Its requests are confirmed on-chain. FloFi is still reconciling the outcome before calling it complete.');
+  });
+  it('while later steps remain, "do I need to sign again?" says the next step needs its own confirmation', () => {
+    const live = lifecycle(), progress = workflowProgressView({ sequence: null, live })!;
+    const multi = { progress: live, workflowProgress: { ...progress, total: 2 } } as unknown as LifecycleView;
+    const pt = executionStatusAnswer(multi, 'SIGNATURE', 'PT')!.text;
+    expect(pt).toMatch(/^Transferência observada no destino\. Não para o que já foi enviado\./); expect(pt).not.toContain('Não precisa assinar novamente');
+    const done = view(lifecycle({ phase: 'RECONCILED', verdict: 'RECONCILED', destination: { transactionHash: fill, safe: true } }));
+    const step1 = { ...done, workflowProgress: { ...(done as unknown as { workflowProgress: object }).workflowProgress, total: 2, completed: 1, finished: false } } as unknown as LifecycleView;
+    expect(executionStatusAnswer(step1, 'SIGNATURE', 'EN')!.text).toMatch(/^Not for what was already sent/);
+    expect(executionStatusAnswer(step1, 'OUTCOME', 'EN')!.text).not.toMatch(/^Yes/);
   });
   it('a request waiting in the wallet, an unknown outcome and a failed run are each said as such', () => {
     const wallet = view(lifecycle({ phase: 'AUTHORIZED', destination: null, attempts: [{ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true, receipt: null }] }));

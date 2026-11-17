@@ -106,7 +106,7 @@ describe('a bridge whose delivery is observed on the destination', () => {
     const message = 'The funds have been observed on the destination chain. FloFi is still verifying final settlement. No additional wallet signature is required.';
     expect(projectDashboardRun(bridge())).toMatchObject({ status: 'In progress', message });
     const attempts = [{ attemptId: 'a', step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true },
-      { attemptId: 'd', step: 'DEPOSIT', state: 'CONFIRMED', transactionHash: hash.replace('a', 'b'), reconciled: true }] as unknown as DashboardRun['attempts'];
+      { attemptId: 'd', step: 'DEPOSIT', state: 'CONFIRMED', transactionHash: hash.replace('a', 'b'), reconciled: true }] as unknown as NonNullable<DashboardRun['attempts']>;
     expect(projectDashboardRun(bridge({ attempts }))).toMatchObject({ status: 'In progress', message });
   });
   it('a flagged record keeps its attention wording', () => {

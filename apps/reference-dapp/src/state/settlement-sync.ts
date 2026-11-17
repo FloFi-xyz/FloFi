@@ -9,8 +9,9 @@ import { adoptSettlementRead, SETTLEMENT_SYNC_MS, settlementSyncDue, type Settle
  * so every surface follows the worker's reconciliation without "Check status" (which stays as the manual fallback).
  *
  * An answer is adopted only if nothing else changed the store since the read started (`epoch`: any operation — a check, an execution, opening
- * another run — advances it), the same run is still shown, and the answer does not move the run back (`adoptSettlementRead`). The store's own
- * `accept` keeps its ownership check. Stops by itself once the run is final. Nothing is observed, retried, signed or submitted.
+ * another run — advances it), the same run is still shown, and the answer does not move the run back (`adoptSettlementRead`). The read is
+ * owner-scoped by the server (the store's status action); the router store's `accept` also checks the signed-in wallet. Stops by itself once
+ * the run is final. Nothing is observed, retried, signed or submitted.
  */
 export function useSettlementSync<T extends SettlementRecord>(input: {
   readonly record: T | null; readonly busy: () => boolean; readonly epoch: () => number; readonly visible: () => string | undefined;

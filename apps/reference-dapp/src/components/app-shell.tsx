@@ -673,7 +673,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     || liveExecution && !isFinalExecutionResult(liveExecution));
   // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): while editing is paused, the Canvas header states the execution's own status (from the same
   // authoritative lifecycle Execute and the Assistant read), never the authoring state that invites a new simulation.
-  const canvasRunStatus = editingPaused ? liveExecution && !isFinalExecutionResult(liveExecution) ? liveExecution.label : 'Execution in progress' : null;
+  const canvasRunStatus = !editingPaused ? null : liveExecution && !isFinalExecutionResult(liveExecution) ? liveExecution.label
+    : ['authorizing', 'proving', 'wallet', 'confirming', 'confirm-update'].includes(workflowRunHere.phase) ? 'Waiting for your authorization'
+    : workflowRunHere.run && ['ATTENTION', 'HALTED'].includes(workflowRunHere.run.state) ? 'Execution needs attention' : 'Execution in progress';
   const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
     // HOTFIX-P1-CHAT-RECOVERY: where the Editor keeps its Canvas (/app), this tab also keeps the signed-in account's conversation per workflow.

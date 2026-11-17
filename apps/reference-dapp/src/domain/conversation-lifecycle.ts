@@ -20,7 +20,7 @@ import type { Command } from './commands';
 import { conversationCopy } from './conversation-copy';
 import { translate } from '../i18n/translate';
 import type { SequencePresentation } from './sequence-presentation';
-import type { WorkflowProgressView } from './workflow-progress';
+import { runReconciled, type WorkflowProgressView } from './workflow-progress';
 import { gaslessWalletRequests, isIncludedNetworkFee } from './gas-payment';
 
 export type ConversationLanguage = 'EN' | 'PT';
@@ -206,19 +206,25 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
   const step = whole?.steps.find(item => item.current) ?? null;
   const where = step ? `${progress} · ${c.stepPhase(step.number, translate(language, step.action), translate(language, step.text.key, ...step.text.args))}` : progress;
   const failure = () => c.statusFailed(translate(language, '{0}. {1}', translate(language, result?.label ?? live.label), translate(language, result?.message ?? live.message)));
-  const done = phase === 'COMPLETED' && Boolean(result) && isFinalExecutionResult(live);
+  // "Yes" only for what the record proves reconciled: the whole workflow finished, or this run's every step reconciled from the chain
+  // (`runReconciled`); a run whose requests confirmed before that is "confirmed, still reconciling".
+  const runDone = phase === 'COMPLETED' && Boolean(result) && isFinalExecutionResult(live) && runReconciled(live);
+  const done = runDone && (!whole || whole.finished);
+  // Later steps of this workflow still need their own Review and wallet confirmation (this run is one step of several).
+  const later = Boolean(whole && !whole.finished && (runDone ? whole.completed < whole.total : whole.completed + 1 < whole.total));
   let text: string;
   if (asked === 'SIGNATURE') {
     text = phase === 'AWAITING_WALLET' ? c.signWallet : phase === 'UNCERTAIN' ? c.signUncertain : phase === 'FAILED' || phase === 'PARTIAL' ? c.signAfterFailure
-      : observed ? translate(language, DESTINATION_OBSERVED_MESSAGE)
+      : observed ? later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.signNext}` : translate(language, DESTINATION_OBSERVED_MESSAGE)
       // A confirmed approval whose action was not sent yet: that action needs its own Review and confirmation (never requested automatically).
-      : !done && wallet.some(op => op.state === 'waiting') && wallet.some(op => op.state === 'confirmed') ? c.signNext : c.signNone;
+      : later || !done && wallet.some(op => op.state === 'waiting') && wallet.some(op => op.state === 'confirmed') ? c.signNext : c.signNone;
   } else if (phase === 'AWAITING_WALLET') text = c.statusWallet;
   else if (phase === 'UNCERTAIN') text = c.statusUncertain;
   else if (phase === 'FAILED' || phase === 'PARTIAL') text = failure();
   else if (done) text = c.statusDone;
   else if (observed) text = translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, DESTINATION_OBSERVED_MESSAGE));
-  else if (phase === 'COMPLETED') text = c.statusConfirmedReconciling;
+  // This step reconciled while the workflow has steps left: where the workflow stands, never "yes".
+  else if (phase === 'COMPLETED') text = runDone ? c.statusInProgress(where) : c.statusConfirmedReconciling;
   else text = asked === 'RECEIVED' && operations.some(op => !op.wallet) ? `${c.statusDeliveryPending} ${c.statusInProgress(where)}` : c.statusInProgress(where);
   return { text, notes: [...readFailed && !done ? [c.statusLastRead] : [], c.statusReadOnly] };
 }
