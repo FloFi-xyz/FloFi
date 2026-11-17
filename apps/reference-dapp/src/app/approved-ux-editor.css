@@ -195,6 +195,13 @@
 .copilot-options .chat-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .copilot-options .chat-action:disabled{border-color:var(--line);background:var(--soft);color:var(--muted)}
 .copilot-options[aria-busy="true"] .chat-action{cursor:progress}
+/* BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): 25% · 50% · 75% · Max under FloFi's amount question: the percentage above the figure it writes. */
+.amount-shortcuts .copilot-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.amount-shortcuts .amount-shortcut{display:grid;gap:1px;justify-items:center;align-content:center;min-height:44px;padding:5px 6px;font-variant-numeric:tabular-nums}
+.amount-shortcut-figure{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:500;color:var(--muted)}
+.amount-shortcuts .amount-shortcut:disabled .amount-shortcut-figure{color:inherit}
+.amount-shortcuts-note{margin:6px 0 0;font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+@media(max-width:380px){.amount-shortcuts .copilot-options{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* ── Touch screens keep 44 px targets; ≤ 800 px the rail stays icon-only (board 16 §7, §8). ─────────────────────────────────────── */
 @media(pointer:coarse){

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ConversationLanguage, ConversationReview } from './conversation-lifecycle';
+import type { AwaitingAmount } from './amount-shortcuts';
 
 /**
  * One FloFi chat message (`state/flofi-conversation.ts` writes them; `components/copilot-panel.tsx` shows them). Presentation only: a message
@@ -23,6 +24,11 @@ export type ChatMessage = {
    * Model-written text is not here (it stays as written, and the catalog translates what it knows).
    */
   readonly variants?: Readonly<Record<ConversationLanguage, ChatContent>>;
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): this message is FloFi's structured question for an amount (the engine's open draft when it was
+   * written). The panel offers balance shortcuts under it only while it is the latest message and the engine still waits for exactly this.
+   */
+  readonly awaitingAmount?: AwaitingAmount;
 };
 /** One rendering of a FloFi message. */
 export type ChatContent = Pick<ChatMessage, 'text' | 'notes' | 'options' | 'question' | 'review'>;

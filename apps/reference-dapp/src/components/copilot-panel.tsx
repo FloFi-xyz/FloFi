@@ -11,6 +11,8 @@ import { shownMessage } from '../domain/chat-message';
 import { ConversationReviewCard, NetworkChoices, networkChoiceOptions } from './conversation-cards';
 import { ChatActions, CopilotMessage, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
 import { CopilotAutomationManager } from './copilot-automation-manager';
+import { AmountShortcuts } from './amount-shortcuts';
+import type { AwaitingAmount } from '../domain/amount-shortcuts';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
 
 /**
@@ -32,6 +34,13 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
   const { copilot, messages, busy, input, setInput, send } = conversation;
   const log = useFollowLatest(copilot.enabled || conversation.direct, messages.length, busy);
   const last = messages.at(-1);
+  // UX-02: balance shortcuts only under FloFi's latest message when it is the structured amount question the engine still waits for, unchanged.
+  const sameRequest = (request: AwaitingAmount | null | undefined, asked: AwaitingAmount | undefined) => !!request && !!asked && request.question === asked.question
+    && request.asset === asked.asset && request.network === asked.network;
+  const awaiting = last?.awaitingAmount ? copilot.awaitingAmount?.() ?? null : null;
+  const shortcuts = awaiting && sameRequest(awaiting.request, last?.awaitingAmount) ? awaiting : null;
+  // Read at the moment of a pick (after any balance re-read): FloFi must still wait for exactly this amount, under its latest message.
+  const stillOpen = (asked: AwaitingAmount) => () => sameRequest(copilot.awaitingAmount?.()?.request, asked) && sameRequest(asked, conversation.messages.at(-1)?.awaitingAmount);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = input.trim();
@@ -62,6 +71,8 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
           {message.question && <p className="conversation-question"><strong>{tr(message.question)}</strong></p>}
           {(message.review || message.question) && options && options.length > 0 && <ChatActions options={options} verbatim={message.verbatim} busy={busy} onPick={send}/>}
           {networks && <NetworkChoices options={networks} disabled={busy} onPick={send}/>}
+          {written === last && shortcuts && <AmountShortcuts request={shortcuts.request} evm={shortcuts.evm} solana={shortcuts.solana} workflow={shortcuts.workflow}
+            disabled={busy || !interactive} stillOpen={stillOpen(shortcuts.request)} onPick={send}/>}
         </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text, ...message.params ?? [])}</p>}
       </div>);
     })}
