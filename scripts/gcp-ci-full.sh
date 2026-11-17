@@ -102,7 +102,7 @@ export PATH="$toolbin:$PATH"
 )
 (
   source scripts/ci-observe.sh 'Dependency audit'
-  pnpm audit --audit-level low
+  pnpm audit --prod --audit-level low
 )
 bash scripts/ci-sbom.sh
 (

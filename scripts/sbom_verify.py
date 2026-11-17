@@ -3,7 +3,7 @@
 
 The expected inventory is computed, never pinned: pnpm-lock.yaml gives the registry identities, their integrities,
 the importers and the graph; the dependency security evidence (scripts/dependency_security.py) gives each package's
-registry-declared license and must be a PASS for this exact revision, lockfile and policy. The SBOM is removed after
+registry-declared license and must be a PASS (or CONTAINED, DEC-0058) for this exact revision, lockfile and policy. The SBOM is removed after
 validation whether it passes or fails.
 
 pnpm 11.22.0 writes no workspace components and lists each component's dependency edges once per traversal, so the
@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 import sys
 
-from dependency_security import (EVIDENCE_KIND, EVIDENCE_NAME, EVIDENCE_SCHEMA, PASS, POLICY_PATH, ROOT, Graph,
+from dependency_security import (ACCEPTED, EVIDENCE_KIND, EVIDENCE_NAME, EVIDENCE_SCHEMA, POLICY_PATH, ROOT, Graph,
                                  current_revision, dependency_identity, parse_yaml, split_identity, workspace_manifests)
 
 
@@ -46,7 +46,8 @@ def license_value(expression):
 
 
 def load_evidence(path, root, graph):
-    """Fail unless the evidence is a PASS for this revision, this lockfile and this policy (no stale or foreign evidence)."""
+    """Fail unless the evidence is a PASS or CONTAINED decision for this revision, this lockfile and this policy (no stale or
+    foreign evidence). CONTAINED means every remaining advisory is development/CI-only and re-proved contained (DEC-0058)."""
     try:
         evidence = json.loads(Path(path).read_text())
     except (OSError, ValueError):
@@ -54,7 +55,7 @@ def load_evidence(path, root, graph):
     policy_sha256 = hashlib.sha256((Path(root) / POLICY_PATH).read_bytes()).hexdigest()
     checks = {
         "kind": evidence.get("kind") == EVIDENCE_KIND and evidence.get("schema_version") == EVIDENCE_SCHEMA,
-        "decision": evidence.get("decision") == PASS,
+        "decision": evidence.get("decision") in ACCEPTED,
         "revision": evidence.get("revision") == current_revision(root) and evidence.get("revision") != "UNKNOWN",
         "lockfile": (evidence.get("lockfile") or {}).get("sha256") == graph.sha256,
         "policy": (evidence.get("policy") or {}).get("sha256") == policy_sha256,
@@ -65,8 +66,8 @@ def load_evidence(path, root, graph):
         raise SbomError("Dependency security evidence is not valid for this revision: " + ", ".join(failed))
     records = {}
     for record in evidence["packages"]:
-        if record.get("decision") != PASS or record.get("identity") in records:
-            raise SbomError("Dependency evidence package is not a unique PASS: " + str(record.get("identity")))
+        if record.get("decision") not in ACCEPTED or record.get("identity") in records:
+            raise SbomError("Dependency evidence package is not a unique PASS or CONTAINED: " + str(record.get("identity")))
         records[record["identity"]] = record
     if set(records) != set(graph.identities()):
         raise SbomError("Dependency evidence does not cover exactly the locked registry packages")
@@ -183,10 +184,13 @@ def validate(sbom_path, evidence_path, root=ROOT, summary=None):
         if actual != (declared if isinstance(declared, str) else None):
             raise SbomError("SBOM license expression changed: " + identity)
     excepted = sorted({f["resolved_by"] for r in records.values() for f in r.get("findings", []) if "resolved_by" in f})
+    contained = {(identity, f["contained_by"]["advisory"]) for identity, r in records.items() for f in r.get("findings", [])
+                 if isinstance(f.get("contained_by"), dict)}
     message = (f"Ephemeral CycloneDX 1.6 SBOM: {len(seen)} registry components = pnpm-lock.yaml (computed), "
                f"{len(manifests)} workspace importers checked from manifests, {sum(len(t) for t in edges.values())} edges "
                f"all in the lockfile, every component reachable, licenses from dependency evidence {evidence['policy']['version']} "
-               f"(exceptions {', '.join(excepted) or 'none'}), SHA-256 {hashlib.sha256(raw).hexdigest()}")
+               f"(exceptions {', '.join(excepted) or 'none'}; contained development/CI-only advisories "
+               f"{', '.join(sorted(f'{c} {i}' for i, c in contained)) or 'none'}), SHA-256 {hashlib.sha256(raw).hexdigest()}")
     print(message, flush=True)
     summary = summary or os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

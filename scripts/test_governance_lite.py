@@ -154,7 +154,7 @@ class GovernanceLite(unittest.TestCase):
         for command in ("pnpm typecheck", "pnpm lint", "pnpm build", "pnpm schemas:check", "python3 scripts/agent_guard.py check",
                         'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
                         'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"',
-                        "pnpm install --frozen-lockfile --ignore-scripts", "pnpm audit --audit-level low",
+                        "pnpm install --frozen-lockfile --ignore-scripts", "pnpm audit --prod --audit-level low",
                         "python3 scripts/dependency_security.py verify", "bash scripts/ci-sbom.sh",
                         "python3 scripts/function_traces.py apps/reference-dapp",
                         "node scripts/guarded-release-browser.mjs critical",

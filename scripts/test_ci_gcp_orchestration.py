@@ -185,7 +185,7 @@ class CloudOrchestration(unittest.TestCase):
     def test_early_critical_order_keeps_setup_resource_and_coverage_constraints(self):
         full = (ROOT / 'scripts/gcp-ci-full.sh').read_text()
         commands = ['gcp-source-snapshot.py verify --initialize-git', 'dependency_security.py verify',
-                    'pnpm audit --audit-level low', 'ci-sbom.sh', 'pnpm build', 'bootstrap-anvil.py',
+                    'pnpm audit --prod --audit-level low', 'ci-sbom.sh', 'pnpm build', 'bootstrap-anvil.py',
                     'bootstrap-playwright.py', 'bash scripts/gcp-ci-certify.sh']
         offsets = [full.index(command) for command in commands]
         self.assertEqual(offsets, sorted(offsets))

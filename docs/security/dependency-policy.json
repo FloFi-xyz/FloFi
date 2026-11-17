@@ -1,9 +1,10 @@
 {
   "policy": "flofi-dependency-security",
-  "version": "1.0.0",
-  "effective": "2026-11-01",
+  "version": "1.1.0",
+  "effective": "2026-11-17",
   "decision_record": "docs/builds/BUILD-FLOFI-CI-ARCHITECTURE-001.md",
-  "summary": "pnpm-lock.yaml is the resolved graph. scripts/dependency_security.py verify evaluates every locked registry package and every lockfile edge against this policy and decides PASS, REVIEW_REQUIRED or BLOCK. Routine dependency changes that pass need no edit here. Only a real license or supply-chain exception is recorded below, once. Mandatory controls (integrity, invalid registry signatures, advisories, prohibited licenses, sources, lockfile edges, malicious indicators, policy bypass) cannot be excepted; a missing signature is REVIEW_REQUIRED.",
+  "amended_by": "docs/DECISIONS.md DEC-0058 (BUILD-FLOFI-CI-ARCHITECTURE-002)",
+  "summary": "pnpm-lock.yaml is the resolved graph. scripts/dependency_security.py verify evaluates every locked registry package and every lockfile edge against this policy and decides PASS, CONTAINED, REVIEW_REQUIRED or BLOCK. Routine dependency changes that pass need no edit here. Only a real license or supply-chain exception is recorded below, once. Mandatory controls (integrity, invalid registry signatures, advisories, prohibited licenses, sources, lockfile edges, malicious indicators, policy bypass) cannot be excepted; a missing signature is REVIEW_REQUIRED. DEC-0058: an advisory is never excepted; one that is development/CI-only, not critical and has no compatible official fix is CONTAINED by one contained_advisories record (advisory + release + integrity), re-proved on every run (lockfile tier, dependents, registry fixes) and by every production build (scripts/function_traces.py: traces, server source maps), with no expiry; any change it cannot re-prove BLOCKs again.",
   "registry": {
     "url": "https://registry.npmjs.org/",
     "tarball_host": "registry.npmjs.org",
@@ -258,6 +259,21 @@
       "approved_by": "Owner",
       "approved_at": "2026-10-15",
       "record": "docs/builds/BUILD-001-REPORT.md"
+    }
+  ],
+  "contained_advisories": [
+    {
+      "advisory": "GHSA-fc5q-39xc-vjpf",
+      "identity": "picomatch@4.0.7",
+      "integrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==",
+      "dependents": [
+        "fdir",
+        "tinyglobby",
+        "vite",
+        "vitest"
+      ],
+      "exposure": "ReDoS needs an attacker-written glob pattern. Its consumers are Vitest/Vite and typescript-eslint (via tinyglobby/fdir) in development and CI, which compile only patterns from committed configuration (no extglobs, no typed-lint project globs); whoever can change those already controls the code CI runs.",
+      "record": "docs/security/ADVISORY-GHSA-fc5q-39xc-vjpf.md"
     }
   ]
 }

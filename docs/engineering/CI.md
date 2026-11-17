@@ -9,7 +9,7 @@ submits a source snapshot). This page describes the topology introduced by
 ```
 t=0      governance (small) ─────────┐            certification-build (large: install, pnpm build, function traces, pack)
                                      │                         │  workspace: build.tar + manifest (this revision only)
-after governance:                    ├─ certification-supply-chain (small): dependency security, audit, SBOM
+after governance:                    ├─ certification-supply-chain (small): dependency security, production audit, SBOM
                                      ├─ certification-checks (large + PostgreSQL): typecheck, lint, schema drift,
                                      │     PostgreSQL suites, anvil + fork suite
                                      ├─ certification-unit (large): package build, unit and contract suites, exported API
@@ -22,8 +22,8 @@ fan-in:  certification (small): `python3 scripts/ci-observe.py verify` (the ledg
 | Job | Runner | Work |
 | --- | --- | --- |
 | `governance` | small | governance unit tests, CI tests, `governance_lite.py`, whitespace over every commit the branch adds |
-| `certification-build` | large, no database | the one production build of the revision; `scripts/ci_build_artifact.py pack` |
-| `certification-supply-chain` | small | dependency security policy, audit, SBOM: a new upstream advisory blocks certification without hiding any other job's results |
+| `certification-build` | large, no database | the one production build of the revision, its function-trace gate (which also re-proves that contained advisories do not ship); `scripts/ci_build_artifact.py pack` |
+| `certification-supply-chain` | small | dependency security policy (whole graph; DEC-0058 containment), `pnpm audit --prod --audit-level low`, SBOM: a new upstream advisory blocks certification without hiding any other job's results |
 | `certification-checks` | large + PostgreSQL | typecheck, lint, schema drift, PostgreSQL suites, fork suite |
 | `certification-unit` | large, no database | `turbo run build` of the packages, then the unit and contract suites with their result guard |
 | `certification-browser-1..8` | medium + PostgreSQL | `ci_build_artifact.py unpack`, then the browser shards (critical tier first in job 1, composition last in job 8) |
@@ -72,7 +72,9 @@ in 60 consecutive pipelines). Every `main` revision is certified; nothing cancel
 4. **Reruns: at most one, same revision, failed jobs only**, and only for a failure shown to be transient: an infrastructure error
    (download, spin-up, out of memory, agent), or a test in CircleCI's flaky-test list failing on timing, unrelated to the diff. Use
    "Rerun failed jobs"; the ledger accepts the original passing jobs' records of the same revision. Deterministic failures (assertions,
-   visual baselines, governance, dependency policy, typecheck, lint, schema drift) are fixed before any new certification.
+   visual baselines, governance, dependency policy, typecheck, lint, schema drift) are fixed before any new certification. A new
+   development/CI-only advisory with no compatible fix prints the one `contained_advisories` record to add after assessing its
+   exposure ([DEC-0058](../security/DEPENDENCY-SECURITY.md#contained-advisories-dec-0058)); any other advisory needs the update.
 5. **Visual baselines.** A test stops at its first differing screenshot, so its later screenshots only render once the first matches. After
    a screenshot difference the guarded runner renders every screenshot of the failed tests once more into
    `playwright-results/<profile>-candidate-baselines/` (the `e2e/` layout; `FLOFI_CANDIDATE_BASELINES`, never set in a certifying run;
@@ -96,3 +98,4 @@ in 60 consecutive pipelines). Every `main` revision is certified; nothing cancel
 | Supersede guard | `FLOFI_CI_SUPERSEDE_CHECK: "0"` in the shared executor environment (one line). |
 | Shared build | In `prepare-browser`, replace the attach/unpack steps with `production-build` and drop `certification-build` from the browser jobs' `requires` (the CI tests document the expected shape). |
 | Shard count | Change `BROWSER_SHARDS` and the browser jobs together. |
+| Advisory containment (DEC-0058) | Revert its commit (the whole-graph audit step and BLOCK-only advisories return); removing one `contained_advisories` record makes that advisory BLOCK again. |

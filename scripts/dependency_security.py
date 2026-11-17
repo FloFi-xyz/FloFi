@@ -8,12 +8,18 @@ package is evaluated on its own evidence and receives one decision:
   REVIEW_REQUIRED  an evidence-backed concern automation cannot settle (a license needing legal reading, a newly
                    introduced install script, a provenance regression with a new publisher, a likely typosquat...).
                    Resolved only by one exception record in the policy, never by waiting.
+  CONTAINED        (DEC-0058) the package's only unresolved findings are advisories that one contained_advisories record
+                   (advisory + exact release + integrity) covers and whose containment this run re-proves from the
+                   lockfile and the registry: development/CI-only, not critical, no new dependents, no compatible
+                   official fix. The production build re-proves absence from the deployed artifacts
+                   (scripts/function_traces.py). Certification passes; the evidence and the summary name it.
   BLOCK            a mandatory control failed (integrity, registry signature, advisory, prohibited license, source
-                   substitution, malicious indicator, policy bypass). No exception can resolve it.
+                   substitution, malicious indicator, policy bypass). No exception can resolve it; an advisory is only
+                   ever CONTAINED as above, never excepted.
 
 There is no release-age gate, no package count, no graph hash and no per-package allowlist: counts are computed from
 the lockfile, and publication time is only a risk signal. Evidence (JSON) records every package, its checks and the
-decision, bound to the policy version and the CI revision. Exit status: 0 PASS, 2 REVIEW_REQUIRED, 3 BLOCK,
+decision, bound to the policy version and the CI revision. Exit status: 0 PASS or CONTAINED, 2 REVIEW_REQUIRED, 3 BLOCK,
 1 when the evidence itself could not be produced (fail closed).
 """
 
@@ -35,11 +41,12 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = "docs/security/dependency-policy.json"
 EVIDENCE_NAME = "flofi-dependency-evidence.json"
 EVIDENCE_KIND = "flofi-dependency-security-evidence"
-EVIDENCE_SCHEMA = 1
+EVIDENCE_SCHEMA = 2  # 2: the CONTAINED decision and exposure fields (DEC-0058)
 
-PASS, REVIEW, BLOCK = "PASS", "REVIEW_REQUIRED", "BLOCK"
-RANK = {PASS: 0, REVIEW: 1, BLOCK: 2}
-EXIT = {PASS: 0, REVIEW: 2, BLOCK: 3}
+PASS, CONTAINED, REVIEW, BLOCK = "PASS", "CONTAINED", "REVIEW_REQUIRED", "BLOCK"
+RANK = {PASS: 0, CONTAINED: 1, REVIEW: 2, BLOCK: 3}
+EXIT = {PASS: 0, CONTAINED: 0, REVIEW: 2, BLOCK: 3}
+ACCEPTED = frozenset({PASS, CONTAINED})  # decisions that let certification continue (scripts/sbom_verify.py)
 
 # Mandatory controls: a finding with one of these codes is BLOCK and no policy exception may resolve it.
 BLOCK_CODES = frozenset({
@@ -65,7 +72,9 @@ REMEDIATION = {
     "policy-bypass": "A mandatory dependency control was disabled. Restore it; mandatory controls cannot be excepted.",
     "registry-signature-invalid": "The npm registry signature does not verify for this name@version:integrity. Treat as tampering.",
     "source-substitution": "Resolve only from https://registry.npmjs.org/ or workspace links; no tarball, git, file or custom-registry sources.",
-    "vulnerability": "Upgrade to a patched release (pnpm audit lists it). Advisories cannot be excepted.",
+    "vulnerability": "Upgrade to a patched release (pnpm audit lists it). Advisories cannot be excepted. Only a development/CI-only "
+                     "advisory with no compatible official fix can be contained, by one contained_advisories record for this "
+                     "advisory, release and integrity (DEC-0058, docs/security/DEPENDENCY-SECURITY.md).",
     "workspace-constraint": "A workspace package violates a policy constraint (see detail).",
     "alias-substitution": "An npm: alias substitutes another package. Remove it or record a reviewed exception.",
     "install-script-introduced": "Inspect the install hook in the tarball. If legitimate, record one exception (identity + integrity). CI never runs lifecycle scripts.",
@@ -571,7 +580,7 @@ def policy_errors(policy):
             and isinstance(k.get("key"), str) and len(k["key"]) >= 80 for k in keys):
         errors.append("Dependency policy must require npm registry signatures with pinned keys")
     if (policy.get("vulnerabilities") or {}).get("block_at_or_above") != "low":
-        errors.append("Dependency policy must block advisories at or above low severity (pnpm audit --audit-level low)")
+        errors.append("Dependency policy must block advisories at or above low severity (the engine and pnpm audit --prod --audit-level low)")
     licenses = policy.get("licenses") or {}
     allowed = licenses.get("allowed")
     if not isinstance(allowed, list) or not allowed or any(not isinstance(i, str) or _COPYLEFT.match(i) for i in allowed):
@@ -605,6 +614,53 @@ def policy_errors(policy):
         errors.extend(exception_errors(entry, seen))
     if not isinstance(policy.get("exceptions", []), list):
         errors.append("Dependency policy exceptions must be a list")
+    contained = policy.get("contained_advisories", [])
+    if not isinstance(contained, list):
+        errors.append("Dependency policy contained_advisories must be a list")
+    else:
+        seen = set()
+        for entry in contained:
+            errors.extend(containment_errors(entry, seen))
+    return errors
+
+
+_GHSA = re.compile(r"^GHSA(?:-[0-9a-z]{4}){3}$")
+_IMPORTER = re.compile(r"^<importer:[A-Za-z0-9._/-]+>$")
+CONTAINMENT_FIELDS = ("advisory", "identity", "integrity", "dependents", "exposure", "record")
+
+
+def containment_errors(entry, seen=None):
+    """One contained_advisories record (DEC-0058): exactly one advisory on exactly one locked release and archive. There is
+    no expiry, approval date or name/range form: the record stays valid while every run re-proves the containment."""
+    label = entry.get("advisory") if isinstance(entry, dict) else None
+    if not isinstance(entry, dict) or not isinstance(label, str) or not _GHSA.fullmatch(label):
+        return ["Contained advisory record needs a GHSA identifier (advisory)"]
+    errors = []
+    if set(entry) != set(CONTAINMENT_FIELDS):
+        errors.append(f"Contained advisory {label}: fields must be exactly {list(CONTAINMENT_FIELDS)}")
+    identity = entry.get("identity")
+    try:
+        name, version = split_identity(identity)
+        exact = bool(_EXACT_NAME.fullmatch(name) and _EXACT_VERSION.fullmatch(version))
+    except (ValueError, AttributeError, TypeError):
+        exact = False
+    if not exact:
+        errors.append(f"Contained advisory {label}: identity must be one exact name@version")
+    elif seen is not None:
+        if (label, identity) in seen:
+            errors.append(f"Contained advisory {label}: duplicate record for {identity}")
+        seen.add((label, identity))
+    if not isinstance(entry.get("integrity"), str) or not _SRI.fullmatch(entry["integrity"]):
+        errors.append(f"Contained advisory {label}: integrity must be the release's sha512 SRI")
+    dependents = entry.get("dependents")
+    if (not isinstance(dependents, list) or not dependents or len(set(map(str, dependents))) != len(dependents)
+            or not all(isinstance(d, str) and (_EXACT_NAME.fullmatch(d) or _IMPORTER.fullmatch(d)) for d in dependents)):
+        errors.append(f"Contained advisory {label}: dependents must list the assessed exact package names (or <importer:path>)")
+    if not isinstance(entry.get("exposure"), str) or len(entry["exposure"].strip()) < 30:
+        errors.append(f"Contained advisory {label}: exposure must say who supplies the vulnerable input and why it stays contained")
+    record = entry.get("record")
+    if (not isinstance(record, str) or not re.fullmatch(r"docs/[A-Za-z0-9._/-]+\.md", record) or ".." in record.split("/")):
+        errors.append(f"Contained advisory {label}: record must reference the assessment document under docs/")
     return errors
 
 
@@ -790,8 +846,10 @@ def prior_release(packument, version):
     return max(candidates, key=_version_key) if candidates else None
 
 
-def reduce_packument(document, versions):
-    """Keep only what evaluation needs: the locked versions, their prior releases and the package history summary."""
+def reduce_packument(document, versions, detail=False):
+    """Keep only what evaluation needs: the locked versions, their prior releases and the package history summary. With
+    detail (dependents of a release with an advisory), also every served release's declared dependency ranges, which is
+    what an update of that dependent would request (DEC-0058 compatible fixes one level up)."""
     keep = {}
     for version in versions:
         keep[version] = None
@@ -799,11 +857,23 @@ def reduce_packument(document, versions):
         if prior:
             keep[prior] = None
     times = document.get("time") or {}
-    return {"name": document.get("name"),
-            "versions": {v: document["versions"][v] for v in keep if v in (document.get("versions") or {})},
+    all_versions = document.get("versions") or {}
+    reduced = {"name": document.get("name"),
+            "versions": {v: all_versions[v] for v in keep if v in all_versions},
             "time": {v: times[v] for v in [*keep, "created"] if v in times},
-            "version_count": len(document.get("versions") or {}),
-            "prior": {v: prior_release(document, v) for v in versions if v in (document.get("versions") or {})}}
+            "version_count": len(all_versions),
+            "prior": {v: prior_release(document, v) for v in versions if v in all_versions},
+            # Every release the registry still serves and does not deprecate: what a compatible advisory fix is looked up in.
+            "releases": sorted((v for v, body in all_versions.items()
+                                if isinstance(body, dict) and not (isinstance(body.get("deprecated"), str) and body["deprecated"])),
+                               key=_version_key),
+            "dist_tags": {tag: target for tag, target in (document.get("dist-tags") or {}).items()
+                          if isinstance(tag, str) and isinstance(target, str)}}
+    if detail:
+        groups = ("dependencies", "optionalDependencies", "peerDependencies", "peerDependenciesMeta")
+        reduced["manifests"] = {v: {g: all_versions[v][g] for g in groups if isinstance(all_versions[v].get(g), dict)}
+                                for v in reduced["releases"]}
+    return reduced
 
 
 def _bootstrap_fetch():
@@ -813,8 +883,9 @@ def _bootstrap_fetch():
     return module.fetch
 
 
-def registry_metadata(identities, fetch=None, workers=8):
-    """One fresh full registry document per name (no cache), reduced per name as soon as it is parsed.
+def registry_metadata(identities, fetch=None, workers=8, detail=()):
+    """One fresh full registry document per name (no cache), reduced per name as soon as it is parsed (names in detail keep
+    every release's declared dependency ranges).
 
     Returns {name: reduced packument | {"error": text, "status": 404|None}}.
     """
@@ -828,7 +899,7 @@ def registry_metadata(identities, fetch=None, workers=8):
         name, versions = item
         try:
             raw = fetch("https://registry.npmjs.org/" + name.replace("/", "%2f"), compressed=True, quiet=True)
-            return name, reduce_packument(json.loads(raw), versions)
+            return name, reduce_packument(json.loads(raw), versions, detail=name in detail)
         except Exception as exc:  # noqa: BLE001 - every failure is recorded and fails closed
             text = re.sub(r"https?://\S+", "<url>", str(exc))[:200]
             return name, {"error": text, "status": 404 if "HTTP 404" in text else None}
@@ -874,8 +945,9 @@ def verify_signatures(items, keys, node=None):
 
 
 def run_audit(root, pnpm=None, registry="https://registry.npmjs.org/"):
-    """Advisories from the policy registry's advisory service, whatever .npmrc says (a substituted registry is BLOCKed
-    separately); the separate `pnpm audit --audit-level low` CI step keeps the repository configuration."""
+    """Advisories for the whole graph (development included) from the policy registry's advisory service, whatever .npmrc
+    says (a substituted registry is BLOCKed separately). The separate `pnpm audit --prod --audit-level low` CI step is a
+    second, independent production gate that nothing can contain (DEC-0058)."""
     pnpm = pnpm or shutil.which("pnpm")
     if not pnpm:
         raise EvidenceError("pnpm is required for the advisory check")
@@ -1173,6 +1245,281 @@ def graph_edge_findings(graph, metadata, workspace):
     return per_package, global_findings
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Advisory exposure (DEC-0058): computed from this run's lockfile and registry documents, never remembered between runs
+# ---------------------------------------------------------------------------------------------------------------------
+
+def production_paths(graph):
+    """{release: what reached it first} for every registry release reachable from any importer's dependencies or
+    optionalDependencies, through every locked dependency, optional dependency and resolved peer: the scope of
+    `pnpm audit --prod`, computed independently. Only devDependencies lead out of it, and every importer counts whether
+    or not it is deployed (an over-approximation of production, never an under-approximation)."""
+    previous, queue = {}, []
+    for path, dependencies in sorted(graph.direct.items()):
+        for name, entry in sorted(dependencies.items()):
+            child = dependency_identity(name, entry.get("version") or "")
+            if entry["group"] != "devDependencies" and child and child not in previous:
+                previous[child] = f"<importer:{path}>"
+                queue.append(child)
+    while queue:
+        identity = queue.pop(0)
+        for child in sorted(graph.children.get(identity, ())):
+            if child not in previous:
+                previous[child] = identity
+                queue.append(child)
+    return previous
+
+
+def production_path(previous, identity):
+    chain = [identity]
+    while chain[-1] in previous and len(chain) < 64:
+        chain.append(previous[chain[-1]])
+    return " > ".join(reversed(chain))
+
+
+def dependent_edges(graph):
+    """{release: {dependent release or <importer:path>}} with exact identities (graph.parents keeps names only)."""
+    edges = {}
+    for parent, children in graph.children.items():
+        for child in children:
+            edges.setdefault(child, set()).add(parent)
+    for path, dependencies in graph.direct.items():
+        for name, entry in dependencies.items():
+            child = dependency_identity(name, entry.get("version") or "")
+            if child:
+                edges.setdefault(child, set()).add(f"<importer:{path}>")
+    return edges
+
+
+def _ranges_for(document, name):
+    """Every range a published manifest declares for package `name` (dependency, optional or peer; aliases unwrapped)."""
+    ranges = []
+    declared = [(key, str(spec)) for group in ("dependencies", "optionalDependencies", "peerDependencies")
+                for key, spec in (document.get(group) or {}).items()]
+    peers = document.get("peerDependencies") or {}
+    declared += [(key, "*") for key in (document.get("peerDependenciesMeta") or {}) if key not in peers]
+    for key, spec in declared:
+        if spec.startswith("npm:"):
+            target = spec[4:]
+            alias, _, alias_range = target.rpartition("@") if "@" in target.lstrip("@") else (target, "", "")
+            if (alias or target) == name:
+                ranges.append(alias_range or "*")
+        elif key == name:
+            ranges.append(spec)
+    return ranges
+
+
+def _accepts(spec, candidate, tags):
+    """Does one declared spec admit `candidate`? A semver range by its rules; a dist-tag only the release it points to now."""
+    try:
+        return satisfies(candidate, spec)
+    except ValueError:
+        if _DIST_TAG.fullmatch(spec) and not re.match(r"^(?:file|link|git|github|https?|workspace)\b", spec):
+            return tags.get(spec) == candidate
+        return False
+
+
+def _newer_stable(package, version):
+    current = parse_semver(version)
+    return [v for v in package.get("releases") or [] if (parsed := parse_semver(v)) is not None and not parsed[3]
+            and current is not None and _compare(parsed, current) > 0]
+
+
+def _edge_ranges(dependent, name, version, metadata):
+    """What one edge to `name` accepts: a workspace importer its own compatible line (^version); a package the ranges its
+    locked release declares. None when that release's registry document is missing."""
+    if dependent.startswith("<importer:"):
+        return ["^" + version]
+    parent_name, parent_version = split_identity(dependent)
+    document = ((metadata.get(parent_name) or {}).get("versions") or {}).get(parent_version)
+    return None if document is None else _ranges_for(document, name)
+
+
+def compatible_fixes(identity, advisory, edges, metadata):
+    """[(dependent, how)] for every edge to this release that an official update fixes: the dependent's declared range (or
+    a workspace importer's own ^version) already admits a newer, stable, non-deprecated release inside the patched range
+    and outside the vulnerable range; or, one level up, a newer release of that dependent which its own dependents admit
+    admits such a fix or no longer depends on the package. None when the evidence needed for the answer is missing."""
+    name, version = split_identity(identity)
+    package = metadata.get(name) or {}
+    patched, vulnerable = advisory.get("patched_versions") or "", advisory.get("vulnerable_versions") or ""
+    if package.get("releases") is None or parse_semver(version) is None or not (patched or vulnerable):
+        return None
+    fixed = []
+    for candidate in _newer_stable(package, version):
+        try:
+            if (patched and not satisfies(candidate, patched)) or (vulnerable and satisfies(candidate, vulnerable)):
+                continue
+        except ValueError:
+            return None
+        fixed.append(candidate)
+    tags = package.get("dist_tags") or {}
+    accepted = []
+    for dependent in sorted(edges.get(identity, ())):
+        ranges = _edge_ranges(dependent, name, version, metadata)
+        if ranges is None:
+            return None
+        direct = next((f for f in fixed if any(_accepts(spec, f, tags) for spec in ranges)), None)  # lowest fix first
+        if direct:
+            accepted.append((dependent, f"accepts {direct}"))
+            continue
+        if dependent.startswith("<importer:"):
+            continue
+        parent_name, parent_version = split_identity(dependent)
+        parent = metadata.get(parent_name) or {}
+        manifests = parent.get("manifests")
+        if manifests is None:
+            return None
+        grand_ranges = []
+        for grand in sorted(edges.get(dependent, ())):
+            ranges = _edge_ranges(grand, parent_name, parent_version, metadata)
+            if ranges is None:
+                return None
+            grand_ranges += ranges
+        parent_tags = parent.get("dist_tags") or {}
+        for update in _newer_stable(parent, parent_version):
+            if update not in manifests or not any(_accepts(spec, update, parent_tags) for spec in grand_ranges):
+                continue
+            declared = _ranges_for(manifests[update], name)
+            if not declared:
+                accepted.append((dependent, f"updates to {parent_name}@{update}, which no longer depends on {name}"))
+                break
+            fix = next((f for f in fixed if any(_accepts(spec, f, tags) for spec in declared)), None)
+            if fix:
+                accepted.append((dependent, f"updates to {parent_name}@{update}, which accepts {fix}"))
+                break
+    return accepted
+
+
+# Where production code starts: the backend image's commands (API, worker, migrate, operator CLI) and the Next.js app (every
+# module under its app directory, the proxy/middleware and instrumentation hooks, next.config). Workspace packages are
+# followed through their src/index.ts. Test files never start or join the walk.
+PRODUCTION_ENTRIES = ("apps/*/backend/main.ts", "apps/*/backend/admin-cli.ts", "apps/*/src/app/**/*", "apps/*/app/**/*",
+                      "apps/*/src/proxy.ts", "apps/*/src/middleware.ts", "apps/*/middleware.ts", "apps/*/proxy.ts",
+                      "apps/*/src/instrumentation*.ts", "apps/*/instrumentation*.ts", "apps/*/next.config.ts")
+_CODE_FILE = re.compile(r"\.(?:[cm]?[jt]sx?)$")
+_TEST_FILE = re.compile(r"(?:\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|/)(?:e2e|test|tests|__tests__|__mocks__)/)")
+# Static and re-export declarations, dynamic import() and require() with a literal specifier; `import type`/`export type` are erased.
+_SPECIFIER = re.compile(r"""^\s*(import|export)\s+(type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]"""
+                        r"""|\bimport\(\s*['"]([^'"]+)['"]\s*\)|\brequire\(\s*['"]([^'"]+)['"]\s*\)""", re.M)
+
+
+def _resolve_module(specifier, source):
+    """A relative specifier as Node (exact path), NodeNext (`./x.js` -> `x.ts`) or the bundler (extensionless, index) resolves it."""
+    base = Path(os.path.normpath(source.parent / specifier))
+    stem = re.sub(r"\.(?:[cm]?js|jsx)$", "", base.as_posix())
+    candidates = [base] + [Path(stem + ext) for ext in (".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs", ".jsx")]
+    candidates += [base / ("index" + ext) for ext in (".ts", ".tsx", ".js", ".mjs")]
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def production_imports(root, graph, manifests):
+    """Walk the production module graph from PRODUCTION_ENTRIES and map every package it imports to the locked release the
+    importing workspace resolves (its own entry, else the root's, as Node's lookup does). Returns
+    {"releases": {release: [example file]}, "undeclared": {name: [file]}, "entries": n, "modules": n}."""
+    root = Path(os.path.abspath(root))
+    packages = {m.get("name"): path for path, m in manifests.items() if m.get("name")}
+    importers = sorted((path for path in graph.importers if path != "."), key=len, reverse=True)
+    queue = sorted({path for pattern in PRODUCTION_ENTRIES for path in root.glob(pattern) if path.is_file()
+                    and _CODE_FILE.search(path.name) and not _TEST_FILE.search(path.relative_to(root).as_posix())})
+    entries, seen, releases, undeclared = len(queue), set(), {}, {}
+    while queue:
+        file = queue.pop()
+        if file in seen:
+            continue
+        seen.add(file)
+        relative = file.relative_to(root).as_posix()
+        importer = next((path for path in importers if relative.startswith(path + "/")), ".")
+        for match in _SPECIFIER.finditer(file.read_text(errors="replace")):
+            if match.group(2):
+                continue
+            specifier = match.group(3) or match.group(4) or match.group(5)
+            if specifier.startswith("."):
+                target = _resolve_module(specifier, file)
+                if target is not None and _CODE_FILE.search(target.name) and not _TEST_FILE.search(target.relative_to(root).as_posix()
+                                                                                                    if target.is_relative_to(root) else ""):
+                    queue.append(target)
+                continue
+            if specifier.startswith(("node:", "/")) or ":" in specifier.split("/", 1)[0]:
+                continue
+            parts = specifier.split("/")
+            name = "/".join(parts[:2]) if specifier.startswith("@") else parts[0]
+            if name in packages:
+                directory = root / packages[name]
+                index = directory / "src" / "index.ts"
+                queue.extend([index] if index.is_file() else [path for path in sorted((directory / "src").rglob("*"))
+                                                               if path.is_file() and _CODE_FILE.search(path.name)
+                                                               and not _TEST_FILE.search(path.relative_to(root).as_posix())])
+                continue
+            entry = graph.direct.get(importer, {}).get(name) or graph.direct.get(".", {}).get(name)
+            release = dependency_identity(name, entry["version"] or "") if entry else None
+            if release:
+                releases.setdefault(release, []).append(relative)
+            else:
+                undeclared.setdefault(name, []).append(relative)
+    return {"releases": releases, "undeclared": undeclared, "entries": entries, "modules": len(seen)}
+
+
+def _closure(graph, release, cache):
+    if release not in cache:
+        reached, stack = set(), [release]
+        while stack:
+            current = stack.pop()
+            if current not in reached:
+                reached.add(current)
+                stack.extend(graph.children.get(current, ()))
+        cache[release] = reached
+    return cache[release]
+
+
+def imported_by_production(identity, imports, graph, cache):
+    """Reasons production code can load this release: it imports a package whose locked dependency closure holds it (a
+    dev-only package imported by production code ships with the backend image, which installs devDependencies), or it
+    imports the package's name without a declared dependency."""
+    if not imports["entries"]:
+        return ["no production entry point was found, so production code cannot be proven not to import it"]
+    name = split_identity(identity)[0]
+    reasons = [f"production code imports {release} ({files[0]}), whose dependencies include it"
+               for release, files in sorted(imports["releases"].items()) if identity in _closure(graph, release, cache)]
+    if name in imports["undeclared"]:
+        reasons.append(f"production code imports {name} without a declared dependency ({imports['undeclared'][name][0]})")
+    return reasons[:3]
+
+
+CONTAINMENT_MISSING = "no contained_advisories record for this advisory and release"
+
+
+def containment(identity, advisory, record, entries, previous, edges, metadata, root, exposure=lambda identity: []):
+    """(record entry, []) when one contained_advisories record covers this advisory on this exact release and archive and
+    every exposure condition holds on this run's evidence; (None, reasons) otherwise. Nothing is remembered between runs:
+    a change in the graph, the registry or the advisory makes the next run BLOCK again."""
+    conditions = []
+    if advisory["severity"] == "critical":
+        conditions.append("critical advisories are never contained")
+    if identity in previous:
+        conditions.append("reachable from production dependencies: " + production_path(previous, identity))
+    else:
+        conditions += exposure(identity)
+    fixes = compatible_fixes(identity, advisory, edges, metadata)
+    if fixes is None:
+        conditions.append("the advisory ranges or registry documents needed to prove there is no compatible fix are unavailable")
+    elif fixes:
+        conditions.append("a compatible official fix exists (" + "; ".join(f"{d} {how}" for d, how in fixes) + "): update")
+    matching = [e for e in entries if e.get("advisory") == advisory["id"] and e.get("identity") == identity]
+    if not matching:
+        return None, [CONTAINMENT_MISSING] + conditions
+    entry, reasons = matching[0], []
+    if entry["integrity"] != record["integrity"]:
+        reasons.append("the locked archive (integrity) is not the one assessed")
+    new = sorted(set(record["dependents"]) - set(entry["dependents"]))
+    if new:
+        reasons.append("new dependents not covered by the assessment: " + ", ".join(new))
+    if not (Path(root) / entry["record"]).is_file():
+        reasons.append(f"assessment document {entry['record']} is missing")
+    reasons += conditions
+    return (None, reasons) if reasons else (entry, [])
+
+
 def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_verdicts=None, verifier=None,
              base_graph=None, now=None, revision=None, workspace=None, npmrc=None, policy_changed=None, extra_lockfiles=()):
     """Pure evaluation of collected evidence. Returns the evidence document."""
@@ -1317,6 +1664,15 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
     records = []
     exceptions = policy.get("exceptions") or []
     used_exceptions = set()
+    contained_entries = policy.get("contained_advisories") or []
+    previous, edges = production_paths(graph), dependent_edges(graph)
+    contained, used_containments = [], set()
+    walk, closures = {}, {}
+
+    def exposure(identity):
+        if "imports" not in walk:  # walked once, only when an advisory is evaluated for containment
+            walk["imports"] = production_imports(root, graph, manifests)
+        return imported_by_production(identity, walk["imports"], graph, closures)
     for identity in identities:
         name, version = split_identity(identity)
         block = graph.packages.get(identity) or {}
@@ -1484,10 +1840,29 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
                                  "npm_provenance_attestation": attested},
                   "install_hooks": install, "prior_release": prior_version, "signals": sorted(set(signals)),
                   "optional": graph.optional.get(identity, False),
-                  "dependents": sorted(graph.parents.get(identity, set())), "advisories": audit.get(identity, [])}
+                  "dependents": sorted(graph.parents.get(identity, set())), "advisories": audit.get(identity, []),
+                  "exposure": "production" if identity in previous else "development"}
         for advisory in record["advisories"]:
-            if advisory["blocking"]:
-                findings.append(_finding("vulnerability", f"{advisory['id']} ({advisory['severity']}): {advisory['title']}"))
+            if not advisory["blocking"]:
+                continue
+            finding = _finding("vulnerability", f"{advisory['id']} ({advisory['severity']}): {advisory['title']}")
+            entry, reasons = containment(identity, advisory, record, contained_entries, previous, edges, metadata, root, exposure)
+            if entry is not None:
+                finding["decision"] = CONTAINED
+                finding["contained_by"] = {"advisory": entry["advisory"], "record": entry["record"]}
+                used_containments.add((entry["advisory"], identity))
+                contained.append({"advisory": entry["advisory"], "identity": identity, "severity": advisory["severity"],
+                                  "record": entry["record"]})
+            else:
+                finding["containment_refused"] = reasons
+                if reasons == [CONTAINMENT_MISSING]:
+                    # Development/CI-only, not critical, no compatible fix: one record makes it CONTAINED once a person has
+                    # assessed who supplies the vulnerable input. This is the only human step, and only for a new advisory.
+                    finding["containment_record"] = {
+                        "advisory": advisory["id"], "identity": identity, "integrity": record["integrity"],
+                        "dependents": record["dependents"], "exposure": "<who supplies the vulnerable input, and why it stays contained>",
+                        "record": f"docs/security/ADVISORY-{advisory['id']}.md"}
+            findings.append(finding)
         if scan is not None:
             record["capability_scan"] = scan
         if base_graph is not None:
@@ -1527,7 +1902,7 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
             raise EvidenceError("pnpm audit reported an advisory for an identity absent from pnpm-lock.yaml: " + identity)
 
     decision = max([r["decision"] for r in records] + [f["decision"] for f in global_findings], key=RANK.get, default=PASS)
-    counts = {d: sum(1 for r in records if r["decision"] == d) for d in (PASS, REVIEW, BLOCK)}
+    counts = {d: sum(1 for r in records if r["decision"] == d) for d in (PASS, CONTAINED, REVIEW, BLOCK)}
     changes = {}
     for record in records:
         changes[record["change"]] = changes.get(record["change"], 0) + 1
@@ -1560,7 +1935,12 @@ def evaluate(root, *, policy, policy_sha256, graph, metadata, audit, signature_v
                     "npm_provenance_attestations": sum(1 for r in records if r["provenance"]["npm_provenance_attestation"]),
                     "install_hooks": sorted(r["identity"] for r in records if r["install_hooks"]),
                     "exceptions_used": sorted(used_exceptions),
-                    "exceptions_unused": sorted(e["id"] for e in exceptions if e["id"] not in used_exceptions)},
+                    "exceptions_unused": sorted(e["id"] for e in exceptions if e["id"] not in used_exceptions),
+                    "contained": sorted(contained, key=lambda row: (row["identity"], row["advisory"])),
+                    "containment_records_unused": sorted(f"{e['advisory']} {e['identity']}" for e in contained_entries
+                                                         if (e["advisory"], e["identity"]) not in used_containments),
+                    "production_packages": sum(1 for r in records if r["exposure"] == "production"),
+                    "production_import_walk": {k: walk["imports"][k] for k in ("entries", "modules")} if "imports" in walk else None},
         "global_findings": global_findings,
         "packages": records,
     }
@@ -1618,6 +1998,9 @@ def report(evidence, stream=None):
     print("License inventory:", summary["licenses"], file=stream)
     print("Exceptions used:", summary["exceptions_used"] or "none", "| unused (remove when convenient):",
           summary["exceptions_unused"] or "none", file=stream)
+    print("Contained development-only advisories (re-proved this run; the production build re-proves artifact absence):",
+          [f"{row['advisory']} {row['identity']}" for row in summary["contained"]] or "none",
+          "| records not in use (remove when convenient):", summary["containment_records_unused"] or "none", file=stream)
     if evidence["release_age_minutes"] not in (0, None):
         print("Note: pnpm-workspace.yaml sets minimumReleaseAge", evidence["release_age_minutes"], file=stream)
     if evidence["policy"].get("changed_in_revision"):
@@ -1631,9 +2014,18 @@ def report(evidence, stream=None):
                 lines.append((finding["decision"], record["identity"], finding))
     for decision, subject, finding in sorted(lines, key=lambda row: (-RANK[row[0]], row[1])):
         print(f"{decision} {subject}: {finding['code']}: {finding['detail']}", file=stream)
+        if decision == CONTAINED:
+            print(f"  contained by {finding['contained_by']['record']}: development/CI-only, not imported by production code, not "
+                  "critical, no new dependents, no compatible official fix (all re-proved this run)", file=stream)
+            continue
         print(f"  resolve: {REMEDIATION[finding['code']]}", file=stream)
         for reason in finding.get("exception_mismatch", []):
             print(f"  exception not applicable: {reason}", file=stream)
+        for reason in finding.get("containment_refused", []):
+            print(f"  not contained: {reason}", file=stream)
+        if finding.get("containment_record"):
+            print("  development/CI-only with no compatible fix: once the exposure is assessed, contain it with this record in "
+                  f"{POLICY_PATH} contained_advisories:\n    {json.dumps(finding['containment_record'])}", file=stream)
     print(f"Dependency security decision: {evidence['decision']}", file=stream)
 
 
@@ -1647,8 +2039,9 @@ def verify(root=ROOT, evidence_path=None, base_ref="origin/main", fetch=None, no
         raise EvidenceError("Unsupported lockfile version " + graph.version)
     workspace = parse_yaml(load_text(root, "pnpm-workspace.yaml") or "")
     identities = graph.identities()
-    metadata = registry_metadata(identities, fetch=fetch)
     audit = advisories_by_identity(run_audit(root, registry=policy["registry"]["url"]), policy["vulnerabilities"]["block_at_or_above"])
+    dependents = {name for identity in audit for name in graph.parents.get(identity, set()) if not name.startswith("<importer:")}
+    metadata = registry_metadata(identities, fetch=fetch, detail=dependents)
     base_graph, policy_changed = baseline(root, base_ref) if base_ref else (None, None)
     evidence = evaluate(root, policy=policy, policy_sha256=policy_sha256, graph=graph, metadata=metadata, audit=audit,
                         base_graph=base_graph, policy_changed=policy_changed, now=now, revision=current_revision(root),

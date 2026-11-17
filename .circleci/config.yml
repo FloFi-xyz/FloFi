@@ -307,7 +307,7 @@ jobs:
           command: |
             set -euo pipefail
             source scripts/ci-observe.sh 'Dependency security policy'
-            # Automatic PASS / REVIEW_REQUIRED / BLOCK per locked package (docs/security/dependency-policy.json); no release-age gate.
+            # Automatic PASS / CONTAINED / REVIEW_REQUIRED / BLOCK per locked package (docs/security/dependency-policy.json); no release-age gate.
             python3 scripts/dependency_security.py verify
       - store_artifacts:
           path: /tmp/flofi-ci/flofi-dependency-evidence.json
@@ -317,7 +317,7 @@ jobs:
           command: |
             set -euo pipefail
             source scripts/ci-observe.sh 'Dependency audit'
-            pnpm audit --audit-level low
+            pnpm audit --prod --audit-level low
       - run:
           name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
           command: |

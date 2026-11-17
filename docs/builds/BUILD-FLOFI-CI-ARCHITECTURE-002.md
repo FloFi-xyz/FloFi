@@ -1,7 +1,10 @@
 # BUILD-FLOFI-CI-ARCHITECTURE-002 — CI performance, concurrency and cost
 
-- Status: implemented on branch `claude/hopeful-hypatia-9gjxig`; one PR open for owner review (not merged, nothing deployed).
-- Scope: CI orchestration, its tests and documentation. No product behaviour, UX, financial logic, wallet, protocol, schema, migration,
+- Status: implemented on branch `claude/hopeful-hypatia-9gjxig` (PR #209, `main` 944fe57 merged in). The owner approved the
+  architecture, medium runners, the shared build and the visual diagnostics on 2026-11-17, and authorized the merge after a fully green
+  CircleCI certification.
+- Scope: CI orchestration, its tests and documentation, and (owner decision DEC-0058, its own commit, §7.7) the dependency security
+  policy's treatment of development/CI-only advisories. No product behaviour, UX, financial logic, wallet, protocol, schema, migration,
   production variable or dependency changed. The only file under `apps/` is `apps/reference-dapp/playwright.config.ts` (a test
   configuration hook used only by a diagnostic render after a screenshot failure, §5.6).
 - Maintained guide: [docs/engineering/CI.md](../engineering/CI.md) (topology, lifecycle rules, rebalancing, rollback).
@@ -293,7 +296,7 @@ After this run the timings were refreshed from its own medium reports (`scripts/
 - **Wall clock: 13.9 min to the last job** (fan-in ~15 s more: ~14.2 min). **Credits: 1236** for the jobs that ran; a
   passing supply-chain job runs ~3 s longer (audit and SBOM, ~0.3 credits) and the fan-in costs ~1.3 credits.
 
-### 7.5 Blocker outside this build: GHSA-fc5q-39xc-vjpf (picomatch ≤ 4.0.7, high)
+### 7.5 Blocker outside this build: GHSA-fc5q-39xc-vjpf (picomatch ≤ 4.0.7, high) — resolved by DEC-0058 (§7.7)
 
 The dependency policy now blocks `picomatch@4.0.7` (ReDoS; dev-tooling paths through `typescript-eslint` → `tinyglobby`/`fdir`). The
 advisory names `>= 4.0.8` as patched, but npm's latest release is 4.0.7 and every 3.x release is in the vulnerable range, so no
@@ -301,6 +304,9 @@ compliant version exists yet. By the owner's policy (DEC-0057) advisories block 
 `main` included, can certify until upstream publishes 4.0.8**. This build does not touch the policy or the lockfile. Because the
 supply-chain gates now run in their own job, every other job still reports its results while the advisory stands; `certification`
 stays blocked, as it must.
+
+`main`'s own certification of 944fe57 passed the policy at 16:30 UTC on 2026-11-17 with the same lockfile: npm's audit feed reported
+the advisory later that day ([assessment](../security/ADVISORY-GHSA-fc5q-39xc-vjpf.md)).
 
 ### 7.6 Before / after
 
@@ -315,6 +321,46 @@ stays blocked, as it must.
 | Browser profiles | 55 + composition | 58 + composition (same specs, each once) | parts |
 | Tests | unchanged | unchanged (every former spec and suite runs) | 0 |
 | Superseded pipelines left running | 4 in the audit (216 large-min) | stopped by the guard (tested; live branch-head reads observed, a live supersede not yet) and by the CircleCI setting once enabled | |
+
+### 7.7 Exposure-based advisories (DEC-0058, owner decision of 2026-11-17)
+
+Exposure assessment ([ADVISORY-GHSA-fc5q-39xc-vjpf.md](../security/ADVISORY-GHSA-fc5q-39xc-vjpf.md)): all 26 lockfile paths to
+`picomatch@4.0.7` are root devDependencies (typescript-eslint, vite, vitest); `pnpm audit --prod` finds nothing; no fix exists upstream
+and no consumer release drops picomatch; the attack needs an attacker-written glob, and its consumers compile only committed patterns.
+
+| Change | Where |
+| --- | --- |
+| `CONTAINED` decision: one `contained_advisories` record (GHSA + exact release + sha512 + assessed dependents + exposure + document), re-proved on every run: development/CI only (lockfile), not imported by production code (import graph from the backend commands and the Next.js app), not critical, no new dependent, no compatible official fix (registry, including a dependent's accepted update); no expiry or renewal; a new development-only advisory prints the record to add | `scripts/dependency_security.py`, `docs/security/dependency-policy.json` 1.1.0 |
+| Absence from the production build re-proved after every `pnpm build`: function traces, server source maps, `.next/node_modules` links. What cannot be proven fails closed: a server bundle without a source map, an index-only map, maps naming no third-party module, a path whose release cannot be identified, a workspace package built with anything but `tsc` | `scripts/function_traces.py` |
+| SBOM gate accepts `PASS` or `CONTAINED` evidence and names contained advisories | `scripts/sbom_verify.py` |
+| Raw CI audit is `pnpm audit --prod --audit-level low` (CircleCI, Cloud Build, the disabled GitHub Actions workflow, governance-lite); the whole-graph audit runs inside the engine, its command pinned by a test | `.circleci/config.yml`, `scripts/gcp-ci-full.sh`, `.github/workflows/contracts.yml`, `scripts/governance_lite.py` |
+| Decision record and guide | `docs/DECISIONS.md` DEC-0058, `docs/security/DEPENDENCY-SECURITY.md` |
+
+Unchanged: production and critical advisories, integrity, registry signatures, licenses, sources, lockfile edges, malicious indicators
+and policy-bypass controls still BLOCK and cannot be contained; the exception mechanism still refuses `vulnerability`. No job, service,
+dependency or approval step was added.
+
+Review (adversarial workflow: flofi-security and flofi-infrastructure-ci read-only, an empirical reviewer with a shell, one skeptic per
+empirical finding):
+
+| Finding | Disposition |
+| --- | --- |
+| security, high: the backend image installs devDependencies and runs source, so the lockfile tier alone does not prove a dev-only release is never loaded in production | Fixed: containment also requires that the production import graph (153 entry points, 1,280 modules today) imports nothing that brings the release; tests for static, dynamic, `require`, re-export, workspace-package and app-route imports, and for test-only helpers and type imports that must not count |
+| empirical, medium (confirmed): an optional-peer marker widened a declared peer range to `*`, which would demand an update no dependent can install | Fixed (`'*'` only for a peer without a range, as the lockfile-edge check does); test |
+| security medium / empirical low (confirmed): a fix reachable by updating an exact-pinning dependent, or a dependent update that drops the package, was not required | Fixed: one level up, within what the dependent's own dependents accept; tests |
+| infrastructure, medium: nothing pinned the engine's whole-graph audit command now that the raw step audits production only | Fixed: a test pins `pnpm audit --json --registry https://registry.npmjs.org/` |
+| empirical, low (confirmed): a dist-tag range accepted every release | Fixed: a tag accepts only its current target; test |
+| security, low: an index-only or third-party-free source map could pass vacuously; a shortened store folder hid a release | Fixed: refused / release read from the package's own `package.json` or fail closed; tests |
+| infrastructure, low: three-decision wording in the guide and CI comments; "same as" overstated the CI build match | Fixed (wording below) |
+| security, medium: browser-only modules have no source map | Covered by the production import walk, which starts from every module of the app directory |
+| empirical, low: `satisfies` keeps `>=0.0.0` where node-semver drops it, for 0.0.0 prereleases | Not changed: pre-existing, fails closed, no such release in the graph |
+
+Validation: 313 CI tests and 21 governance tests (31 new: 19 containment tests, 12 build-artifact tests). The CircleCI build already
+emits the server source maps the build check reads: its artifact at a14c4ce had 3,773 entries and 166.1 MiB, near-identical to the local
+build the check ran on (3,780 entries, 1,125 of them server source maps); the first certification of this commit is its proof on CircleCI.
+Live: the engine decided `CONTAINED` (504 PASS + 1 CONTAINED of 505, 505 signatures verified, production import walk 153 entry points and
+1,280 modules); the SBOM gate and `pnpm audit --prod --audit-level low` passed; the build check found picomatch in none of 2,270 traced
+files and 1,125 server source maps, and found Privy, zod, pg and next when they were named as contained releases.
 
 ## 8. Rollback
 
@@ -336,19 +382,17 @@ the others skipped because no product, wallet, chat, channel or provider code ch
 
 **Open items**
 
-1. *Upstream advisory GHSA-fc5q-39xc-vjpf* (§7.5): no revision of any branch can certify until picomatch 4.0.8 exists. Then the
-   `certification` fan-in of this PR runs for the first time; its result is the final evidence of the new topology end to end.
+1. *Upstream advisory GHSA-fc5q-39xc-vjpf* (§7.5): contained under DEC-0058 (§7.7). When picomatch publishes a fix its dependents
+   accept, certification requires the update.
 2. *Supply-chain job on the small runner*: its install and dependency policy ran on CircleCI (blocked by the advisory); `pnpm audit` and
    the SBOM gate have not run there yet. A failure there blocks certification (fail-closed); rollback is `resource_class: medium`.
-3. *Auto-cancel redundant workflows* (owner setting, recommended). The repository guard was observed reading the branch head on
-   CircleCI; a real supersede (exit 75) is covered by tests, not yet observed live.
+3. *Auto-cancel redundant workflows*: enabled by the owner. The repository guard was observed reading the branch head on CircleCI; a
+   real supersede (exit 75) is covered by tests, not yet observed live.
 4. *Flaky tests* found by CircleCI (not changed here): `flight › board.spec.ts` "Now boarding…" (2 flakes), `flight-closed-beta ›
    flight-transition.spec.ts`, `channel-approve › telegram-approve.spec.ts`; they caused 4 of 30 audited failures and 3 reruns.
 5. *Status contexts*: existing names are kept; if branch protection should list the new jobs, that is an owner setting
    (`certification` already requires all of them).
 
-**Owner decisions requested**
-
-1. Browser jobs on `medium` (−29% credits, +10.6% per-profile time, measured). Rollback is one line.
-2. The build starting beside governance (it runs governance-lite itself first).
-3. Candidate baselines after screenshot failures (diagnostic artifacts; the only change under `apps/` is the gated config hook).
+**Owner decisions** (2026-11-17): the architecture, browser jobs on `medium`, the build beside governance and the candidate baselines
+are approved; DEC-0058 approved the exposure-based advisory policy in this PR as its own commit; merge is authorized after a fully green
+CircleCI certification.
