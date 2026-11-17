@@ -117,7 +117,12 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
    * BUILD-FLOFI-UNIFIED-COPILOT-001: public addresses FloFi itself resolved from a Saved Recipient the user named exactly in this request
    * (`saved-recipients.ts`). They ground a destination like a typed address (and are re-checked for the network like one); nothing else.
    */
-  readonly saved?: readonly string[] };
+  readonly saved?: readonly string[];
+  /**
+   * BUILD-P1: the bare number the user answered to FloFi's own percentage question ("10" after "Which percentage…?"), read by FloFi itself. It is the
+   * only way a number without "%" grounds a percentage; a bare number answering any other question never does.
+   */
+  readonly answeredPercent?: string };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 const ORCA_WHIRLPOOLS_MAINNET_TICK_SPACING = ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY.pool.tickSpacing;
 
@@ -854,14 +859,14 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   if (deposits.size === 1) { const other = [pool.first, pool.second].find(token => !deposits.has(token))!; ask(['amount'], m.depositNeeded(other), [], other, { code: 'COPILOT_DEPOSIT_REQUIRED' }); }
   if (deposits.size === 0) ask(['amount'], m.depositsNeeded(pool.first, pool.second), [], undefined, { code: 'COPILOT_DEPOSIT_REQUIRED' });
   // Orca positions in FloFi always have a finite range (the exact grammar takes prices or ticks): the full range is never substituted silently.
-  if (a.rangeUnit === 'FULL') ask(['range'], m.fullRangeUnavailable(pool.quote, pool.base), [], undefined, { code: 'COPILOT_RANGE_UNSUPPORTED' });
+  if (a.rangeUnit === 'FULL') ask(['range'], m.fullRangeUnavailable(pool.quote, pool.base, protocol === 'ORCA'), [], undefined, { code: 'COPILOT_RANGE_UNSUPPORTED' });
+  if (a.rangeUnit === 'PERCENT' && protocol !== 'ORCA') ask(['range'], m.percentRangeOrcaOnly, [], undefined, { code: 'COPILOT_RANGE_UNSUPPORTED' });
   if (openRange) ask(['range'], openRange.question, [], undefined, { code: openRange.code });
-  if (a.rangeUnit === 'PERCENT' && protocol !== 'ORCA') ask(['range'], m.percentRangeOrcaOnly);
   const range = network === 'SOLANA' ? orcaMainnetRange(a, g, notes) : protocol === 'ORCA' ? orcaRange(a, g, notes, pool.quote) : (() => {
     const lower = a.lower!, upper = a.upper!;
     const grounded = g.carried.has('range') ? true : a.rangeUnit === 'PRICE' ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
       : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
-    if (!grounded) ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+    if (!grounded) ask(['range'], m.rangeNotFound(pool.quote, pool.base), [], undefined, { code: 'COPILOT_RANGE_NOT_FOUND' });
     return a.rangeUnit === 'PRICE' ? `from ${lower} to ${upper} ${pool.quote} per ${pool.base}` : `ticks ${lower} to ${upper}`;
   })();
   const slippage = slippageOf(a.slippageBps, pool.slippage, g, notes);
@@ -897,6 +902,8 @@ export function liquidityUnits(a: CopilotLiquidityAction): Units | null {
   try { const view = catalogPoolView(chain, tokens[0], tokens[1], FEE_BPS[a.feeTier ?? '0.3'] ?? 3000); return { quote: view.quote, base: view.base }; } catch { return null; }
 }
 const FEE_BPS: Readonly<Record<string, number>> = { '0.01': 100, '0.05': 500, '0.3': 3000, '1': 10000 };
+/** Words that state a range (a percentage band, bounds, ticks), in English or Portuguese; "full range" is not one of them. */
+const RANGE_WORDS = /(?:±|\+\s*\/\s*-|plus or minus|mais ou menos)\s*\d|\d+(?:[.,]\d+)?\s*(?:%|percent|per\s?cent|por\s?cento)\s*(?:range|band|wide|around|each side|on each side|either side|faixa|em torno|ao redor|para cada lado|pra cada lado|de cada lado)|\b(?:range|faixa|intervalo)\s+(?:of|de)\s+\d+(?:[.,]\d+)?\s*(?:%|percent|por\s?cento)|\b(?:between|entre)\s+\d[\d.,]*\s+(?:and|e)\s+\d|\b(?:lower|upper|min(?:imum)?|max(?:imum)?|inferior|superior)\s+(?:price|bound|pre[cç]o)?\s*\d|\bticks?\s+-?\d/i;
 /** A symmetric percentage of a PERCENT range ("±10%": upper "10"; a model's lower "-10" or "10" beside it is the same band); null when asymmetric. */
 function symmetricPercent(a: CopilotLiquidityAction): string | null {
   const upper = a.upper ?? (a.lower !== null ? a.lower.replace(/^-/, '') : null);
@@ -905,7 +912,16 @@ function symmetricPercent(a: CopilotLiquidityAction): string | null {
 }
 /** The percentage is the user's own: written as one ("10%", "10 percent"), or the bare number answering FloFi's own percentage question. */
 const percentGrounded = (g: Grounding, percent: string) => g.carried.has('range') || groundedPercent(g.text, percent)
-  || (g.latest !== undefined && /^\s*\d+(?:[.,]\d+)?\s*[.!]?\s*$/.test(g.latest) && amountReadings(g.latest.trim().replace(/[.!]$/, '')).includes(canonicalDecimal(percent)));
+  || (g.answeredPercent !== undefined && canonicalDecimal(g.answeredPercent) === canonicalDecimal(percent));
+/**
+ * How many of the user's written numbers equal `value` and are not already claimed by another field (a deposit maximum, the other bound): a number
+ * written once grounds one field only ("2800 USDC and 1 WETH" never grounds a 1–2800 range by itself).
+ */
+function unclaimed(text: string, value: string, claimed: readonly string[], signed: boolean): boolean {
+  const negative = signed && value.startsWith('-'), wanted = canonicalDecimal(negative ? value.slice(1) : value);
+  const written = numbersIn(text).filter(reading => reading.value === wanted && (!signed || reading.negative === negative)).length;
+  return written > claimed.filter(item => canonicalDecimal(item.replace(/^-/, '')) === wanted && item.startsWith('-') === negative).length;
+}
 function decimalCompare(a: string, b: string): number {
   const [ai = '0', af = ''] = a.split('.'), [bi = '0', bf = ''] = b.split('.'), n = Math.max(af.length, bf.length);
   const x = BigInt(ai + af.padEnd(n, '0')), y = BigInt(bi + bf.padEnd(n, '0'));
@@ -914,9 +930,13 @@ function decimalCompare(a: string, b: string): number {
 /** Explicit bounds as the user wrote them: grounded in their words (or carried), in order, and ticks on the pool's spacing. */
 function explicitBounds(a: CopilotLiquidityAction, g: Grounding, units: Units, spacing: number): { readonly lower: string; readonly upper: string } {
   const m = copyOf(g), lower = a.lower!, upper = a.upper!, text = g.text, price = a.rangeUnit === 'PRICE';
+  // Each bound needs its own written number: one already used as a deposit maximum (or as the other bound) does not count twice.
+  const deposits = a.deposits.map(deposit => deposit.maxAmount);
+  const own = (value: string, other: string) => unclaimed(text, value, [...deposits, other], !price);
   const grounded = g.carried.has('range') ? true : price ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
+      && own(lower, upper) && own(upper, lower)
     : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
-  if (!grounded) ask(['range'], m.rangeNotFound(units.quote, units.base));
+  if (!grounded) ask(['range'], m.rangeNotFound(units.quote, units.base), [], undefined, { code: 'COPILOT_RANGE_NOT_FOUND' });
   const ordered = price ? !lower.startsWith('-') && !upper.startsWith('-') && decimalCompare(canonicalDecimal(lower), canonicalDecimal(upper)) < 0 : Number(lower) < Number(upper);
   if (!ordered) ask(['range'], m.rangeOrder(lower, upper, price ? 'PRICE' : 'TICK'), [], undefined, { code: 'COPILOT_RANGE_ORDER_INVALID' });
   if (!price && (Number(lower) % spacing !== 0 || Number(upper) % spacing !== 0)) ask(['range'], m.rangeTicksInvalid(spacing), [], undefined, { code: 'COPILOT_RANGE_TICKS_INVALID' });
@@ -931,7 +951,8 @@ function requiredRead(ref: PoolRef, g: Grounding, label: string): GoodRead {
   if (read?.ok) return read;
   if (read && poolMissing(read.code)) return ask(['range'], m.poolNotFound(label), [], undefined, { code: 'COPILOT_POOL_NOT_FOUND' });
   if (!read && g.poolReads) return ask(['range'], m.poolPriceReading, [m.retryOption], undefined, { code: 'COPILOT_POOL_PRICE_REQUIRED', pool: ref });
-  return ask(['range'], m.poolPriceUnavailable(label), [m.retryOption], undefined, { code: 'COPILOT_POOL_PRICE_UNAVAILABLE' });
+  // "Try again" only where the surface can read the pool again (the web chat); elsewhere FloFi says what it could not confirm.
+  return ask(['range'], m.poolPriceUnavailable(label), g.poolReads ? [m.retryOption] : [], undefined, { code: 'COPILOT_POOL_PRICE_UNAVAILABLE' });
 }
 /** A read used only to tell where an explicit range sits against the current price: a failed read never blocks it, a missing pool does. */
 function advisoryRead(ref: PoolRef, g: Grounding, label: string): GoodRead | null {
@@ -947,13 +968,13 @@ function converted<T>(g: Grounding, label: string, run: () => T): T {
   try { return run(); } catch (cause) {
     const code = cause instanceof Error ? cause.message : '';
     if (code === 'COPILOT_RANGE_OUT_OF_RANGE') return ask(['range'], m.percentRangeInvalid, [], undefined, { code });
-    if (code === 'COPILOT_POOL_PRICE_UNAVAILABLE') return ask(['range'], m.poolPriceUnavailable(label), [m.retryOption], undefined, { code });
+    if (code === 'COPILOT_POOL_PRICE_UNAVAILABLE') return ask(['range'], m.poolPriceUnavailable(label), g.poolReads ? [m.retryOption] : [], undefined, { code });
     return ask(['range'], m.rangeConversionInvalid, [], undefined, { code: 'COPILOT_RANGE_CONVERSION_INVALID' });
   }
 }
 /** What the person sees before approving: the effective (aligned) range, when and where the price was read, and where the price sits. */
 function rangeNotes(m: CopilotCopy, r: ResolvedRange, units: Units, read: GoodRead | null, at: 'SLOT' | 'BLOCK'): string[] {
-  return [m.effectiveRange(r.lowerPrice, r.upperPrice, units.quote, units.base, r.tickLower, r.tickUpper), ...read ? [m.priceReadAt(at, read.at)] : [],
+  return [m.effectiveRange(r.lowerPrice, r.upperPrice, units.quote, units.base, r.tickLower, r.tickUpper, r.poolOrder ?? null), ...read ? [m.priceReadAt(at, read.at)] : [],
     ...r.position ? [m.rangePosition(r.position, r.onlyToken)] : []];
 }
 /**
@@ -964,8 +985,8 @@ function orcaMainnetRange(a: CopilotLiquidityAction, g: Grounding, notes: string
   const m = copyOf(g), units = { quote: 'USDC', base: 'SOL' }, label = `Orca SOL/USDC (${COPILOT_NETWORK_LABEL.SOLANA})`;
   if (a.rangeUnit === 'PERCENT') {
     const percent = symmetricPercent(a);
-    if (percent === null) return ask(['range'], m.rangeNotFound(units.quote, units.base));
-    if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent));
+    if (percent === null) return ask(['range'], m.rangeNotFound(units.quote, units.base), [], undefined, { code: 'COPILOT_RANGE_NOT_FOUND' });
+    if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent), [], undefined, { code: 'COPILOT_RANGE_PERCENT_NOT_FOUND' });
     converted(g, label, () => percentValue(percent));
     const read = requiredRead(ORCA_MAINNET_POOL, g, label), r = converted(g, label, () => orcaPercentRange(read, percent));
     notes.push(m.percentRangeIn(canonicalDecimal(percent), r.reference!, units.quote, units.base), ...rangeNotes(m, r, units, read, 'SLOT'));
@@ -992,8 +1013,8 @@ function orcaRange(a: CopilotLiquidityAction, g: Grounding, notes: string[], quo
   const m = copyOf(g), pool = { ...COPILOT_POOLS.ORCA, quote }, text = g.text;
   if (a.rangeUnit === 'PERCENT') {
     const percent = symmetricPercent(a);
-    if (percent === null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));
-    if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent));
+    if (percent === null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base), [], undefined, { code: 'COPILOT_RANGE_NOT_FOUND' });
+    if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent), [], undefined, { code: 'COPILOT_RANGE_PERCENT_NOT_FOUND' });
     const value = Number(percent), bps = Math.round(value * 100);
     if (!Number.isFinite(value) || bps < 1 || bps > 9_000) return reject('COPILOT_RANGE_OUT_OF_RANGE', m.percentRangeInvalid);
     const price = g.solana?.price ?? null;
@@ -1002,11 +1023,11 @@ function orcaRange(a: CopilotLiquidityAction, g: Grounding, notes: string[], quo
     notes.push(m.percentRangeNote(canonicalDecimal(percent), price, bounds.lower, bounds.upper));
     return `from ${bounds.lower} to ${bounds.upper} ${pool.quote} per ${pool.base}`;
   }
-  if (a.rangeUnit === null || a.rangeUnit === 'FULL' || a.lower === null || a.upper === null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+  if (a.rangeUnit === null || a.rangeUnit === 'FULL' || a.lower === null || a.upper === null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base), [], undefined, { code: 'COPILOT_RANGE_NOT_FOUND' });
   const lower = a.lower, upper = a.upper;
   const grounded = g.carried.has('range') ? true : a.rangeUnit === 'PRICE' ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
     : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
-  if (!grounded) ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+  if (!grounded) ask(['range'], m.rangeNotFound(pool.quote, pool.base), [], undefined, { code: 'COPILOT_RANGE_NOT_FOUND' });
   return a.rangeUnit === 'PRICE' ? `from ${lower} to ${upper} ${pool.quote} per ${pool.base}` : `ticks ${lower} to ${upper}`;
 }
 
@@ -1068,7 +1089,9 @@ function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: 
   });
   if (tokens[0]!.address === tokens[1]!.address) reject('COPILOT_DUPLICATE_DEPOSIT', m.poolTokenOnce(tokens[0]!.symbol, tokens[1]!.symbol));
   const fee = a.feeTier ?? null;
-  const writtenFee = /\b(?:fee(?: tier)?|taxa|at)\s+(?:(?:of|de)\s+)?([0-9]+(?:[.,][0-9]+)?)\s*%/i.exec(g.latest ?? text)?.[1]?.replace(',', '.');
+  // BUILD-P1: "at 10% around the price" / "±10%" / "a 10% range" is a range, not a fee tier.
+  const writtenFee = /\b(?:fee(?: tier)?|taxa|at)\s+(?:(?:of|de)\s+)?([0-9]+(?:[.,][0-9]+)?)\s*%(?!\s*(?:range|band|wide|around|each|either|on each|both|faixa|em torno|ao redor|para cada|pra cada|de cada|do pre[cç]o|of the price))/i
+    .exec(g.latest ?? text)?.[1]?.replace(',', '.');
   if (writtenFee && !COPILOT_FEE_TIERS.some(tier => canonicalDecimal(tier) === canonicalDecimal(writtenFee)))
     refuse(m.catalogFeeUnsupported(COPILOT_FEE_TIERS));
   if (writtenFee && fee === null && !g.carried.has('feeTier')) ask(['range'], m.feeNotFound(writtenFee));
@@ -1100,7 +1123,17 @@ function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: 
     }
     notes.push(...rangeNotes(m, resolved, units, read, 'BLOCK'));
     range = ` ticks ${resolved.tickLower} to ${resolved.tickUpper}`;
-  } else if (a.rangeUnit === null) notes.push(m.fullRangeNote);
+  } else if (a.rangeUnit === null) {
+    // BUILD-P1: the full range is the default only when the user said nothing about a range. A range they wrote (a percentage, bounds) that the
+    // interpreter did not report is asked for, never replaced by the full range.
+    if (RANGE_WORDS.test(g.latest ?? text) || RANGE_WORDS.test(text)) {
+      const token = (t: (typeof tokens)[number]) => ({ symbol: t.symbol, address: t.address!, decimals: t.decimals });
+      let units: Units = { quote: tokens[0]!.symbol, base: tokens[1]!.symbol };
+      try { const view = catalogPoolView(chainOf(network), token(tokens[0]!), token(tokens[1]!), FEE_BPS[fee ?? '0.3']!); units = { quote: view.quote, base: view.base }; } catch { /* the pair's own order */ }
+      ask(['range'], m.catalogRangeNeeded(units.quote, units.base), [], undefined, { code: 'COPILOT_RANGE_REQUIRED' });
+    }
+    notes.push(m.fullRangeNote);
+  }
   const slippage = slippageOf(a.slippageBps, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE, g, notes);
   if (fee === null) notes.push(m.defaultFeeNote('0.3'));
   if (tokens.some(token => token.ether)) notes.push(m.wethNote);

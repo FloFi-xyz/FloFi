@@ -15,9 +15,9 @@ describe('readRangeAnswer: short answers to FloFi\'s range question (EN/PT)', ()
     ['inferior', { kind: 'SIDE', side: 'LOWER', value: null }], ['é o superior', { kind: 'SIDE', side: 'UPPER', value: null }], ['mínimo', { kind: 'SIDE', side: 'LOWER', value: null }],
     ['1usdc', { kind: 'VALUE', value: '1', unit: 'PRICE' }], ['1 USDC', { kind: 'VALUE', value: '1', unit: 'PRICE' }], ['180', { kind: 'VALUE', value: '180', unit: null }],
     ['$180', { kind: 'VALUE', value: '180', unit: 'PRICE' }], ['180 USDC per SOL', { kind: 'VALUE', value: '180', unit: 'PRICE' }], ['1,5', { kind: 'VALUE', value: '1.5', unit: null }],
-    ['upper 180', { kind: 'SIDE', side: 'UPPER', value: '180' }], ['the upper is 180', { kind: 'SIDE', side: 'UPPER', value: '180' }],
-    ['o superior é 180', { kind: 'SIDE', side: 'UPPER', value: '180' }], ['make the lower 120', { kind: 'SIDE', side: 'LOWER', value: '120' }],
-    ['muda o inferior para 120', { kind: 'SIDE', side: 'LOWER', value: '120' }], ['150 as the lower', { kind: 'SIDE', side: 'LOWER', value: '150' }],
+    ['upper 180', { kind: 'SIDE', side: 'UPPER', value: '180', unit: null }], ['the upper is 180', { kind: 'SIDE', side: 'UPPER', value: '180', unit: null }],
+    ['o superior é 180', { kind: 'SIDE', side: 'UPPER', value: '180', unit: null }], ['make the lower 120', { kind: 'SIDE', side: 'LOWER', value: '120', unit: null }],
+    ['muda o inferior para 120', { kind: 'SIDE', side: 'LOWER', value: '120', unit: null }], ['150 as the lower', { kind: 'SIDE', side: 'LOWER', value: '150', unit: null }],
     ['±10%', { kind: 'PERCENT', percent: '10' }], ['10% range', { kind: 'PERCENT', percent: '10' }], ['+/- 10%', { kind: 'PERCENT', percent: '10' }],
     ['10 percent around current price', { kind: 'PERCENT', percent: '10' }], ['faixa de 10%', { kind: 'PERCENT', percent: '10' }],
     ['10% para cada lado', { kind: 'PERCENT', percent: '10' }], ['mais ou menos 2,5%', { kind: 'PERCENT', percent: '2.5' }], ['a 10% range', { kind: 'PERCENT', percent: '10' }],
@@ -29,6 +29,13 @@ describe('readRangeAnswer: short answers to FloFi\'s range question (EN/PT)', ()
     ['lower 150 and upper 180', { kind: 'BOUNDS', unit: 'PRICE', lower: '150', upper: '180' }], ['max 180 min 150', { kind: 'BOUNDS', unit: 'PRICE', lower: '150', upper: '180' }],
     ['ticks -600 to 600', { kind: 'BOUNDS', unit: 'TICK', lower: '-600', upper: '600' }], ['-600 to 600', { kind: 'BOUNDS', unit: 'TICK', lower: '-600', upper: '600' }],
   ])('%s', (text, expected) => expect(read(text)).toEqual(expected));
+  it('keeps a unit named next to a side, and refuses a contradictory one', () => {
+    expect(read('lower tick 600')).toEqual({ kind: 'SIDE', side: 'LOWER', value: '600', unit: 'TICK' });
+    expect(read('upper 180 usdc')).toEqual({ kind: 'SIDE', side: 'UPPER', value: '180', unit: 'PRICE' });
+    expect(read('preço superior 180')).toEqual({ kind: 'SIDE', side: 'UPPER', value: '180', unit: 'PRICE' });
+    expect(read('lower tick 600 usdc')).toBeNull();
+    expect(read('lower price -600')).toBeNull();
+  });
   it('reads dollars and ETH for a USDC-per-WETH pool', () => {
     expect(read('2800 dollars', WETH)).toEqual({ kind: 'VALUE', value: '2800', unit: 'PRICE' });
     expect(read('3200 usdc per eth', WETH)).toEqual({ kind: 'VALUE', value: '3200', unit: 'PRICE' });
@@ -56,6 +63,13 @@ describe('applyRangeAnswer: only the range slots change', () => {
     expect(applyRangeAnswer(both, null, read('make the lower 120')!)!.action).toEqual(action({ rangeUnit: 'PRICE', lower: '120', upper: '180' }));
     // A bare value when both bounds exist is never assigned silently.
     expect(applyRangeAnswer(both, null, read('120')!)).toMatchObject({ ask: 'SIDE', hold: { value: '120' }, action: both });
+  });
+  it('a named unit decides the bound: "lower tick 600" in a price range starts tick bounds; choosing the kind in use keeps its bounds', () => {
+    const prices = action({ rangeUnit: 'PRICE', lower: '150', upper: null });
+    expect(applyRangeAnswer(prices, null, read('lower tick 600')!)!.action).toMatchObject({ rangeUnit: 'TICK', lower: '600', upper: null });
+    expect(applyRangeAnswer(prices, null, read('upper 180 usdc')!)!.action).toMatchObject({ rangeUnit: 'PRICE', lower: '150', upper: '180' });
+    expect(applyRangeAnswer(prices, null, read('a price range')!)!.action).toEqual(prices);
+    expect(applyRangeAnswer(prices, null, read('ticks')!)!.action).toMatchObject({ rangeUnit: 'TICK', lower: null, upper: null });
   });
   it('a percentage, the full range or a unit replace the range only; deposits, network and slippage are untouched', () => {
     const base = action({ slippageBps: '50', rangeUnit: 'PRICE', lower: '150', upper: null });

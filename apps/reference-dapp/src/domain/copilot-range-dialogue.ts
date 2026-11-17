@@ -17,7 +17,8 @@ export type RangeAnswer =
   | { readonly kind: 'PERCENT'; readonly percent: string | null }
   | { readonly kind: 'UNIT'; readonly unit: 'PRICE' | 'TICK' }
   | { readonly kind: 'BOUNDS'; readonly unit: 'PRICE' | 'TICK'; readonly lower: string; readonly upper: string }
-  | { readonly kind: 'SIDE'; readonly side: RangeSide; readonly value: string | null }
+  /** A side, with its value and unit when the answer named them ("lower tick 600" is a tick; "upper 180 usdc" a price). */
+  | { readonly kind: 'SIDE'; readonly side: RangeSide; readonly value: string | null; readonly unit?: 'PRICE' | 'TICK' | null }
   | { readonly kind: 'VALUE'; readonly value: string; readonly unit: 'PRICE' | 'TICK' | null };
 /** The pool's price unit (quote per base), so "1usdc" or "180 USDC per SOL" is recognised and "0.1 SOL" is not. Null: unknown pool. */
 export type RangeUnits = { readonly quote: string; readonly base: string };
@@ -110,10 +111,17 @@ export function readRangeAnswer(raw: string, units: RangeUnits | null): RangeAns
   const VERB = String.raw`(?:(?:make|set|change|use|move|put|muda(?:r)?|troca(?:r)?|altera(?:r)?|coloca(?:r)?|define|definir|deixa|ajusta(?:r)?)\s+)?(?:the\s+|o\s+|a\s+)?`;
   const LINK = String.raw`\s*(?:is|=|:|to|é|e|para|pra|em|de|as|at|should be|deve ser|ser[aá])?\s*`;
   for (const [side, word] of [['LOWER', LOWER], ['UPPER', UPPER]] as const) {
-    const before = whole(`${VERB}${word}${NOUN}${LINK}${VALUE}`).exec(text);
-    if (before) { const value = valueOf(before, 1, units); return value ? { kind: 'SIDE', side, value: value.value } : null; }
+    const before = whole(String.raw`${VERB}(?:(?:price|pre[cç]o|ticks?)\s+)?${word}${NOUN}${LINK}${VALUE}`).exec(text);
+    // A noun naming the unit ("lower tick", "preço inferior") counts as the value's own unit; a contradiction is not a range answer.
+    const named = (match: RegExpExecArray, value: { value: string; unit: 'PRICE' | 'TICK' | null }) => {
+      const noun = /\bticks?\b/.test(match[0]) && !/\bticks?\b/.test(match[0].slice(match[0].search(/\d/))) ? 'TICK' : /\b(?:price|pre[cç]o)\b/.test(match[0]) ? 'PRICE' : null;
+      if (noun && value.unit && noun !== value.unit) return null;
+      const unit = noun ?? value.unit;
+      return unit === 'PRICE' && value.value.startsWith('-') ? null : { kind: 'SIDE' as const, side, value: value.value, unit };
+    };
+    if (before) { const value = valueOf(before, 1, units); return value ? named(before, value) : null; }
     const after = whole(String.raw`${VALUE}\s*(?:is|é|as|como|for|para|pra)?\s*(?:the\s+|o\s+|a\s+)?${word}${NOUN}`).exec(text);
-    if (after) { const value = valueOf(after, 1, units); return value ? { kind: 'SIDE', side, value: value.value } : null; }
+    if (after) { const value = valueOf(after, 1, units); return value ? named(after, value) : null; }
     if (whole(String.raw`(?:(?:it'?s|it is|that'?s|that is|é|e|eh|seria|is|as)\s+)?(?:the\s+|o\s+|a\s+|como\s+)?${word}${NOUN}`).test(text)) return { kind: 'SIDE', side, value: null };
   }
   const single = whole(String.raw`(?:(?:it'?s|it is|é|seria)\s+)?${VALUE}`).exec(text);
@@ -133,11 +141,12 @@ export function applyRangeAnswer(action: CopilotLiquidityAction, hold: RangeHold
   const range = (rangeUnit: CopilotLiquidityAction['rangeUnit'], lower: string | null, upper: string | null): CopilotLiquidityAction => ({ ...action, rangeUnit, lower, upper });
   switch (answer.kind) {
     case 'FULL': return { action: range('FULL', null, null), hold: null, ask: null };
-    case 'UNIT': return { action: range(answer.unit, null, null), hold: null, ask: null };
+    // Choosing the kind already in use keeps the bounds given; another kind starts them afresh.
+    case 'UNIT': return { action: action.rangeUnit === answer.unit ? action : range(answer.unit, null, null), hold: null, ask: null };
     case 'PERCENT': return { action: range('PERCENT', null, answer.percent), hold: null, ask: null };
     case 'BOUNDS': return { action: range(answer.unit, answer.lower, answer.upper), hold: null, ask: null };
     case 'SIDE': {
-      const value = answer.value ?? hold?.value ?? null, unit = unitFor(action, value);
+      const value = answer.value ?? hold?.value ?? null, unit = unitFor(action, value, answer.unit ?? null);
       // Switching from a percentage or the full range to bounds starts the bounds afresh.
       const keep = bounded(action.rangeUnit) && action.rangeUnit === unit;
       const lower = keep ? action.lower : null, upper = keep ? action.upper : null;

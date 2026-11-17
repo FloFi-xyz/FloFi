@@ -7,7 +7,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { parseArbitrumTokenList } from '@defi-workflow-engine/action-registry';
+import { parseArbitrumTokenList, parseEthereumTokenList } from '@defi-workflow-engine/action-registry';
 import { sqrtRatioAtTick, uniswapAlignPriceRange, uniswapBandAroundSqrtPriceIn, uniswapPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
@@ -16,7 +16,7 @@ import { baseCatalog } from '../server/base-mainnet.test-harness';
 import { setActiveNetworkScope } from './network-scope';
 import { priceBoundsAround } from './pool-price-bounds';
 import { solanaLiquidityTicks } from './solana-liquidity-authoring';
-import { COPILOT_V2_COMMANDS } from './copilot-conversation';
+import { COPILOT_V2_COMMANDS, startTurn } from './copilot-conversation';
 import { parseLocalCommand } from './commands';
 import { editorReducer } from './editor';
 import { composeStrategy, semanticWorkflowHash } from '../engine/strategy-engine';
@@ -26,7 +26,8 @@ import { ORCA_MAINNET_POOL, POOL_PRICE_MAX_AGE_MS, type PoolPriceRead, type Pool
 import type { CopilotReply } from './copilot-conversation';
 
 const arbitrum = parseArbitrumTokenList(readFileSync(new URL('../../../../packages/action-registry/test/fixtures/arbitrum-token-list-fixture.json', import.meta.url), 'utf8'), '2026-10-12T00:00:00Z');
-beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(arbitrum); });
+const ethereum = parseEthereumTokenList(readFileSync(new URL('../../../../packages/action-registry/test/fixtures/ethereum-token-list-fixture.json', import.meta.url), 'utf8'), '2026-10-12T00:00:00Z');
+beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(arbitrum); registerNetworkCatalog(ethereum); });
 afterAll(() => resetNetworkCatalogs());
 beforeEach(() => setActiveNetworkScope('PUBLIC_MAINNET'));
 afterEach(() => setActiveNetworkScope(null));
@@ -36,7 +37,9 @@ const ORCA = { protocol: 'ORCA', network: 'SOLANA' } as const;
 const SOL_USDC = [{ asset: 'SOL', maxAmount: '0.1' }, { asset: 'USDC', maxAmount: '10' }];
 const BASE = { network: 'BASE', deposits: [{ asset: 'USDC', maxAmount: '10' }, { asset: 'ETH', maxAmount: '0.004' }] };
 /** On Base and Arbitrum One WETH is token0 and USDC token1: USDC per WETH is token1 per token0. ~3,000 and ~2,900 USDC per WETH. */
-const TICKS: Record<string, number> = { 'eip155:8453': -196_257, 'eip155:42161': -196_597 };
+const TICKS: Record<string, number> = { 'eip155:8453': -196_257, 'eip155:42161': -196_597,
+  // On Ethereum USDC is token0: USDC per WETH is token0 per token1 (a higher tick is a lower price), ~3,000 USDC per WETH.
+  'eip155:1': 196_257 };
 const ORCA_PRICE = '150.000000', ORCA_TICK = -18_972, SPACING = 60;
 const good = (ref: PoolRef, readAt = NOW): PoolPriceRead => ref.kind === 'UNISWAP_V3'
   ? { ref, readAt, ok: true, sqrtPrice: sqrtRatioAtTick(TICKS[ref.chain]!).toString(), tick: TICKS[ref.chain]!, at: 22_000_000 }
@@ -299,5 +302,116 @@ describe('Safety: the model and the user\'s words never become unverified financ
     const t = orcaOpen();
     replies.push(local(t, 'full range'), local(t, '±10%'));
     for (const reply of replies) expect([reply?.text, ...reply?.notes ?? [], ...reply?.options ?? []].join(' ')).not.toMatch(/devUSDC|Devnet|Sepolia/i);
+  });
+});
+
+describe('Specialist review regressions (security, liquidity, chat)', () => {
+  it('a bare number answering another question never grounds a percentage the user did not write', () => {
+    const s = session();
+    expect(s.say('Add liquidity on Orca on Solana with 10 SOL', intent.action(act.liquidity({ ...ORCA, deposits: [{ asset: 'SOL', maxAmount: '10' }], rangeUnit: 'PERCENT', upper: '10' }))))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_DEPOSIT_REQUIRED' });
+    const reply = local(s, '10');
+    expect(reply).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_NOT_FOUND' });
+    expect(s.poolRequests).toHaveLength(0);
+    expect(local(s, '10%')?.kind).toBe('PROPOSAL');
+  });
+  it('a number written once grounds one field: deposit maxima never double as price bounds', () => {
+    const s = session();
+    const reply = s.say('Add liquidity on Base with 2800 USDC and 1 WETH', intent.action(act.catalogLiquidity({ network: 'BASE',
+      deposits: [{ asset: 'USDC', maxAmount: '2800' }, { asset: 'WETH', maxAmount: '1' }], rangeUnit: 'PRICE', lower: '1', upper: '2800' })));
+    expect(reply).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_NOT_FOUND' });
+    expect(local(s, '2500 to 3500')?.sentence).toMatch(/^add liquidity 2800 USDC and 1 WETH on Base ticks -?\d+ to -?\d+ slippage 100 bps$/);
+  });
+  it('a fee-tier answer is never read as a percentage range (only FloFi\'s own range questions are read locally)', () => {
+    const s = session();
+    expect(s.say('Add liquidity on Base with 10 USDC and 0.004 ETH at 0.05%', intent.action(act.catalogLiquidity({ ...BASE }))))
+      .toMatchObject({ kind: 'CLARIFICATION' });
+    const reply = s.say('0.05%', intent.action(act.catalogLiquidity({ ...BASE, feeTier: '0.05' })));
+    expect(s.turns.at(-1)!.request).not.toBeNull();
+    expect(reply?.sentence).toBe('add liquidity 10 USDC and 0.004 WETH on Base fee 0.05% slippage 100 bps');
+  });
+  it('"at 10% around the current price" is a range, not a 10% fee tier', () => {
+    const s = session();
+    expect(s.say('Add liquidity on Base with 10 USDC and 0.004 ETH at 10% around the current price',
+      intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PERCENT', upper: '10' })))?.kind).toBe('PROPOSAL');
+  });
+  it('a range the user wrote but the interpreter dropped is asked for, never replaced by the full range', () => {
+    const s = session();
+    expect(s.say('Add liquidity on Base with 10 USDC and 0.004 ETH in a 10% range', intent.action(act.catalogLiquidity({ ...BASE }))))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_REQUIRED',
+        text: 'Which range should the position use: the full range, the lower and upper prices in USDC per WETH, a percentage around the current pool price (for example ±10%), or ticks?' });
+    expect(local(s, '±10%')?.sentence).toMatch(/ticks -?\d+ to -?\d+ slippage 100 bps$/);
+    const t = session();
+    t.say('Add liquidity on Base with 10 USDC and 0.004 ETH between 2800 and 3200', intent.action(act.catalogLiquidity({ ...BASE })));
+    expect(local(t, 'full range')?.sentence).toBe('add liquidity 10 USDC and 0.004 WETH on Base slippage 100 bps');
+  });
+  it('repeated values without a side reach the question limit (no endless loop)', () => {
+    const s = orcaOpen();
+    expect(local(s, '1usdc')?.code).toBe('COPILOT_RANGE_SIDE_REQUIRED');
+    expect(local(s, '2usdc')?.code).toBe('COPILOT_RANGE_SIDE_REQUIRED');
+    expect(local(s, '3usdc')).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CLARIFICATION_LIMIT' });
+  });
+  it('FloFi\'s own pool-read request never runs into the question limit', () => {
+    const s = session();
+    s.poolReader = ref => ({ ref, readAt: NOW, ok: false, code: 'BASE_MAINNET_NOT_ENABLED' });
+    s.say('Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PERCENT', upper: '10' })));
+    expect(local(s, 'Try again')?.code).toBe('COPILOT_POOL_PRICE_UNAVAILABLE');
+    expect(local(s, 'Try again')?.code).toBe('COPILOT_POOL_PRICE_UNAVAILABLE');
+    expect(s.state.clarifications).toBe(3);
+    s.poolReader = ref => good(ref);
+    expect(local(s, 'Try again')?.kind).toBe('PROPOSAL');
+  });
+  it('a malformed "successful" read is a failed read: a percentage is not computed, an explicit range proceeds without a position note', () => {
+    const s = orcaOpen();
+    s.poolReader = ref => ({ ref, readAt: NOW, ok: true, price: 'not-a-price', tick: 0, at: 1 });
+    expect(local(s, '±10%')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_PRICE_UNAVAILABLE' });
+    const t = orcaOpen();
+    t.poolReader = ref => ({ ref, readAt: NOW, ok: true, price: 'not-a-price', tick: 0, at: 1 });
+    const done = local(t, '150 to 180');
+    expect(done?.kind).toBe('PROPOSAL');
+    expect(notes(done)).not.toMatch(/current pool price is/);
+  });
+  it('a surface that cannot read pools is not offered a retry that cannot work', () => {
+    const s = Object.assign(new CopilotSession(), { now: NOW });
+    expect(s.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, ±10%', intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, rangeUnit: 'PERCENT', upper: '10' }))))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_PRICE_UNAVAILABLE', options: [] });
+  });
+  it('a context change during the pool read ends the request instead of answering against stale state', () => {
+    const s = orcaOpen(), before = s.state, env = { ...s.env(), poolReads: true, now: NOW };
+    const first = startTurn(before, '±10%', env);
+    expect(first.kind === 'LOCAL' && first.reply.pool).toBeTruthy();
+    const changed = { ...env, wallet: '0x9999999999999999999999999999999999999999',
+      verified: { orcaPrice: null, solanaOwner: null, orcaPositions: null, remaining: [], pools: [good(ORCA_MAINNET_POOL)] } };
+    const replay = startTurn(before, '±10%', changed);
+    expect(replay).toMatchObject({ kind: 'LOCAL', reply: { kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED' } });
+  });
+  it('Review consistency: on Base the note gives the same ticks in the pool\'s own order (WETH per USDC) and names the token held', () => {
+    const s = session();
+    const reply = s.say('Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PERCENT', upper: '10' })));
+    expect(notes(reply)).toMatch(/Review shows the same ticks, priced in the pool's order as [0-9.]+–[0-9.]+ WETH per USDC, before you sign\./);
+    const t = session();
+    const outside = t.say('Add liquidity on Base with 10 USDC and 0.004 ETH between 2000 and 2500 USDC',
+      intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PRICE', lower: '2000', upper: '2500' })));
+    expect(notes(outside)).toContain('The current pool price is outside this range: the position would hold only USDC');
+    const o = orcaOpen();
+    expect(notes(local(o, '100 to 120'))).toContain('The current pool price is outside this range: the position would hold only USDC');
+    expect(notes(local(orcaOpen(), '200 to 300'))).toContain('the position would hold only SOL');
+  });
+  it('Ethereum (USDC is token0): ±10% in USDC per WETH uses the pool\'s own order, with no second price unit', () => {
+    const s = session();
+    const reply = s.say('Add liquidity on Ethereum with 10 USDC and 0.004 ETH, ±10%', intent.action(act.catalogLiquidity({ ...BASE, network: 'ETHEREUM', rangeUnit: 'PERCENT', upper: '10' })));
+    const ticks = uniswapBandAroundSqrtPriceIn(sqrtRatioAtTick(TICKS['eip155:1']!), 1_000, SPACING, 'TOKEN0_PER_TOKEN1');
+    expect(reply?.sentence).toBe(`add liquidity 10 USDC and 0.004 WETH on Ethereum ticks ${ticks.tickLower} to ${ticks.tickUpper} slippage 100 bps`);
+    const usdc = (tick: number) => Number(uniswapPriceAtTick(tick, 6, 18, 'TOKEN0_PER_TOKEN1'));
+    expect(usdc(ticks.tickUpper)).toBeLessThanOrEqual(3000 * 0.9 * 1.001); expect(usdc(ticks.tickLower)).toBeGreaterThanOrEqual(3000 * 1.1 * 0.999);
+    expect(notes(reply)).toMatch(/Effective range after aligning to the pool's ticks: [0-9.]+–[0-9.]+ USDC per WETH/);
+    expect(notes(reply)).not.toMatch(/pool's order/);
+  });
+  it('engineering scope: the Uniswap test pools say a percentage is not available instead of asking for one', () => {
+    setActiveNetworkScope('ENGINEERING');
+    const s = new CopilotSession();
+    expect(s.say('Add Uniswap liquidity 100 USDC and 0.05 WETH on Base Sepolia in a percentage range',
+      intent.action(act.liquidity({ protocol: 'UNISWAP_V3', network: 'BASE_SEPOLIA', deposits: [{ asset: 'USDC', maxAmount: '100' }, { asset: 'WETH', maxAmount: '0.05' }], rangeUnit: 'PERCENT' }))))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_UNSUPPORTED' });
   });
 });

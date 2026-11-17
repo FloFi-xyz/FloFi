@@ -60,7 +60,8 @@ describe('Incident B — Uniswap: a percentage answer is understood', () => {
     const s = session();
     const reply = s.say('Add liquidity on Base with 10 USDC and 0.004 ETH in a 10% range',
       intent.action(act.catalogLiquidity({ ...base, rangeUnit: 'PERCENT', upper: '10' })));
-    if (reply?.kind === 'PROPOSAL') expect(reply.sentence).toMatch(/ticks -?\d+ to -?\d+/);
+    expect(reply?.kind).toBe('PROPOSAL');
+    expect(reply?.sentence).toMatch(/ticks -?\d+ to -?\d+/);
     expect(reply?.notes.join(' ') ?? '').not.toMatch(/full price range/i);
   });
 });

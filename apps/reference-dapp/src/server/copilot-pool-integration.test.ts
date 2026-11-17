@@ -18,6 +18,7 @@ import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-ca
 import { CopilotSession, act, intent } from '../domain/copilot-session.test-harness';
 import { setActiveNetworkScope } from '../domain/network-scope';
 import type { PoolPriceRead, PoolRef } from '../domain/pool-range';
+import { poolReader } from '../state/copilot-pool-reads';
 import { createUniswapLiquidityService } from './uniswap-liquidity-service';
 import type { Rpc } from './public-testnet-service';
 
@@ -45,6 +46,7 @@ describe('conversation → IR → Simulate → Review → owner-wallet handoff (
     const { profile, chain, service, calls } = await arbitrumPool();
     // The web chat's read, through the same service method the server action calls (`catalogLiquidityPrice`).
     const read = await service.price(chainId, { tokenA: asset('USDC').address, tokenB: asset('WETH').address, fee: 500 });
+    expect(read.pool).toBe(profile.pool);
     const reads: PoolRef[] = [];
     const s = Object.assign(new CopilotSession([], UNI_OWNER), { walletChainId: chainId, now: Date.now(), poolReader: (ref: PoolRef): PoolPriceRead => {
       reads.push(ref); return { ref, readAt: Date.now(), ok: true, sqrtPrice: read.sqrtPriceX96, tick: read.tick, at: read.blockNumber };
@@ -72,6 +74,9 @@ describe('conversation → IR → Simulate → Review → owner-wallet handoff (
     // The existing owner-wallet handoff prepares the first request for the owner's own wallet; the chat never signs or sends.
     const begun = await service.begin(run.id, UNI_OWNER, workflow);
     expect(begun.transaction).toMatchObject({ chainId: '0xa4b1', from: UNI_OWNER, value: '0x0' });
+    // The web chat's reader binds the service's read to the pool FloFi asked for.
+    const viaReader = await poolReader({ orca: async () => ({ ok: false, code: 'UNUSED' }), catalog: async (c, p) => ({ ok: true, value: await service.price(c, p) }) })(reads[0]!);
+    expect(viaReader).toMatchObject({ ok: true, sqrtPrice: read.sqrtPriceX96, tick: read.tick });
     expect(calls.every(method => !/send|sign/i.test(method))).toBe(true);
     expect(chain.counters.sends).toBe(0);
   });

@@ -32,7 +32,13 @@ export const poolRefKey = (ref: PoolRef): string => ref.kind === 'ORCA' ? `orca:
 export function poolReadFor(ref: PoolRef, reads: readonly PoolPriceRead[] | undefined, now: number): PoolPriceRead | null {
   const key = poolRefKey(ref);
   const fresh = (reads ?? []).filter(read => poolRefKey(read.ref) === key && read.readAt <= now + 5_000 && now - read.readAt <= POOL_PRICE_MAX_AGE_MS);
-  return fresh.sort((a, b) => b.readAt - a.readAt)[0] ?? null;
+  const read = fresh.sort((a, b) => b.readAt - a.readAt)[0] ?? null;
+  // A read reported as successful but without a usable price is a failed read (never a partial one).
+  return read?.ok && !usable(read) ? { ref: read.ref, readAt: read.readAt, ok: false, code: 'COPILOT_POOL_READ_INVALID' } : read;
+}
+function usable(read: GoodRead): boolean {
+  if (!Number.isSafeInteger(read.tick) || !Number.isSafeInteger(read.at)) return false;
+  return read.ref.kind === 'ORCA' ? typeof read.price === 'string' && validPoolPrice(read.price) : typeof read.sqrtPrice === 'string' && /^[1-9][0-9]{0,48}$/.test(read.sqrtPrice);
 }
 /** Codes of a read that found no usable pool (as opposed to a price that could not be read right now). */
 const POOL_MISSING = /^(?:UNISWAP_POOL_MISMATCH|UNISWAP_CONTRACT_CODE_MISSING|UNISWAP_POOL_UNINITIALIZED|UNISWAP_UNEXPECTED_CONTRACT|UNISWAP_FEE_TIER_UNSUPPORTED|ORCA_POOL_INVALID|ORCA_LIQUIDITY_POOL_INVALID)$/;
@@ -44,7 +50,9 @@ export type RangePosition = 'BELOW' | 'INSIDE' | 'ABOVE';
 export type ResolvedRange = { readonly tickLower: number; readonly tickUpper: number;
   /** The effective prices of the aligned ticks (quote per base), and the reference price the range was computed from, if one was read. */
   readonly lowerPrice: string; readonly upperPrice: string; readonly reference: string | null; readonly position: RangePosition | null;
-  /** The token the position would hold alone when the current price is outside the range. */ readonly onlyToken: string | null };
+  /** The token the position would hold alone when the current price is outside the range. */ readonly onlyToken: string | null;
+  /** Catalog pools read the other way round than Review: the same ticks priced in the pool's order (token0 per token1), as Review shows them. */
+  readonly poolOrder?: { readonly lowerPrice: string; readonly upperPrice: string; readonly unit: string } };
 
 // ── Orca SOL/USDC (Solana mainnet-beta) ─────────────────────────────────────────────────────────────────────────────────────────────
 const orca = ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY;
@@ -106,6 +114,12 @@ function catalogBounds(view: CatalogPoolView, tickLower: number, tickUpper: numb
   return view.orientation === 'TOKEN1_PER_TOKEN0' ? { lowerPrice: priceAt(view, tickLower), upperPrice: priceAt(view, tickUpper) }
     : { lowerPrice: priceAt(view, tickUpper), upperPrice: priceAt(view, tickLower) };
 }
+/** The same ticks in the pool's own order (token0 per token1), when the person reads the price the other way round. */
+function poolOrder(view: CatalogPoolView, tickLower: number, tickUpper: number) {
+  if (view.orientation === 'TOKEN0_PER_TOKEN1') return {};
+  const { profile } = view, at = (tick: number) => uniswapPriceAtTick(tick, profile.token0.decimals, profile.token1.decimals, 'TOKEN0_PER_TOKEN1');
+  return { poolOrder: { lowerPrice: at(tickUpper), upperPrice: at(tickLower), unit: `${profile.token0.symbol} per ${profile.token1.symbol}` } };
+}
 /** Uniswap's own tick rule (tick < tickLower → token0 only; tick ≥ tickUpper → token1 only), told in the person's price direction. */
 function catalogPosition(view: CatalogPoolView, read: GoodRead | null, tickLower: number, tickUpper: number) {
   if (!read) return { position: null, onlyToken: null };
@@ -127,17 +141,19 @@ const conversion = <T>(run: () => T): T => { try { return run(); } catch { throw
 export function catalogPercentRange(view: CatalogPoolView, read: GoodRead, percent: string): ResolvedRange {
   const bps = Math.round(percentValue(percent) * 100);
   const ticks = conversion(() => uniswapBandAroundSqrtPriceIn(sqrtOf(read), bps, view.profile.tickSpacing, view.orientation));
-  return { ...ticks, ...catalogBounds(view, ticks.tickLower, ticks.tickUpper), reference: catalogReference(view, read), ...catalogPosition(view, read, ticks.tickLower, ticks.tickUpper) };
+  return { ...ticks, ...catalogBounds(view, ticks.tickLower, ticks.tickUpper), reference: catalogReference(view, read), ...catalogPosition(view, read, ticks.tickLower, ticks.tickUpper),
+    ...poolOrder(view, ticks.tickLower, ticks.tickUpper) };
 }
 /** An explicit price range (quote per base), aligned outward to the pool's tick spacing. */
 export function catalogPriceRange(view: CatalogPoolView, lower: string, upper: string, read: GoodRead | null): ResolvedRange {
   const ticks = conversion(() => uniswapAlignPriceRange(lower, upper, view.profile.token0.decimals, view.profile.token1.decimals, view.profile.tickSpacing, view.orientation));
-  return { ...ticks, ...catalogBounds(view, ticks.tickLower, ticks.tickUpper), reference: catalogReference(view, read), ...catalogPosition(view, read, ticks.tickLower, ticks.tickUpper) };
+  return { ...ticks, ...catalogBounds(view, ticks.tickLower, ticks.tickUpper), reference: catalogReference(view, read), ...catalogPosition(view, read, ticks.tickLower, ticks.tickUpper),
+    ...poolOrder(view, ticks.tickLower, ticks.tickUpper) };
 }
 /** Explicit ticks (validated by the authoring) with their prices and position. */
 export function catalogTickRange(view: CatalogPoolView, tickLower: number, tickUpper: number, read: GoodRead | null): ResolvedRange {
   return { tickLower, tickUpper, ...conversion(() => catalogBounds(view, tickLower, tickUpper)), reference: catalogReference(view, read),
-    ...catalogPosition(view, read, tickLower, tickUpper) };
+    ...catalogPosition(view, read, tickLower, tickUpper), ...conversion(() => poolOrder(view, tickLower, tickUpper)) };
 }
 
 /** A percentage of the conversational grammar: 0.01–90 with at most two decimals (the Canvas control's bounds). */

@@ -236,15 +236,18 @@ const EN = {
   rangeSideOptions: ['Lower', 'Upper'] as readonly string[],
   percentNeeded: 'Which percentage around the current pool price should the range use? For example 10 for ±10%.',
   rangeOrder: (lower: string, upper: string, unit: 'PRICE' | 'TICK') => `The lower ${unit === 'TICK' ? 'tick' : 'price'} (${lower}) must be below the upper one (${upper}). Which range should Flofi use?`,
-  fullRangeUnavailable: (quote: string, base: string) => `The full range is not available for this pool in Flofi. Give the lower and upper prices in ${quote} per ${base}, a percentage around the current pool price (for example ±10%), or ticks.`,
+  fullRangeUnavailable: (quote: string, base: string, percent = true) => `The full range is not available for this pool in Flofi. Give the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks.`,
+  catalogRangeNeeded: (quote: string, base: string) => `Which range should the position use: the full range, the lower and upper prices in ${quote} per ${base}, a percentage around the current pool price (for example ±10%), or ticks?`,
   rangeTicksInvalid: (spacing: number) => `The ticks must be different and multiples of this pool's tick spacing (${spacing}). Which ticks should the range use?`,
   rangeConversionInvalid: 'Flofi could not turn this range into valid ticks for the pool: it is empty, too narrow or outside the prices the pool supports. Which range should Flofi use?',
   percentRangeIn: (percent: string, price: string, quote: string, base: string) => `Range: ±${percent}% around the current verified pool price (${price} ${quote} per ${base}).`,
-  effectiveRange: (lower: string, upper: string, quote: string, base: string, tickLower: number, tickUpper: number) =>
-    `Effective range after aligning to the pool's ticks: ${lower}–${upper} ${quote} per ${base} (ticks ${tickLower} to ${tickUpper}). Review shows it again before you sign.`,
+  effectiveRange: (lower: string, upper: string, quote: string, base: string, tickLower: number, tickUpper: number,
+    review: { readonly lowerPrice: string; readonly upperPrice: string; readonly unit: string } | null = null) =>
+    `Effective range after aligning to the pool's ticks: ${lower}–${upper} ${quote} per ${base} (ticks ${tickLower} to ${tickUpper}). Review shows the same ticks${
+      review ? `, priced in the pool's order as ${review.lowerPrice}–${review.upperPrice} ${review.unit},` : ''} before you sign.`,
   priceReadAt: (unit: 'SLOT' | 'BLOCK', at: number) => `Pool price read on chain at ${unit === 'SLOT' ? 'slot' : 'block'} ${at}; Simulate and Review read the pool again.`,
   rangePosition: (position: 'INSIDE' | 'ABOVE' | 'BELOW', token: string | null) => position === 'INSIDE' ? 'The current pool price is inside this range: the position earns fees while the price stays in it.'
-    : `The current pool price is ${position === 'ABOVE' ? 'above' : 'below'} this range: the position would hold only ${token} and earn no fees until the price moves into the range.`,
+    : `The current pool price is outside this range: the position would hold only ${token} and earn no fees until the price moves into the range.`,
   poolPriceReading: 'Flofi is reading the current price of this pool. Ask again in a moment.',
   poolPriceUnavailable: (pool: string) => `Flofi could not verify the current price of the ${pool} pool, so it cannot compute a percentage range. Nothing was proposed. Try again, or give the range as prices or ticks.`,
   poolNotFound: (pool: string) => `Flofi could not find a live ${pool} pool. Nothing was proposed. Choose another fee tier or pair.`,
@@ -499,15 +502,17 @@ const PT: CopilotCopy = {
   rangeSideOptions: ['Inferior', 'Superior'],
   percentNeeded: 'Qual porcentagem em torno do preço atual do pool a faixa deve usar? Por exemplo 10 para ±10%.',
   rangeOrder: (lower, upper, unit) => `O ${unit === 'TICK' ? 'tick' : 'preço'} inferior (${lower}) precisa ser menor que o superior (${upper}). Qual faixa o Flofi deve usar?`,
-  fullRangeUnavailable: (quote, base) => `A faixa completa não está disponível para este pool no Flofi. Informe os preços inferior e superior em ${quote} por ${base}, uma porcentagem em torno do preço atual do pool (por exemplo ±10%) ou ticks.`,
+  fullRangeUnavailable: (quote, base, percent = true) => `A faixa completa não está disponível para este pool no Flofi. Informe os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks.`,
+  catalogRangeNeeded: (quote, base) => `Qual faixa a posição deve usar: a faixa completa, os preços inferior e superior em ${quote} por ${base}, uma porcentagem em torno do preço atual do pool (por exemplo ±10%) ou ticks?`,
   rangeTicksInvalid: spacing => `Os ticks precisam ser diferentes e múltiplos do espaçamento de ticks deste pool (${spacing}). Quais ticks a faixa deve usar?`,
   rangeConversionInvalid: 'O Flofi não conseguiu converter esta faixa em ticks válidos para o pool: ela é vazia, estreita demais ou fora dos preços que o pool aceita. Qual faixa o Flofi deve usar?',
   percentRangeIn: (percent, price, quote, base) => `Faixa: ±${percent}% em torno do preço verificado atual do pool (${price} ${quote} por ${base}).`,
-  effectiveRange: (lower, upper, quote, base, tickLower, tickUpper) =>
-    `Faixa efetiva após o alinhamento aos ticks do pool: ${lower}–${upper} ${quote} por ${base} (ticks ${tickLower} a ${tickUpper}). A Revisão mostra de novo antes de você assinar.`,
+  effectiveRange: (lower, upper, quote, base, tickLower, tickUpper, review = null) =>
+    `Faixa efetiva após o alinhamento aos ticks do pool: ${lower}–${upper} ${quote} por ${base} (ticks ${tickLower} a ${tickUpper}). A Revisão mostra os mesmos ticks${
+      review ? `, com o preço na ordem do pool, ${review.lowerPrice}–${review.upperPrice} ${review.unit.replace(' per ', ' por ')},` : ''} antes de você assinar.`,
   priceReadAt: (unit, at) => `Preço do pool lido on-chain no ${unit === 'SLOT' ? 'slot' : 'bloco'} ${at}; a Simulação e a Revisão leem o pool de novo.`,
   rangePosition: (position, token) => position === 'INSIDE' ? 'O preço atual do pool está dentro desta faixa: a posição rende taxas enquanto o preço ficar nela.'
-    : `O preço atual do pool está ${position === 'ABOVE' ? 'acima' : 'abaixo'} desta faixa: a posição teria só ${token} e não renderia taxas até o preço entrar na faixa.`,
+    : `O preço atual do pool está fora desta faixa: a posição teria só ${token} e não renderia taxas até o preço entrar na faixa.`,
   poolPriceReading: 'O Flofi está lendo o preço atual deste pool. Pergunte de novo em instantes.',
   poolPriceUnavailable: pool => `O Flofi não conseguiu verificar o preço atual do pool ${pool}, então não pode calcular uma faixa percentual. Nada foi proposto. Tente de novo ou informe a faixa em preços ou ticks.`,
   poolNotFound: pool => `O Flofi não encontrou um pool ${pool} ativo. Nada foi proposto. Escolha outra taxa ou outro par.`,

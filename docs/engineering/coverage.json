@@ -714,6 +714,10 @@
       "path": "apps/reference-dapp/src/server/copilot-pool-integration.test.ts",
       "stage": "unit"
     },
+    "app.state.copilot-pool-reads": {
+      "path": "apps/reference-dapp/src/state/copilot-pool-reads.test.ts",
+      "stage": "unit"
+    },
     "app.server.base-swap": {
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
@@ -4118,6 +4122,7 @@
         "app.domain.copilot-range-dialogue",
         "app.e2e.copilot-pool-dialogue",
         "app.server.copilot-pool-integration",
+        "app.state.copilot-pool-reads",
         "app.domain.intelligence",
         "app.domain.intelligence.concepts",
         "app.domain.intelligence.conversation-regression",
@@ -4186,6 +4191,7 @@
         "apps/reference-dapp/src/domain/liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/pool-price-bounds.ts",
         "apps/reference-dapp/src/domain/pool-range.ts",
+        "apps/reference-dapp/src/state/copilot-pool-reads.ts",
         "apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/solana-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/uniswap-liquidity-authoring.ts"
@@ -4198,6 +4204,7 @@
         "app.domain.copilot-pool-dialogue.repro",
         "app.e2e.copilot-pool-dialogue",
         "app.server.copilot-pool-integration",
+        "app.state.copilot-pool-reads",
         "reference-compiler.uniswap-price-orientation",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",

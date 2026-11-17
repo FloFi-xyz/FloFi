@@ -98,6 +98,8 @@ export class CopilotSession {
     }
     if (reply.command) this.propose(reply.command);
     this.turns.push({ text, reply, local: start.kind === 'LOCAL' ? 'ENGINE' : null, request, workflowBefore, workflowAfter: this.workflow });
+    // As the web chat: a pool read serves the turn that asked for it only.
+    if (this.poolReader) this.pools = [];
     return reply;
   }
   apply(): ReplyLearning | null {
