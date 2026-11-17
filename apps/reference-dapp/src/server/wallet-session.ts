@@ -33,7 +33,14 @@ const ACCOUNT = /^0x[0-9a-f]{40}$/, DOMAIN = /^[A-Za-z0-9.-]{1,253}(?::[0-9]{1,5
 const fail = (code: string): never => { throw new Error(code); };
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
 
-let processKey: Buffer | null = null;
+/**
+ * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001: the local fallback key is held once per PROCESS, as documented below. A module variable was one key per
+ * server bundle: Next.js bundles Route Handlers and Server Actions separately, so a session sealed by a Server Action could not be read by a
+ * Route Handler of the same local server. Still random, never persisted, and never used by a hosted deployment (which fails closed without a
+ * configured key).
+ */
+const PROCESS_KEY = Symbol.for('flofi.wallet-session.process-key');
+const processKeys = globalThis as typeof globalThis & { [PROCESS_KEY]?: Buffer };
 /**
  * The cookie MAC key: `FLOFI_SESSION_SECRET` (≥ 32 characters) when set, else derived from the server-only `API_AUTH_TOKEN` the
  * deployed BFF already holds (HKDF, separate label, so no new deployment secret), else — only on a local server — a random
@@ -47,7 +54,7 @@ export function walletSessionKey(env: Env): Buffer {
   if (explicit !== undefined && explicit !== '') return explicit.length >= 32 ? derive(explicit) : fail('WALLET_SESSION_SECRET_INVALID');
   if (env.API_AUTH_TOKEN && env.API_AUTH_TOKEN.length >= 32) return derive(env.API_AUTH_TOKEN);
   if (env.API_BASE_URL || isHostedDeployment(env)) fail('WALLET_SESSION_NOT_CONFIGURED');
-  return processKey ??= randomBytes(32);
+  return processKeys[PROCESS_KEY] ??= randomBytes(32);
 }
 function seal(kind: 'c1' | 's1' | 'n1', payload: Challenge | Session | SolanaSessionPayload, key: Buffer): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');

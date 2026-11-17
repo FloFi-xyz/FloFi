@@ -7,7 +7,8 @@ import { reviewFixture, reviewOwner } from '../../test-utils/review-fixture';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 
 vi.mock('../../state/build009-wallet-store', () => ({ useBuild009Wallet: () => ({}), injected: () => null }));
-vi.mock('../../app/dashboard-action', () => ({ dashboardSnapshot: vi.fn(), dashboardRunDetail: vi.fn() }));
+vi.mock('../../app/dashboard-action', () => ({ changeRunHistory: vi.fn() }));
+vi.mock('../../app/dashboard-reads', () => ({ dashboardSnapshot: vi.fn(), dashboardRunDetail: vi.fn(), runHistoryDisposition: vi.fn() }));
 vi.mock('../../app/wallet-session-action', () => ({ walletSignInChallenge: vi.fn(), walletSignIn: vi.fn() }));
 const noop = () => undefined;
 function workspace(account: string | null, runId = 'fixture-detail-run') {

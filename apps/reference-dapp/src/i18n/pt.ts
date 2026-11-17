@@ -38,6 +38,7 @@ import { portugueseBridgeLiveFix } from './pt-bridge-live-fix';
 import { portugueseBuildEntry } from './pt-build-entry';
 import { portugueseChatEditor } from './pt-chat-editor';
 import { portugueseChatDashboard } from './pt-chat-dashboard';
+import { portugueseExecutionUxReliability } from './pt-execution-ux-reliability';
 import { portuguesePortfolio } from './pt-portfolio';
 import { portugueseAccounts } from './pt-accounts';
 import { portugueseWallet } from './pt-wallet';
@@ -339,4 +340,6 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseGasZeroEx,
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: classified nonce refusals, bridge cost disclosure, Log out (new keys, last).
   ...portugueseExecutionReliability,
+  // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001: destination observed, execution status answers, run details and recovery diagnostics (new keys, last).
+  ...portugueseExecutionUxReliability,
 };

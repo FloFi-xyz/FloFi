@@ -31,7 +31,7 @@ import type { ExecutionControls } from './execution-controls';
 import { conversationStorage, forgetConversations, historical, pruneConversations, readConversation, writeConversation } from '../domain/conversation-persistence';
 import { conversationCopy } from '../domain/conversation-copy';
 import type { ChatContent, ChatMessage, Rendering } from '../domain/chat-message';
-import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
+import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, executionQuestion, executionStatusAnswer, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
   QUOTE_MOVED, reviewBinding, reviewChanges, type ConversationLanguage, type ConversationReview, type LifecycleView, type PendingQuestion, type ReviewBinding } from '../domain/conversation-lifecycle';
 
 /**
@@ -946,6 +946,21 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
         const kind = open && open.open.kind !== 'NEXT_STEP' ? open.open.kind : null;
         say(scope, language, (language, c) => [started ? aboutNextRequest(said(language)) : said(language), kind ? { options: questionOptions(kind, c) } : {}]);
         return;
+      }
+      // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (CHAT-01): "Deu certo?", "Recebi os tokens?", "Preciso assinar novamente?" while this workflow's
+      // execution is the subject are answered about THAT execution, from its record (read only), never as proposal authoring. An open question keeps
+      // its answer buttons; a confirmation is never taken from these words.
+      const asked = executionQuestion(text);
+      if (asked && !copilot.drafting()) {
+        const kind = open && open.open.kind !== 'NEXT_STEP' ? open.open.kind : null, now = latest.current.bridge;
+        const facts = (language: ConversationLanguage) => executionStatusAnswer(now, asked, language, Boolean(now.controls.checkFailed), kind,
+          Boolean(now.controls.requesting));
+        if (facts(language)) {
+          const check = now.controls.canCheck;
+          say(scope, language, (language, c) => { const answered = facts(language)!;
+            return [answered.text, { notes: answered.notes, ...kind ? { options: questionOptions(kind, c) } : check ? { options: [c.checkStatus] } : {} }]; });
+          return;
+        }
       }
       // A new message (other than the offered network switch) replaces a Review the chat was waiting to continue.
       if (!offeredNetwork(text)) resume.current = null;

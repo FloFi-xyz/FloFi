@@ -63,6 +63,15 @@ export type ConversationCopy = {
   readonly nextObserve: string; readonly nextCheck: string; readonly nextPreparing: string; readonly nextWallet: string; readonly nextAuthorize: (step: number) => string;
   /** A completed step of a finished workflow and what its reconciled record proves it delivered. */
   readonly stepDelivered: (step: number, action: string, delivered: string) => string;
+  /**
+   * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (CHAT-01): "did it work?", "did I receive the tokens?", "do I need to sign again?" while this workflow's
+   * execution is the subject — answered from its execution record only (read only: nothing proposed, changed, signed, sent or repeated).
+   */
+  readonly statusDone: string; readonly statusConfirmedReconciling: string; readonly statusWallet: string; readonly statusUncertain: string;
+  readonly statusFailed: (detail: string) => string; readonly statusInProgress: (progress: string) => string; readonly statusDeliveryPending: string;
+  readonly signWallet: string; readonly signNone: string; readonly signNext: string; readonly signUncertain: string; readonly signAfterFailure: string;
+  readonly signPreparing: string; readonly signContinue: string;
+  readonly statusLastRead: string; readonly statusReadOnly: string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -171,6 +180,22 @@ const en: ConversationCopy = {
   nextAuthorize: step => `Step ${step} is ready: authorize it in Execute, or answer here to review it first. Your wallet asks you to confirm.`,
   stepDelivered: (step, action, delivered) => `Step ${step} (${action}) delivered ${delivered}.`,
   continueFailed: reason => `The next wallet request did not start, so nothing new was sent. Earlier confirmed requests stay recorded. ${reason}`,
+  statusDone: 'Yes. Every action of this execution is confirmed and reconciled on-chain.',
+  statusConfirmedReconciling: 'Its requests are confirmed on-chain. FloFi is still reconciling the outcome before calling it complete.',
+  statusWallet: 'Not yet: the reviewed request is waiting for your confirmation in your wallet. Nothing is sent until you confirm.',
+  statusUncertain: 'FloFi cannot confirm it yet: the outcome of the current request is not known. Nothing is resent; FloFi keeps checking the execution record.',
+  statusFailed: detail => `It did not complete. ${detail}`,
+  statusInProgress: progress => `Not finished yet: ${progress}. FloFi follows it from the execution record; nothing is sent again.`,
+  statusDeliveryPending: 'The delivery is not observed on the destination network yet, so FloFi cannot say the tokens arrived.',
+  signWallet: 'Yes: the reviewed request is waiting in your wallet. Confirm or decline it there; FloFi never signs for you.',
+  signNone: 'No. Nothing in this execution needs your signature right now.',
+  signNext: 'Not for what was already sent. The next action needs its own Review and your explicit confirmation in your wallet; nothing is requested automatically.',
+  signUncertain: 'No. Do not sign it again: the request may already be on the network. FloFi only checks it; nothing is resent.',
+  signAfterFailure: 'No signature is requested automatically and nothing is retried. Trying again needs a fresh Review and your explicit confirmation.',
+  signPreparing: 'Probably: FloFi is preparing the next request with current provider data. If its checks still pass, your wallet asks you to confirm it; FloFi never signs for you.',
+  signContinue: 'Only if you continue: the next reviewed request needs your confirmation in your wallet. Nothing already sent is signed again.',
+  statusLastRead: 'The last “Check status” did not answer, so this answer uses the latest recorded state. Check status reads it again.',
+  statusReadOnly: 'Read only: nothing was proposed, changed, signed or sent.',
 };
 const pt: ConversationCopy = {
   added: (action, detail) => `Adicionado ao seu fluxo: ${action} · ${detail}.`,
@@ -278,5 +303,21 @@ const pt: ConversationCopy = {
   nextAuthorize: step => `A etapa ${step} está pronta: autorize em Executar, ou responda aqui para revisá-la antes. Sua carteira pede a sua confirmação.`,
   stepDelivered: (step, action, delivered) => `A etapa ${step} (${action}) entregou ${delivered}.`,
   continueFailed: reason => `O próximo pedido na carteira não começou, então nada novo foi enviado. Os pedidos já confirmados continuam registrados. ${reason}`,
+  statusDone: 'Sim. Todas as ações desta execução estão confirmadas e reconciliadas onchain.',
+  statusConfirmedReconciling: 'Os pedidos estão confirmados onchain. A FloFi ainda está reconciliando o resultado antes de considerá-lo concluído.',
+  statusWallet: 'Ainda não: o pedido revisado aguarda a sua confirmação na carteira. Nada é enviado antes de você confirmar.',
+  statusUncertain: 'A FloFi ainda não consegue confirmar: o resultado do pedido atual não é conhecido. Nada é reenviado; a FloFi continua verificando o registro da execução.',
+  statusFailed: detail => `Não foi concluída. ${detail}`,
+  statusInProgress: progress => `Ainda não terminou: ${progress}. A FloFi acompanha pelo registro da execução; nada é enviado de novo.`,
+  statusDeliveryPending: 'A entrega ainda não foi observada na rede de destino, então a FloFi não pode afirmar que os tokens chegaram.',
+  signWallet: 'Sim: o pedido revisado aguarda na sua carteira. Confirme ou recuse por lá; a FloFi nunca assina por você.',
+  signNone: 'Não. Nada nesta execução precisa da sua assinatura agora.',
+  signNext: 'Não para o que já foi enviado. A próxima ação precisa da sua própria revisão e da sua confirmação explícita na carteira; nada é pedido automaticamente.',
+  signUncertain: 'Não. Não assine de novo: o pedido pode já estar na rede. A FloFi apenas verifica; nada é reenviado.',
+  signAfterFailure: 'Nenhuma assinatura é pedida automaticamente e nada é tentado de novo. Tentar outra vez exige uma nova revisão e a sua confirmação explícita.',
+  signPreparing: 'Provavelmente: a FloFi está preparando o próximo pedido com dados atuais dos provedores. Se as verificações continuarem válidas, sua carteira pede a sua confirmação; a FloFi nunca assina por você.',
+  signContinue: 'Só se você continuar: o próximo pedido revisado precisa da sua confirmação na carteira. Nada do que já foi enviado é assinado de novo.',
+  statusLastRead: 'O último “Verificar status” não respondeu, então esta resposta usa o último estado registrado. Verificar status lê de novo.',
+  statusReadOnly: 'Somente leitura: nada foi proposto, alterado, assinado ou enviado.',
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

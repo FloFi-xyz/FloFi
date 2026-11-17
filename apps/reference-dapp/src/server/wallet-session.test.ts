@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHmac, randomBytes } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTestWallet } from '../../../../packages/reference-reconciler/test/test-wallet.ts';
 import { challengeMessage, checksumAddress, issueWalletChallenge, readWalletSession, recoverPersonalSigner, verifyWalletSignIn, walletSessionKey,
   WALLET_SIGN_IN_STATEMENT } from './wallet-session.ts';
@@ -99,5 +99,24 @@ describe('BUILD-CLOUD-PARITY-001 wallet session on hosted deployments', () => {
     expect(walletSessionKey({ VERCEL: '1', FLOFI_SESSION_SECRET: secret }).equals(walletSessionKey({ VERCEL: '1', FLOFI_SESSION_SECRET: secret }))).toBe(true);
     // Local development keeps its single-process key.
     expect(walletSessionKey({}).equals(walletSessionKey({}))).toBe(true);
+  });
+});
+
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001: Next.js loads this module once per server bundle (Server Actions, Route Handlers). The local fallback
+// key is one per process, so a session a Server Action sealed is readable by a Route Handler of the same local server.
+describe('local per-process session key', () => {
+  it('is shared by every module instance of one process, and still random (never derived from nothing)', async () => {
+    vi.resetModules();
+    const first = await import('./wallet-session.ts');
+    vi.resetModules();
+    const second = await import('./wallet-session.ts');
+    expect(first).not.toBe(second);
+    const local = {};
+    expect(first.walletSessionKey(local).equals(second.walletSessionKey(local))).toBe(true);
+    expect(first.walletSessionKey(local).equals(Buffer.alloc(32))).toBe(false);
+    // A configured secret still decides the key; a hosted deployment still refuses to invent one.
+    const secret = randomBytes(32).toString('hex');
+    expect(first.walletSessionKey({ FLOFI_SESSION_SECRET: secret }).equals(first.walletSessionKey(local))).toBe(false);
+    expect(() => second.walletSessionKey({ VERCEL: '1' })).toThrow('WALLET_SESSION_NOT_CONFIGURED');
   });
 });

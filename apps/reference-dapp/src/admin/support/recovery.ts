@@ -19,6 +19,7 @@
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { typedId } from '../../platform/ids.ts';
 import { recordAudit } from '../store.ts';
+import { explainCode } from './codes.ts';
 import { PROPOSED_TEXT_RETENTION_DAYS, readSupportTexts, resolveText, writeSupportText, type TextState } from './privacy.ts';
 import { attentionClearable, RECOVERY_ACTIONS, RETRY_WINDOW_DAYS, stateToken, type Eligibility, type RecoveryActionId, type RecoveryWorkKind,
   type RunRecoveryFacts, type WorkFact, type WorkState } from './registry.ts';
@@ -169,12 +170,14 @@ export async function executeRecovery(host: Host, actor: string, request: Recove
   return { ...committed, action: request.action, runId: request.runId, verification };
 }
 
-type VerifyRow = { item_state: WorkState | null; last_error: string | null; status: string | null; needs_observation: boolean | null; evidence_archived: boolean | null };
+type VerifyRow = { item_state: WorkState | null; last_error: string | null; status: string | null; needs_observation: boolean | null; evidence_archived: boolean | null;
+  /** How many times the re-queued task was delivered to a worker (absent where it was not read). */ deliveries?: number | null };
 /** Re-reads the queued task and the run: the authoritative state of the recovery's postcondition. */
 export async function verifyRecovery(host: Host, input: { readonly runId: string; readonly action: RecoveryActionId; readonly workItemId: string }): Promise<Verification> {
   const { rows } = await host.db.query<VerifyRow>(`SELECT
       (SELECT w.state FROM work_items w WHERE w.tenant_id = $1 AND w.id = $3::bigint AND w.run_id = $2) AS item_state,
       (SELECT w.last_error FROM work_items w WHERE w.tenant_id = $1 AND w.id = $3::bigint AND w.run_id = $2) AS last_error,
+      (SELECT w.deliveries FROM work_items w WHERE w.tenant_id = $1 AND w.id = $3::bigint AND w.run_id = $2) AS deliveries,
       r.status, r.needs_observation, EXISTS (SELECT 1 FROM evidence_objects e WHERE e.tenant_id = $1 AND e.run_id = $2) AS evidence_archived
     FROM (SELECT 1) one LEFT JOIN execution_runs r ON r.tenant_id = $1 AND r.run_id = $2`, [host.tenantId, input.runId, input.workItemId]);
   return verification(RECOVERY_ACTIONS[input.action].workKind, rows[0]!);
@@ -185,7 +188,7 @@ export function verification(kind: RecoveryWorkKind, row: VerifyRow): Verificati
   const base = { taskState, runStatus, code: null } as const;
   if (taskState === 'READY') return { ...base, status: 'PENDING_VERIFICATION', detail: 'Queued. No worker has picked it up yet, so the problem is not resolved yet.' };
   if (taskState === 'LEASED') return { ...base, status: 'PENDING_VERIFICATION', detail: 'A worker is processing it now. The result is not known yet.' };
-  if (taskState === 'DEAD') return { ...base, status: 'STOPPED_AGAIN', code: row.last_error, detail: 'The task stopped again without a final result. The execution is flagged for attention again.' };
+  if (taskState === 'DEAD') return { ...base, status: 'STOPPED_AGAIN', code: row.last_error, detail: stoppedAgainDetail(row.last_error, row.deliveries ?? null) };
   if (kind === 'reconcile') {
     if (row.needs_observation === false) return { ...base, status: 'RESOLVED', detail: `The check finished: the execution no longer needs observation (status ${runStatus}).` };
     return { ...base, status: 'INCONCLUSIVE', detail: taskState === 'DONE' ? 'The task finished, but the execution still needs observation.'
@@ -194,6 +197,24 @@ export function verification(kind: RecoveryWorkKind, row: VerifyRow): Verificati
   if (row.evidence_archived) return { ...base, status: 'RESOLVED', detail: 'The evidence is archived.' };
   return { ...base, status: 'INCONCLUSIVE', detail: taskState === 'DONE' ? 'The task finished, but no archived evidence is recorded (the bundle may no longer qualify).'
     : 'The task is no longer retained and no archived evidence is recorded.' };
+}
+
+/**
+ * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (ADMIN-01): WHY a recovered task stopped again, from its own stop code — a stable nonce conflict (the
+ * designed safety stop: the same complete evidence again, so resuming with unchanged evidence stops again) is told apart from a temporary
+ * condition (an RPC node or provider that did not answer) and from anything else. It explains the code; it never states that funds moved or
+ * that the execution settled — an accepted recovery only re-queued a read-only check.
+ */
+export function stoppedAgainDetail(code: string | null, deliveries: number | null): string {
+  const after = deliveries && deliveries > 0 ? ` after ${deliveries} check${deliveries === 1 ? '' : 's'}` : '';
+  const explained = explainCode(code);
+  if (explained?.code === 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW') return `Stopped again${after}: the nonce-conflict investigation found exactly the same evidence as `
+    + 'before, so the automatic check stopped by design. This is a stable conflict, not a temporary failure: resuming the check again with unchanged evidence '
+    + 'stops again. The transaction outcome stays UNKNOWN (not success, failure or non-execution). This check only read the chain: it submitted, '
+    + 'repeated and settled nothing. The execution is flagged for attention again.';
+  if (explained?.remedy === 'TRANSIENT') return `Stopped again${after} on a temporary condition: ${explained.label} (${explained.code}). A later check may conclude `
+    + 'once the condition clears; the outcome is not established. The execution is flagged for attention again.';
+  return `The task stopped again${after} without a final result${explained ? ` (${explained.label}: ${explained.code})` : ''}. The execution is flagged for attention again.`;
 }
 
 /** Audits a refused or failed recovery request, bounded per window so a flood of refusals cannot flood the audit trail (it is still refused). */
@@ -223,7 +244,7 @@ export async function recoveryHistory(host: Host, now: Date, options: { readonly
     WHERE tenant_id = $1 AND kind = $2 AND at >= $3 AND ($4::text IS NULL OR detail->>'runId' = $4) ORDER BY at DESC, event_id DESC LIMIT $5`,
   [host.tenantId, RECOVERY_AUDIT_KIND, new Date(now.getTime() - days * 86_400_000), options.runId ?? null, limit]);
   const ok = rows.filter(row => row.outcome === 'OK' && str(row.detail?.workItemId) && str(row.detail?.runId));
-  const facts = ok.length ? (await host.db.query<VerifyRow & { event_id: string }>(`SELECT x.event_id, w.state AS item_state, w.last_error, r.status, r.needs_observation,
+  const facts = ok.length ? (await host.db.query<VerifyRow & { event_id: string }>(`SELECT x.event_id, w.state AS item_state, w.last_error, w.deliveries, r.status, r.needs_observation,
         EXISTS (SELECT 1 FROM evidence_objects e WHERE e.tenant_id = $1 AND e.run_id = x.run_id) AS evidence_archived
       FROM unnest($2::text[], $3::text[], $4::bigint[]) AS x(event_id, run_id, item_id)
       LEFT JOIN work_items w ON w.tenant_id = $1 AND w.id = x.item_id AND w.run_id = x.run_id

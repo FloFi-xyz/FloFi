@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { adminPage } from '../../../admin/page-context';
-import { CATEGORIES, CATEGORY_LABELS } from '../../../admin/support/codes';
+import { CATEGORIES, CATEGORY_LABELS, explainCode } from '../../../admin/support/codes';
 import { incidentStatus, STATUS_LABELS, type Note } from '../../../admin/support/diagnostics';
 import { FEATURE_LABELS, INCIDENT_LIFECYCLE_LABELS, SEVERITY_LABELS, type Incident } from '../../../admin/support/incidents';
 import { ELIGIBILITY_LABELS, ELIGIBILITY_ORDER, RECOVERY_ACTIONS, type EligibilityState } from '../../../admin/support/registry';
@@ -157,7 +157,7 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
       {!view.history ? <p className="admin-alert" data-tone="warn">Recovery history could not be read.</p>
         : view.history.length === 0 ? <p className="admin-empty">No recovery attempts in the last 30 days.</p>
         : <div className="admin-table-wrap"><table className="admin-table" aria-label="Recovery history">
-          <thead><tr><th>When (UTC)</th><th>Action</th><th>Execution</th><th>By</th><th>Result</th><th>Reason</th></tr></thead>
+          <thead><tr><th>When (UTC)</th><th>Action</th><th>Execution</th><th>By</th><th>Result</th><th>Operator’s reason (not evidence)</th></tr></thead>
           <tbody>{view.history.map(entry => <tr key={entry.eventId}>
             <td className="admin-mono">{entry.at.replace('T', ' ').slice(0, 16)}</td>
             <td>{entry.action && entry.action in RECOVERY_ACTIONS ? RECOVERY_ACTIONS[entry.action as keyof typeof RECOVERY_ACTIONS].name : <code>{entry.action ?? '—'}</code>}
@@ -168,7 +168,10 @@ export default async function SupportPage({ searchParams }: { searchParams: Sear
               : entry.verification ? <Status tone={entry.verification.status === 'RESOLVED' ? 'ok' : entry.verification.status === 'STOPPED_AGAIN' ? 'bad'
                 : entry.verification.status === 'INCONCLUSIVE' ? 'warn' : 'info'}>{entry.verification.status === 'RESOLVED' ? 'Task completed'
                 : entry.verification.status === 'STOPPED_AGAIN' ? 'Stopped again' : entry.verification.status === 'INCONCLUSIVE' ? 'Inconclusive' : 'Pending verification'}</Status>
-              : <Status tone="warn">Not verifiable</Status>}</td>
+              : <Status tone="warn">Not verifiable</Status>}
+              {/* BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (ADMIN-01): why it stopped again (the task's own stop code), never a claim about settlement. */}
+              {entry.verification?.status === 'STOPPED_AGAIN' && entry.verification.code ? (() => { const stop = explainCode(entry.verification.code)!;
+                return <div className="admin-diff"><code>{stop.code}</code>{' · '}{stop.label}</div>; })() : null}</td>
             <td>{entry.reason ?? (entry.outcome === 'OK' && entry.reasonState === 'REMOVED' ? <span className="admin-diff">Removed (retention or erasure)</span> : '—')}</td>
           </tr>)}</tbody></table></div>}
       {view.history && historyCounts && historyCounts.total > view.history.length ? <p className="admin-diff">Showing the newest {fmt(view.history.length)} of {fmt(historyCounts.total)} attempts;

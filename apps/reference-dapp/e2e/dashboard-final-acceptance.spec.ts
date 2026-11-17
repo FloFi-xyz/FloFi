@@ -18,7 +18,8 @@ test.beforeAll(async () => {
   const result = await build({ root: fileURLToPath(new URL('../../../', import.meta.url)), configFile: false, logLevel: 'error', resolve: { alias: aliases },
     plugins: [{ name: 'isolated-dashboard-acceptance-reads', enforce: 'pre',
       resolveId(id) {
-        if (id.endsWith('/app/dashboard-action')) return '\0dashboard-acceptance-reads';
+        // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): one record's reads moved to a GET route client; the same isolated fixture serves them.
+        if (id.endsWith('/app/dashboard-action') || id.endsWith('/app/dashboard-reads')) return '\0dashboard-acceptance-reads';
         if (id.endsWith('/state/build009-wallet-store')) return '\0dashboard-acceptance-wallet';
         if (id.endsWith('/app/wallet-session-action')) return '\0dashboard-acceptance-signing';
       },

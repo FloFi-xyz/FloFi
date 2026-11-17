@@ -1505,6 +1505,22 @@
     "app.e2e.chat-review-overflow": {
       "path": "apps/reference-dapp/e2e/chat-review-overflow.spec.ts",
       "stage": "browser"
+    },
+    "app.app.api.dashboard.history.route": {
+      "path": "apps/reference-dapp/src/app/api/dashboard/history/route.test.ts",
+      "stage": "unit"
+    },
+    "app.state.settlement-sync": {
+      "path": "apps/reference-dapp/src/state/settlement-sync.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.execution-ux-reliability": {
+      "path": "apps/reference-dapp/src/domain/execution-ux-reliability.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.chat-message-wrapping": {
+      "path": "apps/reference-dapp/e2e/chat-message-wrapping.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -2450,7 +2466,8 @@
         "app.e2e.ux-polish-004",
         "app.e2e.flight",
         "app.legal.privacy",
-        "app.e2e.chat-review-overflow"
+        "app.e2e.chat-review-overflow",
+        "app.e2e.chat-message-wrapping"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2743,7 +2760,9 @@
         "apps/reference-dapp/src/app/observation-action.ts",
         "apps/reference-dapp/src/app/public-testnet-action.ts",
         "apps/reference-dapp/src/app/solana-composition-action.ts",
-        "apps/reference-dapp/src/app/workflow-action.ts"
+        "apps/reference-dapp/src/app/workflow-action.ts",
+        "apps/reference-dapp/src/app/api/dashboard/history/route.ts",
+        "apps/reference-dapp/src/app/dashboard-reads.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -2754,7 +2773,8 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.app.api.dashboard.history.route"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4163,7 +4183,8 @@
         "app.domain.kora-presentation",
         "app.domain.token-fee",
         "app.domain.chat-action-variant",
-        "app.domain.conversation-persistence"
+        "app.domain.conversation-persistence",
+        "app.domain.execution-ux-reliability"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -4461,7 +4482,8 @@
         "apps/reference-dapp/src/domain/editor-run.ts",
         "apps/reference-dapp/src/domain/editor-persistence.ts",
         "apps/reference-dapp/src/domain/workflow-progress.ts",
-        "apps/reference-dapp/src/domain/gas-payment.ts"
+        "apps/reference-dapp/src/domain/gas-payment.ts",
+        "apps/reference-dapp/src/domain/settlement-sync.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -4481,7 +4503,9 @@
         "app.domain.flight-refusal",
         "app.domain.p0-swap-bridge-connections",
         "app.domain.gas-payment",
-        "app.domain.new-workflow-isolation"
+        "app.domain.new-workflow-isolation",
+        "app.state.settlement-sync",
+        "app.domain.execution-ux-reliability"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4763,7 +4787,8 @@
         "apps/reference-dapp/src/i18n/pt-gas-kora.ts",
         "apps/reference-dapp/src/i18n/pt-gas-zerox.ts",
         "apps/reference-dapp/src/i18n/pt-smart-account-transfer.ts",
-        "apps/reference-dapp/src/i18n/pt-execution-reliability.ts"
+        "apps/reference-dapp/src/i18n/pt-execution-reliability.ts",
+        "apps/reference-dapp/src/i18n/pt-execution-ux-reliability.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -7137,14 +7162,17 @@
         "apps/reference-dapp/src/state/bridge-swap-store.tsx",
         "apps/reference-dapp/src/state/destination-wallets.ts",
         "apps/reference-dapp/src/state/router-store.tsx",
-        "apps/reference-dapp/src/state/universal-router-store.tsx"
+        "apps/reference-dapp/src/state/universal-router-store.tsx",
+        "apps/reference-dapp/src/state/settlement-sync.ts"
       ],
       "suites": [
         "app.server.router-service",
         "app.server.universal-router.service",
         "reference-compiler.bridge",
         "reference-executor.bridge",
-        "reference-reconciler.bridge"
+        "reference-reconciler.bridge",
+        "app.state.settlement-sync",
+        "app.domain.execution-ux-reliability"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."

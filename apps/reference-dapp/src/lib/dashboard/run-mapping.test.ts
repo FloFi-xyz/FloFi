@@ -96,3 +96,20 @@ it('BUILD-FLOFI-CHAT-E2E-FIX-002: a run that never made a wallet request says no
   // A run that did reach the network keeps its attention.
   expect(projectDashboardRun({ ...run('FAILED'), errorCode: 'X' }).attention.length).toBeGreaterThan(0);
 });
+
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): the history says what a bridge's DESTINATION_OBSERVED record proves — the delivery observed on the
+// destination, final settlement still being verified, no signature needed — and never that it completed.
+describe('a bridge whose delivery is observed on the destination', () => {
+  const bridge = (over: Partial<DashboardRun> = {}): DashboardRun => ({ ...run('DESTINATION_OBSERVED'), flow: 'crosschain-router', provenance: 'PUBLIC_MAINNET',
+    needsObservation: true, errorCode: 'ROUTER_AWAITING_FINALITY', ...over });
+  it('is in progress with the destination-observed explanation, also with its confirmed source attempts', () => {
+    const message = 'The funds have been observed on the destination chain. FloFi is still verifying final settlement. No additional wallet signature is required.';
+    expect(projectDashboardRun(bridge())).toMatchObject({ status: 'In progress', message });
+    const attempts = [{ attemptId: 'a', step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true },
+      { attemptId: 'd', step: 'DEPOSIT', state: 'CONFIRMED', transactionHash: hash.replace('a', 'b'), reconciled: true }] as unknown as NonNullable<DashboardRun['attempts']>;
+    expect(projectDashboardRun(bridge({ attempts }))).toMatchObject({ status: 'In progress', message });
+  });
+  it('a flagged record keeps its attention wording', () => {
+    expect(projectDashboardRun(bridge({ attentionRequired: true })).message).not.toContain('observed on the destination chain');
+  });
+});
