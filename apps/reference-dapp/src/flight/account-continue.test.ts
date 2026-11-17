@@ -22,11 +22,16 @@ describe('Continue to my account', () => {
   });
   it('keeps an account that holds anything of its own separate (nothing is closed, merged or moved)', () => {
     for (const code of ['ACCOUNT_MOVE_BLOCKED_WALLETS', 'ACCOUNT_MOVE_BLOCKED_BETA_ACCESS', 'ACCOUNT_MOVE_BLOCKED_BOARDING_PASS', 'ACCOUNT_MOVE_HAS_WALLET',
-      'ACCOUNT_MOVE_WALLET_SIGN_IN', 'ACCOUNT_MOVE_PRIVY_HAS_MFA', 'ACCOUNT_MOVE_PRIVY_METHOD_UNSUPPORTED', 'ACCOUNT_MOVE_PRIVY_HELD', 'PRIVY_ACCOUNT_NOT_LINKED'])
+      'ACCOUNT_MOVE_WALLET_SIGN_IN', 'ACCOUNT_MOVE_PRIVY_HAS_MFA', 'ACCOUNT_MOVE_PRIVY_METHOD_UNSUPPORTED', 'ACCOUNT_MOVE_PRIVY_HELD', 'PRIVY_ACCOUNT_NOT_LINKED',
+      'PRIVY_USER_NOT_FOUND'])
       expect(continueStep(refused(code), false), code).toEqual({ kind: 'SEPARATE' });
   });
+  it('sends a person whose session ended to sign in again instead of a "try again" that cannot succeed', () => {
+    expect(continueStep(refused('ACCOUNT_SESSION_REQUIRED'), false)).toEqual({ kind: 'NAVIGATE', to: BOARDED_SIGN_IN });
+    expect(continueStep(refused('ACCOUNT_SESSION_REQUIRED'), true)).toEqual({ kind: 'NAVIGATE', to: BOARDED_SIGN_IN });
+  });
   it('treats outages and anything unknown as "nothing changed, try again"', () => {
-    for (const code of ['ACCOUNT_MOVE_PRIVY_PENDING', 'ACCOUNT_MOVE_PRIVY_UNREADABLE', 'ACCOUNT_MOVE_FAILED', 'ACCOUNT_SIGN_IN_REQUIRED', 'SOMETHING_NEW'])
+    for (const code of ['ACCOUNT_MOVE_PRIVY_PENDING', 'ACCOUNT_MOVE_PRIVY_UNREADABLE', 'ACCOUNT_MOVE_FAILED', 'SOMETHING_NEW'])
       expect(continueStep(refused(code), true), code).toEqual({ kind: 'RETRY' });
   });
 });

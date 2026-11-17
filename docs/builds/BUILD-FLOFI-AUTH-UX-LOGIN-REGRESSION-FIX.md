@@ -25,11 +25,16 @@ It calls the existing `startAccountMove()` and acts on its answer. The server de
 | Server answer | Next step (only when needed) |
 |---|---|
 | Move started (empty duplicate, recent sign-in) | `/login?move=1`: sign in to the boarded account (proof of the keeper). Then Sign-in methods shows **only** the confirmation, then **only** the link of the closed method (Google → Link Google; email → the email-code link), then **Continue to my account** → `/app`. |
-| `ACCOUNT_REAUTHENTICATION_REQUIRED` | Confirm it's you once (`/login?reauth=1`, same account only), back to `/board?continue=1`, which continues once. A second refusal on return never redirects again (no loop). |
+| `ACCOUNT_REAUTHENTICATION_REQUIRED` | Confirm it's you once (`/login?reauth=1`, same account only), back to `/board?continue=1`, which continues once, and only in the tab that asked (a one-shot session-storage marker): a `?continue=1` link from anywhere else starts nothing. A second refusal on return never redirects again (no loop). |
+| `ACCOUNT_SESSION_REQUIRED` (the session ended) | Sign in again → Board now's check. |
 | The account holds anything of its own, or cannot be closed (wallet, wallet sign-in, MFA, unsupported method, held elsewhere, …) | It stays a separate account; nothing is closed, merged or moved. The one action becomes **Sign in with the method I boarded with** → `/login?returnTo=/board?board=1`, which opens the boarded account straight into Board now's check. |
-| Anything else (provider outage, expired step) | "Nothing changed. Try again." |
+| Anything else (provider outage, expired step, an answer lost in transit) | "FloFi could not continue. Try again." It never claims nothing changed: a lost answer may follow a move the server started; the next press then finds the session ended and signs in. |
 
 Only the exact `/login?move=1` destination is followed from the server's answer.
+
+After a duplicate is closed, if this deployment cannot link the closed method here, the step says so and offers **Continue to my account**
+(never an instruction with nothing to press). Focus moves to each result that replaces the control the person pressed (separate account, closed
+duplicate), and the working state is announced.
 
 ## What is preserved
 
@@ -44,10 +49,22 @@ text says only what may have happened.
   `board-page.test.tsx` (EN and PT: one main button, help closed, no email/code/beta text, board panel and mascot present).
 - **BROWSER** (production build, headless Chromium, MOCKED Privy emulator, loopback PostgreSQL), `e2e/board.spec.ts` "closed beta protects a
   boarded person signed in another way…", in **EN and PT**: board with a Web3 wallet → Google in a separate empty account → `/board` shows one
-  action (320/360 px fit) → help on request → Continue → keeper sign-in → confirmation only → link only Google → `/app` with the same grant and
-  beta wallets → Google then opens that same account and `/board` no longer shows the recovery state. The existing identity-recovery test
+  action (320/360 px fit) → help on request → Continue → keeper sign-in → confirmation only → link only Google → `/app` with the same list claim,
+  list entry, beta access, beta wallets and every other table a retirement checks unchanged (re-checked after Google opens it) → the duplicate
+  deleted and its closure audited against the boarded account → Google then opens that same account and `/board` no longer shows the
+  recovery state. Also: help open at 320/360 px, the help answer identical for an unknown and the boarded address, and a foreign
+  `/board?continue=1` starting nothing. The boarded account here holds no pass (a pass needs a simulation); the retirement rule (a duplicate
+  holding a pass is never closed) and the unchanged server keep a pass where it is. The existing identity-recovery test
   ("closed beta protects one account across sign-in methods…") still passes.
 - **OWNER:** real Google/Privy OAuth returns and the owner's own accounts are not exercised here (as in BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 §F/G).
+
+## Review
+
+Read-only specialists (flofi-security, flofi-frontend-ux, flofi-data-privacy) reviewed the first commit. Fixed: a `?continue=1` URL could start a
+move without a click (now a tab marker); an ended session looped on "try again"; "Nothing changed" could be untrue; the separate-account and
+closed-duplicate results lost focus; the help form button overflowed 320 px; a closed-method step with nothing to link; help copy wrong for a
+listed-but-unclaimed address; the browser test did not prove "nothing lost" (now every retirement-checked table, the list entry and identities,
+the duplicate's deletion and audit). Not changed (pre-existing on main): the "Now link {method}" wording; the audit row's retention.
 
 ## Limitations
 

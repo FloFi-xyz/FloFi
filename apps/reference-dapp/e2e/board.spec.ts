@@ -1028,11 +1028,13 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
   const L = {
     EN: { create: 'Create a separate account', skip: 'Skip for now', title: 'You boarded with another sign-in.', continue: 'Continue to my account',
       help: 'Need help signing in?', boardedMethod: 'Sign in with the method I boarded with', emailLabel: 'Your boarding email',
+      send: 'Email me my sign-in method', sent: 'Check your inbox. If this email is on the list, we sent what you need to sign in.',
       move: 'Sign in to the account that keeps everything', wallet: 'Web3 Wallet', confirm: 'Close the duplicate account?',
       understand: 'I understand the duplicate account will be closed for good.', close: 'Close it and continue', closed: 'The duplicate account is closed.',
       linkGoogle: 'Link Google', linked: 'Linked. You can now sign in with it.', methods: 'Sign-in methods', addMethod: 'Add a sign-in method' },
     PT: { create: 'Criar uma conta separada', skip: 'Pular por enquanto', title: 'Você embarcou com outro login.', continue: 'Continuar para minha conta',
-      help: 'Precisa de ajuda para entrar?', boardedMethod: 'Entrar com o método do meu embarque', emailLabel: 'Seu e-mail de embarque',
+      send: 'Enviar meu método de login', sent: 'Confira sua caixa de entrada. Se este e-mail estiver na lista, enviamos o que você precisa para entrar.',
+      help: 'Precisa de ajuda para entrar?', boardedMethod: 'Entrar com o método que usei para embarcar', emailLabel: 'Seu e-mail de embarque',
       move: 'Entre na conta que fica com tudo', wallet: 'Carteira Web3', confirm: 'Fechar a conta duplicada?',
       understand: 'Entendo que a conta duplicada será fechada de vez.', close: 'Fechar e continuar', closed: 'A conta duplicada foi fechada.',
       linkGoogle: 'Vincular Google', linked: 'Vinculado. Agora você pode entrar com ele.', methods: 'Métodos de login', addMethod: 'Adicionar um método de login' },
@@ -1050,7 +1052,7 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
   for (const language of ['EN', 'PT'] as const) {
     const t = L[language], tag = `${language.toLowerCase()}-${run}`;
     const owner = `boarded-${tag}@gmail.com`, wallet = `0x${randomBytes(20).toString('hex')}`, google = `boarded-g-${tag}`;
-    // The person boards with a Web3 wallet (listed address, proven by an emailed code, Board now) and holds a pass.
+    // The person boards with a Web3 wallet (listed address, proven by an emailed code, Board now): list claim, beta access and beta wallet.
     await query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice) VALUES ('default', $1, $2, 'FIRST', 'EN', '2026-11-05')`,
       [`fle_${randomBytes(16).toString('hex')}`, owner]);
     const first = await contextIn(language);
@@ -1066,11 +1068,28 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       expect((await post(page, '/api/board/board', {})).status).toBe(200);
       main = (await query<{ account_id: string }>(`SELECT account_id FROM flofi_account_identities WHERE kind = 'EIP155' AND subject = $1`, [wallet]))[0]!.account_id;
     } finally { await first.close(); }
-    // What the boarded account holds in the campaign (its access and the wallets bound to it): unchanged by the whole recovery.
-    const grants = async () => [...await query(`SELECT to_jsonb(g) AS row FROM flight_beta_grants g WHERE account_id = $1`, [main]),
-      ...await query(`SELECT to_jsonb(w) AS row FROM flight_beta_wallets w WHERE account_id = $1 ORDER BY w.address`, [main])];
-    const before = await grants();
-    expect(before.length).toBeGreaterThan(0);
+    // Everything the boarded account holds (every table a retirement checks, its list entry and its sign-in identities other than the Google
+    // the recovery adds): unchanged by the whole recovery, and again after Google opens it.
+    const holdings = async () => {
+      const rows: unknown[] = [];
+      for (const sql of [
+        `SELECT to_jsonb(t) AS row FROM flofi_account_wallets t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flofi_account_recipients t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_passes t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_invites t WHERE redeemed_by = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_access_claims t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_list_entries t WHERE entry_id IN (SELECT entry_id FROM flight_access_claims WHERE account_id = $1) ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_beta_grants t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_beta_wallets t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_beta_mcp_accounts t WHERE flofi_account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_simulations t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT kind, subject FROM flofi_account_identities WHERE account_id = $1 AND kind <> 'GOOGLE' ORDER BY kind, subject`,
+      ]) rows.push(await query(sql, [main]));
+      return rows;
+    };
+    const before = await holdings();
+    // The list claim and beta access exist (the state the recovery must keep).
+    expect(await query(`SELECT count(*)::int AS n FROM flight_access_claims WHERE account_id = $1`, [main])).toEqual([{ n: 1 }]);
 
     // Later, Google (same address) in a separate, empty account: /board says where the person boarded, with one action.
     const later = await contextIn(language);
@@ -1083,6 +1102,8 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await expect(page).toHaveURL(/\/onboarding\/wallets$/);
       await page.getByRole('button', { name: t.skip }).click();
       await expect(page).toHaveURL('/board');
+      const duplicate = (await query<{ account_id: string }>(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google]))[0]!.account_id;
+      expect(duplicate).not.toBe(main);
       const top = hero(page);
       await expect(top.locator('[data-boarded-elsewhere="true"]')).toBeVisible();
       await expect(top.getByRole('heading', { level: 1 })).toHaveText(t.title);
@@ -1091,9 +1112,9 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await expect(top.locator('img[src="/brand/flight/gota-safety.svg"]')).toBeVisible();
       // One main action; help is secondary and closed; no email, code or beta explanation by default.
       await expect(top.getByRole('button', { name: t.continue })).toHaveCount(1);
-      await expect(top.locator('[data-boarded-elsewhere="true"] :is(a, button)[class*="btn"]')).toHaveCount(1);
+      await expect(top.locator('[data-boarded-elsewhere="true"] :is(a, button)[class*="btn"]:visible')).toHaveCount(1);
       await expect(top.getByRole('button', { name: t.help })).toHaveAttribute('aria-expanded', 'false');
-      await expect(top.locator('input')).toHaveCount(0);
+      await expect(top.locator('input:visible')).toHaveCount(0);
       await expect(top).not.toContainText(/6-digit|6 dígitos|beta/i);
       await fitsPhones(page);
       await shot(page, `account-recovery-board-${language}`);
@@ -1103,8 +1124,25 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await expect(top.getByRole('link', { name: t.boardedMethod })).toBeVisible();
       await expect(top.getByLabel(t.emailLabel, { exact: true })).toBeVisible();
       await expect(top.locator('input[autocomplete="one-time-code"]')).toHaveCount(0);
+      await fitsPhones(page);
       await shot(page, `account-recovery-help-${language}`);
+      // The answer reads the same for an unknown address and the boarded one (the server's answer is identical).
+      const answers: string[] = [];
+      for (const address of [`nobody-${tag}@flofi-e2e.test`, owner]) {
+        await top.getByLabel(t.emailLabel, { exact: true }).fill(address);
+        await top.getByRole('button', { name: t.send }).click();
+        const status = top.locator('[data-sign-in-help="true"] [role="status"]');
+        await expect(status).toHaveText(t.sent);
+        answers.push(await status.innerText());
+      }
+      expect(new Set(answers).size).toBe(1);
       await top.getByRole('button', { name: t.help }).click();
+      await expect(top.locator('[data-sign-in-help="true"]')).toBeHidden();
+      // A "?continue=1" link this tab did not ask for starts nothing: the duplicate's session and the board stay as they are.
+      await page.goto('/board?continue=1');
+      await expect(page).toHaveURL('/board');
+      await expect(hero(page).getByRole('button', { name: t.continue })).toBeVisible();
+      expect(await query(`SELECT count(*)::int AS n FROM flofi_accounts WHERE account_id = $1`, [duplicate])).toEqual([{ n: 1 }]);
 
       // Continue to my account: the boarded account proves itself with its own sign-in (nothing is linked before that).
       await top.getByRole('button', { name: t.continue }).click();
@@ -1118,11 +1156,16 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await expect(confirm).toContainText(t.confirm);
       await expect(page.getByRole('heading', { name: t.addMethod })).toHaveCount(0);
       await expect(page.locator('input[type="email"]')).toHaveCount(0);
+      await fitsPhones(page);
       await shot(page, `account-recovery-confirm-${language}`);
       await confirm.getByRole('checkbox', { name: t.understand }).check();
       await confirm.getByRole('button', { name: t.close }).click();
       const done = page.locator('[data-move-done="true"]');
       await expect(done).toContainText(t.closed);
+      await expect(page.locator('#move-done')).toBeFocused();
+      // The duplicate is gone (it held nothing; nothing of it moved here) and its closure is audited against the boarded account.
+      expect(await query(`SELECT count(*)::int AS n FROM flofi_accounts WHERE account_id = $1`, [duplicate])).toEqual([{ n: 0 }]);
+      expect(await query(`SELECT count(*)::int AS n FROM admin_audit_events WHERE kind = 'ACCOUNT_DUPLICATE_RETIRED' AND detail->>'kept' = $1`, [main])).toEqual([{ n: 1 }]);
       // Then only the link of the method that was closed.
       await expect(done.getByRole('button', { name: t.linkGoogle })).toBeVisible();
       await expect(page.locator('input[type="email"]')).toHaveCount(0);
@@ -1135,7 +1178,7 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await done.getByRole('link', { name: t.continue }).click();
       await expect(page).toHaveURL('/app');
       await expect(page.locator('.app-shell')).toBeVisible();
-      expect(await grants()).toEqual(before);
+      expect(await holdings()).toEqual(before);
     } finally { await later.close(); }
 
     // Google now opens that same boarded account, straight into the product: one account, no loop back to sign-in.
@@ -1149,6 +1192,7 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await expect(page.locator('.app-shell')).toBeVisible();
       await page.goto('/board');
       await expect(hero(page).locator('[data-boarded-elsewhere="true"]')).toHaveCount(0);
+      expect(await holdings()).toEqual(before);
     } finally { await again.close(); }
   }
 });

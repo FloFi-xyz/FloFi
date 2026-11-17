@@ -55,10 +55,14 @@ describe('BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: signed in with another method th
       expect(hero.match(/data-continue-account="true"/g), language).toHaveLength(1);
       expect(hero, language).toContain(action);
       expect(hero, language).toContain(`aria-expanded="false" aria-controls="flight-sign-in-help">${help}</button>`);
-      // No email, no 6-digit code and no beta explanation by default; no second main button.
-      expect(hero, language).not.toMatch(/type="email"|one-time-code|000000|6-digit|6 dígitos|beta/i);
+      // The help is in the page (the toggle's target) but hidden; what shows by default has no email, no 6-digit code, no beta explanation
+      // and no second main button.
+      expect(hero, language).toMatch(/<div id="flight-sign-in-help" [^>]*data-sign-in-help="true" hidden="">/);
+      const shown = hero.slice(0, hero.indexOf('id="flight-sign-in-help"'));
+      expect(shown, language).not.toMatch(/type="email"|one-time-code|000000|6-digit|6 dígitos|beta/i);
+      expect(hero, language).not.toMatch(/one-time-code|000000|6-digit|6 dígitos|beta/i);
       expect(hero, language).not.toMatch(/Bring this sign-in|Trazer este login|Sign in with another method|Entrar com outro método/);
-      expect(hero.match(/<(a|button) [^>]*class="[^"]*btn[^"]*"/g), language).toHaveLength(1);
+      expect(shown.match(/<(a|button) [^>]*class="[^"]*btn[^"]*"/g), language).toHaveLength(1);
       // The mascot and the departures-board flaps are preserved.
       expect(html, language).toContain('/brand/flight/gota-safety.svg');
       expect(hero, language).toContain(language === 'EN' ? 'aria-label="OTHER LOGIN"' : 'aria-label="OUTRO LOGIN"');

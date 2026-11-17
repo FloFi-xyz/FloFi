@@ -112,6 +112,8 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
     if (!result.ok) { setError(result.code); return; }
     setMoved(result.value.kinds);
     await reload();
+    // The confirmation the person pressed is gone: focus the result so it is read out.
+    document.getElementById('move-done')?.focus();
   }
   async function cancelMove() { await cancelAccountMove(); await reload(); }
 
@@ -169,17 +171,23 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
           <button type="button" className={styles.textLink} onClick={() => void cancelMove()}>{t('Cancel')}</button></div></>}
     </section>}
     {moved && <section className={styles.banner} aria-labelledby="move-done" data-move-done="true">
-      <strong id="move-done" role="status">{t('The duplicate account is closed.')}</strong>
+      <strong id="move-done" tabIndex={-1}>{t('The duplicate account is closed.')}</strong>
       {linked ? <>
         <MethodList methods={state.methods} label={t('Sign-in methods')}/>
         <div className={styles.row}><a className={styles.primary} href="/app" data-continue-account="true">{t('Continue to my account')}</a></div>
       </> : <>
-        <p>{t('Now link {0} to this account so it opens it.', kinds(moved))}</p>
-        {!state.fresh ? <p><a className={styles.primary} href={REAUTH}>{t('Confirm it’s you')}</a></p> : <>
-          {linkGoogleNow && <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Link Google')}</button>}
-          {linkEmailNow && emailForms}
-        </>}
-        <div className={styles.row}><a className={styles.textLink} href="/app">{t('Not now')}</a></div>
+        {!state.fresh ? <><p>{t('Now link {0} to this account so it opens it.', kinds(moved))}</p>
+          <p><a className={styles.primary} href={REAUTH}>{t('Confirm it’s you')}</a></p></>
+          : linkGoogleNow || linkEmailNow ? <>
+            <p>{t('Now link {0} to this account so it opens it.', kinds(moved))}</p>
+            {linkGoogleNow && <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Link Google')}</button>}
+            {linkEmailNow && emailForms}
+          </>
+          // Nothing this deployment can link here: say so, and the account is the next step (never an instruction with nothing to press).
+          : <p className={styles.small}>{t(moved.includes('email') && canLink ? 'Linking an email is not available on this deployment yet.' : 'Adding sign-in methods is not available here yet.')}</p>}
+        <div className={styles.row}>{state.fresh && !linkGoogleNow && !linkEmailNow
+          ? <a className={styles.primary} href="/app" data-continue-account="true">{t('Continue to my account')}</a>
+          : <a className={styles.textLink} href="/app">{t('Not now')}</a>}</div>
       </>}
     </section>}
 
