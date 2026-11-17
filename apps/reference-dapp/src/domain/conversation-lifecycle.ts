@@ -13,8 +13,8 @@ import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from './review-presentation';
 import { projectSimulation, type SimulationLine, type SimulationSource, type SimulationWarning } from './simulation-presentation';
-import type { ExecutionLifecycle, LifecycleOperation } from './execution-lifecycle';
-import { currentExecution, projectExecutionResult } from './execution-result';
+import { DESTINATION_OBSERVED_LABEL, DESTINATION_OBSERVED_MESSAGE, type ExecutionLifecycle, type LifecycleOperation } from './execution-lifecycle';
+import { currentExecution, isFinalExecutionResult, projectExecutionResult } from './execution-result';
 import { shellChainLabel } from './product-shell';
 import type { Command } from './commands';
 import { conversationCopy } from './conversation-copy';
@@ -164,6 +164,63 @@ export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' |
   const value = normalize(text);
   return NEXT_REVIEW.test(value) || CONTINUE_REQUEST.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : MODIFY_REQUEST.test(value) ? 'MODIFY' : null;
+}
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (CHAT-01): natural questions about the execution itself ("Deu certo?" was answered "Não há proposta
+// pendente." — a question about proposal authoring). Matched only as whole questions; a request to check ("status", "verificar status") stays the
+// existing STATUS command, which reads the record again.
+const ASKED_SIGNATURE = pattern(['preciso assinar novamente', 'preciso assinar de novo', 'preciso assinar outra vez', 'tenho que assinar de novo',
+  'tenho que assinar novamente', 'preciso assinar mais alguma coisa', 'preciso assinar algo', 'devo assinar de novo', 'devo assinar novamente',
+  'do i need to sign again', 'do i have to sign again', 'should i sign again', 'do i need to sign anything', 'do i need to sign anything else',
+  'do i need to sign', 'need to sign again']);
+const ASKED_RECEIVED = pattern(['recebi os tokens', 'recebi', 'recebi os fundos', 'os tokens chegaram', 'os fundos chegaram', 'chegou', 'chegaram',
+  'did i receive the tokens', 'did i receive the funds', 'did i receive them', 'did i get the tokens', 'did i get the funds', 'did the tokens arrive',
+  'did the funds arrive', 'have the tokens arrived', 'have the funds arrived']);
+const ASKED_OUTCOME = pattern(['deu certo', 'funcionou', 'já terminou', 'ja terminou', 'terminou', 'já acabou', 'ja acabou', 'acabou', 'foi concluída',
+  'foi concluida', 'concluiu', 'já concluiu', 'ja concluiu', 'qual o status', 'qual é o status', 'qual e o status', 'qual o status da execução',
+  'qual o status da execucao', 'como está a execução', 'como esta a execucao', 'a bridge foi concluída', 'a bridge foi concluida', 'a bridge terminou',
+  'a ponte foi concluída', 'a ponte foi concluida', 'a transferência foi concluída', 'a transferencia foi concluida', 'deu tudo certo',
+  'did it work', 'did that work', 'did it succeed', 'was it successful', 'was that successful', 'is it complete', 'is it completed', 'is it done',
+  'is it finished', 'has it finished', 'has it completed', 'is the bridge complete', 'is the bridge done', 'did the bridge complete',
+  'did the bridge work', 'how is the execution going']);
+export type ExecutionQuestion = 'OUTCOME' | 'RECEIVED' | 'SIGNATURE';
+/** A natural question about the outcome of the current execution, or null (`?` and the usual punctuation are ignored). */
+export function executionQuestion(text: string): ExecutionQuestion | null {
+  const value = normalize(text).replace(/[?¿]+/g, '').trim();
+  return ASKED_SIGNATURE.test(value) ? 'SIGNATURE' : ASKED_RECEIVED.test(value) ? 'RECEIVED' : ASKED_OUTCOME.test(value) ? 'OUTCOME' : null;
+}
+/**
+ * The read-only answer to an execution question, from this workflow's execution record only (the lifecycle every surface reads). It says what the
+ * record proves — a reconciled result, a delivery observed on the destination with finality still being verified, a request waiting in the wallet,
+ * an unknown outcome — and never more. Null when no execution of this workflow started (the caller says there is none). Pure: nothing is
+ * proposed, changed, signed, sent or repeated.
+ */
+export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuestion, language: ConversationLanguage, readFailed = false):
+  { readonly text: string; readonly notes: readonly string[] } | null {
+  const live = currentExecution(view.progress);
+  if (!live?.started) return null;
+  const c = conversationCopy(language), phase = conversationPhase(view, null, false), result = projectExecutionResult(live);
+  const operations = live.steps.flatMap(step => step.operations), wallet = operations.filter(op => op.wallet);
+  const observed = live.label === DESTINATION_OBSERVED_LABEL;
+  const whole = view.workflowProgress && view.workflowProgress.total > 0 ? view.workflowProgress : null;
+  const progress = translate(language, '{0} of {1} steps completed', whole?.completed ?? live.completed, whole?.total ?? live.steps.length);
+  const step = whole?.steps.find(item => item.current) ?? null;
+  const where = step ? `${progress} · ${c.stepPhase(step.number, translate(language, step.action), translate(language, step.text.key, ...step.text.args))}` : progress;
+  const failure = () => c.statusFailed(translate(language, '{0}. {1}', translate(language, result?.label ?? live.label), translate(language, result?.message ?? live.message)));
+  const done = phase === 'COMPLETED' && Boolean(result) && isFinalExecutionResult(live);
+  let text: string;
+  if (asked === 'SIGNATURE') {
+    text = phase === 'AWAITING_WALLET' ? c.signWallet : phase === 'UNCERTAIN' ? c.signUncertain : phase === 'FAILED' || phase === 'PARTIAL' ? c.signAfterFailure
+      : observed ? translate(language, DESTINATION_OBSERVED_MESSAGE)
+      // A confirmed approval whose action was not sent yet: that action needs its own Review and confirmation (never requested automatically).
+      : !done && wallet.some(op => op.state === 'waiting') && wallet.some(op => op.state === 'confirmed') ? c.signNext : c.signNone;
+  } else if (phase === 'AWAITING_WALLET') text = c.statusWallet;
+  else if (phase === 'UNCERTAIN') text = c.statusUncertain;
+  else if (phase === 'FAILED' || phase === 'PARTIAL') text = failure();
+  else if (done) text = c.statusDone;
+  else if (observed) text = translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, DESTINATION_OBSERVED_MESSAGE));
+  else if (phase === 'COMPLETED') text = c.statusConfirmedReconciling;
+  else text = asked === 'RECEIVED' && operations.some(op => !op.wallet) ? `${c.statusDeliveryPending} ${c.statusInProgress(where)}` : c.statusInProgress(where);
+  return { text, notes: [...readFailed && !done ? [c.statusLastRead] : [], c.statusReadOnly] };
 }
 /**
  * P0 approved UX (boards 01/02, handoff §4): FloFi replies in the ACTIVE INTERFACE language, whatever language the message was typed in (a

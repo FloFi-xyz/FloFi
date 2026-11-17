@@ -5,16 +5,24 @@ import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import type { ReviewWallet } from '../../domain/review-presentation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
-import { changeRunHistory, dashboardRunDetail, dashboardSnapshot, runHistoryDisposition } from '../../app/dashboard-action';
+import { changeRunHistory } from '../../app/dashboard-action';
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): history reads over a GET route, never queued behind the page's Server Actions.
+import { dashboardRunDetail, dashboardSnapshot, runHistoryDisposition } from '../../app/dashboard-reads';
 import { walletSignInChallenge, walletSignIn } from '../../app/wallet-session-action';
 import { injected, useBuild009Wallet } from '../../state/build009-wallet-store';
 import { currentDashboardRun, dashboardRunIndex, projectDashboardRun, sameOwner } from '../../lib/dashboard/run-mapping';
 import { projectDashboardRecord } from '../../lib/dashboard/record-projection';
-import type { DashboardDetailResponse, DashboardSnapshot } from '../../lib/dashboard/types';
+import type { DashboardDetailResponse, DashboardRun, DashboardSnapshot } from '../../lib/dashboard/types';
 import { DashboardView, type OpenWorkflow } from './dashboard-view';
 import { WALLET_PROOF_CHANGED } from '../../domain/wallet-proof-events';
 import { RunDetailView } from './run-detail-view';
 
+/**
+ * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the run summaries this page last listed for one wallet (this tab's memory only, replaced by
+ * every listing, never persisted). Opening one of them shows its already-listed summary at once, marked as loading, while its full record is
+ * read; only for the same wallet that listed it, and never as a substitute for a record the server does not return.
+ */
+let listedSummaries: { readonly account: string; readonly runs: ReadonlyMap<string, DashboardRun> } | null = null;
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: `records` renders this wallet's execution history inside Your workflows (executed records and records
  * that need attention, in its one list); the Dashboard (`dashboard`) keeps the overview: what needs the owner, the current execution, the
@@ -52,10 +60,11 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   useEffect(() => {
     if (!account || !ownedCurrent) return;
     let active = true;
-    Promise.resolve().then(() => runHistoryDisposition(account, ownedCurrent.run.runId)).then(result => {
+    const abort = new AbortController();
+    Promise.resolve().then(() => runHistoryDisposition(account, ownedCurrent.run.runId, abort.signal)).then(result => {
       if (active) setCurrentVisibility({ key: currentKey, disposition: result.ok ? result.disposition : 'VISIBLE' });
     }, () => { if (active) setCurrentVisibility({ key: currentKey, disposition: 'VISIBLE' }); });
-    return () => { active = false; };
+    return () => { active = false; abort.abort(); };
   }, [account, ownedCurrent?.run.runId, currentKey]);
   const currentDisposition = currentVisibility?.key === currentKey ? currentVisibility.disposition : null;
   const visibleCurrent = currentDisposition === 'VISIBLE' && !(removed?.owner === account && removed.ids.includes(ownedCurrent?.run.runId ?? '')) ? ownedCurrent : null;
@@ -70,16 +79,19 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   useEffect(() => {
     if (!account || isCurrent) return;
     let cancelled = false;
-    const request = runId ? dashboardRunDetail(account, runId).then(response => ({ key, response })) : dashboardSnapshot(account).then(snapshot => ({ key, snapshot }));
+    const abort = new AbortController();
+    const request = runId ? dashboardRunDetail(account, runId, abort.signal).then(response => ({ key, response })) : dashboardSnapshot(account, null, abort.signal).then(snapshot => ({ key, snapshot }));
     request.then(value => { if (!cancelled) setLoaded(value); }).catch(() => {
       if (!cancelled) setLoaded(runId ? { key, response: { connection: 'UNAVAILABLE', account, detail: null } }
         : { key, snapshot: { connection: 'UNAVAILABLE', account, runs: [], hasMore: false } });
     });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; abort.abort(); };
   }, [account, evm, isCurrent, key, runId]);
   const visible = loaded?.key === key ? loaded : null;
   const loading = Boolean(account && (!isCurrent && !visible || ownedCurrent && currentDisposition === null));
   const snapshot = visible?.snapshot;
+  if (account && snapshot?.connection === 'CONNECTED' && sameOwner(snapshot.account, account))
+    listedSummaries = { account, runs: new Map([...listedSummaries?.account === account ? listedSummaries.runs : [], ...snapshot.runs.map(run => [run.runId, run] as const)]) };
   async function loadMore() {
     if (loadingMore || !account || !snapshot?.next) return;
     const owner = account, requestKey = key, cursor = snapshot.next;
@@ -99,7 +111,10 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const detail = visible?.response?.detail;
   // A stale session/result can never flash another account's records while the new read is pending.
   const ownedDetail = detail && sameOwner(detail.run.ownerAccount, account) && detail.run.runId === runId ? detail : null;
-  const historical = ownedDetail ? projectDashboardRun(ownedDetail.run, projectDashboardRecord(ownedDetail, context)) : null;
+  // While the record is read, the summary this wallet's own listing already showed (never another wallet's, never once the read answered).
+  const listed = !ownedDetail && runId && !visible && account && listedSummaries?.account === account ? listedSummaries.runs.get(runId) ?? null : null;
+  const historical = ownedDetail ? projectDashboardRun(ownedDetail.run, projectDashboardRecord(ownedDetail, context))
+    : listed && sameOwner(listed.ownerAccount, account) ? projectDashboardRun(listed) : null;
   function historyChanged(id: string, disposition: 'DELETED' | 'ARCHIVED') {
     if (!account || latestAccount.current !== account) return;
     setRemoved(previous => ({ owner: account, ids: [...(previous?.owner === account ? previous.ids : []), id] }));

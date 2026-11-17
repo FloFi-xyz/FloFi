@@ -14,6 +14,7 @@ import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeRe
 import type { RouterRecord, RouterWalletDiagnostic } from '../server/router-service';
 import type { WalletSession } from '../server/wallet-session';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
+import { useSettlementSync } from './settlement-sync';
 
 /**
  * BUILD-ROUTER-001 browser state for the Cross-chain Router. The server-held run is authoritative; this store only
@@ -349,6 +350,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     }
     void refreshRuns(net);
   }); }
+  // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): a settling run follows the worker's reconciliation from its durable record (no chain read).
+  useSettlementSync({ record, busy: () => busyRef.current, epoch: () => operationEpoch.current, visible: () => visibleRun.current,
+    read: shown => routerStatus(networkOfRecord(shown), shown.id), accept });
   return <Context.Provider value={{ network, available, availability, availabilityKnown, executionEnabled, record, busy, signing, error, retired, recovered, session, sessionReady, runs, notice,
     requoted: requoted && requoted.runId === record?.id ? requoted : null,
     simulate, refresh, review, execute, observe, switchNetwork, signIn, signOut, open, loadRuns }}>

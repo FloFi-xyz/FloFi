@@ -378,6 +378,12 @@ type BuildCanvasProps = { environment?: WalletEnvironment; selectedId: string | 
    * "Editing paused during execution" instead of Undo, Redo and ···) and the step tools are paused. Optional: absent means no run is active.
    */
   runActive?: boolean;
+  /**
+   * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): while `runActive`, the execution's own status (a catalog key derived from the authoritative
+   * execution record, e.g. "Transfer observed on destination chain"), shown instead of the authoring state ("Configured … Simulate and review"),
+   * which describes a workflow that is not executing. Absent: the authoring state is shown.
+   */
+  runStatus?: string | null;
   /** BUILD-FLOFI-MAINNET-EXEC-002: the header's New workflow button (the shell's `startNewWorkflow`); absent: no button. */
   onNewWorkflow?: (() => void) | undefined };
 const EMPTY_OVERLAY: ReadonlyMap<string, SimulationOverlay> = new Map();
@@ -387,7 +393,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
   return <BuildCanvas {...props}/>;
 }
 
-function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, onNewWorkflow }: BuildCanvasProps) {
+function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, runStatus = null, onNewWorkflow }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
     sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
@@ -1030,7 +1036,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         {overview && overview.networks.length > 0 && <ul className="editor-network-chips" aria-label={tr('Workflow networks')}>{overview.networks.map(network => <li key={network}><span className="editor-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>{tr(network)}</li>)}</ul>}
         {networkPending && <span className="editor-network-chips editor-network-pending"><span className="editor-network-pending-dot" aria-hidden="true"/>{tr('Network?')}</span>}
         <span className="revision">{stepCount}</span>
-        {overview && <span className="editor-state-pill" data-editor-state={overview.state} title={tr(editorStateDetail(overview))}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(EDITOR_STATE_LABEL[overview.state])}</span>}
+        {overview && (runActive && runStatus ? <span className="editor-state-pill" data-editor-state="executing" title={tr(runStatus)}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(runStatus)}</span>
+          : <span className="editor-state-pill" data-editor-state={overview.state} title={tr(editorStateDetail(overview))}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(EDITOR_STATE_LABEL[overview.state])}</span>)}
       </div>
       <div className="canvas-head-actions">
         {runActive ? <span className="canvas-edit-paused" role="status"><LockIcon/>{tr('Editing paused during execution')}</span> : <>

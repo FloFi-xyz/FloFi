@@ -13,13 +13,15 @@
  *   SUBMITTED                the wallet sent it to the network; not yet confirmed
  *   CONFIRMED_AT_SOURCE      confirmed on its own (source) network; a cross-chain delivery may still be pending
  *   AWAITING_DESTINATION     a bridge deposit confirmed at the source; the delivery on the destination network is not observed yet
+ *   DESTINATION_OBSERVED     the delivery was verified on the destination network; FloFi still waits for finality and its definitive
+ *                            reconciliation (BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001). Not a completed step, and nothing to sign again
  *   RECONCILED               FloFi read the confirmed outcome from the chain (what was spent and received)
  *   COMPLETED                every step of the workflow reconciled (written once; never before the last reconciliation)
  *   FAILED                   it reverted or was refused; what already reconciled stays reconciled
  *   OUTCOME_UNKNOWN          it may have been sent and its outcome is not known yet: observed only, never sent again
  */
 export const EXECUTION_PHASES = ['PREPARED', 'AWAITING_AUTHORIZATION', 'SENT_TO_WALLET', 'SUBMITTED', 'CONFIRMED_AT_SOURCE', 'AWAITING_DESTINATION',
-  'RECONCILED', 'COMPLETED', 'FAILED', 'OUTCOME_UNKNOWN'] as const;
+  'DESTINATION_OBSERVED', 'RECONCILED', 'COMPLETED', 'FAILED', 'OUTCOME_UNKNOWN'] as const;
 export type ExecutionPhase = (typeof EXECUTION_PHASES)[number];
 
 /** English presentation keys (translated through the locale catalog; `{0}` is a network name where the phase names one). */
@@ -30,6 +32,7 @@ export const EXECUTION_PHASE_LABEL: Readonly<Record<ExecutionPhase, string>> = O
   SUBMITTED: 'Sent to the network',
   CONFIRMED_AT_SOURCE: 'Confirmed on {0}',
   AWAITING_DESTINATION: 'Waiting for delivery on {0}',
+  DESTINATION_OBSERVED: 'Transfer observed on {0}',
   RECONCILED: 'Reconciled',
   COMPLETED: 'Completed',
   FAILED: 'Failed',
@@ -39,14 +42,14 @@ export const EXECUTION_PHASE_LABEL: Readonly<Record<ExecutionPhase, string>> = O
 /** The tone a surface may give a phase (never green before RECONCILED/COMPLETED). */
 export const EXECUTION_PHASE_TONE: Readonly<Record<ExecutionPhase, 'neutral' | 'active' | 'done' | 'attention' | 'blocked'>> = Object.freeze({
   PREPARED: 'neutral', AWAITING_AUTHORIZATION: 'attention', SENT_TO_WALLET: 'active', SUBMITTED: 'active', CONFIRMED_AT_SOURCE: 'active',
-  AWAITING_DESTINATION: 'active', RECONCILED: 'done', COMPLETED: 'done', FAILED: 'blocked', OUTCOME_UNKNOWN: 'attention',
+  AWAITING_DESTINATION: 'active', DESTINATION_OBSERVED: 'active', RECONCILED: 'done', COMPLETED: 'done', FAILED: 'blocked', OUTCOME_UNKNOWN: 'attention',
 });
 
 /** A phase that counts as a finished step in "X of N steps completed" (only a reconciled outcome counts). */
 export const phaseCompletesStep = (phase: ExecutionPhase): boolean => phase === 'RECONCILED' || phase === 'COMPLETED';
 /** A phase in which nothing may be offered to the wallet again (it may already be on its way or on chain). */
 export const phaseLocksResubmission = (phase: ExecutionPhase): boolean =>
-  phase === 'SENT_TO_WALLET' || phase === 'SUBMITTED' || phase === 'CONFIRMED_AT_SOURCE' || phase === 'AWAITING_DESTINATION' || phase === 'OUTCOME_UNKNOWN';
+  phase === 'SENT_TO_WALLET' || phase === 'SUBMITTED' || phase === 'CONFIRMED_AT_SOURCE' || phase === 'AWAITING_DESTINATION' || phase === 'DESTINATION_OBSERVED' || phase === 'OUTCOME_UNKNOWN';
 
 /** "X of N steps completed": counted from per-step phases only (never from a group or a transaction count). */
 export function workflowProgress(phases: readonly ExecutionPhase[]): { readonly completed: number; readonly total: number } {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Owner filter adapted from the Dashboard delivery; final truth reuses UX-005 projections.
-import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
+import { DESTINATION_OBSERVED_MESSAGE, type ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import { projectExecutionResult } from '../../domain/execution-result';
 import { shellChainLabel } from '../../domain/product-shell';
@@ -111,6 +111,10 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (['DRAFT', 'PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED'].includes(run.status)) {
     status = run.needsObservation || unproven ? 'Unresolved' : 'Not started';
     message = run.needsObservation || unproven ? 'A recorded request still needs verification. No transaction is repeated.' : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.';
+  } else if (run.status === 'DESTINATION_OBSERVED' && !run.attentionRequired) {
+    // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): a bridge records DESTINATION_OBSERVED only once its fill is verified on the destination
+    // chain; finality and the definitive reconciliation are still pending (never "completed", nothing to sign again).
+    status = 'In progress'; message = DESTINATION_OBSERVED_MESSAGE;
   } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED', 'PAYMENT_PENDING', 'PAYMENT_SETTLED'].includes(run.status)) {
     status = 'In progress'; message = 'The recorded execution is still awaiting its final outcome.';
   } else if (run.status === 'CONFIRMED') {

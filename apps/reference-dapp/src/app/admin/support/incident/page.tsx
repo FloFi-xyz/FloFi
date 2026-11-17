@@ -163,13 +163,21 @@ function RunDetail({ detail, csrf, canRecover }: { detail: Extract<IncidentDetai
             <td className="admin-mono">{when(j.recordedAt.toISOString())}</td></tr>)}</tbody></table></div> : <p>This flow keeps no journal for this execution.</p>}
       </TechnicalDetails>
     </Section>
+    {/* BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (ADMIN-01): each attempt names THIS execution, why its check stopped again (its stop code and what it
+        means: a stable nonce conflict is the designed stop, a temporary condition may pass), and keeps the operator's typed reason apart from what the
+        task and the execution record verify. */}
     <Section id="support-run-history" title="Recovery attempts for this execution">
-      {detail.history.length === 0 ? <p className="admin-empty">None in the last 90 days.</p> : <ul className="admin-note-list">{detail.history.map(entry => <li key={entry.eventId}>
+      <p className="admin-diff">Execution <code>{run.runId}</code>. An accepted recovery only re-queues a read-only check under this execution’s identity: it does not
+        establish that anything settled. Each result below is read from that task and this execution’s record now.</p>
+      {detail.history.length === 0 ? <p className="admin-empty">None in the last 90 days.</p> : <ul className="admin-note-list">{detail.history.map(entry => {
+        const stop = entry.verification?.status === 'STOPPED_AGAIN' ? explainCode(entry.verification.code) : null;
+        return <li key={entry.eventId}>
         <strong>{entry.action && entry.action in RECOVERY_ACTIONS ? RECOVERY_ACTIONS[entry.action as keyof typeof RECOVERY_ACTIONS].name : entry.action}</strong>
         <span className="admin-diff"> · {when(entry.at)} · <code>{entry.actor.slice(0, 12)}…</code>{entry.operationId ? <> · <code>{entry.operationId}</code></> : null}</span>
         <div>{entry.outcome !== 'OK' ? `Refused: ${entry.code}` : entry.verification ? `${VERIFICATION_LABELS[entry.verification.status]} — ${entry.verification.detail}` : 'Not verifiable'}</div>
-        {entry.reason ? <div className="admin-diff">Reason: {entry.reason}</div> : entry.outcome === 'OK' && entry.reasonState === 'REMOVED'
-          ? <div className="admin-diff">Reason text removed under the retention policy or an approved erasure request.</div> : null}</li>)}</ul>}
+        {stop ? <div className="admin-diff">Stop code: <code>{stop.code}</code> · {stop.label} · {stop.remedy === 'TRANSIENT' ? 'temporary condition' : 'not a temporary failure'}</div> : null}
+        {entry.reason ? <div className="admin-diff">Operator’s reason (as typed; not verified evidence): {entry.reason}</div> : entry.outcome === 'OK' && entry.reasonState === 'REMOVED'
+          ? <div className="admin-diff">Reason text removed under the retention policy or an approved erasure request.</div> : null}</li>; })}</ul>}
     </Section>
   </>;
 }

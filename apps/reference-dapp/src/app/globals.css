@@ -1020,7 +1020,10 @@
 .chat-row>.message{min-width:0;max-width:calc(100% - 36px);overflow-wrap:anywhere}
 .chat-row-flofi>.message{flex:1 1 auto}
 .chat-row-you{justify-content:flex-end;align-self:flex-end;max-width:min(100%,560px)}
-.chat-row>.message.you{align-self:flex-start;flex:0 1 auto}
+.chat-row>.message.you{align-self:flex-start;flex:0 1 auto;max-width:none}
+/* BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (UX-01): the owner's row is shrink-to-fit, so a percentage max-width on its bubble resolved back to
+   exactly the bubble's own text width and any sub-pixel rounding (browser zoom, display scaling) wrapped the last character ("Continua / r").
+   The row's own max-width and the bubble's flex shrink (min-width:0) keep long messages and addresses inside the panel. */
 .copilot .chat-form label{font-size:13px}
 .copilot .chat-form :is(input,button){font-size:14px}
 .copilot .chat-form small{font-size:12px}

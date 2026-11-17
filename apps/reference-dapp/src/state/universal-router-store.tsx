@@ -16,6 +16,7 @@ import { universalBridgeOfWorkflow, type UniversalBridgeDetails } from '../domai
 import { resolvedAddress, useDestinationWallets } from './destination-wallets';
 import { bridgeReviewChanges, REQUOTE_IN_PLACE, requotableInPlace, type BridgeReviewChange } from '../domain/bridge-review-recovery';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
+import { useSettlementSync } from './settlement-sync';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import type { UniversalRecord, UniversalWalletDiagnostic } from '../server/universal-router/types';
 import { bridgeEstimateRequest } from '../domain/bridge-estimate';
@@ -366,6 +367,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     }
     void refreshRuns(eco);
   }); }
+  // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): a settling run follows the worker's reconciliation from its durable record (no chain read).
+  useSettlementSync({ record, busy: () => busyRef.current, epoch: () => operationEpoch.current, visible: () => visibleRun.current,
+    read: shown => universalStatus(ecosystemOfRecord(shown), shown.id), accept });
   return <Context.Provider value={{ available, availabilityKnown, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
     signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork,
     requoted: requoted && requoted.runId === record?.id ? requoted : null, ownDestinations }}>

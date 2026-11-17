@@ -53,6 +53,9 @@ const labels: Record<LifecycleState, string> = {
   'not-submitted': 'Not submitted', waiting: 'Waiting', preparing: 'Preparing request', wallet: 'Confirm in wallet', submitting: 'Submitting', submitted: 'Transaction submitted', pending: 'Pending confirmation',
   confirmed: 'Confirmed', failed: 'Failed', uncertain: 'Execution status uncertain', signed: 'Order signed', posted: 'Order posted', settling: 'Settlement pending', partial: 'Partially settled', cancelled: 'Cancelled', expired: 'Transaction expired',
 };
+/** BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): a bridge whose delivery is verified on the destination and not yet definitively reconciled. */
+export const DESTINATION_OBSERVED_LABEL = 'Transfer observed on destination chain';
+export const DESTINATION_OBSERVED_MESSAGE = 'The funds have been observed on the destination chain. FloFi is still verifying final settlement. No additional wallet signature is required.';
 /** A network as the phase labels name it: its product name, never its chain id (board 16). */
 export const phaseNetwork = (chain: string) => shellChainLabel(chain).replace(/ \(\d+\)$/, '');
 /** Words an operation by its phase from the shared vocabulary (`{0}`: its network), keeping its lifecycle state. */
@@ -212,7 +215,9 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE' : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
       add('destination', nodeId, 'Destination settlement', r.review.intent.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED');
       // P0 hotfix: the deposit confirmed at the source and the fill not reconciled yet reads "Waiting for delivery on <destination>".
-      if (destinationState === 'PENDING') phrase(operations.at(-1)!, 'AWAITING_DESTINATION');
+      // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): once the fill is verified on the destination (the record holds it) and only finality
+      // and the definitive reconciliation remain, it reads "Transfer observed on <destination>" — still pending, never completed.
+      if (destinationState === 'PENDING') phrase(operations.at(-1)!, r.destination ? 'DESTINATION_OBSERVED' : 'AWAITING_DESTINATION');
       break;
     }
     case 'universal': {
@@ -235,7 +240,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE'
         : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
       add('destination', nodeId, 'Destination delivery', r.review.route.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED');
-      if (destinationState === 'PENDING') phrase(operations.at(-1)!, 'AWAITING_DESTINATION');
+      if (destinationState === 'PENDING') phrase(operations.at(-1)!, r.destination ? 'DESTINATION_OBSERVED' : 'AWAITING_DESTINATION');
       if (r.destination && r.verdict !== 'RECONCILED') { const op = operations.at(-1)!; op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality'; delete op.labelArgs; }
       break;
     }
@@ -361,6 +366,10 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const lifecycleState = !started ? 'idle' : uncertain ? 'uncertain' : failed ? 'attention' : complete ? 'complete' : 'active';
   const active = steps.find(step => step.state !== 'confirmed') ?? null;
   const label = lifecycleState === 'uncertain' ? 'Execution status uncertain' : lifecycleState === 'attention' ? 'Execution needs attention' : lifecycleState === 'complete' ? 'Execution confirmed' : lifecycleState === 'active' ? 'Execution in progress' : 'Not started';
+  // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): every wallet request confirmed and the delivery verified on the destination network, with
+  // finality and the definitive reconciliation still pending: said as exactly that (never "completed", never "0 of N" alone, nothing to sign).
+  const deliveryObserved = lifecycleState === 'active' && operations.some(op => !op.wallet && op.phase === 'DESTINATION_OBSERVED')
+    && operations.filter(op => op.wallet).every(op => op.state === 'confirmed');
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a record with no wallet request (simulated or reviewed only) says that nothing was sent, never "0 of N completed"
   // with operations "Waiting" as if a wallet request were pending.
   if (!started) for (const step of steps) { step.label = superseded ? 'Awaiting authorization' : 'Not requested'; delete step.labelArgs; for (const op of step.operations) { op.label = 'Not requested'; delete op.labelArgs; delete op.phase; } }
@@ -370,10 +379,11 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const message = lifecycleState === 'uncertain' ? 'The current request cannot be confirmed or ruled out. No transaction is repeated.' : lifecycleState === 'attention' ? 'The current step could not complete. Any confirmed actions remain recorded. Nothing is retried automatically.' : lifecycleState === 'complete' ? planUnavailable ? 'The saved requests are confirmed. Original workflow details remain unavailable.' : 'All workflow actions are confirmed in the current execution record.'
     : lifecycleState === 'idle' ? superseded ? 'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.'
       : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.'
+    : deliveryObserved ? DESTINATION_OBSERVED_MESSAGE
     : approvalLanded ? `${completed} of ${steps.length} actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.`
     : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
   // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.
   const detached = Boolean(options.freshWorkflow && runKey !== null && workflow.workflowId !== currentWorkflow.workflowId);
   const matchesWorkflow = !planUnavailable && !detached && (JSON.stringify(workflow) === JSON.stringify(currentWorkflow) || restored && isPristineDraft(currentWorkflow));
-  return { started, restored, local, matchesWorkflow, ...detached ? { detached } : {}, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
+  return { started, restored, local, matchesWorkflow, ...detached ? { detached } : {}, planUnavailable, steps, active, completed, label: deliveryObserved ? DESTINATION_OBSERVED_LABEL : label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
 }

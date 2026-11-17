@@ -9,7 +9,7 @@ import { explainCode, retryableStopReason } from './codes.ts';
 import { buildTimeline, freeText, identifierShaped, incidentStatus, isIncidentId, noteText, searchKind, type AttemptRow, type JournalRow, type Note } from './diagnostics.ts';
 import { copilotIncidents, delegatedIncident, executionIncident, featureOf, platformIncidents, sortIncidents, submissionOf, taskIncident, workflowRunIncident,
   type ExecutionSnapshot } from './incidents.ts';
-import { RUN_ID, verification } from './recovery.ts';
+import { RUN_ID, verification, stoppedAgainDetail } from './recovery.ts';
 import { attentionClearable, GUIDED_RECOVERY, RECOVERY_ACTION_IDS, RECOVERY_ACTIONS, RETRY_LIMIT, stateToken, type RunRecoveryFacts, type WorkFact } from './registry.ts';
 
 const now = new Date('2026-11-14T12:00:00.000Z'), hour = 3_600_000;
@@ -238,5 +238,29 @@ describe('recovery verification', () => {
     expect(verification('reconcile', row({ needs_observation: false })).status).toBe('RESOLVED');
     expect(verification('evidence.archive', row({ item_state: 'DONE', evidence_archived: true })).status).toBe('RESOLVED');
     expect(verification('evidence.archive', row({ item_state: 'DONE' })).status).toBe('INCONCLUSIVE');
+  });
+});
+
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (ADMIN-01): an Arbitrum → Base run whose nonce was consumed by a different transaction (MOCKED codes) and
+// was resumed three times: each resumed check stopped again with the same stable evidence after one or two deliveries.
+describe('why a recovered check stopped again', () => {
+  const row = (over: Partial<Parameters<typeof verification>[1]> = {}) => ({ item_state: 'DEAD' as const, last_error: null, status: 'SUBMISSION_RESULT_UNKNOWN',
+    needs_observation: true, evidence_archived: false, ...over });
+  it('a stable nonce conflict is the designed stop, not a temporary failure, and never a settlement', () => {
+    const stopped = verification('reconcile', row({ last_error: 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW', deliveries: 2 }));
+    expect(stopped).toMatchObject({ status: 'STOPPED_AGAIN', code: 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW', runStatus: 'SUBMISSION_RESULT_UNKNOWN' });
+    expect(stopped.detail).toMatch(/^Stopped again after 2 checks: the nonce-conflict investigation found exactly the same evidence/);
+    expect(stopped.detail).toContain('not a temporary failure'); expect(stopped.detail).toContain('stops again');
+    expect(stopped.detail).toContain('outcome stays UNKNOWN'); expect(stopped.detail).not.toMatch(/\b(resolved|succeeded|reconciled)\b/i); expect(stopped.detail).toContain('nothing was submitted, repeated or marked as settled');
+  });
+  it('a temporary RPC or provider condition is said to be temporary', () => {
+    const detail = stoppedAgainDetail('ROUTER_RPC_TIMEOUT', 1);
+    expect(detail).toMatch(/^Stopped again after 1 check on a temporary condition: External service unavailable \(ROUTER_RPC_TIMEOUT\)/);
+    expect(stoppedAgainDetail('OBSERVATION_BUDGET_EXHAUSTED', null)).toContain('temporary condition: Background check gave up');
+  });
+  it('any other stop names its code without guessing, and a missing count is not invented', () => {
+    expect(stoppedAgainDetail('ROUTER_STORE_CORRUPT', 3)).toBe('The task stopped again after 3 checks without a final result (Stored state failed validation: ROUTER_STORE_CORRUPT). '
+      + 'The execution is flagged for attention again.');
+    expect(stoppedAgainDetail(null, null)).toBe('The task stopped again without a final result. The execution is flagged for attention again.');
   });
 });

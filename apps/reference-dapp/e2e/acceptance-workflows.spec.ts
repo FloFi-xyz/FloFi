@@ -231,6 +231,46 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
 });
 
 
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): opening an execution record never waits behind the page's Server Actions. Next.js dispatches
+// Server Actions one at a time per client, so a record read as an action waited for every slow action already in flight (production: a 10.7 s swap
+// preview, an observation, the workflow list) and showed "Loading execution…" for ~30 s. Every action of the page is held here for 10 s; the
+// owned record, read over its GET route, must still render within 5 s (local loopback; the production target is 2 s at p95).
+test('an owned execution record opens while every Server Action of the page is still pending', async ({ page }) => {
+  test.setTimeout(120_000);
+  const A = createTestWallet(); await resetJourneyHarness([A]); await installJourneyWallet(page, [A]); await openBuilder(page);
+  await author(page);
+  // Saving asks this browser to prove the connected wallet first (one sign-in signature), exactly as in the test above.
+  await chooseWorkflowMenuItem(page, 'Save workflow');
+  await proveConnectedEvmWallet(page, page.locator('body'), A.address);
+  await chooseWorkflowMenuItem(page, 'Save workflow');
+  await expect(page.getByRole('status')).toContainText('Workflow saved.');
+  const runId = await executeFixture(await savedCanonical(A.address), A);
+  const held: string[] = [];
+  await page.route('**/*', async route => {
+    const request = route.request();
+    if (request.method() !== 'POST' || !request.headers()['next-action']) { await route.fallback(); return; }
+    held.push(request.url()); await new Promise(resolve => setTimeout(resolve, 10_000)); await route.fallback().catch(() => undefined);
+  });
+  const reads: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/dashboard/history') reads.push(new URL(request.url()).searchParams.get('view') ?? ''); });
+  const started = Date.now();
+  await page.goto(`/app/dashboard/runs/${runId}`);
+  await expect(page.locator('main')).toContainText(runId, { timeout: 5_000 });
+  await expect(page.locator('main')).toContainText('Evidence', { timeout: 5_000 });
+  const elapsed = Date.now() - started;
+  test.info().annotations.push({ type: 'perf-01', description: `record visible after ${elapsed} ms with ${held.length} Server Actions held for 10 s; record reads: ${reads.join(',')}` });
+  expect(elapsed).toBeLessThan(5_000);
+  // One record read (no duplicate), and nothing about it was sent through the Server Action queue.
+  expect(reads.filter(view => view === 'detail')).toHaveLength(1);
+  await expect(page.locator('main')).not.toContainText('Loading execution');
+  // The history list is read the same way: this wallet's executed record is listed while every action is still held.
+  const listed = Date.now();
+  await page.goto('/app/workflows');
+  await expect(page.locator(`a[href="/app/dashboard/runs/${runId}"]`)).toHaveCount(1, { timeout: 5_000 });
+  test.info().annotations.push({ type: 'perf-01', description: `history list visible after ${Date.now() - listed} ms; list reads: ${reads.filter(view => view === 'list').length}` });
+  expect(reads.filter(view => view === 'list')).toHaveLength(1);
+});
+
 for (const [initialChain, initialLabel] of [['0x1', 'Ethereum Mainnet'], ['0xaa36a7', 'Ethereum Sepolia']] as const) {
 test(`header tracks external chain changes and reloads the actual provider on ${initialLabel}`, async ({ page, networkGuard }) => {
   const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner], { chain: initialChain }); await openBuilder(page);

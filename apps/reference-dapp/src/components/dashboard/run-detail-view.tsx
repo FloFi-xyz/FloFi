@@ -65,8 +65,11 @@ export function RunDetailView({ view, detail, connection, loading, back, execute
           {view.progress?.restored && !view.recovered && <p>{tr("The saved result was restored for display. Restoration alone does not establish recovery or reconciliation.")}</p>}
         </section>}
       </aside>}</div>
+      {/* BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the listed summary is shown while the full record is read; its requests, timeline and
+          evidence follow, never guessed in the meantime. */}
+      {!view.progress && !detail && loading ? <section className="panel dashboard-detail-loading" role="status"><p>{tr('Loading execution details…')}</p></section> : <>
       {view.progress ? <ExecutionTimeline progress={view.progress} result={result} workflowName={view.title} runContext={view.current ? 'current' : 'saved'}/> : <RecordedRequests detail={detail}/>}
-      <RunEvidence view={view} detail={detail}/>
+      <RunEvidence view={view} detail={detail}/></>}
       <details className="shell-details technical-workspace"><summary>{tr("View technical details")}</summary>
         {view.progress ? <ExecutionEvidenceDetails progress={view.progress} runContext={view.current ? 'current' : 'saved'}/> : <ExecutionIdentifier full identifier={{ label: 'Run ID', value: view.run.runId, kind: 'reference' }}/>}
         <dl><div><dt>{tr("Recorded status")}</dt><dd>{tr(view.run.status)}</dd></div>{view.run.provenance && <div><dt>{tr("Recorded environment")}</dt><dd>{tr(view.run.provenance)}</dd></div>}{view.run.workflowId && <div><dt>{tr("Workflow reference")}</dt><dd>{view.run.workflowId}</dd></div>}{view.run.errorCode && <div><dt>{tr("Recorded issue")}</dt><dd>{tr(view.run.errorCode)}</dd></div>}</dl>

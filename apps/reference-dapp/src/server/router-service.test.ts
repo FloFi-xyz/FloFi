@@ -631,3 +631,39 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     await expect(service.observe(run.id)).rejects.toThrow('ROUTER_STORE_CORRUPT');
   });
 });
+
+// BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-01): the November 17 Base → Arbitrum shape on the MOCKED harness. The fill is observed quickly, but
+// success waits for BOTH safe heads (Arbitrum's `safe` lags while its batch reaches L1): DESTINATION_OBSERVED + ROUTER_AWAITING_FINALITY, no
+// evidence, still observed. A failing RPC read while waiting changes nothing durable; once the destination safe head passes the fill, the same
+// observation reconciles with the same hashes. Nothing is sent again at any point.
+describe('BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 destination observed, finality pending, then reconciled', () => {
+  it('waits for the safe heads without weakening them, survives an RPC failure, and reconciles with the recorded evidence', async () => {
+    const { service, h, dir } = await setup({ arbitrumSafeLagBlocks: 100_000 }), w = workflow();
+    const run = await reviewed(service, w);
+    await deposit(service, h, run.id, w);
+    const observed = await until(service, h, run.id, 'DESTINATION_OBSERVED');
+    const sends = h.counters.sends;
+    expect(observed).toMatchObject({ phase: 'DESTINATION_OBSERVED', verdict: 'PENDING', evidence: null });
+    const waiting = await service.observe(run.id);
+    expect(waiting).toMatchObject({ phase: 'DESTINATION_OBSERVED', verdict: 'PENDING', error: 'ROUTER_AWAITING_FINALITY', evidence: null });
+    expect(waiting.destination).toMatchObject({ transactionHash: observed.destination!.transactionHash, safe: false });
+    expect(routerNeedsObservation(waiting)).toBe(true);
+    // A provider or RPC outage while waiting: the observation fails, the durable record (fill, hashes, phase) is unchanged.
+    const failing = createRouterService({ storage: createFileExecutionStorage(dir, 'ROUTER_BUSY'), sourceRpc: h.baseRpc, providers: h.providers, provenance: 'MOCKED',
+      destinationRpc: async (method, params) => { if (method === 'eth_getBlockByNumber' && params[0] === 'safe') throw Error('PUBLIC_RPC_UNAVAILABLE'); return h.arbitrumRpc(method, params); },
+      executionEnabled: true, now: h.clock, mockedCodePins: ROUTER_MOCK_CODE_PINS });
+    await failing.observe(run.id).catch(() => undefined);
+    const after = await service.load(run.id);
+    expect(after).toMatchObject({ phase: 'DESTINATION_OBSERVED', verdict: 'PENDING', evidence: null });
+    expect(after.destination!.transactionHash).toBe(observed.destination!.transactionHash);
+    expect(after.attempts.map(a => a.transactionHash)).toEqual(observed.attempts.map(a => a.transactionHash));
+    // The destination safe head passes the fill: success, with the same source and destination transactions as evidence.
+    h.controls.arbitrumSafeLag = 0; h.advance(5);
+    const reconciled = await service.observe(run.id);
+    expect(reconciled).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', error: null });
+    expect(reconciled.destination).toMatchObject({ transactionHash: observed.destination!.transactionHash, safe: true });
+    expect(reconciled.evidence!.transactions.map(t => t.transactionHash)).toEqual([...observed.attempts.map(a => a.transactionHash), observed.destination!.transactionHash]);
+    expect(routerNeedsObservation(reconciled)).toBe(false);
+    expect(h.counters.sends).toBe(sends);
+  });
+});

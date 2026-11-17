@@ -55,6 +55,8 @@ export function lifecycleStepPhase(step: LifecycleStep, reconciled: boolean): Ex
   if (ops.every(op => op.state === 'confirmed')) return reconciled ? 'RECONCILED' : 'CONFIRMED_AT_SOURCE';
   if (ops.some(op => op.state === 'wallet')) return 'SENT_TO_WALLET';
   const requests = ops.filter(op => op.wallet);
+  // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (EXEC-02): the delivery verified on the destination, finality and reconciliation pending.
+  if (requests.length && requests.every(op => op.state === 'confirmed') && ops.some(op => !op.wallet && operationPhase(op) === 'DESTINATION_OBSERVED')) return 'DESTINATION_OBSERVED';
   if (requests.length && requests.every(op => op.state === 'confirmed') && ops.some(op => !op.wallet && operationPhase(op) === 'AWAITING_DESTINATION')) return 'AWAITING_DESTINATION';
   if (ops.some(op => op.phase === 'CONFIRMED_AT_SOURCE')) return 'CONFIRMED_AT_SOURCE';
   if (requests.some(op => SENT.includes(op.state))) return 'SUBMITTED';
@@ -69,8 +71,8 @@ export function phaseText(phase: ExecutionPhase | null, step?: LifecycleStep | n
   const key = EXECUTION_PHASE_LABEL[phase];
   if (!key.includes('{0}')) return { key, args: [] };
   const ops = step?.operations ?? [];
-  const chain = phase === 'AWAITING_DESTINATION' ? ops.find(op => !op.wallet)?.chain : ops.filter(op => op.wallet && op.state !== 'waiting').at(-1)?.chain ?? ops[0]?.chain;
-  return chain ? { key, args: [phaseNetwork(chain)] } : { key: phase === 'AWAITING_DESTINATION' ? 'Waiting for delivery' : 'Confirmed', args: [] };
+  const chain = phase === 'AWAITING_DESTINATION' || phase === 'DESTINATION_OBSERVED' ? ops.find(op => !op.wallet)?.chain : ops.filter(op => op.wallet && op.state !== 'waiting').at(-1)?.chain ?? ops[0]?.chain;
+  return chain ? { key, args: [phaseNetwork(chain)] } : { key: phase === 'AWAITING_DESTINATION' ? 'Waiting for delivery' : phase === 'DESTINATION_OBSERVED' ? 'Transfer observed on destination chain' : 'Confirmed', args: [] };
 }
 const reconciledRun = (live: ExecutionLifecycle) => live.state === 'complete' && isFinalExecutionResult(live);
 /**
