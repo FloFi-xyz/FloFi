@@ -36,6 +36,15 @@ describe('readRangeAnswer: short answers to FloFi\'s range question (EN/PT)', ()
     expect(read('lower tick 600 usdc')).toBeNull();
     expect(read('lower price -600')).toBeNull();
   });
+  it('a unit named by a side noun holds in every answer form; nouns and values that disagree are not a range answer (wave-2 review)', () => {
+    expect(read('lower tick 600 upper tick 900')).toEqual({ kind: 'BOUNDS', unit: 'TICK', lower: '600', upper: '900' });
+    expect(read('upper tick 900 lower tick 600')).toEqual({ kind: 'BOUNDS', unit: 'TICK', lower: '600', upper: '900' });
+    expect(read('600 as the lower tick')).toEqual({ kind: 'SIDE', side: 'LOWER', value: '600', unit: 'TICK' });
+    expect(read('lower tick')).toEqual({ kind: 'SIDE', side: 'LOWER', value: null, unit: 'TICK' });
+    expect(read('the upper price')).toEqual({ kind: 'SIDE', side: 'UPPER', value: null, unit: 'PRICE' });
+    for (const text of ['lower 150 usdc upper 600 ticks', 'min price 150 max tick 900', 'ticks 150 to 180 usdc', '150 to 180 usdc ticks', 'lower tick 150 usdc'])
+      expect(read(text), text).toBeNull();
+  });
   it('reads dollars and ETH for a USDC-per-WETH pool', () => {
     expect(read('2800 dollars', WETH)).toEqual({ kind: 'VALUE', value: '2800', unit: 'PRICE' });
     expect(read('3200 usdc per eth', WETH)).toEqual({ kind: 'VALUE', value: '3200', unit: 'PRICE' });
@@ -70,6 +79,20 @@ describe('applyRangeAnswer: only the range slots change', () => {
     expect(applyRangeAnswer(prices, null, read('upper 180 usdc')!)!.action).toMatchObject({ rangeUnit: 'PRICE', lower: '150', upper: '180' });
     expect(applyRangeAnswer(prices, null, read('a price range')!)!.action).toEqual(prices);
     expect(applyRangeAnswer(prices, null, read('ticks')!)!.action).toMatchObject({ rangeUnit: 'TICK', lower: null, upper: null });
+  });
+  it('a unit given with a held value or side carries to the next answer; a different unit then is not an answer (wave-2 review)', () => {
+    const held = applyRangeAnswer(action(), null, read('600 ticks')!)!;
+    expect(held).toMatchObject({ ask: 'SIDE', hold: { value: '600', unit: 'TICK' } });
+    expect(applyRangeAnswer(held.action, held.hold, read('lower')!)!.action).toMatchObject({ rangeUnit: 'TICK', lower: '600', upper: null });
+    const side = applyRangeAnswer(action(), null, read('lower tick')!)!;
+    expect(side).toMatchObject({ ask: 'BOUND', hold: { side: 'LOWER', unit: 'TICK' }, action: { rangeUnit: 'TICK' } });
+    expect(applyRangeAnswer(side.action, side.hold, read('600')!)!.action).toMatchObject({ rangeUnit: 'TICK', lower: '600', upper: null });
+    expect(applyRangeAnswer(side.action, side.hold, read('150 usdc')!)).toBeNull();
+    const priced = applyRangeAnswer(action({ rangeUnit: 'TICK', lower: '-600', upper: null }), null, read('1usdc')!)!;
+    expect(applyRangeAnswer(priced.action, priced.hold, read('upper')!)!.action).toMatchObject({ rangeUnit: 'PRICE', lower: null, upper: '1' });
+    // "a percentage range" again keeps the percentage already given.
+    const percent = action({ rangeUnit: 'PERCENT', upper: '10' });
+    expect(applyRangeAnswer(percent, null, read('a percentage range')!)!.action).toEqual(percent);
   });
   it('a percentage, the full range or a unit replace the range only; deposits, network and slippage are untouched', () => {
     const base = action({ slippageBps: '50', rangeUnit: 'PRICE', lower: '150', upper: null });

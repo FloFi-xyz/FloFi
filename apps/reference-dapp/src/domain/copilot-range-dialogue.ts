@@ -9,6 +9,7 @@
  */
 import type { CopilotLiquidityAction } from './copilot-intent';
 import { amountReadings } from './copilot-authoring';
+import { isUsdStable } from './pool-range';
 
 export type RangeSide = 'LOWER' | 'UPPER';
 export type RangeAnswer =
@@ -22,8 +23,11 @@ export type RangeAnswer =
   | { readonly kind: 'VALUE'; readonly value: string; readonly unit: 'PRICE' | 'TICK' | null };
 /** The pool's price unit (quote per base), so "1usdc" or "180 USDC per SOL" is recognised and "0.1 SOL" is not. Null: unknown pool. */
 export type RangeUnits = { readonly quote: string; readonly base: string };
-/** What FloFi holds between turns while the range is open: a value whose side is not known yet, or the side the next value is for. */
-export type RangeHold = { readonly value?: string; readonly side?: RangeSide };
+/**
+ * What FloFi holds between turns while the range is open: a value whose side is not known yet, or the side the next value is for, with the unit
+ * the user named for it ("600 ticks", "lower tick"), so the next answer keeps it.
+ */
+export type RangeHold = { readonly value?: string; readonly side?: RangeSide; readonly unit?: 'PRICE' | 'TICK' };
 export type RangeStep = { readonly action: CopilotLiquidityAction; readonly hold: RangeHold | null;
   /** FloFi asks next, itself: which side a held value is (SIDE), or the value of a named side (BOUND). Null: the planner decides. */
   readonly ask: 'SIDE' | 'BOUND' | null };
@@ -41,7 +45,8 @@ const PCT = String.raw`(?:%|percent|per\s?cent|por\s?cento)`;
 const PREFIX = new RegExp(String.raw`^(?:ok(?:ay)?|sure|yes|sim|claro|then|ent[aã]o|actually|na verdade|please|por favor|use|usa|usar|i want|i'?d like|quero|prefiro|escolho|let'?s (?:do|use|go with)|go with|make it|vamos de|pode ser|coloca|set|choose|with|com|a|an|the|uma|um|o|de|of|range|faixa|band|intervalo)[,:]?\s+`, 'iu');
 const SUFFIX = new RegExp(String.raw`\s+(?:range|faixa|band|wide|width|each side|on each side|either side|both sides|para cada lado|pra cada lado|de cada lado|nos dois lados|around(?: the)?(?: current)?(?: pool)?(?: price)?|em torno do pre[cç]o(?: atual)?(?: do pool)?|ao redor do pre[cç]o(?: atual)?(?: do pool)?|do pre[cç]o atual|around it|please|por favor|centered|centrad[ao]|instead|then|ent[aã]o)$`, 'iu');
 const USD_WORDS = new Set(['usd', 'dollar', 'dollars', 'dólar', 'dólares', 'dolar', 'dolares', 'bucks']);
-const STABLE = /^(?:usdc|usdt|usdg|dai|usdbc|usds|pyusd|usdc\.e|usdt0|devusdc)$/i;
+/** The pool's dollar stablecoins (the same list the pool's quote side uses), and the Devnet test dollar in engineering certification. */
+const stable = (symbol: string): boolean => isUsdStable(symbol) || /^devusdc$/i.test(symbol);
 
 /** The answer normalized (case, spaces, dashes, final punctuation) and without a model option's example: "A percentage range (for example, ±10%)". */
 const light = (raw: string): string => raw.normalize('NFKC').trim().toLowerCase().replace(/[−–—]/g, '-').replace(/\s+/g, ' ').replace(/[.!?]+$/, '').trim()
@@ -63,7 +68,7 @@ function valueOf(match: RegExpExecArray, at: number, units: RangeUnits | null): 
   if (value === null) return null;
   if (unit === 'tick' || unit === 'ticks') return per ? null : { value, unit: 'TICK' };
   const quote = units?.quote.toLowerCase(), base = units?.base.toLowerCase();
-  const dollarQuote = Boolean(quote && STABLE.test(quote));
+  const dollarQuote = Boolean(quote && stable(quote));
   if (dollar && !dollarQuote) return null;
   if (unit !== undefined && !(unit === quote || (dollarQuote && (USD_WORDS.has(unit) || unit === 'usdc')))) return null;
   if (per !== undefined && !(per === base || (base === 'weth' && per === 'eth') || (base === 'eth' && per === 'weth'))) return null;
@@ -71,6 +76,17 @@ function valueOf(match: RegExpExecArray, at: number, units: RangeUnits | null): 
   return { value, unit: unit || dollar || per ? 'PRICE' : value.startsWith('-') ? 'TICK' : null };
 }
 const whole = (pattern: string) => new RegExp(`^${pattern}$`, 'iu');
+/** The unit a side noun names in (part of) an answer: "tick" is a tick, "price"/"preço" a price; both at once is a contradiction (undefined). */
+function nounUnit(text: string): 'PRICE' | 'TICK' | null | undefined {
+  const tick = /\bticks?\b/u.test(text), price = /(?<![\p{L}])(?:price|pre[cç]o)s?(?![\p{L}])/u.test(text);
+  return tick && price ? undefined : tick ? 'TICK' : price ? 'PRICE' : null;
+}
+/** One unit for values and the nouns around them, or undefined when they contradict each other ("lower tick 150 usdc", "min price 150 max tick 900"). */
+function agreed(...units: ('PRICE' | 'TICK' | null | undefined)[]): 'PRICE' | 'TICK' | null | undefined {
+  if (units.includes(undefined)) return undefined;
+  const named = [...new Set(units.filter((unit): unit is 'PRICE' | 'TICK' => unit !== null))];
+  return named.length > 1 ? undefined : named[0] ?? null;
+}
 const SEPARATOR = String.raw`\s*(?:to|and|a|at[eé]|e|through|-|até)\s*`;
 
 /** Reads a short answer to FloFi's open range question; null when it is not one. */
@@ -90,9 +106,10 @@ export function readRangeAnswer(raw: string, units: RangeUnits | null): RangeAns
   const ticks = whole(String.raw`(?:ticks?\s+)?(?:from\s+|between\s+|entre\s+|de\s+)?${VALUE}${SEPARATOR}${VALUE}(?:\s+ticks?)?`).exec(text);
   if (ticks) {
     const a = valueOf(ticks, 1, units), b = valueOf(ticks, 5, units);
-    const named = /ticks?/.test(text) ? 'TICK' : null;
-    if (a && b && !(a.unit && b.unit && a.unit !== b.unit)) {
-      const unit = named ?? a.unit ?? b.unit ?? (a.value.startsWith('-') || b.value.startsWith('-') ? 'TICK' : 'PRICE');
+    // "ticks 150 to 180 usdc" names two units: not a range answer.
+    const named = a && b ? agreed(/ticks?/.test(text) ? 'TICK' : null, a.unit, b.unit) : undefined;
+    if (a && b && named !== undefined) {
+      const unit = named ?? (a.value.startsWith('-') || b.value.startsWith('-') ? 'TICK' : 'PRICE');
       if (unit === 'PRICE' && (a.value.startsWith('-') || b.value.startsWith('-'))) return null;
       return { kind: 'BOUNDS', unit, lower: a.value, upper: b.value };
     }
@@ -104,7 +121,11 @@ export function readRangeAnswer(raw: string, units: RangeUnits | null): RangeAns
     const first = valueOf(pair, 1, units), second = valueOf(pair, 5, units), upperFirst = new RegExp(`^${UPPER}`, 'iu').test(text);
     if (!first || !second) return null;
     const lower = upperFirst ? second : first, upper = upperFirst ? first : second;
-    const unit = lower.unit ?? upper.unit ?? (lower.value.startsWith('-') || upper.value.startsWith('-') ? 'TICK' : 'PRICE');
+    // The side nouns name the unit too ("lower tick 600 upper tick 900" are ticks); nouns and values that disagree are not a range answer.
+    const named = agreed(nounUnit(text), lower.unit, upper.unit);
+    if (named === undefined) return null;
+    const unit = named ?? (lower.value.startsWith('-') || upper.value.startsWith('-') ? 'TICK' : 'PRICE');
+    if (unit === 'PRICE' && (lower.value.startsWith('-') || upper.value.startsWith('-'))) return null;
     return { kind: 'BOUNDS', unit, lower: lower.value, upper: upper.value };
   }
   // A side and its value: "lower 150", "upper is 180", "o superior é 180", "make the lower 120", "150 as the lower".
@@ -113,16 +134,19 @@ export function readRangeAnswer(raw: string, units: RangeUnits | null): RangeAns
   for (const [side, word] of [['LOWER', LOWER], ['UPPER', UPPER]] as const) {
     const before = whole(String.raw`${VERB}(?:(?:price|pre[cç]o|ticks?)\s+)?${word}${NOUN}${LINK}${VALUE}`).exec(text);
     // A noun naming the unit ("lower tick", "preço inferior") counts as the value's own unit; a contradiction is not a range answer.
+    // A noun before or after the value ("lower tick 600", "600 as the lower tick") names its unit as well.
     const named = (match: RegExpExecArray, value: { value: string; unit: 'PRICE' | 'TICK' | null }) => {
-      const noun = /\bticks?\b/.test(match[0]) && !/\bticks?\b/.test(match[0].slice(match[0].search(/\d/))) ? 'TICK' : /\b(?:price|pre[cç]o)\b/.test(match[0]) ? 'PRICE' : null;
-      if (noun && value.unit && noun !== value.unit) return null;
-      const unit = noun ?? value.unit;
+      const unit = agreed(nounUnit(match[0]), value.unit);
+      if (unit === undefined) return null;
       return unit === 'PRICE' && value.value.startsWith('-') ? null : { kind: 'SIDE' as const, side, value: value.value, unit };
     };
     if (before) { const value = valueOf(before, 1, units); return value ? named(before, value) : null; }
     const after = whole(String.raw`${VALUE}\s*(?:is|é|as|como|for|para|pra)?\s*(?:the\s+|o\s+|a\s+)?${word}${NOUN}`).exec(text);
     if (after) { const value = valueOf(after, 1, units); return value ? named(after, value) : null; }
-    if (whole(String.raw`(?:(?:it'?s|it is|that'?s|that is|é|e|eh|seria|is|as)\s+)?(?:the\s+|o\s+|a\s+|como\s+)?${word}${NOUN}`).test(text)) return { kind: 'SIDE', side, value: null };
+    if (whole(String.raw`(?:(?:it'?s|it is|that'?s|that is|é|e|eh|seria|is|as)\s+)?(?:the\s+|o\s+|a\s+|como\s+)?${word}${NOUN}`).test(text)) {
+      const unit = nounUnit(text);
+      return unit === undefined ? null : { kind: 'SIDE', side, value: null, ...unit ? { unit } : {} };
+    }
   }
   const single = whole(String.raw`(?:(?:it'?s|it is|é|seria)\s+)?${VALUE}`).exec(text);
   if (single) { const value = valueOf(single, 1, units); return value ? { kind: 'VALUE', value: value.value, unit: value.unit } : null; }
@@ -137,36 +161,44 @@ const unitFor = (action: CopilotLiquidityAction, value: string | null, unit: 'PR
  * The range after one answer. Only range fields change (deposits, network, fee tier and slippage stay exactly as they were); a bound already
  * given changes only when the answer names it. Null: the answer does not fit the open range (it goes to the interpreter).
  */
-export function applyRangeAnswer(action: CopilotLiquidityAction, hold: RangeHold | null, answer: RangeAnswer): RangeStep | null {
+export function applyRangeAnswer(action: CopilotLiquidityAction, hold: RangeHold | null, answer: RangeAnswer,
+  /** FloFi's open question asked for the percentage itself ("Which percentage range?"): a bare number answers it, replacing one it could not use. */
+  percentAsked = false): RangeStep | null {
   const range = (rangeUnit: CopilotLiquidityAction['rangeUnit'], lower: string | null, upper: string | null): CopilotLiquidityAction => ({ ...action, rangeUnit, lower, upper });
   switch (answer.kind) {
     case 'FULL': return { action: range('FULL', null, null), hold: null, ask: null };
     // Choosing the kind already in use keeps the bounds given; another kind starts them afresh.
     case 'UNIT': return { action: action.rangeUnit === answer.unit ? action : range(answer.unit, null, null), hold: null, ask: null };
-    case 'PERCENT': return { action: range('PERCENT', null, answer.percent), hold: null, ask: null };
+    // "a percentage range" again keeps a percentage already given.
+    case 'PERCENT': return { action: answer.percent === null && action.rangeUnit === 'PERCENT' ? action : range('PERCENT', null, answer.percent), hold: null, ask: null };
     case 'BOUNDS': return { action: range(answer.unit, answer.lower, answer.upper), hold: null, ask: null };
     case 'SIDE': {
-      const value = answer.value ?? hold?.value ?? null, unit = unitFor(action, value, answer.unit ?? null);
+      // The unit named now, or the one named with the held value ("600 ticks" then "lower"); two different units are not an answer.
+      const named = agreed(answer.unit ?? null, answer.value === null ? hold?.unit ?? null : null);
+      if (named === undefined) return null;
+      const value = answer.value ?? hold?.value ?? null, unit = unitFor(action, value, named);
       // Switching from a percentage or the full range to bounds starts the bounds afresh.
       const keep = bounded(action.rangeUnit) && action.rangeUnit === unit;
       const lower = keep ? action.lower : null, upper = keep ? action.upper : null;
-      if (value === null) return { action: range(unit, lower, upper), hold: { side: answer.side }, ask: 'BOUND' };
+      if (value === null) return { action: range(unit, lower, upper), hold: { side: answer.side, ...answer.unit ? { unit: answer.unit } : {} }, ask: 'BOUND' };
       return { action: answer.side === 'LOWER' ? range(unit, value, upper) : range(unit, lower, value), hold: null, ask: null };
     }
     case 'VALUE': {
-      const unit = unitFor(action, answer.value, answer.unit);
+      const named = agreed(answer.unit, hold?.side ? hold.unit ?? null : null);
+      if (named === undefined) return null;
+      const unit = unitFor(action, answer.value, named);
       if (hold?.side) {
         const keep = bounded(action.rangeUnit) && action.rangeUnit === unit;
         const lower = keep ? action.lower : null, upper = keep ? action.upper : null;
         return { action: hold.side === 'LOWER' ? range(unit, answer.value, upper) : range(unit, lower, answer.value), hold: null, ask: null };
       }
       // The percentage FloFi asked for ("10" after "which percentage?").
-      if (action.rangeUnit === 'PERCENT' && action.upper === null && answer.unit === null && !answer.value.startsWith('-'))
+      if (action.rangeUnit === 'PERCENT' && (action.upper === null || percentAsked) && answer.unit === null && !answer.value.startsWith('-'))
         return { action: range('PERCENT', null, answer.value), hold: null, ask: null };
       if (bounded(action.rangeUnit) && action.rangeUnit === unit && (action.lower === null) !== (action.upper === null))
         return { action: action.lower === null ? range(unit, answer.value, action.upper) : range(unit, action.lower, answer.value), hold: null, ask: null };
       // A value whose side is not known: FloFi asks whether it is the lower or the upper bound (it never guesses).
-      return { action, hold: { value: answer.value }, ask: 'SIDE' };
+      return { action, hold: { value: answer.value, ...answer.unit ? { unit: answer.unit } : {} }, ask: 'SIDE' };
     }
   }
 }

@@ -215,9 +215,11 @@ const EN = {
   percentRangeNote: (percent: string, price: string, lower: string, upper: string) =>
     `Range ±${percent}% around the current verified pool price (${price} devUSDC per SOL): ${lower}–${upper} devUSDC per SOL, aligned outward to usable ticks.`,
   priceUnavailable: 'Flofi could not verify the current pool price, so it cannot set a percentage range. Try again, or give the range in prices or ticks.',
-  percentRangeOrcaOnly: 'A percentage range is available only for the Orca SOL/devUSDC pool on Solana Devnet. Give the range in prices or ticks.',
+  percentRangeOrcaOnly: 'A percentage range is not available for the Uniswap test pools (it is for the Orca pools and the mainnet catalog pools). Give the range in prices or ticks.',
   percentRangeInvalid: 'Choose a percentage range between 0.01% and 90%.',
   percentNotFound: (percent: string) => `Flofi could not find ${percent}% in your message. Which percentage range?`,
+  percentOneSided: (percent: string, quote: string, base: string) =>
+    `A percentage range is ±${percent}% around the current pool price, on both sides. For a range on one side of the price, give the lower and upper prices in ${quote} per ${base}.`,
   // BUILD-P1 pool conversational reliability: FloFi's own range questions and notes. Every value shown is the user's, or a verified on-chain read.
   rangeNeeded: (quote: string, base: string, percent = true) => `Which price range should the position use? Give the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks.`,
   rangeBoundsNeeded: (unit: 'PRICE' | 'TICK', quote: string, base: string) => unit === 'TICK' ? 'Which lower and upper ticks should the range use?'
@@ -237,7 +239,7 @@ const EN = {
   percentNeeded: 'Which percentage around the current pool price should the range use? For example 10 for ±10%.',
   rangeOrder: (lower: string, upper: string, unit: 'PRICE' | 'TICK') => `The lower ${unit === 'TICK' ? 'tick' : 'price'} (${lower}) must be below the upper one (${upper}). Which range should Flofi use?`,
   fullRangeUnavailable: (quote: string, base: string, percent = true) => `The full range is not available for this pool in Flofi. Give the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks.`,
-  catalogRangeNeeded: (quote: string, base: string) => `Which range should the position use: the full range, the lower and upper prices in ${quote} per ${base}, a percentage around the current pool price (for example ±10%), or ticks?`,
+  catalogRangeNeeded: (quote: string, base: string, percent = true) => `Which range should the position use: the full range, the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks?`,
   rangeTicksInvalid: (spacing: number) => `The ticks must be different and multiples of this pool's tick spacing (${spacing}). Which ticks should the range use?`,
   rangeConversionInvalid: 'Flofi could not turn this range into valid ticks for the pool: it is empty, too narrow or outside the prices the pool supports. Which range should Flofi use?',
   percentRangeIn: (percent: string, price: string, quote: string, base: string) => `Range: ±${percent}% around the current verified pool price (${price} ${quote} per ${base}).`,
@@ -249,12 +251,13 @@ const EN = {
   rangePosition: (position: 'INSIDE' | 'ABOVE' | 'BELOW', token: string | null) => position === 'INSIDE' ? 'The current pool price is inside this range: the position earns fees while the price stays in it.'
     : `The current pool price is outside this range: the position would hold only ${token} and earn no fees until the price moves into the range.`,
   poolPriceReading: 'Flofi is reading the current price of this pool. Ask again in a moment.',
-  poolPriceUnavailable: (pool: string) => `Flofi could not verify the current price of the ${pool} pool, so it cannot compute a percentage range. Nothing was proposed. Try again, or give the range as prices or ticks.`,
-  poolNotFound: (pool: string) => `Flofi could not find a live ${pool} pool. Nothing was proposed. Choose another fee tier or pair.`,
+  poolPriceUnavailable: (pool: string, retry = true) => `Flofi could not verify the current price of the ${pool} pool, so it cannot compute a percentage range. Nothing was proposed. ${retry ? 'Try again, or give' : 'Give'} the range as prices or ticks.`,
+  poolNotFound: (pool: string, alternatives = true) => `Flofi could not find a live ${pool} pool. Nothing was proposed.${alternatives ? ' Choose another fee tier or pair.' : ''}`,
   retryOption: 'Try again',
   depositNeeded: (token: string) => `How much ${token} at most should the position use (0 for none)?`,
   depositsNeeded: (first: string, second: string) => `What are the maximum ${first} and ${second} deposits for the position (0 for none)?`,
-  depositUnitMismatch: (written: string, token: string) => `Flofi asked for the ${token} maximum, but your answer is in ${written}. How much ${token} at most?`,
+  depositUnitMismatch: (written: string | null, token: string) => written
+    ? `Flofi asked for the ${token} maximum, but your answer is in ${written}. How much ${token} at most?` : `Flofi asked for the ${token} maximum. How much ${token} at most?`,
   swapOutputNote: (token: string) => `The position uses 100% of the swap’s actual reconciled ${token} output, never other ${token} already in your wallet.`,
   swapOutputCapNote: (token: string, cap: string) => `The position uses the swap’s actual reconciled ${token} output, up to ${cap} ${token}; never other ${token} already in your wallet.`,
   twoTransactionsNote: 'The swap and the position are two transactions, each simulated, reviewed and signed in your wallet. If the position is not opened, the swapped tokens stay in your wallet.',
@@ -485,9 +488,11 @@ const PT: CopilotCopy = {
   percentRangeNote: (percent, price, lower, upper) =>
     `Faixa de ±${percent}% em torno do preço verificado atual do pool (${price} devUSDC por SOL): ${lower}–${upper} devUSDC por SOL, alinhada para fora aos ticks utilizáveis.`,
   priceUnavailable: 'O Flofi não conseguiu verificar o preço atual do pool, então não pode definir uma faixa percentual. Tente de novo ou informe a faixa em preços ou ticks.',
-  percentRangeOrcaOnly: 'Faixa percentual só está disponível para o pool Orca SOL/devUSDC na Solana Devnet. Informe a faixa em preços ou ticks.',
+  percentRangeOrcaOnly: 'Faixa percentual não está disponível para os pools de teste da Uniswap (está para os pools Orca e os pools do catálogo na mainnet). Informe a faixa em preços ou ticks.',
   percentRangeInvalid: 'Escolha uma faixa percentual entre 0,01% e 90%.',
   percentNotFound: percent => `O Flofi não encontrou ${percent}% na sua mensagem. Qual faixa percentual?`,
+  percentOneSided: (percent, quote, base) =>
+    `Uma faixa percentual é ±${percent}% em torno do preço atual do pool, dos dois lados. Para uma faixa de um lado só do preço, informe os preços inferior e superior em ${quote} por ${base}.`,
   rangeNeeded: (quote, base, percent = true) => `Qual faixa de preço a posição deve usar? Informe os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks.`,
   rangeBoundsNeeded: (unit, quote, base) => unit === 'TICK' ? 'Quais ticks inferior e superior a faixa deve usar?' : `Quais preços inferior e superior em ${quote} por ${base} a faixa deve usar?`,
   rangeOtherBound: (known, value, unit, quote, base) => {
@@ -503,7 +508,7 @@ const PT: CopilotCopy = {
   percentNeeded: 'Qual porcentagem em torno do preço atual do pool a faixa deve usar? Por exemplo 10 para ±10%.',
   rangeOrder: (lower, upper, unit) => `O ${unit === 'TICK' ? 'tick' : 'preço'} inferior (${lower}) precisa ser menor que o superior (${upper}). Qual faixa o Flofi deve usar?`,
   fullRangeUnavailable: (quote, base, percent = true) => `A faixa completa não está disponível para este pool no Flofi. Informe os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks.`,
-  catalogRangeNeeded: (quote, base) => `Qual faixa a posição deve usar: a faixa completa, os preços inferior e superior em ${quote} por ${base}, uma porcentagem em torno do preço atual do pool (por exemplo ±10%) ou ticks?`,
+  catalogRangeNeeded: (quote, base, percent = true) => `Qual faixa a posição deve usar: a faixa completa, os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks?`,
   rangeTicksInvalid: spacing => `Os ticks precisam ser diferentes e múltiplos do espaçamento de ticks deste pool (${spacing}). Quais ticks a faixa deve usar?`,
   rangeConversionInvalid: 'O Flofi não conseguiu converter esta faixa em ticks válidos para o pool: ela é vazia, estreita demais ou fora dos preços que o pool aceita. Qual faixa o Flofi deve usar?',
   percentRangeIn: (percent, price, quote, base) => `Faixa: ±${percent}% em torno do preço verificado atual do pool (${price} ${quote} por ${base}).`,
@@ -514,12 +519,13 @@ const PT: CopilotCopy = {
   rangePosition: (position, token) => position === 'INSIDE' ? 'O preço atual do pool está dentro desta faixa: a posição rende taxas enquanto o preço ficar nela.'
     : `O preço atual do pool está fora desta faixa: a posição teria só ${token} e não renderia taxas até o preço entrar na faixa.`,
   poolPriceReading: 'O Flofi está lendo o preço atual deste pool. Pergunte de novo em instantes.',
-  poolPriceUnavailable: pool => `O Flofi não conseguiu verificar o preço atual do pool ${pool}, então não pode calcular uma faixa percentual. Nada foi proposto. Tente de novo ou informe a faixa em preços ou ticks.`,
-  poolNotFound: pool => `O Flofi não encontrou um pool ${pool} ativo. Nada foi proposto. Escolha outra taxa ou outro par.`,
+  poolPriceUnavailable: (pool, retry = true) => `O Flofi não conseguiu verificar o preço atual do pool ${pool}, então não pode calcular uma faixa percentual. Nada foi proposto. ${retry ? 'Tente de novo ou informe' : 'Informe'} a faixa em preços ou ticks.`,
+  poolNotFound: (pool, alternatives = true) => `O Flofi não encontrou um pool ${pool} ativo. Nada foi proposto.${alternatives ? ' Escolha outra taxa ou outro par.' : ''}`,
   retryOption: 'Tentar de novo',
   depositNeeded: token => `Quanto ${token} no máximo a posição deve usar (0 para nenhum)?`,
   depositsNeeded: (first, second) => `Quais são os depósitos máximos de ${first} e ${second} da posição (0 para nenhum)?`,
-  depositUnitMismatch: (written, token) => `O Flofi pediu o máximo de ${token}, mas sua resposta está em ${written}. Quanto ${token} no máximo?`,
+  depositUnitMismatch: (written, token) => written
+    ? `O Flofi pediu o máximo de ${token}, mas sua resposta está em ${written}. Quanto ${token} no máximo?` : `O Flofi pediu o máximo de ${token}. Quanto ${token} no máximo?`,
   swapOutputNote: token => `A posição usa 100% do resultado real e reconciliado de ${token} do swap, nunca outro ${token} que já esteja na sua carteira.`,
   swapOutputCapNote: (token, cap) => `A posição usa o resultado real e reconciliado de ${token} do swap, até ${cap} ${token}; nunca outro ${token} que já esteja na sua carteira.`,
   twoTransactionsNote: 'O swap e a posição são duas transações, cada uma simulada, revisada e assinada na sua carteira. Se a posição não for aberta, os tokens do swap ficam na sua carteira.',

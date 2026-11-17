@@ -6,8 +6,8 @@
  * was read; nothing here invents, caches or estimates a price. The model never supplies a price or a tick: it only reports the user's words.
  */
 import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
-import { orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick, uniswapAlignPriceRange, uniswapBandAroundSqrtPriceIn, uniswapPriceAtSqrt, uniswapPriceAtTick,
-  type UniswapPriceOrientation } from '@defi-workflow-engine/reference-compiler';
+import { orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick, sqrtRatioAtTick, UNISWAP_MAX_SQRT_RATIO, UNISWAP_MAX_TICK, UNISWAP_MIN_SQRT_RATIO, UNISWAP_MIN_TICK,
+  uniswapAlignPriceRange, uniswapBandAroundSqrtPriceIn, uniswapPriceAtSqrt, uniswapPriceAtTick, type UniswapPriceOrientation } from '@defi-workflow-engine/reference-compiler';
 import { priceBoundsAround, validPoolPrice } from './pool-price-bounds';
 import { solanaLiquidityTicks } from './solana-liquidity-authoring';
 
@@ -26,6 +26,8 @@ export type PoolPriceRead = { readonly ref: PoolRef; readonly readAt: number } &
 type GoodRead = Extract<PoolPriceRead, { ok: true }>;
 /** A price older than this is not used: the surface reads it again for the turn that needs it. */
 export const POOL_PRICE_MAX_AGE_MS = 120_000;
+/** How many pools a surface reads for one message: a request touching several pools (a composition) is answered after each one's read, up to this. */
+export const POOL_READS_PER_TURN = 3;
 export const ORCA_MAINNET_POOL: PoolRef = Object.freeze({ kind: 'ORCA', network: 'SOLANA', pool: ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY.pool.address });
 export const poolRefKey = (ref: PoolRef): string => ref.kind === 'ORCA' ? `orca:${ref.network}:${ref.pool}` : `uniswap-v3:${ref.chain}:${ref.pool}:${ref.fee}`;
 /** The newest read of exactly this pool that is still fresh at `now`, or null. A read from the future (a skewed clock) is not trusted. */
@@ -36,13 +38,27 @@ export function poolReadFor(ref: PoolRef, reads: readonly PoolPriceRead[] | unde
   // A read reported as successful but without a usable price is a failed read (never a partial one).
   return read?.ok && !usable(read) ? { ref: read.ref, readAt: read.readAt, ok: false, code: 'COPILOT_POOL_READ_INVALID' } : read;
 }
+/** Orca's own tick bounds (Whirlpools MIN_TICK_INDEX / MAX_TICK_INDEX). */
+const ORCA_TICK_BOUND = 443_636;
 function usable(read: GoodRead): boolean {
-  if (!Number.isSafeInteger(read.tick) || !Number.isSafeInteger(read.at)) return false;
-  return read.ref.kind === 'ORCA' ? typeof read.price === 'string' && validPoolPrice(read.price) : typeof read.sqrtPrice === 'string' && /^[1-9][0-9]{0,48}$/.test(read.sqrtPrice);
+  if (!Number.isSafeInteger(read.tick) || !Number.isSafeInteger(read.at) || read.at <= 0) return false;
+  if (read.ref.kind === 'ORCA') return Math.abs(read.tick) <= ORCA_TICK_BOUND && typeof read.price === 'string' && validPoolPrice(read.price);
+  if (typeof read.sqrtPrice !== 'string' || !/^[1-9][0-9]{0,48}$/.test(read.sqrtPrice) || read.tick < UNISWAP_MIN_TICK || read.tick >= UNISWAP_MAX_TICK) return false;
+  const sqrt = BigInt(read.sqrtPrice);
+  if (sqrt < UNISWAP_MIN_SQRT_RATIO || sqrt >= UNISWAP_MAX_SQRT_RATIO) return false;
+  // The reported tick belongs to the reported price (one tick of tolerance either way for rounding and the pool's boundary convention): a price
+  // and a tick that disagree would put the range note on the wrong side of the current price.
+  return sqrtRatioAtTick(Math.max(read.tick - 1, UNISWAP_MIN_TICK)) <= sqrt && sqrt <= sqrtRatioAtTick(Math.min(read.tick + 2, UNISWAP_MAX_TICK));
 }
-/** Codes of a read that found no usable pool (as opposed to a price that could not be read right now). */
-const POOL_MISSING = /^(?:UNISWAP_POOL_MISMATCH|UNISWAP_CONTRACT_CODE_MISSING|UNISWAP_POOL_UNINITIALIZED|UNISWAP_UNEXPECTED_CONTRACT|UNISWAP_FEE_TIER_UNSUPPORTED|ORCA_POOL_INVALID|ORCA_LIQUIDITY_POOL_INVALID)$/;
+/** Codes of a read that found no usable pool at this pair and fee tier (as opposed to a price that could not be read right now). */
+const POOL_MISSING = /^(?:UNISWAP_POOL_MISMATCH|UNISWAP_CONTRACT_CODE_MISSING|UNISWAP_POOL_UNINITIALIZED|UNISWAP_FEE_TIER_UNSUPPORTED|ORCA_POOL_INVALID|ORCA_POOL_MISMATCH)$/;
 export const poolMissing = (code: string): boolean => POOL_MISSING.test(code);
+/**
+ * Codes another read cannot change: a deployment or code-pin integrity failure, a pool FloFi does not support as it is, a network not enabled here,
+ * a pool identity the surface could not bind. FloFi says what it could not confirm, without offering "Try again".
+ */
+const POOL_FINAL = /^(?:UNISWAP_UNEXPECTED_CONTRACT|UNISWAP_DEPLOYMENT_MISMATCH|UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED|CATALOG_ASSET_IDENTITY_CHANGED|ORCA_POOL_NO_LIQUIDITY|ORCA_POOL_REWARDS_UNSUPPORTED|COPILOT_POOL_IDENTITY_CHANGED|COPILOT_POOL_IDENTITY_MISSING|[A-Z_]+_NOT_ENABLED)$/;
+export const poolRetryable = (code: string): boolean => !POOL_MISSING.test(code) && !POOL_FINAL.test(code);
 
 /** Where the current pool price sits relative to a range, as a person reads it (prices rise to the right). */
 export type RangePosition = 'BELOW' | 'INSIDE' | 'ABOVE';
@@ -99,10 +115,12 @@ type PoolToken = { readonly symbol: string; readonly address: string; readonly d
  */
 export type CatalogPoolView = { readonly profile: UniswapPoolProfile; readonly orientation: UniswapPriceOrientation; readonly quote: string; readonly base: string;
   readonly ref: Extract<PoolRef, { kind: 'UNISWAP_V3' }> };
-const USD_STABLE = new Set(['USDC', 'USDT', 'USDG', 'DAI', 'USDBC', 'USDS', 'PYUSD', 'USDC.E', 'USDT0']);
+/** Dollar stablecoins by catalog symbol (one list for the pool's quote side and for the dialogue's "$" / "dollars" units). */
+const USD_STABLE = new Set(['USDC', 'USDT', 'USDG', 'DAI', 'USDBC', 'USDS', 'PYUSD', 'USDC.E', 'USDT0', 'USD₮0']);
+export const isUsdStable = (symbol: string): boolean => USD_STABLE.has(symbol.toUpperCase());
 export function catalogPoolView(chain: string, tokenA: PoolToken, tokenB: PoolToken, fee: number): CatalogPoolView {
   const profile = catalogPoolOn(chain, tokenA, tokenB, fee);
-  const stable0 = USD_STABLE.has(profile.token0.symbol.toUpperCase()), stable1 = USD_STABLE.has(profile.token1.symbol.toUpperCase());
+  const stable0 = isUsdStable(profile.token0.symbol), stable1 = isUsdStable(profile.token1.symbol);
   const orientation: UniswapPriceOrientation = stable1 && !stable0 ? 'TOKEN1_PER_TOKEN0' : 'TOKEN0_PER_TOKEN1';
   const [quote, base] = orientation === 'TOKEN1_PER_TOKEN0' ? [profile.token1.symbol, profile.token0.symbol] : [profile.token0.symbol, profile.token1.symbol];
   return { profile, orientation, quote, base,

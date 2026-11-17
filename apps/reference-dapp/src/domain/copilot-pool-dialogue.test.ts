@@ -13,6 +13,9 @@ import { readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
 import { baseCatalog } from '../server/base-mainnet.test-harness';
+import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
+import { parseCopilotIntentV2 } from './copilot-intent-v2';
+import { turnMetrics, parseTurnMetrics } from './intelligence/turn-metrics';
 import { setActiveNetworkScope } from './network-scope';
 import { priceBoundsAround } from './pool-price-bounds';
 import { solanaLiquidityTicks } from './solana-liquidity-authoring';
@@ -27,7 +30,7 @@ import type { CopilotReply } from './copilot-conversation';
 
 const arbitrum = parseArbitrumTokenList(readFileSync(new URL('../../../../packages/action-registry/test/fixtures/arbitrum-token-list-fixture.json', import.meta.url), 'utf8'), '2026-10-12T00:00:00Z');
 const ethereum = parseEthereumTokenList(readFileSync(new URL('../../../../packages/action-registry/test/fixtures/ethereum-token-list-fixture.json', import.meta.url), 'utf8'), '2026-10-12T00:00:00Z');
-beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(arbitrum); registerNetworkCatalog(ethereum); });
+beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(arbitrum); registerNetworkCatalog(ethereum); registerNetworkCatalog(officialCatalog()); });
 afterAll(() => resetNetworkCatalogs());
 beforeEach(() => setActiveNetworkScope('PUBLIC_MAINNET'));
 afterEach(() => setActiveNetworkScope(null));
@@ -39,7 +42,9 @@ const BASE = { network: 'BASE', deposits: [{ asset: 'USDC', maxAmount: '10' }, {
 /** On Base and Arbitrum One WETH is token0 and USDC token1: USDC per WETH is token1 per token0. ~3,000 and ~2,900 USDC per WETH. */
 const TICKS: Record<string, number> = { 'eip155:8453': -196_257, 'eip155:42161': -196_597,
   // On Ethereum USDC is token0: USDC per WETH is token0 per token1 (a higher tick is a lower price), ~3,000 USDC per WETH.
-  'eip155:1': 196_257 };
+  'eip155:1': 196_257,
+  // Robinhood Chain TSLA/USDG 0.3%: TSLA is token0 (18 decimals) and USDG token1 (6), ~400 USDG per TSLA (USDG per TSLA is token1 per token0).
+  'eip155:4663': -216_420 };
 const ORCA_PRICE = '150.000000', ORCA_TICK = -18_972, SPACING = 60;
 const good = (ref: PoolRef, readAt = NOW): PoolPriceRead => ref.kind === 'UNISWAP_V3'
   ? { ref, readAt, ok: true, sqrtPrice: sqrtRatioAtTick(TICKS[ref.chain]!).toString(), tick: TICKS[ref.chain]!, at: 22_000_000 }
@@ -133,6 +138,16 @@ describe('Orca SOL/USDC on Solana: the range in separate messages', () => {
     expect(local(s, '2 SOL')?.text).toMatch(/asked for the USDC maximum/);
     expect(local(s, '2')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_REQUIRED' });
     expect(local(s, '±5%')?.sentence).toMatch(/^add liquidity 0\.1 SOL and 2 USDC from \S+ to \S+ USDC per SOL on Solana slippage 100 bps$/);
+  });
+  it('a deposit answered to FloFi\'s own question is progress: the range dialogue that follows never runs into the question limit', () => {
+    const s = session();
+    s.say('Add liquidity on Orca on Solana', intent.action(act.liquidity({ ...ORCA })));
+    s.say('0.1 SOL', intent.action(act.liquidity({ ...ORCA, deposits: [{ asset: 'SOL', maxAmount: '0.1' }] })));
+    local(s, '2 SOL');
+    expect(local(s, '2')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_REQUIRED' });
+    expect(local(s, '1usdc')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_SIDE_REQUIRED' });
+    expect(local(s, 'lower')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_BOUND_REQUIRED' });
+    expect(local(s, '180')?.sentence).toMatch(/^add liquidity 0\.1 SOL and 2 USDC from 1 to 180 USDC per SOL on Solana/);
   });
   it('a new request never inherits the previous request\'s range', () => {
     const s = orcaOpen();
@@ -238,7 +253,8 @@ describe('Uniswap v3 on catalog networks: percentage, price and full ranges', ()
 describe('Verified market data: unavailable, stale or missing pools', () => {
   it('an unreadable pool price: FloFi says what it could not confirm, proposes nothing, and "Try again" reads it again', () => {
     const s = session();
-    s.poolReader = ref => ({ ref, readAt: NOW, ok: false, code: 'BASE_MAINNET_NOT_ENABLED' });
+    // Intentional change (wave-2 review): a transient service failure (a stale chain head) is retried; a network not enabled here is not (below).
+    s.poolReader = ref => ({ ref, readAt: NOW, ok: false, code: 'UNISWAP_STALE_CHAIN_HEAD' });
     const failed = s.say('Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PERCENT', upper: '10' })));
     expect(failed).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_PRICE_UNAVAILABLE', options: ['Try again'] });
     expect(failed?.command).toBeUndefined();
@@ -353,7 +369,7 @@ describe('Specialist review regressions (security, liquidity, chat)', () => {
   });
   it('FloFi\'s own pool-read request never runs into the question limit', () => {
     const s = session();
-    s.poolReader = ref => ({ ref, readAt: NOW, ok: false, code: 'BASE_MAINNET_NOT_ENABLED' });
+    s.poolReader = ref => ({ ref, readAt: NOW, ok: false, code: 'UNISWAP_STALE_CHAIN_HEAD' });
     s.say('Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PERCENT', upper: '10' })));
     expect(local(s, 'Try again')?.code).toBe('COPILOT_POOL_PRICE_UNAVAILABLE');
     expect(local(s, 'Try again')?.code).toBe('COPILOT_POOL_PRICE_UNAVAILABLE');
@@ -364,7 +380,8 @@ describe('Specialist review regressions (security, liquidity, chat)', () => {
   it('a malformed "successful" read is a failed read: a percentage is not computed, an explicit range proceeds without a position note', () => {
     const s = orcaOpen();
     s.poolReader = ref => ({ ref, readAt: NOW, ok: true, price: 'not-a-price', tick: 0, at: 1 });
-    expect(local(s, '±10%')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_PRICE_UNAVAILABLE' });
+    // Intentional change (wave-2 review): FloFi's own read failures keep their code in the reply (and so in the turn metrics).
+    expect(local(s, '±10%')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_READ_INVALID', options: ['Try again'] });
     const t = orcaOpen();
     t.poolReader = ref => ({ ref, readAt: NOW, ok: true, price: 'not-a-price', tick: 0, at: 1 });
     const done = local(t, '150 to 180');
@@ -413,5 +430,215 @@ describe('Specialist review regressions (security, liquidity, chat)', () => {
     expect(s.say('Add Uniswap liquidity 100 USDC and 0.05 WETH on Base Sepolia in a percentage range',
       intent.action(act.liquidity({ protocol: 'UNISWAP_V3', network: 'BASE_SEPOLIA', deposits: [{ asset: 'USDC', maxAmount: '100' }, { asset: 'WETH', maxAmount: '0.05' }], rangeUnit: 'PERCENT' }))))
       .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_UNSUPPORTED' });
+  });
+});
+
+describe('Wave-2 review regressions (workflow, infrastructure, protocol integrations, fix verification)', () => {
+  const ask = (s: CopilotSession, text: string, fields: Record<string, unknown>) => s.say(text, intent.action(act.catalogLiquidity({ ...BASE, ...fields })));
+  it('one written percentage grounds one field: the fee tier\'s or the slippage\'s percentage is never the range band as well', () => {
+    const s = session();
+    expect(ask(s, 'Add liquidity on Base with 10 USDC and 0.004 ETH in the 1% pool, percentage range', { feeTier: '1', rangeUnit: 'PERCENT', upper: '1' }))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_NOT_FOUND' });
+    expect(s.poolRequests).toEqual([]);
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH in the 1% pool, ±1%', { feeTier: '1', rangeUnit: 'PERCENT', upper: '1' })?.kind).toBe('PROPOSAL');
+    // The reverse: a range written "at 1% around the price" never grounds a 1% fee tier the interpreter reported from it.
+    const fee = ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH at 1% around the price', { feeTier: '1', rangeUnit: 'PERCENT', upper: '1' });
+    expect(fee).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(fee?.text).toMatch(/could not find the fee tier 1%/);
+    const orca = session();
+    expect(orca.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, slippage 1%, percentage range',
+      intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, slippageBps: '100', rangeUnit: 'PERCENT', upper: '1' })))).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_NOT_FOUND' });
+  });
+  it('a one-sided percentage is never turned into a symmetric band; FloFi asks for prices instead', () => {
+    const lower = session().say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, lower bound 10% below the current price',
+      intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, rangeUnit: 'PERCENT', lower: '-10' })));
+    expect(lower).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_ONE_SIDED' });
+    expect(lower?.text).toContain('give the lower and upper prices in USDC per SOL');
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH up to 10% above the price', { rangeUnit: 'PERCENT', upper: '+10%' }))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_ONE_SIDED' });
+    const pt = session('PT').say('liquidez na Orca na Solana com 0,1 SOL e 10 USDC, até 5% abaixo do preço',
+      intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, rangeUnit: 'PERCENT', lower: '-5' }), 'PT'));
+    expect(pt).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_ONE_SIDED' });
+    expect(pt?.text).toContain('preços inferior e superior em USDC por SOL');
+    // Both sides named is a band.
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, 10% above and below the price', { rangeUnit: 'PERCENT', upper: '10' })?.kind).toBe('PROPOSAL');
+    // A lone lower percentage the user did not tie to a side is asked for as a range, never completed.
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH in a percentage range', { rangeUnit: 'PERCENT', lower: '-10' }))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_NOT_FOUND' });
+  });
+  it('a model option\'s example the user clicked is the model\'s value, not the user\'s; FloFi asks, and a bare number answers it', () => {
+    const s = session();
+    s.say('Add liquidity to the USDC/ETH pool on Base with 10 USDC and 0.004 ETH',
+      intent.clarify(['range'], 'What price range should I use for the USDC/ETH pool?', ['Full range', 'A percentage range (for example, ±10%)']));
+    const asked = s.say('A percentage range (for example, ±10%)', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PERCENT', upper: '10' })));
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_NOT_FOUND' });
+    const done = local(s, '12');
+    expect(done?.kind).toBe('PROPOSAL');
+    const ticks = uniswapBandAroundSqrtPriceIn(sqrtRatioAtTick(TICKS['eip155:8453']!), 1_200, SPACING, 'TOKEN1_PER_TOKEN0');
+    expect(done?.sentence).toContain(`ticks ${ticks.tickLower} to ${ticks.tickUpper}`);
+  });
+  it('a percentage outside 0.01–90% is asked again, and the next bare number is the percentage', () => {
+    const s = orcaOpen();
+    expect(local(s, '±95%')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_OUT_OF_RANGE' });
+    expect(local(s, '10')?.sentence).toMatch(/^add liquidity 0\.1 SOL and 10 USDC from [0-9.]+ to [0-9.]+ USDC per SOL on Solana/);
+  });
+  it('read failures: a timeout and an unbound read keep their own code; "Try again" only where another read can help', () => {
+    const failing = (code: string) => Object.assign(session(), { poolReader: (ref: PoolRef): PoolPriceRead => ({ ref, readAt: NOW, ok: false, code }) });
+    const pct = (s: CopilotSession) => ask(s, 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', { rangeUnit: 'PERCENT', upper: '10' });
+    expect(pct(failing('COPILOT_POOL_READ_TIMEOUT'))).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_READ_TIMEOUT', options: ['Try again'] });
+    for (const [code, reply] of [['COPILOT_POOL_IDENTITY_MISSING', 'COPILOT_POOL_IDENTITY_MISSING'], ['BASE_MAINNET_NOT_ENABLED', 'COPILOT_POOL_PRICE_UNAVAILABLE'],
+      ['UNISWAP_UNEXPECTED_CONTRACT', 'COPILOT_POOL_PRICE_UNAVAILABLE']] as const) {
+      const final = pct(failing(code));
+      expect(final, code).toMatchObject({ kind: 'CLARIFICATION', code: reply, options: [] });
+      expect(final?.text).toContain('Give the range as prices or ticks.');
+      expect(final?.text).not.toMatch(/Try again|another fee tier/);
+    }
+    // An explicit range never waits on the read: it is proposed without the position note.
+    const explicit = ask(failing('COPILOT_POOL_READ_TIMEOUT'), 'Add liquidity on Base with 10 USDC and 0.004 ETH between 2800 and 3200', { rangeUnit: 'PRICE', lower: '2800', upper: '3200' });
+    expect(explicit?.kind).toBe('PROPOSAL');
+  });
+  it('the single Orca mainnet pool that cannot be confirmed is named without offering another fee tier', () => {
+    const s = orcaOpen();
+    s.poolReader = ref => ({ ref, readAt: NOW, ok: false, code: 'ORCA_POOL_MISMATCH' });
+    const reply = local(s, '±10%');
+    expect(reply).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_NOT_FOUND' });
+    expect(reply?.text).not.toMatch(/fee tier/);
+  });
+  it('a Uniswap read whose tick does not belong to its price, or whose price is outside Uniswap\'s bounds, is a failed read', () => {
+    for (const patch of [{ tick: 0 }, { sqrtPrice: '1', tick: -887_272 }, { at: 0 }]) {
+      const s = Object.assign(session(), { poolReader: (ref: PoolRef): PoolPriceRead => ({ ...good(ref), ...patch } as PoolPriceRead) });
+      expect(ask(s, 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', { rangeUnit: 'PERCENT', upper: '10' }), JSON.stringify(patch))
+        .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_READ_INVALID' });
+    }
+    // One tick of tolerance for the pool's boundary convention.
+    const edge = Object.assign(session(), { poolReader: (ref: PoolRef): PoolPriceRead => ({ ...good(ref), tick: TICKS['eip155:8453']! - 1 } as PoolPriceRead) });
+    expect(ask(edge, 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', { rangeUnit: 'PERCENT', upper: '10' })?.kind).toBe('PROPOSAL');
+  });
+  it('deposit maxima, a fee tier or a slippage never double as tick or price bounds', () => {
+    const orca = session().say('Add liquidity on Orca on Solana with 64 SOL and 12800 USDC',
+      intent.action(act.liquidity({ ...ORCA, deposits: [{ asset: 'SOL', maxAmount: '64' }, { asset: 'USDC', maxAmount: '12800' }], rangeUnit: 'TICK', lower: '64', upper: '12800' })));
+    expect(orca).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_NOT_FOUND' });
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, fee 1%, slippage 100 bps', { feeTier: '1', slippageBps: '100', rangeUnit: 'PRICE', lower: '1', upper: '100' }))
+      .toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_NOT_FOUND' });
+    // Written once more as bounds, they count.
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, slippage 100 bps, between 100 and 5000', { slippageBps: '100', rangeUnit: 'PRICE', lower: '100', upper: '5000' })?.kind)
+      .toBe('PROPOSAL');
+  });
+  it('"fee X%" always names the fee tier, even before range wording; "at X% on either side" is the range', () => {
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, fee 2% range ±10%', { rangeUnit: 'PERCENT', upper: '10' })?.kind).toBe('UNSUPPORTED');
+    const dropped = ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, fee 0.05% range ±10%', { rangeUnit: 'PERCENT', upper: '10' });
+    expect(dropped?.text).toMatch(/could not find the fee tier 0\.05%/);
+    for (const words of ['at 10% on either side of the price', 'at 10%, around the price', 'at 10% above and below'])
+      expect(ask(session(), `Add liquidity on Base with 10 USDC and 0.004 ETH ${words}`, { rangeUnit: 'PERCENT', upper: '10' })?.kind, words).toBe('PROPOSAL');
+  });
+  it.each(['from 2800 to 3200 USDC per WETH', 'price range 2800 to 3200', '2800-3200', '+-10%', 'within 10% of the price', '10% on either side', '-10% to +10%',
+    'ticks from -600 to 600', 'between $2800 and $3200', 'de 2800 a 3200', '10%'])('a range written as "%s" that the interpreter dropped is asked for, never the full range', words => {
+    expect(ask(session(), `Add liquidity on Base with 10 USDC and 0.004 ETH, ${words}`, {})).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_REQUIRED' });
+  });
+  it('the full range reported over written range words is asked for; asked for in words, it is used', () => {
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', { rangeUnit: 'FULL' })).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_REQUIRED' });
+    const full = ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, full range', { rangeUnit: 'FULL' });
+    expect(full?.kind).toBe('PROPOSAL');
+    expect(notes(full)).toMatch(/full price range/);
+  });
+  it('Robinhood Chain: ±10% and a price range in USDG per TSLA, in ticks aligned outward', () => {
+    const rh = { network: 'ROBINHOOD', deposits: [{ asset: 'USDG', maxAmount: '10' }, { asset: 'TSLA', maxAmount: '0.025' }] };
+    const s = session();
+    const band = s.say('Add liquidity on Robinhood Chain with 10 USDG and 0.025 TSLA, ±10%', intent.action(act.catalogLiquidity({ ...rh, rangeUnit: 'PERCENT', upper: '10' })));
+    const ticks = uniswapBandAroundSqrtPriceIn(sqrtRatioAtTick(TICKS['eip155:4663']!), 1_000, SPACING, 'TOKEN1_PER_TOKEN0');
+    expect(band?.kind).toBe('PROPOSAL');
+    expect(band?.sentence).toContain(`ticks ${ticks.tickLower} to ${ticks.tickUpper}`);
+    expect(s.poolRequests).toEqual([expect.objectContaining({ kind: 'UNISWAP_V3', chain: 'eip155:4663', fee: 3000 })]);
+    expect(notes(band)).toMatch(/USDG per TSLA/);
+    const priced = session().say('Add liquidity on Robinhood Chain with 10 USDG and 0.025 TSLA between 380 and 420 USDG',
+      intent.action(act.catalogLiquidity({ ...rh, rangeUnit: 'PRICE', lower: '380', upper: '420' })));
+    const aligned = uniswapAlignPriceRange('380', '420', 18, 6, SPACING, 'TOKEN1_PER_TOKEN0');
+    expect(priced?.sentence).toContain(`ticks ${aligned.tickLower} to ${aligned.tickUpper}`);
+    const asked = session().say('Add liquidity on Robinhood Chain with 10 USDG and 0.025 TSLA in a percentage range',
+      intent.action(act.catalogLiquidity({ ...rh, rangeUnit: 'PERCENT' })));
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_PERCENT_REQUIRED' });
+  });
+  it('a wallet network switch or a Solana owner change while FloFi\'s range question is open ends the request', () => {
+    const s = orcaOpen();
+    local(s, '1usdc');
+    s.walletChainId = 'eip155:42161';
+    expect(local(s, 'lower')).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED' });
+    const owner = (solanaOwner: string) => ({ orcaPrice: null, solanaOwner, orcaPositions: null, remaining: [] });
+    const t = session();
+    t.verified = owner('So11111111111111111111111111111111111111112');
+    t.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC', intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC })));
+    local(t, '1usdc');
+    t.verified = owner('Stake11111111111111111111111111111111111111');
+    expect(local(t, 'lower')).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED' });
+  });
+  it('Uniswap in Portuguese: the price question in USDC por WETH, and an explicit change of one bound replaces only that bound', () => {
+    const s = session('PT');
+    const asked = s.say('liquidez na Base com 10 USDC e 0,004 ETH, preço inferior 2800', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PRICE', lower: '2800' }), 'PT'));
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_BOUND_REQUIRED' });
+    expect(asked?.text).toMatch(/USDC por WETH/);
+    const first = local(s, '3200');
+    expect(first?.kind).toBe('PROPOSAL');
+    // While FloFi's question is open, naming a bound already given replaces only that bound.
+    const t = session();
+    t.say('Add liquidity on Base with 10 USDC and 0.004 ETH, lower price 2800', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PRICE', lower: '2800' })));
+    expect(local(t, 'make the lower 2900')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_BOUND_REQUIRED' });
+    const changed = local(t, '3300');
+    const aligned = uniswapAlignPriceRange('2900', '3300', 18, 6, SPACING, 'TOKEN1_PER_TOKEN0');
+    expect(changed?.sentence).toContain(`ticks ${aligned.tickLower} to ${aligned.tickUpper}`);
+  });
+  it('a network the user named but the interpreter left out still words FloFi\'s side question in the pool\'s unit', () => {
+    const s = session();
+    expect(s.say('Add liquidity on Solana with 0.1 SOL and 10 USDC', intent.action(act.liquidity({ deposits: SOL_USDC })))).toMatchObject({ code: 'COPILOT_RANGE_REQUIRED' });
+    expect(local(s, '180')?.text).toBe('Is 180 USDC per SOL the lower or the upper price of the range?');
+  });
+  it('a surface that cannot read pools (a channel) is never offered a percentage range it cannot compute', () => {
+    const channel = new CopilotSession();
+    expect(channel.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC', intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC })))?.text).not.toMatch(/percentage|±10%/);
+    expect(new CopilotSession().say('Add liquidity on Base with 10 USDC and 0.004 ETH, between 2800 and', intent.action(act.catalogLiquidity({ ...BASE, rangeUnit: 'PRICE' })))?.text)
+      .not.toMatch(/percentage/);
+    expect(new CopilotSession().say('Add liquidity on Base with 10 USDC and 0.004 ETH in a range', intent.action(act.catalogLiquidity({ ...BASE })))?.text).not.toMatch(/percentage/);
+  });
+  it('a deposit answer in a test token is asked again in the public product without repeating the test token', () => {
+    const s = session();
+    s.say('Add liquidity on Orca on Solana', intent.action(act.liquidity({ ...ORCA })));
+    s.say('0.1 SOL', intent.action(act.liquidity({ ...ORCA, deposits: [{ asset: 'SOL', maxAmount: '0.1' }] })));
+    const again = local(s, '10 devUSDC');
+    expect(again?.text).toBe('Flofi asked for the USDC maximum. How much USDC at most?');
+  });
+  it('Orca with no network named, in the public product: the question is in USDC per SOL, never the Devnet test token', () => {
+    const reply = session().say('Add liquidity on Orca with 0.1 SOL and 10 USDC', intent.action(act.liquidity({ protocol: 'ORCA', deposits: SOL_USDC })));
+    expect(reply?.kind).toBe('CLARIFICATION');
+    expect(reply?.text).not.toMatch(/devUSDC|Devnet/i);
+  });
+  it('a model turn that changes the kind of an open range without the user saying so keeps the range FloFi holds', () => {
+    const s = orcaOpen();
+    local(s, 'lower 150');
+    const reply = s.say('hmm', intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, rangeUnit: 'PERCENT', upper: '10' })));
+    expect(reply?.kind).toBe('CLARIFICATION');
+    expect(s.poolRequests).toEqual([]);
+    expect(local(s, '180')?.sentence).toMatch(/from 150 to 180 USDC per SOL/);
+  });
+  it('a request touching two pools reads each in turn for the same message (no endless "reading the price" loop)', () => {
+    const s = session();
+    const reply = s.say('On Base add 10 USDC and 0.004 ETH ±10% at the 0.3% fee, and 10 USDC and 0.004 ETH ±5% at the 0.05% fee',
+      intent.composition([act.catalogLiquidity({ ...BASE, feeTier: '0.3', rangeUnit: 'PERCENT', upper: '10' }),
+        act.catalogLiquidity({ ...BASE, feeTier: '0.05', rangeUnit: 'PERCENT', upper: '5' })]));
+    expect(reply?.code).not.toBe('COPILOT_POOL_PRICE_REQUIRED');
+    expect(new Set(s.poolRequests.map(ref => ref.kind === 'UNISWAP_V3' ? ref.fee : 0))).toEqual(new Set([3000, 500]));
+  });
+  it('the turn record of a range dialogue carries codes and counters only: no amount, token, price or pool', () => {
+    const s = orcaOpen();
+    const before = s.state;
+    const reply = local(s, '1usdc')!;
+    expect(reply.code).toBe('COPILOT_RANGE_SIDE_REQUIRED');
+    const metrics = turnMetrics(before, reply, s.state, 'LOCAL', 'WEB');
+    expect(metrics.code).toBe('COPILOT_RANGE_SIDE_REQUIRED');
+    expect(parseTurnMetrics(JSON.parse(JSON.stringify(metrics)))).toEqual(metrics);
+    expect(JSON.stringify(metrics)).not.toMatch(/USDC|SOL|1usdc|150|Whirl|[1-9A-HJ-NP-Za-km-z]{32,}/);
+  });
+  it('EDIT changes in a percentage range accept the written percentage forms, and nothing else', () => {
+    const edit = (upper: string) => parseCopilotIntentV2(intent.edit({ rangeUnit: 'PERCENT', upper })) as { changes: { upper: string } };
+    expect(edit('±10%').changes.upper).toBe('10');
+    expect(() => edit('ten')).toThrow();
   });
 });

@@ -58,6 +58,33 @@ against the code and fixed with a regression test:
 | The Uniswap read was labelled with the requested pool, not the pool read | The service returns its verified pool; the web reader (`state/copilot-pool-reads.ts`) fails closed when it is missing or different. |
 | Smaller | "at 10% around the price" is a range, not a fee; a range the interpreter dropped on a catalog pool is asked, never the full range; a malformed "ok" read is a failed read; "Try again" only where a read is possible; a unit named next to a side is kept; engineering-only Devnet/test-pool dead ends removed. |
 
+### Second review wave (after the PR #205 sync)
+
+flofi-workflow, flofi-infrastructure-ci, flofi-protocol-integrations, flofi-mcp and flofi-channels reviewed the integrated branch, five
+read-only verifiers re-checked the first wave's fixes adversarially, and a completeness critic mapped every requirement to its tests. 1 high,
+5 medium and ~20 low findings, all checked against the code; fixed with regression tests (`Wave-2 review regressions` in
+`copilot-pool-dialogue.test.ts`, reader cases in `copilot-range-dialogue.test.ts`, `copilot-pool-reads.test.ts`, the integration and Channel Core suites):
+
+| Finding | Fix |
+| --- | --- |
+| **High** — the Cloud Build orchestration test pinned 54 browser profiles; the new profile makes 55, so `governance` (and every certification job behind it) would fail | `scripts/test_ci_gcp_orchestration.py` pins 55 and names the new profile (intentional change, commented). |
+| The fee tier's or slippage's "N%" could also ground the ±N% range band (and "at 1% around the price" could ground a 1% fee) | One written percentage grounds one field: fee/slippage percentages never ground a band, band percentages never ground a fee; "fee X%" always names the fee (the "at X%" range exception applies to "at" only). |
+| One-sided percentages ("10% below", a lone lower "-10", "+10% above") became a symmetric band | They are asked as prices (`COPILOT_RANGE_PERCENT_ONE_SIDED`); "10% above and below" is still a band. |
+| A model option's example the user clicked ("A percentage range (for example, ±10%)") grounded ±10% | Examples in a clicked option are the model's, not the user's: FloFi asks, and a bare number then answers its own percentage question. |
+| Deposit maxima could ground tick bounds; a fee or slippage could ground price bounds | Every bound (price and tick) needs its own written number; percent readings and the slippage written in bps never ground a bound. |
+| RANGE wording gaps let a dropped range become the full range; a model-reported FULL was never grounded | Wider range wording (from/to, X–Y, +-, within, either side, -N% to +N%, tick range, $ bounds, de X a Y, a bare non-fee "N%"); FULL is used only when the user asked for it (or carried). |
+| Two-sided answers ignored side nouns ("lower tick 600 upper tick 900" became prices); a unit given with a held value was lost | Side nouns name the unit in every form; contradictions are not range answers; `rangeHold` keeps the unit. |
+| The web chat's pool read had no deadline | 20 s (`POOL_READ_TIMEOUT_MS`), then `COPILOT_POOL_READ_TIMEOUT` with "Try again"; explicit ranges never wait on it for a proposal. |
+| A request touching two pools could loop on "reading the price" | Each needed pool is read in turn for the same message (up to `POOL_READS_PER_TURN` = 3), in the web chat and the test harness. |
+| A deposit answered to FloFi's own question did not count as progress | It does (slot rule), so the range dialogue after it never hits the question limit. |
+| Pool-error classification | `ORCA_POOL_MISMATCH` is "pool not found" (Orca copy no longer offers another fee tier); integrity/configuration codes and an unbound read get no "Try again"; FloFi's own read failures keep their code in the reply (`COPILOT_POOL_READ_TIMEOUT`, `COPILOT_POOL_IDENTITY_MISSING`, `COPILOT_POOL_IDENTITY_CHANGED`, `COPILOT_POOL_READ_INVALID`). |
+| A reported tick could disagree with the reported price | A Uniswap read is usable only with a price inside Uniswap's bounds and a tick that belongs to it (one tick of tolerance); Orca ticks are bounds-checked. |
+| Channels were offered a percentage they can never compute; a side question could show empty units | The percentage is offered only where the surface reads pools; units come from the network the user named when the interpreter left it out (else the interpreter answers). |
+| Smaller | One stablecoin list for orientation and "$"/"dollars"; a test token the user typed is not repeated in the public mismatch question; ETH answers a WETH deposit question; engineering-only Devnet read gets a deadline, an end-of-conversation check and implied-network detection; engineering copy corrected; `coverage.json` maps `copilot-prompt-scope` and `copilot-pool-integration` to their owning modules and makes the incident suites required. |
+
+Not changed (owner decision): MCP `compose_strategy` still refuses a `price` range on catalog networks (the chat converts prices to ticks first;
+both reach the same IR). Extending MCP is outside this build's scope.
+
 ## 3. Context continuity
 
 The open request is FloFi's structured draft (protocol, network, deposits, fee tier, range kind and bounds), plus — only while the range is open —
@@ -77,9 +104,9 @@ request (`COPILOT_CONTEXT_CHANGED`), a new request never inherits the closed one
   is token1 per token0 (WETH is token0 on Base and Arbitrum One), the band is computed in that direction (not the inverted band). Ticks are aligned
   outward (`floor` for the lower, `ceil` for the upper, then the spacing), bounded by the usable tick range, and the IR stores those ticks.
   Explicit prices use the same direction and alignment. The proposal states the effective range, the block it was read at and where the
-  current price sits (inside, or above/below with the only token the position would hold).
-- **Not available:** a percentage on the Uniswap test pools (prices or ticks) and full range on Orca (FloFi says so). Asymmetric percentages
-  (`-5% to +10%`) go to the interpreter and are asked as prices.
+  current price sits (inside, or outside with the only token the position would hold).
+- **Not available:** a percentage on the Uniswap test pools (prices or ticks), a percentage on a surface that cannot read pools (channels), and full
+  range on Orca (FloFi says so). Asymmetric or one-sided percentages (`-5% to +10%`, `10% below`) are asked as prices.
 
 ## 5. Mainnet-only (CODE + MOCKED browser)
 
@@ -95,7 +122,8 @@ CI only; historical runs are untouched; no existing workflow is re-networked.
 | Reproduction (failed on `d49f80a` — verified in a clean worktree of `d49f80a`: 4/4 fail; pass now) | `copilot-pool-dialogue.repro.test.ts` (incident A sequence; incident B `±10%` and `10% range`; silent full range) | see PR |
 | Dialogue | `copilot-range-dialogue.test.ts` (reader EN/PT, slot changes), `copilot-pool-dialogue.test.ts` (separate messages, explicit change, new request, wallet/network change, price unavailable/stale/missing pool, malformed and invented model values, yes, public wording, Chat → IR → MCP parity) | see PR |
 | Compiler | `uniswap-price-orientation.test.ts` | see PR |
-| Integration (MOCKED chain, real services) | `server/copilot-pool-integration.test.ts`: chat → IR → Uniswap service Simulate → Review → owner-wallet handoff; exact approvals; zero sends | see PR |
+| Integration (MOCKED chain, real services) | `server/copilot-pool-integration.test.ts`: chat → IR → Uniswap (Arbitrum One) and Orca (mainnet-beta profile) services Simulate → Review → owner-wallet handoff; exact approvals; a price move after the proposal is re-read by Review with the chat's ticks, a move after Review requires a new Review; zero sends | see PR |
+| Channel Core (JSON rehydration) | `channels/core/conversation-mainnet.test.ts`: "1usdc" → Lower → "180" proposes on a channel; a percentage there is explained without a retry | see PR |
 | Browser (MOCKED loopback, replay interpreter, public scope) | `e2e/copilot-pool-dialogue.spec.ts` (3 tests) | see PR |
 | Regression | full unit suite, `copilot-eval` corpus (C10 intentionally updated: the second turn is now local), related browser profiles, PostgreSQL suite | see PR |
 
@@ -104,7 +132,9 @@ CI only; historical runs are untouched; no existing workflow is re-networked.
 Replies now carry closed codes that the existing content-free turn record (`flofi.copilot.turn`) already aggregates — no new table, migration or
 variable: `COPILOT_RANGE_REQUIRED`, `COPILOT_RANGE_BOUND_REQUIRED`, `COPILOT_RANGE_SIDE_REQUIRED`, `COPILOT_RANGE_PERCENT_REQUIRED`,
 `COPILOT_RANGE_UNSUPPORTED`, `COPILOT_RANGE_ORDER_INVALID`, `COPILOT_RANGE_TICKS_INVALID`, `COPILOT_RANGE_CONVERSION_INVALID`,
-`COPILOT_RANGE_OUT_OF_RANGE`, `COPILOT_DEPOSIT_REQUIRED`, `COPILOT_POOL_PRICE_REQUIRED`, `COPILOT_POOL_PRICE_UNAVAILABLE`, `COPILOT_POOL_NOT_FOUND`,
+`COPILOT_RANGE_OUT_OF_RANGE`, `COPILOT_RANGE_PERCENT_ONE_SIDED`, `COPILOT_RANGE_PERCENT_NOT_FOUND`, `COPILOT_RANGE_NOT_FOUND`, `COPILOT_DEPOSIT_REQUIRED`,
+`COPILOT_POOL_PRICE_REQUIRED`, `COPILOT_POOL_PRICE_UNAVAILABLE`, `COPILOT_POOL_READ_TIMEOUT`, `COPILOT_POOL_READ_INVALID`, `COPILOT_POOL_IDENTITY_MISSING`,
+`COPILOT_POOL_IDENTITY_CHANGED`, `COPILOT_POOL_NOT_FOUND`,
 `COPILOT_CONTEXT_CHANGED`, `COPILOT_CLARIFICATION_LIMIT`, and the interpreter's failure code (`COPILOT_INTENT_INVALID`, …) on failed turns. Records
 hold codes and counters only — never text, values, assets, networks, amounts, addresses or transcripts.
 
@@ -123,7 +153,12 @@ hold codes and counters only — never text, values, assets, networks, amounts, 
   model will always classify every phrasing. The local reader removes the model from the common short answers, which narrows that risk.
 - Channels (Telegram/WhatsApp) cannot read pool prices: a percentage there is explained as unverifiable (prices or ticks still work).
 - Deploy order: the web chat binds a Uniswap read to the pool the service reports (new `pool` field of the price read). Deploy the API (Railway)
-  with or before the web (Vercel); until both run this build, a catalog percentage range is answered "could not verify" (fail closed).
+  with or before the web (Vercel); until both run this build, a catalog percentage range is answered "could not verify" (fail closed, recorded as
+  `COPILOT_POOL_IDENTITY_MISSING` so deploy skew is visible in the turn metrics).
+- Chat and MCP differ on catalog price ranges: the chat converts a price range to outward-aligned ticks; MCP `compose_strategy` takes ticks or the
+  full range there and refuses `price` (unchanged, fail closed). Both reach the same IR for the same ticks.
+- The browser profile covers the Orca dialogue; the Uniswap catalog dialogue is covered by unit, Channel Core and MOCKED-service integration tests,
+  not by a browser test.
 - MCP `compose_strategy` keeps its `price`/`tick`/`full` range contract (no percentage): the chat resolves a percentage to ticks, which MCP expresses
   with the same IR and hash (tested).
 - A pool price moves between the proposal and Review; the proposal states the read block/slot and the ticks are fixed, while Simulate/Review read the

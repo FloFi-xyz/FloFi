@@ -9,7 +9,7 @@ import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalA
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
 import type { PendingAgentCapability } from './agent-rollout';
 import type { SavedRecipient } from './saved-recipients';
-import type { PoolPriceRead, PoolRef } from './pool-range';
+import { POOL_READS_PER_TURN, type PoolPriceRead, type PoolRef } from './pool-range';
 
 /**
  * Test-only: drives the real conversation engine the way the Copilot panel does — "explain" and the exact grammar
@@ -82,7 +82,8 @@ export class CopilotSession {
     } catch { /* not an exact command: the engine decides */ }
     const before = this.state;
     let start = startTurn(before, text, this.env());
-    if (start.kind === 'LOCAL' && this.read(start.reply)) start = startTurn(before, text, this.env());
+    // As the web chat: each pool the answer needs is read in turn (up to POOL_READS_PER_TURN for one message), then the same message is answered again.
+    for (let reads = 0; start.kind === 'LOCAL' && reads < POOL_READS_PER_TURN && this.read(start.reply); reads++) start = startTurn(before, text, this.env());
     let reply: CopilotReply, request: CopilotRequestV2 | null = null;
     if (start.kind === 'LOCAL') { reply = start.reply; this.state = start.next; }
     else {
@@ -93,7 +94,7 @@ export class CopilotSession {
         : { ok: true, intent: model };
       race?.(this);
       let finished = finishTurn(start.turn, result, this.env());
-      if (this.read(finished.reply)) finished = finishTurn(start.turn, result, this.env());
+      for (let reads = 0; reads < POOL_READS_PER_TURN && this.read(finished.reply); reads++) finished = finishTurn(start.turn, result, this.env());
       reply = finished.reply; this.state = finished.next;
     }
     if (reply.command) this.propose(reply.command);

@@ -18,8 +18,8 @@ import { automationCreated, closeSegment, emptyConversation, finishTurn, observe
 import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
 import { solanaMainnetLiquidityPrice } from '../app/solana-mainnet-liquidity-action';
 import { catalogLiquidityPrice } from '../app/uniswap-liquidity-action';
-import type { PoolPriceRead } from '../domain/pool-range';
-import { poolReader } from '../state/copilot-pool-reads';
+import { POOL_READS_PER_TURN, type PoolPriceRead } from '../domain/pool-range';
+import { POOL_READ_TIMEOUT_MS, poolReader } from '../state/copilot-pool-reads';
 import { activeNetworkScope } from '../domain/network-scope';
 import { reconciledRemaining } from '../domain/copilot-reconciled-context';
 import { useSolanaComposition } from '../state/solana-composition-store';
@@ -307,16 +307,24 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       if (ended()) return dropped;
       const before = conversation.current;
       // Engineering certification only: a local percentage answer about the Devnet pool reads the Devnet price first (mainnet pools are read on request).
-      const devnetPercent = activeNetworkScope() === 'ENGINEERING' && Boolean(before.draft) && /SOLANA_DEVNET/.test(JSON.stringify(before.draft?.intent ?? null))
-        && /%|percent|por\s?cento/i.test(text);
-      if (devnetPercent) await loadVerified({ rangeUnit: 'PERCENT' });
+      // The Devnet pool is named or implied (Orca with no network, a devUSDC deposit); the answer is a written percentage or the number FloFi asked for.
+      const draftText = JSON.stringify(before.draft?.intent ?? null);
+      const devnetPool = /SOLANA_DEVNET|devUSDC/i.test(draftText) || (/"protocol":"ORCA"/.test(draftText) && /"network":null/.test(draftText));
+      const percentAnswer = /%|percent|por\s?cento/i.test(text) || (/^COPILOT_RANGE_PERCENT_/.test(before.draft?.code ?? '') && /^\s*\d+(?:[.,]\d+)?\s*$/.test(text));
+      const devnetPercent = activeNetworkScope() === 'ENGINEERING' && Boolean(before.draft) && devnetPool && percentAnswer;
+      if (devnetPercent) {
+        await Promise.race([loadVerified({ rangeUnit: 'PERCENT' }), new Promise(resolve => setTimeout(resolve, POOL_READ_TIMEOUT_MS))]);
+        if (ended()) return dropped;
+      }
       let start = startTurn(before, text, { ...(devnetPercent ? contextNow() : sent), ...recipientsNow() });
       // BUILD-P1: FloFi needs a pool's current price for this answer: read it (read-only, this turn only) and answer the same message again with it.
-      if (start.kind === 'LOCAL' && start.reply.pool) {
-        const read = await readPool(start.reply.pool);
+      // A request touching several pools (a composition) asks for each in turn, up to POOL_READS_PER_TURN reads for this message.
+      const reads: PoolPriceRead[] = [];
+      while (start.kind === 'LOCAL' && start.reply.pool && reads.length < POOL_READS_PER_TURN) {
+        reads.push(await readPool(start.reply.pool));
         if (ended()) return dropped;
         // Answered against the context as it is now: a wallet, workflow or proposal change during the read ends the request (never a stale answer).
-        start = startTurn(before, text, withPoolRead({ ...contextNow(), ...recipientsNow() }, read));
+        start = startTurn(before, text, withPoolReads({ ...contextNow(), ...recipientsNow() }, reads));
       }
       // BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (counters and codes only), best effort and never awaited by the chat.
       const measure = (reply: CopilotReply, next: CopilotConversation, interpreted: string | null) =>
@@ -334,10 +342,11 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
       if (result.ok) await Promise.all([ensureCopilotCatalogs(start.turn.state.segment.join('\n'), result.intent), loadVerified(result.intent)]);
       let finished = finishTurn(start.turn, result, environmentNow());
-      if (finished.reply.pool) {
-        const read = await readPool(finished.reply.pool);
+      const later: PoolPriceRead[] = [];
+      while (finished.reply.pool && later.length < POOL_READS_PER_TURN) {
+        later.push(await readPool(finished.reply.pool));
         if (ended()) return dropped;
-        finished = finishTurn(start.turn, result, withPoolRead(environmentNow(), read));
+        finished = finishTurn(start.turn, result, withPoolReads(environmentNow(), later));
       }
       if (ended()) return dropped;
       conversation.current = finished.next;
@@ -360,8 +369,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
 
 /** BUILD-P1: the web chat's pool reads, through the existing read-only server actions (see `state/copilot-pool-reads.ts`). */
 const readPool = poolReader({ orca: solanaMainnetLiquidityPrice, catalog: catalogLiquidityPrice });
-const withPoolRead = (env: CopilotEnvironment, read: PoolPriceRead): CopilotEnvironment =>
-  ({ ...env, verified: { orcaPrice: null, solanaOwner: null, orcaPositions: null, remaining: [], ...env.verified, pools: [...env.verified?.pools ?? [], read] } });
+const withPoolReads = (env: CopilotEnvironment, reads: readonly PoolPriceRead[]): CopilotEnvironment =>
+  ({ ...env, verified: { orcaPrice: null, solanaOwner: null, orcaPositions: null, remaining: [], ...env.verified, pools: [...env.verified?.pools ?? [], ...reads] } });
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: the example names a mainnet (the public product never suggests a test network). */
 export const COPILOT_PLACEHOLDER = 'Put 1 USDC into Aave on Base';
 export function copilotIntro(mode: CopilotMode | 'loading', direct = false): string | null {

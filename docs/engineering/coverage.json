@@ -718,6 +718,10 @@
       "path": "apps/reference-dapp/src/server/copilot-pool-integration.test.ts",
       "stage": "unit"
     },
+    "app.server.copilot-prompt-scope": {
+      "path": "apps/reference-dapp/src/server/copilot-prompt-scope.test.ts",
+      "stage": "unit"
+    },
     "app.state.copilot-pool-reads": {
       "path": "apps/reference-dapp/src/state/copilot-pool-reads.test.ts",
       "stage": "unit"
@@ -1623,7 +1627,9 @@
     "app.backend.plain-node-closure",
     "app.domain.conversation-persistence",
     "app.server.conversation-scope",
-    "app.flight.board-access-http"
+    "app.flight.board-access-http",
+    "app.domain.copilot-pool-dialogue",
+    "app.domain.copilot-pool-dialogue.repro"
   ],
   "modules": [
     {
@@ -6707,6 +6713,7 @@
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.server.copilot-orchestration",
+        "app.server.copilot-prompt-scope",
         "app.state.flofi-conversation",
         "app.server.conversation-scope"
       ],
@@ -6791,6 +6798,7 @@
         "apps/reference-dapp/src/server/uniswap-liquidity-service.ts"
       ],
       "suites": [
+        "app.server.copilot-pool-integration",
         "reference-compiler.liquidity",
         "reference-compiler.liquidity.fork",
         "reference-compiler.uniswap-public-liquidity",

@@ -50,3 +50,31 @@ describe('BUILD-FLOFI-UX-FIX-003 channel conversation (public, mainnet-only)', (
     expect(c.remaining()).toBe(0);
   });
 });
+
+describe('BUILD-P1 pool range dialogue on a channel (public, mainnet-only, across JSON rehydration)', () => {
+  const ORCA = { protocol: 'ORCA', network: 'SOLANA', deposits: [{ asset: 'SOL', maxAmount: '0.1' }, { asset: 'USDC', maxAmount: '10' }] };
+  it('"1usdc" → Lower → "180" keeps every value and proposes the Orca position; no percentage is offered where no pool can be read', async () => {
+    const c = chat([intent.action(act.liquidity(ORCA))]);
+    const asked = await c.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC');
+    expect(asked.replies.at(-1)!.text).toContain('USDC per SOL');
+    expect(asked.replies.at(-1)!.text).not.toMatch(/percentage|devUSDC|Devnet/i);
+    const side = await c.say('1usdc');
+    expect(side.replies.at(-1)!.text).toBe('Is 1 USDC per SOL the lower or the upper price of the range?');
+    expect(labels(side)).toEqual(['Lower', 'Upper']);
+    const bound = await c.say('Lower');
+    expect(bound.replies.at(-1)!.text).toMatch(/upper price in USDC per SOL/);
+    const proposed = await c.say('180');
+    expect(proposed).toMatchObject({ action: 'PROPOSE', command: { type: 'ADD_SOLANA_LIQUIDITY' } });
+    expect(JSON.stringify(proposed.command)).toContain('"lower":"1"');
+    expect(JSON.stringify(proposed.command)).toContain('"upper":"180"');
+    expect(c.remaining()).toBe(0);
+  });
+  it('a percentage on a channel is explained without a retry that cannot work, and the request stays open for prices', async () => {
+    const c = chat([intent.action(act.liquidity({ ...ORCA, rangeUnit: 'PERCENT', upper: '10' }))]);
+    const explained = await c.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, ±10%');
+    expect(explained.replies.at(-1)!.text).toContain('Give the range as prices or ticks.');
+    expect(explained.replies.at(-1)!.text).not.toMatch(/Try again/);
+    expect(labels(explained)).toEqual([]);
+    expect(await c.say('150 to 180')).toMatchObject({ action: 'PROPOSE', command: { type: 'ADD_SOLANA_LIQUIDITY' } });
+  });
+});

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { activeNetworkScope, introducedTestNetworks, publicText, testNetworkMessage } from './network-scope';
+import { activeNetworkScope, introducedTestNetworks, mentionsTestNetwork, publicText, testNetworkMessage } from './network-scope';
 import { automationFaq, groundAutomationDraft, matchAutomationFaq, rescheduleDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -969,28 +969,37 @@ function filledSlots(state: CopilotConversation, after: CopilotIntentV2): { read
  * read here, deterministically, and fills only the range of the open liquidity request — never a model call, never another field. A value whose side
  * is not known is held and FloFi asks which side it is; a side whose value is not known is asked for. Anything else returns null (the interpreter).
  */
-const RANGE_QUESTION = /^COPILOT_(?:RANGE_|POOL_PRICE_)/;
+const RANGE_QUESTION = /^COPILOT_(?:RANGE_|POOL_PRICE_|POOL_READ_|POOL_IDENTITY_)/;
+/** FloFi's own questions for the percentage itself: which one, one it could not find in the message, one outside 0.01–90%. */
+const PERCENT_QUESTION = /^COPILOT_RANGE_(?:PERCENT_REQUIRED|PERCENT_NOT_FOUND|OUT_OF_RANGE)$/;
 function rangeTurn(state: CopilotConversation, draft: Draft, picked: string, env: CopilotEnvironment, m: CopilotCopy): TurnStart | null {
   const intent = draft.intent;
   if (intent.kind !== 'ACTION' || intent.action.type !== 'LIQUIDITY') return null;
   // Only under FloFi's own range questions (or while it holds a range answer): a fee tier, a pool or a model's own question is never read here.
   if (!draft.rangeHold && !RANGE_QUESTION.test(draft.code ?? '')) return null;
-  const action = intent.action, units = liquidityUnits(action), answer = readRangeAnswer(picked, units);
+  // The pool's unit, also when the interpreter left the network out but the user named it ("on Solana"): FloFi never asks with empty units.
+  const action = intent.action, named = action.network === null ? copilotNetworksMentioned(segmentText(state)) : [];
+  const units = liquidityUnits(action) ?? (named.length === 1 ? liquidityUnits({ ...action, network: named[0]! }) : null);
+  const answer = readRangeAnswer(picked, units);
   if (!answer) return null;
-  const step = applyRangeAnswer(action, draft.rangeHold ?? null, answer);
+  const percentAsked = PERCENT_QUESTION.test(draft.code ?? '');
+  const step = applyRangeAnswer(action, draft.rangeHold ?? null, answer, percentAsked);
   if (!step) return null;
   const patched: CopilotIntentV2 = { ...intent, action: step.action }, next = answeredDraft(state, patched, picked);
-  // A bare number that answered FloFi's own percentage question is that percentage (and only then: never a number answering anything else).
-  const percentAnswer = answer.kind === 'VALUE' && action.rangeUnit === 'PERCENT' && action.upper === null && step.action.rangeUnit === 'PERCENT' ? step.action.upper : null;
+  // A bare number that answered FloFi's own percentage question is that percentage (and only then: never a number answering anything else, such
+  // as a range or price question that a percentage kind happened to be open under).
+  const percentAnswer = answer.kind === 'VALUE' && percentAsked && action.rangeUnit === 'PERCENT' && step.action.rangeUnit === 'PERCENT' ? step.action.upper : null;
   const extras: Extras = { ...draft.extras ?? {}, ...percentAnswer ? { answeredPercent: percentAnswer } : {} };
   const local = (result: Result): TurnStart => ({ kind: 'LOCAL', ...withLearning(tallied(result, env), env, ['CLARIFICATION_ANSWERED']) });
   const keep = { intent: patched, expected: ['range'] as DraftField[], validated: validatedDraftFields(patched, segmentText(next)), options: [], amountFill: false,
     snapshot: snapshotOf(env), ...draft.extras ? { extras: draft.extras } : {} };
+  // Without the pool's unit FloFi cannot word its own question: the interpreter answers instead.
+  if (!units && step.ask !== null) return null;
   const quote = units?.quote ?? '', base = units?.base ?? '';
   const unit = step.action.rangeUnit === 'TICK' ? 'TICK' as const : 'PRICE' as const;
   if (step.ask === 'SIDE' && step.hold?.value) {
     const both = step.action.lower !== null && step.action.upper !== null && (step.action.rangeUnit === 'PRICE' || step.action.rangeUnit === 'TICK');
-    const valueUnit = step.hold.value.startsWith('-') ? 'TICK' : unit;
+    const valueUnit = step.hold.unit ?? (step.hold.value.startsWith('-') ? 'TICK' : unit);
     const text = both ? m.rangeSideReplace(step.hold.value, valueUnit, quote, base) : m.rangeSide(step.hold.value, valueUnit, quote, base);
     return local(question(next, m, text, m.rangeSideOptions, { ...keep, rangeHold: step.hold }, [], { code: 'COPILOT_RANGE_SIDE_REQUIRED' }));
   }
@@ -1178,9 +1187,13 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     const unit = !option && draft.amountFill ? amountUnit(text) : null, sent = sentAssetOf(draft.intent);
     if (unit && sent && unit !== sent.toUpperCase()) return { kind: 'LOCAL', ...question(withUser(state, text), m, m.amountUnitMismatch(unit, displayAsset(sent)), [], draft) };
     // BUILD-P1: "2 SOL" never answers "How much USDC at most?": an answer in another token than the one asked for is asked again.
-    const written = !option && draft.depositFill ? amountUnit(text) : null;
-    if (written && written !== draft.depositFill!.toUpperCase() && !(draft.depositFill === 'devUSDC' && (written === 'DEVUSDC' || written === 'USDC')))
-      return { kind: 'LOCAL', ...question(withUser(state, text), m, m.depositUnitMismatch(written, draft.depositFill!), [], draft) };
+    // The same token by another name is the same answer (USDC for devUSDC, ETH for WETH); a test token is never repeated in the public product.
+    const written = !option && draft.depositFill ? amountUnit(text) : null, fill = draft.depositFill?.toUpperCase() ?? '';
+    const sameToken = written === fill || (fill === 'DEVUSDC' && written === 'USDC') || (fill === 'WETH' && written === 'ETH');
+    if (written && !sameToken) {
+      const shown = activeNetworkScope() === 'PUBLIC_MAINNET' && mentionsTestNetwork(written) ? null : written;
+      return { kind: 'LOCAL', ...question(withUser(state, text), m, m.depositUnitMismatch(shown, draft.depositFill!), [], draft) };
+    }
     const amount = !option && (draft.amountFill || draft.depositFill) ? bareAmount(text) : null;
     if (option || amount) {
       if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
@@ -1192,8 +1205,11 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       const local = (result: Result): TurnStart => ({ kind: 'LOCAL', ...withLearning(tallied(result, env), env, signals) });
       if (option?.fill.kind === 'TARGET') return local(resolveIntent(draft.intent, next, env, option.fill.target, extras));
       if (option?.fill.kind === 'EXTRAS') return local(resolveIntent(draft.intent, next, env, null, { ...extras, ...option.fill.extras }));
-      if (!option && draft.depositFill) return local(resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
-        { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
+      // A deposit FloFi asked for fills a slot of the request: progress, like any other answer to its own question.
+      if (!option && draft.depositFill) {
+        const patched = patchDeposit(draft.intent, draft.depositFill, amount!);
+        return local(resolveIntent(patched, answeredDraft(state, patched, picked), env, null, { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
+      }
       const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch, draft.expected) : patchIntent(draft.intent, { amount }, draft.expected);
       return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
