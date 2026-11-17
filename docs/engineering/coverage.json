@@ -1518,6 +1518,10 @@
       "path": "apps/reference-dapp/src/flight/board-access-http.test.ts",
       "stage": "unit"
     },
+    "app.flight.account-continue": {
+      "path": "apps/reference-dapp/src/flight/account-continue.test.ts",
+      "stage": "unit"
+    },
     "app.e2e.chat-review-overflow": {
       "path": "apps/reference-dapp/e2e/chat-review-overflow.spec.ts",
       "stage": "browser"
@@ -4731,12 +4735,14 @@
         "apps/reference-dapp/src/components/flight/board-frame.tsx",
         "apps/reference-dapp/src/components/flight/flight-transition.module.css",
         "apps/reference-dapp/src/components/flight/flight-transition.tsx",
-        "apps/reference-dapp/src/flight/board-arrival.ts"
+        "apps/reference-dapp/src/flight/board-arrival.ts",
+        "apps/reference-dapp/src/flight/account-continue.ts"
       ],
       "suites": [
         "app.flight.campaign",
         "app.flight.launch",
-        "app.e2e.flight"
+        "app.e2e.flight",
+        "app.flight.account-continue"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps. The Portuguese /board copy is a translation of English-only boards, pending team review."

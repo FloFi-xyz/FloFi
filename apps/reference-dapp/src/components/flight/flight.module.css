@@ -242,6 +242,8 @@
   .heroArt{position:relative;right:auto;bottom:auto;align-self:flex-end;width:140px;height:150px}
   .heroArt img.mascot{width:140px}
   .pill .btn{white-space:normal;text-align:center}
+  /* Authentication UX & Login Regression Fix (item 6): the recovery hero's one action wraps instead of running off a phone (PT is longer). */
+  [data-boarded-elsewhere] .ctaRow .btn{white-space:normal;text-align:center;max-width:100%}
   .board .flaps{flex-wrap:wrap;row-gap:4px}
   .pill{flex-wrap:wrap;border-radius:28px;padding:14px 16px}
   .pill .btn{width:100%}
