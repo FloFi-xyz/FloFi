@@ -9,6 +9,7 @@ import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalA
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
 import type { PendingAgentCapability } from './agent-rollout';
 import type { SavedRecipient } from './saved-recipients';
+import type { PoolPriceRead, PoolRef } from './pool-range';
 
 /**
  * Test-only: drives the real conversation engine the way the Copilot panel does — "explain" and the exact grammar
@@ -35,6 +36,15 @@ export class CopilotSession {
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the signed-in account's Saved Recipients and whether the surface may save one (absent: none, as before). */
   recipients: readonly SavedRecipient[] | undefined = undefined;
   recipientWrites = false;
+  /**
+   * BUILD-P1: as the web chat — when FloFi asks for a pool's price, this scripted read-only reader answers and the same message is answered again with
+   * the read (absent: a surface that cannot read pools). `poolRequests` records what FloFi asked for; `pools` the reads handed to it.
+   */
+  poolReader: ((ref: PoolRef) => PoolPriceRead) | undefined = undefined;
+  pools: PoolPriceRead[] = [];
+  readonly poolRequests: PoolRef[] = [];
+  /** The time pool reads are judged fresh against (absent: now). */
+  now: number | undefined = undefined;
   readonly turns: TurnRecord[] = [];
   constructor(setup: readonly string[] | Workflow = [], wallet: string | null = TEST_WALLET) {
     this.wallet = wallet;
@@ -45,7 +55,15 @@ export class CopilotSession {
   env(): CopilotEnvironment {
     return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts(),
       ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {}, ...this.agentRollout ? { agentRollout: this.agentRollout } : {}, ...this.interfaceLanguage ? { interfaceLanguage: this.interfaceLanguage } : {},
-      ...this.recipients ? { recipients: this.recipients } : {}, ...this.recipientWrites ? { recipientWrites: true } : {} };
+      ...this.recipients ? { recipients: this.recipients } : {}, ...this.recipientWrites ? { recipientWrites: true } : {},
+      ...this.poolReader ? { poolReads: true } : {}, ...this.now !== undefined ? { now: this.now } : {},
+      ...this.pools.length ? { verified: { orcaPrice: null, solanaOwner: null, orcaPositions: null, remaining: [], ...this.verified, pools: [...this.pools] } } : {} };
+  }
+  /** One read of the pool FloFi asked for, as the web chat makes it; null when this session has no reader. */
+  private read(reply: CopilotReply): boolean {
+    if (!reply.pool || !this.poolReader) return false;
+    this.poolRequests.push(reply.pool); this.pools.push(this.poolReader(reply.pool));
+    return true;
   }
   propose(command: Command) {
     const before = { workflow: this.workflow, error: null };
@@ -62,7 +80,9 @@ export class CopilotSession {
       this.turns.push({ text, reply: null, local: 'EXACT', request: null, workflowBefore, workflowAfter: this.workflow });
       return null;
     } catch { /* not an exact command: the engine decides */ }
-    const start = startTurn(this.state, text, this.env());
+    const before = this.state;
+    let start = startTurn(before, text, this.env());
+    if (start.kind === 'LOCAL' && this.read(start.reply)) start = startTurn(before, text, this.env());
     let reply: CopilotReply, request: CopilotRequestV2 | null = null;
     if (start.kind === 'LOCAL') { reply = start.reply; this.state = start.next; }
     else {
@@ -72,7 +92,8 @@ export class CopilotSession {
         : 'failure' in model ? { ok: false, code: model.failure as string, ...(model.retryAfterSeconds ? { retryAfterSeconds: model.retryAfterSeconds as number } : {}) }
         : { ok: true, intent: model };
       race?.(this);
-      const finished = finishTurn(start.turn, result, this.env());
+      let finished = finishTurn(start.turn, result, this.env());
+      if (this.read(finished.reply)) finished = finishTurn(start.turn, result, this.env());
       reply = finished.reply; this.state = finished.next;
     }
     if (reply.command) this.propose(reply.command);

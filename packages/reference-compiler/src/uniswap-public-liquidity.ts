@@ -141,6 +141,61 @@ export function uniswapBandAroundSqrtPrice(sqrtPriceX96: bigint, bandBps: number
   const tickUpper = alignUp(ceilTickForRatio(ratio * 10_000n / (10_000n - b)), spacing);
   return checkedRange(tickLower, tickUpper, spacing);
 }
+/**
+ * BUILD-P1 pool conversational reliability: how a person reads a pool's price. `TOKEN0_PER_TOKEN1` is this module's quote convention above
+ * (USDC per WETH on Base Sepolia, where USDC is token0). `TOKEN1_PER_TOKEN0` is the other direction (USDC per WETH on Base mainnet, where WETH is
+ * token0): there a higher tick is a HIGHER price. The functions below are exact and integer-only, like the ones above, and always align outward.
+ */
+export type UniswapPriceOrientation = 'TOKEN0_PER_TOKEN1' | 'TOKEN1_PER_TOKEN0';
+function orientationValue(orientation: UniswapPriceOrientation): UniswapPriceOrientation {
+  if (orientation !== 'TOKEN0_PER_TOKEN1' && orientation !== 'TOKEN1_PER_TOKEN0') fail('UNISWAP_PRICE_ORIENTATION_INVALID');
+  return orientation;
+}
+/** Human price in `orientation` at a Q96 square-root price (truncated to `significant` digits). */
+export function uniswapPriceAtSqrt(sqrtPriceX96: bigint, decimals0: number, decimals1: number, orientation: UniswapPriceOrientation, significant = 8): string {
+  if (orientationValue(orientation) === 'TOKEN0_PER_TOKEN1') return uniswapQuotePriceAtSqrt(sqrtPriceX96, decimals0, decimals1, significant);
+  if (sqrtPriceX96 <= 0n) fail('UNISWAP_PRICE_INVALID');
+  // token1 per token0 (human) = ratio · 10^(decimals0 − decimals1), ratio = sqrtPriceX96² / 2^192 (token1 raw per token0 raw).
+  const shift = decimalsValue(decimals0) - decimalsValue(decimals1), ratio = sqrtPriceX96 * sqrtPriceX96;
+  return shift >= 0 ? formatRatio(ratio * 10n ** BigInt(shift), Q192, significant) : formatRatio(ratio, Q192 * 10n ** BigInt(-shift), significant);
+}
+export function uniswapPriceAtTick(tick: number, decimals0: number, decimals1: number, orientation: UniswapPriceOrientation, significant = 8): string {
+  return uniswapPriceAtSqrt(sqrtRatioAtTick(tickValue(tick)), decimals0, decimals1, orientation, significant);
+}
+/** Q192 ratio (token1 raw per token0 raw) of a human price token1 per token0, rounded down or up. */
+function ratioForPrice1Per0(price: { num: bigint; den: bigint }, decimals0: number, decimals1: number, up: boolean): bigint {
+  const shift = decimalsValue(decimals1) - decimalsValue(decimals0);
+  const num = price.num * Q192 * (shift >= 0 ? 10n ** BigInt(shift) : 1n), den = price.den * (shift >= 0 ? 1n : 10n ** BigInt(-shift));
+  return up ? ceilDiv(num, den) : num / den;
+}
+/**
+ * Outward alignment of a human price range in `orientation` to usable ticks: the aligned range always contains the requested one.
+ * `TOKEN0_PER_TOKEN1` is exactly `uniswapAlignQuotePriceRange`.
+ */
+export function uniswapAlignPriceRange(lowerPrice: string, upperPrice: string, decimals0: number, decimals1: number, spacing: number,
+  orientation: UniswapPriceOrientation): UniswapTickRange {
+  if (orientationValue(orientation) === 'TOKEN0_PER_TOKEN1') return uniswapAlignQuotePriceRange(lowerPrice, upperPrice, decimals0, decimals1, spacing);
+  const low = parseDecimalPrice(lowerPrice), high = parseDecimalPrice(upperPrice);
+  if (low.num * high.den >= high.num * low.den) fail('UNISWAP_RANGE_INVALID');
+  // A higher tick is a higher token1-per-token0 price: the lower price sets tickLower (down), the upper price tickUpper (up).
+  const tickLower = alignDown(floorTickForRatio(ratioForPrice1Per0(low, decimals0, decimals1, false)), spacingValue(spacing));
+  const tickUpper = alignUp(ceilTickForRatio(ratioForPrice1Per0(high, decimals0, decimals1, true)), spacing);
+  return checkedRange(tickLower, tickUpper, spacing);
+}
+/**
+ * ±`bandBps` around the current price as a person reads it in `orientation`, aligned outward: prices P·(1 − b) and P·(1 + b) in that
+ * orientation. `TOKEN0_PER_TOKEN1` is exactly `uniswapBandAroundSqrtPrice`; `TOKEN1_PER_TOKEN0` is the same band read the other way round
+ * (P ∝ ratio, so P·(1 ± b) ⇔ ratio·(1 ± b)), never the inverted band of the other orientation.
+ */
+export function uniswapBandAroundSqrtPriceIn(sqrtPriceX96: bigint, bandBps: number, spacing: number, orientation: UniswapPriceOrientation): UniswapTickRange {
+  if (orientationValue(orientation) === 'TOKEN0_PER_TOKEN1') return uniswapBandAroundSqrtPrice(sqrtPriceX96, bandBps, spacing);
+  if (!Number.isSafeInteger(bandBps) || bandBps < 1 || bandBps > 9_000) fail('UNISWAP_BAND_INVALID');
+  if (sqrtPriceX96 <= UNISWAP_MIN_SQRT_RATIO || sqrtPriceX96 >= UNISWAP_MAX_SQRT_RATIO) fail('UNISWAP_PRICE_INVALID');
+  const ratio = sqrtPriceX96 * sqrtPriceX96, b = BigInt(bandBps);
+  const tickLower = alignDown(floorTickForRatio(ratio * (10_000n - b) / 10_000n), spacingValue(spacing));
+  const tickUpper = alignUp(ceilTickForRatio(ceilDiv(ratio * (10_000n + b), 10_000n)), spacing);
+  return checkedRange(tickLower, tickUpper, spacing);
+}
 export type UniswapRangeState = 'BELOW_RANGE' | 'IN_RANGE' | 'ABOVE_RANGE';
 /** The pool's own rule (UniswapV3Pool._modifyPosition): tick < lower → token0 only; tick ≥ upper → token1 only. */
 export function uniswapRangeState(currentTick: number, tickLower: number, tickUpper: number): UniswapRangeState {

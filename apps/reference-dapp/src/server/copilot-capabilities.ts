@@ -58,9 +58,11 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
   const pools = plain('add_liquidity').map(network => {
     const pool = network.chain.startsWith('solana:') ? { name: 'Orca', ...COPILOT_POOLS.ORCA,
       ...network.environment === 'MAINNET' ? { quote: 'USDC' } : {} } : { name: 'Uniswap v3', ...COPILOT_POOLS.UNISWAP_V3 };
-    return `${pool.name} ${join(tokensOf(network, 'add_liquidity'), '/')} on ${network.name} (price range in ${pool.quote} per ${pool.base}, or ticks)`;
+    // BUILD-P1: the Solana mainnet pool also takes a percentage around its verified price (FloFi reads the pool and computes the bounds).
+    const percent = network.environment === 'MAINNET' ? ', a percentage around the current pool price,' : '';
+    return `${pool.name} ${join(tokensOf(network, 'add_liquidity'), '/')} on ${network.name} (price range in ${pool.quote} per ${pool.base}${percent} or ticks)`;
   });
-  const catalogPools = `Uniswap v3 with any two catalog tokens on ${names(catalogLine('add_liquidity'))} (fee tier ${join(COPILOT_FEE_TIERS.map(String), 'or')} percent; full range or ticks)`;
+  const catalogPools = `Uniswap v3 with any two catalog tokens on ${names(catalogLine('add_liquidity'))} (fee tier ${join(COPILOT_FEE_TIERS.map(String), 'or')} percent; full range, a price range, a percentage around the current pool price, or ticks)`;
   const composition = AUTHORING_CAPABILITIES.filter(capability => capability.action === 'lending_composition' && inScope(scope)(capability.network)).map(capability =>
     `Supply ${capability.asset} on Aave, then Borrow ${capability.asset}, then Swap the borrowed ${capability.asset} to ${capability.outputAsset}, on ${capability.network.name}`);
   return [

@@ -10,11 +10,13 @@ import { ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from './robinhood-liquidity-auth
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from './solana-liquidity-authoring';
 import type { SolanaSwapInput } from './jupiter-authoring';
 import { priceBoundsAround } from './pool-price-bounds';
+import { catalogPercentRange, catalogPoolView, catalogPriceRange, catalogTickRange, orcaPercentRange, orcaPriceRange, orcaTickRange, ORCA_MAINNET_POOL, poolMissing,
+  poolReadFor, percentValue, type CatalogPoolView, type PoolPriceRead, type PoolRef, type ResolvedRange } from './pool-range';
 import { COPILOT_FEE_TIERS, COPILOT_LIMITS, CopilotIntentError, parseCopilotIntent, safeCopilotProse, type CopilotAction, type CopilotAsset, type CopilotBridgeAction,
   type CopilotLegacyAsset, type CopilotLendingAction, type CopilotLiquidityAction, type CopilotMissingField, type CopilotNetwork, type CopilotSwapAction,
   type CopilotTransferAction } from './copilot-intent';
 import { copilotCopy, type CopilotCopy, type CopilotLanguage, type NetworkSubject, type Subject } from './copilot-messages';
-import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, solanaTransferAsset, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, solanaTransferAsset, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { solanaTransferProfileFor } from './solana-transfer-authoring';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
 import { lendingProfileFor, lendingReservesFor } from './supply-authoring';
@@ -48,7 +50,9 @@ export type CopilotAuthoringMissing = CopilotMissingField | 'inputAsset' | 'outp
 export type CopilotOutcome =
   | { readonly kind: 'PROPOSAL'; readonly command: Command; readonly sentence: string; readonly notes: readonly string[] }
   | { readonly kind: 'CLARIFICATION'; readonly missing: readonly CopilotAuthoringMissing[]; readonly question: string; readonly options: readonly string[];
-      /** PR B: the pool token whose maximum the question asks for, so a bare amount can answer it. */ readonly deposit?: 'SOL' | 'devUSDC' }
+      /** PR B: the pool token whose maximum the question asks for, so a bare amount can answer it. */ readonly deposit?: string;
+      /** BUILD-P1: a closed code for what is missing (analytics only), and the pool whose price FloFi must read before it can continue. */
+      readonly code?: string; readonly pool?: PoolRef }
   | { readonly kind: 'UNSUPPORTED'; readonly message: string; readonly missing?: readonly CopilotAuthoringMissing[]; readonly code?: string }
   | { readonly kind: 'REJECTED'; readonly code: string; readonly message: string; readonly missing?: readonly CopilotAuthoringMissing[] };
 export type CopilotConversion = { readonly userText: string; readonly workflow: Workflow; readonly context: ReviewContext; readonly wallet: string | null };
@@ -88,6 +92,12 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
   /** V2: verified Solana Devnet context FloFi read itself — the Orca pool price for percentage ranges, and the swap a position may be funded by. */
   readonly solana?: { readonly price: string | null; readonly swap: SwapSource | null };
   /**
+   * BUILD-P1 pool conversational reliability: pool prices the surface read for this turn (`pool-range.ts`), whether it can read one on request
+   * (the web chat: a question carrying `pool` makes it read that pool and replay the turn), and the time the reads are judged fresh against.
+   * A mainnet range is never computed from any other price (never Devnet's, never the model's).
+   */
+  readonly pools?: readonly PoolPriceRead[]; readonly poolReads?: boolean; readonly now?: number;
+  /**
    * BUILD-CHAT-LEARNING-001: learned vocabulary (`copilot-lexicon.ts`). It only widens which networks and tokens the user *named*: the user's
    * own meanings (this conversation's, or saved for their verified identity) name networks and tokens; FloFi's reviewed glossary names test
    * networks only. It never grounds an amount, a slippage, a range, a fee or an address.
@@ -109,6 +119,7 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
    */
   readonly saved?: readonly string[] };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
+const ORCA_WHIRLPOOLS_MAINNET_TICK_SPACING = ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY.pool.tickSpacing;
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
 // BUILD-BASE-001: the network vocabulary (identifiers, names, environment, family, how a message names a network) is the network registry's.
@@ -256,8 +267,8 @@ const nameNamed = (text: string, asset: CanonicalAsset) => {
 };
 
 class Stop { constructor(readonly outcome: CopilotOutcome) {} }
-const ask = (missing: CopilotAuthoringMissing[], question: string, options: readonly string[] = [], deposit?: 'SOL' | 'devUSDC'): never => {
-  throw new Stop({ kind: 'CLARIFICATION', missing, question, options, ...deposit ? { deposit } : {} });
+const ask = (missing: CopilotAuthoringMissing[], question: string, options: readonly string[] = [], deposit?: string, extra: { readonly code?: string; readonly pool?: PoolRef } = {}): never => {
+  throw new Stop({ kind: 'CLARIFICATION', missing, question, options, ...deposit ? { deposit } : {}, ...extra.code ? { code: extra.code } : {}, ...extra.pool ? { pool: extra.pool } : {} });
 };
 const refuse = (message: string, code?: string, missing?: CopilotAuthoringMissing[]): never => { throw new Stop({ kind: 'UNSUPPORTED', message, ...code ? { code } : {}, ...missing ? { missing } : {} }); };
 const reject = (code: string, message: string, missing?: CopilotAuthoringMissing[]): never => { throw new Stop({ kind: 'REJECTED', code, message, ...missing ? { missing } : {} }); };
@@ -822,10 +833,11 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
     return planCatalogLiquidity(a, g, network, notes);
   }
   const protocol = network === 'SOLANA' || network === 'SOLANA_DEVNET' ? 'ORCA' : 'UNISWAP_V3';
-  if (a.rangeUnit === 'FULL' || a.feeTier) ask(['range'], m.rangeNotFound(COPILOT_POOLS[protocol].quote, COPILOT_POOLS[protocol].base));
-  if (a.protocol !== null && a.protocol !== protocol) ask(['protocol'], m.whichPool, m.poolOptions);
+  // BUILD-SOLANA-MAINNET-001: the mainnet pool quotes in USDC; BUILD-P1: every question names that pool's own unit (never devUSDC on mainnet).
   const pool = network === 'SOLANA' ? { ...COPILOT_POOLS.ORCA, quote: 'USDC', second: 'USDC',
     symbol: (asset: string) => asset.toUpperCase() === 'SOL' ? 'SOL' : asset.toUpperCase() === 'USDC' ? 'USDC' : null } : COPILOT_POOLS[protocol];
+  if (a.feeTier) ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+  if (a.protocol !== null && a.protocol !== protocol) ask(['protocol'], m.whichPool, m.poolOptions);
   const deposits = new Map<string, string>();
   for (const deposit of a.deposits) {
     const symbol = pool.symbol(deposit.asset);
@@ -835,13 +847,17 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
     needAsset(deposit.asset, g, 'liquidity', g.carried.has(`asset:${symbol}`) ? `asset:${symbol}` : `deposit:${symbol}`);
     deposits.set(symbol!, amountOf(deposit.maxAmount, g, 'liquidity', `deposit:${symbol}`));
   }
-  const missing: CopilotMissingField[] = [...(deposits.size < 2 ? ['amount' as const] : []),
-    ...(a.rangeUnit === null || (a.rangeUnit !== 'PERCENT' && a.lower === null) || a.upper === null ? ['range' as const] : [])];
-  if (missing.length) ask(missing, m.liquidityNeeds(pool.first, pool.second, pool.quote, pool.base));
+  // A percentage is offered only where FloFi reads a verified price for the pool (Orca); the Uniswap test pools take prices or ticks.
+  const units = { quote: pool.quote, base: pool.base }, openRange = rangeQuestion(a, units, m, protocol === 'ORCA');
+  // BUILD-P1: FloFi asks only for what is still missing, one slot at a time once the deposits are known (a bare answer then fills exactly that slot).
+  if (deposits.size === 0 && openRange) ask(['amount', 'range'], m.liquidityNeeds(pool.first, pool.second, pool.quote, pool.base));
+  if (deposits.size === 1) { const other = [pool.first, pool.second].find(token => !deposits.has(token))!; ask(['amount'], m.depositNeeded(other), [], other, { code: 'COPILOT_DEPOSIT_REQUIRED' }); }
+  if (deposits.size === 0) ask(['amount'], m.depositsNeeded(pool.first, pool.second), [], undefined, { code: 'COPILOT_DEPOSIT_REQUIRED' });
+  // Orca positions in FloFi always have a finite range (the exact grammar takes prices or ticks): the full range is never substituted silently.
+  if (a.rangeUnit === 'FULL') ask(['range'], m.fullRangeUnavailable(pool.quote, pool.base), [], undefined, { code: 'COPILOT_RANGE_UNSUPPORTED' });
+  if (openRange) ask(['range'], openRange.question, [], undefined, { code: openRange.code });
   if (a.rangeUnit === 'PERCENT' && protocol !== 'ORCA') ask(['range'], m.percentRangeOrcaOnly);
-  // The available percentage-price context belongs to Devnet. Never apply that price to a mainnet position.
-  if (network === 'SOLANA' && a.rangeUnit === 'PERCENT') return reject('COPILOT_POOL_PRICE_UNAVAILABLE', m.priceUnavailable);
-  const range = protocol === 'ORCA' ? orcaRange(a, g, notes, pool.quote) : (() => {
+  const range = network === 'SOLANA' ? orcaMainnetRange(a, g, notes) : protocol === 'ORCA' ? orcaRange(a, g, notes, pool.quote) : (() => {
     const lower = a.lower!, upper = a.upper!;
     const grounded = g.carried.has('range') ? true : a.rangeUnit === 'PRICE' ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
       : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
@@ -851,6 +867,115 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   const slippage = slippageOf(a.slippageBps, pool.slippage, g, notes);
   return { sentence: `add liquidity ${deposits.get(pool.first)} ${pool.first} and ${deposits.get(pool.second)} ${pool.second} ${range} on ` +
     `${COPILOT_NETWORK_LABEL[network]} slippage ${slippage} bps`, expect: pool.expect, notes };
+}
+
+// ── BUILD-P1 pool conversational reliability: ranges from the user's words and verified pool reads ───────────────────────────────────
+type Units = { readonly quote: string; readonly base: string };
+type GoodRead = Extract<PoolPriceRead, { ok: true }>;
+/** FloFi's own question for whatever part of the range is still missing; null when the range is complete. */
+function rangeQuestion(a: CopilotLiquidityAction, units: Units, m: CopilotCopy, percent = true): { readonly question: string; readonly code: string } | null {
+  if (a.rangeUnit === null) return { question: m.rangeNeeded(units.quote, units.base, percent), code: 'COPILOT_RANGE_REQUIRED' };
+  if (a.rangeUnit === 'FULL') return null;
+  if (a.rangeUnit === 'PERCENT') return a.upper === null && a.lower === null ? { question: m.percentNeeded, code: 'COPILOT_RANGE_PERCENT_REQUIRED' } : null;
+  if (a.lower === null && a.upper === null) return { question: m.rangeBoundsNeeded(a.rangeUnit, units.quote, units.base), code: 'COPILOT_RANGE_REQUIRED' };
+  if (a.lower === null || a.upper === null)
+    return { question: m.rangeOtherBound(a.lower !== null ? 'LOWER' : 'UPPER', (a.lower ?? a.upper)!, a.rangeUnit, units.quote, units.base), code: 'COPILOT_RANGE_BOUND_REQUIRED' };
+  return null;
+}
+/** The pool's price unit for FloFi's range questions (quote per base); null when the pool is not known yet. */
+export function liquidityUnits(a: CopilotLiquidityAction): Units | null {
+  const network = a.network;
+  if (network === 'SOLANA' || (network === null && a.protocol === 'ORCA' && publicScope())) return { quote: 'USDC', base: 'SOL' };
+  if (network === 'SOLANA_DEVNET' || (network === null && a.protocol === 'ORCA')) return { quote: COPILOT_POOLS.ORCA.quote, base: COPILOT_POOLS.ORCA.base };
+  if (network === null || network === 'OTHER') return null;
+  if (!isCatalogNetwork(network)) return { quote: COPILOT_POOLS.UNISWAP_V3.quote, base: COPILOT_POOLS.UNISWAP_V3.base };
+  const chain = chainOf(network), tokens = a.deposits.map(deposit => {
+    const found = resolveAssetReference(chain, /^eth$/i.test(deposit.asset) ? 'WETH' : deposit.asset);
+    return found.kind === 'FOUND' && found.asset.kind === 'ERC20' && found.asset.address ? { symbol: found.asset.symbol, address: found.asset.address, decimals: found.asset.decimals } : null;
+  });
+  if (tokens.length !== 2 || !tokens[0] || !tokens[1]) return null;
+  try { const view = catalogPoolView(chain, tokens[0], tokens[1], FEE_BPS[a.feeTier ?? '0.3'] ?? 3000); return { quote: view.quote, base: view.base }; } catch { return null; }
+}
+const FEE_BPS: Readonly<Record<string, number>> = { '0.01': 100, '0.05': 500, '0.3': 3000, '1': 10000 };
+/** A symmetric percentage of a PERCENT range ("±10%": upper "10"; a model's lower "-10" or "10" beside it is the same band); null when asymmetric. */
+function symmetricPercent(a: CopilotLiquidityAction): string | null {
+  const upper = a.upper ?? (a.lower !== null ? a.lower.replace(/^-/, '') : null);
+  if (upper === null || upper.startsWith('-')) return null;
+  return a.lower === null || canonicalDecimal(a.lower.replace(/^-/, '')) === canonicalDecimal(upper) ? upper : null;
+}
+/** The percentage is the user's own: written as one ("10%", "10 percent"), or the bare number answering FloFi's own percentage question. */
+const percentGrounded = (g: Grounding, percent: string) => g.carried.has('range') || groundedPercent(g.text, percent)
+  || (g.latest !== undefined && /^\s*\d+(?:[.,]\d+)?\s*[.!]?\s*$/.test(g.latest) && amountReadings(g.latest.trim().replace(/[.!]$/, '')).includes(canonicalDecimal(percent)));
+function decimalCompare(a: string, b: string): number {
+  const [ai = '0', af = ''] = a.split('.'), [bi = '0', bf = ''] = b.split('.'), n = Math.max(af.length, bf.length);
+  const x = BigInt(ai + af.padEnd(n, '0')), y = BigInt(bi + bf.padEnd(n, '0'));
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+/** Explicit bounds as the user wrote them: grounded in their words (or carried), in order, and ticks on the pool's spacing. */
+function explicitBounds(a: CopilotLiquidityAction, g: Grounding, units: Units, spacing: number): { readonly lower: string; readonly upper: string } {
+  const m = copyOf(g), lower = a.lower!, upper = a.upper!, text = g.text, price = a.rangeUnit === 'PRICE';
+  const grounded = g.carried.has('range') ? true : price ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
+    : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
+  if (!grounded) ask(['range'], m.rangeNotFound(units.quote, units.base));
+  const ordered = price ? !lower.startsWith('-') && !upper.startsWith('-') && decimalCompare(canonicalDecimal(lower), canonicalDecimal(upper)) < 0 : Number(lower) < Number(upper);
+  if (!ordered) ask(['range'], m.rangeOrder(lower, upper, price ? 'PRICE' : 'TICK'), [], undefined, { code: 'COPILOT_RANGE_ORDER_INVALID' });
+  if (!price && (Number(lower) % spacing !== 0 || Number(upper) % spacing !== 0)) ask(['range'], m.rangeTicksInvalid(spacing), [], undefined, { code: 'COPILOT_RANGE_TICKS_INVALID' });
+  return { lower, upper };
+}
+/**
+ * The verified read of `ref` for this turn. Without one FloFi asks: the web chat reads the pool and replays the turn (the question carries the
+ * pool); a surface that cannot read says exactly what it could not confirm. A percentage range is never computed from any other price.
+ */
+function requiredRead(ref: PoolRef, g: Grounding, label: string): GoodRead {
+  const m = copyOf(g), read = poolReadFor(ref, g.pools, g.now ?? Date.now());
+  if (read?.ok) return read;
+  if (read && poolMissing(read.code)) return ask(['range'], m.poolNotFound(label), [], undefined, { code: 'COPILOT_POOL_NOT_FOUND' });
+  if (!read && g.poolReads) return ask(['range'], m.poolPriceReading, [m.retryOption], undefined, { code: 'COPILOT_POOL_PRICE_REQUIRED', pool: ref });
+  return ask(['range'], m.poolPriceUnavailable(label), [m.retryOption], undefined, { code: 'COPILOT_POOL_PRICE_UNAVAILABLE' });
+}
+/** A read used only to tell where an explicit range sits against the current price: a failed read never blocks it, a missing pool does. */
+function advisoryRead(ref: PoolRef, g: Grounding, label: string): GoodRead | null {
+  const m = copyOf(g), read = poolReadFor(ref, g.pools, g.now ?? Date.now());
+  if (read && !read.ok && poolMissing(read.code)) return ask(['range'], m.poolNotFound(label), [], undefined, { code: 'COPILOT_POOL_NOT_FOUND' });
+  if (read) return read.ok ? read : null;
+  if (g.poolReads) ask(['range'], m.poolPriceReading, [m.retryOption], undefined, { code: 'COPILOT_POOL_PRICE_REQUIRED', pool: ref });
+  return null;
+}
+/** A conversion's closed failures become FloFi's question about the range (the request stays open). */
+function converted<T>(g: Grounding, label: string, run: () => T): T {
+  const m = copyOf(g);
+  try { return run(); } catch (cause) {
+    const code = cause instanceof Error ? cause.message : '';
+    if (code === 'COPILOT_RANGE_OUT_OF_RANGE') return ask(['range'], m.percentRangeInvalid, [], undefined, { code });
+    if (code === 'COPILOT_POOL_PRICE_UNAVAILABLE') return ask(['range'], m.poolPriceUnavailable(label), [m.retryOption], undefined, { code });
+    return ask(['range'], m.rangeConversionInvalid, [], undefined, { code: 'COPILOT_RANGE_CONVERSION_INVALID' });
+  }
+}
+/** What the person sees before approving: the effective (aligned) range, when and where the price was read, and where the price sits. */
+function rangeNotes(m: CopilotCopy, r: ResolvedRange, units: Units, read: GoodRead | null, at: 'SLOT' | 'BLOCK'): string[] {
+  return [m.effectiveRange(r.lowerPrice, r.upperPrice, units.quote, units.base, r.tickLower, r.tickUpper), ...read ? [m.priceReadAt(at, read.at)] : [],
+    ...r.position ? [m.rangePosition(r.position, r.onlyToken)] : []];
+}
+/**
+ * BUILD-P1: the Orca SOL/USDC range on Solana mainnet-beta. A percentage is ±that percent around the mainnet pool's verified price, through the
+ * same bounds as the Canvas range control; explicit prices or ticks are the user's own. The aligned (effective) range is always shown.
+ */
+function orcaMainnetRange(a: CopilotLiquidityAction, g: Grounding, notes: string[]): string {
+  const m = copyOf(g), units = { quote: 'USDC', base: 'SOL' }, label = `Orca SOL/USDC (${COPILOT_NETWORK_LABEL.SOLANA})`;
+  if (a.rangeUnit === 'PERCENT') {
+    const percent = symmetricPercent(a);
+    if (percent === null) return ask(['range'], m.rangeNotFound(units.quote, units.base));
+    if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent));
+    converted(g, label, () => percentValue(percent));
+    const read = requiredRead(ORCA_MAINNET_POOL, g, label), r = converted(g, label, () => orcaPercentRange(read, percent));
+    notes.push(m.percentRangeIn(canonicalDecimal(percent), r.reference!, units.quote, units.base), ...rangeNotes(m, r, units, read, 'SLOT'));
+    return `from ${r.lower} to ${r.upper} USDC per SOL`;
+  }
+  const { lower, upper } = explicitBounds(a, g, units, ORCA_WHIRLPOOLS_MAINNET_TICK_SPACING);
+  const read = advisoryRead(ORCA_MAINNET_POOL, g, label);
+  const r = converted(g, label, () => a.rangeUnit === 'PRICE' ? orcaPriceRange(lower, upper, read) : orcaTickRange(Number(lower), Number(upper), read));
+  notes.push(...rangeNotes(m, r, units, read, 'SLOT'));
+  return a.rangeUnit === 'PRICE' ? `from ${lower} to ${upper} USDC per SOL` : `ticks ${lower} to ${upper}`;
 }
 
 /** A percentage written as such: "10%", "10 %", "10 percent", "10 por cento". */
@@ -866,9 +991,9 @@ function groundedPercent(text: string, percent: string): boolean {
 function orcaRange(a: CopilotLiquidityAction, g: Grounding, notes: string[], quote = COPILOT_POOLS.ORCA.quote): string {
   const m = copyOf(g), pool = { ...COPILOT_POOLS.ORCA, quote }, text = g.text;
   if (a.rangeUnit === 'PERCENT') {
-    const percent = a.upper;
-    if (percent === null || a.lower !== null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));
-    if (!g.carried.has('range') && !groundedPercent(text, percent)) return ask(['range'], m.percentNotFound(percent));
+    const percent = symmetricPercent(a);
+    if (percent === null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+    if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent));
     const value = Number(percent), bps = Math.round(value * 100);
     if (!Number.isFinite(value) || bps < 1 || bps > 9_000) return reject('COPILOT_RANGE_OUT_OF_RANGE', m.percentRangeInvalid);
     const price = g.solana?.price ?? null;
@@ -927,15 +1052,19 @@ function planSolanaComposition(swapAction: CopilotSwapAction | null, a: CopilotL
 const groundedFee = (text: string, fee: string) => numbersIn(text).some(reading => reading.percent && !reading.negative && reading.value === canonicalDecimal(fee));
 /**
  * BUILD-BASE-001: a Uniswap v3 position on a catalog network — any two catalog ERC-20s the user named, a standard fee tier (0.3% unless the
- * user named another) and the full range unless the user gave ticks. The sentence is the exact grammar's
+ * user named another) and the full range unless the user gave a range. The sentence is the exact grammar's
  * (`add liquidity 100 USDC and 0.04 WETH on Base fee 0.05% slippage 100 bps`).
+ * BUILD-P1: a range is ticks in the IR. Ticks the user gave are kept; a price range (quote per base, e.g. USDC per WETH) and a percentage around the
+ * pool's verified on-chain price become ticks aligned outward to the pool's spacing, in the token order of the pool, and the effective range is shown.
+ * A percentage is never turned into the full range or any other default.
  */
 function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: Network, notes: string[]): Plan {
   const m = copyOf(g), text = g.text, label = COPILOT_NETWORK_LABEL[network];
   if (a.deposits.length < 2) ask(['amount'], m.catalogLiquidityNeeds(label));
   const tokens = a.deposits.map(deposit => {
     const token = catalogToken(deposit.asset, network, g, 'liquidity', `deposit:${deposit.asset}` as CarriedField, 'ERC20', notes);
-    return { symbol: token.asset.symbol, address: token.asset.address, ether: token.ether, amount: amountOf(deposit.maxAmount, g, 'liquidity', `deposit:${deposit.asset}` as CarriedField) };
+    return { symbol: token.asset.symbol, address: token.asset.address, decimals: token.asset.decimals, ether: token.ether,
+      amount: amountOf(deposit.maxAmount, g, 'liquidity', `deposit:${deposit.asset}` as CarriedField) };
   });
   if (tokens[0]!.address === tokens[1]!.address) reject('COPILOT_DUPLICATE_DEPOSIT', m.poolTokenOnce(tokens[0]!.symbol, tokens[1]!.symbol));
   const fee = a.feeTier ?? null;
@@ -945,13 +1074,33 @@ function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: 
   if (writtenFee && fee === null && !g.carried.has('feeTier')) ask(['range'], m.feeNotFound(writtenFee));
   if (fee !== null && !g.carried.has('feeTier') && !groundedFee(text, fee)) ask(['range'], m.feeNotFound(fee));
   let range = '';
-  if (a.rangeUnit === 'TICK') {
-    const lower = a.lower ?? '', upper = a.upper ?? '';
-    if (!(g.carried.has('range') || (/^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper))))
-      ask(['range'], m.catalogRangeNotFound);
-    range = ` ticks ${lower} to ${upper}`;
-  } else if (a.rangeUnit === 'PRICE') ask(['range'], m.catalogRangeNotFound);
-  else if (a.rangeUnit === null) notes.push(m.fullRangeNote);
+  if (a.rangeUnit === 'PERCENT' || a.rangeUnit === 'PRICE' || a.rangeUnit === 'TICK') {
+    let view: CatalogPoolView;
+    try {
+      const token = (t: (typeof tokens)[number]) => ({ symbol: t.symbol, address: t.address!, decimals: t.decimals });
+      view = catalogPoolView(chainOf(network), token(tokens[0]!), token(tokens[1]!), FEE_BPS[fee ?? '0.3']!);
+    } catch { return refuse(m.catalogFeeUnsupported(COPILOT_FEE_TIERS)); }
+    const units = { quote: view.quote, base: view.base }, poolName = `Uniswap v3 ${view.base}/${view.quote} ${fee ?? '0.3'}% (${label})`;
+    const open = rangeQuestion(a, units, m);
+    if (open) ask(['range'], open.question, [], undefined, { code: open.code });
+    let resolved: ResolvedRange, read: GoodRead | null;
+    if (a.rangeUnit === 'PERCENT') {
+      const percent = symmetricPercent(a);
+      if (percent === null) return ask(['range'], m.rangeNotFound(units.quote, units.base));
+      if (!percentGrounded(g, percent)) return ask(['range'], m.percentNotFound(percent));
+      converted(g, poolName, () => percentValue(percent));
+      const verified = requiredRead(view.ref, g, poolName);
+      read = verified; resolved = converted(g, poolName, () => catalogPercentRange(view, verified, percent));
+      notes.push(m.percentRangeIn(canonicalDecimal(percent), resolved.reference!, units.quote, units.base));
+    } else {
+      const { lower, upper } = explicitBounds(a, g, units, view.profile.tickSpacing);
+      read = advisoryRead(view.ref, g, poolName);
+      const current = read;
+      resolved = converted(g, poolName, () => a.rangeUnit === 'PRICE' ? catalogPriceRange(view, lower, upper, current) : catalogTickRange(view, Number(lower), Number(upper), current));
+    }
+    notes.push(...rangeNotes(m, resolved, units, read, 'BLOCK'));
+    range = ` ticks ${resolved.tickLower} to ${resolved.tickUpper}`;
+  } else if (a.rangeUnit === null) notes.push(m.fullRangeNote);
   const slippage = slippageOf(a.slippageBps, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE, g, notes);
   if (fee === null) notes.push(m.defaultFeeNote('0.3'));
   if (tokens.some(token => token.ether)) notes.push(m.wethNote);

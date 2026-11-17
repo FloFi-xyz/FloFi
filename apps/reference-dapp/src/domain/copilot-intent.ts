@@ -127,6 +127,18 @@ function pattern(value: unknown, shape: RegExp, nullable: boolean, max: number =
   return value;
 }
 const amount = (value: unknown) => pattern(value, AMOUNT, true);
+/**
+ * BUILD-P1: a PERCENT range bound only. A model that copied the user's notation ("±10%", "10%", "+/-10") reported the same number: its sign and
+ * percent marks are read as written and the digits kept ("10"; "-10" for a symmetric lower bound). Any other text still fails; the number must
+ * still be the user's own (FloFi grounds it in their words) and within 0.01–90%.
+ */
+const PERCENT_BOUND = /^\s*(±|\+\s*\/\s*-|\+-|\+|-|−)?\s*((?:0|[1-9][0-9]*)(?:\.[0-9]+)?)\s*(?:%|percent)?\s*$/i;
+function percentBound(value: unknown): string | null {
+  if (value === null) return null;
+  const match = typeof value === 'string' && value.length <= COPILOT_LIMITS.maxValueLength ? PERCENT_BOUND.exec(value) : null;
+  if (!match) return fail();
+  return `${match[1] === '-' || match[1] === '−' ? '-' : ''}${match[2]}`;
+}
 const bps = (value: unknown) => pattern(value, BPS, true);
 const address = (value: unknown) => { const found = pattern(value, ADDRESS, true, 42); return found && found.toLowerCase(); };
 const transferAddress = (value: unknown) => typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value) ? value : address(value);
@@ -201,8 +213,9 @@ function parseActionV2(value: unknown): CopilotAction {
       const d = exact(item, ['asset', 'maxAmount']);
       return { asset: symbol(d.asset) ?? fail(), maxAmount: pattern(d.maxAmount, AMOUNT, false)! };
     });
+    const rangeUnit = nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), bound = (value: unknown) => rangeUnit === 'PERCENT' ? percentBound(value) : pattern(value, SIGNED_DECIMAL, true);
     return { type, protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol), network: network(v.network), deposits,
-      rangeUnit: nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), lower: pattern(v.lower, SIGNED_DECIMAL, true), upper: pattern(v.upper, SIGNED_DECIMAL, true),
+      rangeUnit, lower: bound(v.lower), upper: bound(v.upper),
       slippageBps: bps(v.slippageBps), ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {},
       ...withFunding ? { funding: nullableOneOf(COPILOT_FUNDING, v.funding) } : {} };
   }
@@ -313,8 +326,9 @@ const actionSchemasV2 = [
     network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
     deposits: { type: 'array', description: 'Maximum amount of each token the user named (at most 2).', items: object({ asset: string(SYMBOL_TEXT), maxAmount: string(AMOUNT_TEXT) }) },
     rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE for a price range (quote token per base token), TICK for tick indexes, FULL for "full range", ' +
-      'PERCENT for a range of plus or minus a percentage around the current pool price ("a 10% range": upper "10", lower null); null if not stated.'),
-    lower: nullableString('Lower range bound exactly as written; null if not stated.'), upper: nullableString('Upper range bound exactly as written; null if not stated.'),
+      'PERCENT for a range of plus or minus a percentage around the current pool price ("a 10% range", "±10%", "10% range", "faixa de 10%": upper "10", lower null); null if not stated.'),
+    lower: nullableString('Lower range bound as the user wrote the number, digits only ("." decimal; "-" only for a negative tick); no %, ±, currency or token; null if not stated.'),
+    upper: nullableString('Upper range bound as the user wrote the number, digits only ("." decimal; "-" only for a negative tick); for PERCENT the percentage ("±10%" → "10"); no %, ±, currency or token; null if not stated.'),
     slippageBps: nullableString(SLIPPAGE_TEXT),
     feeTier: nullableChoice(COPILOT_FEE_TIERS, 'Pool fee tier in percent only if the user named it (0.01, 0.05, 0.3 or 1); null otherwise.'),
     funding: nullableChoice(COPILOT_FUNDING, 'SWAP_OUTPUT when the user funds the position with a swap\'s tokens ("with these tokens", "with the swapped devUSDC", ' +
@@ -331,7 +345,7 @@ export const COPILOT_OUTPUT_SCHEMA = Object.freeze(object({ intent: { anyOf: [
 
 /** BUILD-COPILOT-002: the V1 building blocks that CopilotIntentV2 reuses unchanged (same checks, same closed error codes). */
 export const COPILOT_V1_PARTS = Object.freeze({
-  exact, list, oneOf, nullableOneOf, text, amount, bps, address, transferAddress, parseAction, signedDecimal: (value: unknown) => pattern(value, SIGNED_DECIMAL, true),
+  exact, list, oneOf, nullableOneOf, text, amount, bps, address, transferAddress, parseAction, signedDecimal: (value: unknown) => pattern(value, SIGNED_DECIMAL, true), percentBound,
   depositAmount: (value: unknown) => pattern(value, AMOUNT, false)!, fail, symbol, parseActionV2,
   schema: Object.freeze({ string, nullableString, constant, choice, nullableChoice, object, actions: actionSchemas, actionsV2: actionSchemasV2, symbolText: SYMBOL_TEXT,
     networkV2Text: NETWORK_V2_TEXT }),

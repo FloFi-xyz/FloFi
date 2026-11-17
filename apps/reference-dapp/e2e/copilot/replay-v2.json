@@ -2313,6 +2313,74 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "ORCA",
+       "network": "SOLANA",
+       "deposits": [
+        {
+         "asset": "SOL",
+         "maxAmount": "0.1"
+        },
+        {
+         "asset": "USDC",
+         "maxAmount": "10"
+        }
+       ],
+       "rangeUnit": null,
+       "lower": null,
+       "upper": null,
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Quero adicionar liquidez na Orca na Solana com 0,1 SOL e 10 USDC"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "ORCA",
+       "network": "SOLANA",
+       "deposits": [
+        {
+         "asset": "SOL",
+         "maxAmount": "0.1"
+        },
+        {
+         "asset": "USDC",
+         "maxAmount": "10"
+        }
+       ],
+       "rangeUnit": null,
+       "lower": null,
+       "upper": null,
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

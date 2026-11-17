@@ -57,7 +57,8 @@ const LOCAL_CHAINS = new Set(['mock:local', 'eip155:31337']);
 export function isTestNetwork(value: string | null | undefined): boolean {
   return networkIdentity(value)?.environment === 'TESTNET';
 }
-const TEST_WORDING = /\b(?:sepolia|devnet|testnets?|test\s?net(?:works?)?|redes?\s+de\s+teste)\b/i;
+// BUILD-P1: devUSDC is the Solana Devnet test token; a model's question naming it is test-network wording the public product never shows.
+const TEST_WORDING = /\b(?:sepolia|devnet|devusdc|testnets?|test\s?net(?:works?)?|redes?\s+de\s+teste)\b/i;
 /** BUILD-FLOFI-UX-FIX-003: whether display text (a button, a model's question or explanation) names a test network, by name or registry mention. */
 export function mentionsTestNetwork(text: string): boolean {
   return TEST_WORDING.test(text) || copilotNetworksMentioned(text).some(id => networkOfCopilot(id).environment === 'TESTNET');

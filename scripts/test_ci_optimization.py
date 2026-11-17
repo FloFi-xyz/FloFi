@@ -466,6 +466,8 @@ MAIN_PROFILES = {
     "copilot": (["copilot.spec.ts","copilot-conversation.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SUPPLY_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "copilot-learning": (["copilot-learning-memory.spec.ts"], {"FLOFI_COPILOT":"replay","FLOFI_LEARNING_E2E":"LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
     "copilot-solana": (["copilot-solana.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    # BUILD-P1 pool conversational reliability (intentional change): the multi-turn liquidity range dialogue in the public Mainnet-only product.
+    "copilot-pool-dialogue": (["copilot-pool-dialogue.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_E2E_NETWORK_SCOPE":"PUBLIC_MAINNET"}),
     # BUILD-FLOFI-MAINNET-PRODUCT-001 (intentional change): this profile now certifies the public Mainnet-only product as deployed.
     "solana-mainnet-network": (["solana-mainnet-network.spec.ts"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_E2E_NETWORK_SCOPE":"PUBLIC_MAINNET"}),
     "canvas-corrections": (["canvas-corrections.spec.ts"], {}),
