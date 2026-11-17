@@ -214,3 +214,40 @@ describe('Supply service lifecycle',()=>{
  });
 
 });
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01 audit, lending): the same defect as the Uniswap incident. `begin` checked the Review's expiry
+ * in `assertSupplyReview`, then waited on the fee preflight (a public gas estimate) and reserved the owner's nonce before persisting the Supply
+ * request, so a request could be prepared — and its nonce durably leased — under a Review that expired meanwhile. The hand-off then refused it,
+ * and "Simulate again" (a new run) could no longer reserve that nonce: a dead end until the owner sent another transaction.
+ */
+describe('EXEC-01 audit: a Supply after a confirmed approval is never prepared under a Review that expires before its hand-off',()=>{
+ it('refuses before reserving the nonce, so a new simulation continues with the Supply only (the approval is not repeated)',async()=>{
+   const dir=await mkdtemp(join(tmpdir(),'build012a-service-')),model=supplyModel();
+   let clock=Date.now();const now=vi.spyOn(Date,'now').mockImplementation(()=>clock);
+   const slow={estimate:0};
+   const rpc:typeof model.rpc=async(method,params)=>{if(method==='eth_estimateGas'&&slow.estimate){clock+=slow.estimate;slow.estimate=0;}return model.rpc(method,params);};
+   const service=createSupplyService({rpc,journalDir:dir,provenance:'MOCKED'});
+   try{
+     let run=await service.simulate(workflow,SUPPLY_OWNER);run=await service.review(run.id,run.review.commitment,workflow);
+     const approval=await service.begin(run.id,SUPPLY_OWNER,workflow);expect(approval.step).toBe('APPROVAL');
+     await service.handoff(run.id,'APPROVAL');await service.report(run.id,'APPROVAL',{kind:'HASH',hash:await model.rpc('MOCK_submit',[approval.transaction]) as string});
+     run=await service.observe(run.id);expect(run.attempts[0]).toMatchObject({step:'APPROVAL',reconciled:true});
+     // 15 s before expiry the owner continues; the network takes 20 s to answer the Supply's gas estimate.
+     clock=Date.parse(run.review.expiresAt)-15_000;slow.estimate=20_000;
+     await expect(service.begin(run.id,SUPPLY_OWNER,workflow)).rejects.toThrow('SUPPLY_AUTHORIZATION_STALE');
+     const after=await service.load(run.id);
+     expect(after.attempts.map(a=>a.step)).toEqual(['APPROVAL']);expect(model.transactions).toHaveLength(1);
+     // Fewer seconds left than the hand-off needs: refused before anything is reserved, as well.
+     const fresh=await service.simulate(workflow,SUPPLY_OWNER);await service.review(fresh.id,fresh.review.commitment,workflow);
+     expect(fresh.review.transactions).toHaveLength(1);
+     clock=Date.parse(fresh.review.expiresAt)-5_000;
+     await expect(service.begin(fresh.id,SUPPLY_OWNER,workflow)).rejects.toThrow('SUPPLY_AUTHORIZATION_STALE');
+     // A fresh simulation of the same workflow then takes the nonce and asks only for the Supply (the allowance already covers it).
+     const next=await service.simulate(workflow,SUPPLY_OWNER);await service.review(next.id,next.review.commitment,workflow);
+     const supply=await service.begin(next.id,SUPPLY_OWNER,workflow);expect(supply.step).toBe('SUPPLY');
+     await service.handoff(next.id,'SUPPLY');await service.report(next.id,'SUPPLY',{kind:'HASH',hash:await model.rpc('MOCK_submit',[supply.transaction]) as string});
+     expect((await service.observe(next.id)).verdict).toBe('RECONCILED');expect(model.transactions).toHaveLength(2);
+   }finally{now.mockRestore();await rm(dir,{recursive:true,force:true});}
+ });
+});

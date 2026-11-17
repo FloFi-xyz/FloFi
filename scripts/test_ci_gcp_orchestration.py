@@ -29,7 +29,7 @@ class CloudOrchestration(unittest.TestCase):
                     'RUNNER_TEMP': str(self.root / 'runner'), 'FAKE_LOG': str(self.log), 'FLOFI_CI_REVISION': 'c' * 40}
 
         # Stub only external setup/fork work, not collection, reporting, the
-        # browser runner or the ledger. All 55 profiles execute the fake pnpm.
+        # browser runner or the ledger. All 56 profiles execute the fake pnpm.
         composition = (ROOT / 'scripts/gcp-ci-composition.sh').read_text()
         tail = composition[composition.index('composition_status=0\n'):]
         (self.root / 'scripts/gcp-ci-composition.sh').write_text(
@@ -78,11 +78,12 @@ class CloudOrchestration(unittest.TestCase):
         # BUILD-FLOFI-AUTH-WALLETS-001 adds the auth-wallets profile (49 → 50); BUILD-FLOFI-FLIGHT-001 adds the flight profile (50 → 51).
         # BUILD-FLOFI-FLIGHT-TEAM-EARLY-ACCESS-001 adds the Flight team and closed-beta profiles (51 → 53);
         # P0 universal execution adds the editor-wallet-batch profile (53 → 54);
-        # BUILD-P1 pool conversational reliability adds the copilot-pool-dialogue profile (54 → 55).
-        self.assertIn('55 browser profiles each exactly once', result.stdout)
+        # BUILD-P1 pool conversational reliability adds the copilot-pool-dialogue profile (54 → 55);
+        # BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 adds the uniswap-continuation profile (55 → 56).
+        self.assertIn('56 browser profiles each exactly once', result.stdout)
         self.assertIn('Cloud certification: PASS', result.stdout)
         rows = [row for report in self.reports() for row in report['profiles']]
-        self.assertEqual(len(rows), 55)
+        self.assertEqual(len(rows), 56)
         self.assertTrue(all(row['status'] == 'PASS' for row in rows))
         order = [line for line in self.log.read_text().splitlines() if '--add-reporter junit' in line]
         self.assertIn('copilot-learning-memory.spec.ts', order[0])
@@ -97,7 +98,7 @@ class CloudOrchestration(unittest.TestCase):
         self.assertIn('Certification ledger: FAIL', result.stdout)
         self.assertNotIn('Cloud certification: PASS', result.stdout)
         rows = {row['name']: row for report in self.reports() for row in report['profiles']}
-        self.assertEqual(len(rows), 55)
+        self.assertEqual(len(rows), 56)
         self.assertEqual([name for name, row in rows.items() if row['status'] == 'NOT_RUN'], [])
         for name in ['copilot-learning', 'default-product', 'approve-authorize-journeys']:
             self.assertEqual(rows[name]['status'], 'FAIL')
@@ -169,7 +170,7 @@ class CloudOrchestration(unittest.TestCase):
         result = self.run_cloud()
         self.assertEqual(result.returncode, 1)
         self.assertIn('required stage never ran: Production build', result.stdout)
-        self.assertEqual(len([row for report in self.reports() for row in report['profiles']]), 55)
+        self.assertEqual(len([row for report in self.reports() for row in report["profiles"]]), 56)
 
     def test_composition_setup_and_fork_coverage_match_the_existing_pipeline(self):
         shared = (ROOT / '.circleci/scripts/ci-composition.sh').read_text()
@@ -206,10 +207,11 @@ class CloudOrchestration(unittest.TestCase):
         self.assertIn('flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com', config)
         self.assertIn('postgres:18.6-bookworm@sha256:', config)
         self.assertIn("export TEST_DATABASE_URL='postgres://flofi@127.0.0.1:5432/postgres'", full)
-        self.assertEqual(len(browser_plan()['product']) + len(browser_plan()['composition']), 55)
+        self.assertEqual(len(browser_plan()['product']) + len(browser_plan()['composition']), 56)
         self.assertIn('flight-team-early-access', browser_plan()['product'])
         self.assertIn('editor-wallet-batch', browser_plan()['product'])
         self.assertIn('copilot-pool-dialogue', browser_plan()['product'])
+        self.assertIn('uniswap-continuation', browser_plan()['product'])
 
 
 if __name__ == '__main__':

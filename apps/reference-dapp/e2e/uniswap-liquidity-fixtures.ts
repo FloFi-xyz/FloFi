@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-UNISWAP-LIQUIDITY-PUBLIC browser fixtures: a scripted EIP-1193 wallet whose only "broadcast" is the MOCKED loopback chain. */
-import { rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
@@ -16,7 +16,19 @@ export async function resetUniswapHarness(options: { delegatedOwner?: boolean } 
   const journal = process.env.GRYLOO_UNISWAP_LIQUIDITY_JOURNAL;
   if (process.env.GRYLOO_UNISWAP_LIQUIDITY_E2E !== 'MOCKED_LOOPBACK_ONLY' || !journal?.startsWith(join(tmpdir(), 'gryloo-unilp-'))) throw new Error('MOCK_RESET_DENIED');
   await rm(journal, { recursive: true, force: true });
+  await rm(`${journal}.clock`, { force: true });
   await uniswapHarnessRpc('MOCK_reset', [options]);
+}
+/**
+ * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): `seconds` pass on the MOCKED chain (new blocks) and on the app server's harness clock
+ * together, e.g. to let a Review expire between two wallet requests. The browser's own clock is not moved.
+ */
+export async function advanceUniswapHarness(seconds: number) {
+  const journal = process.env.GRYLOO_UNISWAP_LIQUIDITY_JOURNAL;
+  if (process.env.GRYLOO_UNISWAP_LIQUIDITY_E2E !== 'MOCKED_LOOPBACK_ONLY' || !journal?.startsWith(join(tmpdir(), 'gryloo-unilp-'))) throw new Error('MOCK_ADVANCE_DENIED');
+  await uniswapHarnessRpc('MOCK_advance', [seconds]);
+  const prior = Number(await readFile(`${journal}.clock`, 'utf8').catch(() => '0')) || 0;
+  await writeFile(`${journal}.clock`, String(prior + seconds * 1000));
 }
 export const walletSends = async () => Number(await uniswapHarnessRpc('MOCK_sends'));
 /** `delegated`: the wallet fulfils each request as a relayed MetaMask type-2, depth-1 redemption (owner already delegated). */

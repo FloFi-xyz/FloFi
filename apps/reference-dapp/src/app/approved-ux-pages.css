@@ -42,6 +42,8 @@
 .ux-page .ux-row-name>span{overflow-wrap:anywhere}
 .ux-page .ux-row-meta{margin:0;font-size:13px;line-height:1.5;color:var(--muted)}
 .ux-page .ux-row-actions{display:flex;flex:none;align-items:center;justify-content:flex-end;gap:10px 12px;flex-wrap:wrap;max-width:100%;margin-left:auto}
+/* UX-01: on the narrowest rows (320 px at 125% zoom) a status tag wraps inside the card instead of running past its edge. */
+.ux-page .ux-row-actions .ux-tag{white-space:normal;min-width:0}
 .ux-page .ux-address{margin-left:6px;font-size:13px;font-weight:400;color:var(--muted)}
 /* An execution record's name opens its facts in place; the visible Open goes to the record. */
 .ux-page .ux-row-toggle{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-height:32px;margin:0;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer}

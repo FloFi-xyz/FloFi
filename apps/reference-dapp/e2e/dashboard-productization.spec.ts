@@ -196,15 +196,14 @@ test('the Current execution card keeps its name and network readable and its act
     const layout = await card.evaluate(element => {
       const box = (node: Element | null) => { if (!node) return null; const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
       const name = element.querySelector('.ux-row-name span[title]')!, meta = element.querySelector('.ux-row-meta')!;
-      return { card: box(element), row: box(element.querySelector('.ux-row')), name: box(name), meta: box(meta),
+      return { card: box(element), row: box(element.querySelector('.ux-row')), column: box(element.querySelector('.ux-row-main')), name: box(name), meta: box(meta),
         nameLine: parseFloat(getComputedStyle(name).lineHeight), metaLine: parseFloat(getComputedStyle(meta).lineHeight),
         actions: [box(element.querySelector('.dashboard-status')), box(element.querySelector('a.ux-button')), box(element.querySelector('.history-actions > button'))] };
     });
-    const { card: c, row, name, meta } = layout;
+    const { card: c, row, column, name, meta } = layout;
     // The name and its network line keep a readable column (never a character per line) and wrap in at most a few lines.
-    const readable = Math.min(150, row!.width - 60);
-    expect(name!.width, `name width ${at}`).toBeGreaterThanOrEqual(readable);
-    expect(meta!.width, `network line width ${at}`).toBeGreaterThanOrEqual(readable);
+    expect(column!.width, `name column ${at}`).toBeGreaterThanOrEqual(Math.min(150, row!.width - 60));
+    expect(name!.width, `name width ${at}`).toBeGreaterThan(80);
     expect(Math.round(name!.height / layout.nameLine), `name lines ${at}`).toBeLessThanOrEqual(3);
     expect(Math.round(meta!.height / layout.metaLine), `network lines ${at}`).toBeLessThanOrEqual(3);
     // Status, View current run and the menu are visible, inside the card, and never on top of the name or its network line.

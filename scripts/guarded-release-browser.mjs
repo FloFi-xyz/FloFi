@@ -87,6 +87,9 @@ const definitions = [
   // after base-mainnet-authoring.spec.ts on purpose (one worker, file order): that spec's unavailable-list case must be the server's first read.
   ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts', 'base-mainnet-lending-catalog.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['uniswap-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'uniswap', GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a Review that expires between the two approvals of a Uniswap position is refreshed on the
+  // same run and authorized again through the chat (MOCKED loopback chain and harness clock; the confirmed approval is never asked again).
+  ['uniswap-continuation', ['uniswap-liquidity-continuation.spec.ts'], { GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['journey-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'journey', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-ADMIN-001: the private Admin console (sign-in refusal and grant, dashboards, AI settings) on a disposable loopback database.
@@ -156,7 +159,7 @@ const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refus
 // loopback ports and PostgreSQL. Each list runs shortest first, so fast financial boundaries report before long suites.
 // GitHub Actions (one job) and Cloud Build run the three shards in one place.
 const shards = [
-  ['unsafe-lending-simulations', 'router-provenance', 'devnet-provenance', 'uniswap-provenance', 'transfer-provenance',
+  ['unsafe-lending-simulations', 'router-provenance', 'devnet-provenance', 'uniswap-provenance', 'uniswap-continuation', 'transfer-provenance',
     'robinhood-mainnet-authoring', 'mcp-routes-oauth-disabled', 'card-provider-loopback', 'delegated-execution', 'workflow-ux-authoring',
     'channel-approve', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'auth-wallets', 'approve-workflow-run',
     'default-product'],
