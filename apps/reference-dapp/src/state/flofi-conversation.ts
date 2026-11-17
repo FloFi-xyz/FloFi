@@ -1069,7 +1069,10 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
           return;
         }
-        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options, ...reply.link ? { link: reply.link } : {}, ...reply.verbatimOptions ? { verbatim: true } : {} });
+        // UX-02: FloFi's structured question for an amount is marked on its message (the panel may offer balance shortcuts under it).
+        const awaiting = reply.kind === 'CLARIFICATION' ? copilot.awaitingAmount?.()?.request ?? null : null;
+        append(scope, { role: 'ai', text: reply.text, notes: reply.notes, options: reply.options, ...reply.link ? { link: reply.link } : {}, ...reply.verbatimOptions ? { verbatim: true } : {},
+          ...awaiting ? { awaitingAmount: awaiting } : {} });
         if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });
         return;
       }

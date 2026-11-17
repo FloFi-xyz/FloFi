@@ -104,14 +104,18 @@ describe('Privy access tokens (verified by @privy-io/node)', () => {
       signInPrivy: async () => { sessions++; return { accountId: `acct_${'a'.repeat(32)}`, sessionId: 'b'.repeat(32), method: 'email' as const,
         authenticatedAt: now, expiresAt: now + 3600, created: true, skipped: 0 }; },
       wallets: async () => [], account: async () => null,
-    } satisfies Pick<AccountStore, 'consumeProof' | 'signInPrivy' | 'wallets' | 'account'>;
+      // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: no move in progress; the sign-in reaches an existing account (no duplicate question).
+      proofActive: async () => false, releaseProof: async () => undefined,
+      signInPreview: async () => ({ reaches: `acct_${'a'.repeat(32)}`, sameEmail: [] }),
+    } satisfies Pick<AccountStore, 'consumeProof' | 'signInPrivy' | 'wallets' | 'account' | 'proofActive' | 'releaseProof' | 'signInPreview'>;
     const service = createAccountService({ store: store as unknown as AccountStore, privy });
     // An invalid signature cannot consume the valid token's proof.
     await expect(service.completePrivy(token({}, other.privateKey))).rejects.toThrow('PRIVY_TOKEN_INVALID');
     expect(proofs.size).toBe(0);
     await expect(service.completePrivy(original)).resolves.toMatchObject({ session: { method: 'email' } });
     for (const replay of [original, alias, malleated]) await expect(service.completePrivy(replay)).rejects.toThrow('PRIVY_SIGN_IN_STALE');
-    expect(proofs.size).toBe(1);
+    // One proof for the signed token, one for its Privy session (one FloFi sign-in per Privy session).
+    expect(proofs.size).toBe(2);
     expect(sessions).toBe(1);
   });
 });
@@ -122,11 +126,14 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
     const result = await privy.user(USER);
     expect(seen[0]).toMatchObject({ url: `https://api.privy.io/v1/users/${USER}`, app: APP_ID });
     expect(seen[0]!.authorization).toBe(`Basic ${Buffer.from(`${APP_ID}:${SECRET}`).toString('base64')}`);
-    expect(result.identities).toEqual([
+    // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: each identity carries when Privy first verified it (`since`), and the login names the method used.
+    expect(result.identities.map(identity => ({ kind: identity.kind, subject: identity.subject, label: identity.label }))).toEqual([
       { kind: 'google', subject: '109876543210987654321', label: 'ana@example.com' },
       { kind: 'email', subject: 'ana@example.com', label: 'ana@example.com' },
       { kind: 'eip155', subject: '0xabcdef0123456789abcdef0123456789abcdef01', label: null },
     ]);
+    expect(result.identities.every(identity => typeof identity.since === 'number' && identity.since > 0)).toBe(true);
+    expect(result.login).toMatchObject({ kind: 'email', subject: 'ana@example.com' });
     // The most recently verified sign-in method (the email code, latest_verified_at 30), and when Privy verified it.
     expect(result.method).toBe('email');
     expect(result.verifiedAt).toBe(30);
@@ -144,7 +151,7 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
     const apple = { type: 'apple_oauth', subject: '001234.abcdef.0123', email: 'ana@privaterelay.appleid.com', verified_at: 40, latest_verified_at: 40 };
     expect(readPrivyUser(user([apple, google]), USER)).toMatchObject({ identities: [{ kind: 'google' }], method: 'google', verifiedAt: 20 });
     expect(readPrivyUser(user([apple, google]), USER, { apple: true })).toMatchObject({ identities: [{ kind: 'apple' }, { kind: 'google' }], method: 'apple', verifiedAt: 40 });
-    expect(readPrivyUser(user([apple]), USER)).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null });
+    expect(readPrivyUser(user([apple]), USER)).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null, login: null });
   });
   it('maps provider failures to stable codes', async () => {
     await expect(server(() => json({ error: 'nope' }, 404)).privy.user(USER)).rejects.toThrow('PRIVY_USER_NOT_FOUND');
@@ -163,6 +170,6 @@ describe('Privy users (read with the app secret, never from the browser)', () =>
       { type: 'phone', number: '+15555550123', verified_at: 99, latest_verified_at: 99 },
       { ...embeddedEvm, chain_type: 'bitcoin-segwit' },
     ]), USER);
-    expect(parsed).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null });
+    expect(parsed).toEqual({ id: USER, identities: [], method: null, wallets: [], verifiedAt: null, login: null });
   });
 });

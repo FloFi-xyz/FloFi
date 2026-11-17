@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createEmailDelivery, FLIGHT_CREATOR_BRIEF_URL, type DeliveryDeps } from './delivery';
 import { FLIGHT_DEFAULT_CALENDAR } from '../campaign';
-import { emailLanguage, LAUNCH_LANGUAGE, LAUNCH_UPGRADABLE_FROM, renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
+import { emailLanguage, LAUNCH_LANGUAGE, LAUNCH_UPGRADABLE_FROM, renderAccessRecovery, renderEmail, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type EmailContext, type TemplateInput } from './templates';
+import { ACCESS_RECOVERY_VERSION } from '../access';
+/** The approved boarding-recovery copy (EN and PT text), frozen at ACCESS_RECOVERY_VERSION. */
+const RECOVERY_COPY_SHA256 = 'be66e9bbcf477eafaa84f3ca010f3ee9ab97d50c2ab4f1c916273d2061e6486e';
 import { renderEmail as renderEmailV2 } from './templates-v2';
 import { renderEmail as renderEmailV3 } from './templates-v3';
 import { renderEmail as renderEmailV4 } from './templates-v4';
@@ -304,5 +307,27 @@ describe('Email 6 approved guest copy v5 (render only; no enqueue or provider)',
     expect(rendered.html).toContain('href="https://flofi.xyz/board/unsubscribe?t=&quot;&lt;tag&gt;&amp;x=1"');
     expect(rendered.html).not.toContain('<tag>');
     expect(rendered.text).toContain(unsubscribeUrl);
+  });
+});
+
+describe('BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 boarding recovery copy', () => {
+  const input = { seat: { founding: true, label: '#001' }, methods: [{ kind: 'wallet' as const, hint: '0x1a2b…9f0e' }, { kind: 'google' as const, hint: 'o***@gmail.com' }] };
+  it('names the sign-in method of the account that holds the pass, in both languages, and carries no link, code or token', () => {
+    for (const language of ['EN', 'PT'] as const) {
+      const email = renderAccessRecovery(input, context(language));
+      expect(email.subject).toBe(language === 'PT' ? 'Você já embarcou no Flight FloFi ✈️' : 'You already boarded Flight FloFi ✈️');
+      expect(email.text).toContain('0x1a2b…9f0e');
+      expect(email.text).toContain(language === 'PT' ? 'como Founding Member #001' : 'as Founding Member #001');
+      expect(email.html).toContain('https://flofi.xyz/login');
+      expect(`${email.html}\n${email.text}`).not.toMatch(/\/board\/access|#t=|\b\d{6}\b/);
+    }
+    // No account can be told apart: general guidance only.
+    expect(renderAccessRecovery({ seat: null, methods: [] }, context('EN')).text).toContain('The same sign-in method you used when you boarded.');
+    expect(() => renderAccessRecovery({ seat: null, methods: [{ kind: 'google', hint: '<script>' }] }, context('EN'))).toThrow('EMAIL_TEMPLATE_INPUT_INVALID');
+  });
+  it('is frozen at its own version: a copy change needs a new ACCESS_RECOVERY_VERSION', () => {
+    const digest = createHash('sha256').update(JSON.stringify(['EN', 'PT'].map(language => renderAccessRecovery(input, context(language as 'EN' | 'PT')).text))).digest('hex');
+    expect(ACCESS_RECOVERY_VERSION).toBe(100);
+    expect(digest).toBe(RECOVERY_COPY_SHA256);
   });
 });

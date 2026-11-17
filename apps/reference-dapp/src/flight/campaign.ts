@@ -18,6 +18,12 @@ export const FLIGHT_NOTICE_VERSION = '2026-11-09'; // BUILD-FLOFI-FLIGHT-LAUNCH-
 /** How long a recorded simulation can still issue a pass. */
 export const SIMULATION_EVIDENCE_MS = 2 * 60 * 60 * 1000;
 export const DEPARTURES_SHOWN = 5;
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-01): the public departures board appears only once MORE than this many passengers chose to
+ * show their pass (public, not taken down). Until then the server sends no rows at all (page data and `/api/board/state` alike), so
+ * nothing about the first few passengers is public, and the board never looks empty. Never shown as a number (no public count of people).
+ */
+export const DEPARTURES_MIN_PUBLIC = 10;
 export const MAX_ROUTE_STEPS_SHOWN = 4;
 
 /** Campaign calendar, shared by the web and worker. There is a single boarding opening for every origin. */

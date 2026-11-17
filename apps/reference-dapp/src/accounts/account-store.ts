@@ -15,7 +15,16 @@ import { accountWalletId, ACCOUNT_ID, canonicalAddress, exportOf, isManagedProvi
 import { ACCOUNT_SESSION_TTL_SECONDS, newAccountId, newSessionId, type AccountSessionToken } from './account-session.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 
-export type IdentityClaim = { readonly kind: IdentityKind; readonly subject: string; readonly label: string | null };
+export type IdentityClaim = { readonly kind: IdentityKind; readonly subject: string; readonly label: string | null;
+  /** When Privy first verified this method for the user (Unix seconds), when known (see `METHOD_CONFIRMATION_SINCE`). */
+  readonly since?: number | null };
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: methods a Privy user verified before this time keep being adopted at sign-in as before (e.g. a
+ * sign-in wallet removed from FloFi earlier), unless another account holds that method now (it is then never the way in). A method first
+ * verified after this time opens an account only once FloFi confirmed it (`syncLinkedIdentities`).
+ */
+export const METHOD_CONFIRMATION_SINCE = Date.parse('2026-11-17T12:00:00Z') / 1000;
+const grandfathered = (claim: IdentityClaim) => typeof claim.since === 'number' && claim.since > 0 && claim.since < METHOD_CONFIRMATION_SINCE;
 export type WalletOrganization = { readonly provider: 'turnkey'; readonly organization: string; readonly user: string; readonly login: ManagedLogin };
 export type AccountRecord = { readonly accountId: string; readonly onboarding: Onboarding; readonly identities: readonly AccountIdentity[];
   readonly wallets: readonly AccountWallet[]; readonly organization: WalletOrganization | null; readonly createdAt: string };
@@ -52,7 +61,38 @@ function walletOf(row: WalletRow): AccountWallet | null {
 /** What a verified Privy sign-in claims: the Privy user, plus the Google/Apple/email/external-wallet identities Privy verified for it. */
 export type PrivySignIn = { readonly privyUser: string; readonly identities: readonly IdentityClaim[]; readonly method: SessionMethod;
   /** When the person last verified an identity at Privy (Unix seconds); the session's authentication time, never later than now. */
-  readonly verifiedAt?: number | null };
+  readonly verifiedAt?: number | null;
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the identity this sign-in used (Privy's most recently verified method). An account already linked to this
+   * Privy user signs in only with a method it has confirmed (an identity it holds): a method linked at Privy without FloFi's step-up — by
+   * anyone holding a Privy session — never opens it. Absent (legacy callers and tests): not checked.
+   */
+  readonly login?: IdentityClaim | null;
+  /** A step-up or the second half of a duplicate move signs in to an EXISTING account only: never creates one (`ACCOUNT_SIGN_IN_NO_ACCOUNT`). */
+  readonly existingOnly?: boolean };
+/** Why an account cannot be retired as an empty duplicate (account-store.ts `retirementBlockers`). */
+export type RetirementBlocker = 'WALLETS' | 'WALLET_SIGN_IN' | 'LEGACY_WALLET' | 'RECIPIENTS' | 'BOARDING_PASS' | 'INVITE' | 'LIST_CLAIM' | 'BETA_ACCESS' | 'MCP'
+  | 'SIMULATION' | 'HISTORY' | 'IDENTITIES';
+/** Every table that can hold something of an account, and the blocker it raises (all scoped by tenant and account). */
+export const RETIREMENT_CHECKS: readonly (readonly [RetirementBlocker, string])[] = [
+  ['WALLETS', 'SELECT 1 FROM flofi_account_wallets WHERE tenant_id=$1 AND account_id=$2'],
+  // A wallet the account signs in with is a wallet it holds (history, saved workflows, beta wallets follow it): never released by a retirement.
+  ['WALLET_SIGN_IN', "SELECT 1 FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind IN ('EIP155','SOLANA')"],
+  ['LEGACY_WALLET', 'SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2 AND wallet_organization IS NOT NULL'],
+  ['RECIPIENTS', 'SELECT 1 FROM flofi_account_recipients WHERE tenant_id=$1 AND account_id=$2'],
+  ['BOARDING_PASS', 'SELECT 1 FROM flight_passes WHERE tenant_id=$1 AND account_id=$2'],
+  ['INVITE', 'SELECT 1 FROM flight_invites WHERE tenant_id=$1 AND redeemed_by=$2'],
+  ['LIST_CLAIM', 'SELECT 1 FROM flight_access_claims WHERE tenant_id=$1 AND account_id=$2'],
+  ['BETA_ACCESS', 'SELECT 1 FROM flight_beta_grants WHERE tenant_id=$1 AND account_id=$2'],
+  ['MCP', 'SELECT 1 FROM flight_beta_mcp_accounts WHERE tenant_id=$1 AND flofi_account_id=$2'],
+  ['SIMULATION', 'SELECT 1 FROM flight_simulations WHERE tenant_id=$1 AND account_id=$2'],
+  // Immutable evidence that names the account as its requester (the Editor): never orphaned by a retirement.
+  ['HISTORY', `SELECT 1 FROM mcp_handoffs WHERE tenant_id=$1 AND requester_kind='EDITOR_SESSION' AND requester_ref=$2
+    UNION ALL SELECT 1 FROM workflow_runs WHERE tenant_id=$1 AND requester_kind='EDITOR_SESSION' AND requester_ref=$2`],
+  // Exactly one Privy user, and only the sign-in identities a retirement may release (an allowlist).
+  ['IDENTITIES', `SELECT 1 WHERE (SELECT count(*) FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind='PRIVY') <> 1
+    OR EXISTS (SELECT 1 FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind NOT IN ('PRIVY','GOOGLE','APPLE','EMAIL','EIP155','SOLANA'))`],
+];
 
 export function createAccountStore(db: Database, tenantId: string) {
   async function sessionRow(tx: Queryable, accountId: string, method: SessionMethod, now: Date, verifiedAt?: number | null): Promise<AccountSessionToken> {
@@ -112,6 +152,13 @@ export function createAccountStore(db: Database, tenantId: string) {
            FOR UPDATE`, [tenantId, claims.map(claim => KIND_SQL[claim.kind]), claims.map(claim => claim.subject)])).rows : [];
         const linked = (await holders([privy]))[0]?.account_id ?? null;
         const matched = await holders(others);
+        // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: a returning account signs in only with a method it already confirmed (see `PrivySignIn.login`).
+        if (linked && input.login !== undefined) {
+          const login = input.login;
+          if (!login || (!matched.some(row => row.account_id === linked && row.kind === KIND_SQL[login.kind] && row.subject === login.subject)
+            && !(grandfathered(login) && !matched.some(row => row.kind === KIND_SQL[login.kind] && row.subject === login.subject))))
+            fail('ACCOUNT_SIGN_IN_METHOD_UNCONFIRMED');
+        }
         let accountId = linked, created = false;
         if (!accountId) {
           const accounts = [...new Set(matched.map(row => row.account_id))];
@@ -125,6 +172,7 @@ export function createAccountStore(db: Database, tenantId: string) {
               [tenantId, accountId])).rows[0];
             if (other && other.subject !== input.privyUser) fail('ACCOUNT_PRIVY_USER_MISMATCH');
           } else {
+            if (input.existingOnly) fail('ACCOUNT_SIGN_IN_NO_ACCOUNT');
             accountId = newAccountId(); created = true;
             await tx.query('INSERT INTO flofi_accounts (tenant_id, account_id, created_at, updated_at) VALUES ($1,$2,$3,$3)', [tenantId, accountId, now]);
           }
@@ -137,6 +185,9 @@ export function createAccountStore(db: Database, tenantId: string) {
         for (const claim of others) {
           const holder = matched.find(row => row.kind === KIND_SQL[claim.kind] && row.subject === claim.subject)?.account_id;
           if (holder && holder !== accountId) { skipped++; continue; }
+          // An account already linked to this Privy user adds a NEW identity only through FloFi's own confirmed link (`syncLinkedIdentities`),
+          // never because it appeared at Privy (`PrivySignIn.login`).
+          if (!holder && linked && input.login !== undefined && !grandfathered(claim)) { skipped++; continue; }
           const row = (await tx.query<{ account_id: string }>(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label, created_at, last_used_at)
             VALUES ($1,$2,$3,$4,$5,$6,$6) ON CONFLICT (tenant_id, kind, subject) DO UPDATE SET last_used_at=EXCLUDED.last_used_at,
             label=COALESCE(EXCLUDED.label, flofi_account_identities.label) WHERE flofi_account_identities.account_id=EXCLUDED.account_id RETURNING account_id`,
@@ -208,6 +259,133 @@ export function createAccountStore(db: Database, tenantId: string) {
     async releaseProof(digest: string): Promise<void> {
       if (!/^[0-9a-f]{64}$/.test(digest)) fail('ACCOUNT_PROOF_INVALID');
       await db.query('DELETE FROM flofi_account_used_proofs WHERE tenant_id=$1 AND digest=$2', [tenantId, digest]);
+    },
+    /** Whether a single-use proof or marker (see `consumeProof`) is recorded and not expired. */
+    async proofActive(digest: string, now = new Date()): Promise<boolean> {
+      if (!/^[0-9a-f]{64}$/.test(digest)) fail('ACCOUNT_PROOF_INVALID');
+      return (await db.query('SELECT 1 FROM flofi_account_used_proofs WHERE tenant_id=$1 AND digest=$2 AND expires_at > $3', [tenantId, digest, now])).rowCount === 1;
+    },
+    /** When a recorded, unexpired marker expires (null when none). */
+    async proofExpiresAt(digest: string, now = new Date()): Promise<Date | null> {
+      if (!/^[0-9a-f]{64}$/.test(digest)) fail('ACCOUNT_PROOF_INVALID');
+      const row = (await db.query<{ expires_at: Date }>('SELECT expires_at FROM flofi_account_used_proofs WHERE tenant_id=$1 AND digest=$2 AND expires_at > $3',
+        [tenantId, digest, now])).rows[0];
+      return row ? new Date(row.expires_at) : null;
+    },
+    /** Records a marker until `expiresAt` (idempotent; never shortens one already recorded). */
+    async recordProof(digest: string, expiresAt: Date, now = new Date()): Promise<void> {
+      if (!/^[0-9a-f]{64}$/.test(digest)) fail('ACCOUNT_PROOF_INVALID');
+      await db.query(`INSERT INTO flofi_account_used_proofs (tenant_id, digest, expires_at) VALUES ($1,$2,$3) ON CONFLICT (tenant_id, digest)
+        DO UPDATE SET expires_at=greatest(flofi_account_used_proofs.expires_at, EXCLUDED.expires_at)`, [tenantId, digest, expiresAt > now ? expiresAt : new Date(now.getTime() + 60_000)]);
+    },
+    /**
+     * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the account (if any) that a sign-in of this Privy user would reach WITHOUT creating one — the
+     * holder of the Privy user, else the single holder of a same-kind identity — and the other accounts of this tenant that already verified
+     * one of `emails` (an email-code identity, a Google sign-in, or a Flight list address the account claimed with an emailed proof).
+     * Read only: a hint before a NEW account is created, never authority and never a merge.
+     */
+    async signInPreview(privyUser: string, identities: readonly IdentityClaim[], emails: readonly string[]): Promise<{ readonly reaches: string | null;
+      readonly sameEmail: readonly { readonly accountId: string; readonly kinds: readonly IdentityKind[] }[] }> {
+      const claims = [{ kind: 'privy' as const, subject: privyUser, label: null }, ...identities.filter(identity => identity.kind !== 'privy')].filter(validIdentity).slice(0, 33);
+      const held = claims.length ? (await db.query<{ account_id: string }>(`SELECT DISTINCT account_id FROM flofi_account_identities WHERE tenant_id=$1
+        AND (kind, subject) IN (SELECT * FROM unnest($2::text[], $3::text[]))`, [tenantId, claims.map(claim => KIND_SQL[claim.kind]), claims.map(claim => claim.subject)])).rows : [];
+      if (held.length) return { reaches: held.length === 1 ? held[0]!.account_id : null, sameEmail: [] };
+      const addresses = [...new Set(emails.map(email => email.toLowerCase()))].filter(email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254).slice(0, 8);
+      if (!addresses.length) return { reaches: null, sameEmail: [] };
+      const rows = (await db.query<{ account_id: string; kind: string }>(`WITH owners AS (
+          SELECT account_id FROM flofi_account_identities WHERE tenant_id=$1 AND ((kind='EMAIL' AND subject = ANY($2::text[])) OR (kind='GOOGLE' AND lower(label) = ANY($2::text[]) AND lower(label) ~ '@(gmail|googlemail)\\.com$'))
+          UNION SELECT c.account_id FROM flight_access_claims c JOIN flight_list_entries e ON e.tenant_id=c.tenant_id AND e.entry_id=c.entry_id
+            WHERE c.tenant_id=$1 AND e.email = ANY($2::text[]))
+        SELECT DISTINCT o.account_id, i.kind FROM owners o JOIN flofi_account_identities i ON i.tenant_id=$1 AND i.account_id=o.account_id AND i.kind <> 'PRIVY'
+        ORDER BY 1, 2 LIMIT 40`, [tenantId, addresses])).rows;
+      const accounts = new Map<string, IdentityKind[]>();
+      for (const row of rows) accounts.set(row.account_id, [...accounts.get(row.account_id) ?? [], KIND_OF[row.kind]!]);
+      return { reaches: null, sameEmail: [...accounts].slice(0, 3).map(([accountId, kinds]) => ({ accountId, kinds })) };
+    },
+    /** What keeps this account from being retired as an empty duplicate (none: it holds nothing but its sign-in identities). */
+    async retirementBlockers(accountId: string, q: Queryable = db): Promise<RetirementBlocker[]> {
+      const out: RetirementBlocker[] = [];
+      for (const [blocker, sql] of RETIREMENT_CHECKS) if ((await q.query(`${sql} LIMIT 1`, [tenantId, accountId])).rowCount) out.push(blocker);
+      return out;
+    },
+    /** Every tenant's account that holds this Privy user (a Privy app may serve several tenants, e.g. previews): read only. */
+    async privyHolders(privyUser: string): Promise<readonly { readonly tenantId: string; readonly accountId: string }[]> {
+      if (!PRIVY_USER_ID.test(privyUser)) fail('ACCOUNT_IDENTITY_INVALID');
+      return (await db.query<{ tenant_id: string; account_id: string }>(`SELECT tenant_id, account_id FROM flofi_account_identities WHERE kind='PRIVY' AND subject=$1`,
+        [privyUser])).rows.map(row => ({ tenantId: row.tenant_id, accountId: row.account_id }));
+    },
+    /**
+     * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: deletes an EMPTY duplicate account the person proved they control (account-service.ts
+     * `completeAccountMove`), in one transaction: the account is locked, still linked to `privyUser`, and still holds nothing but its sign-in
+     * identities (re-checked under the lock); then deleted (its identities and sessions go with it) and `tombstone` recorded, so no sign-in of
+     * that Privy user creates a new account while FloFi retires it at Privy. Nothing is moved to any other account. Gone already: 'GONE'.
+     */
+    async retireAccount(accountId: string, privyUser: string, tombstone: { readonly digest: string; readonly expiresAt: Date }, now = new Date(), keptBy?: string):
+      Promise<'RETIRED' | 'GONE' | RetirementBlocker | 'PRIVY_MISMATCH'> {
+      if (!ACCOUNT_ID.test(accountId) || !PRIVY_USER_ID.test(privyUser) || !/^[0-9a-f]{64}$/.test(tombstone.digest)) fail('ACCOUNT_IDENTITY_INVALID');
+      return db.transaction(async tx => {
+        const row = (await tx.query('SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2 FOR UPDATE', [tenantId, accountId])).rowCount;
+        if (!row) return 'GONE' as const;
+        const linked = (await tx.query<{ subject: string }>("SELECT subject FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind='PRIVY'",
+          [tenantId, accountId])).rows;
+        if (linked.length !== 1 || linked[0]!.subject !== privyUser) return 'PRIVY_MISMATCH' as const;
+        const blockers = await store.retirementBlockers(accountId, tx);
+        if (blockers.length) return blockers[0]!;
+        await tx.query(`INSERT INTO flofi_account_used_proofs (tenant_id, digest, expires_at) VALUES ($1,$2,$3) ON CONFLICT (tenant_id, digest)
+          DO UPDATE SET expires_at=greatest(flofi_account_used_proofs.expires_at, EXCLUDED.expires_at)`, [tenantId, tombstone.digest, tombstone.expiresAt]);
+        await tx.query('DELETE FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2', [tenantId, accountId]);
+        // Append-only evidence of the retirement (opaque ids only): who closed which empty duplicate, and which account kept everything.
+        await tx.query(`INSERT INTO admin_audit_events (tenant_id, at, actor, kind, outcome, target, detail) VALUES ($1,$2,'anonymous','ACCOUNT_DUPLICATE_RETIRED','OK',$3,$4)`,
+          [tenantId, now, accountId, JSON.stringify({ kept: keptBy ?? null })]);
+        return 'RETIRED' as const;
+      });
+    },
+    /**
+     * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: adds identities the person just linked to this account's own Privy user through FloFi's confirmed
+     * link (account-service.ts `syncLinkedIdentities`). An identity another account holds is never moved (reported instead).
+     */
+    /**
+     * Adds the sign-in identities FloFi's own link confirmed: only methods Privy first verified at or after `from` (Unix seconds, the start of
+     * the link window) — or before `METHOD_CONFIRMATION_SINCE`, as at sign-in. A method linked at Privy before the window (outside FloFi) is
+     * never adopted: it is counted in `unconfirmed`.
+     */
+    async addLinkedIdentities(accountId: string, claims: readonly IdentityClaim[], from: number, now = new Date()): Promise<{ readonly added: number;
+      readonly heldElsewhere: number; readonly unconfirmed: number }> {
+      let added = 0, heldElsewhere = 0;
+      const candidates = claims.filter(claim => claim.kind !== 'privy' && validIdentity(claim));
+      const confirmed = candidates.filter(claim => grandfathered(claim) || (typeof claim.since === 'number' && Number.isFinite(from) && claim.since >= from));
+      const known = new Set((await db.query<{ kind: string; subject: string }>('SELECT kind, subject FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2',
+        [tenantId, accountId])).rows.map(row => `${row.kind}:${row.subject}`));
+      const unconfirmed = candidates.filter(claim => !confirmed.includes(claim) && !known.has(`${KIND_SQL[claim.kind]}:${claim.subject}`)).length;
+      for (const claim of confirmed.slice(0, 32)) {
+        const row = (await db.query<{ account_id: string; inserted: boolean }>(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label, created_at, last_used_at)
+          SELECT $1,$2,$3,$4,$5,$6,$6 WHERE EXISTS (SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$4)
+          ON CONFLICT (tenant_id, kind, subject) DO UPDATE SET label=COALESCE(EXCLUDED.label, flofi_account_identities.label)
+          WHERE flofi_account_identities.account_id=EXCLUDED.account_id RETURNING account_id, (xmax = 0) AS inserted`,
+        [tenantId, KIND_SQL[claim.kind], claim.subject, accountId, claim.label, now])).rows[0];
+        if (!row) heldElsewhere++; else if (row.inserted) added++;
+      }
+      return { added, heldElsewhere, unconfirmed };
+    },
+    /** Append-only evidence of a retirement step at the sign-in provider (opaque ids and closed codes only). */
+    async auditRetirement(retired: string, outcome: 'OK' | 'FAILED', code: string | null, now = new Date()): Promise<void> {
+      if (!ACCOUNT_ID.test(retired) || (code !== null && !/^[A-Z][A-Z0-9_]{2,80}$/.test(code))) fail('ACCOUNT_IDENTITY_INVALID');
+      await db.query(`INSERT INTO admin_audit_events (tenant_id, at, actor, kind, outcome, code, target) VALUES ($1,$2,'anonymous','ACCOUNT_DUPLICATE_PRIVY_RETIRED',$3,$4,$5)`,
+        [tenantId, now, outcome, code, retired]);
+    },
+    /** Deletes an account created moments ago that still holds nothing but its sign-in identities (a move that could not start). */
+    async discardEmptyAccount(accountId: string): Promise<boolean> {
+      if (!ACCOUNT_ID.test(accountId)) fail('ACCOUNT_IDENTITY_INVALID');
+      return db.transaction(async tx => {
+        if (!(await tx.query('SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2 FOR UPDATE', [tenantId, accountId])).rowCount) return false;
+        if ((await store.retirementBlockers(accountId, tx)).length) return false;
+        return (await tx.query('DELETE FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2', [tenantId, accountId])).rowCount === 1;
+      });
+    },
+    /** This account's sign-in identities (never the Privy user): kind, subject and label. */
+    async identities(accountId: string): Promise<IdentityClaim[]> {
+      return (await db.query<{ kind: string; subject: string; label: string | null }>(`SELECT kind, subject, label FROM flofi_account_identities WHERE tenant_id=$1
+        AND account_id=$2 AND kind <> 'PRIVY' ORDER BY created_at, kind`, [tenantId, accountId])).rows.map(row => ({ kind: KIND_OF[row.kind]!, subject: row.subject, label: row.label }));
     },
     /**
      * Deletes the account and, through the foreign keys, its identities, sessions and saved wallet metadata. Wallets at the provider
@@ -347,8 +525,9 @@ export function createAccountStore(db: Database, tenantId: string) {
       if (!updated.rowCount) fail('ACCOUNT_WALLET_NOT_FOUND');
     },
     /**
-     * Removes FloFi's association with a wallet. Nothing on-chain or at the provider changes. A wallet that is also a sign-in identity
-     * of this account stops being one too, unless it is the account's only way to sign in.
+     * Removes FloFi's association with a wallet. Nothing on-chain or at the provider changes. A wallet that is also a sign-in identity of this
+     * account stops being one too, unless it is the account's only way to sign in, or the account signs in through Privy: there the wallet stays a
+     * sign-in method of the account's Privy user, so it stays a sign-in identity here (BUILD-FLOFI-IDENTITY-RECOVERY-UX-001).
      */
     async removeWallet(accountId: string, ecosystem: WalletEcosystem, address: string): Promise<void> {
       await db.transaction(async tx => {
@@ -362,8 +541,11 @@ export function createAccountStore(db: Database, tenantId: string) {
         const removed = await tx.query('DELETE FROM flofi_account_wallets WHERE tenant_id=$1 AND account_id=$2 AND ecosystem=$3 AND address=$4',
           [tenantId, accountId, ecosystem === 'evm' ? 'EVM' : 'SOLANA', address]);
         if (!removed.rowCount) fail('ACCOUNT_WALLET_NOT_FOUND');
+        // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: an account linked to a Privy user keeps the wallet's sign-in identity: the wallet is still a sign-in
+        // method of that Privy user, and a returning account signs in only with identities it holds (`PrivySignIn.login`).
         await tx.query(`DELETE FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind=$3 AND subject=$4
-          AND (SELECT count(*) FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2) > 1`,
+          AND (SELECT count(*) FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2) > 1
+          AND NOT EXISTS (SELECT 1 FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind='PRIVY')`,
         [tenantId, accountId, ecosystem === 'evm' ? 'EIP155' : 'SOLANA', address]);
       });
     },

@@ -33,12 +33,34 @@ function LanguageSwitch() {
   </div>;
 }
 
-const CHIPS: readonly { label: string; x: string; y: string; color: string }[] = [
-  { label: 'Build', x: '18%', y: '10%', color: '#93A6FF' }, { label: 'Simulate', x: '64%', y: '8%', color: '#5FD4F5' },
-  { label: 'Copilot', x: '2%', y: '34%', color: '#F5B94A' }, { label: 'EVM', x: '82%', y: '32%', color: '#93A6FF' },
-  { label: 'Dashboard', x: '0%', y: '62%', color: '#A4ABB8' }, { label: 'Solana', x: '80%', y: '62%', color: '#9C7BFF' },
-  { label: 'AI agents (MCP)', x: '14%', y: '86%', color: '#4ADE80' }, { label: 'Execute', x: '62%', y: '88%', color: '#2343D9' },
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-03): each capability around the account carries its own mark. FloFi line icons (the app's own
+ * navigation geometry where one exists) drawn in the chip's colour; EVM and Solana use the repository's official brand marks
+ * (public/brand/crypto/sources.md), shown as images, never redrawn. Decorative: the orbit is aria-hidden and every chip keeps its text.
+ */
+type ChipMark = 'build' | 'simulate' | 'copilot' | 'evm' | 'dashboard' | 'solana' | 'agents' | 'execute';
+const CHIPS: readonly { label: string; mark: ChipMark; x: string; y: string; color: string }[] = [
+  { label: 'Build', mark: 'build', x: '18%', y: '10%', color: '#93A6FF' }, { label: 'Simulate', mark: 'simulate', x: '64%', y: '8%', color: '#5FD4F5' },
+  { label: 'Copilot', mark: 'copilot', x: '2%', y: '34%', color: '#F5B94A' }, { label: 'EVM', mark: 'evm', x: '82%', y: '32%', color: '#93A6FF' },
+  { label: 'Dashboard', mark: 'dashboard', x: '0%', y: '62%', color: '#A4ABB8' }, { label: 'Solana', mark: 'solana', x: '80%', y: '62%', color: '#9C7BFF' },
+  { label: 'AI agents (MCP)', mark: 'agents', x: '14%', y: '86%', color: '#4ADE80' }, { label: 'Execute', mark: 'execute', x: '62%', y: '88%', color: '#7C93FF' },
 ];
+const MOBILE_CHIPS: readonly ChipMark[] = ['evm', 'solana', 'copilot', 'agents'];
+const MOBILE_LABEL: Readonly<Partial<Record<ChipMark, string>>> = { evm: 'EVM', solana: 'Solana', copilot: 'Copilot', agents: 'AI agents (MCP)' };
+const LINE: Readonly<Record<Exclude<ChipMark, 'evm' | 'solana'>, ReactNode>> = {
+  build: <><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v7a3.5 3.5 0 0 0 3.5 3.5h4M14 5.5h7m-3-3 3 3-3 3"/></>,
+  simulate: <path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>,
+  copilot: <><path d="M12 3.5 13.9 9 19.5 11l-5.6 2-1.9 5.5-1.9-5.5L4.5 11l5.6-2Z"/><path d="M19 3v3m-1.5-1.5h3"/></>,
+  dashboard: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
+  agents: <><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M2 12h2m16 0h2M9 16h6"/><path d="M9 11v1m6-1v1"/></>,
+  execute: <><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5Z"/></>,
+};
+function ChipIcon({ mark }: { mark: ChipMark }) {
+  if (mark === 'evm') return <img className={`${styles.chipMark} ${styles.chipMarkEvm}`} src="/brand/crypto/ethereum.svg" alt="" width={14} height={14}/>;
+  if (mark === 'solana') return <img className={styles.chipMark} src="/brand/crypto/solana.svg" alt="" width={14} height={14}/>;
+  return <svg className={styles.chipMark} viewBox="0 0 24 24" width={14} height={14} fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden="true">{LINE[mark]}</svg>;
+}
 type Slide = 'account' | 'wallets' | 'review';
 const SLIDES: readonly Slide[] = ['account', 'wallets', 'review'];
 const SLIDE_TEXT: Readonly<Record<Slide, { title: string; body: string }>> = {
@@ -60,7 +82,11 @@ function Showcase({ initial }: { initial: Slide }) {
   return <aside className={styles.showcase} aria-label={t('About FloFi accounts')} onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
     onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
     {slide === 'account' ? <div className={styles.orbit} aria-hidden="true">
-      {CHIPS.map(chip => <span key={chip.label} className={styles.chip} style={{ left: chip.x, top: chip.y, ['--chip' as string]: chip.color }}>{t(chip.label)}</span>)}
+      <svg className={styles.orbitRings} viewBox="0 0 540 400" preserveAspectRatio="none" aria-hidden="true">
+        <ellipse cx="270" cy="200" rx="250" ry="178"/><ellipse className={styles.orbitTrack} cx="270" cy="200" rx="178" ry="128"/>
+      </svg>
+      {CHIPS.map(chip => <span key={chip.label} className={styles.chip} style={{ left: chip.x, top: chip.y, ['--chip' as string]: chip.color }}>
+        <ChipIcon mark={chip.mark}/>{t(chip.label)}</span>)}
       <div className={styles.orbitCore}><img src="/brand/flofi-droplet-wave-dark.svg" alt=""/><small>FLOFI</small><strong>{t('Your account')}</strong><span>{t('One account for FloFi')}</span></div>
     </div> : slide === 'wallets' ? <div className={styles.preview} aria-hidden="true">
       <div className={styles.previewCard}><small>EVM</small><p>{t('FloFi wallet · Generated')}</p><p><code>0x7a3…e91c</code></p></div>
@@ -92,7 +118,8 @@ export function AccountShell({ children, showcase = 'account', start = false }: 
         <div className={styles.controls}><LanguageSwitch/><ThemeToggle/></div>
       </div>
       <div className={styles.mobileBrand} aria-hidden="true"><strong>{t(SLIDE_TEXT[showcase].title)}</strong><span>{t('One account for FloFi')}</span>
-        <div className={styles.mobileChips}>{['EVM', 'Solana', 'Copilot', 'AI agents (MCP)'].map(label => <span key={label} className={styles.chip}>{t(label)}</span>)}</div></div>
+        <div className={styles.mobileChips}>{MOBILE_CHIPS.map(mark => <span key={mark} className={styles.chip}
+          style={{ ['--chip' as string]: CHIPS.find(chip => chip.mark === mark)!.color }}><ChipIcon mark={mark}/>{t(MOBILE_LABEL[mark]!)}</span>)}</div></div>
       <div className={`${styles.content}${start ? ` ${styles.contentStart}` : ''}`}>{children}</div>
     </main>
     <Showcase initial={showcase}/>

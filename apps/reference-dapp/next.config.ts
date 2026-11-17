@@ -48,7 +48,8 @@ const config: NextConfig = {
     return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: `connect-src 'self' ${privyConnect}` }, { key: 'X-Content-Type-Options', value: 'nosniff' }] },
       { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive },
       // BUILD-FLOFI-AUTH-WALLETS-001: sign-in, wallet onboarding and Credentials (wallet import/export) are never framed by another site.
-      ...['/login', '/onboarding', '/onboarding/:path*', '/app/credentials'].map(source => ({ source, headers: [{ key: 'X-Frame-Options', value: 'DENY' },
+      // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: Sign-in methods (linking, duplicate-account move) too.
+      ...['/login', '/onboarding', '/onboarding/:path*', '/app/credentials', '/account/sign-in-methods'].map(source => ({ source, headers: [{ key: 'X-Frame-Options', value: 'DENY' },
         { key: 'Content-Security-Policy', value: `connect-src 'self' ${privyConnect}; frame-ancestors 'none'` }, { key: 'Referrer-Policy', value: 'no-referrer' },
         // BUILD-FLOFI-PRIVY-UX-001: never kept in a cache, so Back after Disconnect cannot show a signed-in page again.
         { key: 'Cache-Control', value: 'no-store' }] })),
@@ -69,6 +70,8 @@ export default config;
  * This is type-only. It does not install or polyfill URLPattern and has no
  * runtime effect. Remove and re-review it when Next, TypeScript, or Node type
  * versions change.
+ * Re-reviewed on next@16.4.6 (BUILD UX POLISH 004): its declarations
+ * (dist/server/web/spec-extension/url-pattern.d.ts) still reference both names.
  */
 declare global {
   type URLPatternInput = string | URLPatternInit;

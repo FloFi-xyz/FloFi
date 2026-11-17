@@ -65,6 +65,7 @@ export const TEMPLATE_DEVIATIONS: readonly string[] = Object.freeze([
   'Email 6 v4 follows Dayane’s approved invited-guest copy (BUILD-FLOFI-FLIGHT-EMAIL6-CONSOLE-FIX-001); v1–v3 remain historical renderers.',
   'Emails 4a and 4b show the real card image (the 1200 × 630 card picture) in place of the drawn card block.',
   'Email 6 v5 and Email 3 v3 follow the 13/11 boarding canvas: no weekday in Email 6 (preheader, step 1), its Boarding panel reads OPEN (PT: ABERTO, like the Email 3 Gate panel), and Email 3 v3 carries the team-approved launch copy (preheader, two opening paragraphs, "what you can try today" checked against the mainnet capability matrix, small-amounts reminder, feedback request). ACCESS_REQUESTED keeps its v2 copy. The English copy mirrors the Portuguese change.',
+  'Boarding recovery (BUILD-FLOFI-IDENTITY-RECOVERY-UX-001): a request for a link and a code from an address that already boarded is answered, as an essential ACCESS_REQUESTED email (trigger access_recovery), with the sign-in method of the account that holds the pass, never a link or code. New copy: needs the team\'s confirmation.',
   'Version 2 follows BUILD-FLOFI-FLIGHT-LAUNCH-ADMIN-001: linked-wallet return access in Email 3, @ in Email 4a, official card after the first route in Email 6, Portuguese interface labels and boarding-card footers. Portuguese copy follows section 04 of the supplied Flight FloFi.html; unsupported route-limit and automatic-sign-in promises remain omitted.',
 ]);
 
@@ -380,6 +381,43 @@ export function renderEmail(input: TemplateInput, ctx: EmailContext): RenderedEm
     }
   }
 }
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (P0): the answer to "send me a link and a code" for an address that ALREADY boarded. Recorded in the outbox
+ * as the essential ACCESS_REQUESTED template with trigger `access_recovery` (no schema change); rendered here, never through the access email.
+ * It carries NO link, code or token and authorizes nothing: it only tells the address's owner which sign-in method opens the FloFi account
+ * that holds the boarding pass, and how to add another method to that same account. New copy: needs the team's confirmation (TEMPLATE_DEVIATIONS).
+ */
+export type RecoveryMethod = { readonly kind: 'wallet' | 'solana' | 'google' | 'apple' | 'email'; readonly hint: string | null };
+export type RecoveryInput = { readonly seat: { readonly founding: boolean; readonly label: string } | null; readonly methods: readonly RecoveryMethod[] };
+const METHOD_NAME: Readonly<Record<RecoveryMethod['kind'], Readonly<Record<EmailLanguage, string>>>> = {
+  wallet: { EN: 'Web3 wallet', PT: 'Carteira Web3' }, solana: { EN: 'Solana wallet', PT: 'Carteira Solana' }, google: { EN: 'Google', PT: 'Google' },
+  apple: { EN: 'Apple', PT: 'Apple' }, email: { EN: 'Email code', PT: 'Código por e-mail' },
+};
+export function renderAccessRecovery(input: RecoveryInput, ctx: EmailContext): RenderedEmail {
+  const PT = ctx.language === 'PT', login = `${ctx.origin}/login`;
+  if (input.methods.length > 8 || input.methods.some(method => !METHOD_NAME[method.kind] || (method.hint !== null && !/^[\w.*+@…-]{1,80}$/u.test(method.hint))))
+    throw new Error('EMAIL_TEMPLATE_INPUT_INVALID');
+  const subject = PT ? 'Você já embarcou no Flight FloFi ✈️' : 'You already boarded Flight FloFi ✈️';
+  const preheader = PT ? 'Entre com o mesmo método que você usou para embarcar.' : 'Sign in with the method you boarded with.';
+  const seat = input.seat ? input.seat.founding ? (PT ? `, como Founding Member ${input.seat.label}` : `, as Founding Member ${input.seat.label}`)
+    : (PT ? `, como passageiro (assento ${input.seat.label})` : `, as a passenger (seat ${input.seat.label})`) : '';
+  const intro = PT ? `Este e-mail já embarcou no Flight FloFi${seat}. Seu cartão de embarque está na conta FloFi que entra com:`
+    : `This email address already boarded Flight FloFi${seat}. Your boarding pass is on the FloFi account that signs in with:`;
+  const unknown = PT ? 'O mesmo método de login que você usou quando embarcou.' : 'The same sign-in method you used when you boarded.';
+  const methods = input.methods.map(method => `${METHOD_NAME[method.kind][ctx.language]}${method.hint ? ` · ${method.hint}` : ''}`);
+  const next = PT ? 'Entre com esse método em flofi.xyz/login. Para usar também outro método (como o Google) com a mesma conta, abra Métodos de login depois de entrar e vincule-o lá.'
+    : 'Sign in with that method at flofi.xyz/login. To also use another sign-in method (like Google) with the same account, open Sign-in methods after signing in and link it there.';
+  const safety = PT ? 'Este e-mail não é um link de acesso e não dá acesso a nada sozinho. Não pediu? Pode ignorar.'
+    : 'This email is not a sign-in link and grants no access by itself. Didn’t ask for it? You can ignore it.';
+  const rows = [label(PT ? 'Entre com' : 'Sign in with') + (methods.length ? methods.map(text => `<div style="padding:4px 0 0;font-family:${MONO};font-weight:500;font-size:15px;color:${C.navy}">${e(text)}</div>`).join('')
+    : `<div style="font-family:${SANS};font-size:16px;color:${C.navy}">${e(unknown)}</div>`)];
+  const body = h1(PT ? 'Você já ' : 'You already ', PT ? 'embarcou.' : 'boarded.') + p(e(intro)) + panel(rows) + p(e(next)) + button(login, PT ? 'Entrar na FloFi →' : 'Sign in to FloFi →')
+    + small(e(safety));
+  const reason = FOOTER[ctx.language].access;
+  return { subject, preheader, html: layout(ctx, { subject, preheader, band: PT ? 'Flight FloFi · Seu embarque' : 'Flight FloFi · Your boarding', pose: 'welcome', body, reason }),
+    text: plain([subject, intro, ...(methods.length ? methods : [unknown]), next, `${PT ? 'Entrar' : 'Sign in'}: ${login}`, safety], ctx, reason) };
+}
+
 /** HTML fragments of the copy as plain text. */
 function strip(html: string): string {
   return html.replace(/<br\s*\/?>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
