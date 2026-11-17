@@ -11,6 +11,8 @@ export const portugueseIdentityRecovery: Readonly<Record<string, string>> = {
   'That sign-in method already opens another FloFi account, so it was not added. Nothing was merged or moved.':
     'Esse método de login já abre outra conta FloFi, então não foi adicionado. Nada foi unido ou movido.',
   'Linked. You can now sign in with it.': 'Vinculado. Agora você pode entrar com ele.',
+  // Authentication UX & Login Regression Fix (item 6): the step after a link, and after closing a duplicate.
+  'Continue to my account': 'Continuar para minha conta',
   'Nothing new was linked.': 'Nada novo foi vinculado.',
   'A sign-in method was linked at Privy before FloFi asked, so it was not added and does not open this account.': 'Um método de login foi vinculado na Privy antes de a FloFi pedir, então não foi adicionado e não abre esta conta.',
   'One FloFi account, several ways in. Every method you add opens this same account; adding one approves nothing and moves no funds.':

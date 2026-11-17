@@ -1015,6 +1015,188 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects one acc
     .toEqual([{ trigger: 'access_recovery', template_version: 100 }]);
 });
 
+/**
+ * Authentication UX & Login Regression Fix (item 6), in closed beta and in EN and PT: a person who boarded with a Web3 wallet is signed in
+ * with Google in a separate (empty) account and lands on "You boarded with another sign-in." The page keeps its board panel and mascot and
+ * offers ONE action, "Continue to my account"; help (the boarded method, the method by email) stays closed until asked for, with no email
+ * or 6-digit code field and no beta explanation by default. Continue proves the boarded account (its own sign-in), asks once to close the
+ * empty duplicate, then offers only the link of the closed method; the person ends in the boarded account with the pass and access it had,
+ * Google opens that same account afterwards, and no step loops back to sign-in.
+ */
+if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a boarded person signed in another way: one Continue to my account, help on request, one account (EN and PT)', async ({ browser }) => {
+  test.setTimeout(420_000);
+  const L = {
+    EN: { create: 'Create a separate account', skip: 'Skip for now', title: 'You boarded with another sign-in.', continue: 'Continue to my account',
+      help: 'Need help signing in?', boardedMethod: 'Sign in with the method I boarded with', emailLabel: 'Your boarding email',
+      send: 'Email me my sign-in method', sent: 'Check your inbox. If this email is on the list, we sent what you need to sign in.',
+      move: 'Sign in to the account that keeps everything', wallet: 'Web3 Wallet', confirm: 'Close the duplicate account?',
+      understand: 'I understand the duplicate account will be closed for good.', close: 'Close it and continue', closed: 'The duplicate account is closed.',
+      linkGoogle: 'Link Google', linked: 'Linked. You can now sign in with it.', methods: 'Sign-in methods', addMethod: 'Add a sign-in method' },
+    PT: { create: 'Criar uma conta separada', skip: 'Pular por enquanto', title: 'Você embarcou com outro login.', continue: 'Continuar para minha conta',
+      send: 'Enviar meu método de login', sent: 'Confira sua caixa de entrada. Se este e-mail estiver na lista, enviamos o que você precisa para entrar.',
+      help: 'Precisa de ajuda para entrar?', boardedMethod: 'Entrar com o método que usei para embarcar', emailLabel: 'Seu e-mail de embarque',
+      move: 'Entre na conta que fica com tudo', wallet: 'Carteira Web3', confirm: 'Fechar a conta duplicada?',
+      understand: 'Entendo que a conta duplicada será fechada de vez.', close: 'Fechar e continuar', closed: 'A conta duplicada foi fechada.',
+      linkGoogle: 'Vincular Google', linked: 'Vinculado. Agora você pode entrar com ele.', methods: 'Métodos de login', addMethod: 'Adicionar um método de login' },
+  } as const;
+  const post = (p: Page, path: string, data: object) => p.evaluate(async ({ path, data }) => {
+    const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    return { status: response.status, body: await response.text() };
+  }, { path, data });
+  const contextIn = async (language: 'EN' | 'PT') => {
+    const context = await browser.newContext({ baseURL: E2E_APP_ORIGIN, storageState: returningVisitor(E2E_APP_ORIGIN) });
+    await at(context, BOARDING);
+    await context.addCookies([{ name: 'flofi_language', value: language, url: E2E_APP_ORIGIN }]);
+    return context;
+  };
+  for (const language of ['EN', 'PT'] as const) {
+    const t = L[language], tag = `${language.toLowerCase()}-${run}`;
+    const owner = `boarded-${tag}@gmail.com`, wallet = `0x${randomBytes(20).toString('hex')}`, google = `boarded-g-${tag}`;
+    // The person boards with a Web3 wallet (listed address, proven by an emailed code, Board now): list claim, beta access and beta wallet.
+    await query(`INSERT INTO flight_list_entries (tenant_id, entry_id, email, flight, language, notice) VALUES ('default', $1, $2, 'FIRST', 'EN', '2026-11-05')`,
+      [`fle_${randomBytes(16).toString('hex')}`, owner]);
+    const first = await contextIn(language);
+    let main: string;
+    try {
+      const page = await first.newPage();
+      await privy(page, { wallet: { address: wallet } });
+      await page.goto('/login?returnTo=%2Fboard');
+      await page.getByRole('button', { name: t.wallet, exact: true }).click();
+      await expect(page).toHaveURL('/board');
+      const { code } = await accessEmail(owner);
+      expect((await post(page, '/api/board/access/code', { email: owner, code })).status).toBe(200);
+      expect((await post(page, '/api/board/board', {})).status).toBe(200);
+      main = (await query<{ account_id: string }>(`SELECT account_id FROM flofi_account_identities WHERE kind = 'EIP155' AND subject = $1`, [wallet]))[0]!.account_id;
+    } finally { await first.close(); }
+    // Everything the boarded account holds (every table a retirement checks, its list entry and its sign-in identities other than the Google
+    // the recovery adds): unchanged by the whole recovery, and again after Google opens it.
+    const holdings = async () => {
+      const rows: unknown[] = [];
+      for (const sql of [
+        `SELECT to_jsonb(t) AS row FROM flofi_account_wallets t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flofi_account_recipients t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_passes t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_invites t WHERE redeemed_by = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_access_claims t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_list_entries t WHERE entry_id IN (SELECT entry_id FROM flight_access_claims WHERE account_id = $1) ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_beta_grants t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_beta_wallets t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_beta_mcp_accounts t WHERE flofi_account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT to_jsonb(t) AS row FROM flight_simulations t WHERE account_id = $1 ORDER BY to_jsonb(t)::text`,
+        `SELECT kind, subject FROM flofi_account_identities WHERE account_id = $1 AND kind <> 'GOOGLE' ORDER BY kind, subject`,
+      ]) rows.push(await query(sql, [main]));
+      return rows;
+    };
+    const before = await holdings();
+    // The list claim and beta access exist (the state the recovery must keep).
+    expect(await query(`SELECT count(*)::int AS n FROM flight_access_claims WHERE account_id = $1`, [main])).toEqual([{ n: 1 }]);
+
+    // Later, Google (same address) in a separate, empty account: /board says where the person boarded, with one action.
+    const later = await contextIn(language);
+    try {
+      const page = await later.newPage();
+      await privy(page, { google, googleEmail: owner, wallet: { address: wallet }, link: { google, googleEmail: owner } });
+      await page.goto('/login?returnTo=%2Fboard');
+      await page.getByRole('button', { name: 'Google', exact: true }).click();
+      await page.locator('[data-existing-account="true"]').getByRole('button', { name: t.create }).click();
+      await expect(page).toHaveURL(/\/onboarding\/wallets$/);
+      await page.getByRole('button', { name: t.skip }).click();
+      await expect(page).toHaveURL('/board');
+      const duplicate = (await query<{ account_id: string }>(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google]))[0]!.account_id;
+      expect(duplicate).not.toBe(main);
+      const top = hero(page);
+      await expect(top.locator('[data-boarded-elsewhere="true"]')).toBeVisible();
+      await expect(top.getByRole('heading', { level: 1 })).toHaveText(t.title);
+      // The identity is preserved: the board panel, the mascot, the page's own styles.
+      await expect(flaps(top, language === 'EN' ? 'OTHER LOGIN' : 'OUTRO LOGIN')).toBeVisible();
+      await expect(top.locator('img[src="/brand/flight/gota-safety.svg"]')).toBeVisible();
+      // One main action; help is secondary and closed; no email, code or beta explanation by default.
+      await expect(top.getByRole('button', { name: t.continue })).toHaveCount(1);
+      await expect(top.locator('[data-boarded-elsewhere="true"] :is(a, button)[class*="btn"]:visible')).toHaveCount(1);
+      await expect(top.getByRole('button', { name: t.help })).toHaveAttribute('aria-expanded', 'false');
+      await expect(top.locator('input:visible')).toHaveCount(0);
+      await expect(top).not.toContainText(/6-digit|6 dígitos|beta/i);
+      await fitsPhones(page);
+      await shot(page, `account-recovery-board-${language}`);
+      // Help on request: the boarded method and the method by email (an email field only now, never a code field).
+      await top.getByRole('button', { name: t.help }).click();
+      await expect(top.getByRole('button', { name: t.help })).toHaveAttribute('aria-expanded', 'true');
+      await expect(top.getByRole('link', { name: t.boardedMethod })).toBeVisible();
+      await expect(top.getByLabel(t.emailLabel, { exact: true })).toBeVisible();
+      await expect(top.locator('input[autocomplete="one-time-code"]')).toHaveCount(0);
+      await fitsPhones(page);
+      await shot(page, `account-recovery-help-${language}`);
+      // The answer reads the same for an unknown address and the boarded one (the server's answer is identical).
+      const answers: string[] = [];
+      for (const address of [`nobody-${tag}@flofi-e2e.test`, owner]) {
+        await top.getByLabel(t.emailLabel, { exact: true }).fill(address);
+        await top.getByRole('button', { name: t.send }).click();
+        const status = top.locator('[data-sign-in-help="true"] [role="status"]');
+        await expect(status).toHaveText(t.sent);
+        answers.push(await status.innerText());
+      }
+      expect(new Set(answers).size).toBe(1);
+      await top.getByRole('button', { name: t.help }).click();
+      await expect(top.locator('[data-sign-in-help="true"]')).toBeHidden();
+      // A "?continue=1" link this tab did not ask for starts nothing: the duplicate's session and the board stay as they are.
+      await page.goto('/board?continue=1');
+      await expect(page).toHaveURL('/board');
+      await expect(hero(page).getByRole('button', { name: t.continue })).toBeVisible();
+      expect(await query(`SELECT count(*)::int AS n FROM flofi_accounts WHERE account_id = $1`, [duplicate])).toEqual([{ n: 1 }]);
+
+      // Continue to my account: the boarded account proves itself with its own sign-in (nothing is linked before that).
+      await top.getByRole('button', { name: t.continue }).click();
+      await expect(page).toHaveURL(/\/login\?move=1$/);
+      await expect(page.locator('[data-sign-in-mode="move"]')).toContainText(t.move);
+      expect(await query(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google])).not.toEqual([{ account_id: main }]);
+      await page.getByRole('button', { name: t.wallet, exact: true }).click();
+      await expect(page).toHaveURL('/account/sign-in-methods');
+      // Only this step: the confirmation, never the full page (other methods, an email field, the duplicate section).
+      const confirm = page.locator('[data-move-confirm="true"]');
+      await expect(confirm).toContainText(t.confirm);
+      await expect(page.getByRole('heading', { name: t.addMethod })).toHaveCount(0);
+      await expect(page.locator('input[type="email"]')).toHaveCount(0);
+      await fitsPhones(page);
+      await shot(page, `account-recovery-confirm-${language}`);
+      await confirm.getByRole('checkbox', { name: t.understand }).check();
+      await confirm.getByRole('button', { name: t.close }).click();
+      const done = page.locator('[data-move-done="true"]');
+      await expect(done).toContainText(t.closed);
+      await expect(page.locator('#move-done')).toBeFocused();
+      // The duplicate is gone (it held nothing; nothing of it moved here) and its closure is audited against the boarded account.
+      expect(await query(`SELECT count(*)::int AS n FROM flofi_accounts WHERE account_id = $1`, [duplicate])).toEqual([{ n: 0 }]);
+      expect(await query(`SELECT count(*)::int AS n FROM admin_audit_events WHERE kind = 'ACCOUNT_DUPLICATE_RETIRED' AND detail->>'kept' = $1`, [main])).toEqual([{ n: 1 }]);
+      // Then only the link of the method that was closed.
+      await expect(done.getByRole('button', { name: t.linkGoogle })).toBeVisible();
+      await expect(page.locator('input[type="email"]')).toHaveCount(0);
+      await done.getByRole('button', { name: t.linkGoogle }).click();
+      await expect(page.getByRole('status').filter({ hasText: t.linked })).toBeVisible();
+      await expect(done.getByRole('list', { name: t.methods })).toContainText('Google');
+      await shot(page, `account-recovery-linked-${language}`);
+      expect(await query(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google])).toEqual([{ account_id: main }]);
+      // Into the boarded account, with the access it had (nothing lost, nothing granted to the closed duplicate).
+      await done.getByRole('link', { name: t.continue }).click();
+      await expect(page).toHaveURL('/app');
+      await expect(page.locator('.app-shell')).toBeVisible();
+      expect(await holdings()).toEqual(before);
+    } finally { await later.close(); }
+
+    // Google now opens that same boarded account, straight into the product: one account, no loop back to sign-in.
+    const again = await contextIn(language);
+    try {
+      const page = await again.newPage();
+      await privy(page, { google, googleEmail: owner });
+      await page.goto('/login');
+      await page.getByRole('button', { name: 'Google', exact: true }).click();
+      await expect(page).toHaveURL('/app');
+      await expect(page.locator('.app-shell')).toBeVisible();
+      await page.goto('/board');
+      await expect(hero(page).locator('[data-boarded-elsewhere="true"]')).toHaveCount(0);
+      expect(await holdings()).toEqual(before);
+    } finally { await again.close(); }
+  }
+});
+
 if (process.env.FLOFI_FLIGHT_TEAM_E2E === 'MOCKED_LOOPBACK_ONLY') test('temporary team access uses public login, protects APIs and expires without campaign records', async ({ page, context }) => {
   test.setTimeout(180_000); // Multiple real login/session transitions and deep links in one isolated scenario.
   const accounts = process.env.FLOFI_FLIGHT_TEAM_ACCOUNTS!.split(',');

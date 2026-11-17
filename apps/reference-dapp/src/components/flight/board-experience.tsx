@@ -15,7 +15,8 @@ import Link from 'next/link';
 import { FLIGHT_BOARDING_KEY, FLIGHT_DRAFT_KEY, FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import type { FlightState } from '../../flight/http';
 import { boardOutcome } from '../../flight/board-arrival';
-import { accountSignOut } from '../../app/account-action';
+import { accountSignOut, startAccountMove } from '../../app/account-action';
+import { BOARDED_SIGN_IN, CONTINUE_MARKER, CONTINUE_PARAM, CONTINUE_REAUTH, continueStep } from '../../flight/account-continue';
 import { INVITE_CODE, type FlightAccess } from '../../flight/campaign';
 import type { FlightPass, OwnInvite } from '../../flight/store';
 import { useBoardChecking } from './board-frame';
@@ -234,6 +235,39 @@ function AccessForms({ copy, language, onClaimed, onBoard, intro = true }: { cop
   </div>;
 }
 
+/**
+ * Authentication UX & Login Regression Fix (item 6): "Need help signing in?" under "You boarded with another sign-in." — the method the
+ * person boarded with, and that method by email (never a link, a code or a token for a boarded address: see B5 of
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001). The public answer is the same for every address, so the text says only what may have happened.
+ */
+function SignInHelp({ copy, language, open, switchable, email }: { copy: FlightCopy; language: Language; open: boolean; switchable: boolean; email: boolean }) {
+  const t = copy.elsewhere, [address, setAddress] = useState(''), [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  async function request(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setMessage(null);
+    const answer = await post('/api/board/access/request', { email: address, language });
+    setBusy(false);
+    setMessage(answer.ok ? { ok: true, text: t.sent } : { ok: false, text: errorText(copy, answer.code) });
+  }
+  // Always in the page (the toggle's aria-controls target), hidden until asked for.
+  return <div id="flight-sign-in-help" className={styles.accessForms} data-sign-in-help="true" hidden={!open}>
+    {switchable && <div className={styles.ctaRow}><a className={`${styles.btn} ${styles.btnGhost}`} href={BOARDED_SIGN_IN}
+      onClick={event => { event.preventDefault(); void signOutTo(BOARDED_SIGN_IN); }}>{t.boardedMethod}</a></div>}
+    {email && <>
+      <p className={styles.small}>{t.helpEmail}</p>
+      <form onSubmit={request} className={styles.inviteForm} noValidate>
+        <label className={styles.srOnly} htmlFor="flight-recovery-email">{t.emailLabel}</label>
+        <input id="flight-recovery-email" type="email" autoComplete="email" inputMode="email" placeholder={copy.finalCall.email} value={address}
+          onChange={e => setAddress(e.target.value)}/>
+        <button className={`${styles.btn} ${styles.btnGhost}`} type="submit" disabled={busy || address.trim().length < 6}>{t.send}</button>
+      </form>
+      <p className={message?.ok ? styles.status : styles.srOnly} role="status">{message?.ok ? message.text : ''}</p>
+      {message && !message.ok && <p className={styles.error} role="alert">{message.text}</p>}
+    </>}
+  </div>;
+}
+
 function calendarFile(opensAt: number, language: Language): string {
   const stamp = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const summary = language === 'PT' ? 'Flight FloFi: embarque do seu grupo' : 'Flight FloFi: your group boards';
@@ -354,6 +388,28 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
   const [focusMessage, setFocusMessage] = useState(false);
   useEffect(() => { if (focusMessage) { document.getElementById('flight-board-message')?.focus(); setFocusMessage(false); } }, [focusMessage]);
 
+  // Authentication UX & Login Regression Fix (item 6): "Continue to my account" (src/flight/account-continue.ts decides the next step).
+  const [continuing, setContinuing] = useState(false), [separate, setSeparate] = useState(false), [showHelp, setShowHelp] = useState(false);
+  const [focusSeparate, setFocusSeparate] = useState(false);
+  useEffect(() => { if (focusSeparate) { document.getElementById('flight-elsewhere-body')?.focus(); setFocusSeparate(false); } }, [focusSeparate]);
+  const continueToAccount = useCallback(async (returning: boolean) => {
+    const t = copy.elsewhere;
+    setContinuing(true); setMessage(null);
+    const result = await startAccountMove().catch(() => ({ ok: false as const, code: 'ACCOUNT_MOVE_FAILED' }));
+    const step = continueStep(result, returning);
+    // A full navigation: the next page (sign-in) starts its own document and ends any leftover provider session.
+    if (step.kind === 'NAVIGATE') {
+      if (step.to === CONTINUE_REAUTH) storage()?.setItem(CONTINUE_MARKER, '1');
+      window.location.assign(step.to);
+      return;
+    }
+    setContinuing(false);
+    // The button the person pressed is replaced: focus the explanation so the change is read out.
+    if (step.kind === 'SEPARATE') { setSeparate(true); setFocusSeparate(true); return; }
+    setMessage(step.kind === 'REAUTH_AGAIN' ? t.reauth : t.failed);
+    setFocusMessage(true);
+  }, [copy]);
+
   const refresh = useCallback(async () => {
     try {
       const response = await fetch('/api/board/state', { cache: 'no-store' });
@@ -415,6 +471,17 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     else if (checks) void checkAccess();
   }, []); // Only on arrival.
 
+  // Back from the identity confirmation "Continue to my account" asked for: continue once (the parameter and this tab's marker are removed
+  // first, never retried). Without the marker this tab set before leaving, a `?continue=1` link starts nothing.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has(CONTINUE_PARAM)) return;
+    window.history.replaceState(null, '', '/board');
+    const asked = storage()?.getItem(CONTINUE_MARKER) === '1';
+    storage()?.removeItem(CONTINUE_MARKER);
+    if (asked && initial?.me.boardedElsewhere && initial.me.flight?.access.kind === 'not_listed') void continueToAccount(true);
+  }, []); // Only on arrival.
+
   /** "Board now": the hero's button and (HOTFIX-P1-FLIGHT-ACCESS) the one offered after a second-email refusal behave the same. */
   const boardNow = () => {
     report('board_click');
@@ -453,6 +520,8 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
     </div>;
   } else if (personal?.kind === 'not_listed' && state.me.boardedElsewhere) {
     // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: this email boarded with another FloFi account (another sign-in method): never "not on the list".
+    // Authentication UX & Login Regression Fix (item 6): one action, "Continue to my account"; identity confirmation, the boarded account's
+    // sign-in and the help (another method, the method by email) appear only when needed or asked for (src/flight/account-continue.ts).
     const t = copy.elsewhere;
     hero = <div className={`${styles.heroText} ${styles.onDark}`} data-boarded-elsewhere="true">
       <div className={styles.board}>
@@ -461,13 +530,22 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
         <span className={styles.boardLabel}>{t.labels[1]}</span><Flaps text={t.board[2]} cells={12}/>
       </div>
       <h1 id="flight-hero-title" tabIndex={-1}>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
-      <p className={styles.heroBody}>{t.body}</p>
+      <p id="flight-elsewhere-body" tabIndex={-1} className={styles.heroBody}>{separate ? t.separate : t.body}</p>
       <div className={styles.ctaRow}>
-        <a className={`${styles.btn} ${styles.btnBlue}`} href="/account/sign-in-methods">{t.move}</a>
-        <a className={`${styles.btn} ${styles.btnGhost}`} href="/login?returnTo=%2Fboard" onClick={event => { event.preventDefault(); void signOutTo('/login?returnTo=%2Fboard'); }}>{t.switch}</a>
+        {separate
+          ? <a className={`${styles.btn} ${styles.btnBlue}`} href={BOARDED_SIGN_IN} data-boarded-sign-in="true"
+            onClick={event => { event.preventDefault(); void signOutTo(BOARDED_SIGN_IN); }}>{t.boardedMethod} <span aria-hidden="true">→</span></a>
+          // aria-disabled, not disabled: focus stays on the button while it works, and its new name is read out.
+          : <button type="button" className={`${styles.btn} ${styles.btnBlue}`} aria-disabled={continuing} aria-busy={continuing} data-continue-account="true"
+            onClick={() => { if (!continuing) void continueToAccount(false); }}>{continuing ? t.working : t.continue} <span aria-hidden="true">→</span></button>}
       </div>
-      {state.phase === 'BOARDING' && <><p className={styles.small}>{t.email}</p><AccessForms copy={copy} language={language} onClaimed={claimed}/></>}
-      {message && <p className={styles.error} role="alert">{message}</p>}
+      <p className={styles.srOnly} role="status">{continuing ? t.working : ''}</p>
+      {message && <p id="flight-board-message" tabIndex={-1} className={styles.error} role="alert">{message}</p>}
+      {(!separate || state.phase === 'BOARDING') && <>
+        <p className={styles.small}><button type="button" className={styles.linkButton} aria-expanded={showHelp} aria-controls="flight-sign-in-help"
+          onClick={() => setShowHelp(value => !value)}>{t.help}</button></p>
+        <SignInHelp copy={copy} language={language} open={showHelp} switchable={!separate} email={state.phase === 'BOARDING'}/>
+      </>}
     </div>;
   } else if (personal?.kind === 'not_listed') {
     const t = copy.notListed;

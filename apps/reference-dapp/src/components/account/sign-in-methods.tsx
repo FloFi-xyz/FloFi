@@ -36,7 +36,7 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
   const privy = useFloFiPrivy();
   const [state, setState] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
-  const [understood, setUnderstood] = useState(false), [moved, setMoved] = useState<readonly string[] | null>(null);
+  const [understood, setUnderstood] = useState(false), [moved, setMoved] = useState<readonly string[] | null>(null), [linked, setLinked] = useState(false);
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [codeSent, setCodeSent] = useState(false);
   const emailId = useId(), codeId = useId(), syncing = useRef(false);
   const reload = useCallback(async () => setState(await signInMethodsState()), []);
@@ -49,6 +49,7 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
       const token = await privy.getAccessToken();
       const result = token ? await syncSignInMethods(token) : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
       if (!result.ok) { setError(result.code); return; }
+      if (result.value.added) setLinked(true);
       setNotice(result.value.heldElsewhere ? t('That sign-in method already opens another FloFi account, so it was not added. Nothing was merged or moved.')
         : result.value.added ? t('Linked. You can now sign in with it.')
           : result.value.unconfirmed ? t('A sign-in method was linked at Privy before FloFi asked, so it was not added and does not open this account.')
@@ -111,17 +112,37 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
     if (!result.ok) { setError(result.code); return; }
     setMoved(result.value.kinds);
     await reload();
+    // The confirmation the person pressed is gone: focus the result so it is read out.
+    document.getElementById('move-done')?.focus();
   }
   async function cancelMove() { await cancelAccountMove(); await reload(); }
 
   const canLink = state.signedIn && state.privy && state.fresh && Boolean(privy?.linkWithOAuth);
   const move = state.move;
   const kinds = (list: readonly string[]) => list.map(kind => t(METHOD_KIND_LABEL[kind] ?? kind)).join(', ');
+  // Authentication UX & Login Regression Fix (item 6): while a duplicate is being closed, and right after, the page shows only that step and
+  // then only the link of the method that was closed (no other method, no email field unless that method is an email). The full page returns
+  // once the step is finished or abandoned.
+  const focused = Boolean(move) || moved !== null;
+  const linkGoogleNow = moved?.includes('google') && canLink, linkEmailNow = moved?.includes('email') && canLink && state.emailLink && Boolean(privy?.sendLinkEmailCode);
+  const emailForms = !codeSent ? <form className={styles.form} onSubmit={event => void sendEmailCode(event)} aria-label={t('Link an email')}>
+    <label htmlFor={emailId}>{t('Email address')}</label>
+    <input id={emailId} className={styles.input} type="email" inputMode="email" autoComplete="email" required maxLength={254} value={email}
+      onChange={event => setEmail(event.currentTarget.value)}/>
+    <button type="submit" className={styles.primary} disabled={busy !== null || !email.includes('@')}>{t(busy === 'email' ? 'Sending code…' : 'Email me a code')}</button>
+  </form> : <form className={styles.form} onSubmit={event => void verifyEmailCode(event)} aria-label={t('Enter your code')}>
+    <label htmlFor={codeId}>{t('Enter the 6-digit code we sent to {0}', email.trim())}</label>
+    <input id={codeId} className={`${styles.input} ${styles.code}`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required
+      value={code} onChange={event => setCode(event.currentTarget.value.replace(/\D/g, '').slice(0, 6))}/>
+    <button type="submit" className={styles.primary} disabled={busy !== null || code.length !== 6}>{t(busy === 'email' ? 'Verifying…' : 'Link this email')}</button>
+  </form>;
   return <AccountShell showcase="account" start>
     <h1 className={styles.title}>{t('Sign-in methods')}</h1>
     <p className={styles.lead}>{t('One FloFi account, several ways in. Every method you add opens this same account; adding one approves nothing and moves no funds.')}</p>
     {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
     {notice && <p className={styles.status} role="status">{notice}</p>}
+    {/* A link that came back from the provider's page (a new document): the next step is the account itself. */}
+    {linked && !moved && <div className={styles.row}><a className={styles.primary} href="/app" data-continue-account="true">{t('Continue to my account')}</a></div>}
 
     {move && !state.signedIn && <section className={styles.banner} aria-labelledby="move-signin">
       <strong id="move-signin">{t('Sign in to the account that keeps everything')}</strong>
@@ -149,12 +170,28 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
           {t(busy === 'confirm' ? 'Closing…' : 'Close it and continue')}</button>
           <button type="button" className={styles.textLink} onClick={() => void cancelMove()}>{t('Cancel')}</button></div></>}
     </section>}
-    {moved && <section className={styles.banner} role="status" aria-labelledby="move-done" data-move-done="true">
-      <strong id="move-done">{t('The duplicate account is closed.')}</strong>
-      <p>{t('Now link {0} to this account so it opens it.', kinds(moved))}</p>
+    {moved && <section className={styles.banner} aria-labelledby="move-done" data-move-done="true">
+      <strong id="move-done" tabIndex={-1}>{t('The duplicate account is closed.')}</strong>
+      {linked ? <>
+        <MethodList methods={state.methods} label={t('Sign-in methods')}/>
+        <div className={styles.row}><a className={styles.primary} href="/app" data-continue-account="true">{t('Continue to my account')}</a></div>
+      </> : <>
+        {!state.fresh ? <><p>{t('Now link {0} to this account so it opens it.', kinds(moved))}</p>
+          <p><a className={styles.primary} href={REAUTH}>{t('Confirm it’s you')}</a></p></>
+          : linkGoogleNow || linkEmailNow ? <>
+            <p>{t('Now link {0} to this account so it opens it.', kinds(moved))}</p>
+            {linkGoogleNow && <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Link Google')}</button>}
+            {linkEmailNow && emailForms}
+          </>
+          // Nothing this deployment can link here: say so, and the account is the next step (never an instruction with nothing to press).
+          : <p className={styles.small}>{t(moved.includes('email') && canLink ? 'Linking an email is not available on this deployment yet.' : 'Adding sign-in methods is not available here yet.')}</p>}
+        <div className={styles.row}>{state.fresh && !linkGoogleNow && !linkEmailNow
+          ? <a className={styles.primary} href="/app" data-continue-account="true">{t('Continue to my account')}</a>
+          : <a className={styles.textLink} href="/app">{t('Not now')}</a>}</div>
+      </>}
     </section>}
 
-    {state.signedIn && <section aria-labelledby="methods-title" className={styles.form}>
+    {state.signedIn && !focused && <section aria-labelledby="methods-title" className={styles.form}>
       <h2 id="methods-title" className={styles.subtitle}>{t('This account signs in with')}</h2>
       <MethodList methods={state.methods} label={t('Sign-in methods')}/>
       <h2 className={styles.subtitle}>{t('Add a sign-in method')}</h2>
@@ -162,17 +199,7 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
         <a className={styles.primary} href={REAUTH}>{t('Confirm it’s you')}</a></div>
         : !canLink ? <p className={styles.small}>{t('Adding sign-in methods is not available here yet.')}</p> : <>
           <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Link Google')}</button>
-          {state.emailLink && privy?.sendLinkEmailCode && (!codeSent ? <form className={styles.form} onSubmit={event => void sendEmailCode(event)} aria-label={t('Link an email')}>
-            <label htmlFor={emailId}>{t('Email address')}</label>
-            <input id={emailId} className={styles.input} type="email" inputMode="email" autoComplete="email" required maxLength={254} value={email}
-              onChange={event => setEmail(event.currentTarget.value)}/>
-            <button type="submit" className={styles.primary} disabled={busy !== null || !email.includes('@')}>{t(busy === 'email' ? 'Sending code…' : 'Email me a code')}</button>
-          </form> : <form className={styles.form} onSubmit={event => void verifyEmailCode(event)} aria-label={t('Enter your code')}>
-            <label htmlFor={codeId}>{t('Enter the 6-digit code we sent to {0}', email.trim())}</label>
-            <input id={codeId} className={`${styles.input} ${styles.code}`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required
-              value={code} onChange={event => setCode(event.currentTarget.value.replace(/\D/g, '').slice(0, 6))}/>
-            <button type="submit" className={styles.primary} disabled={busy !== null || code.length !== 6}>{t(busy === 'email' ? 'Verifying…' : 'Link this email')}</button>
-          </form>)}
+          {state.emailLink && privy?.sendLinkEmailCode && emailForms}
           {!state.emailLink && <p className={styles.small}>{t('Linking an email is not available on this deployment yet.')}</p>}
         </>}
       <p className={styles.small}>{t('A sign-in method that already opens another FloFi account cannot be added here. If that account is an empty duplicate, sign in with that method and choose to bring it to your main account.')}</p>

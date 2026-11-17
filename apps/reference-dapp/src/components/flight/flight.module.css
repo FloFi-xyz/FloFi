@@ -242,6 +242,8 @@
   .heroArt{position:relative;right:auto;bottom:auto;align-self:flex-end;width:140px;height:150px}
   .heroArt img.mascot{width:140px}
   .pill .btn{white-space:normal;text-align:center}
+  /* Authentication UX & Login Regression Fix (item 6): the recovery hero's one action wraps instead of running off a phone (PT is longer). */
+  [data-boarded-elsewhere] .btn{white-space:normal;text-align:center;max-width:100%}
   .board .flaps{flex-wrap:wrap;row-gap:4px}
   .pill{flex-wrap:wrap;border-radius:28px;padding:14px 16px}
   .pill .btn{width:100%}
@@ -279,6 +281,7 @@
 .accessPage h1{font-weight:700;font-size:clamp(44px,6vw,88px);line-height:.98;letter-spacing:-.05em;max-width:900px}
 .accessPage .small a{color:#fff}
 .accessForms{display:flex;flex-direction:column;gap:12px;max-width:720px}
+.accessForms[hidden]{display:none}
 @media (max-width:640px){.cardPublic{padding-bottom:64px}.accessPage{padding:48px var(--gutter)}}
 .cardPublic .passStage{padding-bottom:56px}
 .passControls .btnGhost{color:var(--navy)!important;border-color:var(--navy)}

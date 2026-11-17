@@ -44,14 +44,29 @@ describe('/board first paint', () => {
 describe('BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: signed in with another method than the one the person boarded with', () => {
   const notListed = (boardedElsewhere: boolean): FlightState => ({ ok: true, now: 0, phase: 'BOARDING', closesAt: 0, boardingOpensAt: 0, foundingOpen: true, departures: [],
     me: { signedIn: true, hasEmail: true, accessPending: false, flight: { access: { kind: 'not_listed' }, pass: null, invites: [], listed: null }, ...boardedElsewhere ? { boardedElsewhere } : {} } });
-  it('never says "Not on the list" to a person whose address boarded with another account, and offers the way back', () => {
-    const html = renderToStaticMarkup(<BoardPage language="EN" state={notListed(true)}/>);
-    expect(html).toContain('data-boarded-elsewhere="true"');
-    expect(html).toContain('You boarded with ');
-    expect(html).not.toContain('Not on the list.');
-    expect(html).toContain('href="/account/sign-in-methods"');
-    expect(html).toContain('Bring this sign-in to my boarded account');
-    expect(renderToStaticMarkup(<BoardPage language="PT" state={notListed(true)}/>)).toContain('Você embarcou com ');
+  it('never says "Not on the list" to a person whose address boarded with another account, and offers one way back', () => {
+    for (const [language, title, action, help] of [['EN', 'You boarded with ', 'Continue to my account', 'Need help signing in?'],
+      ['PT', 'Você embarcou com ', 'Continuar para minha conta', 'Precisa de ajuda para entrar?']] as const) {
+      const html = renderToStaticMarkup(<BoardPage language={language} state={notListed(true)}/>);
+      const hero = html.slice(html.indexOf('data-boarded-elsewhere="true"'), html.lastIndexOf('/brand/flight/gota-safety.svg'));
+      expect(hero, language).toContain(title);
+      expect(html, language).not.toMatch(/Not on the list\.|Fora da lista\./);
+      // Authentication UX & Login Regression Fix (item 6): the board panel stays; one main action; help is secondary and closed.
+      expect(hero.match(/data-continue-account="true"/g), language).toHaveLength(1);
+      expect(hero, language).toContain(action);
+      expect(hero, language).toContain(`aria-expanded="false" aria-controls="flight-sign-in-help">${help}</button>`);
+      // The help is in the page (the toggle's target) but hidden; what shows by default has no email, no 6-digit code, no beta explanation
+      // and no second main button.
+      expect(hero, language).toMatch(/<div id="flight-sign-in-help" [^>]*data-sign-in-help="true" hidden="">/);
+      const shown = hero.slice(0, hero.indexOf('id="flight-sign-in-help"'));
+      expect(shown, language).not.toMatch(/type="email"|one-time-code|000000|6-digit|6 dígitos|beta/i);
+      expect(hero, language).not.toMatch(/one-time-code|000000|6-digit|6 dígitos|beta/i);
+      expect(hero, language).not.toMatch(/Bring this sign-in|Trazer este login|Sign in with another method|Entrar com outro método/);
+      expect(shown.match(/<(a|button) [^>]*class="[^"]*btn[^"]*"/g), language).toHaveLength(1);
+      // The mascot and the departures-board flaps are preserved.
+      expect(html, language).toContain('/brand/flight/gota-safety.svg');
+      expect(hero, language).toContain(language === 'EN' ? 'aria-label="OTHER LOGIN"' : 'aria-label="OUTRO LOGIN"');
+    }
   });
   it('keeps "Not on the list" otherwise, with a quiet link for a signed-in person who boarded another way', () => {
     const html = renderToStaticMarkup(<BoardPage language="EN" state={notListed(false)}/>);
