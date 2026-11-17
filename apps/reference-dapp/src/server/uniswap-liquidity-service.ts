@@ -114,6 +114,13 @@ const ACTIVE: readonly UniswapAttemptState[] = ['PREPARED', 'SUBMITTING', 'SUBMI
 export const UNISWAP_OBSERVABLE: readonly UniswapAttemptState[] = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 const TERMINAL: readonly UniswapAttemptState[] = ['CANCELLED', 'NOT_FOUND', 'CONFIRMED', 'REVERTED', 'RECONCILIATION_REQUIRED'];
 const REFUSALS = [4001, 4100, 4200];
+/**
+ * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a wallet request is authorized and prepared only while its Review stays valid for the
+ * wallet handoff that follows (the browser's wallet-session checks, up to 4 s of nonce re-reads, and the handoff's own fresh reads). A Review
+ * with less time left counts as expired for preparing: the owner refreshes it (confirmed steps are kept) and authorizes the updated Review.
+ * This never extends a Review: the handoff still refuses at the exact expiry.
+ */
+export const UNISWAP_REVIEW_HANDOFF_MARGIN_MS = 10_000;
 const staleReviewError = (code: string) => /^UNISWAP_(?:.*_REVIEW_REQUIRED|UNEXPECTED_CONTRACT|DEPLOYMENT_MISMATCH|POOL_MISMATCH|TOKEN_MISMATCH|FEE_TIER_UNSUPPORTED|SIMULATION_(?:MINT|APPROVAL)_REVERTED)$/.test(code) ||
   /^(STOCK_[A-Z_]+|CATALOG_ASSET_IDENTITY_CHANGED)$/.test(code);
 /**
@@ -740,7 +747,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       if (!sameWorkflow(workflow, record.workflow)) fail('UNISWAP_SEMANTIC_REVISION_CHANGED');
       if (record.verdict !== 'PENDING' || active(record)) fail('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
       if (commitment !== record.review.commitment) fail('UNISWAP_REVIEW_CHANGED');
-      if (now().getTime() >= Date.parse(record.review.expiresAt)) fail('UNISWAP_REVIEW_EXPIRED');
+      if (now().getTime() >= Date.parse(record.review.expiresAt) - UNISWAP_REVIEW_HANDOFF_MARGIN_MS) fail('UNISWAP_REVIEW_EXPIRED');
       return save({ ...record, authorization: commitment, error: null });
     }); },
     async invalidate(id: string): Promise<UniswapLiquidityRecord> { return locked(id, async () => {
@@ -760,7 +767,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       if (record.verdict !== 'PENDING') fail(record.verdict === 'RECONCILED' ? 'UNISWAP_POSITION_ALREADY_MINTED' : 'UNISWAP_RECONCILIATION_REQUIRED');
       if (active(record)) fail('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
       if (record.authorization !== record.review.commitment) fail('UNISWAP_REVIEW_REQUIRED');
-      if (now().getTime() >= Date.parse(record.review.expiresAt)) fail('UNISWAP_REVIEW_EXPIRED');
+      // EXEC-01: the Review must still cover this prepare and the handoff after it, both now and (below) once the fresh public reads are done.
+      // An expired Review is recorded on the run (the owner sees why it stopped) and never prepares another wallet request; confirmed steps stay.
+      const expiring = () => now().getTime() >= Date.parse(record.review.expiresAt) - UNISWAP_REVIEW_HANDOFF_MARGIN_MS;
+      const expired = async (): Promise<never> => { if (record.error !== 'UNISWAP_REVIEW_EXPIRED') await save({ ...record, error: 'UNISWAP_REVIEW_EXPIRED' }); return fail('UNISWAP_REVIEW_EXPIRED'); };
+      if (expiring()) return expired();
       const R = runtimeOfRecord(record), profile = R.profile;
       const review = record.review;
       const changed = async (code = 'UNISWAP_STATE_CHANGED_REVIEW_REQUIRED'): Promise<never> => { await save({ ...record, authorization: null, error: code }); return fail(code); };
@@ -797,6 +808,9 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
       try { await R.assertRequestFees(review, tx, tag(state.block.number)); }
       catch (cause) { if (cause instanceof Error && /^UNISWAP_.*_REVIEW_REQUIRED$/.test(cause.message)) return changed(cause.message); throw cause; }
+      // EXEC-01 (incident balp-ae7ef0ce…): the reads above take seconds on a public network; the Review is checked again before anything is
+      // reserved or persisted, so no wallet request is ever prepared under a Review that expired meanwhile.
+      if (expiring()) return expired();
       await R.reserveNonce(record, attemptId, nonce);
       const attempt: UniswapAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: nonce.toString(),
         preparedAtBlock: state.block.number, createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null,
@@ -807,8 +821,16 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     /** The handoff boundary: SUBMITTING is durable before the browser calls the wallet. */
     async handoff(id: string): Promise<UniswapLiquidityRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
-      if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment ||
-          now().getTime() >= Date.parse(record.review.expiresAt)) fail('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
+      if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment) fail('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
+      // EXEC-01: a Review that expired before the wallet was asked is named as such (not a refusal or a cancellation by the owner). The attempt is
+      // provably unsent (the wallet is only called after SUBMITTING is durable), so it is concluded here; the run continues after a refreshed,
+      // re-authorized Review, without repeating any confirmed step.
+      const expired = async (): Promise<never> => {
+        await save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_REVIEW_EXPIRED' }, { ...attempt, state: 'CANCELLED', note: 'UNISWAP_REVIEW_EXPIRED' }));
+        return fail('UNISWAP_REVIEW_EXPIRED');
+      };
+      const lapsed = () => now().getTime() >= Date.parse(record.review.expiresAt);
+      if (lapsed()) return expired();
       const R = runtimeOfRecord(record), { rpc } = R;
       try {
         const state = await R.readState(record.owner, await assetsOfRecord(record));
@@ -829,6 +851,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
       // The reserved nonce must still be the one the wallet assigns next (the owner's other pending transactions come before it).
       if (pending !== BigInt(attempt.nonce) || latest > pending) fail('UNISWAP_NONCE_CHANGED');
+      // The fresh reads above take seconds: the Review must still be valid at the moment the wallet request becomes durable.
+      if (lapsed()) return expired();
       return save(replaceAttempt(record, { ...attempt, state: 'SUBMITTING' }));
     }); },
     /** Wallet result. A hash is recorded once (a repeated identical report is a no-op); ambiguity is observed, never resent. */

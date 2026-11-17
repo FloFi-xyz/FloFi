@@ -14,6 +14,9 @@ export type ExecutionResult = {
   networks: string[];
 };
 
+/** EXEC-01: a Review that expired before the next wallet request, after confirmed steps (kept) or before any (nothing sent). */
+export const REVIEW_EXPIRED_CONTINUE = 'Your Review expired before FloFi asked your wallet for the next request, so nothing more was sent. The confirmed steps stay recorded and are not repeated. Simulate again to refresh the Review of the same run, then authorize it to continue.';
+export const REVIEW_EXPIRED_NOTHING_SENT = 'Your Review expired before FloFi asked your wallet, so nothing was sent. Simulate again to refresh the Review, then authorize it to continue.';
 export function projectExecutionResult(progress: ExecutionLifecycle | null | undefined): ExecutionResult | null {
   if (!progress?.started || progress.state === 'idle' || progress.state === 'active') return null;
   const completed = progress.completed, total = progress.steps.length;
@@ -41,9 +44,13 @@ export function projectExecutionResult(progress: ExecutionLifecycle | null | und
   const approvalOnly = confirmedApproval && !confirmedActions && incomplete.length > 0 && incomplete.every(operation => !operation.hash && ['not-submitted', 'failed', 'cancelled'].includes(operation.state));
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a request FloFi stopped before the wallet because the wallet's transaction number disagreed says so.
   const nonceReason = incomplete.map(operation => operation.state === 'not-submitted' && !operation.hash && operation.reason ? walletNonceMessage(operation.reason) : null).find(Boolean) ?? null;
+  // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a request stopped because its Review expired before the wallet was asked says exactly
+  // that, and how to continue — never "declined" or "cancelled", which would describe something the owner did.
+  const expiredReview = incomplete.some(operation => operation.state === 'not-submitted' && !operation.hash && /_(?:REVIEW_EXPIRED|WALLET_HANDOFF_NOT_AUTHORIZED)$/.test(operation.reason ?? ''));
   return {
     label: completed > 0 || confirmedActions || confirmedApproval ? 'Execution partially completed' : declined || nothingSent ? 'Transaction not submitted' : definitiveFailure ? 'Execution failed' : 'Execution needs attention',
-    message: approvalOnly ? 'An earlier approval is confirmed. The remaining request did not complete. Network costs and token allowance may remain.'
+    message: expiredReview ? (completed > 0 || confirmedActions || confirmedApproval ? REVIEW_EXPIRED_CONTINUE : REVIEW_EXPIRED_NOTHING_SENT)
+      : approvalOnly ? 'An earlier approval is confirmed. The remaining request did not complete. Network costs and token allowance may remain.'
       : declined ? 'Wallet confirmation was declined. Earlier confirmed requests remain recorded.' : definitiveFailure ? 'A recorded action failed. Earlier confirmed actions remain recorded.'
       : nothingSent ? nonceReason ?? 'No transaction from this run was sent, so nothing reached the network. The step result explains why.' : 'The run has an incomplete action. Any confirmed actions remain recorded.',
     tone: 'attention', completed, total, countLabel, networks,

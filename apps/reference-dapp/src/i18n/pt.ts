@@ -63,11 +63,14 @@ import { portugueseGasKora } from './pt-gas-kora';
 import { portugueseGasZeroEx } from './pt-gas-zerox';
 import { portugueseSavedRecipients } from './pt-saved-recipients';
 import { portugueseCopilotAssist } from './pt-copilot-assist';
+import { portugueseLiquidityExecution } from './pt-liquidity-execution';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
   ...portugueseSavedRecipients,
   ...portugueseCopilotAssist,
+  // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): new keys only.
+  ...portugueseLiquidityExecution,
   ...portugueseCatalogReliability,
   ...portugueseWorkflowExecution,
   // BUILD-FLOFI-BUILDER-UX-002: new keys only, first so every existing translation of a shared word still wins.

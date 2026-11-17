@@ -248,9 +248,16 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
       const nodeId = composerActions(workflow)[0]?.nodeId ?? '', chain = `eip155:${r.review.chainId}`;
-      for (const call of r.review.calls) {
-        const a = r.attempts.filter(a => a.step === call.step).at(-1), approval = call.step !== 'MINT';
-        add(call.step, nodeId, approval ? `Approve ${call.step === 'APPROVE_TOKEN0' ? r.review.token0.symbol : r.review.token1.symbol}` : 'Add liquidity', chain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), approval, simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
+      // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a Review refreshed in place lists only the requests still needed (an approval whose
+      // allowance now suffices is not asked again), so the run's confirmed steps are kept from its attempts, as for lending; a never-sent
+      // attempt of an earlier Review (superseded by that refresh) does not hold its step, as for the bridges.
+      const attempts = r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)); superseded ||= attempts.length < r.attempts.length;
+      const order = ['APPROVE_TOKEN0', 'APPROVE_TOKEN1', 'MINT'] as const;
+      const steps = order.filter(step => r.review.calls.some(c => c.step === step) || attempts.some(a => a.step === step && a.state === 'CONFIRMED'));
+      for (const step of steps) {
+        const a = attempts.filter(a => a.step === step).at(-1), approval = step !== 'MINT';
+        add(step, nodeId, approval ? `Approve ${step === 'APPROVE_TOKEN0' ? r.review.token0.symbol : r.review.token1.symbol}` : 'Add liquidity', chain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), approval, simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
+        notSubmittedReason(operations.at(-1)!, a);
       } break;
     }
     case 'solana-swap': case 'solana-pool': case 'solana-transfer': {
@@ -377,7 +384,8 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   // own request is said to be not sent yet, so a landed approval is never read as the completed action nor as "nothing was sent".
   const approvalLanded = Boolean(active?.operations.some(op => op.approval && /^Approve\b/.test(op.title) && op.state === 'confirmed') && active?.operations.some(op => !op.approval && op.wallet && op.state === 'waiting'));
   const message = lifecycleState === 'uncertain' ? 'The current request cannot be confirmed or ruled out. No transaction is repeated.' : lifecycleState === 'attention' ? 'The current step could not complete. Any confirmed actions remain recorded. Nothing is retried automatically.' : lifecycleState === 'complete' ? planUnavailable ? 'The saved requests are confirmed. Original workflow details remain unavailable.' : 'All workflow actions are confirmed in the current execution record.'
-    : lifecycleState === 'idle' ? superseded ? 'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.'
+    : lifecycleState === 'idle' ? superseded ? source.kind === 'uniswap-pool' ? 'An earlier wallet request was not sent and the Review was refreshed. Check the updated Review and authorize it again.'
+      : 'An earlier wallet request was not sent and the route was re-quoted. Review the fresh quote and authorize it again.'
       : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.'
     : deliveryObserved ? DESTINATION_OBSERVED_MESSAGE
     : approvalLanded ? `${completed} of ${steps.length} actions completed. The token approval is confirmed on-chain; it only allows the spend. The action itself has not been sent yet and needs its own confirmation in your wallet.`

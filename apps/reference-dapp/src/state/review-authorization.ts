@@ -16,6 +16,7 @@ import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
 import { useSolanaComposition } from './solana-composition-store';
 import { useUniswapLiquidity } from './uniswap-liquidity-store';
+import { uniswapReviewAuthorizable } from '../domain/uniswap-liquidity-continuation';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
 import { useSolanaTransfer } from './solana-transfer-store';
 import { useAcross } from './across-store';
@@ -220,7 +221,9 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
     }
     case 'uniswap-pool': {
       const r = uniswapPool.record, q = r?.review; if (!r || !q) break;
-      attach(`${r.id}:${q.commitment}`, null, null, r.authorization === q.commitment, uniswapPool.review, !uniswapPool.busy && !uniswapPool.retired && !r.attempts.length, q);
+      // EXEC-01: a Review refreshed in place after a confirmed approval (or after a request refused before the wallet) is authorized again
+      // explicitly; its earlier attempts stay on the run.
+      attach(`${r.id}:${q.commitment}`, null, null, r.authorization === q.commitment, uniswapPool.review, !uniswapPool.busy && !uniswapPool.retired && uniswapReviewAuthorizable(r), q);
       authorization.owner = q.owner; authorization.chain = `eip155:${q.chainId}`;
       for (const [token, max] of [[q.token0, q.intent.amount0Max], [q.token1, q.intent.amount1Max]] as const) {
         authorization.tokens.push({ ...token, chain: authorization.chain });

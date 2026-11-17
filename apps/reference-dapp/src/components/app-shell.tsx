@@ -2,6 +2,7 @@
 'use client';
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
+import { uniswapRefreshInPlace } from '../domain/uniswap-liquidity-continuation';
 import { flightWalletAccess } from '../app/flight-wallet-action';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
@@ -415,7 +416,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : simulationSource.kind === 'transfer' ? transfer.simulate
     : simulationSource.kind === 'lending' ? lending.simulate
     : simulationSource.kind === 'supply' ? supply.simulate
-    : simulationSource.kind === 'uniswap-pool' ? uniswapLiquidity.simulate
+    // EXEC-01: "Simulate again" of a started liquidity run (an approval landed, nothing pending) refreshes that same run in place: the
+    // confirmed approval is kept and only the remaining requests are reviewed again. A run with nothing landed starts a new simulation.
+    : simulationSource.kind === 'uniswap-pool' ? () => uniswapRefreshInPlace(uniswapLiquidity.record, uniswapLiquidity.retired) ? uniswapLiquidity.refresh() : uniswapLiquidity.simulate()
     : simulationSource.kind === 'solana-composition' ? solanaComposition.simulate
     : simulationSource.kind === 'solana-pool' ? () => solanaLiquidity.simulate(solanaReview?.operation ?? 'OPEN', solanaReview?.operation === 'OPEN' ? undefined : solanaReview?.accounts.positionMint, solanaReview?.partBps ?? undefined)
     : simulationSource.kind === 'solana-swap' ? jupiter.simulate
