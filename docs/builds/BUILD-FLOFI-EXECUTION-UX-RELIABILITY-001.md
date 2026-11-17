@@ -152,6 +152,43 @@ the operator's text "Operator's reason (as typed; not verified evidence)"; the g
 | Engineering correction | Presentation and synchronization only; finality untouched | Diagnostics only; recovery rules untouched |
 | Records modified | None | None |
 
+## Specialist reviews (read-only, Claude Code twins; 9 of 19 domains)
+
+`agent_guard.py impact` selected all 19 domains because the coverage contract changed (a governance file). Reviewed by the primary owners and the
+required cross-cutting domains: flofi-workflow, flofi-security, flofi-bridge, flofi-chat, flofi-frontend-ux, flofi-wallet-execution,
+flofi-admin-analytics, flofi-data-privacy, flofi-infrastructure-ci (at most three at a time). Not run, with reason — automations, channels,
+developers, lending, liquidity, mcp, payments-billing, protocol-integrations, swap, transfer-payments: no source of theirs changed; they were selected
+only as dependents of the shared lifecycle presentation, whose state machine, fingerprints and gates are unchanged (confirmed by flofi-workflow and
+flofi-wallet-execution).
+
+No critical or high finding. Every medium/low finding was checked against the code; fixed with a regression test unless noted:
+
+| Finding | Resolution |
+| --- | --- |
+| "Did it work?" said reconciled for a run only confirmed (workflow, M) | "Yes" only with `runReconciled` and the whole workflow finished; otherwise "confirmed, still reconciling" or where the workflow stands |
+| Sync could refuse a terminal record or RECOVERY_REQUIRED → DESTINATION_OBSERVED (workflow + bridge, M) | Terminal records always adopted; RECOVERY_REQUIRED ranked before DESTINATION_OBSERVED; universal source `final` counted; never another owner's read |
+| "No signature needed" with later steps left (workflow, chat, M) | Outcome, receipt and signature answers name the next step's own confirmation; request-being-prepared and open-Continue cases |
+| History route: no origin check, wallet in URL (security, L) | `x-flofi-account` header (never in URL/logs); non-`same-origin` browser fetches refused; 500 for non-access failures |
+| Listed-summary cache written in render, outliving delete/sign-out (frontend, privacy, L) | Written where listings arrive; replaced/extended/emptied on delete, history change elsewhere, non-connected listing, signed-out or not-found record, wallet-proof change |
+| Admin wording could read as non-execution (admin, M) | "This check only read the chain: it submitted, repeated and settled nothing"; outcome stays UNKNOWN (not success, failure or non-execution); neutral temporary wording; three-way stop label |
+| Coverage contract had no suites for the new tests; route duration; test flake (infra, L) | Four suites registered; `maxDuration = 300` like the Dashboard pages; 8 s CI budget and answered-read counting |
+| Embedded-approval isolation of the GET route (infra, privacy, conditional) | Not reachable: `/mcp/approve` renders no Dashboard; first-party session cookies are Strict/Lax (never sent from a cross-site frame) and the embedded cookie is never read on `/api/*`, so a framed call fails closed |
+
+Accepted and recorded, not changed: the settlement sync is one Server Action (`status`, a durable read) per 15 s while a bridge settles in a visible
+tab; the worker's 600 s backoff cap can add up to ~10 min after finality (follow-up above); Server Actions removed from `dashboard-action.ts` fail
+closed in tabs opened before the deploy until reload (no Skew Protection evidence available here); the review-time preview of a stable nonce
+conflict could warn before resuming (pre-existing, outside diagnostics scope).
+
+## Local validation (this container: pinned Node 24.21.0, pnpm 11.22.0, headless shell 1243, anvil 1.8.3, PostgreSQL 16 loopback)
+
+- `pnpm check` (typecheck, lint, build, schema drift, 9 169 unit tests): pass. `python3 scripts/governance_lite.py` + 21 self-tests, all 278
+  `scripts/test_*.py`, `agent_guard.py check`: pass.
+- PostgreSQL suites: 887 pass; `forward-compatibility.pg.test.ts` fails locally only because it pins PostgreSQL 18 NOT NULL constraint modelling
+  (CI runs 18.6; no migration or schema changed here) — not counted as a pass.
+- Browser: `execution-continuity` 38/38 (chat and Assistant journeys); new UX-01 and PERF-01 specs pass and fail on the pre-fix code; `default-product`
+  172 pass, 7 visual-baseline comparisons differ by glyph anti-aliasing only (this container's font rendering; CI is the authority);
+  `workflow-acceptance` 6/6 (PERF-01 test included) and `admin-console` 9/9.
+
 ## C–E
 
 Certification, deployment, rollback references and scope compliance are recorded in the PR description and the final delivery report.
