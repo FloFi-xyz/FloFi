@@ -62,7 +62,18 @@ export type FloFiPrivy = {
   readonly signSolanaTransaction: (address: string, transaction: Uint8Array, review?: PrivyReview) => Promise<Uint8Array>;
   readonly signSolanaMessage: (address: string, message: Uint8Array) => Promise<Uint8Array>;
   readonly logout: () => Promise<void>;
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: link another sign-in method to the signed-in Privy user, on the Sign-in methods page only (the only page
+   * that completes a link return). Google navigates away and back; the outcome then arrives through `onLinkResult`. The email code links in
+   * place. Optional: a page or stand-in without them offers no linking. FloFi's server decides what was linked (`syncSignInMethods`).
+   */
+  readonly linkWithOAuth?: (provider: 'google') => Promise<void>;
+  readonly sendLinkEmailCode?: (email: string) => Promise<void>;
+  readonly linkWithEmailCode?: (code: string) => Promise<void>;
+  readonly onLinkResult?: (listener: (result: PrivyLinkResult) => void) => () => void;
 };
+/** The browser's hint about a link's outcome (never authority: the server's sync decides). */
+export type PrivyLinkResult = { readonly status: 'linked' } | { readonly status: 'error'; readonly code: string };
 
 const Context = createContext<FloFiPrivy | null>(null);
 /** The page's current FloFi Privy interface, for the wallet providers (they live outside React; src/wallet/flofi-privy-signer.ts). */
@@ -139,7 +150,14 @@ const PRIVY_CODES: readonly [RegExp, string][] = [
 ];
 /** A stable FloFi code for a Privy error (never the provider's own text, which could echo input). */
 export function privyErrorCode(cause: unknown, fallback = 'PRIVY_REQUEST_FAILED'): string {
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: Privy's own link codes, matched exactly before any wording (the error's data, which can name the
+  // other user, is never read or shown).
+  const code = cause instanceof Error || (cause && typeof cause === 'object') ? (cause as { privyErrorCode?: unknown }).privyErrorCode : cause;
+  if (code === 'linked_to_another_user' || code === 'account_transfer_required') return 'FLOFI_SIGN_IN_METHOD_HELD_ELSEWHERE';
+  if (code === 'cannot_link_more_of_type') return 'FLOFI_SIGN_IN_METHOD_ALREADY_LINKED';
   const text = cause instanceof Error ? `${cause.message} ${(cause as { privyErrorCode?: string }).privyErrorCode ?? ''}` : typeof cause === 'string' ? cause : '';
   if (/^[A-Z][A-Z0-9_]{2,80}$/.test(text.trim())) return text.trim();
+  if (/linked_to_another_user|account_transfer_required/.test(text)) return 'FLOFI_SIGN_IN_METHOD_HELD_ELSEWHERE';
+  if (/cannot_link_more_of_type/.test(text)) return 'FLOFI_SIGN_IN_METHOD_ALREADY_LINKED';
   return PRIVY_CODES.find(([pattern]) => pattern.test(text))?.[1] ?? fallback;
 }

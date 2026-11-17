@@ -3,6 +3,10 @@
  * This audit inventory is not a translation catalog and never changes product values. */
 export const preservedValues = new Set<string>([
   "Telegram",
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: sign-in provider and campaign names.
+  "Google",
+  "Apple",
+  "Flight FloFi",
   "Base USDC → Arbitrum USDC",
   "Base Sepolia",
   "Base",

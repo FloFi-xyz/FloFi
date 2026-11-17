@@ -45,6 +45,7 @@ import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { workflowSequence } from './workflow-sequence';
 import { networkCapabilityProfile } from './intelligence/capability-api';
 import { lookupAsset } from './intelligence/asset-resolution';
+import type { AwaitingAmount } from './amount-shortcuts';
 import { intelligenceCopy } from './intelligence/copy';
 import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } from './intelligence/goal-planner';
 import { lendingOffers } from './authoring-capabilities';
@@ -895,6 +896,35 @@ function actionFills(intent: CopilotIntentV2, missing: readonly string[], option
     if (patch) out.push({ label, fill: { kind: 'ACTION', patch } });
   }
   return out;
+}
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): FloFi's own open question when, and only when, it waits for the AMOUNT of one single action
+ * that spends a wallet balance (swap input, bridge, transfer, Aave supply) on a named network and asset, and nothing else is missing. Read from
+ * the structured draft (never from the question's wording). Null for a goal plan's amount or cap (a future output), a composition or sequence,
+ * a liquidity deposit, Borrow/Repay/Withdraw (not a wallet balance; Repay and Withdraw are partial-only) and a question the model asked.
+ */
+export function awaitingAmount(state: CopilotConversation): AwaitingAmount | null {
+  const draft = state.draft;
+  if (!draft || !draft.amountFill || draft.depositFill || draft.rangeHold || !draft.question || draft.intent.kind !== 'ACTION') return null;
+  if ((draft.expected ?? []).length !== 1 || draft.expected![0] !== 'amount' || draft.extras?.planned || draft.extras?.target) return null;
+  const action = draft.intent.action;
+  const spent = action.type === 'SWAP' ? { kind: 'SWAP' as const, asset: action.inputAsset, network: action.network }
+    : action.type === 'BRIDGE' ? { kind: 'BRIDGE' as const, asset: action.asset, network: action.sourceNetwork }
+      : action.type === 'TRANSFER' ? { kind: 'TRANSFER' as const, asset: action.asset, network: action.network }
+        : action.type === 'SUPPLY' ? { kind: 'SUPPLY' as const, asset: action.asset, network: action.network } : null;
+  if (!spent || !spent.asset || spent.asset === 'OTHER' || !spent.network || spent.network === 'OTHER') return null;
+  // FloFi's buttons for "which reading?" of a typed amount are the answer there: no balance shortcuts beside them.
+  if ((draft.shown ?? []).length) return null;
+  // The planners ask for the amount BEFORE they check the network and the asset, so both must already be the person's own (stated in their
+  // words, with an identity on that chain) or carried by FloFi itself; a value only the model wrote never selects a balance.
+  const fields = action.type === 'SWAP' ? { asset: 'inputAsset', network: 'network' } : action.type === 'BRIDGE' ? { asset: 'asset', network: 'sourceNetwork' }
+    : { asset: 'asset', network: 'network' };
+  const carried = new Set<string>(draft.extras?.carried ?? []), validated = draft.validated ?? [];
+  const settled = (field: string, value: string) => carried.has(field) || validated.some(entry => entry.step === 0 && entry.field === field && entry.value === value);
+  if (!settled(fields.network, spent.network) || !settled(fields.asset, spent.asset)) return null;
+  // Aave: only a reserve this market lists for supplying on that network (FloFi would otherwise refuse after the amount).
+  if (spent.kind === 'SUPPLY' && !lendingOffers('supply').some(offer => offer.network.copilot === spent.network && offer.asset.toLowerCase() === spent.asset!.toLowerCase())) return null;
+  return { field: 'amount', action: spent.kind, asset: spent.asset, network: spent.network as CopilotNetworkId, question: draft.question };
 }
 /** A reply that is only a number answers Flofi's amount question, when it has exactly one reading. */
 function bareAmount(text: string): string | null {

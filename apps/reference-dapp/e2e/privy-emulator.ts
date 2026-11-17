@@ -24,8 +24,8 @@ if (!/^[A-Za-z0-9]{10,64}$/.test(appId) || appSecret.length < 16) throw new Erro
 type Json = Record<string, unknown>;
 type Wallet = { readonly ecosystem: 'evm' | 'solana'; readonly address: string; readonly imported: boolean; readonly id: string; readonly evm?: Uint8Array; readonly solana?: KeyObject };
 type User = { readonly id: string; readonly linked: Json[]; readonly wallets: Wallet[] };
-const users = new Map<string, User>(), tokens = new Map<string, string>(), codes = new Set<string>();
-const stats = { signatures: 0, imports: 0, creations: 0, exports: 0, logins: 0 };
+const users = new Map<string, User>(), tokens = new Map<string, string>(), codes = new Set<string>(), frozen = new Set<string>();
+const stats = { signatures: 0, imports: 0, creations: 0, exports: 0, logins: 0, deletions: 0 };
 const signer = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const b64url = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -108,17 +108,45 @@ function holder(input: Json): User {
   const user = users.get(tokens.get(String(input.token)) ?? '');
   return user ?? fail('User must be authenticated');
 }
+/** A Privy-coded client error (like the SDK's `privyErrorCode`). */
+const coded = (message: string, code: string): never => { throw Object.assign(new Error(message), { status: 400, code }); };
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: linking another sign-in method to the signed-in user, as Privy does it — only with a Privy session, and
+ * refused when another user already holds the method (`linked_to_another_user`) or this user already has one of its type.
+ */
+function link(user: User, account: Json, match: (entry: Json) => boolean) {
+  if ([...users.values()].some(other => other !== user && other.linked.some(match))) coded('Account already linked to another user', 'linked_to_another_user');
+  if (user.linked.some(entry => entry.type === account.type)) coded('Cannot link more accounts of this type', 'cannot_link_more_of_type');
+  user.linked.push({ ...account, verified_at: now(), first_verified_at: now(), latest_verified_at: now() });
+}
 const walletOf = (user: User, address: unknown) => user.wallets.find(wallet => wallet.address === address || wallet.address === String(address).toLowerCase())
   ?? fail('Wallet not found for this user');
 
 const client: Readonly<Record<string, (input: Json) => unknown>> = {
+  link(input) {
+    const user = holder(input);
+    if (input.method === 'google') {
+      const subject = String(input.subject ?? '');
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(subject)) fail('OAuth link failed');
+      const address = typeof input.email === 'string' && /^[a-z0-9._+-]{1,64}@[a-z0-9.-]{1,64}$/.test(input.email) ? input.email : `${subject}@gmail.test`;
+      link(user, { type: 'google_oauth', subject, email: address, name: subject }, entry => entry.type === 'google_oauth' && entry.subject === subject);
+    } else if (input.method === 'email') {
+      const email = String(input.email ?? '').toLowerCase();
+      if (!codes.has(email) || input.code !== PRIVY_E2E_EMAIL_CODE) fail('Invalid code');
+      codes.delete(email);
+      link(user, { type: 'email', address: email }, entry => entry.type === 'email' && entry.address === email);
+    } else return fail('Unsupported link method');
+    return { user: clientUser(user) };
+  },
   login(input) {
     stats.logins++;
     let user: User;
     if (input.method === 'google') {
       const subject = String(input.subject ?? '');
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(subject)) fail('OAuth sign-in failed');
-      user = loginUser(account => account.type === 'google_oauth' && account.subject === subject, { type: 'google_oauth', subject, email: `${subject}@gmail.test`, name: subject });
+      // The Google account's address: the test may name it (e.g. a gmail.com address), else a test-only domain.
+      const address = typeof input.email === 'string' && /^[a-z0-9._+-]{1,64}@[a-z0-9.-]{1,64}$/.test(input.email) ? input.email : `${subject}@gmail.test`;
+      user = loginUser(account => account.type === 'google_oauth' && account.subject === subject, { type: 'google_oauth', subject, email: address, name: subject });
     } else if (input.method === 'email') {
       const email = String(input.email ?? '').toLowerCase();
       if (!codes.has(email) || input.code !== PRIVY_E2E_EMAIL_CODE) fail('Invalid code');
@@ -131,6 +159,8 @@ const client: Readonly<Record<string, (input: Json) => unknown>> = {
         { type: 'wallet', address: ethereum ? address : address, chain_type: ethereum ? 'ethereum' : 'solana', wallet_client: 'unknown', wallet_client_type: ethereum ? 'metamask' : 'phantom',
           connector_type: 'injected' });
     } else return fail('Unsupported login method');
+    // A frozen user cannot log in (Privy `freeze`).
+    if (frozen.has(user.id)) fail('User is frozen');
     return { token: accessToken(user.id), user: clientUser(user) };
   },
   'send-code'(input) {
@@ -174,11 +204,26 @@ createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === `/v1/apps/${appId}/jwks.json`) {
       return reply(response, 200, { keys: [{ ...signer.publicKey.export({ format: 'jwk' }), kid: 'e2e', alg: 'ES256', use: 'sig' }] });
     }
-    if (request.method === 'GET' && url.pathname.startsWith('/v1/users/')) {
+    if (url.pathname.startsWith('/v1/users/')) {
       const expected = `Basic ${Buffer.from(`${appId}:${appSecret}`).toString('base64')}`;
       if (request.headers.authorization !== expected || request.headers['privy-app-id'] !== appId) return reply(response, 401, { error: 'Invalid app credentials' });
-      const user = users.get(decodeURIComponent(url.pathname.slice('/v1/users/'.length)));
-      return user ? reply(response, 200, apiUser(user)) : reply(response, 404, { error: 'User not found' });
+      const [rawId = '', action = ''] = url.pathname.slice('/v1/users/'.length).split('/');
+      const id = decodeURIComponent(rawId), user = users.get(id);
+      if (!user) return reply(response, 404, { error: 'User not found' });
+      if (request.method === 'GET' && !action) return reply(response, 200, apiUser(user));
+      // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: freeze (block logins, revoke sessions), unfreeze and delete, as the official SDK calls them.
+      if (action === 'freeze' && (request.method === 'POST' || request.method === 'DELETE')) {
+        if (request.method === 'POST') { frozen.add(id); for (const [value, owner] of tokens) if (owner === id) tokens.delete(value); } else frozen.delete(id);
+        return reply(response, 200, { success: true });
+      }
+      if (request.method === 'DELETE' && !action) {
+        users.delete(id); frozen.delete(id);
+        for (const [value, owner] of tokens) if (owner === id) tokens.delete(value);
+        stats.deletions++;
+        response.writeHead(204).end();
+        return;
+      }
+      return reply(response, 404, { error: 'Not found' });
     }
     if (request.method === 'POST' && url.pathname.startsWith('/client/')) {
       const handler = client[url.pathname.slice('/client/'.length)];
@@ -199,11 +244,12 @@ createServer(async (request, response) => {
     }
     if (url.pathname === '/__e2e/user') {
       const user = [...users.values()].find(entry => entry.linked.some(account => account.subject === url.searchParams.get('google') || account.address === url.searchParams.get('email')));
-      return reply(response, 200, user ? { id: user.id, wallets: user.wallets.map(wallet => wallet.address), tokens: [...tokens.values()].filter(owner => owner === user.id).length } : null);
+      return reply(response, 200, user ? { id: user.id, wallets: user.wallets.map(wallet => wallet.address), tokens: [...tokens.values()].filter(owner => owner === user.id).length,
+        frozen: frozen.has(user.id), linked: user.linked.map(account => account.type) } : null);
     }
     return reply(response, 404, { error: 'Not found' });
   } catch (error) {
     const status = (error as { status?: number }).status ?? 500;
-    reply(response, status, { error: error instanceof Error ? error.message : 'Error' });
+    reply(response, status, { error: error instanceof Error ? error.message : 'Error', ...(error as { code?: string }).code ? { code: (error as { code?: string }).code } : {} });
   }
 }).listen(PRIVY_E2E_PORT, '127.0.0.1');

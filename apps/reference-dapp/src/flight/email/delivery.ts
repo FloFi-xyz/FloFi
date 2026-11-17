@@ -10,12 +10,13 @@
  */
 import type { Database, Logger } from '@defi-workflow-engine/cloud-runtime';
 import type { FlightCalendar } from '../campaign.ts';
-import { ACCESS_LINK_MS, addressHash, EMAIL_CODE_MS, REQUESTED_CODE_MS, unsubscribeTokenFor } from '../access.ts';
+import { ACCESS_LINK_MS, ACCESS_RECOVERY_VERSION, addressHash, EMAIL_CODE_MS, REQUESTED_CODE_MS, unsubscribeTokenFor } from '../access.ts';
 import type { AccessStore } from '../access-store.ts';
 import type { FlightStore } from '../store.ts';
 import type { EmailOutbox, EmailRow, Settlement } from './outbox.ts';
 import type { OutgoingEmail, ResendClient, SendOutcome } from './resend.ts';
-import { FLIGHT_CREATOR_BRIEF_URL, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type TemplateInput } from './templates.ts';
+import { FLIGHT_CREATOR_BRIEF_URL, renderAccessRecovery, renderEmailForVersion, TEMPLATE_VERSIONS, type CardView, type RecoveryInput, type TemplateInput } from './templates.ts';
+import { boardingRecoveryHint } from '../recovery-hint.ts';
 
 export const FLIGHT_EMAIL_FROM = 'FloFi <hello@flofi.xyz>';
 export const FLIGHT_EMAIL_REPLY_TO = 'flofi.xyz@gmail.com';
@@ -73,7 +74,7 @@ export function createEmailDelivery(deps: DeliveryDeps) {
         WHERE i.tenant_id = $1 AND e.email = $2`, [deps.tenantId, row.recipient])).rows[0];
       if (imported && !imported.campaign_consent) return { kind: 'CANCEL', code: 'NO_CAMPAIGN_CONSENT' };
     }
-    let input: TemplateInput, attachments: OutgoingEmail['attachments'];
+    let input!: TemplateInput, attachments: OutgoingEmail['attachments'], recovery: RecoveryInput | null = null;
     switch (row.template) {
       case 'EARLY_LIST': case 'LIST_CONFIRMATION': case 'EVE': case 'NEXT_FLIGHT': {
         const entry = await entryOf(row.entryId);
@@ -88,6 +89,16 @@ export function createEmailDelivery(deps: DeliveryDeps) {
       }
       case 'GROUP_BOARDING': case 'ACCESS_REQUESTED': {
         const entry = await entryOf(row.entryId);
+        // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the answer to a request from an address that already boarded — its sign-in method, never a code.
+        if (row.template === 'ACCESS_REQUESTED' && row.trigger === 'access_recovery') {
+          // Only the exact copy this row was enqueued with is ever sent (its own version); anything else waits for review.
+          if (row.templateVersion !== ACCESS_RECOVERY_VERSION) throw new Error('TEMPLATE_VERSION_REVIEW');
+          if (!entry || entry.flight !== 'FIRST') return { kind: 'CANCEL', code: 'ENTRY_GONE' };
+          // It holds no credential: an unsubscribed (or operator-suppressed) address never gets it, unlike an access code.
+          if (await deps.outbox.isSuppressed(addressHash(row.recipient))) return { kind: 'CANCEL', code: 'UNSUBSCRIBED' };
+          recovery = await boardingRecoveryHint(deps.db, deps.tenantId, entry.email);
+          break;
+        }
         if (!entry || entry.flight !== 'FIRST') return { kind: 'CANCEL', code: 'ENTRY_GONE' };
         if (entry.boarded_at) return { kind: 'CANCEL', code: 'BOARDED' };
         const token = await deps.access.issueToken({ emailId: row.emailId, entryId: row.entryId!, now: at,
@@ -118,8 +129,9 @@ export function createEmailDelivery(deps: DeliveryDeps) {
       }
     }
     const unsubscribe = unsubscribeTokenFor(deps.secret, row.emailId, row.recipient);
-    const rendered = renderEmailForVersion(input, { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
-      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` }, row.templateVersion);
+    const context = { language: row.language, recipient: row.recipient, origin, calendar: deps.calendar,
+      unsubscribeUrl: `${origin}/board/unsubscribe?l=${row.language.toLowerCase()}&t=${unsubscribe}` };
+    const rendered = recovery ? renderAccessRecovery(recovery, context) : renderEmailForVersion(input, context, row.templateVersion);
     return { kind: 'SEND', email: { idempotencyKey: row.emailId, to: row.recipient, subject: rendered.subject, html: rendered.html, text: rendered.text,
       headers: { 'List-Unsubscribe': `<${origin}/api/board/unsubscribe?t=${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       ...attachments ? { attachments } : {}, tags: [{ name: 'template', value: row.template.toLowerCase() }, { name: 'campaign', value: 'flight-flofi' }] } };
@@ -155,6 +167,11 @@ export function createEmailDelivery(deps: DeliveryDeps) {
       // An email whose earlier outcome is unknown stays UNKNOWN (retried with its key only inside the provider's window, then held).
       const wasUnknown = row.previousState === 'UNKNOWN';
       if (stop) { await deps.outbox.settle(row, wasUnknown ? { kind: 'UNKNOWN', code: stop } : { kind: 'RETRY', code: stop, delayMs: 60_000 }, at); report.retried++; continue; }
+      // A boarding-recovery answer reads live account facts: after an unknown outcome (a provider timeout, an expired lease) it is never
+      // rendered again under the same idempotency key. It is held as UNRESOLVED_OUTCOME (kept reserved, released only by id after the operator
+      // checked the provider's log); the person can simply ask again.
+      const recoveryRow = row.template === 'ACCESS_REQUESTED' && row.trigger === 'access_recovery';
+      if (recoveryRow && wasUnknown) { await deps.outbox.settle(row, { kind: 'HELD', code: 'UNRESOLVED_OUTCOME' }, at); report.held++; continue; }
       let rendered: Rendered;
       try { rendered = await render(row, at); }
       catch (error) {
@@ -165,7 +182,8 @@ export function createEmailDelivery(deps: DeliveryDeps) {
       if (index > 0) await sleep(Math.ceil(1000 / perSecond));
       const outcome = await deps.provider.send(rendered.email);
       const settled = settlementOf(outcome);
-      const settlement: Settlement = wasUnknown && settled.kind === 'RETRY' ? { kind: 'UNKNOWN', code: settled.code } : settled;
+      const settlement: Settlement = recoveryRow && settled.kind === 'UNKNOWN' ? { kind: 'HELD', code: 'UNRESOLVED_OUTCOME' }
+        : wasUnknown && settled.kind === 'RETRY' ? { kind: 'UNKNOWN', code: settled.code } : settled;
       await deps.outbox.settle(row, settlement, now());
       deps.logger.info('flight.email.attempt', { template: row.template, outcome: outcome.kind, code: 'code' in outcome ? outcome.code : undefined, attempt: row.attempts });
       if (settlement.kind === 'SENT') report.sent++; else if (settlement.kind === 'UNKNOWN') report.unknown++; else if (settlement.kind === 'HELD') report.held++;

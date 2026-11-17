@@ -10,8 +10,8 @@ import { cookies } from 'next/headers';
 import { platformStateHost } from '../server/platform-state-host.ts';
 import { requestOrigin } from '../server/session-principal.ts';
 import { sessionCookieName } from '../server/session-cookie.ts';
-import { ACCOUNT_SESSION_COOKIE, ACCOUNT_SESSION_TTL_SECONDS, readAccountSession, safeReturnPath, sealAccountSession, type AccountIntent,
-  type AccountSessionToken } from './account-session.ts';
+import { ACCOUNT_MOVE_COOKIE, ACCOUNT_SESSION_COOKIE, ACCOUNT_SESSION_TTL_SECONDS, readAccountSession, readMoveIntent, safeReturnPath, sealAccountSession,
+  sealMoveIntent, type AccountIntent, type AccountSessionToken, type SealedMoveIntent } from './account-session.ts';
 import { createAccountStore, type AccountStore } from './account-store.ts';
 import { createAccountService, type AccountService, type SignInOutcome } from './account-service.ts';
 import { createPrivyServer, privyConfig, type PrivyBrowserConfig } from './privy-server.ts';
@@ -56,6 +56,24 @@ export async function clearAccountCookie(): Promise<void> {
   jar.set(name, '', accountCookieOptions(origin.secure, 0));
   // Cleanup only: an HTTPS request never authenticates with the legacy name, including before it has a new cookie.
   if (name !== ACCOUNT_SESSION_COOKIE) jar.set(ACCOUNT_SESSION_COOKIE, '', accountCookieOptions(origin.secure, 0));
+}
+/**
+ * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the duplicate-account move intent, as an HttpOnly, host-only, SameSite=Strict cookie (only FloFi's own
+ * pages and server actions ever carry it) that lives as long as the intent.
+ */
+export async function setMoveCookie(intent: SealedMoveIntent, env: Env = process.env): Promise<void> {
+  const origin = await requestOrigin();
+  (await cookies()).set(sessionCookieName(ACCOUNT_MOVE_COOKIE, origin.secure), sealMoveIntent(env, intent, origin.domain),
+    { httpOnly: true, sameSite: 'strict', secure: origin.secure, path: '/', maxAge: Math.max(0, intent.expiresAt - Math.floor(Date.now() / 1000)) });
+}
+export async function clearMoveCookie(): Promise<void> {
+  const origin = await requestOrigin(), jar = await cookies(), name = sessionCookieName(ACCOUNT_MOVE_COOKIE, origin.secure);
+  if (jar.get(name)) jar.set(name, '', { httpOnly: true, sameSite: 'strict', secure: origin.secure, path: '/', maxAge: 0 });
+}
+/** This browser's verified move intent, or null. */
+export async function currentMoveIntent(env: Env = process.env): Promise<SealedMoveIntent | null> {
+  const origin = await requestOrigin();
+  return readMoveIntent(env, (await cookies()).get(sessionCookieName(ACCOUNT_MOVE_COOKIE, origin.secure))?.value, new Date(), origin.domain);
 }
 /** The verified account session of this request, or null (no cookie, tampered, expired, revoked, another host or no database). */
 export async function currentAccountSession(host: AccountHost | null, env: Env = process.env): Promise<AccountSessionToken | null> {

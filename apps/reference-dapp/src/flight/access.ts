@@ -16,6 +16,10 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 export const ACCESS_LINK_MS = 72 * 60 * 60 * 1000;
 /** A code the person asked for at /board: 15 minutes ("Código de 6 dígitos pedido na landing: 15 minutos"). */
 export const REQUESTED_CODE_MS = 15 * 60 * 1000;
+/** How long a boarding-recovery answer may wait in the outbox before it is no longer sent (it names a sign-in method; no code expires). */
+export const RECOVERY_EMAIL_MS = 60 * 60_000;
+/** The boarding-recovery copy's own version (an ACCESS_REQUESTED row with trigger access_recovery): rendered only at exactly this version. */
+export const ACCESS_RECOVERY_VERSION = 100;
 /** Email 3 (GROUP_BOARDING): 72 hours from generation, like its paired link. Existing rows keep their persisted expiry. */
 export const EMAIL_CODE_MS = 72 * 60 * 60 * 1000;
 export const CODE_MAX_ATTEMPTS = 5;
@@ -28,7 +32,13 @@ export const ACCESS_SESSION_COOKIE = 'flofi_flight_access';
 /** Abuse limits per hour ("5 tentativas de código por hora por IP e e-mail; 3 links únicos por hora por e-mail"). */
 export const ACCESS_LIMITS = { codePerClientHour: 30, codePerAddressHour: 5, requestPerAddressHour: 3, requestPerClientHour: 30, consumePerClientHour: 120, // A link flow is a peek and a consume.
   // Requested access emails a tenant sends per day at most, and per entry per hour at most one: requests can never eat the email quota.
-  requestedEmailsPerDay: 30 } as const; // Per-client limits allow carriers' shared IPv4 addresses (CGNAT), as the list form does.
+  requestedEmailsPerDay: 30,
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: boarding-recovery answers (an address that already boarded) have their own, smaller daily cap, so they
+  // can never use up the access emails of people still waiting to board (and the reverse); kept below the essential daily reserve (5), so it
+  // never takes the provider quota a credential email needs.
+  recoveryEmailsPerDay: 3,
+  // One client (one address) can queue at most this many recovery answers per hour, so the tenant-wide cap above is not a lever for a single sender.
+  recoveryPerClientHour: 2 } as const; // Per-client limits allow carriers' shared IPv4 addresses (CGNAT), as the list form does.
 /** A request without a usable client address counts under this one shared subject (it is never exempt). */
 export const NO_CLIENT_SUBJECT = 'no-client';
 

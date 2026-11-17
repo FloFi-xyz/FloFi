@@ -238,15 +238,32 @@ describe('BUILD-FLOFI-FLIGHT-001 boarding passes', () => {
   });
 
   it('shows only passes their holders made public, newest first, five at most, and never an amount or account', async () => {
+    // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-01): nothing at all until more than ten passengers chose to be shown.
+    const holders = (await t.db.query<{ account_id: string; pass_id: string }>(`SELECT account_id, pass_id FROM flight_passes WHERE tenant_id = 'default'
+      ORDER BY boarding_no LIMIT 12`)).rows;
+    expect(holders).toHaveLength(12);
+    await t.db.query(`UPDATE flight_passes SET public = false WHERE tenant_id = 'default'`);
+    expect(await store.departures()).toEqual([]);
+    for (const [index, holder] of holders.slice(0, 10).entries())
+      await store.setHandle({ accountId: holder.account_id, handle: `seat_${index}`, public: true });
+    expect(await store.departures()).toEqual([]); // exactly ten: still hidden
+    await store.setHandle({ accountId: holders[10]!.account_id, handle: 'eleventh', public: true });
     const shown = await store.departures();
-    expect(shown.length).toBeLessThanOrEqual(5);
+    expect(shown).toHaveLength(5);
     for (const departure of shown) expect(Object.keys(departure).sort()).toEqual(['from', 'handle', 'seat', 'steps', 'to']);
-    const someone = (await t.db.query<{ account_id: string }>(`SELECT account_id FROM flight_passes ORDER BY boarding_no LIMIT 1`)).rows[0]!.account_id;
-    await store.setHandle({ accountId: someone, handle: 'first_aboard', public: true });
+    // Newest first: the holder of the first pass opts in again with a new departure time.
+    await t.db.query(`UPDATE flight_passes SET departed_at = clock_timestamp() + interval '1 minute' WHERE tenant_id = 'default' AND account_id = $1`, [holders[0]!.account_id]);
+    await store.setHandle({ accountId: holders[0]!.account_id, handle: 'first_aboard', public: true });
     expect((await store.departures())[0]).toMatchObject({ handle: 'first_aboard', from: 'BASE', to: 'BASE', steps: 1, seat: '#001' });
-    const passId = (await t.db.query<{ pass_id: string }>(`SELECT pass_id FROM flight_passes WHERE account_id = $1`, [someone])).rows[0]!.pass_id;
-    expect(await store.hidePass(passId)).toBe(true);
+    // Moderation back to ten hides the whole board again; a taken-down card never counts, even if its holder sets it public again.
+    expect(await store.hidePass(holders[0]!.pass_id)).toBe(true);
+    expect(await store.departures()).toEqual([]);
+    await store.setHandle({ accountId: holders[11]!.account_id, handle: 'twelfth', public: true });
     expect((await store.departures()).some(d => d.handle === 'first_aboard')).toBe(false);
+    expect(await store.departures()).toHaveLength(5);
+    expect(await store.removeCard(holders[11]!.pass_id, BOARDING)).toBe(true);
+    await store.setHandle({ accountId: holders[11]!.account_id, handle: 'twelfth', public: true });
+    expect(await store.departures()).toEqual([]);
   });
 
   it('erases on request: a list address by the operator, and everything of an account when the account is deleted', async () => {

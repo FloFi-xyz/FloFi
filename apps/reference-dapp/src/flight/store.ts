@@ -13,7 +13,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { cardPublicIdFrom, carriesInvites, decideAccess, eventOrigin, FLIGHT_DEFAULT_CALENDAR, FLIGHT_EVENTS, FLIGHT_NOTICE_VERSION, FOUNDING_INVITES, FOUNDING_SEATS,
-  foundingSeat, fullCalendar, inviteCodeFrom, passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_SHOWN, type FlightAccess, type FlightCalendar, type FlightEvent,
+  foundingSeat, fullCalendar, inviteCodeFrom, passengerSeat, SIMULATION_EVIDENCE_MS, DEPARTURES_MIN_PUBLIC, DEPARTURES_SHOWN, type FlightAccess, type FlightCalendar, type FlightEvent,
   normalizeEmail, type FlightOrigin, type FlightRoute } from './campaign.ts';
 import { enqueueEmail } from './email/outbox.ts';
 
@@ -124,9 +124,15 @@ export function createFlightStore(host: FlightHost, given: FlightCalendar = FLIG
     });
   }
 
+  /**
+   * The newest public passes for the departures board, or none at all until more than DEPARTURES_MIN_PUBLIC passengers chose to be shown
+   * (UX-01). One statement: the rows and the threshold read the same snapshot with the same predicate (public, not taken down), and the
+   * bounded EXISTS (an 11th eligible row) never counts the whole table or returns a number.
+   */
   async function departures(): Promise<Departure[]> {
-    const rows = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND public AND removed_at IS NULL ORDER BY departed_at DESC, boarding_no DESC
-      LIMIT ${DEPARTURES_SHOWN}`, [tenantId])).rows;
+    const rows = (await db.query<PassRow>(`SELECT ${PASS_COLUMNS} FROM flight_passes WHERE tenant_id = $1 AND public AND removed_at IS NULL
+      AND EXISTS (SELECT 1 FROM flight_passes WHERE tenant_id = $1 AND public AND removed_at IS NULL OFFSET ${DEPARTURES_MIN_PUBLIC} LIMIT 1)
+      ORDER BY departed_at DESC, boarding_no DESC LIMIT ${DEPARTURES_SHOWN}`, [tenantId])).rows;
     return rows.map(passOf).map(pass => ({ handle: pass.handle!, from: pass.route.from, to: pass.route.to, steps: pass.route.stepCount, seat: pass.seat }));
   }
 

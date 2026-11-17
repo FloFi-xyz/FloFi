@@ -11,7 +11,7 @@
  */
 import { useEffect, useId, useRef, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
-import { privySignIn, type AccountState } from '../../app/account-action';
+import { privyMoveToExisting, privySignIn, type AccountState } from '../../app/account-action';
 import { useFloFiPrivy } from '../../accounts/privy-client';
 import { rememberSignIn } from '../../wallet/sign-in-wallet';
 import { invalidateSavedRecipients } from '../../state/saved-recipients-store';
@@ -24,7 +24,11 @@ type Method = 'google' | 'apple' | 'email' | 'wallet';
 /** Whether this page load is Privy's OAuth redirect back (its completion then signs the person in). */
 const oauthReturn = () => typeof window !== 'undefined' && /[?&]privy_oauth_(?:code|state)=/.test(window.location.search);
 
-export function SignInScreen({ state, initialError, returnTo }: { state: AccountState; initialError: string | null; returnTo: string }) {
+/** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the sign-in methods of another account, named by kind only (never an address). */
+export const METHOD_KIND_LABEL: Readonly<Record<string, string>> = { google: 'Google', apple: 'Apple', email: 'Email code', eip155: 'Web3 wallet', solana: 'Solana wallet' };
+export function SignInScreen({ state, initialError, returnTo, mode = null, moving = [] }: { state: AccountState; initialError: string | null; returnTo: string;
+  /** `reauth`: confirm the account already signed in (a step-up). `move`: sign in to the account that keeps everything (a duplicate is closing). */
+  mode?: 'reauth' | 'move' | null; moving?: readonly { readonly kind: string; readonly hint: string | null }[] }) {
   const { t } = useLocale();
   const privy = useFloFiPrivy();
   const [open, setOpen] = useState<Method | null>(null);
@@ -32,20 +36,28 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
   const [error, setError] = useState<string | null>(initialError);
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [sent, setSent] = useState<string | null>(null), [notice, setNotice] = useState('');
   const emailId = useId(), codeId = useId(), statusId = useId();
+  /** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: a new account would be created for an email another account already verified (its method kinds). */
+  const [existing, setExisting] = useState<readonly string[] | null>(null);
   /** Set when the person started a sign-in on this page; a Privy session without it is never used. */
   const started = useRef(false), finishing = useRef(false), cleared = useRef(false);
   useEffect(() => { if (oauthReturn()) { started.current = true; setBusy('finish'); } }, []);
   const available = state.availability, configured = privy !== null;
 
   /** Hands the completed Privy sign-in to FloFi's server, which verifies it and opens the FloFi session. */
-  async function finish() {
+  async function finish(allowNew = false) {
     if (!privy || finishing.current) return;
-    finishing.current = true; setBusy('finish'); setError(null);
+    finishing.current = true; setBusy('finish'); setError(null); setExisting(null);
     const token = await privy.getAccessToken();
-    const result = token ? await privySignIn(token, returnTo).catch((cause: unknown) => ({ ok: false as const, code: signInCallFailure(cause) }))
-      : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
+    const result = token ? await privySignIn(token, returnTo, { allowNew, ...mode ? { mode } : {} })
+      .catch((cause: unknown) => ({ ok: false as const, code: signInCallFailure(cause) })) : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
     // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the verified sign-in re-allows silent restore of the wallet just used (no prompt, no authority).
     if (result.ok) { rememberSignIn(result.value.method); invalidateSavedRecipients(); window.location.assign(result.value.next); return; }
+    // Nothing was created: the person chooses between the account that already has this email and a separate account (the Privy session stays
+    // for "Create a separate account"; "Use another method" ends it).
+    if (result.code === 'ACCOUNT_EXISTS_FOR_EMAIL' && 'kinds' in result && Array.isArray(result.kinds)) {
+      finishing.current = false; setBusy(null); setExisting((result.kinds as unknown[]).filter((kind): kind is string => typeof kind === 'string'));
+      return;
+    }
     // A refused sign-in leaves no Privy session behind either, so the next attempt starts clean.
     await privy.logout();
     // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: this page belongs to an earlier deployment, whose sign-in call no longer exists. Retrying here
@@ -72,6 +84,20 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
     if (privy.authenticated && !started.current) void privy.logout();
   }, [privy?.ready]);
 
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: bring this just-verified sign-in to the account that already has the email: FloFi starts the move (the
+   * server checks everything), then the person signs in to that account to confirm it and link this method there.
+   */
+  async function addToExisting() {
+    if (!privy || finishing.current) return;
+    finishing.current = true; setBusy('finish'); setError(null);
+    const token = await privy.getAccessToken();
+    const result = token ? await privyMoveToExisting(token).catch((cause: unknown) => ({ ok: false as const, code: signInCallFailure(cause) }))
+      : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
+    await privy.logout();
+    if (result.ok) { window.location.assign(result.value.next); return; }
+    finishing.current = false; started.current = false; setBusy(null); setExisting(null); setError(result.code);
+  }
   async function begin(method: Method, run: () => Promise<void> | void) {
     setError(null); setNotice(''); started.current = true; setBusy(method);
     try { await run(); } catch (cause) { started.current = false; setBusy(null); setError(cause instanceof Error ? cause.message : 'PRIVY_SIGN_IN_FAILED'); return; }
@@ -117,7 +143,20 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
       <a className={styles.primary} href="/app">{t('Continue to FloFi')}</a></div>}
     {available.accounts && !available.google && <div className={styles.banner} role="status"><strong>{t("Sign-in isn't configured on this deployment yet.")}</strong>
       <p>{t('You can still build workflows and use your own wallet in FloFi without an account.')}</p></div>}
-    {busy === 'finish' ? <p className={styles.status} role="status" data-signing-in="true">{t('Signing you in…')}</p> : <>
+    {mode === 'reauth' && <div className={styles.banner} role="status" data-sign-in-mode="reauth"><strong>{t('Confirm it’s you')}</strong>
+      <p>{t('Sign in again with a method of the account you are using. Nothing else changes.')}</p></div>}
+    {mode === 'move' && <div className={styles.banner} role="status" data-sign-in-mode="move"><strong>{t('Sign in to the account that keeps everything')}</strong>
+      <p>{t('Use the method of your other FloFi account (for example the one with your boarding pass). Not this one, which is closing: {0}.',
+        moving.map(method => `${t(METHOD_KIND_LABEL[method.kind] ?? method.kind)}${method.hint ? ` · ${method.hint}` : ''}`).join(', '))}</p></div>}
+    {existing && <div className={styles.banner} role="alert" data-existing-account="true"><strong>{t('This email already belongs to a FloFi account.')}</strong>
+      <p>{t('That account signs in with: {0}. You can bring this sign-in to it (you will sign in to it once to confirm), create a separate account, or use another method.',
+        existing.map(kind => t(METHOD_KIND_LABEL[kind] ?? kind)).join(', '))}</p>
+      <div className={styles.row}>
+        <button type="button" className={styles.primary} onClick={() => void addToExisting()}>{t('Add this sign-in to that account')}</button>
+        <button type="button" className={styles.textLink} onClick={() => { setExisting(null); started.current = false; void privy?.logout(); }}>{t('Use another sign-in method')}</button>
+        <button type="button" className={styles.textLink} onClick={() => { started.current = true; void finish(true); }}>{t('Create a separate account')}</button>
+      </div></div>}
+    {busy === 'finish' ? <p className={styles.status} role="status" data-signing-in="true">{t('Signing you in…')}</p> : existing ? null : <>
       <div className={styles.methods} role="group" aria-label={t('Sign-in methods')}>
         {methodButton('google', 'Google', 'google', () => void begin('google', () => privy!.loginWithOAuth('google')))}
         {available.apple && methodButton('apple', 'Apple', 'apple', () => void begin('apple', () => privy!.loginWithOAuth('apple')))}

@@ -40,6 +40,8 @@ import { portugueseChatEditor } from './pt-chat-editor';
 import { portugueseChatDashboard } from './pt-chat-dashboard';
 import { portugueseExecutionUxReliability } from './pt-execution-ux-reliability';
 import { portuguesePortfolio } from './pt-portfolio';
+import { portugueseIdentityRecovery } from './pt-identity-recovery';
+import { portugueseAmountShortcuts } from './pt-amount-shortcuts';
 import { portugueseAccounts } from './pt-accounts';
 import { portugueseWallet } from './pt-wallet';
 import { portuguesePrivy } from './pt-privy';
@@ -77,6 +79,8 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseFlight,
   // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the wallet portfolio widget, first so every existing translation of a shared word still wins.
   ...portuguesePortfolio,
+  ...portugueseIdentityRecovery,
+  ...portugueseAmountShortcuts,
   // BUILD-FLOFI-E2E-RELIABILITY-001 (#149): new keys only, first so every existing translation still wins.
   ...portugueseStatusTruth,
   // BUILD-FLOFI-AUTH-WALLETS-001: first, so every existing product translation of a shared word keeps precedence.

@@ -11,10 +11,12 @@ import { learningCopy } from '../domain/copilot-learning-copy';
 import type { LearningStatusView } from '../learning/web-actions';
 import { LEARNING_CHANGED } from './wallet-proof';
 import type { Command } from '../domain/commands';
+import type { AwaitingAmount } from '../domain/amount-shortcuts';
+import type { Workflow } from '../domain/initial-workflow';
 import { chainStatus } from '../domain/artifact-chain';
 import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type SimulationFlow } from '../domain/copilot-answers';
-import { automationCreated, closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
-  type CopilotReply, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from '../domain/copilot-conversation';
+import { automationCreated, awaitingAmount as engineAwaitingAmount, closeSegment, contextChange, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn,
+  type CopilotConversation, type CopilotEnvironment, type CopilotReply, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from '../domain/copilot-conversation';
 import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
 import { solanaMainnetLiquidityPrice } from '../app/solana-mainnet-liquidity-action';
 import { catalogLiquidityPrice } from '../app/uniswap-liquidity-action';
@@ -252,6 +254,18 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   const language = useCallback(() => conversation.current.language, []);
   /** Whether FloFi's own clarification question is open (the request still misses a required field). */
   const drafting = useCallback(() => Boolean(conversation.current.draft), []);
+  /**
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): FloFi's open question for an amount (the engine's structured draft), with the wallets that
+   * would sign and the workflow it was asked against — null as soon as the workflow, the pending proposal or a wallet changed (the engine
+   * would refuse that answer as stale), so a shortcut is never computed for another wallet or workflow.
+   */
+  const awaitingAmountNow = useCallback((): { readonly request: AwaitingAmount; readonly evm: string | null; readonly solana: string | null; readonly workflow: Workflow } | null => {
+    const state = conversation.current, request = engineAwaitingAmount(state);
+    if (!request || !state.draft) return null;
+    const now = latest.current, store = now.workflow;
+    const snapshot = { workflow: store.state.workflow, pending: store.pending, wallet: now.wallet.account, walletChainId: now.wallet.chainId, solanaOwner: now.orca.owner };
+    return contextChange(state.draft.snapshot, snapshot) ? null : { request, evm: now.wallet.account, solana: now.orca.owner, workflow: store.state.workflow };
+  }, []);
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi just explained a DeFi concept, so "não entendi" refers to it (not to an execution blocker). */
   const explaining = useCallback(() => Boolean(conversation.current.concept), []);
   /** The owner created the automation FloFi proposed: a later schedule change is a confirmed replacement of the saved rule. */
@@ -368,7 +382,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   }, [interpret]);
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
-    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining, automationCreated: automationCreatedNow };
+    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting, explaining, automationCreated: automationCreatedNow,
+    awaitingAmount: awaitingAmountNow };
 }
 
 /** BUILD-P1: the web chat's pool reads, through the existing read-only server actions (see `state/copilot-pool-reads.ts`). */

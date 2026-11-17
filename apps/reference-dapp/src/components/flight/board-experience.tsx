@@ -15,12 +15,19 @@ import Link from 'next/link';
 import { FLIGHT_BOARDING_KEY, FLIGHT_DRAFT_KEY, FLIGHT_RETURN_KEY } from '../../flight/app-boarding';
 import type { FlightState } from '../../flight/http';
 import { boardOutcome } from '../../flight/board-arrival';
+import { accountSignOut } from '../../app/account-action';
 import { INVITE_CODE, type FlightAccess } from '../../flight/campaign';
 import type { FlightPass, OwnInvite } from '../../flight/store';
 import { useBoardChecking } from './board-frame';
 import { faceOf, Flaps, FoundingPass, PassengerPass } from './boarding-pass';
 import { boardingDay, brtClock as clockOf, FLIGHT_COPY, type FlightCopy } from './flight-copy';
 import styles from './flight.module.css';
+
+/** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: end this FloFi session, then sign in again with another method (the sign-in page ends any Privy session). */
+async function signOutTo(path: string) {
+  await accountSignOut().catch(() => undefined);
+  window.location.assign(path);
+}
 
 type Language = 'EN' | 'PT';
 type Answer = { ok: boolean; code?: string; [key: string]: unknown };
@@ -444,6 +451,24 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       <p className={styles.small}>{t.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{t.useIt}</button></p>
       {showInvite && <InviteForm key="invite" copy={copy} now={state.now} opensAt={state.boardingOpensAt} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
     </div>;
+  } else if (personal?.kind === 'not_listed' && state.me.boardedElsewhere) {
+    // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: this email boarded with another FloFi account (another sign-in method): never "not on the list".
+    const t = copy.elsewhere;
+    hero = <div className={`${styles.heroText} ${styles.onDark}`} data-boarded-elsewhere="true">
+      <div className={styles.board}>
+        <Flaps text={t.board[0]} cells={12}/>
+        <span className={styles.boardLabel}>{t.labels[0]}</span><Flaps text={t.board[1]} cells={12} hi/>
+        <span className={styles.boardLabel}>{t.labels[1]}</span><Flaps text={t.board[2]} cells={12}/>
+      </div>
+      <h1 id="flight-hero-title" tabIndex={-1}>{t.title[0]}<span className={styles.accentPeri}>{t.title[1]}</span></h1>
+      <p className={styles.heroBody}>{t.body}</p>
+      <div className={styles.ctaRow}>
+        <a className={`${styles.btn} ${styles.btnBlue}`} href="/account/sign-in-methods">{t.move}</a>
+        <a className={`${styles.btn} ${styles.btnGhost}`} href="/login?returnTo=%2Fboard" onClick={event => { event.preventDefault(); void signOutTo('/login?returnTo=%2Fboard'); }}>{t.switch}</a>
+      </div>
+      {state.phase === 'BOARDING' && <><p className={styles.small}>{t.email}</p><AccessForms copy={copy} language={language} onClaimed={claimed}/></>}
+      {message && <p className={styles.error} role="alert">{message}</p>}
+    </div>;
   } else if (personal?.kind === 'not_listed') {
     const t = copy.notListed;
     hero = <div className={`${styles.heroText} ${styles.onDark}`}>
@@ -468,6 +493,8 @@ export function BoardExperience({ initial, language }: { initial: FlightState | 
       </>}
       <p className={styles.notice}><ListNotice copy={copy} language={language}/></p>
       <p className={styles.small}>{copy.batch.invite} <button type="button" className={styles.linkButton} onClick={() => setShowInvite(true)}>{copy.batch.useIt}</button></p>
+      {/* BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: a signed-in person who boarded with another method can bring this sign-in to that account. */}
+      {state.me.signedIn && <p className={styles.small}>{t.otherSignIn} <a className={styles.linkButton} href="/account/sign-in-methods">{t.otherSignInLink}</a></p>}
       {showInvite && <InviteForm key="invite" copy={copy} now={state.now} opensAt={state.boardingOpensAt} onRedeemed={() => { setPersonal(null); void refresh(); }}/>}
       {message && <p className={styles.error} role="alert">{message}</p>}
     </div>;

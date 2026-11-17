@@ -35,8 +35,11 @@ export type OidcFlow = { readonly provider: OidcProvider; readonly state: string
 /** The email challenge cookie names only FloFi's challenge record: no address, provider id or code. */
 export type EmailFlow = { readonly challengeId: string; readonly intent: AccountIntent; readonly returnTo: string };
 
-/** a1 account session, o1 OIDC flow, m1 email flow, h1 FloFi Wallet handoff, w1 FloFi Wallet session, f1 FloFi Wallet unlock flow. */
-type Kind = 'a1' | 'o1' | 'm1' | 'h1' | 'w1' | 'f1';
+/**
+ * a1 account session, o1 OIDC flow, m1 email flow, h1 FloFi Wallet handoff, w1 FloFi Wallet session, f1 FloFi Wallet unlock flow, x1 duplicate
+ * account move intent (BUILD-FLOFI-IDENTITY-RECOVERY-UX-001). The kind is part of the MAC input: one kind never reads as another.
+ */
+type Kind = 'a1' | 'o1' | 'm1' | 'h1' | 'w1' | 'f1' | 'x1';
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
 const METHODS: readonly SessionMethod[] = ['google', 'apple', 'email', 'eip155', 'solana'];
 const HEX32 = /^[0-9a-f]{32}$/, B64URL = /^[A-Za-z0-9_-]{43,128}$/;
@@ -94,6 +97,28 @@ export function readAccountSession(env: Env, token: string | undefined, now: Dat
   return { accountId: v.a, sessionId: v.s, method: v.m as SessionMethod, authenticatedAt: v.t as number, expiresAt: v.e as number,
     ...(loginWallet ? { loginWallet } : {}) };
 }
+export const ACCOUNT_MOVE_COOKIE = 'flofi_account_move';
+export type SealedMoveIntent = { readonly retiring: string; readonly privyUser: string; readonly nonce: string; readonly expiresAt: number;
+  readonly methods: readonly { readonly kind: string; readonly hint: string | null }[] };
+const MOVE_KINDS = new Set(['google', 'apple', 'email', 'eip155', 'solana']);
+/** Seals the duplicate-account move intent (HttpOnly cookie, this host, until `expiresAt`). */
+export function sealMoveIntent(env: Env, intent: SealedMoveIntent, domain: string): string {
+  if (!ACCOUNT_ID.test(intent.retiring) || !/^did:privy:[A-Za-z0-9]{8,64}$/.test(intent.privyUser) || !B64URL.test(intent.nonce) || intent.methods.length > 8)
+    throw new Error('ACCOUNT_MOVE_INVALID');
+  return seal('x1', { r: intent.retiring, u: intent.privyUser, n: intent.nonce, k: intent.methods, e: intent.expiresAt, d: domain }, accountKey(env));
+}
+/** The verified move intent of this browser, or null (absent, tampered, expired, another key or host). */
+export function readMoveIntent(env: Env, token: string | undefined, now: Date, domain: string): SealedMoveIntent | null {
+  const key = keyOrNull(env), v = key && unseal('x1', token, key, now, domain);
+  if (!v || typeof v.r !== 'string' || !ACCOUNT_ID.test(v.r) || typeof v.u !== 'string' || !/^did:privy:[A-Za-z0-9]{8,64}$/.test(v.u)
+    || typeof v.n !== 'string' || !B64URL.test(v.n) || !Array.isArray(v.k) || v.k.length > 8) return null;
+  const methods = (v.k as unknown[]).flatMap(item => {
+    const m = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    return typeof m.kind === 'string' && MOVE_KINDS.has(m.kind) && (m.hint === null || (typeof m.hint === 'string' && m.hint.length <= 80))
+      ? [{ kind: m.kind, hint: m.hint as string | null }] : [];
+  });
+  return { retiring: v.r, privyUser: v.u, nonce: v.n, expiresAt: v.e as number, methods };
+}
 /** Whether a session signed in recently enough for a sensitive action. */
 export const freshlyAuthenticated = (session: Pick<AccountSessionToken, 'authenticatedAt'>, now: Date) =>
   seconds(now) - session.authenticatedAt <= ACCOUNT_REAUTH_SECONDS;
@@ -105,6 +130,8 @@ export function safeReturnPath(value: unknown): string {
   if (typeof value !== 'string' || value.length > 200 || !/^\/(?!\/)[A-Za-z0-9/_?=&.%-]*$/.test(value) || value.includes('\\')) return '/app';
   const path = value.split('?')[0]!;
   if (path.includes('//') || /%2e/i.test(path) || /(?:^|\/)\.{1,2}(?:\/|$)/.test(path)) return '/app';
+  // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the account's Sign-in methods page, exactly (a step-up returns there).
+  if (path === '/account/sign-in-methods') return value;
   return /^\/(?:app|onboarding|board)(?:[/?]|$)/.test(value) ? value : '/app';
 }
 

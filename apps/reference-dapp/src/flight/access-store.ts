@@ -13,9 +13,10 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { ACCESS_LIMITS, ACCESS_LINK_MS, ACCESS_SESSION_MS, CODE_MAX_ATTEMPTS, codeFor, codeHash, LINK_TOKEN, linkTokenFor, NO_CLIENT_SUBJECT, REQUESTED_CODE_MS, sameHex,
+import { ACCESS_LIMITS, ACCESS_LINK_MS, ACCESS_RECOVERY_VERSION, ACCESS_SESSION_MS, addressHash, CODE_MAX_ATTEMPTS, codeFor, codeHash, LINK_TOKEN, linkTokenFor, NO_CLIENT_SUBJECT, RECOVERY_EMAIL_MS, REQUESTED_CODE_MS, sameHex,
   sha256Hex, subjectDigest, tokenIdFor } from './access.ts';
 import { enqueueEmail, maskAddress } from './email/outbox.ts';
+import { entryHolder } from './entry-holder.ts';
 
 const at = (ms: number) => new Date(ms).toISOString();
 const HOUR_MS = 3_600_000;
@@ -129,24 +130,41 @@ export function createAccessStore(host: { readonly db: Database; readonly tenant
   /**
    * "Send me a link": always answered the same way (no address is confirmed or denied). An email goes out only when the address is on the
    * beta list, has not boarded, and its group is open (`groupOpen` decides with the deployment's calendar).
+   *
+   * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: an address that already boarded, or that a FloFi account already claimed (`entryHolder`), gets a
+   * boarding-recovery email instead: which sign-in method opens the account that holds it. It carries no link or code and never binds the entry
+   * to anyone (a boarded entry stays unclaimable). It is essential mail the person asked for, but it honours every suppression (it holds no
+   * credential, so suppressing it never blocks boarding), goes out at most once per address per day, under its own small daily cap.
    */
   async function requestAccess(input: { readonly email: string; readonly language: 'EN' | 'PT'; readonly client: string | null; readonly now: number;
     readonly groupOpen: (entry: { readonly opensAt: number | null }) => boolean }): Promise<'OK' | 'RATE_LIMITED'> {
     return db.transaction(async tx => {
       if (!await attempt(tx, 'REQUEST_CLIENT', input.client, ACCESS_LIMITS.requestPerClientHour, input.now)) return 'RATE_LIMITED' as const;
       if (!await attempt(tx, 'REQUEST_ADDRESS', input.email, ACCESS_LIMITS.requestPerAddressHour, input.now)) return 'OK' as const; // Silent: no confirmation of the address.
-      const entry = (await tx.query<{ entry_id: string; language: 'EN' | 'PT'; opens_at: Date | null }>(`SELECT e.entry_id, e.language, b.opens_at FROM flight_list_entries e
-        LEFT JOIN flight_batches b ON b.tenant_id = e.tenant_id AND b.batch_no = e.batch_no
-        WHERE e.tenant_id = $1 AND e.email = $2 AND e.flight = 'FIRST' AND e.boarded_at IS NULL`, [tenantId, input.email])).rows[0];
-      if (!entry || !input.groupOpen({ opensAt: entry.opens_at?.getTime() ?? null })) return 'OK' as const;
-      // A tenant-wide daily cap keeps requests from eating the email quota Email 3 needs (silent, like every other refusal here).
-      const today = Number((await tx.query<{ n: string }>(`SELECT count(*) AS n FROM flight_emails WHERE tenant_id = $1 AND template = 'ACCESS_REQUESTED'
-        AND created_at > $2::timestamptz - interval '1 day'`, [tenantId, at(input.now)])).rows[0]!.n);
-      if (today >= ACCESS_LIMITS.requestedEmailsPerDay) return 'OK' as const;
-      // At most one per entry per hour (the dedupe key): repeated requests collapse into the one already queued.
+      const entry = await entryHolder(tx, tenantId, input.email);
+      if (!entry) return 'OK' as const;
+      const recovery = entry.boarded || entry.claimed, trigger = recovery ? 'access_recovery' : 'access_requested';
+      if (!recovery && !input.groupOpen({ opensAt: entry.opensAt })) return 'OK' as const;
+      if (recovery && (await tx.query('SELECT 1 FROM flight_email_suppressions WHERE tenant_id = $1 AND address_hash = $2', [tenantId, addressHash(input.email)])).rowCount)
+        return 'OK' as const;
+      // Recovery answers per client are counted apart from access requests (same attempt table and kind, a distinct subject): silent, like the rest.
+      if (recovery && !await attempt(tx, 'REQUEST_CLIENT', `recovery:${input.client ?? 'none'}`, ACCESS_LIMITS.recoveryPerClientHour, input.now)) return 'OK' as const;
+      // Tenant-wide daily caps keep requests from eating the email quota Email 3 needs (silent, like every other refusal here); access and
+      // recovery answers are counted apart, so one can never use up the other.
+      const today = Number((await tx.query<{ n: string }>(`SELECT count(*) AS n FROM flight_emails WHERE tenant_id = $1 AND template = 'ACCESS_REQUESTED' AND trigger = $3
+        AND created_at > $2::timestamptz - interval '1 day'`, [tenantId, at(input.now), trigger])).rows[0]!.n);
+      if (today >= (recovery ? ACCESS_LIMITS.recoveryEmailsPerDay : ACCESS_LIMITS.requestedEmailsPerDay)) {
+        // Visible to operators (no address, no entry): the day's cap is reached and further answers wait for tomorrow.
+        console.warn(JSON.stringify({ event: 'flight.access_email_cap_reached', trigger }));
+        return 'OK' as const;
+      }
+      // At most one per entry per hour (access) or per UTC day (recovery): repeated requests collapse into the one already queued.
       // The recipient's registered language wins over the current page's locale, including recovery from another device.
-      await enqueueEmail(tx, tenantId, { template: 'ACCESS_REQUESTED', recipient: input.email, language: entry.language, trigger: 'access_requested',
-        dedupeKey: `access:${entry.entry_id}:${Math.floor(input.now / HOUR_MS)}`, notBefore: input.now, expiresAt: input.now + REQUESTED_CODE_MS, entryId: entry.entry_id });
+      await enqueueEmail(tx, tenantId, recovery
+        ? { template: 'ACCESS_REQUESTED', templateVersion: ACCESS_RECOVERY_VERSION, recipient: input.email, language: entry.language, trigger,
+          dedupeKey: `recovery:${entry.entryId}:${at(input.now).slice(0, 10).replace(/-/g, '')}`, notBefore: input.now, expiresAt: input.now + RECOVERY_EMAIL_MS, entryId: entry.entryId }
+        : { template: 'ACCESS_REQUESTED', recipient: input.email, language: entry.language, trigger, dedupeKey: `access:${entry.entryId}:${Math.floor(input.now / HOUR_MS)}`,
+          notBefore: input.now, expiresAt: input.now + REQUESTED_CODE_MS, entryId: entry.entryId });
       return 'OK' as const;
     });
   }

@@ -42,17 +42,19 @@ function LegalIcon({ item }: { item: 'terms' | 'privacy' }) {
  */
 // The exact complement of the CSS `(min-width: 801px)`, so a fractional width (browser zoom) never falls between the two.
 const COMPACT_NAVIGATION_QUERY = 'not all and (min-width: 801px)';
-function useCompactNavigation() {
-  const [compact, setCompact] = useState(false);
+/** Below 1360 px the expanded rail floats over the workspace (globals.css) instead of moving it aside. */
+const FLOATING_RAIL_QUERY = 'not all and (min-width: 1360px)';
+function useMediaFlag(source: string) {
+  const [matches, setMatches] = useState(false);
   useEffect(() => {
     let query: MediaQueryList;
-    try { query = window.matchMedia(COMPACT_NAVIGATION_QUERY); } catch { return; }
-    const update = () => setCompact(query.matches);
+    try { query = window.matchMedia(source); } catch { return; }
+    const update = () => setMatches(query.matches);
     update();
     query.addEventListener?.('change', update);
     return () => query.removeEventListener?.('change', update);
-  }, []);
-  return compact;
+  }, [source]);
+  return matches;
 }
 /**
  * Whether the desktop rail shows names. One value for the page, so a section change (which remounts the top bar) keeps the owner's choice; a
@@ -82,7 +84,8 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   const { t: tr, language } = useLocale();
   // `open`: the mobile overlay. `expanded`: the desktop rail's names (UX-01). Only one of them applies at a time.
   const [open, setOpen] = useState(false);
-  const compact = useCompactNavigation();
+  const compact = useMediaFlag(COMPACT_NAVIGATION_QUERY);
+  const floating = useMediaFlag(FLOATING_RAIL_QUERY);
   const expanded = useRailExpanded();
   // The rail's names and tags are visible (or about to be): only then are the availability tags read.
   const [engaged, setEngaged] = useState(false);
@@ -125,6 +128,23 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   const dismiss = () => { if (open) close(true); };
   // A window widened past the breakpoint while the overlay was open: the rail takes over and the overlay's listeners end.
   useEffect(() => { if (!compact) setOpen(false); }, [compact]);
+  // An expanded rail that floats over the workspace (801–1359 px) gets out of the way like the drawer did: a pointer press outside navigation
+  // collapses it (the press still reaches what it was meant for), and so does Escape from inside it, returning focus to the chevron. From
+  // 1360 px it sits beside the workspace and stays as the owner left it.
+  useEffect(() => {
+    if (compact || !floating || !expanded) return;
+    function outside(event: Event) {
+      if (event.target instanceof Node && !container.current?.contains(event.target)) setRailExpanded(false);
+    }
+    function escape(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || !container.current?.contains(document.activeElement)) return;
+      setRailExpanded(false);
+      trigger.current?.focus({ preventScroll: true });
+    }
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [compact, floating, expanded]);
 
   // UX-01: the collapsed rail names each item beside it — after 300 ms on hover, at once on keyboard focus; leaving, Escape or scrolling hides
   // it. The same timing and look as the Canvas rail's tooltip; presentation only (every item keeps its accessible name).

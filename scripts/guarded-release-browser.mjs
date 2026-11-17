@@ -25,7 +25,9 @@ const definitions = [
     'portfolio-ux004.spec.ts', 'dashboard-productization.spec.ts', 'dashboard-theme-states.spec.ts', 'dashboard-run-details.spec.ts',
     'simulate-canvas-controls.spec.ts', 'editor-layout-hotfix.spec.ts', 'editor-header-new-workflow.spec.ts', 'ux-polish-004.spec.ts',
     // BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (UX-01): the owner's chat bubbles keep short messages on one line at every zoom, width and theme.
-    'chat-message-wrapping.spec.ts'], {}],
+    'chat-message-wrapping.spec.ts',
+    // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): 25% · 50% · 75% · Max under FloFi's amount question (real component, fixture balances).
+    'amount-shortcuts.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts', 'chat-review-overflow.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],

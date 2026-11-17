@@ -60,12 +60,14 @@ export type EnqueueInput = {
   readonly template: EmailTemplate; readonly recipient: string; readonly language: EmailLanguage; readonly trigger: string; readonly dedupeKey: string;
   readonly notBefore: number; readonly expiresAt?: number | null; readonly batchKey?: string | null; readonly entryId?: string | null;
   readonly passId?: string | null; readonly inviteCode?: string | null;
+  /** A row whose copy has its own version within its template (the boarding-recovery answer); default: the template's current version. */
+  readonly templateVersion?: number;
 };
 /** Enqueue one email in the caller's transaction (in its template's launch language, if any); false when its `dedupeKey` was already enqueued (never twice). */
 export async function enqueueEmail(q: Queryable, tenantId: string, input: EnqueueInput): Promise<boolean> {
   const inserted = await q.query(`INSERT INTO flight_emails (tenant_id, email_id, dedupe_key, template, template_version, category, recipient, language, trigger,
     batch_key, entry_id, pass_id, invite_code, not_before, expires_at, next_attempt_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $14)
-    ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, newEmailId(), input.dedupeKey, input.template, TEMPLATE_VERSIONS[input.template],
+    ON CONFLICT (tenant_id, dedupe_key) DO NOTHING`, [tenantId, newEmailId(), input.dedupeKey, input.template, input.templateVersion ?? TEMPLATE_VERSIONS[input.template],
     TEMPLATE_CATEGORY[input.template], input.recipient.trim().toLowerCase(), emailLanguage(input.template, input.language), input.trigger, input.batchKey ?? null, input.entryId ?? null,
     input.passId ?? null, input.inviteCode ?? null, at(input.notBefore), input.expiresAt ? at(input.expiresAt) : null]);
   return inserted.rowCount > 0;

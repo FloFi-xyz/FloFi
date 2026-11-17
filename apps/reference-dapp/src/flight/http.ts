@@ -19,6 +19,7 @@ import { sessionCookieName } from '../server/session-cookie';
 import type { AccountFlight, FlightStore } from './store';
 import { betaAccessMode, createBetaAccessStore } from './beta-access';
 import { platformStateHost } from '../server/platform-state-host';
+import { entryHolder } from './entry-holder';
 import { requireFlightAccess, requireFlightProductAccess } from '../server/flight-access';
 
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' };
@@ -54,8 +55,25 @@ const language = (value: unknown): 'EN' | 'PT' => value === 'PT' ? 'PT' : 'EN';
 export type FlightState = {
   readonly ok: true; readonly now: number; readonly phase: ReturnType<typeof flightPhase>; readonly closesAt: number; readonly boardingOpensAt: number;
   readonly foundingOpen: boolean; readonly departures: Awaited<ReturnType<FlightStore['departures']>>;
-  readonly me: { readonly signedIn: boolean; readonly hasEmail: boolean; readonly flight: AccountFlight | null; readonly accessPending: boolean };
+  readonly me: { readonly signedIn: boolean; readonly hasEmail: boolean; readonly flight: AccountFlight | null; readonly accessPending: boolean;
+    /**
+     * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the signed-in person is not on board, but an address this account verified is held by ANOTHER FloFi
+     * account (claimed or boarded, `entryHolder`): they signed in with a different method than the one they boarded with. Only ever about the
+     * signed-in person (false for anonymous visitors); never access, never a claim.
+     */
+    readonly boardedElsewhere?: boolean };
 };
+/** Whether one of the person's strongly verified addresses is held by another account (see `FlightState.me.boardedElsewhere`). */
+async function heldElsewhere(person: FlightPerson): Promise<boolean> {
+  const emails = (person.strongEmails ?? []).slice(0, 4);
+  if (!emails.length) return false;
+  const { db, tenantId } = await platformStateHost(process.env);
+  for (const email of emails) {
+    const holder = await entryHolder(db, tenantId, email);
+    if (holder?.accountId && holder.accountId !== person.accountId) return true;
+  }
+  return false;
+}
 // The retention periods hold without traffic: the page prunes expired campaign records at most every five minutes per instance.
 const PRUNE_EVERY_MS = 5 * 60_000;
 let prunedAt = 0;
@@ -74,9 +92,10 @@ export async function flightState(): Promise<FlightState | null> {
     if (person) await store.ensurePublicId(person.accountId).catch(() => null);
     const [foundingOpen, departures, flight] = await Promise.all([store.foundingOpen(), store.departures(), person ? store.account({ ...person, now }) : Promise.resolve(null)]);
     const calendar = store.calendar;
+    const elsewhere = person && flight?.access.kind === 'not_listed' ? await heldElsewhere(person).catch(() => false) : false;
     return { ok: true, now, phase: flightPhase(now, calendar), closesAt: calendar.listClosesAt, boardingOpensAt: calendar.boardingOpensAt,
       foundingOpen, departures,
-      me: { signedIn: person !== null, hasEmail: (person?.emails.length ?? 0) > 0, flight, accessPending: pending !== null } };
+      me: { signedIn: person !== null, hasEmail: (person?.emails.length ?? 0) > 0, flight, accessPending: pending !== null, ...elsewhere ? { boardedElsewhere: true } : {} } };
   } catch { return null; }
 }
 

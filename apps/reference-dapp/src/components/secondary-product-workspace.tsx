@@ -528,6 +528,13 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
         : <p className="ux-panel-text">{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p>}
     </section>
     <SavedRecipientsSection account={account}/>
+    {/* BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the account's sign-in methods (Google, email, wallet) live on their own page, outside the product. */}
+    {signedIn && <section className="ux-panel ux-panel-row" aria-labelledby="credentials-sign-in">
+      <div className="ux-row"><span className="ux-row-icon"><WorkspaceIcon name="key" size={22}/></span>
+        <div className="ux-row-main"><h2 id="credentials-sign-in" className="ux-row-name">{tr("Sign-in methods")}</h2>
+          <p className="ux-row-meta">{tr("Add Google or an email so they open this same account.")}</p></div>
+        <a className="ux-button" href="/account/sign-in-methods">{tr("Manage")}</a></div>
+    </section>}
     <section className="ux-panel" aria-labelledby="credentials-cards">
       <div className="ux-panel-head"><div><h2 id="credentials-cards">{tr("Cards")}</h2><span className="ux-count">{credentials.cards.length}</span></div>
         <button type="button" className="ux-button" onClick={() => setCardEntry(true)}><WorkspaceIcon name="plus" size={18}/>{tr("Add card")}</button></div>
