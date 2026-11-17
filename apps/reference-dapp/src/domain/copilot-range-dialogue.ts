@@ -193,7 +193,8 @@ export function applyRangeAnswer(action: CopilotLiquidityAction, hold: RangeHold
         return { action: hold.side === 'LOWER' ? range(unit, answer.value, upper) : range(unit, lower, answer.value), hold: null, ask: null };
       }
       // The percentage FloFi asked for ("10" after "which percentage?").
-      if (action.rangeUnit === 'PERCENT' && (action.upper === null || percentAsked) && answer.unit === null && !answer.value.startsWith('-'))
+      // Only under FloFi's own percentage question: after any other question (prices for a one-sided range) a bare number is a price.
+      if (action.rangeUnit === 'PERCENT' && percentAsked && answer.unit === null && !answer.value.startsWith('-'))
         return { action: range('PERCENT', null, answer.value), hold: null, ask: null };
       if (bounded(action.rangeUnit) && action.rangeUnit === unit && (action.lower === null) !== (action.upper === null))
         return { action: action.lower === null ? range(unit, answer.value, action.upper) : range(unit, action.lower, answer.value), hold: null, ask: null };

@@ -100,6 +100,9 @@ describe('applyRangeAnswer: only the range slots change', () => {
     expect(applyRangeAnswer(base, null, read('full range')!)!.action).toEqual({ ...base, rangeUnit: 'FULL', lower: null, upper: null });
     const percent = applyRangeAnswer(base, null, read('a percentage range')!)!.action;
     expect(percent).toEqual({ ...base, rangeUnit: 'PERCENT', lower: null, upper: null });
-    expect(applyRangeAnswer(percent, null, read('10')!)!.action).toEqual({ ...base, rangeUnit: 'PERCENT', lower: null, upper: '10' });
+    // Intentional change (delta review): a bare number is the percentage only under FloFi's own percentage question (`percentAsked`);
+    // after any other question (prices for a one-sided range) it is held as a price and FloFi asks its side.
+    expect(applyRangeAnswer(percent, null, read('10')!, true)!.action).toEqual({ ...base, rangeUnit: 'PERCENT', lower: null, upper: '10' });
+    expect(applyRangeAnswer(percent, null, read('10')!)).toMatchObject({ ask: 'SIDE', hold: { value: '10' } });
   });
 });

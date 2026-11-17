@@ -42,7 +42,7 @@ export function poolReadFor(ref: PoolRef, reads: readonly PoolPriceRead[] | unde
 const ORCA_TICK_BOUND = 443_636;
 function usable(read: GoodRead): boolean {
   if (!Number.isSafeInteger(read.tick) || !Number.isSafeInteger(read.at) || read.at <= 0) return false;
-  if (read.ref.kind === 'ORCA') return Math.abs(read.tick) <= ORCA_TICK_BOUND && typeof read.price === 'string' && validPoolPrice(read.price);
+  if (read.ref.kind === 'ORCA') return Math.abs(read.tick) <= ORCA_TICK_BOUND && typeof read.price === 'string' && validPoolPrice(read.price) && orcaTickHolds(read.tick, read.price);
   if (typeof read.sqrtPrice !== 'string' || !/^[1-9][0-9]{0,48}$/.test(read.sqrtPrice) || read.tick < UNISWAP_MIN_TICK || read.tick >= UNISWAP_MAX_TICK) return false;
   const sqrt = BigInt(read.sqrtPrice);
   if (sqrt < UNISWAP_MIN_SQRT_RATIO || sqrt >= UNISWAP_MAX_SQRT_RATIO) return false;
@@ -50,14 +50,23 @@ function usable(read: GoodRead): boolean {
   // and a tick that disagree would put the range note on the wrong side of the current price.
   return sqrtRatioAtTick(Math.max(read.tick - 1, UNISWAP_MIN_TICK)) <= sqrt && sqrt <= sqrtRatioAtTick(Math.min(read.tick + 2, UNISWAP_MAX_TICK));
 }
+/** The reported Orca tick belongs to the reported price (one tick of tolerance either way, the price being rounded to the token's decimals). */
+function orcaTickHolds(tick: number, price: string): boolean {
+  const scaled = (value: string) => { const [whole = '0', fraction = ''] = value.split('.'); return BigInt(whole + fraction.padEnd(18, '0').slice(0, 18)); };
+  try {
+    const at = scaled(price);
+    return scaled(orcaPrice(Math.max(tick - 1, -ORCA_TICK_BOUND))) <= at && at <= scaled(orcaPrice(Math.min(tick + 2, ORCA_TICK_BOUND)));
+  } catch { return false; }
+}
 /** Codes of a read that found no usable pool at this pair and fee tier (as opposed to a price that could not be read right now). */
-const POOL_MISSING = /^(?:UNISWAP_POOL_MISMATCH|UNISWAP_CONTRACT_CODE_MISSING|UNISWAP_POOL_UNINITIALIZED|UNISWAP_FEE_TIER_UNSUPPORTED|ORCA_POOL_INVALID|ORCA_POOL_MISMATCH)$/;
+// A pool locked at a block boundary has never been initialized (slot0 is unlocked after every swap), so it is a missing pool too.
+const POOL_MISSING = /^(?:UNISWAP_POOL_MISMATCH|UNISWAP_CONTRACT_CODE_MISSING|UNISWAP_POOL_UNINITIALIZED|UNISWAP_POOL_LOCKED|UNISWAP_FEE_TIER_UNSUPPORTED|ORCA_POOL_INVALID|ORCA_POOL_MISMATCH)$/;
 export const poolMissing = (code: string): boolean => POOL_MISSING.test(code);
 /**
  * Codes another read cannot change: a deployment or code-pin integrity failure, a pool FloFi does not support as it is, a network not enabled here,
  * a pool identity the surface could not bind. FloFi says what it could not confirm, without offering "Try again".
  */
-const POOL_FINAL = /^(?:UNISWAP_UNEXPECTED_CONTRACT|UNISWAP_DEPLOYMENT_MISMATCH|UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED|CATALOG_ASSET_IDENTITY_CHANGED|ORCA_POOL_NO_LIQUIDITY|ORCA_POOL_REWARDS_UNSUPPORTED|COPILOT_POOL_IDENTITY_CHANGED|COPILOT_POOL_IDENTITY_MISSING|[A-Z_]+_NOT_ENABLED)$/;
+const POOL_FINAL = /^(?:UNISWAP_UNEXPECTED_CONTRACT|UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED|CATALOG_ASSET_IDENTITY_CHANGED|ORCA_POOL_NO_LIQUIDITY|ORCA_POOL_REWARDS_UNSUPPORTED|COPILOT_POOL_IDENTITY_CHANGED|COPILOT_POOL_IDENTITY_MISSING|UNISWAP_NETWORK_UNAVAILABLE|[A-Z_]+_NOT_ENABLED|[A-Z_]+_NOT_CONFIGURED|[A-Z_]+_MISMATCH)$/;
 export const poolRetryable = (code: string): boolean => !POOL_MISSING.test(code) && !POOL_FINAL.test(code);
 
 /** Where the current pool price sits relative to a range, as a person reads it (prices rise to the right). */

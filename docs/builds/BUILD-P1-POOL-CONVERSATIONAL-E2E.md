@@ -82,6 +82,24 @@ read-only verifiers re-checked the first wave's fixes adversarially, and a compl
 | Channels were offered a percentage they can never compute; a side question could show empty units | The percentage is offered only where the surface reads pools; units come from the network the user named when the interpreter left it out (else the interpreter answers). |
 | Smaller | One stablecoin list for orientation and "$"/"dollars"; a test token the user typed is not repeated in the public mismatch question; ETH answers a WETH deposit question; engineering-only Devnet read gets a deadline, an end-of-conversation check and implied-network detection; engineering copy corrected; `coverage.json` maps `copilot-prompt-scope` and `copilot-pool-integration` to their owning modules and makes the incident suites required. |
 
+### Delta review of the wave-2 fixes (`abfa059`)
+
+flofi-chat, flofi-security and flofi-liquidity reviewed the wave-2 delta on the clean `abfa059`; each finding was then reproduced against the real
+engine with a temporary test, or traced by reading. 5 medium and ~10 low findings were confirmed (none critical or high); all are fixed with regression
+tests (`Delta review regressions (abfa059)` in `copilot-pool-dialogue.test.ts`):
+
+| Finding | Fix |
+| --- | --- |
+| A range band ("±5%") or a deposit amount ("500 USDC") could ground a slippage the interpreter reported (e.g. 500 bps instead of the 100 default) | Liquidity slippage is grounded only when written as bps or next to a slippage word (`groundedBps(…, strict)`; other actions unchanged). |
+| A bare "full" ("my full 10 USDC") let a model-reported full range replace a written ±10% | The full range needs range wording ("full range", "faixa completa") or a bare "full" as the whole answer, and never alongside another range in the same message. |
+| "max 10 USDC", "between 10 USDC and 0.004 ETH" and slippage phrasings asked a range question on the default full-range journey, again until the question limit | min/max name a bound only with a range noun; deposit amounts with their token are masked before range wording is read; slippage wording is wider; once FloFi has asked for the range, only the answer decides it. |
+| One-sided questions could not be answered with the same percentage as a band; "10% below and 10% above" was one-sided; a bare number after it became a percentage | A band in the latest message answers it; both sides written are a band; a bare number is a percentage only under FloFi's own percentage questions. |
+| The user's own "(exactly ±10%)" was stripped as a model example | Only "(for example …)", "(e.g. …)", "(por exemplo …)", "(ex. …)" are a model's example. |
+| A slippage percentage could ground a fee tier; "slippage at 0.5%" read as a fee | Slippage percentages are masked before the fee is read. |
+| Pool codes | An uninitialized (locked) Uniswap pool is "not found"; configuration and identity mismatches (`*_MISMATCH`, `*_NOT_CONFIGURED`, `UNISWAP_NETWORK_UNAVAILABLE`) get no "Try again". |
+| Orca reads had no tick/price consistency check | The tick must belong to the price (±1 tick). |
+| Engineering-only: a timed-out Devnet read could reuse an older price as "current" | A read that does not answer in time leaves no price for that turn. |
+
 Not changed (owner decision): MCP `compose_strategy` still refuses a `price` range on catalog networks (the chat converts prices to ticks first;
 both reach the same IR). Extending MCP is outside this build's scope.
 

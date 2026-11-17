@@ -642,3 +642,85 @@ describe('Wave-2 review regressions (workflow, infrastructure, protocol integrat
     expect(() => edit('ten')).toThrow();
   });
 });
+
+describe('Delta review regressions (abfa059): grounding, range wording and pool reads', () => {
+  const ask = (s: CopilotSession, text: string, fields: Record<string, unknown>) => s.say(text, intent.action(act.catalogLiquidity({ ...BASE, ...fields })));
+  const orca = (text: string, fields: Record<string, unknown>) => session().say(text, intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, ...fields })));
+  it('a range band or a deposit amount never grounds a slippage the interpreter reported; a slippage written as such does', () => {
+    for (const [text, fields] of [
+      ['Add liquidity on Base with 10 USDC and 0.004 ETH, ±5%', { rangeUnit: 'PERCENT', upper: '5', slippageBps: '500' }],
+      ['Add liquidity on Base with 500 USDC and 0.2 ETH, ±10%', { deposits: [{ asset: 'USDC', maxAmount: '500' }, { asset: 'ETH', maxAmount: '0.2' }], rangeUnit: 'PERCENT', upper: '10', slippageBps: '500' }],
+    ] as const) {
+      const reply = ask(session(), text, fields);
+      expect(reply, text).toMatchObject({ kind: 'CLARIFICATION' });
+      expect(reply?.text).toMatch(/slippage/i);
+      expect(reply?.command).toBeUndefined();
+    }
+    expect(orca('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, ±5%', { rangeUnit: 'PERCENT', upper: '5', slippageBps: '500' })?.command).toBeUndefined();
+    for (const [words, bps] of [['slippage 1%', '100'], ['0.5% max slippage', '50'], ['slippage of up to 0.5%', '50'], ['50 bps slippage', '50'], ['slippage at 0.5%', '50']] as const) {
+      const reply = ask(session(), `Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%, ${words}`, { rangeUnit: 'PERCENT', upper: '10', slippageBps: bps });
+      expect(reply?.kind, words).toBe('PROPOSAL');
+      expect(reply?.sentence).toContain(`slippage ${bps} bps`);
+    }
+  });
+  it('the full range is the user\'s only when written as a range; a bare "full" or "not the full range" never replaces a written range', () => {
+    for (const words of ['my full 10 USDC and 0.004 ETH, ±10% around the price', '10 USDC and 0.004 ETH, not the full range, ±10%'])
+      expect(ask(session(), `Add liquidity on Base with ${words}`, { rangeUnit: 'FULL' }), words).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_REQUIRED' });
+    // A bare "full" answering FloFi's own range question is the full range (no question loop).
+    const s = session();
+    expect(ask(s, 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', {})).toMatchObject({ code: 'COPILOT_RANGE_REQUIRED' });
+    const full = local(s, 'full');
+    expect(full?.kind).toBe('PROPOSAL');
+    expect(notes(full)).toMatch(/full price range/);
+  });
+  it('deposit maxima and slippage wording never trigger a range question on the default full-range journey', () => {
+    for (const text of ['Add liquidity on Base with max 10 USDC and max 0.004 ETH', 'Add liquidity on Base, split between 10 USDC and 0.004 ETH',
+      'Add liquidity on Base with 10 USDC and 0.004 ETH, slippage max 0.5%', 'Add liquidity on Base with 10 USDC and 0.004 ETH, 0.5% max slippage']) {
+      const bps = /0\.5%/.test(text) ? '50' : null;
+      const reply = ask(session(), text, { slippageBps: bps });
+      expect(reply?.kind, text).toBe('PROPOSAL');
+      expect(notes(reply)).toMatch(/full price range/);
+    }
+  });
+  it('once FloFi has asked for the range, the answer decides it: no question loop over words written before', () => {
+    const s = session();
+    expect(ask(s, 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', {})).toMatchObject({ code: 'COPILOT_RANGE_REQUIRED' });
+    const reply = s.say('the default one', intent.action(act.catalogLiquidity({ ...BASE })));
+    expect(reply?.kind).toBe('PROPOSAL');
+    expect(notes(reply)).toMatch(/full price range/);
+  });
+  it('the user\'s own parentheses are their words; only a model option\'s "(for example, …)" is not', () => {
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH (exactly ±10% around the price)', {})).toMatchObject({ code: 'COPILOT_RANGE_REQUIRED' });
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH (exactly ±10% around the price)', { rangeUnit: 'PERCENT', upper: '10' })?.kind).toBe('PROPOSAL');
+  });
+  it('a slippage percentage never grounds a fee tier, and "slippage at 0.5%" is not a fee', () => {
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, slippage 1%', { feeTier: '1', slippageBps: '100' })?.text).toMatch(/could not find the fee tier 1%/);
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, slippage at 0.5%', { slippageBps: '50' })?.kind).toBe('PROPOSAL');
+  });
+  it('a one-sided question is answered by the same percentage as a band, and both sides written are a band', () => {
+    const s = session();
+    expect(s.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, lower bound 10% below the current price',
+      intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, rangeUnit: 'PERCENT', lower: '-10' })))).toMatchObject({ code: 'COPILOT_RANGE_PERCENT_ONE_SIDED' });
+    expect(local(s, '±10%')?.sentence).toMatch(/^add liquidity 0\.1 SOL and 10 USDC from \S+ to \S+ USDC per SOL on Solana/);
+    for (const words of ['10% below and 10% above the current price', 'from 10% below to 10% above the current price'])
+      expect(orca(`Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, ${words}`, { rangeUnit: 'PERCENT', lower: '-10', upper: '10' })?.kind, words).toBe('PROPOSAL');
+    // After the one-sided question (which asks for prices) a bare number is a price: FloFi asks its side, never a ±150% band.
+    const t = session();
+    t.say('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, lower bound 10% below the current price',
+      intent.action(act.liquidity({ ...ORCA, deposits: SOL_USDC, rangeUnit: 'PERCENT', lower: '-10' })));
+    expect(local(t, '50')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_RANGE_SIDE_REQUIRED', text: 'Is 50 USDC per SOL the lower or the upper price of the range?' });
+  });
+  it('pool codes: an uninitialized (locked) pool is not found; configuration and identity mismatches get no retry', () => {
+    const failing = (code: string) => Object.assign(session(), { poolReader: (ref: PoolRef): PoolPriceRead => ({ ref, readAt: NOW, ok: false, code }) });
+    const pct = (s: CopilotSession) => ask(s, 'Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%', { rangeUnit: 'PERCENT', upper: '10' });
+    expect(pct(failing('UNISWAP_POOL_LOCKED'))).toMatchObject({ code: 'COPILOT_POOL_NOT_FOUND' });
+    for (const code of ['UNISWAP_TOKEN_MISMATCH', 'CATALOG_NETWORK_MISMATCH', 'UNISWAP_NETWORK_UNAVAILABLE', 'UNISWAP_LIQUIDITY_STORAGE_NOT_CONFIGURED', 'UNISWAP_DEPLOYMENT_MISMATCH'])
+      expect(pct(failing(code)), code).toMatchObject({ code: 'COPILOT_POOL_PRICE_UNAVAILABLE', options: [] });
+    expect(pct(failing('UNISWAP_STALE_CHAIN_HEAD'))).toMatchObject({ code: 'COPILOT_POOL_PRICE_UNAVAILABLE', options: ['Try again'] });
+  });
+  it('an Orca read whose tick does not belong to its price is a failed read', () => {
+    const s = orcaOpen();
+    s.poolReader = ref => ({ ref, readAt: NOW, ok: true, price: ORCA_PRICE, tick: 0, at: 1 });
+    expect(local(s, '±10%')).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POOL_READ_INVALID' });
+  });
+});

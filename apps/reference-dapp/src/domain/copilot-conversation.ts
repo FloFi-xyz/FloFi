@@ -100,7 +100,8 @@ type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: Swap
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: misspelled words whose reading FloFi already showed the user ("arbriturm" as Arbitrum One). */ readonly typos?: readonly string[];
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the step an edit or repeat already resolved (a later answer never asks "which step?" again). */ readonly target?: Resolved;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient (id) the user picked from FloFi's "which one?" buttons. */ readonly savedRecipient?: string;
-  /** BUILD-P1: the bare number the user gave to FloFi's own percentage question (see `Grounding.answeredPercent`). */ readonly answeredPercent?: string };
+  /** BUILD-P1: the bare number the user gave to FloFi's own percentage question (see `Grounding.answeredPercent`). */ readonly answeredPercent?: string;
+  /** BUILD-P1: FloFi asked this request for its range (see `Grounding.rangeAsked`). */ readonly rangeAsked?: boolean };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -1790,7 +1791,7 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
     ...env.verified?.pools?.length ? { pools: env.verified.pools } : {}, ...env.poolReads ? { poolReads: true } : {}, now: env.now ?? Date.now(),
     // BUILD-FLOFI-UX-FIX-003: only a new single action reads "to 1 USDC" as an amount to receive; an edit's "to 4 USDC" is its new amount.
     ...intent.kind === 'ACTION' && !composition ? { receiving: true } : {}, ...saved.addresses.length ? { saved: saved.addresses } : {},
-    ...extras.answeredPercent ? { answeredPercent: extras.answeredPercent } : {} };
+    ...extras.answeredPercent ? { answeredPercent: extras.answeredPercent } : {}, ...extras.rangeAsked ? { rangeAsked: true } : {} };
   if (!composition && !extras.planned) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon, grounding.receiving === true));
   // The stored draft never holds a saved address: it keeps the recipient's id, so the next turn resolves (and re-checks) it again.
   const open = (list: readonly CopilotAction[]) => saved.id ? list.map(action => (action.type === 'TRANSFER' || action.type === 'BRIDGE') && action.recipient !== null
@@ -1846,7 +1847,9 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   const suggested = withSuggestion(state, env, outcome.options.filter(option => publicText(option) !== null), intent.language);
   // BUILD-P1: "Try again" after a pool read FloFi could not make resolves the same request again (locally; the surface reads the pool once more).
   const retry: Draft['options'] = suggested.options.includes(m.retryOption) ? [{ label: m.retryOption, fill: { kind: 'EXTRAS', extras: {} } }] : [];
-  const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [...actionFills(intent, outcome.missing, suggested.options), ...retry], snapshot: snapshotOf(env), extras,
+  // BUILD-P1: once FloFi has asked for the range, the answer alone decides it (see `Grounding.rangeAsked`).
+  const kept: Extras = outcome.code === 'COPILOT_RANGE_REQUIRED' ? { ...extras, rangeAsked: true } : extras;
+  const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [...actionFills(intent, outcome.missing, suggested.options), ...retry], snapshot: snapshotOf(env), extras: kept,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
   return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes],

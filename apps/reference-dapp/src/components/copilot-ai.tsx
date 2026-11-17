@@ -313,8 +313,12 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       const percentAnswer = /%|percent|por\s?cento/i.test(text) || (/^COPILOT_RANGE_PERCENT_/.test(before.draft?.code ?? '') && /^\s*\d+(?:[.,]\d+)?\s*$/.test(text));
       const devnetPercent = activeNetworkScope() === 'ENGINEERING' && Boolean(before.draft) && devnetPool && percentAnswer;
       if (devnetPercent) {
-        await Promise.race([loadVerified({ rangeUnit: 'PERCENT' }), new Promise(resolve => setTimeout(resolve, POOL_READ_TIMEOUT_MS))]);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const loaded = await Promise.race([loadVerified({ rangeUnit: 'PERCENT' }).then(() => true),
+          new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), POOL_READ_TIMEOUT_MS); })]).finally(() => clearTimeout(timer));
         if (ended()) return dropped;
+        // A read that did not answer in time leaves no price for this turn: an earlier price is never shown as the current one.
+        if (!loaded) fetched.current = { ...fetched.current, price: null };
       }
       let start = startTurn(before, text, { ...(devnetPercent ? contextNow() : sent), ...recipientsNow() });
       // BUILD-P1: FloFi needs a pool's current price for this answer: read it (read-only, this turn only) and answer the same message again with it.
