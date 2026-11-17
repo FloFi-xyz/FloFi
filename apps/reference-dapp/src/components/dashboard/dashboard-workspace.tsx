@@ -60,8 +60,10 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   // A wallet proven anywhere on the page (Your workflows, Save, /approve) re-reads the history: a read, never another signature.
   useEffect(() => {
     const changed = () => { forgetListed(); refresh(value => value + 1); };
-    window.addEventListener(WALLET_PROOF_CHANGED, changed);
-    return () => window.removeEventListener(WALLET_PROOF_CHANGED, changed);
+    // A history change on another surface (delete or archive elsewhere) also retires the listed summaries.
+    const historyElsewhere = () => forgetListed();
+    window.addEventListener(WALLET_PROOF_CHANGED, changed); window.addEventListener('flofi:history-changed', historyElsewhere);
+    return () => { window.removeEventListener(WALLET_PROOF_CHANGED, changed); window.removeEventListener('flofi:history-changed', historyElsewhere); };
   }, []);
   const currentKey = JSON.stringify([account, ownedCurrent?.run.runId, version]);
   const [currentVisibility, setCurrentVisibility] = useState<{ key: string; disposition: 'VISIBLE' | 'DELETED' | 'ARCHIVED' } | null>(null);
@@ -92,7 +94,11 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     const request = runId ? dashboardRunDetail(account, runId, abort.signal).then(response => ({ key, response })) : dashboardSnapshot(account, null, abort.signal).then(snapshot => ({ key, snapshot }));
     request.then(value => {
       if (cancelled) return;
-      if ('snapshot' in value && value.snapshot.connection === 'CONNECTED' && sameOwner(value.snapshot.account, account)) rememberListed(account, value.snapshot.runs, false);
+      // A listing of this wallet replaces the summaries; any other answer (signed out, unavailable, another wallet) drops them. A record the
+      // server no longer returns to this wallet drops its listed summary.
+      if ('snapshot' in value) {
+        if (value.snapshot.connection === 'CONNECTED' && sameOwner(value.snapshot.account, account)) rememberListed(account, value.snapshot.runs, false); else forgetListed();
+      } else if (!value.response.detail && value.response.connection !== 'UNAVAILABLE') forgetListed(value.response.connection === 'NOT_FOUND' ? runId ?? undefined : undefined);
       setLoaded(value);
     }).catch(() => {
       if (!cancelled) setLoaded(runId ? { key, response: { connection: 'UNAVAILABLE', account, detail: null } }

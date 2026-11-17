@@ -251,7 +251,7 @@ describe('why a recovered check stopped again', () => {
     expect(stopped).toMatchObject({ status: 'STOPPED_AGAIN', code: 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW', runStatus: 'SUBMISSION_RESULT_UNKNOWN' });
     expect(stopped.detail).toMatch(/^Stopped again after 2 checks: the nonce-conflict investigation found exactly the same evidence/);
     expect(stopped.detail).toContain('not a temporary failure'); expect(stopped.detail).toContain('stops again');
-    expect(stopped.detail).toContain('outcome stays UNKNOWN'); expect(stopped.detail).not.toMatch(/\b(resolved|succeeded|reconciled)\b/i); expect(stopped.detail).toContain('nothing was submitted, repeated or marked as settled');
+    expect(stopped.detail).toContain('outcome stays UNKNOWN'); expect(stopped.detail).not.toMatch(/\b(resolved|succeeded|reconciled)\b/i); expect(stopped.detail).toContain('This check only read the chain: it submitted, repeated and settled nothing.'); expect(stopped.detail).toContain('not success, failure or non-execution');
   });
   it('a temporary RPC or provider condition is said to be temporary', () => {
     const detail = stoppedAgainDetail('ROUTER_RPC_TIMEOUT', 1);

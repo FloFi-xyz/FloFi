@@ -90,6 +90,10 @@ describe('EXEC-02: settlement sync re-reads only a settling run and never adopts
     expect(adoptSettlementRead(universal, { ...universal, destination: { final: true } })).toBe(true);
     expect(adoptSettlementRead(universal, { ...universal, source: { final: false } })).toBe(false);
   });
+  it('never adopts a read of another owner, even for the same run id', () => {
+    expect(adoptSettlementRead({ ...base, owner: '0xAa' }, { ...base, phase: 'DESTINATION_OBSERVED', owner: '0xbb' })).toBe(false);
+    expect(adoptSettlementRead({ ...base, owner: '0xAa' }, { ...base, phase: 'DESTINATION_OBSERVED', owner: '0xaa' })).toBe(true);
+  });
   it('refuses a late answer that would move the run back, and another run', () => {
     const observed = { ...base, phase: 'DESTINATION_OBSERVED', destination: { safe: false } };
     expect(adoptSettlementRead(observed, base)).toBe(false);
@@ -152,7 +156,7 @@ describe('CHAT-01: status questions about the current execution', () => {
   });
   it('says the next request is being prepared, or reviewed and waiting for Continue, instead of "no"', () => {
     const approved = view(lifecycle({ phase: 'AUTHORIZED', destination: null, attempts: [{ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true, receipt: null }] }));
-    expect(executionStatusAnswer(approved, 'SIGNATURE', 'EN', false, null, true)!.text).toMatch(/^Yes, soon: FloFi is preparing the next request/);
+    expect(executionStatusAnswer(approved, 'SIGNATURE', 'EN', false, null, true)!.text).toMatch(/^Probably: FloFi is preparing the next request.*If its checks still pass/);
     expect(executionStatusAnswer(approved, 'SIGNATURE', 'PT', false, 'CONFIRM_CONTINUE')!.text).toMatch(/^Só se você continuar/);
   });
   it('a request waiting in the wallet, an unknown outcome and a failed run are each said as such', () => {

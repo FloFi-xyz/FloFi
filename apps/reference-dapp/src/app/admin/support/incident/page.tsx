@@ -167,8 +167,8 @@ function RunDetail({ detail, csrf, canRecover }: { detail: Extract<IncidentDetai
         means: a stable nonce conflict is the designed stop, a temporary condition may pass), and keeps the operator's typed reason apart from what the
         task and the execution record verify. */}
     <Section id="support-run-history" title="Recovery attempts for this execution">
-      <p className="admin-diff">Execution <code>{run.runId}</code>. An accepted recovery only re-queues a read-only check under this execution’s identity: it does not
-        establish that anything settled. Each result below is read from that task and this execution’s record now.</p>
+      <p className="admin-diff">Execution <code>{run.runId}</code>. An accepted recovery only re-queues this execution’s existing background task under its identity (a
+        read-only transaction check, or an evidence copy) and may clear its attention flag: it does not establish that anything settled. Each result below is read from that task and this execution’s record now.</p>
       {detail.history.length === 0 ? <p className="admin-empty">None in the last 90 days.</p> : <ul className="admin-note-list">{detail.history.map(entry => {
         const stop = entry.verification?.status === 'STOPPED_AGAIN' ? explainCode(entry.verification.code) : null;
         return <li key={entry.eventId}>

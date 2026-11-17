@@ -17,6 +17,8 @@ export const SETTLEMENT_SYNC_MS = 15_000;
 /** The fields every bridge record (cross-chain router, universal router) shares that order its settlement. */
 export type SettlementRecord = {
   readonly id: string; readonly verdict: string; readonly phase: string;
+  /** The run's owner wallet, where the record carries it: a read for another owner is never adopted (defence in depth; reads are owner-scoped). */
+  readonly owner?: string;
   /** Router records mark each side `safe` once its block is final; universal records mark each side `final`. */
   readonly source: object | null; readonly destination: object | null;
 };
@@ -48,6 +50,7 @@ function progress(record: SettlementRecord): readonly number[] {
  */
 export function adoptSettlementRead(shown: SettlementRecord | null | undefined, incoming: SettlementRecord): boolean {
   if (!shown || shown.id !== incoming.id || shown.verdict !== 'PENDING') return false;
+  if (shown.owner !== undefined && incoming.owner !== undefined && shown.owner.toLowerCase() !== incoming.owner.toLowerCase()) return false;
   if (incoming.verdict !== 'PENDING') return true;
   const before = progress(shown), after = progress(incoming);
   return after.every((value, index) => value >= before[index]!);

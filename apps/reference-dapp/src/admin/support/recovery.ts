@@ -210,9 +210,10 @@ export function stoppedAgainDetail(code: string | null, deliveries: number | nul
   const explained = explainCode(code);
   if (explained?.code === 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW') return `Stopped again${after}: the nonce-conflict investigation found exactly the same evidence as `
     + 'before, so the automatic check stopped by design. This is a stable conflict, not a temporary failure: resuming the check again with unchanged evidence '
-    + 'stops again. The transaction outcome stays UNKNOWN; nothing was submitted, repeated or marked as settled. The execution is flagged for attention again.';
-  if (explained?.remedy === 'TRANSIENT') return `Stopped again${after} on a temporary condition: ${explained.label} (${explained.code}). A later check may succeed `
-    + 'once the external service answers; the outcome is not established. The execution is flagged for attention again.';
+    + 'stops again. The transaction outcome stays UNKNOWN (not success, failure or non-execution). This check only read the chain: it submitted, '
+    + 'repeated and settled nothing. The execution is flagged for attention again.';
+  if (explained?.remedy === 'TRANSIENT') return `Stopped again${after} on a temporary condition: ${explained.label} (${explained.code}). A later check may conclude `
+    + 'once the condition clears; the outcome is not established. The execution is flagged for attention again.';
   return `The task stopped again${after} without a final result${explained ? ` (${explained.label}: ${explained.code})` : ''}. The execution is flagged for attention again.`;
 }
 
