@@ -1537,6 +1537,26 @@
     "app.e2e.chat-message-wrapping": {
       "path": "apps/reference-dapp/e2e/chat-message-wrapping.spec.ts",
       "stage": "browser"
+    },
+    "app.server.base-liquidity": {
+      "path": "apps/reference-dapp/src/server/base-liquidity.test.ts",
+      "stage": "unit"
+    },
+    "app.server.supply-service": {
+      "path": "apps/reference-dapp/src/server/supply-service.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.uniswap-liquidity-continuation": {
+      "path": "apps/reference-dapp/e2e/uniswap-liquidity-continuation.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.dashboard-productization": {
+      "path": "apps/reference-dapp/e2e/dashboard-productization.spec.ts",
+      "stage": "browser"
+    },
+    "app.state.uniswap-liquidity-store": {
+      "path": "apps/reference-dapp/src/state/uniswap-liquidity-store.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1663,7 +1683,10 @@
     "app.server.conversation-scope",
     "app.flight.board-access-http",
     "app.domain.copilot-pool-dialogue",
-    "app.domain.copilot-pool-dialogue.repro"
+    "app.domain.copilot-pool-dialogue.repro",
+    "app.server.base-liquidity",
+    "app.server.supply-service",
+    "app.state.uniswap-liquidity-store"
   ],
   "modules": [
     {
@@ -2488,7 +2511,8 @@
         "app.e2e.flight",
         "app.legal.privacy",
         "app.e2e.chat-review-overflow",
-        "app.e2e.chat-message-wrapping"
+        "app.e2e.chat-message-wrapping",
+        "app.e2e.dashboard-productization"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -2545,7 +2569,10 @@
         "reference-compiler.uniswap-public-liquidity",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
-        "reference-reconciler.orca-mainnet-liquidity"
+        "reference-reconciler.orca-mainnet-liquidity",
+        "app.server.base-liquidity",
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -3573,7 +3600,8 @@
         "app.e2e.ux-polish-004",
         "app.e2e.portfolio-ux004",
         "app.e2e.editor-workflow-run",
-        "app.components.review-summary-panel"
+        "app.components.review-summary-panel",
+        "app.e2e.dashboard-productization"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4264,7 +4292,8 @@
         "apps/reference-dapp/src/state/copilot-pool-reads.ts",
         "apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/solana-liquidity-authoring.ts",
-        "apps/reference-dapp/src/domain/uniswap-liquidity-authoring.ts"
+        "apps/reference-dapp/src/domain/uniswap-liquidity-authoring.ts",
+        "apps/reference-dapp/src/domain/uniswap-liquidity-continuation.ts"
       ],
       "suites": [
         "reference-compiler.liquidity",
@@ -4278,7 +4307,10 @@
         "reference-compiler.uniswap-price-orientation",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
-        "reference-reconciler.orca-mainnet-liquidity"
+        "reference-reconciler.orca-mainnet-liquidity",
+        "app.server.base-liquidity",
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -4818,7 +4850,8 @@
         "apps/reference-dapp/src/i18n/pt-execution-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-execution-ux-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-identity-recovery.ts",
-        "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts"
+        "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts",
+        "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -6832,7 +6865,8 @@
         "reference-compiler.borrow",
         "reference-compiler.repay",
         "reference-compiler.supply",
-        "reference-compiler.withdraw"
+        "reference-compiler.withdraw",
+        "app.server.supply-service"
       ],
       "gaps": [
         "Live Aave positions and real-wallet state transitions require separate acceptance on supported networks."
@@ -6863,7 +6897,10 @@
         "reference-compiler.uniswap-public-liquidity",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
-        "reference-reconciler.orca-mainnet-liquidity"
+        "reference-reconciler.orca-mainnet-liquidity",
+        "app.server.base-liquidity",
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7289,7 +7326,10 @@
         "reference-compiler.uniswap-public-liquidity",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
-        "reference-reconciler.orca-mainnet-liquidity"
+        "reference-reconciler.orca-mainnet-liquidity",
+        "app.server.base-liquidity",
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",

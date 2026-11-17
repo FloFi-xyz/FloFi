@@ -30,6 +30,8 @@ function recoveredRepayApproval(record:SupplyRecord):boolean {
  * Catalog mainnets use their registered lending namespace (`baave-` Base, `araave-` Arbitrum), profile and chain-bound RPC.
  * Mainnet execution defaults off and needs the network's owner-execution opt-in; Simulate and Review remain read-only.
  */
+/** A request is prepared only while its Review stays valid for the wallet hand-off that follows (the same rule as Uniswap liquidity). */
+export const SUPPLY_REVIEW_HANDOFF_MARGIN_MS = 10_000;
 export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<Record<string,SupplyRpc>>>;journalDir?:string;storage?:ExecutionStorage;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';
   idPrefix?:'supply'|'baave'|'araave'|'etaave';executionEnabled?:boolean}) {
   const idPrefix=input.idPrefix??'supply',executionEnabled=input.executionEnabled??(idPrefix==='supply');
@@ -185,6 +187,8 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       const state=await readState(record.review,record.review.account);
       assertSupplyReview(record.review,workflow,record.review.account,state);
       if(record.priorApproval)await verifyPriorApproval(record);
+      // EXEC-01 audit: a Review that cannot reach the wallet before it expires is not authorized (begin would refuse it).
+      if(Date.now()>=Date.parse(record.review.expiresAt)-SUPPLY_REVIEW_HANDOFF_MARGIN_MS)throw new Error('SUPPLY_AUTHORIZATION_STALE');
       const updated={...record,authorization:commitment};await save(updated);return updated;
     });},
     async invalidate(id:string):Promise<SupplyRecord>{return locked(idCheck(id),async()=>{const record=await load(id);const next={...record,authorization:null,error:'SUPPLY_SEMANTIC_EDIT_REQUIRES_REVIEW'};await save(next);return next;});},
@@ -200,6 +204,10 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       const index=approvalConfirmed?review.transactions.length-1:0;
       const gas=review.gasLimits[index]!;
       await feePreflight(review,index,state);
+      // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01 audit): the reads above take seconds on a public network. The Review must still cover
+      // this request's hand-off (SUPPLY_REVIEW_HANDOFF_MARGIN_MS) before its nonce is durably reserved: a request prepared under a Review that then
+      // expired was refused at the hand-off and left that nonce leased, so a new simulation could not continue (SUPPLY_NONCE_ALREADY_RESERVED).
+      if(Date.now()>=Date.parse(review.expiresAt)-SUPPLY_REVIEW_HANDOFF_MARGIN_MS)throw new Error('SUPPLY_AUTHORIZATION_STALE');
       const prepared={...prepareSupplyAttempt(record,state.block,state.nonce,false),observations:record.observations,evidence:record.evidence,error:null};
       const attempt=prepared.attempts.at(-1)!;
       // Permanent nonce lease across runs/processes. Uncertainty never releases economic intent.
@@ -241,6 +249,8 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
             if(!continuingApproval&&priorRun.verdict!=='RECONCILED'||!(priorAttempt?.reconciled||continuingApproval&&recoveredRepayApproval(priorRun))||priorAttempt?.nonce!==attempt.nonce||JSON.stringify(priorAttempt.transaction)!==JSON.stringify(last.transaction))throw new Error('SUPPLY_NONCE_ALREADY_RESERVED');
             const proof=await reconcileSupplyAttempt(priorRun.review,priorAttempt,rpcOf(priorRun.review));
             if(proof.verdict!=='RECONCILED'||proof.walletEnvelope?.owner!==review.account||proof.walletEnvelope.ownerNonceAfter!==attempt.nonce)throw new Error('SUPPLY_NONCE_ALREADY_RESERVED');
+            // That proof read the network: the Review must still cover the hand-off before anything is reserved (EXEC-01 audit).
+            if(Date.now()>=Date.parse(review.expiresAt)-SUPPLY_REVIEW_HANDOFF_MARGIN_MS)throw new Error('SUPPLY_AUTHORIZATION_STALE');
             await reserveBorrowIntent();await reserveRepayIntent();
             await log.extend(lease,new TextEncoder().encode(prior+JSON.stringify(entry)+'\n'),bytes=>{
               const history=new TextDecoder('utf-8',{fatal:true}).decode(bytes).trimEnd().split('\n').map(line=>JSON.parse(line) as typeof entry);

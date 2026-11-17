@@ -487,6 +487,8 @@ MAIN_PROFILES = {
     # BUILD AAVE-V3-CARD-CATALOG-FIX-001 (intentional change): the same harness profile also certifies the lending card's Aave reserve catalog.
     "base-mainnet-authoring": (["base-mainnet-authoring.spec.ts","base-mainnet-lending-catalog.spec.ts"], {"GRYLOO_BASE_MAINNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_COPILOT":"replay"}),
     "uniswap-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"uniswap","GRYLOO_UNISWAP_LIQUIDITY_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    # BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (intentional change): the Uniswap multi-approval continuation after a Review expiry, through the chat.
+    "uniswap-continuation": (["uniswap-liquidity-continuation.spec.ts"], {"GRYLOO_UNISWAP_LIQUIDITY_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "router-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"router","GRYLOO_ROUTER_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "journey-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"journey","GRYLOO_ROUTER_TESTNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "admin-console": (["admin-console.spec.ts", "admin-login-layout.spec.ts"], {"FLOFI_ADMIN_E2E":"LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),

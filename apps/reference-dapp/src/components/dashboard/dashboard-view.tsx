@@ -103,7 +103,8 @@ function NeedsYouRow({ view, openRun }: { view: DashboardRunView; openRun(runId:
     <span className="ux-row-icon"><ActionIcon action={runAction(view.run.flow)}/></span>
     <div className="ux-row-main"><h3 className="ux-row-name">{label}</h3>
       <p className="ux-row-meta">{tr(view.status)}{updated && <> · <time dateTime={view.run.updatedAt!}>{updated}</time></>}</p></div>
-    <a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)} aria-label={tr('See what to do: {0}', label)}>{tr('See what to do')}</a>
+    {/* UX-01: in the row's actions, so it wraps beside or below the name like every other row action. */}
+    <div className="ux-row-actions"><a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)} aria-label={tr('See what to do: {0}', label)}>{tr('See what to do')}</a></div>
   </div>;
 }
 

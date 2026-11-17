@@ -4,8 +4,11 @@ import { currentExecution, isFinalExecutionResult, nothingSubmitted, refreshable
 import type { ExecutionControlsState } from '../state/execution-controls';
 
 const FRESH_SIMULATION_AFTER_NOTHING_SENT: readonly string[] = ['public', 'solana-swap', 'solana-pool', 'solana-composition', 'solana-transfer'];
-/** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: bridges whose shell simulation re-quotes in place after a landed approval (`refreshBridgeAfterApproval`). */
-const REFRESH_AFTER_PRESEND_REFUSAL: readonly string[] = ['universal', 'router'];
+/**
+ * BUILD-P0-MAINNET-EXECUTION-RELIABILITY: bridges whose shell simulation re-quotes in place after a landed approval (`refreshBridgeAfterApproval`).
+ * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): Uniswap liquidity refreshes the same run in place the same way (`uniswapRefreshInPlace`).
+ */
+export const REFRESH_AFTER_PRESEND_REFUSAL: readonly string[] = ['universal', 'router', 'uniswap-pool'];
 export const REFRESH_AND_REVIEW_LABEL = 'Refresh & review';
 /** A Solana composition whose swap is reconciled and bound, and whose position has no transaction yet. */
 function awaitsPosition(source: ExecutionControlsState['source']): boolean {

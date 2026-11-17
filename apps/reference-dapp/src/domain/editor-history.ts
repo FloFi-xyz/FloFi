@@ -40,6 +40,8 @@ export type HistoryAction =
   | { readonly type: 'RESTORE_LENDING_CANVAS'; readonly workflow: SemanticWorkflow }
   /** P0: a recovered Solana Swap → liquidity run that still needs the owner (its position is owed) shows its authorized workflow again. */
   | { readonly type: 'RESTORE_SOLANA_COMPOSITION_CANVAS'; readonly workflow: SemanticWorkflow }
+  /** BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a recovered, still-pending Uniswap v3 liquidity run's own workflow. */
+  | { readonly type: 'RESTORE_LIQUIDITY_CANVAS'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'COMMAND'; readonly command: Command; readonly context: ReviewContext; readonly position?: { x: number; y: number }; readonly authoringId?: string; readonly authoringAmount?: string }
   | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string }
   /** BUILD-RH-002: the Stocks card — a Robinhood Chain catalog swap from USDG into the first featured Stock Token. */
@@ -273,6 +275,16 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     try {
       const workflow=validateWorkflowDraft(action.workflow,createBaseSepoliaReviewContext());
       if(!isBoundComposition(workflow))return state;
+      return {...state,editor:{workflow:freeze(workflow),error:null},layout:{},past:[],future:[]};
+    } catch {return state;}
+  }
+  if(action.type==='RESTORE_LIQUIDITY_CANVAS') {
+    // EXEC-01: the same rule as the lending and Solana composition restores (only the untouched initial Canvas, the exact IR/revision of a
+    // validated durable run, no Review or execution authority): after a reload, the owner can refresh and continue the run that still needs them.
+    if(state.actionSetup||Object.keys(state.amountInputs).length||state.editor.workflow.revision!==0||state.past.length||!state.editor.workflow.nodes.every(n=>n.actionType.startsWith('mock-')))return state;
+    try {
+      const workflow=validateWorkflowDraft(action.workflow,createBaseSepoliaReviewContext());
+      if(workflow.nodes.length!==1||workflow.nodes[0]!.actionType!=='asset.liquidity.concentrated')return state;
       return {...state,editor:{workflow:freeze(workflow),error:null},layout:{},past:[],future:[]};
     } catch {return state;}
   }

@@ -149,7 +149,10 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   const attention: string[] = [];
   if (status === 'Unresolved') attention.push('Execution status unresolved');
   else if (status === 'Partially completed' || status === 'Failed') attention.push('Review the incomplete action');
-  else if (status === 'Transaction not submitted') attention.push(progress ? 'Wallet confirmation was declined' : notSubmittedChip);
+  // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a request stopped because its Review expired before the wallet was asked is never
+  // presented as declined by the owner; "declined" stays for real wallet declines.
+  else if (status === 'Transaction not submitted') attention.push(progress?.steps.some(step => step.operations.some(op => op.state === 'not-submitted' && !op.hash
+    && /_REVIEW_EXPIRED$/.test(op.reason ?? ''))) ? 'The Review expired before the wallet request' : progress ? 'Wallet confirmation was declined' : notSubmittedChip);
   else if (status === 'Needs attention') attention.push(message);
   if (run.needsObservation) attention.push('Awaiting an execution status check');
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a run that never made a wallet request has nothing to attend to on chain: its recorded issue (an expired quote,

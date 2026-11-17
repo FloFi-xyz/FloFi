@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { requotedMessage } from '../domain/simulation-presentation';
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -220,6 +221,8 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
       {authorized && !lp.executionEnabled && <p role="status">{tr("Execution is not enabled on this server. Simulation and Review remain read-only.")}</p>}
       {canExecute && nextStep && <button type="button" className="primary" disabled={lp.busy} onClick={() => void lp.execute()}>{tr("Execute: ")}{tr(stepLabel[nextStep])}</button>}
       {needsRefresh && <button type="button" disabled={lp.busy} onClick={() => void lp.refresh()}>{tr("Refresh simulation for the next step")}</button>}
+      {/* EXEC-01: why this run's Review was refreshed in place before the next wallet request (nothing was sent; confirmed steps are kept). */}
+      {lp.requoted && <p className="bridge-requote-reason" role="status">{tr(requotedMessage(lp.requoted.code))}</p>}
       {pending && <button type="button" disabled={lp.busy} onClick={() => void lp.observe()}>{tr("Observe existing transaction")}</button>}
       {record.attempts.length > 0 && <ol aria-label={tr("Liquidity transactions")}>{record.attempts.map(a => <li key={a.attemptId}>{tr(stepLabel[a.step])}: {tr(a.state.toLowerCase().replaceAll('_', ' '))}
         {a.transactionHash && <> · <a href={explorer(a.replacementHash ?? a.transactionHash, profile)} target="_blank" rel="noreferrer">{tr("view transaction")}</a></>}{tr(a.note ? ` · ${message(a.note) ?? a.note}` : '')}</li>)}</ol>}
