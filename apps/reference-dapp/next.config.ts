@@ -69,6 +69,8 @@ export default config;
  * This is type-only. It does not install or polyfill URLPattern and has no
  * runtime effect. Remove and re-review it when Next, TypeScript, or Node type
  * versions change.
+ * Re-reviewed on next@16.4.6 (BUILD UX POLISH 004): its declarations
+ * (dist/server/web/spec-extension/url-pattern.d.ts) still reference both names.
  */
 declare global {
   type URLPatternInput = string | URLPatternInit;

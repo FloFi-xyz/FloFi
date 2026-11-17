@@ -146,6 +146,9 @@ test.describe('UX-01 collapsible navigation rail', () => {
             const label = `${theme} ${width}px ${expanded ? 'expanded' : 'collapsed'} ${section}`;
             await openProductSection(page, section);
             await expectProductSection(page, section);
+            // Below 1360 px a press outside the floating rail (the stepper is one) collapses it: show the names again for this section.
+            if ((await rail(page).getAttribute('data-expanded')) !== String(expanded)) await railToggle(page).click();
+            await expect(rail(page)).toHaveAttribute('data-expanded', String(expanded));
             await page.evaluate(() => window.scrollTo(0, 0));
             const railWidth = expanded ? 260 : 64;
             await expect.poll(async () => (await box(page.locator('.navigation-drawer'))).width, { message: label }).toBe(railWidth);
@@ -177,6 +180,44 @@ test.describe('UX-01 collapsible navigation rail', () => {
       networkGuard.assertClean();
     });
   }
+
+  test('below 1360 px the expanded rail floats over the Canvas and gets out of the way; from 1360 px it sits beside the workspace', async ({ page, networkGuard }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openBuilder(page);
+    const tool = await box(graph(page).locator('.floating-toolbox button').first());
+    const toolCenter = { x: tool.x + tool.width / 2, y: tool.y + tool.height / 2 };
+    const covered = () => page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.navigation-layer')), toolCenter);
+    expect(await covered()).toBe(false);
+    const workspace = await box(main(page));
+    await railToggle(page).click();
+    await expect(rail(page)).toHaveAttribute('data-expanded', 'true');
+    // It floats: the workspace keeps its width and position, the rail covers its left edge with the drawer's shadow.
+    expect(await box(main(page))).toEqual(workspace);
+    expect(await covered()).toBe(true);
+    await expect(page.locator('.navigation-drawer')).not.toHaveCSS('box-shadow', 'none');
+    // A press outside navigation collapses it, and the Canvas tool under it is reachable again.
+    await page.mouse.click(toolCenter.x + 420, toolCenter.y + 120);
+    await expect(rail(page)).toHaveAttribute('data-expanded', 'false');
+    await expect.poll(covered).toBe(false);
+    // Escape from inside it collapses it and returns focus to the chevron; Escape elsewhere leaves it as it is.
+    await railToggle(page).click();
+    await navigationDrawer(page).getByRole('link', { name: 'Dashboard', exact: true }).focus();
+    await page.keyboard.press('Escape');
+    await expect(rail(page)).toHaveAttribute('data-expanded', 'false');
+    await expect(railToggle(page)).toBeFocused();
+    await railToggle(page).click();
+    await page.locator('#mock-prompt').focus();
+    await page.keyboard.press('Escape');
+    await expect(rail(page)).toHaveAttribute('data-expanded', 'true');
+    // From 1360 px the expanded rail moves the workspace aside and stays as the owner left it.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => (await box(main(page))).x).toBeGreaterThanOrEqual(260);
+    await page.mouse.click(1000, 600);
+    await page.waitForTimeout(200);
+    await expect(rail(page)).toHaveAttribute('data-expanded', 'true');
+    await expect(page.locator('.navigation-drawer')).toHaveCSS('box-shadow', 'none');
+    networkGuard.assertClean();
+  });
 
   test('the docked Canvas toolbar keeps every action inside the Canvas at 1101–1280 px beside the collapsed rail', async ({ page, networkGuard }) => {
     await page.addInitScript(() => localStorage.setItem('gryloo:toolbox-mode', 'top'));
