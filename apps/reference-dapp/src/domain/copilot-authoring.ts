@@ -262,11 +262,17 @@ const SLIPPAGE_FORMS = [
   new RegExp(String.raw`(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(${BPS_UNIT})(?![\p{L}])`, 'giu'),
 ];
 function slippageWritten(text: string, value: string): boolean {
-  const own = withoutExamples(text);
-  return SLIPPAGE_FORMS.some(form => [...own.matchAll(form)].some(match => {
-    const written = canonicalDecimal(match[1]!.replace(',', '.')), percent = match[2] === '%';
-    return (percent ? percentToBps(written) : /^\d+$/.test(written) ? written : null) === value;
-  }));
+  // A range band ("±5%", "5% around the price") is never the slippage.
+  const own = withoutExamples(text).replace(BAND_PERCENT, ' ');
+  const bps = (amount: string, unit: string | undefined) => {
+    const written = canonicalDecimal(amount.replace(',', '.'));
+    return unit === '%' ? percentToBps(written) : /^\d+$/.test(written) ? written : null;
+  };
+  if (SLIPPAGE_FORMS.some(form => [...own.matchAll(form)].some(match => bps(match[1]!, match[2]) === value))) return true;
+  // A percentage or bps written shortly after a slippage word ("set the slippage to 2%", "change the slippage from 1% to 2%"); a bare number counts
+  // only right after the word (above), so a deposit amount nearby never does.
+  return [...own.matchAll(new RegExp(SLIPPAGE_WORD, 'giu'))].some(word => [...own.slice(word.index, word.index + word[0].length + 40)
+    .matchAll(new RegExp(String.raw`(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(%|${BPS_UNIT})`, 'giu'))].some(match => bps(match[1]!, match[2] === '%' ? '%' : undefined) === value));
 }
 export function groundedAddress(text: string, address: string): boolean {
   if (!address.startsWith('0x')) return [...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => match[0] === address);

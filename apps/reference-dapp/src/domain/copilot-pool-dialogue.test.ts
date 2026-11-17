@@ -657,7 +657,10 @@ describe('Delta review regressions (abfa059): grounding, range wording and pool 
       expect(reply?.command).toBeUndefined();
     }
     expect(orca('Add liquidity on Orca on Solana with 0.1 SOL and 10 USDC, ±5%', { rangeUnit: 'PERCENT', upper: '5', slippageBps: '500' })?.command).toBeUndefined();
-    for (const [words, bps] of [['slippage 1%', '100'], ['0.5% max slippage', '50'], ['slippage of up to 0.5%', '50'], ['50 bps slippage', '50'], ['slippage at 0.5%', '50']] as const) {
+    // A band beside a slippage word is still the band.
+    expect(ask(session(), 'Add liquidity on Base with 10 USDC and 0.004 ETH, slippage 1% and ±5%', { rangeUnit: 'PERCENT', upper: '5', slippageBps: '500' })?.command).toBeUndefined();
+    for (const [words, bps] of [['slippage 1%', '100'], ['0.5% max slippage', '50'], ['slippage of up to 0.5%', '50'], ['50 bps slippage', '50'], ['slippage at 0.5%', '50'],
+      ['set the slippage to 2%', '200'], ['slippage from 1% to 2% please', '200']] as const) {
       const reply = ask(session(), `Add liquidity on Base with 10 USDC and 0.004 ETH, ±10%, ${words}`, { rangeUnit: 'PERCENT', upper: '10', slippageBps: bps });
       expect(reply?.kind, words).toBe('PROPOSAL');
       expect(reply?.sentence).toContain(`slippage ${bps} bps`);
