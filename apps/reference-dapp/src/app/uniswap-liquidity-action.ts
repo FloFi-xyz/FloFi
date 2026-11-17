@@ -28,9 +28,9 @@ function localMode(): Mode {
  * The offset sits next to the disposable journal; a live or deployed service never reads it (it always uses the wall clock).
  */
 function harnessClock(journalDir: string): () => Date {
+  const offsetOf = () => { try { return Number(readFileSync(`${journalDir}.clock`, 'utf8')); } catch { return 0; } };
   return () => {
-    let offset = 0;
-    try { offset = Number(readFileSync(`${journalDir}.clock`, 'utf8')); } catch { offset = 0; }
+    const offset = offsetOf();
     return new Date(Date.now() + (Number.isSafeInteger(offset) && offset >= 0 && offset <= 86_400_000 ? offset : 0));
   };
 }
