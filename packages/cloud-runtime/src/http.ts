@@ -37,28 +37,55 @@ async function readBody(request: IncomingMessage, limit: number): Promise<unknow
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'BODY_INVALID'); }
 }
-function send(response: ServerResponse, status: number, body: unknown, requestId: string): void {
+function send(response: ServerResponse, status: number, body: unknown, requestId: string, draining: boolean): void {
   const text = JSON.stringify(body);
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
-    'x-request-id': requestId, 'content-length': Buffer.byteLength(text) });
+    'x-request-id': requestId, 'content-length': Buffer.byteLength(text), ...draining ? { connection: 'close' } : {} });
   response.end(text);
 }
 
 export type HttpServerOptions = { readonly routes: readonly Route[]; readonly logger: Logger; readonly authToken: string | null;
   readonly maxBodyBytes?: number; readonly ready?: () => Promise<boolean> };
-export function createHttpServer(options: HttpServerOptions): Server {
+export type HttpServer = Server & {
+  /** Resolves once no route handler is running, including one whose caller already disconnected (a mutation keeps going; see `signal`). */
+  readonly drained: () => Promise<void>;
+  /** Route handlers running now (what a forced stop would cut). */
+  readonly activeHandlers: () => number;
+};
+export function createHttpServer(options: HttpServerOptions): HttpServer {
   const limit = options.maxBodyBytes ?? 1_048_576, expected = options.authToken ? digest(options.authToken) : null;
-  return createServer((request, response) => {
-    const requestId = randomUUID(), url = new URL(request.url ?? '/', 'http://internal'), method = request.method ?? 'GET';
-    if (method === 'GET' && url.pathname === '/healthz') { send(response, 200, { ok: true }, requestId); return; }
+  /**
+   * BUILD-INFRA-API-FAILOVER-CERT-001: once `server.close()` was called (the API's SIGTERM drain) the server no longer listens, so new
+   * connections are refused — but Node keeps serving NEW requests on connections kept alive, and a reverse proxy reuses its pooled ones.
+   * While draining, every answer (including one to a request that arrived before) closes its connection, and readiness reports false, so a
+   * kept-alive connection carries no further request after its current answer. (Node's own limits remain: a connection opened before the
+   * drain that has not sent its request yet can still deliver one, a pipelined request behind a closing answer runs without its answer
+   * being delivered, and close() drops idle connections whose last answer is still being flushed.) `drained()` covers handlers whose caller
+   * left before its answer, so the database is closed only after every handler ended.
+   */
+  const reply = (response: ServerResponse, status: number, body: unknown, requestId: string) => send(response, status, body, requestId, !server.listening);
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  const drained = () => active === 0 ? Promise.resolve() : new Promise<void>(resolve => { waiting.push(resolve); });
+  const settled = () => { if (--active === 0) for (const resolve of waiting.splice(0)) resolve(); };
+  const server = createServer((request, response) => {
+    const requestId = randomUUID(), method = request.method ?? 'GET';
+    let url: URL;
+    // A request-target the URL parser refuses (`//`, `//a:99999/`, `http://`) is answered here: thrown in this listener, it would end the
+    // process — one unauthenticated request taking a replica down (BUILD-INFRA-API-FAILOVER-CERT-001).
+    try { url = new URL(request.url ?? '/', 'http://internal'); } catch { reply(response, 400, { ok: false, code: 'REQUEST_INVALID' }, requestId); return; }
+    if (method === 'GET' && url.pathname === '/healthz') { reply(response, 200, { ok: true }, requestId); return; }
     if (method === 'GET' && url.pathname === '/readyz') {
-      (options.ready?.() ?? Promise.resolve(true)).then(ok => send(response, ok ? 200 : 503, { ok }, requestId), () => send(response, 503, { ok: false }, requestId));
+      if (!server.listening) { reply(response, 503, { ok: false }, requestId); return; }
+      (options.ready?.() ?? Promise.resolve(true)).then(ok => { const ready = ok && server.listening; reply(response, ready ? 200 : 503, { ok: ready }, requestId); },
+        () => reply(response, 503, { ok: false }, requestId));
       return;
     }
     const route = options.routes.find(r => r.method === method && r.pattern.test(url.pathname));
     const match = route ? route.pattern.exec(url.pathname)! : null;
     const disconnected = new AbortController();
     response.once('close', () => { if (!response.writableFinished) disconnected.abort(); });
+    active++;
     void withSpan(options.logger, 'http.request', { http_method: method, http_route: route?.name ?? 'unmatched', request_id: requestId }, async () => {
       try {
         if (expected) {
@@ -70,14 +97,15 @@ export function createHttpServer(options: HttpServerOptions): Server {
         const body = await readBody(request, limit);
         const result = await route.handler({ method, path: url.pathname, query: url.searchParams, headers: request.headers, body, requestId,
           signal: disconnected.signal }, match);
-        send(response, result.status, result.body, requestId);
+        reply(response, result.status, result.body, requestId);
         // The span sees the answer, so a refusal answered as `{ ok: false, code }` is logged as refused (telemetry.ts), never as ok.
         return result;
       } catch (error) {
-        if (error instanceof HttpError) { send(response, error.status, { ok: false, code: CODE.test(error.message) ? error.message : 'REQUEST_INVALID' }, requestId); throw error; }
-        send(response, 500, { ok: false, code: 'INTERNAL_ERROR' }, requestId);
+        if (error instanceof HttpError) { reply(response, error.status, { ok: false, code: CODE.test(error.message) ? error.message : 'REQUEST_INVALID' }, requestId); throw error; }
+        reply(response, 500, { ok: false, code: 'INTERNAL_ERROR' }, requestId);
         throw error;
       }
-    }, parseTraceparent(typeof request.headers.traceparent === 'string' ? request.headers.traceparent : null)).catch(() => undefined);
+    }, parseTraceparent(typeof request.headers.traceparent === 'string' ? request.headers.traceparent : null)).catch(() => undefined).finally(settled);
   });
+  return Object.assign(server, { drained, activeHandlers: () => active });
 }
