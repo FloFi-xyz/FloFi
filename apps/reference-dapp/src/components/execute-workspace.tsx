@@ -15,8 +15,10 @@ import { NetworkBrandIcon } from './brand-icon';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { isFinalExecutionResult, refreshableAfterNothingSent } from '../domain/execution-result';
+import { REFRESH_AFTER_PRESEND_REFUSAL } from '../domain/canvas-lifecycle';
 
-const REFRESHABLE_SOURCES: readonly string[] = ['universal', 'router'];
+// EXEC-01: the same list as the Canvas action (bridges and Uniswap liquidity refresh the same run in place).
+const REFRESHABLE_SOURCES: readonly string[] = REFRESH_AFTER_PRESEND_REFUSAL;
 import { STEPS_COMPLETED, type WorkflowProgressView } from '../domain/workflow-progress';
 import { SequenceContinuationPanel, WorkflowProgressList, type SequenceContinuation } from './workflow-progress-panel';
 

@@ -177,3 +177,75 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} Dashboard cards, 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: `.tmp/ux006b-run-detail-${theme}-320.png`, fullPage: true });
 });
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (UX-01): the Current execution card of a partially completed run — its name, its network line, the
+ * "Partially completed" status, "View current run" and the ··· menu — beside "Needs you". The actions used to keep their full width on one
+ * line while the name took what was left, down to a one-character column (narrow card in the split layout, browser zoom). Browser zoom is
+ * modelled as the CSS viewport it leaves (width ÷ zoom).
+ */
+test('the Current execution card keeps its name and network readable and its actions beside or below them at every width and zoom', async ({ page }) => {
+  await page.evaluate(() => window.flofiDashboardAcceptance.mode('partial-current'));
+  const card = page.locator('.dashboard-current .ux-record-current');
+  await expect(card.getByRole('button', { name: /^Show details for Add liquidity: WETH\/USDC/ })).toBeVisible();
+  await expect(card.locator('.dashboard-status')).toHaveText('Partially completed');
+  for (const width of [320, 375, 768, 1024, 1280, 1440]) for (const zoom of [0.8, 0.9, 1, 1.25]) {
+    const at = `${width}px at ${zoom * 100}%`;
+    await page.setViewportSize({ width: Math.round(width / zoom), height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), at).toBe(true);
+    const layout = await card.evaluate(element => {
+      const box = (node: Element | null) => { if (!node) return null; const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
+      const name = element.querySelector('.ux-row-name span[title]')!, meta = element.querySelector('.ux-row-meta')!;
+      return { card: box(element), row: box(element.querySelector('.ux-row')), column: box(element.querySelector('.ux-row-main')), name: box(name), meta: box(meta),
+        nameLine: parseFloat(getComputedStyle(name).lineHeight), metaLine: parseFloat(getComputedStyle(meta).lineHeight),
+        actions: [box(element.querySelector('.dashboard-status')), box(element.querySelector('a.ux-button')), box(element.querySelector('.history-actions > button'))] };
+    });
+    const { card: c, row, column, name, meta } = layout;
+    // The name and its network line keep a readable column (never a character per line) and wrap in at most a few lines.
+    // 10rem at the app's 14 px root (the CSS minimum before the actions wrap), else the width beside the icon.
+    expect(column!.width, `name column ${at}`).toBeGreaterThanOrEqual(Math.min(140, row!.width - 60));
+    expect(name!.width, `name width ${at}`).toBeGreaterThan(80);
+    expect(Math.round(name!.height / layout.nameLine), `name lines ${at}`).toBeLessThanOrEqual(3);
+    expect(Math.round(meta!.height / layout.metaLine), `network lines ${at}`).toBeLessThanOrEqual(3);
+    // Status, View current run and the menu are visible, inside the card, and never on top of the name or its network line.
+    for (const [index, action] of layout.actions.entries()) {
+      expect(action, `action ${index} ${at}`).not.toBeNull();
+      expect(action!.width, `action ${index} ${at}`).toBeGreaterThan(0);
+      expect(action!.x, `action ${index} inside ${at}`).toBeGreaterThanOrEqual(c!.x - 1);
+      expect(action!.right, `action ${index} inside ${at}`).toBeLessThanOrEqual(c!.right + 1);
+      for (const text of [name!, meta!]) {
+        const overlap = action!.x < text.right && text.x < action!.right && action!.y < text.bottom && text.y < action!.bottom;
+        expect(overlap, `action ${index} over text ${at}`).toBe(false);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.screenshot({ path: '.tmp/ux01-current-execution-1280-125.png', fullPage: true });
+});
+
+/** UX-01: no row label spills out of its button or tag, on the Dashboard ("Needs you" and Current execution) and in Your workflows. */
+test('row buttons and status tags keep their text inside at every width and zoom, on the Dashboard and in Your workflows', async ({ page }) => {
+  await page.evaluate(() => window.flofiDashboardAcceptance.mode('partial-current'));
+  for (const view of ['dashboard', 'records'] as const) {
+    await page.evaluate(value => window.flofiDashboardAcceptance.view(value), view);
+    // In the product, Your workflows is a `ux-page` section; the shared harness frame is not, so this check gives the records the product's page.
+    if (view === 'records') await page.evaluate(() => document.querySelector('#acceptance-root .dashboard-workspace')?.classList.add('ux-page', 'saved-workflows'));
+    for (const width of [320, 375, 768, 1280]) for (const zoom of [1, 1.25]) {
+      const at = `${view} ${width}px at ${zoom * 100}%`;
+      await page.setViewportSize({ width: Math.round(width / zoom), height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), at).toBe(true);
+      const rows = await page.locator('.ux-page .ux-row').evaluateAll(elements => elements.filter(row => (row as HTMLElement).offsetParent).map(row => {
+        const main = row.querySelector('.ux-row-main'), box = row.getBoundingClientRect();
+        const spill = [...row.querySelectorAll('.ux-row-actions .ux-button, .ux-row-actions .ux-tag')]
+          .filter(item => (item as HTMLElement).scrollWidth > (item as HTMLElement).clientWidth + 1 || item.getBoundingClientRect().right > box.right + 1)
+          .map(item => item.textContent);
+        return { text: row.textContent?.slice(0, 40), main: main ? main.getBoundingClientRect().width : null, width: box.width, spill };
+      }));
+      expect(rows.length, at).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.spill, `${at}: ${row.text}`).toEqual([]);
+        if (row.main !== null) expect(row.main, `${at}: ${row.text}`).toBeGreaterThanOrEqual(Math.min(140, row.width - 60));
+      }
+    }
+  }
+});

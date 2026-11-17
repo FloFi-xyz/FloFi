@@ -58,7 +58,7 @@ describe('shared Canvas lifecycle across runtime projections', () => {
   // "not submitted" and continues the same workflow with Refresh & review — never "needs attention" with only "Create new workflow". (The record →
   // lifecycle projection of these notes is covered on real universal records in server/universal-router/service.test.ts.)
   type Op = { id: string; state: string; hash?: string | null; approval?: boolean; reason?: string };
-  function bridgeRun(kind: 'router' | 'universal' | 'public', ops: Op[]): ExecutionControlsState {
+  function bridgeRun(kind: 'router' | 'universal' | 'public' | 'uniswap-pool', ops: Op[]): ExecutionControlsState {
     const f = fixture('router'), operations = ops.map(o => ({ nodeId: 'n1', title: o.id, label: o.state, hash: null, chain: 'eip155:8453', explorer: null, fee: null, approval: false,
       intent: false, wallet: o.id !== 'destination', ...o }));
     const step = { id: 's1', number: 1, action: 'Bridge', input: '1 USDC', pair: null, network: 'Base', provider: 'Relay', tokens: [], state: 'not-submitted', label: '', operations };
@@ -94,7 +94,17 @@ describe('shared Canvas lifecycle across runtime projections', () => {
     expect(refreshableAfterNothingSent(f.progress)).toBe(false);
     expect(projectCanvasAction(f, controls).label).not.toBe('Refresh & review');
   });
-  it('other runtimes keep their own wording (Refresh & review is the bridges’ in-place continuation only)', () => {
+  // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): the incident's run (WETH approval confirmed, USDC approval not submitted because its Review
+  // expired) continues the same run with Refresh & review — never a disabled "Execution needs attention" (also after a reload).
+  it('a Uniswap position whose next approval was not sent because the Review expired continues with Refresh & review', () => {
+    const f = bridgeRun('uniswap-pool', [{ id: 'APPROVE_TOKEN0', state: 'confirmed', approval: true, hash: hash('a') },
+      { id: 'APPROVE_TOKEN1', state: 'not-submitted', approval: true, reason: 'UNISWAP_REVIEW_EXPIRED' }, { id: 'MINT', state: 'waiting' }]);
+    expect(projectExecutionResult(f.progress)).toMatchObject({ label: 'Execution partially completed' });
+    expect(projectCanvasAction(f, controls)).toEqual({ kind: 'simulate', label: 'Refresh & review', disabled: false });
+    const sent = bridgeRun('uniswap-pool', [{ id: 'APPROVE_TOKEN0', state: 'confirmed', approval: true, hash: hash('a') }, { id: 'APPROVE_TOKEN1', state: 'uncertain', approval: true }]);
+    expect(projectCanvasAction(sent, controls).label).not.toBe('Refresh & review');
+  });
+  it('other runtimes keep their own wording (Refresh & review is the in-place continuation of bridges and Uniswap liquidity only)', () => {
     const f = bridgeRun('public', [{ id: 'swap', state: 'not-submitted' }]);
     expect(projectCanvasAction(f, controls).label).not.toBe('Refresh & review');
   });

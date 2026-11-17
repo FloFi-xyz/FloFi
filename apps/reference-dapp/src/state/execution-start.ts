@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { supersededUnsent } from '../domain/execution-lifecycle';
+import { currentUniswapAttempts } from '../domain/uniswap-liquidity-continuation';
 import type { ExecutionStart } from '../domain/execution-presentation';
 import type { ReviewWallet } from '../domain/review-presentation';
 import type { SimulationSource } from '../domain/simulation-presentation';
@@ -92,11 +93,12 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       if (!solanaComposition.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
     }
     case 'uniswap-pool': {
-      const r = uniswapPool.record, last = r?.attempts.at(-1);
+      // EXEC-01: as for the bridges, a never-sent attempt of an earlier Review (superseded by the in-place refresh) is not this run's request.
+      const r = uniswapPool.record, attempts = r ? currentUniswapAttempts(r) : [], last = attempts.at(-1);
       const pending = Boolean(last && r?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
-      const confirmed = new Set(r?.attempts.filter(a => a.state === 'CONFIRMED').map(a => a.step));
+      const confirmed = new Set(attempts.filter(a => a.state === 'CONFIRMED').map(a => a.step));
       const next = r?.review.calls.find(c => !confirmed.has(c.step));
-      attach(Boolean(r?.authorization && r.authorization === r.review.commitment && !uniswapPool.retired && !uniswapPool.busy && !pending && r.verdict === 'PENDING' && uniswapPool.executionEnabled && next), Boolean(r?.attempts.length), uniswapPool.execute);
+      attach(Boolean(r?.authorization && r.authorization === r.review.commitment && !uniswapPool.retired && !uniswapPool.busy && !pending && r.verdict === 'PENDING' && uniswapPool.executionEnabled && next), attempts.length > 0, uniswapPool.execute);
       if (!uniswapPool.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
     }
     case 'transfer': {
@@ -164,8 +166,9 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
         result.nextLabel = 'Continue to add liquidity'; break;
       }
       case 'uniswap-pool': {
-        const r = uniswapPool.record, next = r?.review.calls.find(c => !r.attempts.some(a => a.step === c.step && a.state === 'CONFIRMED'));
-        safeNext = Boolean(r && next && !r.attempts.some(a => a.step === next.step));
+        // EXEC-01: after the in-place refresh the remaining step was never attempted under the CURRENT, newly authorized Review.
+        const r = uniswapPool.record, attempts = r ? currentUniswapAttempts(r) : [], next = r?.review.calls.find(c => !attempts.some(a => a.step === c.step && a.state === 'CONFIRMED'));
+        safeNext = Boolean(r && next && !attempts.some(a => a.step === next.step));
         result.nextLabel = next?.step === 'MINT' ? 'Continue to add liquidity' : 'Continue to token approval'; break;
       }
       case 'fork-swap': {

@@ -12,11 +12,18 @@ import { uniswapLiquidityBegin, uniswapLiquidityHandoff, uniswapLiquidityInvalid
 import { CATALOG_NETWORK_IDENTITIES, networkIdentity } from '../domain/network-registry';
 import type { UniswapLiquidityPrice, UniswapLiquidityRecord, UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
+import { UNISWAP_REFRESH_IN_PLACE, uniswapRunResumable } from '../domain/uniswap-liquidity-continuation';
 
 const KEY = 'flofi:uniswap-liquidity:run';
 const REFUSALS = [4001, 4100, 4200];
 type Store = { available: boolean; executionEnabled: boolean; record: UniswapLiquidityRecord | null; busy: boolean; signing: boolean; error: string | null;
   retired: boolean; recovered: boolean; price: UniswapLiquidityPrice | null; priceChain: 'eip155:84532' | 'eip155:11155111' | null;
+  /**
+   * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): the run's Review stopped standing before the next wallet request (it expired, or the
+   * pool or fees moved) and was refreshed in place: `code` says why; the updated Review of the same run waits for the owner's authorization.
+   * The same contract as the bridges' in-place re-quote, so the Review, the chat and the Canvas present it the same way.
+   */
+  requoted: { readonly code: string; readonly runId: string } | null;
   simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>;
   switchNetwork(): Promise<void>; fetchPrice(chain?: 'eip155:84532' | 'eip155:11155111'): Promise<UniswapLiquidityPrice | null> };
 const Context = createContext<Store | null>(null);
@@ -28,7 +35,7 @@ function errorValue(value: unknown): unknown {
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
 
 export function UniswapLiquidityProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow(), wallet = useBuild009Wallet();
+  const { state, restoreLiquidityCanvas, trackCanvasRestoration } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<UniswapLiquidityRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   // BUILD-RH-002: the testnet pools and each catalog network (real funds: Robinhood Chain, BUILD-BASE-001 Base) are enabled separately; the
   // authored position (else the run) selects one.
@@ -36,6 +43,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   const [signing, setSigning] = useState(false), [networks, setNetworks] = useState<Readonly<Record<string, Availability>>>({ testnet: { available: false, executionEnabled: false } });
   const [recovered, setRecovered] = useState(false), [price, setPrice] = useState<UniswapLiquidityPrice | null>(null);
   const [priceChain, setPriceChain] = useState<'eip155:84532' | 'eip155:11155111' | null>(null);
+  const [requoted, setRequoted] = useState<Store['requoted']>(null);
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const authoredChain = workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')?.chainId;
   const servedCatalog = networkIdentity(authoredChain ?? (record ? `eip155:${record.review.chainId}` : null));
@@ -69,17 +77,25 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
         // A hash saved before the browser closed reaches the server first; it is never resent to a wallet.
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
           await uniswapLiquidityReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
-        return uniswapLiquidityStatus(pointer.id as string);
-      })().then(result => { if (mounted && result.ok) { setRecord(result.value); setRecovered(true); } }).catch(() => undefined);
+        return trackCanvasRestoration(uniswapLiquidityStatus(pointer.id as string));
+      })().then(result => {
+        if (!mounted || !result.ok) return;
+        setRecord(result.value); setRecovered(true);
+        // EXEC-01: a started run that still needs the owner (a confirmed approval, the rest not sent) shows its own workflow on the untouched
+        // Canvas again, so the owner can refresh its Review and continue it after a reload. Finished runs stay in the Dashboard.
+        if (result.value.verdict === 'PENDING' && result.value.attempts.length > 0) restoreLiquidityCanvas(result.value.workflow);
+      }).catch(() => undefined);
     } catch { setError('UNISWAP_RECOVERY_POINTER_INVALID'); }
     return () => { mounted = false; };
-  }, []);
+  }, [restoreLiquidityCanvas, trackCanvasRestoration]);
   useEffect(() => {
     if (record && retired && record.authorization) uniswapLiquidityInvalidate(record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('UNISWAP_AUTHORIZATION_INVALIDATION_FAILED'));
   }, [record, retired]);
   async function operation(action: () => Promise<void>) {
     if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'UNISWAP_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
+    // EXEC-01: a refusal refreshed in place leaves no error (its updated Review is valid; `requoted` explains it).
+    try { await action(); } catch (cause) { const code = cause instanceof Error ? cause.message : 'UNISWAP_OPERATION_FAILED'; setError(code === 'UNISWAP_REFRESHED_REVIEW_REQUIRED' ? null : code); }
+    finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function ownerSession() {
     let session = await wallet.session(); if (!session) session = await wallet.connect();
@@ -100,12 +116,22 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     const session = await ownerSession(), snapshot = latest.current;
     const value = unwrap(await uniswapLiquiditySimulate(snapshot, session.account));
     if (latest.current !== snapshot) throw new Error('UNISWAP_SEMANTIC_REVISION_CHANGED');
-    setRecovered(false); accept(value);
+    setRecovered(false); setRequoted(null); accept(value);
   }); }
-  async function refresh() { await operation(async () => { if (!record) throw new Error('UNISWAP_RUN_MISSING'); accept(unwrap(await uniswapLiquidityRefresh(record.id))); }); }
+  /** A fresh simulation and Review of the same run (read-only); its earlier confirmed steps stay, the updated Review needs a new authorization. */
+  async function refresh() { await operation(async () => { if (!record) throw new Error('UNISWAP_RUN_MISSING'); setRequoted(null); accept(unwrap(await uniswapLiquidityRefresh(record.id))); }); }
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error('UNISWAP_SIMULATION_REQUIRED');
-    accept(unwrap(await uniswapLiquidityReview(record.id, record.review.commitment, record.workflow)));
+    const result = await uniswapLiquidityReview(record.id, record.review.commitment, record.workflow);
+    // EXEC-01: a Review authorized in its last seconds (too close to expiry to reach the wallet) is refused by the server; the same run is then
+    // refreshed in place, as after Execute, and the owner authorizes the updated Review. Nothing is authorized by itself.
+    if (!result.ok && result.code === 'UNISWAP_REVIEW_EXPIRED' && uniswapRunResumable(record)) {
+      const refreshed = unwrap(await uniswapLiquidityRefresh(record.id));
+      accept(refreshed); setRequoted({ code: result.code, runId: record.id });
+      throw new Error('UNISWAP_REFRESHED_REVIEW_REQUIRED');
+    }
+    accept(unwrap(result));
+    setRequoted(null);
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error('UNISWAP_RUN_MISSING'); accept(unwrap(await uniswapLiquidityObserve(record.id))); }); }
   async function switchNetwork() { await operation(async () => {
@@ -116,6 +142,32 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   }); }
   /** One Execute click = one exact wallet request (the next approval or the mint). */
   async function execute() { await operation(async () => {
+    const reviewed = record;
+    try { await request(); }
+    catch (cause) {
+      // EXEC-01 (incident balp-ae7ef0ce…): the server refused before any wallet request because the Review no longer stands (expired, or the
+      // pool, fees or gas moved). Nothing was sent: the SAME run is refreshed in place (read-only), keeping every confirmed step, and its updated
+      // Review — only the requests still needed — waits for the owner's explicit authorization. Never a silent extension, never a new run.
+      const code = cause instanceof Error ? cause.message : '';
+      if (reviewed && UNISWAP_REFRESH_IN_PLACE.test(code)) {
+        // No interim record is shown while the run is refreshed: its concluded attempt would read "partially completed" and end the chat's
+        // follow-up before the updated Review arrives (as the universal bridge store does). Only the refreshed run, else the latest record.
+        const interim = (cause as { interim?: UniswapLiquidityRecord | null }).interim ?? null;
+        const current = await uniswapLiquidityStatus(reviewed.id).catch(() => null);
+        const latestRecord = current?.ok ? current.value : interim;
+        if (latestRecord && uniswapRunResumable(latestRecord)) {
+          const refreshed = await uniswapLiquidityRefresh(reviewed.id).catch(() => null);
+          if (refreshed?.ok) {
+            accept(refreshed.value); setRequoted({ code, runId: reviewed.id });
+            throw new Error('UNISWAP_REFRESHED_REVIEW_REQUIRED', { cause });
+          }
+        }
+        if (latestRecord) accept(latestRecord);
+      }
+      throw cause;
+    }
+  }); }
+  async function request() {
     if (!record || retired || record.authorization !== record.review.commitment) throw new Error('UNISWAP_REVIEW_REQUIRED');
     const reviewedChain = chainHexOf(record.review.chainId);
     if (!reviewedChain) throw new Error('UNISWAP_WRONG_CHAIN');
@@ -173,7 +225,10 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
       diagnostic.code = refused ? 'UNISWAP_REJECTED' : !diagnostic.invoked ? (cause instanceof Error && /^UNISWAP_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'UNISWAP_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'UNISWAP_SUBMISSION_UNKNOWN';
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await uniswapLiquidityWalletFailure(id, diagnostic); if (failure.ok) accept(failure.value);
+        const failure = await uniswapLiquidityWalletFailure(id, diagnostic);
+        // A refusal that execute() refreshes in place hands its record over instead of showing it (see execute()).
+        if (!diagnostic.invoked && UNISWAP_REFRESH_IN_PLACE.test(diagnostic.code)) throw Object.assign(new Error(diagnostic.code, { cause }), { interim: failure.ok ? failure.value : null });
+        if (failure.ok) accept(failure.value);
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
@@ -181,7 +236,8 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
         const report = await uniswapLiquidityReport(id, { kind: 'UNKNOWN', code: diagnostic.code }); if (report.ok) accept(report.value);
         throw new Error('UNISWAP_SUBMISSION_UNKNOWN_OBSERVE_EXISTING', { cause });
       }
-      if (cause instanceof Error && /STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message)) {
+      // A refusal that execute() refreshes in place is not shown on its own (see execute()); any other stale-state refusal shows the latest record.
+      if (cause instanceof Error && /STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message) && !UNISWAP_REFRESH_IN_PLACE.test(cause.message)) {
         const current = await uniswapLiquidityStatus(id); if (current.ok) accept(current.value);
       }
       throw cause;
@@ -194,9 +250,9 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       if (!last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || observed.value.verdict !== 'PENDING') break;
       await new Promise(resolve => setTimeout(resolve, 2_000));
     }
-  }); }
+  }
   return <Context.Provider value={{ available, executionEnabled, record, busy, signing, error, retired, recovered, price, priceChain,
-    simulate, refresh, review, execute, observe, switchNetwork, fetchPrice }}>
+    requoted: requoted && requoted.runId === record?.id ? requoted : null, simulate, refresh, review, execute, observe, switchNetwork, fetchPrice }}>
     {signing && <WalletPendingNotice/>}
     <div data-uniswap-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

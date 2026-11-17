@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
 import { withFlightAccess, withFlightOwner } from '../server/flight-access';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -21,6 +22,18 @@ function localMode(): Mode {
   if (process.env.GRYLOO_UNISWAP_LIQUIDITY_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
   return process.env.GRYLOO_UNISWAP_LIQUIDITY_TESTNET === 'live' ? 'live' : 'off';
 }
+/**
+ * BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01), MOCKED loopback harness only: the browser suite moves the harness chain and this
+ * service's clock forward together (`advanceUniswapHarness`), so a Review can expire between two wallet requests without waiting minutes.
+ * The offset sits next to the disposable journal; a live or deployed service never reads it (it always uses the wall clock).
+ */
+function harnessClock(journalDir: string): () => Date {
+  const offsetOf = () => { try { return Number(readFileSync(`${journalDir}.clock`, 'utf8')); } catch { return 0; } };
+  return () => {
+    const offset = offsetOf();
+    return new Date(Date.now() + (Number.isSafeInteger(offset) && offset >= 0 && offset <= 86_400_000 ? offset : 0));
+  };
+}
 let service: UniswapLiquidityService | null = null;
 function current(): UniswapLiquidityService {
   const mode = localMode();
@@ -32,7 +45,7 @@ function current(): UniswapLiquidityService {
     // BUILD-ETHEREUM-001: live Ethereum Sepolia reads use their own chain-bound client; the MOCKED harness is Base Sepolia only.
     ...mode === 'live' ? { rpcs: { 'eip155:11155111': ethereumSepoliaSwapRpc(process.env.GRYLOO_ETHEREUM_SEPOLIA_RPC_URL, UNISWAP_LIQUIDITY_RPC_METHODS) } } : {},
     provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_TESTNET', executionEnabled: process.env.GRYLOO_UNISWAP_LIQUIDITY_EXECUTION !== 'DISABLED',
-    ...mode === 'harness' ? { mockedCodePins: UNI_MOCK_CODE_PINS } : {} });
+    ...mode === 'harness' ? { mockedCodePins: UNI_MOCK_CODE_PINS, now: harnessClock(journalDir) } : {} });
   return service;
 }
 /**
