@@ -6,6 +6,7 @@
  */
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
+import { isOtherAccountOfBoardedPerson } from '../../../../../../flight/other-account';
 import { accountState } from '../../../../../account-action';
 import { ImportWallet } from '../../../../../../components/account/import-wallet';
 
@@ -16,5 +17,8 @@ export default async function ImportWalletPage({ params }: { params: Promise<{ e
   if (ecosystem !== 'evm' && ecosystem !== 'solana') notFound();
   const state = await accountState();
   if (!state.account) redirect(`/login?returnTo=${encodeURIComponent(`/onboarding/wallets/import/${ecosystem}`)}`);
+  // Authentication UX & Login Regression Fix (P0): the person's OTHER account (no beta access of its own; its verified address is held by the
+  // boarded account) never creates or imports a wallet: that would make it impossible to close, and keep its sign-in out of the boarded account.
+  if (await isOtherAccountOfBoardedPerson(state.account.accountId, state.account.identities)) redirect('/board');
   return <ImportWallet state={state} ecosystem={ecosystem}/>;
 }

@@ -23,6 +23,21 @@ import { AccountShell, accountStyles as styles } from './account-shell';
 type Method = 'google' | 'apple' | 'email' | 'wallet';
 /** Whether this page load is Privy's OAuth redirect back (its completion then signs the person in). */
 const oauthReturn = () => typeof window !== 'undefined' && /[?&]privy_oauth_(?:code|state)=/.test(window.location.search);
+/** Removes Privy's OAuth return from the address, so a reload never tries to finish that return again. */
+function stripOAuthReturn() {
+  const url = new URL(window.location.href);
+  for (const key of [...url.searchParams.keys()]) if (key.startsWith('privy_oauth_')) url.searchParams.delete(key);
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+/**
+ * Authentication UX & Login Regression Fix (P0): a return from Google that Privy has not finished within this time is ended (with a reason).
+ * Privy's real SDK finishes nothing — no completion, no error — when a session already existed in the browser and has Google; the page then
+ * waited on "Signing you in…" forever.
+ */
+export const OAUTH_RETURN_TIMEOUT_MS = 20_000;
+/** How long the page waits for Privy to load before saying the wallet provider could not be reached (the methods stay disabled until it loads). */
+export const PRIVY_READY_TIMEOUT_MS = 15_000;
+export const SIGN_IN_INTERRUPTED = 'PRIVY_SIGN_IN_INTERRUPTED';
 
 /** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the sign-in methods of another account, named by kind only (never an address). */
 export const METHOD_KIND_LABEL: Readonly<Record<string, string>> = { google: 'Google', apple: 'Apple', email: 'Email code', eip155: 'Web3 wallet', solana: 'Solana wallet' };
@@ -39,9 +54,23 @@ export function SignInScreen({ state, initialError, returnTo, mode = null, movin
   /** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: a new account would be created for an email another account already verified (its method kinds). */
   const [existing, setExisting] = useState<readonly string[] | null>(null);
   /** Set when the person started a sign-in on this page; a Privy session without it is never used. */
-  const started = useRef(false), finishing = useRef(false), cleared = useRef(false);
-  useEffect(() => { if (oauthReturn()) { started.current = true; setBusy('finish'); } }, []);
+  const started = useRef(false), finishing = useRef(false), cleared = useRef(false), returning = useRef(false);
+  /**
+   * Authentication UX & Login Regression Fix (P0): no method starts while Privy is loading or while a Privy session left in this browser (an
+   * earlier sign-in, a sign-out that only ended FloFi's session, the account being closed) is still being ended. With Privy's real SDK a login
+   * started over a live session is ignored ("already logged in"), a wallet signature fails ("User already authenticated") and a Google return
+   * is finished as a LINK to that session's user, or not at all: the person saw "Sign-in did not complete" or waited forever.
+   */
+  const [prepared, setPrepared] = useState(false);
+  useEffect(() => { if (oauthReturn()) { started.current = true; returning.current = true; setBusy('finish'); } }, []);
   const available = state.availability, configured = privy !== null;
+  /** Ends a sign-in that cannot finish here (nothing was signed in at FloFi): the return is removed and the Privy session ended. */
+  const interrupt = async (code: string) => {
+    if (finishing.current) return;
+    if (returning.current) { stripOAuthReturn(); returning.current = false; }
+    started.current = false; setBusy(null); setError(code);
+    await privy?.logout();
+  };
 
   /** Hands the completed Privy sign-in to FloFi's server, which verifies it and opens the FloFi session. */
   async function finish(allowNew = false) {
@@ -68,20 +97,41 @@ export function SignInScreen({ state, initialError, returnTo, mode = null, movin
   useEffect(() => {
     if (!privy) return;
     // Only a login this page just completed signs in. A session that already existed (Privy reports `wasAlreadyAuthenticated`) is never
-    // turned into a FloFi sign-in, even when the URL looks like an OAuth return: it is ended instead.
+    // turned into a FloFi sign-in, even when the URL looks like an OAuth return: it is ended instead — and on a return from Google, the person is
+    // told so (Privy cannot finish that return as a sign-in while another session was open), never left waiting.
     const offLogin = privy.onLogin(event => {
       if (!event.wasAlreadyAuthenticated) { if (started.current) void finish(); return; }
       if (finishing.current) return;
+      if (returning.current) { void interrupt(SIGN_IN_INTERRUPTED); return; }
       started.current = false; setBusy(null); void privy.logout();
     });
-    const offError = privy.onLoginError(failure => { started.current = false; setBusy(null); setError(failure); });
+    const offError = privy.onLoginError(failure => {
+      started.current = false; setBusy(null); setError(failure);
+      // A sign-in Privy refused because another session was still open: that session is ended, so the next attempt starts clean.
+      if (failure === SIGN_IN_INTERRUPTED) { if (returning.current) { stripOAuthReturn(); returning.current = false; } void privy.logout(); }
+    });
     return () => { offLogin(); offError(); };
   }); // re-subscribes with the latest `privy` on every render
   useEffect(() => {
-    // A Privy session that this page did not just complete (left over from before, or after Disconnect) is ended, never reused.
+    // A Privy session that this page did not just complete (left over from before, or after Disconnect) is ended, never reused — and the
+    // methods are offered only once it has ended.
     if (!privy?.ready || cleared.current) return;
     cleared.current = true;
-    if (privy.authenticated && !started.current) void privy.logout();
+    if (privy.authenticated && !started.current) void privy.logout().finally(() => setPrepared(true));
+    else setPrepared(true);
+  }, [privy?.ready]);
+  useEffect(() => {
+    // Privy did not load: say so (the methods stay disabled; they are offered as soon as it loads).
+    if (!privy || privy.ready) return;
+    const timer = setTimeout(() => setError(current => current ?? 'PRIVY_UNAVAILABLE'), PRIVY_READY_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [privy, privy?.ready]);
+  useEffect(() => { if (prepared) setError(current => current === 'PRIVY_UNAVAILABLE' ? null : current); }, [prepared]);
+  useEffect(() => {
+    // A return from Google that Privy has not finished in time is ended with a reason, never left on "Signing you in…".
+    if (!privy?.ready || !returning.current) return;
+    const timer = setTimeout(() => { if (returning.current && !finishing.current) void interrupt(SIGN_IN_INTERRUPTED); }, OAUTH_RETURN_TIMEOUT_MS);
+    return () => clearTimeout(timer);
   }, [privy?.ready]);
 
   /**
@@ -100,6 +150,8 @@ export function SignInScreen({ state, initialError, returnTo, mode = null, movin
   }
   async function begin(method: Method, run: () => Promise<void> | void) {
     setError(null); setNotice(''); started.current = true; setBusy(method);
+    // Never over a live Privy session (see `prepared`): one that appeared since the page loaded is ended first.
+    if (privy?.authenticated) await privy.logout();
     try { await run(); } catch (cause) { started.current = false; setBusy(null); setError(cause instanceof Error ? cause.message : 'PRIVY_SIGN_IN_FAILED'); return; }
     // OAuth navigates away; the wallet chooser and the email code answer through `onLogin` / `onLoginError`.
     if (method === 'wallet') setBusy(null);
@@ -129,7 +181,7 @@ export function SignInScreen({ state, initialError, returnTo, mode = null, movin
   const unavailable = (method: Method) => !configured || !available[method];
   const methodButton = (method: Method, label: string, icon: 'apple' | 'google' | 'email' | 'wallet', onClick: () => void) => {
     const disabled = unavailable(method);
-    return <button type="button" className={styles.method} onClick={onClick} disabled={disabled || (busy !== null && busy !== method)}
+    return <button type="button" className={styles.method} onClick={onClick} disabled={disabled || !prepared || (busy !== null && busy !== method)}
       aria-expanded={method === 'email' ? open === method : undefined} aria-describedby={disabled ? statusId : undefined}
       title={disabled ? t('Not available on this deployment yet') : undefined}>
       <AccountIcon name={icon}/><span>{t(label)}{busy === method && method !== 'email' ? <small>{t('Opening…')}</small> : null}</span></button>;
@@ -144,13 +196,11 @@ export function SignInScreen({ state, initialError, returnTo, mode = null, movin
     {available.accounts && !available.google && <div className={styles.banner} role="status"><strong>{t("Sign-in isn't configured on this deployment yet.")}</strong>
       <p>{t('You can still build workflows and use your own wallet in FloFi without an account.')}</p></div>}
     {mode === 'reauth' && <div className={styles.banner} role="status" data-sign-in-mode="reauth"><strong>{t('Confirm it’s you')}</strong>
-      <p>{t('Sign in again with a method of the account you are using. Nothing else changes.')}</p></div>}
+      <p>{t('Sign in again with the same method.')}</p></div>}
     {mode === 'move' && <div className={styles.banner} role="status" data-sign-in-mode="move"><strong>{t('Sign in to the account that keeps everything')}</strong>
-      <p>{t('Use the method of your other FloFi account (for example the one with your boarding pass). Not this one, which is closing: {0}.',
-        moving.map(method => `${t(METHOD_KIND_LABEL[method.kind] ?? method.kind)}${method.hint ? ` · ${method.hint}` : ''}`).join(', '))}</p></div>}
+      <p>{t('Use the method you boarded with, not {0}.', [...new Set(moving.map(method => t(METHOD_KIND_LABEL[method.kind] ?? method.kind)))].join(', '))}</p></div>}
     {existing && <div className={styles.banner} role="alert" data-existing-account="true"><strong>{t('This email already belongs to a FloFi account.')}</strong>
-      <p>{t('That account signs in with: {0}. You can bring this sign-in to it (you will sign in to it once to confirm), create a separate account, or use another method.',
-        existing.map(kind => t(METHOD_KIND_LABEL[kind] ?? kind)).join(', '))}</p>
+      <p>{t('That account signs in with {0}.', existing.map(kind => t(METHOD_KIND_LABEL[kind] ?? kind)).join(', '))}</p>
       <div className={styles.row}>
         <button type="button" className={styles.primary} onClick={() => void addToExisting()}>{t('Add this sign-in to that account')}</button>
         <button type="button" className={styles.textLink} onClick={() => { setExisting(null); started.current = false; void privy?.logout(); }}>{t('Use another sign-in method')}</button>
@@ -177,9 +227,8 @@ export function SignInScreen({ state, initialError, returnTo, mode = null, movin
           <button type="button" className={styles.textLink} onClick={() => { setSent(null); setCode(''); }}>{t('Use another email')}</button></div>
       </form>)}
     </>}
-    <p id={statusId} className={styles.status} role="status">{notice || (available.accounts && !configured ? t('Methods shown as unavailable are not configured on this deployment yet.') : '')}</p>
+    <p id={statusId} className={styles.status} role="status">{notice || (configured && !prepared && busy === null ? t('Getting sign-in ready…') : '')}</p>
     {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
-    {available.accounts && <p className={styles.small} style={{ textAlign: 'left' }}>{t('FloFi stores your sign-in identities (email address or provider ID, as verified by Privy), the public addresses of your FloFi wallets and of wallets you link, and the recipients you save (a name and a public address), never a key. You can delete your account in Credentials.')} <a href="/privacy">{t('Privacy')}</a></p>}
     <div className={styles.notice}><span className={styles.noticeIcon}><AccountIcon name="shield" size={18}/></span><div>
       <strong>{t('Nothing executes without your review')}</strong>
       <p>{t('Your account is how you sign in. Transactions are always simulated, reviewed and signed by your own wallet.')}</p></div></div>

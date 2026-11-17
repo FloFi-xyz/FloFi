@@ -54,6 +54,8 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   'Sign-in is misconfigured on this deployment. Nothing was signed in.': 'O login está mal configurado nesta implantação. Nada foi conectado.',
   'The wallet provider sent an answer FloFi could not read. Nothing changed.': 'O provedor de carteiras enviou uma resposta que o FloFi não conseguiu ler. Nada mudou.',
   'Sign-in did not complete. Try again.': 'O login não foi concluído. Tente de novo.',
+  'This browser still had another sign-in open, so this one didn’t finish. It’s closed now. Choose your method again.':
+    'Este navegador ainda tinha outro login aberto, então este não foi concluído. Ele já foi encerrado. Escolha seu método de novo.',
   'FloFi was updated while you were signing in. Nothing was signed in. Sign in again.': 'A FloFi foi atualizada enquanto você entrava. Nenhum login foi feito. Entre de novo.', 'Sign in with Google, your email or a Web3 wallet.': 'Entre com o Google, seu e-mail ou uma carteira Web3.',
   'Your wallet provider session has ended in this browser. Sign in again.': 'Sua sessão no provedor de carteiras terminou neste navegador. Entre de novo.',
   'You are signed in to the wallet provider as someone else. Sign in again.': 'Você está conectado ao provedor de carteiras como outra pessoa. Entre de novo.',

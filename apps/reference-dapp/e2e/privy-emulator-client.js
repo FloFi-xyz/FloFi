@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/* global window, document, location, localStorage, fetch, btoa, atob, TextDecoder, setTimeout */
+/* global window, document, location, localStorage, fetch, btoa, atob, TextDecoder, setTimeout, console */
 /**
  * BUILD-FLOFI-PRIVY-UX-001 — MOCKED, LOOPBACK ONLY: the browser half of the Privy stand-in (e2e/privy-emulator.ts), injected by the browser
  * suite into the page (`addInitScript`). It implements FloFi's `PrivyDriver` (src/accounts/privy-client.tsx), which FloFi uses only when its
@@ -35,6 +35,17 @@
     } catch (error) { for (const listener of [...errors]) listener('PRIVY_SIGN_IN_FAILED'); throw error; }
   }
   const identity = () => window.__FLOFI_PRIVY_E2E_IDENTITY__ || {};
+  /**
+   * Authentication UX & Login Regression Fix: like Privy's real SDK (@privy-io/react-auth 3.51.0, `login` and `useLoginWithOAuth`), a login
+   * started while a session is still open does nothing but warn: no completion, no error ("Attempted to log in, but user is already logged
+   * in"; a Google return over a session that already has Google only warns). FloFi's sign-in page must never start one over a live session.
+   */
+  const alreadyLoggedIn = () => {
+    if (!state.authenticated) return false;
+    console.warn('Attempted to log in, but user is already logged in. (MOCKED, as Privy)');
+    window.__FLOFI_PRIVY_E2E_IGNORED_LOGINS__ = (window.__FLOFI_PRIVY_E2E_IGNORED_LOGINS__ || 0) + 1;
+    return true;
+  };
   /** Privy's own confirmation screen, played by a dialog the test answers. */
   function confirm(kind, title, detail) {
     return new Promise((resolve, reject) => {
@@ -68,12 +79,14 @@
     },
     onLoginError(listener) { errors.add(listener); return () => errors.delete(listener); },
     async loginWithOAuth(provider) {
+      if (alreadyLoggedIn()) return;
       if (provider !== 'google' || !identity().google) throw new Error('OAuth sign-in failed');
       await login({ method: 'google', subject: identity().google, ...identity().googleEmail ? { email: identity().googleEmail } : {} });
     },
     async sendEmailCode(email) { await call('send-code', { email }); },
-    async loginWithEmailCode(code) { await login({ method: 'email', email: identity().email, code }); },
+    async loginWithEmailCode(code) { if (alreadyLoggedIn()) return; await login({ method: 'email', email: identity().email, code }); },
     loginWithWallet() {
+      if (alreadyLoggedIn()) return;
       const wallet = identity().wallet;
       if (!wallet) { for (const listener of [...errors]) listener('PRIVY_USER_CANCELLED'); return; }
       void login({ method: 'wallet', chain: wallet.chain || 'ethereum', address: wallet.address }).catch(() => undefined);

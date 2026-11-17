@@ -71,6 +71,14 @@ describe('Privy errors and wallets', () => {
     expect(privyErrorCode(new Error('something odd 0xabc'))).toBe('PRIVY_REQUEST_FAILED');
     expect(privyErrorCode('weird', 'PRIVY_SIGN_IN_FAILED')).toBe('PRIVY_SIGN_IN_FAILED');
   });
+  it('names a login Privy refused because a session was still open (the real SDK’s own texts), never the generic failure', () => {
+    // Texts of @privy-io/react-auth 3.51.0 (login, loginWithSiwe, the OAuth completion step).
+    for (const text of ['Attempted to log in, but user is already logged in. Use a `link` helper instead.', 'User already authenticated',
+      'Cannot login with OAuth because no OAuth flow is in progress'])
+      expect(privyErrorCode(new Error(text), 'PRIVY_SIGN_IN_FAILED'), text).toBe('PRIVY_SIGN_IN_INTERRUPTED');
+    // Other "already" texts keep their own meaning.
+    expect(privyErrorCode(new Error('User already has an embedded wallet'))).toBe('PRIVY_WALLET_LIMIT');
+  });
   it('lists only Privy embedded wallets (not external wallets) with canonical EVM addresses', () => {
     const user = { linkedAccounts: [
       { type: 'wallet', walletClientType: 'privy', connectorType: 'embedded', chainType: 'ethereum', address: '0xABCDEF0123456789ABCDEF0123456789ABCDEF01', imported: false },

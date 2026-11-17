@@ -141,6 +141,10 @@ export function createLoginChannel() {
 }
 
 const PRIVY_CODES: readonly [RegExp, string][] = [
+  // Authentication UX & Login Regression Fix (P0): Privy's real SDK refuses a login while a session is already open ("Attempted to log in, but
+  // user is already logged in", "User already authenticated") and an OAuth completion it no longer tracks ("no OAuth flow is in progress").
+  // These used to reach the person as the generic "Sign-in did not complete"; the sign-in page now ends that session and says so.
+  [/already (logged in|authenticated)|no oauth flow is in progress/i, 'PRIVY_SIGN_IN_INTERRUPTED'],
   [/exited|closed|cancel|rejected|denied|user_exited/i, 'PRIVY_USER_CANCELLED'],
   [/already has (an )?(embedded|imported)/i, 'PRIVY_WALLET_LIMIT'],
   [/invalid.*(private )?key|private key/i, 'PRIVY_PRIVATE_KEY_INVALID'],

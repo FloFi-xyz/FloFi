@@ -37,7 +37,7 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
   const [state, setState] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [understood, setUnderstood] = useState(false), [moved, setMoved] = useState<readonly string[] | null>(null), [linked, setLinked] = useState(false);
-  const [email, setEmail] = useState(''), [code, setCode] = useState(''), [codeSent, setCodeSent] = useState(false);
+  const [email, setEmail] = useState(''), [code, setCode] = useState(''), [codeSent, setCodeSent] = useState(false), [showEmail, setShowEmail] = useState(false);
   const emailId = useId(), codeId = useId(), syncing = useRef(false);
   const reload = useCallback(async () => setState(await signInMethodsState()), []);
 
@@ -124,6 +124,10 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
   // then only the link of the method that was closed (no other method, no email field unless that method is an email). The full page returns
   // once the step is finished or abandoned.
   const focused = Boolean(move) || moved !== null;
+  // Only the methods this account can still add here (Privy holds one of each kind per user), and only what this deployment can link.
+  const has = (kind: string) => state.methods.some(method => method.kind === kind);
+  const linkable = state.signedIn && state.privy && Boolean(privy?.linkWithOAuth);
+  const addGoogle = linkable && !has('google'), addEmail = linkable && state.emailLink && Boolean(privy?.sendLinkEmailCode) && !has('email');
   const linkGoogleNow = moved?.includes('google') && canLink, linkEmailNow = moved?.includes('email') && canLink && state.emailLink && Boolean(privy?.sendLinkEmailCode);
   const emailForms = !codeSent ? <form className={styles.form} onSubmit={event => void sendEmailCode(event)} aria-label={t('Link an email')}>
     <label htmlFor={emailId}>{t('Email address')}</label>
@@ -138,7 +142,7 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
   </form>;
   return <AccountShell showcase="account" start>
     <h1 className={styles.title}>{t('Sign-in methods')}</h1>
-    <p className={styles.lead}>{t('One FloFi account, several ways in. Every method you add opens this same account; adding one approves nothing and moves no funds.')}</p>
+    <p className={styles.lead}>{t('Every method here opens this same account.')}</p>
     {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
     {notice && <p className={styles.status} role="status">{notice}</p>}
     {/* A link that came back from the provider's page (a new document): the next step is the account itself. */}
@@ -194,23 +198,25 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
     {state.signedIn && !focused && <section aria-labelledby="methods-title" className={styles.form}>
       <h2 id="methods-title" className={styles.subtitle}>{t('This account signs in with')}</h2>
       <MethodList methods={state.methods} label={t('Sign-in methods')}/>
-      <h2 className={styles.subtitle}>{t('Add a sign-in method')}</h2>
-      {!state.fresh ? <div role="note"><p className={styles.small}>{t('For your security, confirm it’s you before adding a sign-in method.')}</p>
-        <a className={styles.primary} href={REAUTH}>{t('Confirm it’s you')}</a></div>
-        : !canLink ? <p className={styles.small}>{t('Adding sign-in methods is not available here yet.')}</p> : <>
-          <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Link Google')}</button>
-          {state.emailLink && privy?.sendLinkEmailCode && emailForms}
-          {!state.emailLink && <p className={styles.small}>{t('Linking an email is not available on this deployment yet.')}</p>}
-        </>}
-      <p className={styles.small}>{t('A sign-in method that already opens another FloFi account cannot be added here. If that account is an empty duplicate, sign in with that method and choose to bring it to your main account.')}</p>
-      {!move && <>
-        <h2 className={styles.subtitle}>{t('Is this a duplicate account?')}</h2>
+      {(addGoogle || addEmail) && <>
+        <h2 className={styles.subtitle}>{t('Add a sign-in method')}</h2>
+        {/* Authentication UX & Login Regression Fix: the security step is asked only when adding, and only when the sign-in is not recent. */}
+        {!state.fresh ? <div role="note"><p className={styles.small}>{t('For your security, confirm it’s you first.')}</p>
+          <a className={styles.primary} href={REAUTH}>{t('Confirm it’s you')}</a></div>
+          : <>
+            {addGoogle && <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Add Google')}</button>}
+            {addEmail && (showEmail || codeSent ? emailForms
+              : <button type="button" className={styles.method} disabled={busy !== null} onClick={() => setShowEmail(true)} aria-expanded={false}>{t('Add email')}</button>)}
+          </>}
+      </>}
+      {!move && <details className={styles.small} data-duplicate-help="true">
+        <summary>{t('Is this a second FloFi account?')}</summary>
         {state.retirement.length === 0 ? <>
-          <p className={styles.small}>{t('If you already have another FloFi account (for example the one with your boarding pass), you can close this empty one and bring its sign-in method there. You will sign in to the other account to confirm.')}</p>
+          <p>{t('If you boarded with another sign-in, close this empty account and bring its sign-in there. You will sign in to the other account to confirm.')}</p>
           {!state.fresh ? <a className={styles.quiet} href={REAUTH}>{t('Confirm it’s you')}</a>
             : <button type="button" className={styles.quiet} disabled={busy !== null} onClick={() => void startMove()} data-start-move="true">{t('Bring this sign-in to my other account')}</button>}
-        </> : <p className={styles.small}>{t('This account holds something of its own (a wallet, a boarding pass, saved recipients or history), so it is not a duplicate FloFi can close.')}</p>}
-      </>}
+        </> : <p>{t('This account holds something of its own (a wallet, a boarding pass, saved recipients or history), so it is not a duplicate FloFi can close.')}</p>}
+      </details>}
     </section>}
     <div className={styles.footerLinks}><a href="/app/credentials">{t('Credentials')}</a><a href="/board">{t('Flight FloFi')}</a><a href="/privacy">{t('Privacy')}</a></div>
   </AccountShell>;

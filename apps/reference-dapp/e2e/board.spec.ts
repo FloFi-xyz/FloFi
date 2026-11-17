@@ -1026,13 +1026,13 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects one acc
 if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a boarded person signed in another way: one Continue to my account, help on request, one account (EN and PT)', async ({ browser }) => {
   test.setTimeout(420_000);
   const L = {
-    EN: { create: 'Create a separate account', skip: 'Skip for now', title: 'You boarded with another sign-in.', continue: 'Continue to my account',
+    EN: { create: 'Create a separate account', title: 'You boarded with another sign-in.', continue: 'Continue to my account',
       help: 'Need help signing in?', boardedMethod: 'Sign in with the method I boarded with', emailLabel: 'Your boarding email',
       send: 'Email me my sign-in method', sent: 'Check your inbox. If this email is on the list, we sent what you need to sign in.',
       move: 'Sign in to the account that keeps everything', wallet: 'Web3 Wallet', confirm: 'Close the duplicate account?',
       understand: 'I understand the duplicate account will be closed for good.', close: 'Close it and continue', closed: 'The duplicate account is closed.',
       linkGoogle: 'Link Google', linked: 'Linked. You can now sign in with it.', methods: 'Sign-in methods', addMethod: 'Add a sign-in method' },
-    PT: { create: 'Criar uma conta separada', skip: 'Pular por enquanto', title: 'Você embarcou com outro login.', continue: 'Continuar para minha conta',
+    PT: { create: 'Criar uma conta separada', title: 'Você embarcou com outro login.', continue: 'Continuar para minha conta',
       send: 'Enviar meu método de login', sent: 'Confira sua caixa de entrada. Se este e-mail estiver na lista, enviamos o que você precisa para entrar.',
       help: 'Precisa de ajuda para entrar?', boardedMethod: 'Entrar com o método que usei para embarcar', emailLabel: 'Seu e-mail de embarque',
       move: 'Entre na conta que fica com tudo', wallet: 'Carteira Web3', confirm: 'Fechar a conta duplicada?',
@@ -1099,11 +1099,14 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await page.goto('/login?returnTo=%2Fboard');
       await page.getByRole('button', { name: 'Google', exact: true }).click();
       await page.locator('[data-existing-account="true"]').getByRole('button', { name: t.create }).click();
-      await expect(page).toHaveURL(/\/onboarding\/wallets$/);
-      await page.getByRole('button', { name: t.skip }).click();
+      // Authentication UX & Login Regression Fix (P0): the person's other account goes straight to /board's recovery, never through wallet
+      // onboarding, and cannot open it directly either (a wallet created there would make it impossible to close).
       await expect(page).toHaveURL('/board');
       const duplicate = (await query<{ account_id: string }>(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google]))[0]!.account_id;
       expect(duplicate).not.toBe(main);
+      await page.goto('/onboarding/wallets');
+      await expect(page).toHaveURL('/board');
+      expect(await query(`SELECT count(*)::int AS n FROM flofi_account_wallets WHERE account_id = $1`, [duplicate])).toEqual([{ n: 0 }]);
       const top = hero(page);
       await expect(top.locator('[data-boarded-elsewhere="true"]')).toBeVisible();
       await expect(top.getByRole('heading', { level: 1 })).toHaveText(t.title);
@@ -1149,7 +1152,10 @@ if (process.env.FLOFI_BETA_ACCESS === 'beta') test('closed beta protects a board
       await expect(page).toHaveURL(/\/login\?move=1$/);
       await expect(page.locator('[data-sign-in-mode="move"]')).toContainText(t.move);
       expect(await query(`SELECT account_id FROM flofi_account_identities WHERE kind = 'GOOGLE' AND subject = $1`, [google])).not.toEqual([{ account_id: main }]);
+      // The duplicate's Privy session was still open in this browser (/board does not end it): the methods wait until it has ended, so the
+      // keeper's login is never started over it (Privy would ignore it, as its real SDK does).
       await page.getByRole('button', { name: t.wallet, exact: true }).click();
+      expect(await page.evaluate(() => (window as unknown as { __FLOFI_PRIVY_E2E_IGNORED_LOGINS__?: number }).__FLOFI_PRIVY_E2E_IGNORED_LOGINS__ ?? 0)).toBe(0);
       await expect(page).toHaveURL('/account/sign-in-methods');
       // Only this step: the confirmation, never the full page (other methods, an email field, the duplicate section).
       const confirm = page.locator('[data-move-confirm="true"]');
