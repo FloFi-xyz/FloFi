@@ -1553,6 +1553,10 @@
     "app.e2e.dashboard-productization": {
       "path": "apps/reference-dapp/e2e/dashboard-productization.spec.ts",
       "stage": "browser"
+    },
+    "app.state.uniswap-liquidity-store": {
+      "path": "apps/reference-dapp/src/state/uniswap-liquidity-store.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1681,7 +1685,8 @@
     "app.domain.copilot-pool-dialogue",
     "app.domain.copilot-pool-dialogue.repro",
     "app.server.base-liquidity",
-    "app.server.supply-service"
+    "app.server.supply-service",
+    "app.state.uniswap-liquidity-store"
   ],
   "modules": [
     {
@@ -2566,7 +2571,8 @@
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
-        "app.e2e.uniswap-liquidity-continuation"
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -4303,7 +4309,8 @@
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
-        "app.e2e.uniswap-liquidity-continuation"
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -6888,7 +6895,8 @@
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
-        "app.e2e.uniswap-liquidity-continuation"
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7316,7 +7324,8 @@
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
-        "app.e2e.uniswap-liquidity-continuation"
+        "app.e2e.uniswap-liquidity-continuation",
+        "app.state.uniswap-liquidity-store"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
