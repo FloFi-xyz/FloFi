@@ -131,7 +131,7 @@ def control_errors(files):
                     "pnpm build", "python3 scripts/function_traces.py apps/reference-dapp", "pnpm schemas:check", "python3 scripts/agent_guard.py check",
                     'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
                     'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"', "pnpm test:anvil",
-                    "pnpm test:fork --testTimeout=30000", "pnpm audit --audit-level low",
+                    "pnpm test:fork --testTimeout=30000", "pnpm audit --prod --audit-level low",
                     "node scripts/guarded-release-browser.mjs critical",
                     "node scripts/guarded-release-browser.mjs extended",
                     "node scripts/guarded-release-browser.mjs composition"),

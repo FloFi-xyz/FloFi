@@ -28,6 +28,11 @@ useful design context. Historical exact-path lists do not authorize future work.
   an offline test into a public provider or financial execution attempt.
 - Report meaningful blockers and validation results honestly. Skipped tests are
   not passes; local/mock evidence does not prove public execution or certification.
+- CI lifecycle ([guide](docs/engineering/CI.md)): read every failing job and push
+  their fixes together; a push supersedes the branch's running certification.
+  Never trigger a manual pipeline for a revision that already has one. Rerun at
+  most once, failed jobs only, same SHA, and only for a proven transient failure;
+  fix deterministic failures before a new certification.
 
 ## Engineering review specialists
 
