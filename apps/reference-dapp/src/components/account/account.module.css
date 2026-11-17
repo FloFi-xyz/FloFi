@@ -130,6 +130,14 @@
 .banner{display:grid;gap:8px;margin:0 0 18px;padding:14px 16px;border-radius:14px;border:1px solid var(--acc-line);background:var(--acc-blue-soft);font-size:14px}
 .banner strong{font-size:15px}
 .banner p{margin:0;color:var(--acc-muted)}
+/* BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: Sign-in methods (a list of the account's ways in, section titles and the explicit confirmation box). */
+.subtitle{margin:22px 0 8px;font-size:16px;font-weight:600;color:var(--acc-ink)}
+.methodList{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:6px}
+.methodList li{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 10px;padding:10px 12px;border:1px solid var(--acc-line);border-radius:12px;
+  background:var(--acc-surface);font-size:14px;color:var(--acc-ink);overflow-wrap:anywhere}
+.methodList li span{font:500 13px var(--font-ibm-plex-mono),monospace;color:var(--acc-muted)}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.45;color:var(--acc-ink)}
+.check input{margin-top:3px;width:18px;height:18px;flex:none}
 /* Provider frames (import / export): another origin, shown inside FloFi's dialog. */
 .frameDialog{width:min(480px,calc(100vw - 24px));max-height:calc(100dvh - 24px);border:1px solid var(--acc-line);border-radius:24px;padding:0;
   background:var(--acc-panel);color:var(--acc-ink);box-shadow:var(--acc-shadow);overflow:auto}
@@ -171,7 +179,12 @@
 .orbitCore span{font-size:12px;color:#A4ABB8}
 .chip{position:absolute;display:inline-flex;align-items:center;gap:7px;border:1px solid rgb(164 171 184 / .28);background:rgb(21 24 31 / .72);border-radius:999px;padding:6px 13px;font-size:13px;
   color:#E6E9F0;white-space:nowrap;backdrop-filter:blur(6px)}
-.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--chip,#93A6FF)}
+/* UX-03: each chip carries its capability's mark in the chip colour (EVM and Solana: their official marks). Subtle orbit rings sit behind. */
+.chipMark{flex:none;width:14px;height:14px;color:var(--chip,#93A6FF)}
+.chipMarkEvm{filter:brightness(0) invert(1);opacity:.92}
+.orbitRings{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;fill:none;stroke:rgb(147 166 255 / .14);stroke-width:1}
+.orbitRings ellipse{vector-effect:non-scaling-stroke}
+.orbitTrack{stroke:rgb(147 166 255 / .2);stroke-dasharray:2 7}
 .showcaseText{position:relative;text-align:center;max-width:520px;margin-top:28px}
 .showcaseText h2{font-size:clamp(26px,2.6vw,34px);font-weight:500;letter-spacing:-.02em;margin:0 0 12px;color:#F4F5F7}
 .showcaseText p{color:#A4ABB8;margin:0;font-size:16px}
@@ -191,10 +204,12 @@
 @media (prefers-reduced-motion:no-preference){
   .method,.primary,.quiet,.tile,.themeToggle span{transition:background-color .16s ease,border-color .16s ease,transform .2s ease,filter .16s ease}
   .chip{animation:float 6s ease-in-out infinite alternate}
-  .chip:nth-child(2n){animation-duration:7.5s}
+  .chip:nth-of-type(2n){animation-duration:7.5s}
+  .orbitTrack{animation:orbit 48s linear infinite}
   .content{animation:rise .32s ease-out both}
 }
 @keyframes float{from{translate:0 0}to{translate:0 -6px}}
+@keyframes orbit{to{stroke-dashoffset:-90}}
 @keyframes rise{from{opacity:0;translate:0 8px}to{opacity:1;translate:0 0}}
 /* Mobile: one column designed for the hand — brand band on top, content in a sheet, actions within thumb reach. */
 @media (max-width:900px){
