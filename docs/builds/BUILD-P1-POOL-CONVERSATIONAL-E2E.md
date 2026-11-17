@@ -1,6 +1,8 @@
 # BUILD-P1 — Pool conversational E2E reliability (Orca Whirlpools, Uniswap v3)
 
-**Status:** ready for owner review. Branch `claude/festive-bell-43awox`, based on `main` at `d49f80a` (PR #204 merged). Nothing is merged,
+**Status:** ready for owner review. Branch `claude/festive-bell-43awox`, started on `main` at `d49f80a` (PR #204) and synchronized with `main` at
+`c105e1d` (PR #205, BUILD-INFRA-API-FAILOVER-CERT-001) by a merge commit — no conflict; PR #205's API drain/shutdown behaviour, request-target guard and
+required suites are untouched. Nothing is merged,
 deployed or configured. Production was not read or changed (no service, variable, database, migration, Neon/Railway/Vercel setting), and no
 transaction was signed or submitted: every test uses scripted interpreter answers, MOCKED in-process chains or the MOCKED loopback harnesses.
 
@@ -40,6 +42,22 @@ factor: the Canvas range control (`priceBoundsAround`) is now also what the chat
 
 No migration, table, environment variable, execution gate, fee policy, amount limit, slippage default, approval logic, signer or executor changed.
 
+## 2a. Changes from the specialist reviews
+
+Read-only reviews (flofi-chat, flofi-liquidity, flofi-security) found 0 critical/high, 4 medium (overlapping) and 13 low findings; each was checked
+against the code and fixed with a regression test:
+
+| Finding | Fix |
+| --- | --- |
+| A bare number answering another question (a deposit) could ground a percentage the model invented | A number without `%` grounds a percentage only when it answers FloFi's own percentage question (`answeredPercent`, set by the local reader). |
+| A fee-tier answer ("0.05%") could be read as a ±0.05% range | The local reader runs only under FloFi's own range questions (by question code) or while it holds a range answer. |
+| After a pool read, a local turn was answered against the context captured before the read | It is answered against the current context: a wallet, workflow or proposal change ends the request (`COPILOT_CONTEXT_CHANGED`). |
+| Chat and Review read Base/Arbitrum prices in opposite directions | The note states that Review shows the same ticks and gives them in the pool's order too (e.g. WETH per USDC); the position note names the token held, without "above/below". |
+| Local range loops could reset the question budget forever; the internal pool read could hit the limit | Progress is a slot never filled before in the request; FloFi's internal pool-read request neither counts nor is stopped. |
+| A deposit maximum could also ground a price bound | A written number grounds one field only. |
+| The Uniswap read was labelled with the requested pool, not the pool read | The service returns its verified pool; the web reader (`state/copilot-pool-reads.ts`) fails closed when it is missing or different. |
+| Smaller | "at 10% around the price" is a range, not a fee; a range the interpreter dropped on a catalog pool is asked, never the full range; a malformed "ok" read is a failed read; "Try again" only where a read is possible; a unit named next to a side is kept; engineering-only Devnet/test-pool dead ends removed. |
+
 ## 3. Context continuity
 
 The open request is FloFi's structured draft (protocol, network, deposits, fee tier, range kind and bounds), plus — only while the range is open —
@@ -74,7 +92,7 @@ CI only; historical runs are untouched; no existing workflow is re-networked.
 
 | Layer | Suites | Result |
 | --- | --- | --- |
-| Reproduction (failed on `d49f80a`, pass now) | `copilot-pool-dialogue.repro.test.ts` (incident A sequence; incident B `±10%` and `10% range`; silent full range) | see PR |
+| Reproduction (failed on `d49f80a` — verified in a clean worktree of `d49f80a`: 4/4 fail; pass now) | `copilot-pool-dialogue.repro.test.ts` (incident A sequence; incident B `±10%` and `10% range`; silent full range) | see PR |
 | Dialogue | `copilot-range-dialogue.test.ts` (reader EN/PT, slot changes), `copilot-pool-dialogue.test.ts` (separate messages, explicit change, new request, wallet/network change, price unavailable/stale/missing pool, malformed and invented model values, yes, public wording, Chat → IR → MCP parity) | see PR |
 | Compiler | `uniswap-price-orientation.test.ts` | see PR |
 | Integration (MOCKED chain, real services) | `server/copilot-pool-integration.test.ts`: chat → IR → Uniswap service Simulate → Review → owner-wallet handoff; exact approvals; zero sends | see PR |
@@ -104,6 +122,8 @@ hold codes and counters only — never text, values, assets, networks, amounts, 
 - A real interpreter was not run (no authorized environment/budget in this session): scripted answers prove FloFi's handling, not that a live
   model will always classify every phrasing. The local reader removes the model from the common short answers, which narrows that risk.
 - Channels (Telegram/WhatsApp) cannot read pool prices: a percentage there is explained as unverifiable (prices or ticks still work).
+- Deploy order: the web chat binds a Uniswap read to the pool the service reports (new `pool` field of the price read). Deploy the API (Railway)
+  with or before the web (Vercel); until both run this build, a catalog percentage range is answered "could not verify" (fail closed).
 - MCP `compose_strategy` keeps its `price`/`tick`/`full` range contract (no percentage): the chat resolves a percentage to ticks, which MCP expresses
   with the same IR and hash (tested).
 - A pool price moves between the proposal and Review; the proposal states the read block/slot and the ticks are fixed, while Simulate/Review read the
