@@ -250,6 +250,10 @@
       "path": "apps/reference-dapp/src/channels/whatsapp/learning.pg.test.ts",
       "stage": "postgres"
     },
+    "app.components.account.account-shell": {
+      "path": "apps/reference-dapp/src/components/account/account-shell.test.tsx",
+      "stage": "unit"
+    },
     "app.components.account.add-wallets": {
       "path": "apps/reference-dapp/src/components/account/add-wallets.test.tsx",
       "stage": "unit"
@@ -353,6 +357,10 @@
     "app.developer.webhooks.pg": {
       "path": "apps/reference-dapp/src/developer/webhooks.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.domain.amount-shortcuts": {
+      "path": "apps/reference-dapp/src/domain/amount-shortcuts.test.ts",
+      "stage": "unit"
     },
     "app.domain.approved-ux": {
       "path": "apps/reference-dapp/src/domain/approved-ux.test.ts",
@@ -466,6 +474,10 @@
       "path": "apps/reference-dapp/e2e/admin-console.spec.ts",
       "stage": "browser"
     },
+    "app.e2e.amount-shortcuts": {
+      "path": "apps/reference-dapp/e2e/amount-shortcuts.spec.ts",
+      "stage": "browser"
+    },
     "app.e2e.auth-wallets": {
       "path": "apps/reference-dapp/e2e/auth-wallets.spec.ts",
       "stage": "browser"
@@ -572,6 +584,10 @@
     },
     "app.flight.launch.pg": {
       "path": "apps/reference-dapp/src/flight/launch.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.flight.recovery.pg": {
+      "path": "apps/reference-dapp/src/flight/recovery.pg.test.ts",
       "stage": "postgres"
     },
     "app.flight.store.pg": {
@@ -1542,10 +1558,12 @@
     "app.channels.core.copilot-assist",
     "app.channels.core.delivery",
     "app.channels.core.workflow",
+    "app.components.account.account-shell",
     "app.components.automations-workspace",
     "app.components.copilot-automation-proposal",
     "app.developer.events-sync",
     "app.developer.openapi",
+    "app.domain.amount-shortcuts",
     "app.domain.canonical-execution-status",
     "app.domain.copilot-context",
     "app.domain.intelligence",
@@ -1775,7 +1793,9 @@
         "packages/cloud-runtime/migrations/0018_flofi_accounts.sql",
         "packages/cloud-runtime/migrations/0019_privy_accounts.sql",
         "apps/reference-dapp/src/server/session-cookie.ts",
-        "apps/reference-dapp/src/accounts/page-exit.ts"
+        "apps/reference-dapp/src/accounts/page-exit.ts",
+        "apps/reference-dapp/src/app/(account)/account/sign-in-methods/page.tsx",
+        "apps/reference-dapp/src/components/account/sign-in-methods.tsx"
       ],
       "suites": [
         "app.accounts.account-csp",
@@ -1827,7 +1847,8 @@
         "app.wallet.flofi-wallet-sync",
         "cloud-runtime.flofi-accounts-migration.pg",
         "cloud-runtime.privy-accounts-migration.pg",
-        "app.accounts.account-store-schema19.pg"
+        "app.accounts.account-store-schema19.pg",
+        "app.components.account.account-shell"
       ],
       "gaps": [
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
@@ -4153,7 +4174,9 @@
         "apps/reference-dapp/src/domain/chat-message.ts",
         "apps/reference-dapp/src/domain/token-fee.ts",
         "apps/reference-dapp/src/domain/chat-action-variant.ts",
-        "apps/reference-dapp/src/domain/conversation-persistence.ts"
+        "apps/reference-dapp/src/domain/conversation-persistence.ts",
+        "apps/reference-dapp/src/domain/amount-shortcuts.ts",
+        "apps/reference-dapp/src/components/amount-shortcuts.tsx"
       ],
       "suites": [
         "app.domain.copilot-assist",
@@ -4184,7 +4207,9 @@
         "app.domain.token-fee",
         "app.domain.chat-action-variant",
         "app.domain.conversation-persistence",
-        "app.domain.execution-ux-reliability"
+        "app.domain.execution-ux-reliability",
+        "app.domain.amount-shortcuts",
+        "app.e2e.amount-shortcuts"
       ],
       "gaps": [
         "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
@@ -4636,7 +4661,9 @@
         "apps/reference-dapp/src/flight/simulation-record.ts",
         "apps/reference-dapp/src/flight/store.ts",
         "packages/cloud-runtime/migrations/0020_flight_flofi.sql",
-        "packages/cloud-runtime/migrations/0024_flight_launch.sql"
+        "packages/cloud-runtime/migrations/0024_flight_launch.sql",
+        "apps/reference-dapp/src/flight/entry-holder.ts",
+        "apps/reference-dapp/src/flight/recovery-hint.ts"
       ],
       "suites": [
         "app.flight.campaign",
@@ -4650,7 +4677,8 @@
         "app.flight.identity-http",
         "app.flight.email.templates",
         "app.backend.flight-admin.pg",
-        "app.flight.board-access-http"
+        "app.flight.board-access-http",
+        "app.flight.recovery.pg"
       ],
       "gaps": [
         "Email goes out through Resend from the Railway worker (FLOFI_FLIGHT_EMAIL=enabled); tests use a fake provider in the test process, so delivery, spam placement, DNS (SPF/DKIM/DMARC) and the account's real quota are not proven by tests. The FloFi quota counts FloFi's own reservations only (sends outside FloFi need the external reserve and reconciliation in the Resend dashboard). No bounce or complaint webhook is consumed. Joining has no confirmation step (any address can be submitted); campaign access needs a proven address (Privy-verified login email, or the access link or code). X handles are self-declared. Production rate and abuse behaviour is not measured by tests; browser funnel events are limited per instance."
@@ -4788,7 +4816,9 @@
         "apps/reference-dapp/src/i18n/pt-gas-zerox.ts",
         "apps/reference-dapp/src/i18n/pt-smart-account-transfer.ts",
         "apps/reference-dapp/src/i18n/pt-execution-reliability.ts",
-        "apps/reference-dapp/src/i18n/pt-execution-ux-reliability.ts"
+        "apps/reference-dapp/src/i18n/pt-execution-ux-reliability.ts",
+        "apps/reference-dapp/src/i18n/pt-identity-recovery.ts",
+        "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -8139,6 +8169,7 @@
     "app.flight.beta-access.pg",
     "app.flight.launch-1311.pg",
     "app.flight.launch.pg",
+    "app.flight.recovery.pg",
     "app.flight.store.pg",
     "app.learning.automatic.pg",
     "app.learning.learning.pg",
