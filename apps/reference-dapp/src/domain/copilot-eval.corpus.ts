@@ -141,9 +141,10 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true }) }] },
   { id: 'C10', category: 'clarification', language: 'EN', turns: [
     { user: 'Add Uniswap liquidity 100 USDC and 0.05 WETH on Base Sepolia', model: intent.action(act.liquidity({ protocol: 'UNISWAP_V3', network: 'BASE_SEPOLIA',
-      deposits: [{ asset: 'USDC', maxAmount: '100' }, { asset: 'WETH', maxAmount: '0.05' }] })), expect: Q({ contains: ['a range'] }) },
-    { user: 'from 2000 to 4000 USDC per WETH', model: intent.action(act.liquidity({ protocol: 'UNISWAP_V3', network: 'BASE_SEPOLIA',
-      deposits: [{ asset: 'USDC', maxAmount: '100' }, { asset: 'WETH', maxAmount: '0.05' }], rangeUnit: 'PRICE', lower: '2000', upper: '4000' })), expect: P('ADD_UNISWAP_LIQUIDITY') }] },
+      deposits: [{ asset: 'USDC', maxAmount: '100' }, { asset: 'WETH', maxAmount: '0.05' }] })), expect: Q({ contains: ['price range', 'USDC per WETH'] }) },
+    // BUILD-P1 (intentional change): a range answer to FloFi's own range question is read by FloFi itself, without a model call.
+    { user: 'from 2000 to 4000 USDC per WETH', expect: P('ADD_UNISWAP_LIQUIDITY', { local: true,
+      sentence: 'add liquidity 100 USDC and 0.05 WETH from 2000 to 4000 USDC per WETH on Base Sepolia slippage 100 bps' }) }] },
   { id: 'C11', category: 'clarification', language: 'EN', turns: [
     { user: 'Add liquidity on Uniswap or Orca: 1 SOL and 100 devUSDC ticks -1024 to 1024', model: intent.action(act.liquidity({
       deposits: [{ asset: 'SOL', maxAmount: '1' }, { asset: 'DEVUSDC', maxAmount: '100' }], rangeUnit: 'TICK', lower: '-1024', upper: '1024' })),

@@ -28,9 +28,26 @@ function stated(field: string, value: unknown, text: string): boolean {
   return words(text, value.replaceAll('_', ' ')) || words(text, value);
 }
 const record = (value: object) => value as Record<string, unknown>;
+const RANGE_FIELDS = ['rangeUnit', 'lower', 'upper'];
+/**
+ * BUILD-P1: a liquidity range is one group (its kind and its bounds). A different kind of range replaces the open one only when the latest words state
+ * it ("±10%", "full range", a bound); otherwise the open range is kept whole and its bounds merge one by one as before.
+ */
+function rangeReplaced(before: Record<string, unknown>, out: Record<string, unknown>, text: string): boolean | null {
+  if (!RANGE_FIELDS.every(field => field in before && field in out)) return null;
+  const was = before.rangeUnit, now = out.rangeUnit;
+  if (was === null || now === null || was === now) return null;
+  const bound = (field: 'lower' | 'upper') => typeof out[field] === 'string' && stated(field, out[field], text);
+  if (now === 'FULL') return /\bfull\b|complet|inteir|toda a faixa/i.test(text);
+  if (now === 'PERCENT') return bound('upper') || /%|percent|por ?cento|porcentagem|percentual/i.test(text);
+  return bound('lower') || bound('upper') || (now === 'TICK' && /\bticks?\b/i.test(text));
+}
 function mergeFields(before: object, interpreted: object, text: string): Record<string, unknown> {
   const out = { ...record(interpreted) };
+  const range = rangeReplaced(record(before), out, text);
+  if (range === false) for (const field of RANGE_FIELDS) out[field] = record(before)[field];
   for (const [field, value] of Object.entries(before)) {
+    if (range !== null && RANGE_FIELDS.includes(field)) continue;
     if (field === 'deposits' && Array.isArray(value) && Array.isArray(out[field])) {
       const updated = out[field] as { asset: string; maxAmount: string }[];
       const prior = value as { asset: string; maxAmount: string }[];
@@ -124,6 +141,15 @@ export function answerDraftField(intent: CopilotIntentV2, expected: readonly Dra
     else if (!['FOUND', 'AMBIGUOUS'].includes(resolveAssetReference(identity.chain, value).kind)) return null;
   }
   return put(field, value);
+}
+/** BUILD-P1: the slots an open request has filled (per step; a liquidity deposit per token), for the clarification budget's progress test. */
+export function draftSlots(intent: CopilotIntentV2): readonly string[] {
+  const actions = intent.kind === 'ACTION' ? [intent.action] : intent.kind === 'COMPOSITION' ? intent.actions : [];
+  return actions.flatMap((action, step) => Object.entries(action).flatMap(([field, value]): string[] => {
+    if (field === 'type') return [];
+    if (field === 'deposits') return Array.isArray(value) ? (value as { asset: string }[]).map(deposit => `${step}:deposit:${deposit.asset.toUpperCase()}`) : [];
+    return value === null || value === undefined ? [] : [`${step}:${field}`];
+  }));
 }
 export function validatedDraftFields(intent: CopilotIntentV2, text: string): readonly ValidatedDraftField[] {
   const actions = intent.kind === 'ACTION' ? [intent.action] : intent.kind === 'COMPOSITION' ? intent.actions : [];

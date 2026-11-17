@@ -382,6 +382,18 @@
       "path": "apps/reference-dapp/src/domain/copilot-conversation.test.ts",
       "stage": "unit"
     },
+    "app.domain.copilot-pool-dialogue": {
+      "path": "apps/reference-dapp/src/domain/copilot-pool-dialogue.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.copilot-pool-dialogue.repro": {
+      "path": "apps/reference-dapp/src/domain/copilot-pool-dialogue.repro.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.copilot-range-dialogue": {
+      "path": "apps/reference-dapp/src/domain/copilot-range-dialogue.test.ts",
+      "stage": "unit"
+    },
     "app.domain.copilot-mainnet-bridge": {
       "path": "apps/reference-dapp/src/domain/copilot-mainnet-bridge.test.ts",
       "stage": "unit"
@@ -468,6 +480,10 @@
     },
     "app.e2e.chat-assistant": {
       "path": "apps/reference-dapp/e2e/chat-assistant.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.copilot-pool-dialogue": {
+      "path": "apps/reference-dapp/e2e/copilot-pool-dialogue.spec.ts",
       "stage": "browser"
     },
     "app.e2e.editor-redesign": {
@@ -696,6 +712,18 @@
     },
     "app.server.arbitrum-runtime": {
       "path": "apps/reference-dapp/src/server/arbitrum-runtime.test.ts",
+      "stage": "unit"
+    },
+    "app.server.copilot-pool-integration": {
+      "path": "apps/reference-dapp/src/server/copilot-pool-integration.test.ts",
+      "stage": "unit"
+    },
+    "app.server.copilot-prompt-scope": {
+      "path": "apps/reference-dapp/src/server/copilot-prompt-scope.test.ts",
+      "stage": "unit"
+    },
+    "app.state.copilot-pool-reads": {
+      "path": "apps/reference-dapp/src/state/copilot-pool-reads.test.ts",
       "stage": "unit"
     },
     "app.server.base-swap": {
@@ -1140,6 +1168,10 @@
     },
     "reference-compiler.uniswap-public-liquidity": {
       "path": "packages/reference-compiler/test/uniswap-public-liquidity.test.ts",
+      "stage": "unit"
+    },
+    "reference-compiler.uniswap-price-orientation": {
+      "path": "packages/reference-compiler/test/uniswap-price-orientation.test.ts",
       "stage": "unit"
     },
     "reference-compiler.withdraw": {
@@ -1595,7 +1627,9 @@
     "app.backend.plain-node-closure",
     "app.domain.conversation-persistence",
     "app.server.conversation-scope",
-    "app.flight.board-access-http"
+    "app.flight.board-access-http",
+    "app.domain.copilot-pool-dialogue",
+    "app.domain.copilot-pool-dialogue.repro"
   ],
   "modules": [
     {
@@ -4075,6 +4109,7 @@
         "apps/reference-dapp/src/domain/copilot-authoring.ts",
         "apps/reference-dapp/src/domain/copilot-conversation.ts",
         "apps/reference-dapp/src/domain/copilot-draft.ts",
+        "apps/reference-dapp/src/domain/copilot-range-dialogue.ts",
         "apps/reference-dapp/src/domain/copilot-eval.corpus.ts",
         "apps/reference-dapp/src/domain/copilot-intent-v2.ts",
         "apps/reference-dapp/src/domain/copilot-intent.ts",
@@ -4106,6 +4141,12 @@
         "app.domain.build-entry",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
+        "app.domain.copilot-pool-dialogue",
+        "app.domain.copilot-pool-dialogue.repro",
+        "app.domain.copilot-range-dialogue",
+        "app.e2e.copilot-pool-dialogue",
+        "app.server.copilot-pool-integration",
+        "app.state.copilot-pool-reads",
         "app.domain.intelligence",
         "app.domain.intelligence.concepts",
         "app.domain.intelligence.conversation-regression",
@@ -4173,6 +4214,8 @@
         "apps/reference-dapp/src/domain/cross-chain-liquidity.ts",
         "apps/reference-dapp/src/domain/liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/pool-price-bounds.ts",
+        "apps/reference-dapp/src/domain/pool-range.ts",
+        "apps/reference-dapp/src/state/copilot-pool-reads.ts",
         "apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/solana-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/uniswap-liquidity-authoring.ts"
@@ -4181,6 +4224,12 @@
         "reference-compiler.liquidity",
         "reference-compiler.liquidity.fork",
         "reference-compiler.uniswap-public-liquidity",
+        "app.domain.copilot-pool-dialogue",
+        "app.domain.copilot-pool-dialogue.repro",
+        "app.e2e.copilot-pool-dialogue",
+        "app.server.copilot-pool-integration",
+        "app.state.copilot-pool-reads",
+        "reference-compiler.uniswap-price-orientation",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity"
@@ -5610,6 +5659,7 @@
         "reference-compiler.liquidity",
         "reference-compiler.liquidity.fork",
         "reference-compiler.uniswap-public-liquidity",
+        "reference-compiler.uniswap-price-orientation",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity"
@@ -6663,6 +6713,7 @@
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.server.copilot-orchestration",
+        "app.server.copilot-prompt-scope",
         "app.state.flofi-conversation",
         "app.server.conversation-scope"
       ],
@@ -6747,6 +6798,7 @@
         "apps/reference-dapp/src/server/uniswap-liquidity-service.ts"
       ],
       "suites": [
+        "app.server.copilot-pool-integration",
         "reference-compiler.liquidity",
         "reference-compiler.liquidity.fork",
         "reference-compiler.uniswap-public-liquidity",

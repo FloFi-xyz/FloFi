@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { activeNetworkScope, introducedTestNetworks, publicText, testNetworkMessage } from './network-scope';
+import { activeNetworkScope, introducedTestNetworks, mentionsTestNetwork, publicText, testNetworkMessage } from './network-scope';
 import { automationFaq, groundAutomationDraft, matchAutomationFaq, rescheduleDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -9,7 +9,7 @@ import type { Workflow } from './initial-workflow';
 import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
-import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, groundedSigned, mentionedNetworks,
+import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, groundedSigned, liquidityUnits, mentionedNetworks,
   planCopilotActions, proposalFromPlan, SELF_RECIPIENT, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
@@ -18,7 +18,9 @@ import { orcaLiquidityAmounts, orcaSqrtPriceAtTick } from '@defi-workflow-engine
 import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotFeeTier, type CopilotLendingAction, type CopilotNetwork,
   type CopilotSwapAction } from './copilot-intent';
 import { groundExplicitAssets } from './copilot-asset-intent';
-import { answerDraftField, mergeDraftIntent, validatedDraftFields, type DraftField, type ValidatedDraftField } from './copilot-draft';
+import { answerDraftField, draftSlots, mergeDraftIntent, validatedDraftFields, type DraftField, type ValidatedDraftField } from './copilot-draft';
+import { applyRangeAnswer, readRangeAnswer, type RangeHold } from './copilot-range-dialogue';
+import type { PoolPriceRead, PoolRef } from './pool-range';
 import { canonicalSymbol } from './asset-catalogs';
 import { networkIdentity, networkOfCopilot } from './network-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
@@ -83,7 +85,11 @@ export type ConversationLedger = { readonly asked: readonly { readonly field: st
 type Draft = { readonly expected?: readonly DraftField[]; readonly validated?: readonly ValidatedDraftField[]; readonly grounding?: string;
   readonly intent: CopilotIntentV2; readonly options: readonly { readonly label: string; readonly fill: DraftFill }[]; readonly amountFill: boolean;
   readonly snapshot: ContextSnapshot;
-  /** A bare amount answers Flofi's question for this pool token's maximum (FloFi's own question named it). */ readonly depositFill?: 'SOL' | 'devUSDC';
+  /** A bare amount answers Flofi's question for this pool token's maximum (FloFi's own question named it). */ readonly depositFill?: string;
+  /** BUILD-P1: an open range answer — a value whose side FloFi asked about, or the side whose value it asked for (`copilot-range-dialogue.ts`). */
+  readonly rangeHold?: RangeHold;
+  /** BUILD-P1: the closed code of FloFi's own open question (a range answer is read locally only under FloFi's range questions). */
+  readonly code?: string;
   /** What resolving the open request already settled (a chosen swap or position). */ readonly extras?: Extras;
   /** The question and the buttons shown, so "yes" never guesses among several. */ readonly question?: string; readonly shown?: readonly string[];
   /** BUILD-CHAT-LEARNING-001: a mainnet FloFi's glossary suggested, offered first (picking it or another option is a feedback signal). */
@@ -93,7 +99,9 @@ type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: Swap
   /** BUILD-FLOFI-INTELLIGENCE-001: the action is a goal plan's step (its assets were grounded per goal field, see `Grounding.explicitAssets`). */ readonly planned?: true;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: misspelled words whose reading FloFi already showed the user ("arbriturm" as Arbitrum One). */ readonly typos?: readonly string[];
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the step an edit or repeat already resolved (a later answer never asks "which step?" again). */ readonly target?: Resolved;
-  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient (id) the user picked from FloFi's "which one?" buttons. */ readonly savedRecipient?: string };
+  /** BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient (id) the user picked from FloFi's "which one?" buttons. */ readonly savedRecipient?: string;
+  /** BUILD-P1: the bare number the user gave to FloFi's own percentage question (see `Grounding.answeredPercent`). */ readonly answeredPercent?: string;
+  /** BUILD-P1: FloFi asked this request for its range (see `Grounding.rangeAsked`). */ readonly rangeAsked?: boolean };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -110,6 +118,8 @@ export type CopilotConversation = {
    *  conversation's language was already observed. */
   readonly adapted?: readonly LexiconEntry[]; readonly suppressed?: readonly { readonly term: string; readonly target: LexiconTarget }[];
   readonly askedAt?: number; readonly languageObserved?: boolean;
+  /** BUILD-P1: every slot the open request has filled so far (reset with the request): only a never-filled slot is progress for the budget. */
+  readonly slots?: readonly string[];
   /** BUILD-FLOFI-INTELLIGENCE-001: the open request's ledger (reset with the request). */
   readonly ledger?: ConversationLedger;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the DeFi concept FloFi last explained, so "não entendi" or "e na Aave?" has a grounded subject. */
@@ -175,6 +185,13 @@ export type CopilotEnvironment = {
   readonly recipientWrites?: boolean;
   /** Where the conversation happens (default WEB): a chat channel never applies a change, it links to the owner's FloFi screen. */
   readonly surface?: PlatformSurface;
+  /**
+   * BUILD-P1: the surface reads a pool's price on request. A reply whose `pool` is set asks it to read that pool (read-only) and replay the same
+   * turn with the read in `verified.pools`; a surface without it gets FloFi's explanation of what it could not confirm instead.
+   */
+  readonly poolReads?: boolean;
+  /** Tests only: the time pool reads are judged fresh against (default: now). */
+  readonly now?: number;
 };
 /** One FloFi-registered Orca position of the connected Solana Devnet wallet, as the position registry and the chain report it. */
 export type CopilotPosition = { readonly positionMint: string; readonly status: string; readonly tickLower: number | null; readonly tickUpper: number | null;
@@ -186,6 +203,11 @@ export type CopilotVerified = {
   readonly solanaOwner: string | null; readonly orcaPositions: readonly CopilotPosition[] | null;
   /** Swap output a reconciled execution left in the wallet: a reconciled Devnet swap's output, or a composition's undeposited swap output. */
   readonly remaining: readonly { readonly token: 'SOL' | 'devUSDC'; readonly amount: string }[];
+  /**
+   * BUILD-P1 pool conversational reliability: mainnet pool prices the surface read on chain for this turn (Orca SOL/USDC, a catalog network's
+   * Uniswap v3 pool), each with its pool identity, slot or block and read time. FloFi computes a percentage range only from one of these.
+   */
+  readonly pools?: readonly PoolPriceRead[];
 };
 export type CopilotReply = {
   readonly code?: string; readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'AUTOMATION_MANAGE' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY';
@@ -202,6 +224,8 @@ export type CopilotReply = {
   /** FloFi's optional offer after a proposal (save the typed address): shown as its own message with its two answers; never required. */
   readonly offer?: { readonly text: string; readonly options: readonly string[] };
   readonly options: readonly string[]; readonly automation?: AutomationInput; readonly command?: Command; readonly sentence?: string; readonly topic?: CopilotQuestionTopic;
+  /** BUILD-P1: the pool whose current price FloFi needs before it can continue (read-only; see `CopilotEnvironment.poolReads`). */
+  readonly pool?: PoolRef;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the options are the user's own saved names, shown and sent exactly as saved (never translated). */ readonly verbatimOptions?: true;
   /** BUILD-CHAT-LEARNING-001: a memory change for the caller to perform (only after the user's own click or explicit statement). */
   readonly memory?: MemoryAction;
@@ -272,8 +296,8 @@ const withUser = (state: CopilotConversation, text: string): CopilotConversation
   segment: state.draft?.grounding ? [state.draft.grounding.slice(-(COPILOT_V2_LIMITS.maxRequestCharacters - text.length - 1)), text]
     : [...state.segment, text].slice(-COPILOT_V2_LIMITS.maxSegmentUserTurns), transcript: bounded([...state.transcript, { role: 'user', text }]) });
 export const closeSegment = (state: CopilotConversation): CopilotConversation => {
-  const { askedAt: _asked, ledger: _ledger, ...rest } = state;
-  void _asked; void _ledger;
+  const { askedAt: _asked, ledger: _ledger, slots: _slots, ...rest } = state;
+  void _asked; void _ledger; void _slots;
   return { ...rest, segment: [], clarifications: 0, draft: null };
 };
 const EMPTY_LEDGER: ConversationLedger = Object.freeze({ asked: [], corrected: [], repeats: 0, turns: 0 });
@@ -295,14 +319,24 @@ const terminal = (state: CopilotConversation, value: CopilotReply, summary: stri
   ({ reply: value, next: { ...closeSegment(state), transcript: bounded([...state.transcript, { role: 'assistant', text: summary }]) } });
 const failed = (state: CopilotConversation, m: CopilotCopy, message: string): Result =>
   terminal(state, reply('FAILED', /(?:Nothing changed|Nada mudou)\.$/.test(message) ? message : `${message} ${m.nothingChanged}`), COPILOT_TRANSCRIPT.declined + message);
+/** BUILD-P1 observability: the same failure with its closed code, so content-free turn metrics can tell why a request stopped. */
+const failedWith = (state: CopilotConversation, m: CopilotCopy, message: string, code: string): Result => {
+  const result = failed(state, m, message);
+  return { ...result, reply: { ...result.reply, code } };
+};
 const refused = (state: CopilotConversation, m: CopilotCopy, message: string): Result =>
   terminal(state, reply('UNSUPPORTED', message), COPILOT_TRANSCRIPT.declined + message);
 /** A question keeps the request open, up to the clarification budget. */
-function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null, notes: readonly string[] = []): Result {
-  if (state.clarifications >= COPILOT_V2_LIMITS.maxClarifications) return failed(state, m, m.tooManyClarifications);
-  return { reply: reply('CLARIFICATION', text, { options, ...notes.length ? { notes } : {} }),
-    next: { ...state, clarifications: state.clarifications + 1, ledger: askedLedger(state.ledger, draft?.expected ?? ['request']),
-      draft: draft && { ...draft, grounding: segmentText(state), expected: draft.expected ?? ['target'], question: text, shown: options },
+function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null, notes: readonly string[] = [],
+  extra: Partial<CopilotReply> = {}): Result {
+  // BUILD-P1: FloFi's own request to read a pool (the surface reads it and answers the same message again) is not a question to the person: it
+  // neither counts against nor is stopped by the clarification budget.
+  const internal = extra.code === 'COPILOT_POOL_PRICE_REQUIRED';
+  if (!internal && state.clarifications >= COPILOT_V2_LIMITS.maxClarifications) return failedWith(state, m, m.tooManyClarifications, 'COPILOT_CLARIFICATION_LIMIT');
+  const slots = draft ? [...new Set([...state.slots ?? [], ...draftSlots(draft.intent)])] : state.slots;
+  return { reply: reply('CLARIFICATION', text, { options, ...notes.length ? { notes } : {}, ...extra }),
+    next: { ...state, clarifications: state.clarifications + (internal ? 0 : 1), ledger: askedLedger(state.ledger, draft?.expected ?? ['request']), ...slots ? { slots } : {},
+      draft: draft && { ...draft, grounding: segmentText(state), expected: draft.expected ?? ['target'], question: text, shown: options, ...extra.code ? { code: extra.code } : {} },
       // BUILD-CHAT-LEARNING-002: what the user writes from here on answers FloFi's question (the request's own words end here).
       askedAt: state.askedAt ?? state.segment.length,
       transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
@@ -879,9 +913,10 @@ function sentAssetOf(intent: CopilotIntentV2): string | null {
 }
 const displayAsset = (asset: string) => /^[a-z]{2,6}$/.test(asset) ? asset.toUpperCase() : asset;
 /** A bare amount that answers Flofi's question for one pool token's maximum becomes that deposit of the request's liquidity step. */
-function patchDeposit(intent: CopilotIntentV2, asset: 'SOL' | 'devUSDC', maxAmount: string): CopilotIntentV2 {
+function patchDeposit(intent: CopilotIntentV2, asset: string, maxAmount: string): CopilotIntentV2 {
+  const same = (written: string) => written.toUpperCase() === asset.toUpperCase() || (asset === 'devUSDC' && COPILOT_POOLS.ORCA.symbol(written) === 'devUSDC');
   const add = (action: CopilotAction): CopilotAction => action.type !== 'LIQUIDITY' ? action
-    : { ...action, deposits: [...action.deposits.filter(d => COPILOT_POOLS.ORCA.symbol(d.asset) !== asset), { asset: asset === 'SOL' ? 'SOL' : 'DEVUSDC', maxAmount }] };
+    : { ...action, deposits: [...action.deposits.filter(d => !same(d.asset)), { asset: asset === 'devUSDC' ? 'DEVUSDC' : asset, maxAmount }] };
   return intent.kind === 'ACTION' ? { ...intent, action: add(intent.action) } : intent.kind === 'COMPOSITION' ? { ...intent, actions: intent.actions.map(add) } : intent;
 }
 // "yes"/"no" as a whole message. Flofi never applies, signs or guesses from them: yes picks the single deterministic answer to Flofi's own open question.
@@ -914,9 +949,64 @@ function patchIntent(intent: CopilotIntentV2, patch: Readonly<Record<string, unk
 /** The clarification budget counts lack of progress. A newly validated value opens the budget for the next missing slot. */
 function answeredDraft(state: CopilotConversation, intent: CopilotIntentV2, text: string): CopilotConversation {
   const next = withUser(state, text), before = state.draft?.validated ?? [];
-  const after = validatedDraftFields(intent, segmentText(next));
-  const progress = after.some(field => !before.some(old => old.step === field.step && old.field === field.field && JSON.stringify(old.value) === JSON.stringify(field.value)));
-  return progress ? { ...next, clarifications: 0 } : next;
+  const after = validatedDraftFields(intent, segmentText(next)), slots = filledSlots(state, intent);
+  const progress = after.some(field => !before.some(old => old.step === field.step && old.field === field.field && JSON.stringify(old.value) === JSON.stringify(field.value)))
+    || slots.progress;
+  return { ...next, slots: slots.slots, ...progress ? { clarifications: 0 } : {} };
+}
+/**
+ * BUILD-P1: an answer that fills a slot this request never had (a deposit, a range bound, a range kind, a fee tier) is progress too. The request
+ * remembers every slot it has filled (`slots`), so clearing and refilling one is not progress again: the budget reopens at most once per slot.
+ */
+function filledSlots(state: CopilotConversation, after: CopilotIntentV2): { readonly progress: boolean; readonly slots: readonly string[] } {
+  const before = state.draft?.intent ?? null;
+  // Only the same request progresses: another operation is not an answer to the open question.
+  if (!before || operationsOf(before) !== operationsOf(after)) return { progress: false, slots: state.slots ?? [] };
+  const known = new Set([...state.slots ?? [], ...draftSlots(before)]), fresh = draftSlots(after).filter(slot => !known.has(slot));
+  return { progress: fresh.length > 0, slots: [...known, ...fresh] };
+}
+/**
+ * BUILD-P1 pool conversational reliability: a short answer to FloFi's open range question ("lower", "1usdc", "±10%", "full range", "150 to 180") is
+ * read here, deterministically, and fills only the range of the open liquidity request — never a model call, never another field. A value whose side
+ * is not known is held and FloFi asks which side it is; a side whose value is not known is asked for. Anything else returns null (the interpreter).
+ */
+const RANGE_QUESTION = /^COPILOT_(?:RANGE_|POOL_PRICE_|POOL_READ_|POOL_IDENTITY_)/;
+/** FloFi's own questions for the percentage itself: which one, one it could not find in the message, one outside 0.01–90%. */
+const PERCENT_QUESTION = /^COPILOT_RANGE_(?:PERCENT_REQUIRED|PERCENT_NOT_FOUND|OUT_OF_RANGE)$/;
+function rangeTurn(state: CopilotConversation, draft: Draft, picked: string, env: CopilotEnvironment, m: CopilotCopy): TurnStart | null {
+  const intent = draft.intent;
+  if (intent.kind !== 'ACTION' || intent.action.type !== 'LIQUIDITY') return null;
+  // Only under FloFi's own range questions (or while it holds a range answer): a fee tier, a pool or a model's own question is never read here.
+  if (!draft.rangeHold && !RANGE_QUESTION.test(draft.code ?? '')) return null;
+  // The pool's unit, also when the interpreter left the network out but the user named it ("on Solana"): FloFi never asks with empty units.
+  const action = intent.action, named = action.network === null ? copilotNetworksMentioned(segmentText(state)) : [];
+  const units = liquidityUnits(action) ?? (named.length === 1 ? liquidityUnits({ ...action, network: named[0]! }) : null);
+  const answer = readRangeAnswer(picked, units);
+  if (!answer) return null;
+  const percentAsked = PERCENT_QUESTION.test(draft.code ?? '');
+  const step = applyRangeAnswer(action, draft.rangeHold ?? null, answer, percentAsked);
+  if (!step) return null;
+  const patched: CopilotIntentV2 = { ...intent, action: step.action }, next = answeredDraft(state, patched, picked);
+  // A bare number that answered FloFi's own percentage question is that percentage (and only then: never a number answering anything else, such
+  // as a range or price question that a percentage kind happened to be open under).
+  const percentAnswer = answer.kind === 'VALUE' && percentAsked && action.rangeUnit === 'PERCENT' && step.action.rangeUnit === 'PERCENT' ? step.action.upper : null;
+  const extras: Extras = { ...draft.extras ?? {}, ...percentAnswer ? { answeredPercent: percentAnswer } : {} };
+  const local = (result: Result): TurnStart => ({ kind: 'LOCAL', ...withLearning(tallied(result, env), env, ['CLARIFICATION_ANSWERED']) });
+  const keep = { intent: patched, expected: ['range'] as DraftField[], validated: validatedDraftFields(patched, segmentText(next)), options: [], amountFill: false,
+    snapshot: snapshotOf(env), ...draft.extras ? { extras: draft.extras } : {} };
+  // Without the pool's unit FloFi cannot word its own question: the interpreter answers instead.
+  if (!units && step.ask !== null) return null;
+  const quote = units?.quote ?? '', base = units?.base ?? '';
+  const unit = step.action.rangeUnit === 'TICK' ? 'TICK' as const : 'PRICE' as const;
+  if (step.ask === 'SIDE' && step.hold?.value) {
+    const both = step.action.lower !== null && step.action.upper !== null && (step.action.rangeUnit === 'PRICE' || step.action.rangeUnit === 'TICK');
+    const valueUnit = step.hold.unit ?? (step.hold.value.startsWith('-') ? 'TICK' : unit);
+    const text = both ? m.rangeSideReplace(step.hold.value, valueUnit, quote, base) : m.rangeSide(step.hold.value, valueUnit, quote, base);
+    return local(question(next, m, text, m.rangeSideOptions, { ...keep, rangeHold: step.hold }, [], { code: 'COPILOT_RANGE_SIDE_REQUIRED' }));
+  }
+  if (step.ask === 'BOUND' && step.hold?.side)
+    return local(question(next, m, m.rangeBoundAsk(step.hold.side, unit, quote, base), [], { ...keep, rangeHold: step.hold }, [], { code: 'COPILOT_RANGE_BOUND_REQUIRED' }));
+  return local(resolveIntent(patched, next, env, null, extras));
 }
 
 // ── BUILD-FLOFI-UNIFIED-COPILOT-001: conversational aids ─────────────────────────────────────────────────────────────────
@@ -1088,13 +1178,23 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   }
   const draft = state.draft, picked = answered ? answered.pick : text;
   if (draft) {
-    if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
+    if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failedWith(closeSegment(state), m, m.draftStale, 'COPILOT_CONTEXT_CHANGED') };
+    const ranged = rangeTurn(state, draft, picked, env, m);
+    if (ranged) return ranged;
     const filled = answerDraftField(draft.intent, draft.expected ?? [], picked);
     if (filled && !draft.options.some(o => normalize(o.label) === normalize(picked))) return { kind: 'LOCAL', ...withLearning(tallied(resolveIntent(filled, answeredDraft(state, filled, picked), env, null, draft.extras ?? {}), env), env, ['CLARIFICATION_ANSWERED']) };
     const option = draft.options.find(item => normalize(item.label) === normalize(picked));
     // BUILD-FLOFI-UX-FIX-003: "1 USDC" never answers "How much ETH…?": an amount written in another asset than the one sent is asked again.
     const unit = !option && draft.amountFill ? amountUnit(text) : null, sent = sentAssetOf(draft.intent);
     if (unit && sent && unit !== sent.toUpperCase()) return { kind: 'LOCAL', ...question(withUser(state, text), m, m.amountUnitMismatch(unit, displayAsset(sent)), [], draft) };
+    // BUILD-P1: "2 SOL" never answers "How much USDC at most?": an answer in another token than the one asked for is asked again.
+    // The same token by another name is the same answer (USDC for devUSDC, ETH for WETH); a test token is never repeated in the public product.
+    const written = !option && draft.depositFill ? amountUnit(text) : null, fill = draft.depositFill?.toUpperCase() ?? '';
+    const sameToken = written === fill || (fill === 'DEVUSDC' && written === 'USDC') || (fill === 'WETH' && written === 'ETH');
+    if (written && !sameToken) {
+      const shown = activeNetworkScope() === 'PUBLIC_MAINNET' && mentionsTestNetwork(written) ? null : written;
+      return { kind: 'LOCAL', ...question(withUser(state, text), m, m.depositUnitMismatch(shown, draft.depositFill!), [], draft) };
+    }
     const amount = !option && (draft.amountFill || draft.depositFill) ? bareAmount(text) : null;
     if (option || amount) {
       if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
@@ -1106,8 +1206,11 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       const local = (result: Result): TurnStart => ({ kind: 'LOCAL', ...withLearning(tallied(result, env), env, signals) });
       if (option?.fill.kind === 'TARGET') return local(resolveIntent(draft.intent, next, env, option.fill.target, extras));
       if (option?.fill.kind === 'EXTRAS') return local(resolveIntent(draft.intent, next, env, null, { ...extras, ...option.fill.extras }));
-      if (!option && draft.depositFill) return local(resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
-        { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
+      // A deposit FloFi asked for fills a slot of the request: progress, like any other answer to its own question.
+      if (!option && draft.depositFill) {
+        const patched = patchDeposit(draft.intent, draft.depositFill, amount!);
+        return local(resolveIntent(patched, answeredDraft(state, patched, picked), env, null, { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
+      }
       const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch, draft.expected) : patchIntent(draft.intent, { amount }, draft.expected);
       return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
@@ -1132,14 +1235,20 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   const preferred = preferredLanguage(turn.state, env), language = preferred ?? turn.state.language, m = copilotCopy(language), rollback = turn.before.draft ? turn.before : closeSegment(turn.before);
   const change = contextChange(turn.snapshot, snapshotOf(env));
   if (change) return { reply: reply('FAILED', change === 'WORKFLOW' ? m.workflowChanged : change === 'PROPOSAL' ? m.proposalChanged : m.walletChanged), next: closeSegment(turn.before) };
-  if (!result.ok) return tallied({ reply: reply('FAILED', failureText(result.code, language, result.retryAfterSeconds)), next: rollback }, env);
+  // BUILD-P1: a failed interpretation keeps FloFi's open question (and says so), with its closed code for content-free turn metrics.
+  if (!result.ok) return tallied({ reply: withDraftReminder(reply('FAILED', failureText(result.code, language, result.retryAfterSeconds), { code: result.code }), rollback, language), next: rollback }, env);
   // BUILD-FLOFI-INTELLIGENCE-001: tool facts were read for the context this turn sent; an answer bound to any other context is never applied.
   if (turn.contextKey && result.contextKey !== undefined && result.contextKey !== turn.contextKey)
     return { reply: reply('FAILED', m.workflowChanged), next: closeSegment(turn.before) };
   let intent: CopilotIntentV2;
   try { intent = parseCopilotIntentV2(withoutRecipientMarker(result.intent)); }
-  catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
+  catch (cause) {
+    const code = isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID';
+    return tallied({ reply: withDraftReminder(reply('FAILED', failureText(code, language), { code }), rollback, language), next: rollback }, env);
+  }
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
+  // BUILD-P1: an interpreted answer that filled a slot the open request never had is progress: the clarification budget opens again for the next one.
+  const progressed = filledSlots(turn.before, intent);
   // P0 approved UX: FloFi composes its reply in the interface language, not the language the model detected.
   // P0 hotfix (locale contract): a model text written in another language than the person's (a closed replay fixture, or a model that ignored the
   // reply-language note) is never shown; FloFi's own copy in the person's language stands instead. The values it offered (networks, assets) stay.
@@ -1158,7 +1267,8 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   const said = !env.interfaceLanguage && env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null,
     read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
-  const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language }, env, null, carriedOver(turn.before.draft, intent)), env);
+  const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language, slots: progressed.slots, ...progressed.progress ? { clarifications: 0 } : {} }, env, null,
+    carriedOver(turn.before.draft, intent)), env);
   if (!said || said !== read) return resolved;
   return withAdaptation({ ...resolved, next: { ...resolved.next, languageObserved: true } }, env, { ...NO_ADAPTATION, observations: [{ kind: 'LANGUAGE', language: said }] });
 }
@@ -1508,7 +1618,9 @@ function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind:
     return refused(state, m, ASSIST_COPY[language].recipientNotUsed(recipients.find(recipient => recipient.id === saved.id)?.label ?? ''));
   const grounding: Grounding = { text: masked(segmentText(state)), carried: new Set(), policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
     latest: masked(state.segment.at(-1) ?? ''), solana: { price: env.verified?.orcaPrice?.price ?? null, swap: null }, explicitAssets: false,
-    ...saved.addresses.length ? { saved: saved.addresses } : {} };
+    ...saved.addresses.length ? { saved: saved.addresses } : {},
+    // BUILD-P1: a liquidity step of a sequence reads its pool exactly as a single position does.
+    ...env.verified?.pools?.length ? { pools: env.verified.pools } : {}, ...env.poolReads ? { poolReads: true } : {}, now: env.now ?? Date.now() };
   let workflow = env.workflow;
   const steps: Command[] = [], sentences: string[] = [], stepNotes: string[] = [];
   for (const [index, action] of actions.entries()) {
@@ -1675,8 +1787,11 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   const grounding: Grounding = { text: corrected.text, carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
     latest: fix(masked(latestText)),
     solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {}, ...extras.planned ? { explicitAssets: false } : {},
+    // BUILD-P1: the mainnet pool reads the surface made for this turn, whether it can read one on request, and the time they are judged fresh against.
+    ...env.verified?.pools?.length ? { pools: env.verified.pools } : {}, ...env.poolReads ? { poolReads: true } : {}, now: env.now ?? Date.now(),
     // BUILD-FLOFI-UX-FIX-003: only a new single action reads "to 1 USDC" as an amount to receive; an edit's "to 4 USDC" is its new amount.
-    ...intent.kind === 'ACTION' && !composition ? { receiving: true } : {}, ...saved.addresses.length ? { saved: saved.addresses } : {} };
+    ...intent.kind === 'ACTION' && !composition ? { receiving: true } : {}, ...saved.addresses.length ? { saved: saved.addresses } : {},
+    ...extras.answeredPercent ? { answeredPercent: extras.answeredPercent } : {}, ...extras.rangeAsked ? { rangeAsked: true } : {} };
   if (!composition && !extras.planned) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon, grounding.receiving === true));
   // The stored draft never holds a saved address: it keeps the recipient's id, so the next turn resolves (and re-checks) it again.
   const open = (list: readonly CopilotAction[]) => saved.id ? list.map(action => (action.type === 'TRANSFER' || action.type === 'BRIDGE') && action.recipient !== null
@@ -1730,10 +1845,15 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   const otherToken = outcome.deposit;
   // BUILD-CHAT-LEARNING-001: a glossary suggestion for a mainnet only puts that option first, with a note; the user still picks.
   const suggested = withSuggestion(state, env, outcome.options.filter(option => publicText(option) !== null), intent.language);
-  const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: actionFills(intent, outcome.missing, suggested.options), snapshot: snapshotOf(env), extras,
+  // BUILD-P1: "Try again" after a pool read FloFi could not make resolves the same request again (locally; the surface reads the pool once more).
+  const retry: Draft['options'] = suggested.options.includes(m.retryOption) ? [{ label: m.retryOption, fill: { kind: 'EXTRAS', extras: {} } }] : [];
+  // BUILD-P1: once FloFi has asked for the range, the answer alone decides it (see `Grounding.rangeAsked`).
+  const kept: Extras = outcome.code === 'COPILOT_RANGE_REQUIRED' ? { ...extras, rangeAsked: true } : extras;
+  const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [...actionFills(intent, outcome.missing, suggested.options), ...retry], snapshot: snapshotOf(env), extras: kept,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
-  return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes]);
+  return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes],
+    { ...outcome.code ? { code: outcome.code } : {}, ...outcome.pool ? { pool: outcome.pool } : {} });
 }
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient a request names, for its empty destination (a send's recipient, a bridge's destination

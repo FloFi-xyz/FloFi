@@ -105,7 +105,8 @@ export type UniswapLiquidityRecord = { readonly format: 'flofi.uniswap-liquidity
 export type UniswapBegin = { readonly record: UniswapLiquidityRecord; readonly attempt: UniswapAttempt; readonly transaction: UniswapTx };
 export type UniswapWalletDiagnostic = { invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[];
   code: string; rejectionCode?: number };
-export type UniswapLiquidityPrice = { readonly sqrtPriceX96: string; readonly tick: number; readonly price: string; readonly blockNumber: number };
+export type UniswapLiquidityPrice = { readonly sqrtPriceX96: string; readonly tick: number; readonly price: string; readonly blockNumber: number;
+  /** BUILD-P1: the pool this price was read from (its verified address), so a caller can bind the price to the pool it asked for. */ readonly pool: string };
 
 export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp|balp|arlp|etlp)-[a-f0-9]{32}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/, HASH = /^0x[0-9a-f]{64}$/;
@@ -661,7 +662,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   async function price(assets: PoolAssets | null): Promise<UniswapLiquidityPrice> {
     const state = await readState('0x' + '0'.repeat(40), assets);
     return { sqrtPriceX96: state.sqrtPriceX96.toString(), tick: state.tick,
-      price: uniswapQuotePriceAtSqrt(state.sqrtPriceX96, t0.decimals, t1.decimals), blockNumber: state.block.number };
+      price: uniswapQuotePriceAtSqrt(state.sqrtPriceX96, t0.decimals, t1.decimals), blockNumber: state.block.number, pool: profile.pool };
   }
   return { profile, rpc, head, readState, simulateCalls, buildReview, assertRequestFees, assertMintBounds, reserveNonce, discoverByNonce, sameIntent, settle, price };
   }

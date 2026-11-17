@@ -215,9 +215,49 @@ const EN = {
   percentRangeNote: (percent: string, price: string, lower: string, upper: string) =>
     `Range ±${percent}% around the current verified pool price (${price} devUSDC per SOL): ${lower}–${upper} devUSDC per SOL, aligned outward to usable ticks.`,
   priceUnavailable: 'Flofi could not verify the current pool price, so it cannot set a percentage range. Try again, or give the range in prices or ticks.',
-  percentRangeOrcaOnly: 'A percentage range is available only for the Orca SOL/devUSDC pool on Solana Devnet. Give the range in prices or ticks.',
+  percentRangeOrcaOnly: 'A percentage range is not available for the Uniswap test pools (it is for the Orca pools and the mainnet catalog pools). Give the range in prices or ticks.',
   percentRangeInvalid: 'Choose a percentage range between 0.01% and 90%.',
   percentNotFound: (percent: string) => `Flofi could not find ${percent}% in your message. Which percentage range?`,
+  percentOneSided: (percent: string, quote: string, base: string) =>
+    `A percentage range is ±${percent}% around the current pool price, on both sides. For a range on one side of the price, give the lower and upper prices in ${quote} per ${base}.`,
+  // BUILD-P1 pool conversational reliability: FloFi's own range questions and notes. Every value shown is the user's, or a verified on-chain read.
+  rangeNeeded: (quote: string, base: string, percent = true) => `Which price range should the position use? Give the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks.`,
+  rangeBoundsNeeded: (unit: 'PRICE' | 'TICK', quote: string, base: string) => unit === 'TICK' ? 'Which lower and upper ticks should the range use?'
+    : `What lower and upper prices in ${quote} per ${base} should the range use?`,
+  rangeOtherBound: (known: 'LOWER' | 'UPPER', value: string, unit: 'PRICE' | 'TICK', quote: string, base: string) => {
+    const have = known === 'LOWER' ? 'lower' : 'upper', want = known === 'LOWER' ? 'upper' : 'lower';
+    return unit === 'TICK' ? `The ${have} tick is ${value}. Which ${want} tick should the range use?`
+      : `The ${have} price is ${value} ${quote} per ${base}. What ${want} price in ${quote} per ${base} should the range use?`;
+  },
+  rangeBoundAsk: (side: 'LOWER' | 'UPPER', unit: 'PRICE' | 'TICK', quote: string, base: string) => unit === 'TICK'
+    ? `Which ${side === 'LOWER' ? 'lower' : 'upper'} tick should the range use?` : `What ${side === 'LOWER' ? 'lower' : 'upper'} price in ${quote} per ${base} should the range use?`,
+  rangeSide: (value: string, unit: 'PRICE' | 'TICK', quote: string, base: string) => unit === 'TICK' ? `Is tick ${value} the lower or the upper tick of the range?`
+    : `Is ${value} ${quote} per ${base} the lower or the upper price of the range?`,
+  rangeSideReplace: (value: string, unit: 'PRICE' | 'TICK', quote: string, base: string) => unit === 'TICK' ? `Should tick ${value} replace the lower or the upper tick?`
+    : `Should ${value} ${quote} per ${base} replace the lower or the upper price?`,
+  rangeSideOptions: ['Lower', 'Upper'] as readonly string[],
+  percentNeeded: 'Which percentage around the current pool price should the range use? For example 10 for ±10%.',
+  rangeOrder: (lower: string, upper: string, unit: 'PRICE' | 'TICK') => `The lower ${unit === 'TICK' ? 'tick' : 'price'} (${lower}) must be below the upper one (${upper}). Which range should Flofi use?`,
+  fullRangeUnavailable: (quote: string, base: string, percent = true) => `The full range is not available for this pool in Flofi. Give the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks.`,
+  catalogRangeNeeded: (quote: string, base: string, percent = true) => `Which range should the position use: the full range, the lower and upper prices in ${quote} per ${base}, ${percent ? 'a percentage around the current pool price (for example ±10%), ' : ''}or ticks?`,
+  rangeTicksInvalid: (spacing: number) => `The ticks must be different and multiples of this pool's tick spacing (${spacing}). Which ticks should the range use?`,
+  rangeConversionInvalid: 'Flofi could not turn this range into valid ticks for the pool: it is empty, too narrow or outside the prices the pool supports. Which range should Flofi use?',
+  percentRangeIn: (percent: string, price: string, quote: string, base: string) => `Range: ±${percent}% around the current verified pool price (${price} ${quote} per ${base}).`,
+  effectiveRange: (lower: string, upper: string, quote: string, base: string, tickLower: number, tickUpper: number,
+    review: { readonly lowerPrice: string; readonly upperPrice: string; readonly unit: string } | null = null) =>
+    `Effective range after aligning to the pool's ticks: ${lower}–${upper} ${quote} per ${base} (ticks ${tickLower} to ${tickUpper}). Review shows the same ticks${
+      review ? `, priced in the pool's order as ${review.lowerPrice}–${review.upperPrice} ${review.unit},` : ''} before you sign.`,
+  priceReadAt: (unit: 'SLOT' | 'BLOCK', at: number) => `Pool price read on chain at ${unit === 'SLOT' ? 'slot' : 'block'} ${at}; Simulate and Review read the pool again.`,
+  rangePosition: (position: 'INSIDE' | 'ABOVE' | 'BELOW', token: string | null) => position === 'INSIDE' ? 'The current pool price is inside this range: the position earns fees while the price stays in it.'
+    : `The current pool price is outside this range: the position would hold only ${token} and earn no fees until the price moves into the range.`,
+  poolPriceReading: 'Flofi is reading the current price of this pool. Ask again in a moment.',
+  poolPriceUnavailable: (pool: string, retry = true) => `Flofi could not verify the current price of the ${pool} pool, so it cannot compute a percentage range. Nothing was proposed. ${retry ? 'Try again, or give' : 'Give'} the range as prices or ticks.`,
+  poolNotFound: (pool: string, alternatives = true) => `Flofi could not find a live ${pool} pool. Nothing was proposed.${alternatives ? ' Choose another fee tier or pair.' : ''}`,
+  retryOption: 'Try again',
+  depositNeeded: (token: string) => `How much ${token} at most should the position use (0 for none)?`,
+  depositsNeeded: (first: string, second: string) => `What are the maximum ${first} and ${second} deposits for the position (0 for none)?`,
+  depositUnitMismatch: (written: string | null, token: string) => written
+    ? `Flofi asked for the ${token} maximum, but your answer is in ${written}. How much ${token} at most?` : `Flofi asked for the ${token} maximum. How much ${token} at most?`,
   swapOutputNote: (token: string) => `The position uses 100% of the swap’s actual reconciled ${token} output, never other ${token} already in your wallet.`,
   swapOutputCapNote: (token: string, cap: string) => `The position uses the swap’s actual reconciled ${token} output, up to ${cap} ${token}; never other ${token} already in your wallet.`,
   twoTransactionsNote: 'The swap and the position are two transactions, each simulated, reviewed and signed in your wallet. If the position is not opened, the swapped tokens stay in your wallet.',
@@ -448,9 +488,44 @@ const PT: CopilotCopy = {
   percentRangeNote: (percent, price, lower, upper) =>
     `Faixa de ±${percent}% em torno do preço verificado atual do pool (${price} devUSDC por SOL): ${lower}–${upper} devUSDC por SOL, alinhada para fora aos ticks utilizáveis.`,
   priceUnavailable: 'O Flofi não conseguiu verificar o preço atual do pool, então não pode definir uma faixa percentual. Tente de novo ou informe a faixa em preços ou ticks.',
-  percentRangeOrcaOnly: 'Faixa percentual só está disponível para o pool Orca SOL/devUSDC na Solana Devnet. Informe a faixa em preços ou ticks.',
+  percentRangeOrcaOnly: 'Faixa percentual não está disponível para os pools de teste da Uniswap (está para os pools Orca e os pools do catálogo na mainnet). Informe a faixa em preços ou ticks.',
   percentRangeInvalid: 'Escolha uma faixa percentual entre 0,01% e 90%.',
   percentNotFound: percent => `O Flofi não encontrou ${percent}% na sua mensagem. Qual faixa percentual?`,
+  percentOneSided: (percent, quote, base) =>
+    `Uma faixa percentual é ±${percent}% em torno do preço atual do pool, dos dois lados. Para uma faixa de um lado só do preço, informe os preços inferior e superior em ${quote} por ${base}.`,
+  rangeNeeded: (quote, base, percent = true) => `Qual faixa de preço a posição deve usar? Informe os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks.`,
+  rangeBoundsNeeded: (unit, quote, base) => unit === 'TICK' ? 'Quais ticks inferior e superior a faixa deve usar?' : `Quais preços inferior e superior em ${quote} por ${base} a faixa deve usar?`,
+  rangeOtherBound: (known, value, unit, quote, base) => {
+    const have = known === 'LOWER' ? 'inferior' : 'superior', want = known === 'LOWER' ? 'superior' : 'inferior';
+    return unit === 'TICK' ? `O tick ${have} é ${value}. Qual tick ${want} a faixa deve usar?`
+      : `O preço ${have} é ${value} ${quote} por ${base}. Qual preço ${want} em ${quote} por ${base} a faixa deve usar?`;
+  },
+  rangeBoundAsk: (side, unit, quote, base) => unit === 'TICK' ? `Qual tick ${side === 'LOWER' ? 'inferior' : 'superior'} a faixa deve usar?`
+    : `Qual preço ${side === 'LOWER' ? 'inferior' : 'superior'} em ${quote} por ${base} a faixa deve usar?`,
+  rangeSide: (value, unit, quote, base) => unit === 'TICK' ? `O tick ${value} é o tick inferior ou o superior da faixa?` : `${value} ${quote} por ${base} é o preço inferior ou o superior da faixa?`,
+  rangeSideReplace: (value, unit, quote, base) => unit === 'TICK' ? `O tick ${value} substitui o tick inferior ou o superior?` : `${value} ${quote} por ${base} substitui o preço inferior ou o superior?`,
+  rangeSideOptions: ['Inferior', 'Superior'],
+  percentNeeded: 'Qual porcentagem em torno do preço atual do pool a faixa deve usar? Por exemplo 10 para ±10%.',
+  rangeOrder: (lower, upper, unit) => `O ${unit === 'TICK' ? 'tick' : 'preço'} inferior (${lower}) precisa ser menor que o superior (${upper}). Qual faixa o Flofi deve usar?`,
+  fullRangeUnavailable: (quote, base, percent = true) => `A faixa completa não está disponível para este pool no Flofi. Informe os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks.`,
+  catalogRangeNeeded: (quote, base, percent = true) => `Qual faixa a posição deve usar: a faixa completa, os preços inferior e superior em ${quote} por ${base}${percent ? ', uma porcentagem em torno do preço atual do pool (por exemplo ±10%)' : ''} ou ticks?`,
+  rangeTicksInvalid: spacing => `Os ticks precisam ser diferentes e múltiplos do espaçamento de ticks deste pool (${spacing}). Quais ticks a faixa deve usar?`,
+  rangeConversionInvalid: 'O Flofi não conseguiu converter esta faixa em ticks válidos para o pool: ela é vazia, estreita demais ou fora dos preços que o pool aceita. Qual faixa o Flofi deve usar?',
+  percentRangeIn: (percent, price, quote, base) => `Faixa: ±${percent}% em torno do preço verificado atual do pool (${price} ${quote} por ${base}).`,
+  effectiveRange: (lower, upper, quote, base, tickLower, tickUpper, review = null) =>
+    `Faixa efetiva após o alinhamento aos ticks do pool: ${lower}–${upper} ${quote} por ${base} (ticks ${tickLower} a ${tickUpper}). A Revisão mostra os mesmos ticks${
+      review ? `, com o preço na ordem do pool, ${review.lowerPrice}–${review.upperPrice} ${review.unit.replace(' per ', ' por ')},` : ''} antes de você assinar.`,
+  priceReadAt: (unit, at) => `Preço do pool lido on-chain no ${unit === 'SLOT' ? 'slot' : 'bloco'} ${at}; a Simulação e a Revisão leem o pool de novo.`,
+  rangePosition: (position, token) => position === 'INSIDE' ? 'O preço atual do pool está dentro desta faixa: a posição rende taxas enquanto o preço ficar nela.'
+    : `O preço atual do pool está fora desta faixa: a posição teria só ${token} e não renderia taxas até o preço entrar na faixa.`,
+  poolPriceReading: 'O Flofi está lendo o preço atual deste pool. Pergunte de novo em instantes.',
+  poolPriceUnavailable: (pool, retry = true) => `O Flofi não conseguiu verificar o preço atual do pool ${pool}, então não pode calcular uma faixa percentual. Nada foi proposto. ${retry ? 'Tente de novo ou informe' : 'Informe'} a faixa em preços ou ticks.`,
+  poolNotFound: (pool, alternatives = true) => `O Flofi não encontrou um pool ${pool} ativo. Nada foi proposto.${alternatives ? ' Escolha outra taxa ou outro par.' : ''}`,
+  retryOption: 'Tentar de novo',
+  depositNeeded: token => `Quanto ${token} no máximo a posição deve usar (0 para nenhum)?`,
+  depositsNeeded: (first, second) => `Quais são os depósitos máximos de ${first} e ${second} da posição (0 para nenhum)?`,
+  depositUnitMismatch: (written, token) => written
+    ? `O Flofi pediu o máximo de ${token}, mas sua resposta está em ${written}. Quanto ${token} no máximo?` : `O Flofi pediu o máximo de ${token}. Quanto ${token} no máximo?`,
   swapOutputNote: token => `A posição usa 100% do resultado real e reconciliado de ${token} do swap, nunca outro ${token} que já esteja na sua carteira.`,
   swapOutputCapNote: (token, cap) => `A posição usa o resultado real e reconciliado de ${token} do swap, até ${cap} ${token}; nunca outro ${token} que já esteja na sua carteira.`,
   twoTransactionsNote: 'O swap e a posição são duas transações, cada uma simulada, revisada e assinada na sua carteira. Se a posição não for aberta, os tokens do swap ficam na sua carteira.',
@@ -516,7 +591,7 @@ const EN_MAINNET: Partial<CopilotCopy> = {
   insertUnsupported: 'Flofi cannot insert a step into this workflow: Aave actions, Solana actions and liquidity positions each stay in their own workflow. Author the action on its own.',
   tooManyClarifications: 'Flofi still cannot prepare this request. Describe the whole action in one message, for example “swap 2 USDC to WETH on Base”.',
   devUsdcNetworkNote: 'devUSDC is a Solana Devnet test token. FloFi runs on mainnets only: use USDC on Solana.',
-  percentRangeOrcaOnly: 'A percentage range is not available on mainnets yet. Give the range in prices or ticks.',
+  percentRangeOrcaOnly: 'A percentage range is not available for this pool. Give the range in prices or ticks.',
   swapOutputUnsupported: 'Flofi cannot fund a position with a swap’s output on mainnets yet. Give the maximum deposit of each token.',
   noSwapForTokens: 'Flofi cannot fund a position with a swap’s output on mainnets yet. Give the maximum deposit of each token.',
   positionWalletRequired: 'Managing an existing liquidity position from chat is not available on mainnets yet. Nothing changed.',
@@ -533,7 +608,7 @@ const PT_MAINNET: Partial<CopilotCopy> = {
   insertUnsupported: 'O Flofi não consegue inserir um passo neste fluxo: ações da Aave, da Solana e posições de liquidez ficam cada uma no seu fluxo. Crie a ação separadamente.',
   tooManyClarifications: 'O Flofi ainda não consegue preparar este pedido. Descreva a ação completa em uma mensagem, por exemplo “troca 2 USDC por WETH na Base”.',
   devUsdcNetworkNote: 'devUSDC é um token de teste da Solana Devnet. O Flofi funciona só em mainnets: use USDC na Solana.',
-  percentRangeOrcaOnly: 'Faixa percentual ainda não está disponível nas mainnets. Informe a faixa em preços ou ticks.',
+  percentRangeOrcaOnly: 'Faixa percentual não está disponível para este pool. Informe a faixa em preços ou ticks.',
   swapOutputUnsupported: 'O Flofi ainda não financia uma posição com o resultado de um swap nas mainnets. Informe o depósito máximo de cada token.',
   noSwapForTokens: 'O Flofi ainda não financia uma posição com o resultado de um swap nas mainnets. Informe o depósito máximo de cada token.',
   positionWalletRequired: 'Gerenciar uma posição de liquidez existente pelo chat ainda não está disponível nas mainnets. Nada mudou.',

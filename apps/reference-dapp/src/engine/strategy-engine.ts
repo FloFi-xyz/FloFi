@@ -256,7 +256,8 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       const amounts = spec.maxAmounts, keys = Object.keys(amounts).sort().join();
       const poolNetwork = catalogNetworkName(spec.network);
       if (poolNetwork) {
-        // Any two official catalog assets at a standard fee tier: the full range, or explicit ticks (a price range would need the pool's live price).
+        // Any two official catalog assets at a standard fee tier: the full range, or explicit ticks. MCP takes catalog ranges as ticks; the chat
+        // (BUILD-P1) converts a price or percentage range into the same outward-aligned ticks before composing, so both reach the same IR.
         if (spec.range.unit === 'price') refuse('LIQUIDITY_RANGE_UNIT_UNSUPPORTED');
         const [tokenA, tokenB] = Object.keys(amounts) as [string, string];
         const input: CryptoActionInput = { selection: { action: 'pool', network: poolNetwork, from: tokenA, to: tokenB }, amount: amounts[tokenA]!,

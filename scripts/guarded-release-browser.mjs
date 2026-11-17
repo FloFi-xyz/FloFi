@@ -49,6 +49,9 @@ const definitions = [
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // PR B: context-aware Solana Devnet authoring (swap → position, "these tokens", yes/no, chat position management) on replay answers and the MOCKED Devnet loopback.
   ['copilot-solana', ['copilot-solana.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // BUILD-P1 pool conversational reliability: a liquidity range answered in separate messages in the public Mainnet-only product, on committed replay
+  // answers and the MOCKED loopback copy of the mainnet Orca pool (its price is read by FloFi itself).
+  ['copilot-pool-dialogue', ['copilot-pool-dialogue.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_E2E_NETWORK_SCOPE: 'PUBLIC_MAINNET' }],
   // BUILD-SOLANA-MAINNET-001: the Solana Mainnet/Testnet header switch, family-preserving re-networking and Orca mainnet liquidity authoring on the
   // MOCKED loopback (the Devnet harness also serves a MOCKED copy of the mainnet-beta pool); MOCKED cannot authorize, nothing is signed or sent.
   // BUILD-FLOFI-MAINNET-PRODUCT-001: the public Mainnet-only product exactly as deployed (no engineering opt-in); every other profile certifies the engines.
@@ -156,7 +159,7 @@ const shards = [
   ['admin-console', 'jupiter-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance', 'synthetic-fork-provenance',
     'copilot-solana', 'mcp-embedded-signing', 'swap-read-acceptance', 'workflow-acceptance', 'cow-loopback', 'chat-automations', 'copilot',
     'owner-history', 'mcp-in-chat', 'approve-authorize-journeys', 'execution-continuity'],
-  ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'developer-journey', 'base-mainnet-authoring',
+  ['journey-provenance', 'lending-provenance', 'cloud-provenance', 'solana-mainnet-network', 'copilot-pool-dialogue', 'developer-journey', 'base-mainnet-authoring',
     'canvas-workflow-ux', 'channel-signing', 'automations', 'canvas-automation-ux', 'flight-team-early-access', 'flight-closed-beta', 'flight',
     'editor-wallet-batch', 'universal-bridge'],
 ];
