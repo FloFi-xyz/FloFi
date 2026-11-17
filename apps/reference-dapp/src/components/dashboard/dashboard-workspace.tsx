@@ -18,11 +18,20 @@ import { WALLET_PROOF_CHANGED } from '../../domain/wallet-proof-events';
 import { RunDetailView } from './run-detail-view';
 
 /**
- * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the run summaries this page last listed for one wallet (this tab's memory only, replaced by
- * every listing, never persisted). Opening one of them shows its already-listed summary at once, marked as loading, while its full record is
- * read; only for the same wallet that listed it, and never as a substitute for a record the server does not return.
+ * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the run summaries this page last listed for one wallet (this tab's memory only, never
+ * persisted): replaced by every first-page listing, extended by "load more", emptied of a deleted or archived run and cleared whenever a wallet
+ * proof changes. Opening one of them shows its already-listed summary at once, marked as loading, while its full record is read; only for the
+ * same wallet that listed it, and never as a substitute for a record the server does not return.
  */
 let listedSummaries: { readonly account: string; readonly runs: ReadonlyMap<string, DashboardRun> } | null = null;
+function rememberListed(account: string, runs: readonly DashboardRun[], extend: boolean) {
+  const kept = extend && listedSummaries?.account === account ? [...listedSummaries.runs] : [];
+  listedSummaries = { account, runs: new Map([...kept, ...runs.filter(run => sameOwner(run.ownerAccount, account)).map(run => [run.runId, run] as const)]) };
+}
+function forgetListed(runId?: string) {
+  if (!runId || !listedSummaries) { listedSummaries = null; return; }
+  const runs = new Map(listedSummaries.runs); runs.delete(runId); listedSummaries = { account: listedSummaries.account, runs };
+}
 /**
  * BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: `records` renders this wallet's execution history inside Your workflows (executed records and records
  * that need attention, in its one list); the Dashboard (`dashboard`) keeps the overview: what needs the owner, the current execution, the
@@ -50,7 +59,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   useEffect(() => { setReturnTo(runId && window.location.hash === '#from-workflows' ? '/app/workflows' : '/app/dashboard'); }, [runId]);
   // A wallet proven anywhere on the page (Your workflows, Save, /approve) re-reads the history: a read, never another signature.
   useEffect(() => {
-    const changed = () => refresh(value => value + 1);
+    const changed = () => { forgetListed(); refresh(value => value + 1); };
     window.addEventListener(WALLET_PROOF_CHANGED, changed);
     return () => window.removeEventListener(WALLET_PROOF_CHANGED, changed);
   }, []);
@@ -81,7 +90,11 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     let cancelled = false;
     const abort = new AbortController();
     const request = runId ? dashboardRunDetail(account, runId, abort.signal).then(response => ({ key, response })) : dashboardSnapshot(account, null, abort.signal).then(snapshot => ({ key, snapshot }));
-    request.then(value => { if (!cancelled) setLoaded(value); }).catch(() => {
+    request.then(value => {
+      if (cancelled) return;
+      if ('snapshot' in value && value.snapshot.connection === 'CONNECTED' && sameOwner(value.snapshot.account, account)) rememberListed(account, value.snapshot.runs, false);
+      setLoaded(value);
+    }).catch(() => {
       if (!cancelled) setLoaded(runId ? { key, response: { connection: 'UNAVAILABLE', account, detail: null } }
         : { key, snapshot: { connection: 'UNAVAILABLE', account, runs: [], hasMore: false } });
     });
@@ -90,8 +103,6 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const visible = loaded?.key === key ? loaded : null;
   const loading = Boolean(account && (!isCurrent && !visible || ownedCurrent && currentDisposition === null));
   const snapshot = visible?.snapshot;
-  if (account && snapshot?.connection === 'CONNECTED' && sameOwner(snapshot.account, account))
-    listedSummaries = { account, runs: new Map([...listedSummaries?.account === account ? listedSummaries.runs : [], ...snapshot.runs.map(run => [run.runId, run] as const)]) };
   async function loadMore() {
     if (loadingMore || !account || !snapshot?.next) return;
     const owner = account, requestKey = key, cursor = snapshot.next;
@@ -100,6 +111,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
       const page = await dashboardSnapshot(owner, cursor);
       if (latestKey.current !== requestKey || latestAccount.current !== owner) return;
       if (page.connection !== 'CONNECTED' || !sameOwner(page.account, owner)) { setPageState({ key: requestKey, loading: false, issue: 'Saved history could not be loaded. Try again.' }); return; }
+      rememberListed(owner, page.runs, true);
       setLoaded(prior => {
         if (prior?.key !== requestKey || prior.snapshot?.next !== cursor) return prior;
         const ids = new Set(prior.snapshot.runs.map(run => run.runId));
@@ -117,6 +129,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     : listed && sameOwner(listed.ownerAccount, account) ? projectDashboardRun(listed) : null;
   function historyChanged(id: string, disposition: 'DELETED' | 'ARCHIVED') {
     if (!account || latestAccount.current !== account) return;
+    forgetListed(id);
     setRemoved(previous => ({ owner: account, ids: [...(previous?.owner === account ? previous.ids : []), id] }));
     if (id === ownedCurrent?.run.runId) setCurrentVisibility({ key: currentKey, disposition });
     window.dispatchEvent(new CustomEvent('flofi:history-changed', { detail: { account, id } }));

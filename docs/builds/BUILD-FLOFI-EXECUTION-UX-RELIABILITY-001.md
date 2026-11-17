@@ -84,7 +84,8 @@ signing") while editing was paused for the execution. (4) The Dashboard summary 
 `PROPOSAL` topic answered "Não há proposta pendente." The conversation never treated the current execution as the subject of such questions.
 
 **Correction.** `domain/conversation-lifecycle.ts` recognizes whole questions about the outcome (Deu certo? Funcionou? Já terminou? Qual o status?
-A bridge foi concluída? Did it work? Was it successful? Is it complete? What's the status? …), receipt (Recebi os tokens? Did I receive the tokens?)
+A bridge foi concluída? Did it work? Was it successful? Is it complete? …; "status", "verificar status" and "What's the status?" stay the existing
+Status command, which re-reads the record), receipt (Recebi os tokens? Did I receive the tokens?)
 and signatures (Preciso assinar novamente? Do I need to sign again?). While this workflow has a started execution, `state/flofi-conversation.ts`
 answers them from that execution's lifecycle only (`executionStatusAnswer`): reconciled → yes; delivery observed → the destination-observed
 sentence; a request in the wallet, an unknown outcome or a failure → said as such; receipt never claimed before the delivery is observed; the last

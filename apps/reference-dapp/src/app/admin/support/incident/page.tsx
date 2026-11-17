@@ -175,7 +175,8 @@ function RunDetail({ detail, csrf, canRecover }: { detail: Extract<IncidentDetai
         <strong>{entry.action && entry.action in RECOVERY_ACTIONS ? RECOVERY_ACTIONS[entry.action as keyof typeof RECOVERY_ACTIONS].name : entry.action}</strong>
         <span className="admin-diff"> · {when(entry.at)} · <code>{entry.actor.slice(0, 12)}…</code>{entry.operationId ? <> · <code>{entry.operationId}</code></> : null}</span>
         <div>{entry.outcome !== 'OK' ? `Refused: ${entry.code}` : entry.verification ? `${VERIFICATION_LABELS[entry.verification.status]} — ${entry.verification.detail}` : 'Not verifiable'}</div>
-        {stop ? <div className="admin-diff">Stop code: <code>{stop.code}</code> · {stop.label} · {stop.remedy === 'TRANSIENT' ? 'temporary condition' : 'not a temporary failure'}</div> : null}
+        {stop ? <div className="admin-diff">Stop code: <code>{stop.code}</code> · {stop.label} · {stop.remedy === 'TRANSIENT' ? 'temporary condition'
+          : stop.code === 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW' || ['USER', 'CONFIGURATION', 'CODE'].includes(stop.remedy) ? 'not a temporary failure' : 'cause not established'}</div> : null}
         {entry.reason ? <div className="admin-diff">Operator’s reason (as typed; not verified evidence): {entry.reason}</div> : entry.outcome === 'OK' && entry.reasonState === 'REMOVED'
           ? <div className="admin-diff">Reason text removed under the retention policy or an approved erasure request.</div> : null}</li>; })}</ul>}
     </Section>

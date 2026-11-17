@@ -70,6 +70,7 @@ export type ConversationCopy = {
   readonly statusDone: string; readonly statusConfirmedReconciling: string; readonly statusWallet: string; readonly statusUncertain: string;
   readonly statusFailed: (detail: string) => string; readonly statusInProgress: (progress: string) => string; readonly statusDeliveryPending: string;
   readonly signWallet: string; readonly signNone: string; readonly signNext: string; readonly signUncertain: string; readonly signAfterFailure: string;
+  readonly signPreparing: string; readonly signContinue: string;
   readonly statusLastRead: string; readonly statusReadOnly: string;
 };
 const en: ConversationCopy = {
@@ -191,7 +192,9 @@ const en: ConversationCopy = {
   signNext: 'Not for what was already sent. The next action needs its own Review and your explicit confirmation in your wallet; nothing is requested automatically.',
   signUncertain: 'No. Do not sign it again: the request may already be on the network. FloFi only checks it; nothing is resent.',
   signAfterFailure: 'No signature is requested automatically and nothing is retried. Trying again needs a fresh Review and your explicit confirmation.',
-  statusLastRead: 'The latest status read did not answer, so this is the last recorded state. Check status reads it again.',
+  signPreparing: 'Yes, soon: FloFi is preparing the next request with current provider data. Your wallet will ask you to confirm it; FloFi never signs for you.',
+  signContinue: 'Only if you continue: the next reviewed request needs your confirmation in your wallet. Nothing already sent is signed again.',
+  statusLastRead: 'The last “Check status” did not answer, so this answer uses the latest recorded state. Check status reads it again.',
   statusReadOnly: 'Read only: nothing was proposed, changed, signed or sent.',
 };
 const pt: ConversationCopy = {
@@ -309,10 +312,12 @@ const pt: ConversationCopy = {
   statusDeliveryPending: 'A entrega ainda não foi observada na rede de destino, então a FloFi não pode afirmar que os tokens chegaram.',
   signWallet: 'Sim: o pedido revisado aguarda na sua carteira. Confirme ou recuse por lá; a FloFi nunca assina por você.',
   signNone: 'Não. Nada nesta execução precisa da sua assinatura agora.',
-  signNext: 'Não para o que já foi enviado. A próxima ação precisa da própria revisão e da sua confirmação explícita na carteira; nada é pedido automaticamente.',
+  signNext: 'Não para o que já foi enviado. A próxima ação precisa da sua própria revisão e da sua confirmação explícita na carteira; nada é pedido automaticamente.',
   signUncertain: 'Não. Não assine de novo: o pedido pode já estar na rede. A FloFi apenas verifica; nada é reenviado.',
   signAfterFailure: 'Nenhuma assinatura é pedida automaticamente e nada é tentado de novo. Tentar outra vez exige uma nova revisão e a sua confirmação explícita.',
-  statusLastRead: 'A última leitura de status não respondeu, então este é o último estado registrado. Verificar status lê de novo.',
+  signPreparing: 'Sim, em breve: a FloFi está preparando o próximo pedido com dados atuais dos provedores. Sua carteira vai pedir a sua confirmação; a FloFi nunca assina por você.',
+  signContinue: 'Só se você continuar: o próximo pedido revisado precisa da sua confirmação na carteira. Nada do que já foi enviado é assinado de novo.',
+  statusLastRead: 'O último “Verificar status” não respondeu, então esta resposta usa o último estado registrado. Verificar status lê de novo.',
   statusReadOnly: 'Somente leitura: nada foi proposto, alterado, assinado ou enviado.',
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

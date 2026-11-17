@@ -144,6 +144,16 @@ describe('CHAT-01: status questions about the current execution', () => {
     const step1 = { ...done, workflowProgress: { ...(done as unknown as { workflowProgress: object }).workflowProgress, total: 2, completed: 1, finished: false } } as unknown as LifecycleView;
     expect(executionStatusAnswer(step1, 'SIGNATURE', 'EN')!.text).toMatch(/^Not for what was already sent/);
     expect(executionStatusAnswer(step1, 'OUTCOME', 'EN')!.text).not.toMatch(/^Yes/);
+    // "Deu certo?" / "Recebi os tokens?" with later steps left: the transfer and where the workflow stands, never "no signature needed".
+    for (const asked of ['OUTCOME', 'RECEIVED'] as const) {
+      const text = executionStatusAnswer(multi, asked, 'PT')!.text;
+      expect(text).toMatch(/^Transferência observada no destino\. Ainda não terminou: 0 de 2 etapas concluídas/); expect(text).not.toContain('Não precisa assinar');
+    }
+  });
+  it('says the next request is being prepared, or reviewed and waiting for Continue, instead of "no"', () => {
+    const approved = view(lifecycle({ phase: 'AUTHORIZED', destination: null, attempts: [{ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true, receipt: null }] }));
+    expect(executionStatusAnswer(approved, 'SIGNATURE', 'EN', false, null, true)!.text).toMatch(/^Yes, soon: FloFi is preparing the next request/);
+    expect(executionStatusAnswer(approved, 'SIGNATURE', 'PT', false, 'CONFIRM_CONTINUE')!.text).toMatch(/^Só se você continuar/);
   });
   it('a request waiting in the wallet, an unknown outcome and a failed run are each said as such', () => {
     const wallet = view(lifecycle({ phase: 'AUTHORIZED', destination: null, attempts: [{ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true, receipt: null }] }));
@@ -155,7 +165,7 @@ describe('CHAT-01: status questions about the current execution', () => {
     expect(executionStatusAnswer(failed, 'OUTCOME', 'EN')!.text).toMatch(/^It did not complete\./);
   });
   it('says the last read failed instead of presenting it as fresh, and answers nothing without an execution', () => {
-    expect(executionStatusAnswer(view(lifecycle()), 'OUTCOME', 'EN', true)!.notes[0]).toMatch(/^The latest status read did not answer/);
+    expect(executionStatusAnswer(view(lifecycle()), 'OUTCOME', 'EN', true)!.notes[0]).toMatch(/^The last “Check status” did not answer/);
     expect(executionStatusAnswer({ progress: null } as unknown as LifecycleView, 'OUTCOME', 'PT')).toBeNull();
   });
 });

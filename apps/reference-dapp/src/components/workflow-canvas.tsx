@@ -1036,7 +1036,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         {overview && overview.networks.length > 0 && <ul className="editor-network-chips" aria-label={tr('Workflow networks')}>{overview.networks.map(network => <li key={network}><span className="editor-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>{tr(network)}</li>)}</ul>}
         {networkPending && <span className="editor-network-chips editor-network-pending"><span className="editor-network-pending-dot" aria-hidden="true"/>{tr('Network?')}</span>}
         <span className="revision">{stepCount}</span>
-        {overview && (runActive && runStatus ? <span className="editor-state-pill" data-editor-state="executing" title={tr(runStatus)}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(runStatus)}</span>
+        {overview && (runActive && runStatus ? <span className="editor-state-pill" data-editor-state={/needs attention|uncertain/i.test(runStatus) ? 'attention' : 'executing'} title={tr(runStatus)}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(runStatus)}</span>
           : <span className="editor-state-pill" data-editor-state={overview.state} title={tr(editorStateDetail(overview))}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(EDITOR_STATE_LABEL[overview.state])}</span>)}
       </div>
       <div className="canvas-head-actions">

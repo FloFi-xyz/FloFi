@@ -952,9 +952,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       // its answer buttons; a confirmation is never taken from these words.
       const asked = executionQuestion(text);
       if (asked && !copilot.drafting()) {
-        const facts = (language: ConversationLanguage) => executionStatusAnswer(latest.current.bridge, asked, language, Boolean(latest.current.bridge.controls.checkFailed));
+        const kind = open && open.open.kind !== 'NEXT_STEP' ? open.open.kind : null, now = latest.current.bridge;
+        const facts = (language: ConversationLanguage) => executionStatusAnswer(now, asked, language, Boolean(now.controls.checkFailed), kind,
+          Boolean(now.controls.requesting));
         if (facts(language)) {
-          const kind = open && open.open.kind !== 'NEXT_STEP' ? open.open.kind : null, check = latest.current.bridge.controls.canCheck;
+          const check = now.controls.canCheck;
           say(scope, language, (language, c) => { const answered = facts(language)!;
             return [answered.text, { notes: answered.notes, ...kind ? { options: questionOptions(kind, c) } : check ? { options: [c.checkStatus] } : {} }]; });
           return;

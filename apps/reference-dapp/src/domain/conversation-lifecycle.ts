@@ -194,7 +194,9 @@ export function executionQuestion(text: string): ExecutionQuestion | null {
  * an unknown outcome — and never more. Null when no execution of this workflow started (the caller says there is none). Pure: nothing is
  * proposed, changed, signed, sent or repeated.
  */
-export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuestion, language: ConversationLanguage, readFailed = false):
+export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuestion, language: ConversationLanguage, readFailed = false,
+  /** FloFi's open question, if any (CONFIRM_CONTINUE: the next request is already reviewed and waits only for the owner's answer). */
+  open: PendingQuestion['kind'] | null = null, preparing = false):
   { readonly text: string; readonly notes: readonly string[] } | null {
   const live = currentExecution(view.progress);
   if (!live?.started) return null;
@@ -215,6 +217,9 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
   let text: string;
   if (asked === 'SIGNATURE') {
     text = phase === 'AWAITING_WALLET' ? c.signWallet : phase === 'UNCERTAIN' ? c.signUncertain : phase === 'FAILED' || phase === 'PARTIAL' ? c.signAfterFailure
+      // The next request is being prepared (after Continue), or is reviewed and waits for the owner's answer to Continue.
+      : preparing || wallet.some(op => op.state === 'preparing') ? c.signPreparing
+      : open === 'CONFIRM_CONTINUE' || open === 'CONFIRM_CONTINUE_REVIEW' ? c.signContinue
       : observed ? later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.signNext}` : translate(language, DESTINATION_OBSERVED_MESSAGE)
       // A confirmed approval whose action was not sent yet: that action needs its own Review and confirmation (never requested automatically).
       : later || !done && wallet.some(op => op.state === 'waiting') && wallet.some(op => op.state === 'confirmed') ? c.signNext : c.signNone;
@@ -222,7 +227,9 @@ export function executionStatusAnswer(view: LifecycleView, asked: ExecutionQuest
   else if (phase === 'UNCERTAIN') text = c.statusUncertain;
   else if (phase === 'FAILED' || phase === 'PARTIAL') text = failure();
   else if (done) text = c.statusDone;
-  else if (observed) text = translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, DESTINATION_OBSERVED_MESSAGE));
+  // With later steps left, the transfer is said with where the workflow stands (never "no signature needed": the next step needs its own).
+  else if (observed) text = later ? `${translate(language, DESTINATION_OBSERVED_LABEL)}. ${c.statusInProgress(where)}`
+    : translate(language, '{0}. {1}', translate(language, DESTINATION_OBSERVED_LABEL), translate(language, DESTINATION_OBSERVED_MESSAGE));
   // This step reconciled while the workflow has steps left: where the workflow stands, never "yes".
   else if (phase === 'COMPLETED') text = runDone ? c.statusInProgress(where) : c.statusConfirmedReconciling;
   else text = asked === 'RECEIVED' && operations.some(op => !op.wallet) ? `${c.statusDeliveryPending} ${c.statusInProgress(where)}` : c.statusInProgress(where);
