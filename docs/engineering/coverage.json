@@ -1578,8 +1578,8 @@
       "path": "apps/reference-dapp/src/server/wallet-activity.test.ts",
       "stage": "unit"
     },
-    "app.app.api.wallet.activity.route": {
-      "path": "apps/reference-dapp/src/app/api/wallet/activity/route.test.ts",
+    "app.app.api.dashboard.activity.route": {
+      "path": "apps/reference-dapp/src/app/api/dashboard/activity/route.test.ts",
       "stage": "unit"
     },
     "app.app.api.automations.overview.route": {
@@ -1726,7 +1726,7 @@
     "app.domain.canvas-execution",
     "app.components.live-canvas",
     "app.server.wallet-activity",
-    "app.app.api.wallet.activity.route",
+    "app.app.api.dashboard.activity.route",
     "app.app.api.automations.overview.route",
     "app.app.api.account.presence.route",
     "app.app.automation-reads"
@@ -2860,7 +2860,7 @@
         "apps/reference-dapp/src/app/workflow-action.ts",
         "apps/reference-dapp/src/app/api/dashboard/history/route.ts",
         "apps/reference-dapp/src/app/dashboard-reads.ts",
-        "apps/reference-dapp/src/app/api/wallet/activity/route.ts",
+        "apps/reference-dapp/src/app/api/dashboard/activity/route.ts",
         "apps/reference-dapp/src/app/wallet-activity-reads.ts"
       ],
       "suites": [
@@ -2874,7 +2874,7 @@
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
         "app.app.api.dashboard.history.route",
-        "app.app.api.wallet.activity.route"
+        "app.app.api.dashboard.activity.route"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",

@@ -12,9 +12,9 @@ vi.mock('../../../../server/wallet-activity', async importOriginal => ({ ...awai
 const { GET } = await import('./route');
 const owner = '0x' + 'a'.repeat(40);
 const get = (query = '', headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', 'x-flofi-account': owner }) =>
-  GET(new Request(`https://flofi.test/api/wallet/activity${query}`, { headers }));
+  GET(new Request(`https://flofi.test/api/dashboard/activity${query}`, { headers }));
 
-describe('GET /api/wallet/activity', () => {
+describe('GET /api/dashboard/activity', () => {
   beforeEach(() => { access.mockClear(); read.mockClear(); principals.mockClear(); });
   it('reads one page for a wallet this browser or the signed-in account holds, through the Flight boundary, never cached', async () => {
     const response = await get('', { 'sec-fetch-site': 'same-origin', 'x-flofi-account': owner, 'x-flofi-cursor': 'abc' });
@@ -38,5 +38,10 @@ describe('GET /api/wallet/activity', () => {
     read.mockRejectedValueOnce(new Error('connect ECONNREFUSED 10.0.0.1:443'));
     const response = await get();
     expect(response.status).toBe(500); expect(await response.json()).toEqual({ ok: false, code: 'ACTIVITY_READ_UNAVAILABLE' });
+  });
+  it('lives on the product host: never in the FloFi Wallet origin namespace, which the product proxy answers 404', async () => {
+    const { isWalletPath } = await import('../../../../accounts/wallet-origin');
+    expect(isWalletPath('/api/dashboard/activity')).toBe(false);
+    expect(isWalletPath('/api/wallet/activity')).toBe(true);
   });
 });

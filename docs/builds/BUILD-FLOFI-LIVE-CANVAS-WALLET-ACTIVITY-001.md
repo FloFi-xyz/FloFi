@@ -40,7 +40,7 @@ was changed. No new provider, paid subscription, mandatory environment variable,
 
 `/app/workflows` (the History) gains **All · Workflows · Received · Sent**. Workflows is the existing list unchanged; All adds the wallet activity
 under it; Received/Sent show the activity filtered by direction. The activity loads from its own same-origin GET route
-(`/api/wallet/activity`) — restricted to a wallet this browser proved or the signed-in account holds (`historyPrincipals`) — so a slow or failing
+(`/api/dashboard/activity`) — restricted to a wallet this browser proved or the signed-in account holds (`historyPrincipals`) — so a slow or failing
 provider never delays FloFi's own records.
 
 ### Network coverage

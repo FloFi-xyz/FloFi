@@ -237,14 +237,14 @@ test('History shows received and sent wallet activity beside the workflow record
   // A deliberately slow activity provider: the workflow records must not wait for it.
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
-  await page.route('**/api/wallet/activity**', async route => { await held; await route.continue(); });
+  await page.route('**/api/dashboard/activity**', async route => { await held; await route.continue().catch(() => undefined); });
   await open(page, [owner, other]);
   await expect(card(page, id)).toBeVisible();
   const views = page.getByRole('group', { name: 'History view', exact: true });
   for (const label of ['All', 'Workflows', 'Received', 'Sent']) await expect(views.getByRole('button', { name: label, exact: true })).toBeVisible();
   const activity = page.locator('.wallet-activity');
   await expect(activity.getByRole('status')).toContainText('Loading wallet activity…');
-  release(); await page.unroute('**/api/wallet/activity**');
+  release();
   await expect(activity).toContainText('Test data (MOCKED)');
   await expect(activity).toContainText('+1 USDC'); await expect(activity).toContainText('−0.01 ETH');
   await expect(activity.getByRole('list', { name: 'Network coverage', exact: true })).toContainText('Robinhood Chain: wallet activity is not available on this network yet.');

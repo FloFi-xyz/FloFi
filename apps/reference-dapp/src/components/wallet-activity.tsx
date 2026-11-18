@@ -2,7 +2,7 @@
 'use client';
 /**
  * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (History): the wallet's received and sent token movements, beside FloFi's own workflow records.
- * Read-only: it loads on its own (`/api/wallet/activity`), so a slow or failing provider never holds the workflow history, and it starts
+ * Read-only: it loads on its own (`/api/dashboard/activity`), so a slow or failing provider never holds the workflow history, and it starts
  * nothing. Per network it says what is covered; a network without a history source, or whose read failed, is named as such — never shown as
  * an empty history. "FloFi" marks only a movement whose transaction a FloFi execution record carries.
  */
