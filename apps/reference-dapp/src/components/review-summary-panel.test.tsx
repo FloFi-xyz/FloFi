@@ -44,10 +44,19 @@ describe('blocker panel (board 07)', () => {
 });
 
 describe('Review panel (board 06)', () => {
-  it('shows "You are authorizing" without any authorize control; the footer owns the one primary action', () => {
+  it('shows the ordered workflow and simulation guidance without authorization copy before a valid result', () => {
     const html = render({ kind: 'unavailable', state: { error: null, busy: false } });
-    expect(html).toContain('You are authorizing'); expect(html).toContain('<details class="review-panel-technical"><summary>Technical details</summary><p>SUMMARY</p>');
-    expect(html).not.toMatch(/<button[^>]*class="primary"|Authorize in wallet/);
+    expect(html).toContain('<h2>Workflow simulation</h2>');
+    expect(html).toContain('<ol class="workflow-progress-steps" aria-label="Workflow actions">');
+    expect(html).toContain('Simulation checks expected outcomes and costs');
+    expect(html).toContain('<details class="review-panel-technical"><summary>Technical details</summary><p>SUMMARY</p>');
+    expect(html).not.toMatch(/You are authorizing|<button[^>]*class="primary"|Authorize in wallet/);
+  });
+  it('explains expiration and displays neither authorization copy nor old financial values', () => {
+    const html = render(blocked('QUOTE_EXPIRED'));
+    expect(html).toContain('Simulation expired');
+    expect(html).toContain('Simulate again to refresh network fees and token permissions');
+    expect(html).not.toMatch(/You are authorizing|Token permission<|Network fee, at most/);
   });
 });
 

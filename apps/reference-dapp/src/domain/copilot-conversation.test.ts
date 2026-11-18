@@ -8,6 +8,18 @@ import { workflowSteps } from './workflow-steps';
 const supply5 = act.lending('SUPPLY', { asset: 'USDC', amount: '5' });
 
 describe('bounded multi-turn conversation', () => {
+  it('suggests the current workflow output in an open network clarification and keeps an explicit choice', () => {
+    const session = new CopilotSession(['swap 1 USDC to WETH on Arbitrum One']);
+    const original = session.workflow;
+    const asked = session.say(`Send 0.0001 WETH to ${OTHER_ADDRESS}`, intent.action(act.transfer({ amount: '0.0001', asset: 'WETH', recipient: OTHER_ADDRESS })))!;
+    expect(asked.kind).toBe('CLARIFICATION');
+    expect(asked.notes).toContain('The previous step delivers WETH on Arbitrum One.');
+    expect(asked.options[0]).toBe('Arbitrum One');
+    expect(session.workflow).toBe(original);
+    const chosen = session.say('Base')!;
+    expect(chosen).toMatchObject({ kind: 'PROPOSAL', command: { input: { network: 'Base', asset: 'WETH' } } });
+    expect(session.workflow).toBe(original);
+  });
   it('asks for the network, takes the button answer without a model call, then revises the pending proposal', () => {
     const session = new CopilotSession();
     const asked = session.say('Quero colocar 5 USDC na Aave.', intent.action(supply5, 'PT'))!;

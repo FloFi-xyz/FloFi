@@ -69,6 +69,7 @@ describe('simulation financial presentation', () => {
     } } });
     const result = project(source);
     expect(result.steps[0]).toMatchObject({ result: '0.1 SOL', resultLabel: 'Simulated output', minimum: '0.095 SOL', slippage: '0.75%', configuredSlippage: '0.50%', priceImpact: '0.08%', provider: 'Jupiter' });
+    expect(result.steps[0]?.details).toContainEqual({ label: 'Aggregator', value: 'Jupiter' });
     expect(result.steps[0]?.details).toContainEqual({ label: 'Route pools', value: 'Raydium' });
     expect(result.fees.map(f => f.value)).toEqual(['0.000005 SOL', '0.00203928 SOL']);
     expect(result.fees.some(f => /total/i.test(f.label))).toBe(false); expect(result.status).toBe('ready');
@@ -147,6 +148,7 @@ describe('router and liquidity records', () => {
     workflow: bridge, provenance: 'PUBLIC_TESTNET', verdict: 'PENDING', error: null, requote: false, review: {
       workflowHash: hash(bridge), revision: bridge.revision, nodeId: bridge.nodes[0]!.nodeId, expiresAt: expiry,
       selection: { selected: 'lifi' }, route: { inputToken: token, outputToken: token, inputAmount: '5000000', underlyingProtocol: 'across', slippageBps: 50,
+        steps: [{ protocol: 'Across', fromChain: 'eip155:8453', toChain: 'eip155:42161' }],
         fees: [{ kind: 'INTEGRATOR', amount: '100000', chainId: token.chainId, token: token.address }, { kind: 'BRIDGE_RELAYER_CAPITAL', amount: '500000', chainId: token.chainId, token: token.address }] },
       quote: { expectedOutput: '4400000', minimumOutput: '4300000', feeTotal: '600000', expiresAt: expiry },
       deadlines: { depositMustLandBy: (now + 60_000) / 1000 }, approvals: [{ required: true }],
@@ -156,6 +158,7 @@ describe('router and liquidity records', () => {
   it('shows the selected provider, actual bridge fees and recorded network total without summing them', () => {
     const result = project(router(), now, bridge);
     expect(result.steps[0]).toMatchObject({ provider: 'LI.FI · Across', result: '4.4 USDC', resultLabel: 'Quoted destination output', slippage: '0.50%' });
+    expect(result.steps[0]!.details).toContainEqual({ label: 'Route segment', value: 'Across · Base → Arbitrum One' });
     expect(result.fees.map(f => [f.label, f.value])).toEqual([['Maximum network fee', '0.00042 ETH'], ['Provider fee', '0.1 USDC'], ['Bridge relayer fee', '0.5 USDC'], ['Route fee total', '0.6 USDC']]);
     expect(result.fees.some(f => f.label === 'Estimated total')).toBe(false);
     expect(result.warnings.some(w => w.message.includes('delivery and refunds are not simulated'))).toBe(true);

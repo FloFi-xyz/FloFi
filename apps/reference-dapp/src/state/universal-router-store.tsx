@@ -53,6 +53,10 @@ export const bounded = <T,>(work: Promise<T>, ms: number, code: string): Promise
   const timer = setTimeout(() => reject(new Error(code)), ms);
   work.then(value => { clearTimeout(timer); resolve(value); }, cause => { clearTimeout(timer); reject(cause); });
 });
+type SimulationWallets = { readonly owner: string | null; readonly destination: string | null };
+export function universalSimulationWalletsCurrent(before: SimulationWallets, current: SimulationWallets, owner: string) {
+  return current.destination === before.destination && (!before.owner || before.owner === owner) && (current.owner === owner || !before.owner && !current.owner);
+}
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string; correlationId?: string }): T => { if (!result.ok) throw Object.assign(new Error(result.code), { correlationId: result.correlationId }); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
 const ecosystemOfRecord = (record: UniversalRecord): UniversalEcosystem => record.review.source.ecosystem;
@@ -90,6 +94,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const destinations = useDestinationWallets(wallet);
   const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem
     ? resolvedAddress(destinationEcosystem === 'EVM' ? destinations.evm : destinations.solana) : null;
+  const implicitDestination = details?.fields.recipient === 'CONNECTED_DESTINATION_WALLET' ? destinationWallet : null;
+  const latestSimulationWallets = useRef<SimulationWallets>({ owner, destination: implicitDestination });
+  latestSimulationWallets.current = { owner, destination: implicitDestination };
   // Review round 3: only these may be called "your wallet" in the chat Review; a saved Credentials address is the device's, not proof of control.
   const ownDestinations = useMemo(() => [...destinations.inventory.session, ...destinations.inventory.account].map(entry => entry.address), [destinations.inventory]);
   const latest = useRef(workflow); latest.current = workflow;
@@ -208,14 +215,22 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): every simulation resolves into a defined outcome. A wallet sign-in the wallet never answers
     // (production 2026-11-18: "Simulando o fluxo…" forever) or a network call that never settles becomes a coded refusal; busy clears and the
     // owner can retry. A late answer is dropped here (nothing after the timed-out await consumes it), never adopted into a newer state.
-    const account = await bounded(establishSession(), SIGNIN_TIMEOUT_MS, 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT'), snapshot = latest.current;
-    const value = unwrap(await bounded(universalSimulate(snapshot, account, destinationWallet ?? undefined), SIMULATION_TIMEOUT_MS, 'UNIVERSAL_SIMULATION_TIMEOUT'));
-    if (latest.current !== snapshot) throw new Error('UNIVERSAL_SEMANTIC_REVISION_CHANGED');
+    const snapshot = latest.current, wallets = latestSimulationWallets.current;
+    const account = await bounded(establishSession(), SIGNIN_TIMEOUT_MS, 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT');
+    const current = () => latest.current === snapshot && universalSimulationWalletsCurrent(wallets, latestSimulationWallets.current, account);
+    if (!current()) return;
+    const result = await bounded(universalSimulate(snapshot, account, wallets.destination ?? undefined), SIMULATION_TIMEOUT_MS, 'UNIVERSAL_SIMULATION_TIMEOUT');
+    if (!current()) return;
+    const value = unwrap(result);
     setRecovered(false); accept(value); void refreshRuns();
   }); }
   async function refresh() { await operation(async () => {
     if (!record) throw new Error('UNIVERSAL_RUN_MISSING');
-    accept(unwrap(await universalRefresh(ecosystemOfRecord(record), record.id, record.review.recipientKind === 'CONNECTED_DESTINATION_WALLET' ? destinationWallet ?? undefined : undefined)));
+    const snapshot = latest.current, wallets = latestSimulationWallets.current;
+    if (!universalSimulationWalletsCurrent(wallets, wallets, record.owner)) return;
+    const result = await bounded(universalRefresh(ecosystemOfRecord(record), record.id, wallets.destination ?? undefined), SIMULATION_TIMEOUT_MS, 'UNIVERSAL_SIMULATION_TIMEOUT');
+    if (latest.current !== snapshot || !universalSimulationWalletsCurrent(wallets, latestSimulationWallets.current, record.owner)) return;
+    accept(unwrap(result));
   }); }
   async function review() { await operation(async () => {
     if (!record || retired) throw new Error('UNIVERSAL_SIMULATION_REQUIRED');

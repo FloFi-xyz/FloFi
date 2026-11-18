@@ -6,6 +6,10 @@ export const portugueseApprovedUxEditor: Readonly<Record<string, string>> = {
   'Rename workflow: {0}': 'Renomear fluxo: {0}', 'Click to rename': 'Clique para renomear', 'More options': 'Mais opções',
   '{0} step': '{0} passo', '{0} steps': '{0} passos', 'No warnings': 'Nenhum aviso', 'Network?': 'Rede?',
   'Editing paused during execution': 'Edição pausada durante a execução',
+  'The previous step delivers to a network this action does not support. Choose a supported network.': 'O passo anterior entrega em uma rede incompatível com esta ação. Escolha uma rede compatível.',
+  'This action cannot use the previous step’s output asset. Choose a supported asset.': 'Esta ação não pode usar o ativo recebido no passo anterior. Escolha um ativo compatível.',
+  'More than one step could come before this action. Choose its network and asset.': 'Mais de um passo pode preceder esta ação. Escolha a rede e o ativo.',
+  'Choose a compatible network and asset for this action.': 'Escolha uma rede e um ativo compatíveis com esta ação.',
   // The configured state, shown once in the header (board 16 §4).
   'Configured': 'Pronto para simular',
   'Undo': 'Desfazer', 'Undo (Ctrl+Z)': 'Desfazer (Ctrl+Z)', 'Delete': 'Excluir', 'Select a card to delete': 'Selecione um cartão para excluir',

@@ -83,7 +83,7 @@ async function assertSection(page: Page, section: EditorSection, width: number, 
     const frame = page.locator('.simulate-workspace .simulation-workflow-canvas');
     const dock = frame.locator('> .simulate-canvas-body > aside.canvas-review-dock');
     await expect(dock).toBeVisible();
-    await expect(page.getByRole('complementary', { name: /^(Review|Revisão)$/ })).toHaveCount(1);
+    await expect(page.getByRole('complementary', { name: /^(Review|Revisão|Workflow simulation|Simulação do fluxo)$/ })).toHaveCount(1);
     await expect(page.locator('details.simulation-details')).toHaveCount(0);
     const dockBox = (await dock.boundingBox())!, frameBox = (await frame.boundingBox())!;
     expect(inside(dockBox, frameBox), `${label}: the Review is outside the Canvas frame`).toBe(true);

@@ -13,6 +13,7 @@ import { EXECUTION_PHASE_LABEL, phaseCompletesStep, phaseLocksResubmission } fro
 import { adoptSettlementRead, settlementSyncDue, type SettlementRecord } from './settlement-sync';
 import { executionQuestion, executionStatusAnswer, lifecycleRequest, type LifecycleView } from './conversation-lifecycle';
 import { translate } from '../i18n/translate';
+import { bounded, universalSimulationWalletsCurrent } from '../state/universal-router-store';
 
 const hash = `0x${'a'.repeat(64)}`, fill = `0x${'b'.repeat(64)}`;
 const workflow = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createRouterNode('bridge', { source: 'Base', destination: 'Arbitrum', token: 'USDC',
@@ -45,7 +46,6 @@ describe('FIX-09: bounded simulation outcomes', () => {
     expect(new Set([route, minimum, liquidity, signin, quote]).size).toBe(5);
   });
   it('bounded(): the awaited work settles first or the coded refusal does; a late answer is never consumed', async () => {
-    const { bounded } = await import('../state/universal-router-store');
     await expect(bounded(Promise.resolve('ok'), 1_000, 'X_TIMEOUT')).resolves.toBe('ok');
     await expect(bounded(Promise.reject(new Error('OWN_CODE')), 1_000, 'X_TIMEOUT')).rejects.toThrow('OWN_CODE');
     let late: ((value: string) => void) | null = null;
@@ -54,6 +54,15 @@ describe('FIX-09: bounded simulation outcomes', () => {
     // The late answer resolves the underlying promise, but the timed-out caller already threw: nothing adopts it.
     late!('too-late');
     await hanging;
+  });
+  it('drops a bridge simulation when an implicit destination or source owner changes while pending', () => {
+    const before = { owner: 'source', destination: 'destination' };
+    expect(universalSimulationWalletsCurrent(before, before, 'source')).toBe(true);
+    expect(universalSimulationWalletsCurrent(before, { ...before, destination: 'replacement' }, 'source')).toBe(false);
+    expect(universalSimulationWalletsCurrent(before, { ...before, owner: 'replacement' }, 'source')).toBe(false);
+    expect(universalSimulationWalletsCurrent(before, { ...before, owner: 'replacement' }, 'replacement')).toBe(false);
+    expect(universalSimulationWalletsCurrent(before, { ...before, owner: null }, 'source')).toBe(false);
+    expect(universalSimulationWalletsCurrent({ ...before, owner: null }, before, 'source')).toBe(true);
   });
 });
 

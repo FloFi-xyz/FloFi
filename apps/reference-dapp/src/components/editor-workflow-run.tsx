@@ -960,7 +960,7 @@ export function EditorWorkflowRunPrimaryAction({ state }: { state: EditorWorkflo
   if (review && state.grouped && !expired) return <button type="button" className="primary editor-run-authorize" disabled={busy} aria-busy={busy || undefined}
     onClick={() => void state.authorize()}>{tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>;
   return <button type="button" className="primary" disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
-    {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : review ? 'Review again' : 'Review whole workflow')}</button>;
+    {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : expired ? 'Simulate again' : review ? 'Review again' : 'Review whole workflow')}</button>;
 }
 
 export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { state: EditorWorkflowRunState;
@@ -1200,10 +1200,11 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     {fresh && !feeBlocked && <>
       {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
       <p className="eyebrow">{tr('REVIEW')}</p>
-      <h3>{tr(block ? 'You are authorizing' : 'Review the whole workflow')}</h3>
+      <h3>{tr(expired ? 'Simulation expired' : block ? 'You are authorizing' : 'Workflow simulation')}</h3>
       {review?.mode === 'STEP_BY_STEP' && <p className="review-panel-note">{tr('This workflow needs a confirmation in your wallet for each step on its own.')}</p>}
       {circleOnApproval}
-      {!block ? <p className="review-panel-status" role="status">{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…'
+      {expired ? <p className="review-panel-status" role="status">{tr('Simulate again to refresh network fees and token permissions before review.')}</p>
+        : !block ? <p className="review-panel-status" role="status">{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…'
         : 'FloFi checks every step together — amounts, minimums, fees and Aave risk — and asks your wallet only once where it can batch. Nothing is signed or sent by a review.')}</p> : <>
         <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
         <dl className="review-panel-rows review-block-rows">

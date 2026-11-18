@@ -48,7 +48,8 @@ import { lookupAsset } from './intelligence/asset-resolution';
 import type { AwaitingAmount } from './amount-shortcuts';
 import { intelligenceCopy } from './intelligence/copy';
 import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } from './intelligence/goal-planner';
-import { lendingOffers } from './authoring-capabilities';
+import { copilotNetworksFor, lendingOffers } from './authoring-capabilities';
+import { followOnSelection, type CryptoAction } from './crypto-action-picker';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { lendingProfileOfReserve } from './supply-authoring';
@@ -1883,7 +1884,11 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   // Flofi's question for the other pool token's maximum (a position funded by a swap's output) is answered by a bare amount.
   const otherToken = outcome.deposit;
   // BUILD-CHAT-LEARNING-001: a glossary suggestion for a mainnet only puts that option first, with a note; the user still picks.
-  const suggested = withSuggestion(state, env, outcome.options.filter(option => publicText(option) !== null), intent.language);
+  const followOn = intent.kind === 'ACTION' && outcome.missing.includes('network') && !extras.target && !extras.planned &&
+    !mentionedNetworks(segmentText(state)).length ? followOnClarification(intent.action, intent.language, env) : null;
+  const original = outcome.options.filter(option => publicText(option) !== null);
+  const options = followOn?.network ? [followOn.network, ...original.filter(option => option !== followOn.network)] : original;
+  const suggested = withSuggestion(state, env, options, intent.language);
   // BUILD-P1: "Try again" after a pool read FloFi could not make resolves the same request again (locally; the surface reads the pool once more).
   const retry: Draft['options'] = suggested.options.includes(m.retryOption) ? [{ label: m.retryOption, fill: { kind: 'EXTRAS', extras: {} } }] : [];
   // BUILD-P1: once FloFi has asked for the range, the answer alone decides it (see `Grounding.rangeAsked`).
@@ -1891,8 +1896,27 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [...actionFills(intent, outcome.missing, suggested.options), ...retry], snapshot: snapshotOf(env), extras: kept,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
-  return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes],
+  return question(state, m, outcome.question, suggested.options, draft, [...readNotes, ...suggested.notes, ...followOn ? [followOn.note] : []],
     { ...outcome.code ? { code: outcome.code } : {}, ...outcome.pool ? { pool: outcome.pool } : {} });
+}
+
+function followOnClarification(action: CopilotAction, language: CopilotLanguage, env: CopilotEnvironment) {
+  const kinds = { TRANSFER: 'transfer', SUPPLY: 'supply', REPAY: 'repay', BORROW: 'borrow', WITHDRAW: 'withdraw', SWAP: 'swap', LIQUIDITY: 'pool' } as const;
+  const kind: CryptoAction | undefined = kinds[action.type as keyof typeof kinds];
+  if (!kind || kind === 'pool') return null;
+  const suggestion = followOnSelection(env.workflow, kind, activeNetworkScope() === 'PUBLIC_MAINNET' ? 'mainnet' : undefined);
+  if (!suggestion) return null;
+  const match = suggestion.selection && networkIdentity(suggestion.selection.network);
+  const network = match?.copilot && copilotNetworksFor(kind, env.agentRollout).includes(match.copilot) ? match.name : null;
+  if (suggestion.issue === 'ambiguous') return null;
+  if (!network || !suggestion.selection) return { note: language === 'PT'
+    ? 'A rede de destino do passo anterior não está disponível para esta ação. Escolha uma rede compatível.'
+    : 'The previous step’s output network is unavailable for this action. Choose a supported network.' };
+  if (suggestion.issue === 'asset') return { network, note: language === 'PT'
+    ? `O passo anterior termina em ${network}. Escolha um ativo compatível com esta ação.`
+    : `The previous step ends on ${network}. Choose an asset supported by this action.` };
+  return { network, note: language === 'PT' ? `O passo anterior entrega ${suggestion.selection.from} em ${network}.`
+    : `The previous step delivers ${suggestion.selection.from} on ${network}.` };
 }
 /**
  * BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient a request names, for its empty destination (a send's recipient, a bridge's destination

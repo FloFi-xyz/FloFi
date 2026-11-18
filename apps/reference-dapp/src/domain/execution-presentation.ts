@@ -32,7 +32,7 @@ export function projectExecution(props: ExecutionWorkspaceState, now = Date.now(
     if (review.status !== 'invalidated' && review.label !== 'Connect your wallet') { label = 'Review required'; message = 'Simulate and review this workflow before execution.'; }
   }
   if (source.state.busy) { status = 'loading'; label = 'Preparing execution…'; message = 'Checking the workflow and wallet authorization. Complete any open wallet confirmation.'; }
-  if (expiresAt !== null && now >= expiresAt || review.status === 'expired') { status = 'blocked'; label = 'Simulation expired'; message = 'Simulate again and review the refreshed workflow before execution.'; }
+  if (expiresAt !== null && now >= expiresAt || review.status === 'expired') { status = 'blocked'; label = 'Simulation expired'; message = 'Simulate again to refresh network fees and token permissions before review.'; }
   if (execution.started) { status = 'started'; label = 'Execution already started'; message = 'A request is already recorded for this workflow. Check its existing execution details before taking another action.'; }
   if (!review.steps.length) { status = 'empty'; label = 'No workflow ready to execute'; message = 'Create a workflow in the Editor first.'; }
   return { status, label, message, canExecute: status === 'ready', expiresAt, steps: review.steps,

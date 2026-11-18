@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_LIQUIDITY_PROFILES, SOLANA_TRANSFER_PROFILES } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext } from '@defi-workflow-engine/reference-linter';
-import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import type { Asset, SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createAuthoredTransfer, transferDetails, TRANSFER_NETWORKS, type TransferNetwork } from './robinhood-transfer-authoring';
 import { classifyWalletEnvironment, type WalletEnvironment } from '../wallet/environment';
 import type { Workflow } from './initial-workflow';
@@ -108,6 +108,52 @@ export function selectCryptoNetwork(action: CryptoAction, network: string, curre
     : (from === 'USDG' ? featuredStockSymbols()[0] : 'USDG') : undefined;
   const to = profile.pair?.[1] ?? (erc20Only(action) ? current?.to && current.to !== from && profile.tokens.includes(current.to) ? current.to : pooled ?? profile.tokens.find(token => token !== from) : undefined);
   return { action, network, from, ...(to ? { to } : {}) };
+}
+
+export type FollowOnSelection = { selection: CryptoSelection; issue?: never } | { selection?: CryptoSelection; issue: 'network' | 'asset' | 'ambiguous' };
+
+/** An appended action can suggest the unique terminal step's output. Only authoring fields are seeded. */
+export function followOnSelection(workflow: Workflow, action: CryptoAction, environment?: WalletEnvironment): FollowOnSelection | null {
+  const nodes = workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+  if (!nodes.length) return null;
+  const sources = new Set([...nodes.flatMap(node => node.dependencies), ...workflow.resourceEdges.map(edge => edge.fromNodeId)]);
+  const tails = nodes.filter(node => !sources.has(node.nodeId));
+  if (tails.length !== 1) return { issue: 'ambiguous' };
+  const predecessor = tails[0]!;
+  const declaration = predecessor.inputs.find(input => input.kind === 'ASSET' && input.name === 'asset-out');
+  const output = declaration?.kind === 'ASSET' ? declaration.value : predecessor.expectedOutputs.find(item => item.outputId === 'amount-out')?.asset;
+  if (!output) return null;
+  const profiles = environment ? cryptoNetworks(action, environment) : cryptoProfiles(action);
+  const profile = profiles.find(item => item.chain === output.chainId);
+  if (!profile) return { issue: 'network' };
+  const sameNetwork = selectCryptoNetwork(action, profile.network);
+  const symbol = followOnAsset(action, profile, output, predecessor.actionType === 'asset.swap.exact-input');
+  if (!symbol) return { selection: sameNetwork, issue: 'asset' };
+  try {
+    const next = action === 'transfer' ? { ...sameNetwork, from: symbol } : selectCryptoToken(sameNetwork, 'source', symbol);
+    if (next.from === symbol && validCryptoSelection(next)) return { selection: next };
+  } catch { /* The authoring picker is the authority for action-specific combinations. */ }
+  return { selection: sameNetwork, issue: 'asset' };
+}
+
+function followOnAsset(action: CryptoAction, profile: CryptoPickerProfile, output: Asset, swapOutput: boolean): string | null {
+  if (lendingAction(action)) {
+    const reserve = 'address' in output && lendingProfileOfReserve(output.chainId, output.address);
+    return reserve && reserve.decimals === output.decimals ? reserve.symbol : null;
+  }
+  if (profile.chain.startsWith('solana:')) {
+    const swap = SOLANA_SWAP_RUNTIMES.find(runtime => runtime.chain === profile.chain);
+    const token = 'address' in output ? Object.values(swap?.tokens ?? {}).find(item => item.mint === output.address && item.decimals === output.decimals)
+      : output.nativeId === 'SOL' && output.decimals === 9 ? swap?.tokens.SOL : undefined;
+    // A swap unwraps its SOL output. A bridge's wrapped-SOL mint cannot be substituted for native SOL.
+    return token?.symbol === 'SOL' && 'address' in output && !swapOutput ? null : token?.symbol ?? null;
+  }
+  if ('nativeId' in output) return output.nativeId === 'ETH' && output.decimals === 18 ? 'ETH' : null;
+  const asset = resolveNetworkAsset(profile.chain, { address: output.address.toLowerCase() });
+  if (!asset || asset.decimals !== output.decimals) return null;
+  // A label is safe to seed only when the picker resolves it back to the very same asset.
+  try { return authoringAssetSymbol(profile.chain, asset.symbol) === asset.symbol ? asset.symbol : null; }
+  catch { return null; }
 }
 /** A test token and its mainnet asset, as one step moves between its network family's environments; any other token keeps its symbol. */
 const TOKEN_COUNTERPARTS: readonly (readonly [string, string])[] = [['devUSDC', 'USDC']];

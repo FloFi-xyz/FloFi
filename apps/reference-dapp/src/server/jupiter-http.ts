@@ -2,14 +2,46 @@
 /** Jupiter swap-build HTTP client shared by the in-process server action and the cloud backend (read-only quotes/builds). */
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 
+const ATTEMPT_TIMEOUT_MS = 8_000;
+const RETRY_WAIT_LIMIT_MS = 1_500;
+
+function retryDelay(retryAfter: string | null): number {
+  const jitter = Math.floor(Math.random() * 200);
+  if (retryAfter === null) return 500 + jitter;
+  const wait = /^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now();
+  return Number.isFinite(wait) ? Math.max(0, wait) + jitter : Infinity;
+}
+
 export function createJupiterHttp(buildEndpoint: string, apiKey: string | undefined): JupiterHttp {
   return async query => {
-    const response = await fetch(buildEndpoint + '?' + new URLSearchParams(query), { cache: 'no-store', signal: AbortSignal.timeout(20_000),
-      headers: apiKey ? { 'x-api-key': apiKey } : {} });
-    const text = await response.text(); if (text.length > 1_048_576) throw new Error('JUPITER_RESPONSE_TOO_LARGE');
-    if (response.status === 429) throw new Error('JUPITER_RATE_LIMITED');
-    if (response.status === 400 && /No routes found/.test(text)) throw new Error('JUPITER_NO_ROUTE');
-    if (!response.ok) throw new Error('JUPITER_UNAVAILABLE');
-    return JSON.parse(text) as unknown;
+    const url = buildEndpoint + '?' + new URLSearchParams(query);
+    // One retry within the existing request budget, only for the read-only /build GET.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const signal = AbortSignal.timeout(ATTEMPT_TIMEOUT_MS);
+      let response: Response;
+      let body: string;
+      try {
+        response = await fetch(url, { cache: 'no-store', signal, headers: apiKey ? { 'x-api-key': apiKey } : {} });
+        body = await response.text();
+      } catch {
+        if (attempt) throw new Error(signal.aborted ? 'JUPITER_QUOTE_TIMEOUT' : 'JUPITER_UNAVAILABLE');
+        await new Promise(resolve => setTimeout(resolve, retryDelay(null)));
+        continue;
+      }
+      if (body.length > 1_048_576) throw new Error('JUPITER_RESPONSE_TOO_LARGE');
+      const transient = [429, 502, 503, 504].includes(response.status);
+      if (!attempt && transient) {
+        const wait = retryDelay(response.headers.get('retry-after'));
+        if (wait <= RETRY_WAIT_LIMIT_MS) {
+          await new Promise(resolve => setTimeout(resolve, wait));
+          continue;
+        }
+      }
+      if (response.status === 429) throw new Error('JUPITER_RATE_LIMITED');
+      if (response.status === 400 && /No routes found/.test(body)) throw new Error('JUPITER_NO_ROUTE');
+      if (!response.ok) throw new Error('JUPITER_UNAVAILABLE');
+      return JSON.parse(body) as unknown;
+    }
+    throw new Error('JUPITER_UNAVAILABLE');
   };
 }

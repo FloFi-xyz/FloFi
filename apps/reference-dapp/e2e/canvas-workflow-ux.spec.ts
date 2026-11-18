@@ -4,7 +4,7 @@ import type { Page } from '@playwright/test';
 import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr, sendChatCommand } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { workflowOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { continueToBuilder, openBuilder, useDockedToolbar, useToolbarRail } from './build-entry-navigation';
+import { continueToBuilder, openBuilder, openEditorSection, useDockedToolbar, useToolbarRail } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 const cards = (page: Page) => page.locator('.build-flow-surface .react-flow__node');
 const viewport = (page: Page) => page.locator('.build-flow-surface .react-flow__viewport');
@@ -15,6 +15,35 @@ async function open(page: Page) {
 }
 /** BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply). */
 const say = sendChatCommand;
+test('a followed Send uses the swap output and the same workflow survives stage navigation', async ({ page, networkGuard }) => {
+  await page.setViewportSize({ width: 1536, height: 1080 });
+  await open(page);
+  await say(page, 'swap 1 USDC to WETH on Arbitrum One');
+  await visibleCards(page, 1);
+  await page.getByRole('button', { name: 'Add send', exact: true }).click();
+  const send = cards(page).last();
+  await expect(send.getByRole('textbox', { name: 'Source amount (WETH)' })).toHaveValue('0');
+  await expect(send.locator('.composer-network-badge').first()).toHaveAttribute('aria-label', 'Arbitrum One network');
+  await send.getByRole('textbox', { name: 'To', exact: true }).fill('0x3333333333333333333333333333333333333333');
+  const amount = send.getByRole('textbox', { name: 'Source amount (WETH)' });
+  await amount.fill('0.0001');
+  await amount.press('Enter');
+  await visibleCards(page, 2);
+  const workflow = await ir(page);
+  expect(workflow.nodes[1]?.dependencies).toEqual([workflow.nodes[0]?.nodeId]);
+  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await settledViewport(page);
+  const view = await viewport(page).getAttribute('style');
+  await openEditorSection(page, 'Simulate');
+  await expect(page.locator('.simulate-flow-surface')).toHaveAttribute('data-viewport', 'fitted');
+  await expect(page.getByRole('heading', { name: 'Workflow simulation', exact: true })).toBeVisible();
+  await expect(page.getByText('You are authorizing', { exact: true })).toHaveCount(0);
+  await openEditorSection(page, 'Build');
+  await expect.poll(() => viewport(page).getAttribute('style')).toBe(view);
+  expect(await ir(page)).toEqual(workflow);
+  await assertPassiveWallet(page);
+  networkGuard.assertClean();
+});
 async function settledViewport(page: Page) {
   let last: string | null = null, stable = 0;
   await expect.poll(async () => {

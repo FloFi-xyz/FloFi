@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useReducer, useRef, 
 import { BaseObservationError, createReviewContext, lintWorkflow, reviewContextForChain, type ReviewContext, type ReviewResult } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, type EditorState } from '../domain/editor';
 import { editorHistoryReducer, initialEditorHistory } from '../domain/editor-history';
-import { readCanvasLayout, saveCanvasLayout, type CanvasLayout } from '../domain/canvas-layout';
+import { readCanvasLayout, saveCanvasLayout, viewportAtCenter, viewportCenter, type CanvasLayout, type CanvasViewport } from '../domain/canvas-layout';
 import { describeProposal } from '../domain/proposal';
 import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from '../domain/network-scope';
 import { chainReducer, checkChainAccess, initialChainState, type ChainState } from '../domain/artifact-chain';
@@ -29,14 +29,15 @@ import { jupiterStatus } from '../app/jupiter-action';
 import { routerStatus } from '../app/router-action';
 import { universalStatus } from '../app/universal-router-action';
 import { ROUTER_NETWORK_OPTIONS, type RouterNetwork } from '../domain/router-authoring';
+import type { WalletEnvironment } from '../wallet/environment';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
-  cryptoSelections: CryptoSelections; editCryptoSelection(id: string, selection: CryptoSelection, beneficiary?: string): void;
+  cryptoSelections: CryptoSelections; editCryptoSelection(id: string, selection: CryptoSelection, beneficiary?: string, automatic?: boolean): void;
   reviewCryptoPool(id: string, input: CryptoActionInput): string | null;
   actionSetup: CanvasActionSetup | null; amountInputs: CanvasAmountInputs; authoringIncomplete: boolean;
   bridgeNetworkInputs: CanvasBridgeNetworkInputs; editBridgeNetworks(id: string, patch: Partial<CanvasBridgeNetworks>): void;
-  startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string): string;
+  startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment): string;
   /** BUILD-RH-002: the Stocks card, a Robinhood Chain catalog swap (USDG → Stock Token). */
   startStocksSetup(position: { x: number; y: number }): string;
   editCanvasAmount(id: string, amount: string): void; cancelCanvasAmount(id: string): void;
@@ -63,6 +64,8 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   /** UX-004: true once the owner created a new workflow in this visit; a persisted run is recovered only into the visit's initial draft. */
   newWorkflow: boolean;
   canvasLayout: CanvasLayout; canUndo: boolean; canRedo: boolean; undo(): void; redo(): void;
+  readCanvasViewport(width: number, height: number, stacked?: boolean): CanvasViewport | undefined;
+  rememberCanvasViewport(view: CanvasViewport, width: number, height: number, stacked?: boolean): void;
   moveCanvasNodes(positions: Readonly<Record<string, { x: number; y: number }>>): void;
   addCanvasCommand(command: Command, position: { x: number; y: number }): void;
   duplicateCanvasNodes(nodeIds: readonly string[]): void;
@@ -422,9 +425,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'UNDO' });
     return true;
   }, []);
-  function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string) {
+  function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string, environment?: WalletEnvironment) {
     if (history.actionSetup) return history.actionSetup.id;
-    dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}) });
+    dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}), ...(environment ? { environment } : {}) });
     return `action-setup-${history.setupSerial + 1}`;
   }
   function startStocksSetup(position: { x: number; y: number }) {
@@ -444,8 +447,8 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'EDIT_SWAP_SETUP_DIRECTION', id, direction });
     setPending(current => current?.authoringId === id ? null : current);
   }
-  function editCryptoSelection(id: string, selection: CryptoSelection, beneficiary?: string) {
-    dispatchHistory({ type: 'EDIT_CRYPTO_SELECTION', id, selection, context, ...(beneficiary ? { beneficiary } : {}) });
+  function editCryptoSelection(id: string, selection: CryptoSelection, beneficiary?: string, automatic = false) {
+    dispatchHistory({ type: 'EDIT_CRYPTO_SELECTION', id, selection, context, automatic, ...(beneficiary ? { beneficiary } : {}) });
     setPending(current => current?.authoringId === id || (current && 'nodeId' in current.command && current.command.nodeId === id) ? null : current);
   }
   function editBridgeNetworks(id: string, patch: Partial<CanvasBridgeNetworks>) {
@@ -524,6 +527,18 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (!checkChainAccess(chainRef.current, workflowRef.current, Date.now(), performance.now()).ok) { accessCheck(); return; }
     generateArtifacts();
   }, [accessCheck, generateArtifacts]);
+  const viewportMemory = useRef<{ id: string; stacked?: CanvasViewport; standard?: CanvasViewport } | null>(null);
+  const canvasId = state.workflow.workflowId;
+  const readCanvasViewport = useCallback((width: number, height: number, stacked = false) => {
+    const saved = viewportMemory.current;
+    const center = saved?.id === canvasId ? saved[stacked ? 'stacked' : 'standard'] : undefined;
+    return center && viewportAtCenter(center, width, height);
+  }, [canvasId]);
+  const rememberCanvasViewport = useCallback((view: CanvasViewport, width: number, height: number, stacked = false) => {
+    if (!width || !height) return;
+    const previous = viewportMemory.current;
+    viewportMemory.current = { ...previous?.id === canvasId ? previous : { id: canvasId }, [stacked ? 'stacked' : 'standard']: viewportCenter(view, width, height) };
+  }, [canvasId]);
   return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
     canvasRestoring: pendingRestorations > 0, trackCanvasRestoration,
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
@@ -531,7 +546,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
-    canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
+    canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, readCanvasViewport, rememberCanvasViewport,
     pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>

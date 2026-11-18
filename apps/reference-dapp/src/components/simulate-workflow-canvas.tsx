@@ -2,8 +2,8 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ReactFlow, Background, MarkerType, Panel, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeProps, type ReactFlowState } from '@xyflow/react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ReactFlow, Background, MarkerType, Panel, getNodesBounds, getViewportForBounds, useReactFlow, useStore, useStoreApi, useUpdateNodeInternals, type Node, type NodeProps, type ReactFlowState, type Viewport } from '@xyflow/react';
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { composerActions, composerConnections, composerSummary } from '../domain/composer-presentation';
 import { CANVAS_ROW, shownCanvasPositions } from '../domain/canvas-layout';
@@ -48,8 +48,9 @@ function useNarrowFrame(frame: { readonly current: HTMLElement | null }): boolea
 }
 
 /** Viewport state is presentation only. Nodes, order, links and parameters come from the shared draft. */
-function InspectionViewport({ onState, padding }: { onState: (value: 'pending' | 'fitted') => void; padding: ReturnType<typeof fitPadding> }) {
+function InspectionViewport({ onState, padding, stacked }: { onState: (value: 'pending' | 'fitted') => void; padding: ReturnType<typeof fitPadding>; stacked: boolean }) {
   const store = useStoreApi();
+  const { readCanvasViewport } = useWorkflow();
   const updateNodeInternals = useUpdateNodeInternals();
   const requestedMeasurement = useRef<string | null>(null);
   const ready = useStore((state: ReactFlowState) => state.panZoom !== null);
@@ -72,11 +73,11 @@ function InspectionViewport({ onState, padding }: { onState: (value: 'pending' |
     requestedMeasurement.current = null;
     if (nodes.length) {
       // Set the viewport directly: controlled read-only nodes have no authoring change callback.
-      const viewport = getViewportForBounds(getNodesBounds(nodes), state.width, state.height, 0.35, 1.1, padding);
+      const viewport = readCanvasViewport?.(state.width, state.height, stacked) ?? getViewportForBounds(getNodesBounds(nodes), state.width, state.height, 0.35, 1.1, padding);
       void setViewport(viewport, { duration: 0 });
     }
     onState('fitted');
-  }, [ready, signature, setViewport, onState, store, updateNodeInternals, padding]);
+  }, [ready, signature, setViewport, onState, store, updateNodeInternals, padding, readCanvasViewport, stacked]);
   return null;
 }
 
@@ -96,7 +97,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   /** The frame's caption line ("Execution plan · Configured on the Canvas"); off where the docked Review already says what runs (board 06). */ foot?: boolean;
   /** The docked panel's landmark name; null when the docked content already names itself (e.g. Execute's status panel). */ dockLabel?: string | null }) {
   const { t: tr } = useLocale();
-  const { state, context, canvasLayout, reviewError, actionSetup } = useWorkflow();
+  const { state, context, canvasLayout, reviewError, actionSetup, rememberCanvasViewport } = useWorkflow();
   const workflow = state.workflow;
   const actions = composerActions(workflow);
   const execution = canvasExecutionFor(executionInput, workflow);
@@ -106,7 +107,12 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   const { evm: evmAccount, solana: solanaAccount } = useEstimateOwners();
   // BUILD-FLOFI-BUILDER-UX-002: the same flow placement as the Build Canvas, so a step keeps its place between Create and Simulate.
   const frame = useRef<HTMLElement>(null);
+  const surface = useRef<HTMLDivElement>(null);
   const narrow = useNarrowFrame(frame) && !lending;
+  const rememberView = useCallback((view: Viewport) => {
+    const pane = surface.current;
+    if (pane) rememberCanvasViewport?.(view, pane.clientWidth, pane.clientHeight, narrow);
+  }, [rememberCanvasViewport, narrow]);
   const positions = useMemo(() => {
     if (narrow) return Object.fromEntries(composerActions(workflow).map((node, index) => [node.nodeId, { x: 0, y: index * CANVAS_ROW }]));
     const setup = actionSetup ? canvasLayout?.[actionSetup.id] : undefined;
@@ -159,18 +165,18 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     style={{ '--canvas-steps': nodes.length } as CSSProperties}>
     <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length === 1 ? '1 step' : '{0} steps', actions.length)}</span></div>
     <div className="simulate-canvas-body">
-    <div className="flow-surface simulate-flow-surface" style={surfaceStyle} role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
+    <div ref={surface} className="flow-surface simulate-flow-surface" style={surfaceStyle} role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} nodesFocusable={false} edgesFocusable={false}
-        deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES} proOptions={CANVAS_PRO_OPTIONS}>
-        <InspectionViewport onState={setViewport} padding={padding}/>
+        deleteKeyCode={null} fitViewOptions={{ padding }} {...CANVAS_GESTURES} proOptions={CANVAS_PRO_OPTIONS} onMoveEnd={(event, view) => { if (event) rememberView(view); }}>
+        <InspectionViewport onState={setViewport} padding={padding} stacked={narrow}/>
         <Background gap={18} size={1} color="var(--grid)"/>
         <DarkSpotlight/>
         {/* BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: one bottom control group laid out by the flow, never by offsets against each other: the
             Canvas navigator on its own centred line, then Back to the Canvas immediately left of the primary action, bottom-right. A step note
             takes its own line above the buttons, so no width, locale or note can make the navigator and the actions overlap. */}
         <Panel ref={controls} position="bottom-right" className="simulation-canvas-controls">
-          <CanvasNavigator embedded fitViewOptions={{ padding }} compactBelow={1024}/>
+          <CanvasNavigator embedded fitViewOptions={{ padding }} compactBelow={1024} onViewportChange={rememberView}/>
           {primaryAction && <div className={`canvas-primary-action simulation-canvas-actions${execution ? ' execution-lifecycle-actions' : ''}`}>{primaryAction}</div>}
         </Panel>
       </ReactFlow>

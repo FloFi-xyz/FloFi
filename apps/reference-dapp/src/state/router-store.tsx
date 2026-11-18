@@ -224,9 +224,11 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   async function simulate() { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
-    const owner = await establishSession(), snapshot = latest.current;
-    const value = unwrap(await routerSimulate(network, snapshot, owner.account));
-    if (latest.current !== snapshot) throw new Error('ROUTER_SEMANTIC_REVISION_CHANGED');
+    const snapshot = latest.current, owner = await establishSession();
+    if (latest.current !== snapshot) return;
+    const result = await routerSimulate(network, snapshot, owner.account);
+    if (latest.current !== snapshot || latestSession.current?.account !== owner.account) return;
+    const value = unwrap(result);
     setRecovered(false); accept(value); void refreshRuns();
   }); }
   async function refresh() { await operation(async () => { if (!record) throw new Error('ROUTER_RUN_MISSING'); accept(unwrap(await routerRefresh(networkOfRecord(record), record.id))); }); }

@@ -21,12 +21,13 @@ import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
  * wide enough for both, under the graph otherwise (a container query on the frame, so the first paint is already final). It is never a third
  * column between the Canvas and the FloFi Assistant, never a disclosure detached below the page, and never laid over a card.
  */
-export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHost, simulationSource, simulationReason, review, simulateAction, children, detailsOnly = false, sequenceNote = null, renderPanel }: {
+export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHost, simulationSource, simulationReason, review, simulateAction, children, detailsOnly = false, sequenceNote = null, renderPanel, panelLabel = 'Review' }: {
   workflowName: string; returnToBuild?: (() => void) | undefined; reviewActionHost?: Ref<HTMLDivElement> | undefined; children?: ReactNode; review?: ReactNode; simulateAction?: ReactNode; simulationSource?: SimulationSource | undefined; simulationReason?: string | null;
   detailsOnly?: boolean;
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: the sequence step this summary describes (it never stands for the whole workflow). */
   sequenceNote?: string | null;
   renderPanel?: ((technical: ReactNode) => ReactNode) | undefined;
+  panelLabel?: string;
 }) {
   const { t: tr } = useLocale();
   // The summary describes the simulated workflow: a sequence's current step (BUILD-FLOFI-CHAT-E2E-FIX-002), else the canonical workflow.
@@ -50,7 +51,7 @@ export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHos
   const dock = panel ?? (detailsOnly ? null : summary);
   return <section className="simulate-workspace" aria-label={tr("Workflow simulation workspace")} data-review-panel={panel ? 'open' : undefined}>
     <div className="simulate-workspace-grid stage-grid-single">
-      <SimulateWorkflowCanvas workflowName={workflowName} primaryAction={canvasAction} dock={dock} dockLabel={panel ? 'Review' : 'Simulation Summary'}/>
+      <SimulateWorkflowCanvas workflowName={workflowName} primaryAction={canvasAction} dock={dock} dockLabel={panel ? panelLabel : 'Simulation Summary'}/>
     </div>
     {detailsOnly && !panel && <details className="shell-details stage-details simulation-details" open={blocked || undefined}><summary>{tr('Simulation details')}</summary>{summary}</details>}
     {children}
