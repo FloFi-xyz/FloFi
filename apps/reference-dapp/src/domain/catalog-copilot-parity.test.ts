@@ -39,11 +39,11 @@ function expectParity(session: CopilotSession, command: Command, sentence: strin
 }
 
 describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
-  it('swaps any Base catalog token the user names (cbbtc → cbBTC) through the same exact grammar, with a real-funds note', () => {
+  it('swaps any Base catalog token the user names (cbbtc → cbBTC) through the same exact grammar, with a signing-boundary note', () => {
     const s = new CopilotSession();
     const reply = s.say('Please swap 100 USDC for some cbbtc on Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'cbbtc', amount: '100' })))!;
     expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 100 USDC to cbBTC on Base slippage 100 bps', command: { type: 'ADD_CRYPTO_ACTION' } });
-    expect(reply.notes.join(' ')).toContain('Real funds on Base');
+    expect(reply.notes.join(' ')).toContain("Your wallet signs every transaction on Base");
     expectParity(s, reply.command!, reply.sentence!);
     const node = editorReducer({ workflow: s.workflow, error: null }, reply.command!, s.context).workflow.nodes.at(-1)!;
     expect(JSON.stringify(node)).toContain(baseAsset(baseCatalog(), 'cbBTC').address!);
@@ -117,7 +117,7 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
     const s = new CopilotSession();
     const supply = s.say('Please lend 100 USDC on Aave on Base', intent.action(act.lending('SUPPLY', { network: 'BASE', asset: 'USDC', amount: '100' })))!;
     expect(supply).toMatchObject({ kind: 'PROPOSAL', sentence: 'supply 100 USDC to Aave on Base', command: { type: 'ADD_SUPPLY', input: { network: 'Base', beneficiary: TEST_WALLET } } });
-    expect(supply.notes.join(' ')).toContain('Real funds on Base');
+    expect(supply.notes.join(' ')).toContain("Your wallet signs every transaction on Base");
     expectParity(s, supply.command!, supply.sentence!);
     const bridge = new CopilotSession().say('Move 20 USDC from Arbitrum over to Base', intent.action(act.bridge({ sourceNetwork: 'ARBITRUM', destinationNetwork: 'BASE', asset: 'USDC', amount: '20' })))!;
     expect(bridge).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 20 USDC from Arbitrum to Base via auto slippage 100 bps', command: { type: 'ADD_ROUTER_BRIDGE' } });
@@ -229,6 +229,6 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
   it('answers in Portuguese with the same proposal', () => {
     const reply = new CopilotSession().say('Quero trocar 100 USDC por cbBTC na Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'cbBTC', amount: '100' }), 'PT'))!;
     expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 100 USDC to cbBTC on Base slippage 100 bps' });
-    expect(reply.notes.join(' ')).toContain('Fundos reais na Base');
+    expect(reply.notes.join(' ')).toContain("Sua carteira assina cada transação na Base");
   });
 });

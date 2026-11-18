@@ -30,6 +30,33 @@ const lifecycle = (over: Over = {}, kind: 'router' | 'universal' = 'router') => 
   { kind, state: { record: record(over), busy: false, signing: false, recovered: false } } as unknown as ExecutionLifecycleSource);
 const view = (live: ExecutionLifecycle): LifecycleView => ({ progress: live, workflowProgress: workflowProgressView({ sequence: null, live }) } as unknown as LifecycleView);
 
+// BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): every simulation resolves into a defined outcome — bounded waits, truthful differentiated
+// refusals (route unavailable / provider minimum / liquidity / timeout), and late answers that are dropped, never adopted.
+describe('FIX-09: bounded simulation outcomes', () => {
+  it('turns an unanswered wallet sign-in or quote read into a truthful, translated refusal with a retry path', async () => {
+    const { simulationError } = await import('./simulation-presentation');
+    const signin = simulationError('UNIVERSAL_WALLET_SIGNIN_TIMEOUT'), quote = simulationError('UNIVERSAL_SIMULATION_TIMEOUT');
+    expect(signin).toMatch(/was not simulated and nothing was signed or sent/);
+    expect(quote).toMatch(/did not answer in time/);
+    for (const message of [signin, quote]) expect(translate('PT', message), message).not.toBe(message);
+    // Distinct causes keep distinct, truthful messages: an unavailable route is never a minimum, a minimum is never a generic failure.
+    const route = simulationError('UNIVERSAL_NO_EXECUTABLE_ROUTE'), minimum = simulationError('RELAY_AMOUNT_TOO_LOW'), liquidity = simulationError('RELAY_INSUFFICIENT_LIQUIDITY');
+    expect(route).toMatch(/No bridge route/); expect(minimum).toMatch(/below the bridge provider/); expect(liquidity).toMatch(/enough liquidity/);
+    expect(new Set([route, minimum, liquidity, signin, quote]).size).toBe(5);
+  });
+  it('bounded(): the awaited work settles first or the coded refusal does; a late answer is never consumed', async () => {
+    const { bounded } = await import('../state/universal-router-store');
+    await expect(bounded(Promise.resolve('ok'), 1_000, 'X_TIMEOUT')).resolves.toBe('ok');
+    await expect(bounded(Promise.reject(new Error('OWN_CODE')), 1_000, 'X_TIMEOUT')).rejects.toThrow('OWN_CODE');
+    let late: ((value: string) => void) | null = null;
+    const hanging = new Promise<string>(resolve => { late = resolve; });
+    await expect(bounded(hanging, 1, 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT')).rejects.toThrow('UNIVERSAL_WALLET_SIGNIN_TIMEOUT');
+    // The late answer resolves the underlying promise, but the timed-out caller already threw: nothing adopts it.
+    late!('too-late');
+    await hanging;
+  });
+});
+
 describe('EXEC-02: a delivery observed on the destination while finality is pending', () => {
   it('is "Transfer observed on Arbitrum", still pending, never a completed step and nothing to sign again', () => {
     const live = lifecycle(), destination = live.steps[0]!.operations.at(-1)!;

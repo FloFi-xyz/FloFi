@@ -7,12 +7,14 @@
  * approves, submits, executes or skips Simulate and Review. Without an authoritative balance of the exact asset in the wallet that would sign,
  * the buttons stay visible but disabled, with the reason; nothing is estimated.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { walletPortfolio } from '../app/portfolio-action';
 import { amountBalance, amountShortcuts, amountSource, NATIVE_FEE_RESERVE, shortcutFigure, workflowTouches, type AmountShortcut, type AmountShortcutKey,
   type AwaitingAmount } from '../domain/amount-shortcuts';
+import { networkCatalogsVersion, subscribeNetworkCatalogs } from '../domain/asset-catalogs';
 import type { Workflow } from '../domain/initial-workflow';
 import { networkOfCopilot } from '../domain/network-registry';
+import { ensureNetworkCatalog } from '../state/asset-catalog-store';
 import { useLocale } from '../i18n/locale';
 
 type Read = { readonly status: 'loading' } | { readonly status: 'ready'; readonly units: bigint; readonly observedAt: string | null }
@@ -29,7 +31,12 @@ export function AmountShortcuts({ request, evm, solana, workflow, disabled, stil
   const lang = language === 'PT' ? 'PT' : 'EN';
   // Keyed on the asset and network written (the request object is rebuilt on every render of the panel).
   const { asset, network } = request;
-  const source = useMemo(() => amountSource({ asset, network }), [asset, network]);
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-01): the question can render before the network's catalog is registered; the asset identity is
+  // re-resolved when a catalog arrives (and the missing catalog is loaded below), so the shortcuts appear instead of silently never rendering.
+  const catalogVersion = useSyncExternalStore(subscribeNetworkCatalogs, networkCatalogsVersion, networkCatalogsVersion);
+  const source = useMemo(() => { void catalogVersion; return amountSource({ asset, network }); }, [asset, network, catalogVersion]);
+  const identity = networkOfCopilot(network);
+  useEffect(() => { if (!source && identity.catalog) void ensureNetworkCatalog(false, identity.chain); }, [source, identity.catalog, identity.chain]);
   const owner = source ? source.ecosystem === 'evm' ? evm : solana : null;
   // A step already in the workflow spends or delivers this asset here: today's balance says nothing about this step (no shortcut at all).
   const follows = useMemo(() => source ? workflowTouches(workflow, source) : true, [source, workflow]);

@@ -161,13 +161,24 @@ export const featuredAssets = (catalog: AssetCatalog): readonly CanonicalAsset[]
 export const assetDisplayName = (asset: Pick<CanonicalAsset, 'name'>): string => asset.name.replace(/\s*[•·]\s*Robinhood Token$/u, '').trim();
 const nameKey = (text: string) => text.normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
 /**
+ * BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-04/FIX-05): verified aliases people write for well-known identities, never invented per token.
+ * "Ethereum"/"Ether" names the native coin ETH (its catalog name is "Ether"); "Wrapped ETH"/"Wrapped Ether"/"WETH9" names canonical WETH.
+ * Aliases only widen written-reference matching; they never merge the two assets (native ETH and WETH stay separately selectable).
+ */
+export function assetAliases(asset: Pick<CanonicalAsset, 'symbol' | 'assetClass'>): readonly string[] {
+  if (asset.assetClass === 'NATIVE' && asset.symbol.toUpperCase() === 'ETH') return ['ETHEREUM', 'ETHER'];
+  if (asset.assetClass === 'WRAPPED_NATIVE' && asset.symbol.toUpperCase() === 'WETH') return ['WRAPPED ETH', 'WRAPPED ETHER', 'WETH9'];
+  return [];
+}
+/**
  * BUILD-BASE-001: the assets whose display name or full catalog name is exactly `name` (case- and spacing-insensitive), never a fragment:
  * "tesla" names TSLA ("Tesla • Robinhood Token"); "Coinbase BTC" names nothing. More than one result is an ambiguity the caller must ask
  * about; this never chooses.
  */
 export function catalogAssetsByName(catalog: AssetCatalog, name: string): readonly CanonicalAsset[] {
   const wanted = typeof name === 'string' ? nameKey(name) : '';
-  return wanted ? catalog.assets.filter(asset => nameKey(assetDisplayName(asset)) === wanted || nameKey(asset.name) === wanted) : [];
+  return wanted ? catalog.assets.filter(asset => nameKey(assetDisplayName(asset)) === wanted || nameKey(asset.name) === wanted
+    || assetAliases(asset).some(alias => nameKey(alias) === wanted)) : [];
 }
 
 /**
@@ -182,9 +193,9 @@ export function searchAssets(catalog: AssetCatalog, query: string, options: { re
   // Identity queries never degrade into a cross-chain symbol/name match.
   if (/^(?:0X|EIP155:)/.test(text)) return pool.filter(asset => asset.address?.toUpperCase() === text || asset.id.toUpperCase() === text).slice(0, limit);
   const rank = (asset: CanonicalAsset): number => {
-    const symbol = asset.symbol.toUpperCase(), name = assetDisplayName(asset).toUpperCase();
-    if (symbol === text) return 0;
-    if (symbol.startsWith(text)) return 1;
+    const symbol = asset.symbol.toUpperCase(), name = assetDisplayName(asset).toUpperCase(), aliases = assetAliases(asset);
+    if (symbol === text || aliases.some(alias => alias === text)) return 0;
+    if (symbol.startsWith(text) || aliases.some(alias => alias.startsWith(text))) return 1;
     if (name.split(/[^A-Z0-9]+/).some(word => word.startsWith(text)) || name.startsWith(text)) return 2;
     if (symbol.includes(text) || name.includes(text)) return 3;
     return -1;

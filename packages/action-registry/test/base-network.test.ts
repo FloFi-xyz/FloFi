@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { AAVE_V3_BASE, AAVE_V3_LENDING_PROFILES, BASE_BASE_ASSETS, BASE_FEATURED_ASSETS, BASE_MAINNET, BASE_MAINNET_TRANSFER, BASE_TOKEN_LIST,
   CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_BASE_ARBITRUM, ROBINHOOD_BASE_ASSETS, UNISWAP_V3_BASE, UNISWAP_V3_ROBINHOOD_CATALOG, aaveEnvironment, aaveLendingProfile,
-  baseAddChainParameters, baseLiquidityPool, catalogAsset, catalogLiquidityPool, catalogPoolOn, contentSha256, createAssetRegistry, executionCapabilityRegistry,
+  baseAddChainParameters, baseLiquidityPool, catalogAsset, catalogAssetsByName, catalogLiquidityPool, catalogPoolOn, contentSha256, createAssetRegistry, executionCapabilityRegistry,
   featuredAssets, isBaseNetworkCatalog, mergeAssetCatalogs, nativeTransferProfile, parseBaseTokenList, robinhoodLiquidityPool, routerProfileFor, searchAssets,
   transferAllowsRecipients, transferAllowsTokens, transferEnvironment, transferL1FeeOracle, uniswapCatalogDeployment, uniswapV3PoolAddress,
   workflowAsset } from '../src/index.js';
@@ -83,6 +83,19 @@ describe('BUILD-BASE-001 Base asset catalog (Uniswap Labs Default Token List pol
     expect(searchAssets(catalog, 'zzzz-no-such-token')).toEqual([]);
     expect(searchAssets(catalog, '', { limit: 5 })).toHaveLength(5);
     expect(workflowAsset(cbbtc)).toEqual({ chainId: 'eip155:8453', address: CBBTC, decimals: 8 });
+  });
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-05): verified aliases find the native coin and canonical WETH; the two stay distinct assets.
+  it('finds native ETH by "Ethereum"/"Ether"/"eth" and WETH by "wrapped ether"/"WETH9", case-insensitively, ranked first', () => {
+    const native = catalog.assets.find(asset => asset.assetClass === 'NATIVE')!;
+    const weth = catalogAsset(catalog, { symbol: 'WETH' })!;
+    for (const query of ['Ethereum', 'ETHEREUM', 'ethereum', 'Ether', 'eth']) expect(searchAssets(catalog, query)[0]).toBe(native);
+    for (const query of ['wrapped ether', 'Wrapped ETH', 'WETH9', 'weth']) expect(searchAssets(catalog, query)[0]).toBe(weth);
+    // Alias matching never merges the assets: both remain in the results, separately selectable, with their own identities.
+    expect(searchAssets(catalog, 'eth')).toContain(weth);
+    expect(native.address).toBeNull(); expect(weth.address).not.toBeNull();
+    // Whole-name resolution accepts the aliases too (the shared resolver path used by chat and the Canvas).
+    expect(catalogAssetsByName(catalog, 'Ethereum')).toEqual([native]);
+    expect(catalogAssetsByName(catalog, 'Wrapped ETH')).toEqual([weth]);
   });
   it('excludes, and counts, a symbol outside the FloFi grammar instead of renaming it', () => {
     expect(catalogAsset(catalog, { symbol: '1INCH' })).toBeNull();

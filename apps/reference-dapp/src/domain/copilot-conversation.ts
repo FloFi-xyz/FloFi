@@ -901,7 +901,9 @@ function actionFills(intent: CopilotIntentV2, missing: readonly string[], option
  * BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): FloFi's own open question when, and only when, it waits for the AMOUNT of one single action
  * that spends a wallet balance (swap input, bridge, transfer, Aave supply) on a named network and asset, and nothing else is missing. Read from
  * the structured draft (never from the question's wording). Null for a goal plan's amount or cap (a future output), a composition or sequence,
- * a liquidity deposit, Borrow/Repay/Withdraw (not a wallet balance; Repay and Withdraw are partial-only) and a question the model asked.
+ * a liquidity deposit and Borrow/Repay/Withdraw (not a wallet balance; Repay and Withdraw are partial-only). A model-phrased clarification
+ * qualifies only when it waits for exactly the amount of one open action whose asset and network the person stated (FIX-01: both
+ * clarification paths carry the same structured metadata; the model's wording never widens what a shortcut may do).
  */
 export function awaitingAmount(state: CopilotConversation): AwaitingAmount | null {
   const draft = state.draft;
@@ -1382,8 +1384,15 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
     case 'CLARIFICATION_REQUIRED': {
       const text = publicText(safeCopilotProse(intent.question)) || m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
       // BUILD-FLOFI-UX-FIX-003: an option the model wrote that names a test network is never offered in the public product.
+      // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-01): a model-phrased question waiting for exactly the AMOUNT of one open action carries the
+      // same structured metadata as the engine's own (`amountFill` + validated grounding evidence), so the UX-02 balance shortcuts are offered
+      // consistently on both clarification paths. `awaitingAmount` still enforces every guard: the asset and network must be the person's own
+      // stated words (or carried), nothing else missing, no option buttons, and the shortcut only ever writes the amount as the answer.
+      const kept = state.draft?.intent ?? intent;
+      const expected = intent.missing.map(field => field === 'asset' && state.draft?.expected?.length === 1 ? state.draft.expected[0]! : field);
+      const amountFill = kept.kind === 'ACTION' && expected.length === 1 && expected[0] === 'amount' && kept.action.type !== 'LIQUIDITY';
       return question(state, m, text, intent.options.flatMap(option => publicText(safeCopilotProse(option)) ?? []),
-        { intent: state.draft?.intent ?? intent, expected: intent.missing.map(field => field === 'asset' && state.draft?.expected?.length === 1 ? state.draft.expected[0]! : field), options: [], amountFill: false, snapshot: snapshotOf(env), ...state.draft?.extras ? { extras: state.draft.extras } : {} });
+        { intent: kept, expected, validated: validatedDraftFields(kept, segmentText(state)), options: [], amountFill, snapshot: snapshotOf(env), ...state.draft?.extras ? { extras: state.draft.extras } : {} });
     }
     case 'QUESTION': {
       let step: WorkflowStep | null = null;

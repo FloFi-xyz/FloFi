@@ -171,7 +171,14 @@ const NATIVE_ETH_WORDS = /\beth\b|\bether\b/i;
 const COIN_VERBS = String.raw`(?:swap|trade|buy|sell|convert|exchange|troca|trocar|troque|compra|comprar|compre|vende|vender|venda|converte|converter|converta)`;
 const ETHEREUM_AS_COIN_SOURCE = String.raw`(?:(?<=\b\d[\d.,]*\s*)|(?<=\b${COIN_VERBS}\s+(?:(?:o|a|os|as|my|meu|meus|minha|the|all|todo|tudo|some|um|uma)\s+)?))ethereum\b`
   + String.raw`|(?<!\b(?:on|in|at|na|no|em|from|da|do|de|to|para|pra|network|rede|chain|mainnet)\s+(?:(?:the|a|o)\s+)?)`
-  + String.raw`\bethereum(?=\s+(?:por|for|to|into|em|pra|para)\s+(?:usdc(?:\.e)?|usdt|weth|wbtc|btc|sol|dai|arb|eth|ether)\b)`;
+  + String.raw`\bethereum(?=\s+(?:por|for|to|into|em|pra|para)\s+(?:usdc(?:\.e)?|usdt|weth|wbtc|btc|sol|dai|arb|eth|ether)\b)`
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-04): "ethereum" as the RECEIVED side of an exchange. "por"/"for" is the exchange preposition
+  // itself ("trocar USDC por ethereum", "swap USDC for ethereum"), so it is always the coin — unless a network word follows ("por ethereum
+  // mainnet" names the network). A directional "to/into/para/pra ethereum" is a bridge or transfer destination network unless another NAMED
+  // network follows ("swap USDC to ethereum on Arbitrum"), which only an asset can precede: one sentence never puts two networks in one slot.
+  // The follower must be a network name (not "at 9am", "em 5 minutos"), so scheduled transfers keep their destination network.
+  + String.raw`|(?<=\b(?:por|for)\s+(?:(?:o|a|the)\s+)?)ethereum\b(?!\s+(?:network|rede|chain|mainnet)\b)`
+  + String.raw`|(?<=\b(?:to|into|para|pra)\s+(?:(?:o|a|the)\s+)?)ethereum(?=\s+(?:on|in|at|na|no|em)\s+(?:(?:the|a|o)\s+)?(?:(?:network|rede|chain)\s+)?(?:base|arbitrum|arb|ethereum|solana|robinhood)\b)`;
 const ETHEREUM_AS_COIN = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'i');
 const ETHEREUM_AS_COIN_ALL = new RegExp(ETHEREUM_AS_COIN_SOURCE, 'gi');
 const NATIVE_ETH_NAMED = { test: (text: string) => NATIVE_ETH_WORDS.test(text) || ETHEREUM_AS_COIN.test(text) };
@@ -182,10 +189,16 @@ export function mentionedNetworks(raw: string): Network[] {
   const text = raw.replace(ETHEREUM_AS_COIN_ALL, ' ');
   return copilotNetworksMentioned(text).filter(id => {
     const identity = networkOfCopilot(id);
-    // Catalog names can equal a chain alias (ARB is named Arbitrum). Asset context alone cannot choose a mainnet.
-    const collision = identity.catalog && [identity.name, ...identity.aliases].some(label => resolveAssetReference(identity.chain, label).kind === 'FOUND');
+    // Catalog names can equal a chain alias (ARB is named Arbitrum). Asset context alone cannot choose a mainnet. A NATIVE coin's verified
+    // alias ("Ethereum" names native ETH) is not such a collision: the coin reading is handled by the coin-position rules above, and treating
+    // it as one would strip ordinary network mentions ("via Ethereum") the registry always accepted.
+    const collision = identity.catalog && [identity.name, ...identity.aliases].some(label => {
+      const found = resolveAssetReference(identity.chain, label);
+      return found.kind === 'FOUND' && found.asset.kind !== 'NATIVE';
+    });
     if (!collision || !identity.chatName) return true;
-    const explicit = new RegExp(`(?:^|\\b(?:on|na|no|da|de|do|from|to|para|network|rede|chain)\\s+(?:(?:the|a|o)\\s+)?)(?:${identity.chatName.source})(?![A-Za-z0-9])`, 'im');
+    // FIX-03: every preposition people put before a network name counts ("na/em/in/at/pra arbitrum"); the list mirrors the coin-position one.
+    const explicit = new RegExp(`(?:^|\\b(?:on|in|at|na|no|em|da|de|do|from|to|para|pra|network|rede|chain)\\s+(?:(?:the|a|o)\\s+)?)(?:${identity.chatName.source})(?![A-Za-z0-9])`, 'im');
     return explicit.test(text);
   });
 }
@@ -296,8 +309,9 @@ const nameNamed = (text: string, asset: CanonicalAsset) => {
   const name = assetDisplayName(asset).trim();
   if (name.length < 3) return false;
   const matches = [...text.matchAll(new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'gi'))];
-  // A token name equal to a network label (e.g. ARB's name Arbitrum) must occur in asset context, not only after 'on'.
-  return matches.some(match => !(networkIdentity(name) || catalogNetworkOfChatName(name)) || !/(?:\b(?:on|na|no|da|de|do|from|to|para|network|rede|chain))\s+(?:(?:the|a|o)\s+)?$/i.test(text.slice(0, match.index)));
+  // A token name equal to a network label (e.g. ARB's name Arbitrum) must occur in asset context, not only after 'on'. FIX-03 review (F1):
+  // this exclusion mirrors the collision filter's preposition list exactly, so one word never grounds both the network and the token.
+  return matches.some(match => !(networkIdentity(name) || catalogNetworkOfChatName(name)) || !/(?:\b(?:on|in|at|na|no|em|da|de|do|from|to|para|pra|network|rede|chain))\s+(?:(?:the|a|o)\s+)?$/i.test(text.slice(0, match.index)));
 };
 
 class Stop { constructor(readonly outcome: CopilotOutcome) {} }
@@ -333,7 +347,9 @@ function resolveNetwork(value: CopilotNetwork | null, supported: readonly Networ
   if (!supported.includes(network)) return ask(['network'], m.networkOnlyOn(what, options), options);
   if (MAINNETS.has(network)) {
     // Real funds are never inferred: the user must name the mainnet (or it is carried from a step they authored) and use no test-network wording.
-    if ((!named.includes(network) && !carried) || testWording(g)) return ask(['network'], m.realFundsWhichNetwork(COPILOT_NETWORK_LABEL[network]), options);
+    // FIX-02: test-network wording keeps the explicit real-funds explanation; an ungrounded mainnet is a plain confirmation (Mainnet-only product).
+    if (testWording(g)) return ask(['network'], m.testWordingWhichNetwork(COPILOT_NETWORK_LABEL[network]), options);
+    if (!named.includes(network) && !carried) return ask(['network'], m.realFundsWhichNetwork(COPILOT_NETWORK_LABEL[network]), options);
     return network;
   }
   if (named.includes(network) || carried) return network;
@@ -429,8 +445,10 @@ function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding
   const missing = g.policy.catalog && (field === 'inputAsset' || field === 'outputAsset') ? field : 'asset';
   if (value === null) return ask([missing], stillNeeds(m, [missing], subject));
   if (value === 'OTHER') return refuse(m.tokenUnsupported(m.tokenSubject[subject]));
-  const ether = /^eth$/i.test(value) && kinds === 'ERC20';
-  const found = resolveAssetReference(chain, ether ? 'WETH' : value);
+  // FIX-04: "ETH", "Ether" and a coin-position "Ethereum" are the same native coin (normalized to the catalog's ETH); WETH stays distinct.
+  const nativeWord = /^(?:eth|ether|ethereum)$/i.test(value);
+  const ether = nativeWord && kinds === 'ERC20';
+  const found = resolveAssetReference(chain, ether ? 'WETH' : nativeWord ? 'ETH' : value);
   if (found.kind === 'INVALID_REFERENCE' || found.kind === 'DECIMALS_MISMATCH') {
     const code = found.kind === 'INVALID_REFERENCE' ? 'ASSET_ADDRESS_INVALID' : 'ASSET_DECIMALS_MISMATCH';
     return refuse(m.universalAssetInvalid(value, label, code), code, [missing]);
@@ -443,10 +461,11 @@ function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding
   }
   const asset = found.asset;
   if (kinds === 'ERC20' && asset.kind !== 'ERC20') return refuse(m.catalogTokenUnknown(value, label), 'ASSET_UNKNOWN', [missing]);
-  // Native ETH is grounded only by the user's ETH/Ether, never by their WETH (FIX 1 review: ETH and WETH stay distinct).
-  const text = /^eth$/i.test(value) && !ether ? g.text.replace(WRAPPED_ETH_WORDS, ' ') : g.text;
-  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || ((found.by === 'SYMBOL' || found.by === 'ADDRESS') && symbolNamed(text, value)) || (/^eth$/i.test(value) && NATIVE_ETH_NAMED.test(text)) ||
-    nameNamed(text, asset);
+  // Native ETH is grounded only by the user's ETH/Ether or a coin-position "Ethereum", never by their WETH and never by "Ethereum" written as a
+  // network (FIX 1 review + FIX-04: ETH and WETH stay distinct; one word never grounds both an asset and a network).
+  const text = nativeWord && !ether ? g.text.replace(WRAPPED_ETH_WORDS, ' ') : g.text;
+  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || (nativeWord ? NATIVE_ETH_NAMED.test(text)
+    : ((found.by === 'SYMBOL' || found.by === 'ADDRESS') && symbolNamed(text, value)) || nameNamed(text, asset));
   if (!grounded) return ask([missing], m.tokenNotFound(value));
   if (found.by === 'NAME' && notes) notes.push(m.catalogNameNote(value, asset.symbol, assetDisplayName(asset), label));
   return { asset, ether };

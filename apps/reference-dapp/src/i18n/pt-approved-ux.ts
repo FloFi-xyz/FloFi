@@ -97,6 +97,11 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
     "A FloFi não consegue enviar WETH pela ponte nesta rota: o provedor da ponte o converte em ETH nativo por meio de contratos que a FloFi não verifica, por isso este passo não foi simulado nem enviado. Envie ETH pela ponte (faça antes o unwrap do WETH) ou USDC.",
   "No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.":
     "Nenhuma rota de ponte que a FloFi consiga verificar e executar está disponível para este valor agora, por isso este passo não foi simulado nem enviado. Tente novamente mais tarde ou altere o valor.",
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): bounded simulation outcomes.
+  "Your wallet did not answer the sign-in request, so this step was not simulated and nothing was signed or sent. Open your wallet and choose Review to try again.":
+    "Sua carteira não respondeu ao pedido de sign-in, então este passo não foi simulado e nada foi assinado nem enviado. Abra sua carteira e escolha Revisar para tentar de novo.",
+  "The bridge provider did not answer in time, so this step was not simulated and nothing was signed or sent. Try again in a moment.":
+    "O provedor de ponte não respondeu a tempo, então este passo não foi simulado e nada foi assinado nem enviado. Tente novamente em instantes.",
   "Below the provider minimum":
     "Abaixo do mínimo do provedor",
   "No executable bridge route":

@@ -42,6 +42,17 @@ type Store = { available: boolean; /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until
   /** Review round 3: the owner's wallets connected in this session or on the FloFi account (not the device's saved Credentials addresses). */
   ownDestinations?: readonly string[] };
 const Context = createContext<Store | null>(null);
+/** FIX-09: how long a simulation waits for the wallet's sign-in signature (a human reads the message) and for the quote round-trip. */
+export const SIGNIN_TIMEOUT_MS = 180_000, SIMULATION_TIMEOUT_MS = 60_000;
+/**
+ * FIX-09: a defined outcome for every awaited step of a simulation. On timeout the awaiting caller throws `code` (busy clears, the refusal is
+ * shown, retry stays available); the underlying promise keeps running but nothing after the timed-out await consumes its late answer, so a
+ * stale result can never overwrite a newer workflow state.
+ */
+export const bounded = <T,>(work: Promise<T>, ms: number, code: string): Promise<T> => new Promise<T>((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(code)), ms);
+  work.then(value => { clearTimeout(timer); resolve(value); }, cause => { clearTimeout(timer); reject(cause); });
+});
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string; correlationId?: string }): T => { if (!result.ok) throw Object.assign(new Error(result.code), { correlationId: result.correlationId }); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
 const ecosystemOfRecord = (record: UniversalRecord): UniversalEcosystem => record.review.source.ecosystem;
@@ -194,8 +205,11 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }); }
   async function simulate() { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending bridge never blocks a new, separate one; earlier runs keep being observed server-side.
-    const account = await establishSession(), snapshot = latest.current;
-    const value = unwrap(await universalSimulate(snapshot, account, destinationWallet ?? undefined));
+    // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): every simulation resolves into a defined outcome. A wallet sign-in the wallet never answers
+    // (production 2026-11-18: "Simulando o fluxo…" forever) or a network call that never settles becomes a coded refusal; busy clears and the
+    // owner can retry. A late answer is dropped here (nothing after the timed-out await consumes it), never adopted into a newer state.
+    const account = await bounded(establishSession(), SIGNIN_TIMEOUT_MS, 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT'), snapshot = latest.current;
+    const value = unwrap(await bounded(universalSimulate(snapshot, account, destinationWallet ?? undefined), SIMULATION_TIMEOUT_MS, 'UNIVERSAL_SIMULATION_TIMEOUT'));
     if (latest.current !== snapshot) throw new Error('UNIVERSAL_SEMANTIC_REVISION_CHANGED');
     setRecovered(false); accept(value); void refreshRuns();
   }); }

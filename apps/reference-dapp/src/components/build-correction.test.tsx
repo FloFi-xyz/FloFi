@@ -231,7 +231,7 @@ describe('UX-002 canonical composer projections', () => {
       expect(canvas.match(/class="numeric composer-amount-box/g)).toHaveLength(2);
       for (const value of values) {
         expect(canvas).toContain(`value="${value.amount}"`);
-        expect(canvas).toContain(`<span class="composer-amount-token">${value.token}</span>`);
+        expect(canvas).toContain(`<span class="composer-amount-token" title="${value.token}">${value.token}</span>`);
       }
       expect(canvas).not.toContain('composer-value-arrow');
       expect(canvas).toContain('data-relationship="contribution"');

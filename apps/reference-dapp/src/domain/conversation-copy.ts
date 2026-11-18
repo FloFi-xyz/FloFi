@@ -27,6 +27,8 @@ export type ConversationCopy = {
   readonly sequenceReviewReady: (current: number, total: number) => string; readonly confirmStep: (current: number, total: number) => string;
   readonly executeStepQuestion: (current: number, total: number) => string;
   readonly stepCompleted: (current: number, total: number, delivered: string | null) => string; readonly stepSimulatingNext: (next: number) => string;
+  /** FIX-07: the next step's simulation may open a wallet request, so only the owner's own answer starts it. */
+  readonly stepReadyNext: (next: number) => string;
   readonly workflowCompleted: (total: number) => string; readonly awaitingDelivery: (current: number) => string;
   readonly stepStopped: (current: number, total: number) => string;
   readonly editPending: (step: number, action: string, value: string) => string; readonly applyEdit: string; readonly discardEdit: string;
@@ -139,6 +141,7 @@ const en: ConversationCopy = {
   executeStepQuestion: (current, total) => current === 1 && total === 1 ? 'Would you like to execute this workflow now?' : `Would you like to execute step ${current} of ${total} now?`,
   stepCompleted: (current, total, delivered) => `Step ${current} of ${total} is completed and reconciled${delivered ? `: it delivered ${delivered}` : ''}.`,
   stepSimulatingNext: next => `Simulating step ${next} with current provider data. Nothing is signed or sent.`,
+  stepReadyNext: next => `Step ${next} is ready to simulate. Its simulation may ask your wallet to sign in (no funds move), so it starts only when you choose Review.`,
   workflowCompleted: total => `All ${total} steps of this workflow are completed and reconciled. Their records stay in your history.`,
   awaitingDelivery: current => `Step ${current} is confirmed. FloFi is waiting for its reconciled delivery before the next step can be simulated. Nothing is resent.`,
   stepStopped: (current, total) => `Step ${current} of ${total} did not complete, so the steps after it were not started. Steps before it stay executed.`,
@@ -262,6 +265,7 @@ const pt: ConversationCopy = {
   executeStepQuestion: (current, total) => current === 1 && total === 1 ? 'Quer executar este fluxo agora?' : `Quer executar a etapa ${current} de ${total} agora?`,
   stepCompleted: (current, total, delivered) => `A etapa ${current} de ${total} foi concluída e reconciliada${delivered ? `: entregou ${delivered}` : ''}.`,
   stepSimulatingNext: next => `Simulando a etapa ${next} com dados atuais dos provedores. Nada é assinado nem enviado.`,
+  stepReadyNext: next => `A etapa ${next} está pronta para simular. A simulação pode pedir um sign-in da sua carteira (nenhum fundo se move), então ela só começa quando você escolher Revisar.`,
   workflowCompleted: total => `As ${total} etapas deste fluxo foram concluídas e reconciliadas. Os registros ficam no seu histórico.`,
   awaitingDelivery: current => `A etapa ${current} está confirmada. A FloFi aguarda a entrega reconciliada antes de simular a etapa seguinte. Nada é reenviado.`,
   stepStopped: (current, total) => `A etapa ${current} de ${total} não foi concluída, então as etapas seguintes não foram iniciadas. As etapas anteriores continuam executadas.`,

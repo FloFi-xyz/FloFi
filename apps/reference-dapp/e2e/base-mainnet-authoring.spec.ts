@@ -123,7 +123,9 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     await ask(page, 'Please swap 100 USDC for Coinbase Wrapped BTC on Base');
     await expectProposal(page, 'Interpreted as “swap 100 USDC to cbBTC on Base slippage 100 bps”', 'cbBTC');
     await expect(copilotSays(page)).toContainText('“Coinbase Wrapped BTC” is cbBTC (Coinbase Wrapped BTC) in the official Base catalog.');
-    await expect(copilotSays(page)).toContainText('Real funds on Base');
+    // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-02): routine authoring keeps the wallet-signing boundary and no longer repeats "Real funds on {network}".
+    await expect(copilotSays(page)).toContainText('Your wallet signs every transaction on Base after your Review; Flofi never signs.');
+    await expect(copilotSays(page)).not.toContainText('Real funds on Base');
     await ask(page, 'Quero colocar 100 USDC e 50 Aerodrome num pool da Uniswap na Base com taxa de 0,3%');
     // FloFi answers in the interface language (English here), whatever language the request is written in.
     await expectProposal(page, 'Interpreted as “add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps”', 'AERO');
