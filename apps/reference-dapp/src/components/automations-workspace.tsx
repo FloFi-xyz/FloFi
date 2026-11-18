@@ -7,8 +7,9 @@
  * server action re-verifies the owner's wallet session, and the only way forward from a proposal is the shared approval flow.
  */
 import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { automationHistory, automationOverview, automationsAvailability, changeAutomationState, createAutomation, createTelegramLinkCode, dismissAutomationOccurrence,
+import { automationHistory, changeAutomationState, createAutomation, createTelegramLinkCode, dismissAutomationOccurrence,
   openAutomationOccurrence, prepareWatchProposal, rebindAutomation, unlinkTelegram } from '../app/automation-action';
+import { AUTOMATIONS_OFF, automationSnapshot, type AutomationSnapshot } from '../app/automation-reads';
 import type { CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, OccurrenceView, OverviewView, RouteCapability, RuleHistoryView, RuleView } from '../automations/views';
 import type { Command } from '../domain/commands';
 import type { WorkflowOwner } from '../domain/saved-workflow';
@@ -382,22 +383,54 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
   const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null;
   const overview = snapshot?.owner === ownerKey ? snapshot?.value : null;
   const verificationRequired = access?.owner === ownerKey && access.required;
-  useEffect(() => { void automationsAvailability().then(a => setEnabled(a.enabled)).catch(() => setEnabled(false)); }, []);
   useEffect(() => { try { setHighlight(new URLSearchParams(window.location.search).get('occurrence')); } catch { /* no query */ } }, []);
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (Automations loading): availability and the owner's overview are read in ONE parallel GET
+  // (`/api/automations/overview`), outside the page's Server Action queue; later refreshes read the overview alone. A refusal that is not
+  // "this deployment does not serve automations" is temporary: it shows a retry, never the "Coming soon" state.
+  const [availabilityIssue, setAvailabilityIssue] = useState<string | null>(null);
+  const enabledNow = useRef(enabled);
+  enabledNow.current = enabled;
+  const applyOverview = useCallback((key: string, result: NonNullable<AutomationSnapshot['overview']>) => {
+    if (result.ok) { setSnapshot({ owner: key, value: result.value }); setAccess({ owner: key, required: false }); setError(null); }
+    else { if (result.code === 'WALLET_SESSION_REQUIRED') setSnapshot(null); setAccess({ owner: key, required: result.code === 'WALLET_SESSION_REQUIRED' }); if (result.code !== 'WALLET_SESSION_REQUIRED') setError(result.code); }
+  }, []);
   const refresh = useCallback(async () => {
     if (!owner) return;
     const request = generation.current, sequence = ++refreshSequence.current, key = `${owner.namespace}:${owner.address}`;
-    const result = await automationOverview(owner).catch(() => ({ ok: false as const, code: 'AUTOMATION_UNAVAILABLE' }));
+    const result = await automationSnapshot(owner, 'overview').then(value => value.overview ?? { ok: false as const, code: 'AUTOMATION_UNAVAILABLE' },
+      (cause: unknown) => ({ ok: false as const, code: cause instanceof Error ? cause.message : 'AUTOMATION_UNAVAILABLE' }));
     if (request !== generation.current || sequence !== refreshSequence.current) return;
-    if (result.ok) { setSnapshot({ owner: key, value: result.value }); setAccess({ owner: key, required: false }); setError(null); }
-    else { if (result.code === 'WALLET_SESSION_REQUIRED') setSnapshot(null); setAccess({ owner: key, required: result.code === 'WALLET_SESSION_REQUIRED' }); if (result.code !== 'WALLET_SESSION_REQUIRED') setError(result.code); }
-  }, [owner]);
+    applyOverview(key, result);
+  }, [owner, applyOverview]);
+  /** The first read for this owner (or none): availability (unless already known enabled) and the overview together. */
+  const load = useCallback(() => {
+    const request = generation.current, sequence = ++refreshSequence.current, key = owner ? `${owner.namespace}:${owner.address}` : null;
+    setAvailabilityIssue(null);
+    void automationSnapshot(owner, enabledNow.current === true && owner ? 'overview' : 'all').then(value => {
+      if (request !== generation.current || sequence !== refreshSequence.current) return;
+      if (value.availability) {
+        if (value.availability.enabled) setEnabled(true);
+        else if (AUTOMATIONS_OFF.has(value.availability.code ?? '')) setEnabled(false);
+        else { setAvailabilityIssue(value.availability.code ?? 'AUTOMATION_UNAVAILABLE'); return; }
+      }
+      if (key && value.overview && (value.availability?.enabled ?? enabledNow.current)) applyOverview(key, value.overview);
+    }, (cause: unknown) => {
+      if (request !== generation.current || sequence !== refreshSequence.current) return;
+      if (enabledNow.current === null) setAvailabilityIssue(cause instanceof Error ? cause.message : 'AUTOMATION_UNAVAILABLE'); else setError('AUTOMATION_UNAVAILABLE');
+    });
+  }, [owner, applyOverview]);
   useEffect(() => {
     generation.current++; setSnapshot(null); setAccess(null); setHistory(null); setCreating(null); setCreationDraft({}); setCreationStep(1); setReview(null); setMode('CONFIRM'); setError(null); setNotice('');
-    if (enabled && owner) void refresh();
+    load();
     return () => { generation.current++; };
-  }, [enabled, ownerKey, refresh]);
-  useEffect(() => { if (enabled && owner && proof?.proven) void refresh(); }, [enabled, owner, proof?.proven, refresh]);
+  }, [ownerKey, load]);
+  // A wallet proven AFTER the page loaded reads the overview again (the first read already covered a wallet proven before it).
+  const provenBefore = useRef(proof?.proven ?? null);
+  useEffect(() => {
+    const before = provenBefore.current;
+    provenBefore.current = proof?.proven ?? null;
+    if (enabled && owner && proof?.proven && proof.proven !== before) void refresh();
+  }, [enabled, owner, proof?.proven, refresh]);
   useEffect(() => {
     if (!enabled || !owner) return;
     const timer = setInterval(() => { void refresh(); }, 30_000);
@@ -438,7 +471,9 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       {overview && owner && <span className="automation-session">{t('Wallet session verified')} · <code>{owner.address.slice(0, 6)}…{owner.address.slice(-4)}</code></span>}</header>
     <p className="workspace-notice" role="status">{t(notice)}</p>
     {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button></div>}
-    {enabled === null ? <p role="status">{t('Loading automations…')}</p>
+    {enabled === null && availabilityIssue ? <div className="ux-panel ux-notice automation-availability-issue" role="status"><p>{t('Automations are temporarily unavailable. This is not a change to your automations.')}</p>
+        <button type="button" className="ux-button ux-button-small" onClick={load}>{t('Retry')}</button></div>
+      : enabled === null ? <div className="ux-panel ux-list-empty automation-loading" role="status" aria-busy="true"><p>{t('Loading automations…')}</p></div>
       // P0 approved UX (board 12): a deployment without automations shows one "Coming soon" state, never a form or a disabled control.
       : !enabled ? <section className="ux-panel ux-empty automation-coming-soon" aria-label={t('Automations')}><StatusTag tone="soon">{t('Coming soon')}</StatusTag>
         <h2>{t('Recurring buys, price triggers and daily watches')}</h2><p>{t('Automations are not enabled on this deployment.')}</p></section>
@@ -509,11 +544,10 @@ export function AutomationInbox({ owner: ownerProp, proven, open }: { owner: Wor
   useEffect(() => {
     if (!owner || !proven) { setCount(0); return; }
     let live = true;
+    // One GET with availability and the overview together (shared with the workspace's own read), outside the Server Action queue.
     const load = async () => {
-      const availability = await automationsAvailability().catch(() => ({ enabled: false }));
-      if (!availability.enabled) return;
-      const result = await automationOverview(owner).catch(() => null);
-      if (live && result?.ok) setCount(result.value.pending.length);
+      const snapshot = await automationSnapshot(owner).catch(() => null);
+      if (live && snapshot?.availability?.enabled && snapshot.overview?.ok) setCount(snapshot.overview.value.pending.length);
     };
     void load();
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);

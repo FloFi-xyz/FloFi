@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({ redirect: h.redirect }));
 vi.mock('next/headers', () => ({ headers: async () => h.headers, cookies: async () => h.cookies() }));
 vi.mock('../../server/flight-access', () => ({ requireFlightProductAccess: h.requireFlightProductAccess }));
 vi.mock('../../server/engineering-ui', () => ({ engineeringUiAllowed: async () => false }));
-vi.mock('../../server/conversation-scope', () => ({ currentConversationScope: async () => null }));
+vi.mock('../../server/conversation-scope', () => ({ currentConversationScope: async () => null, currentAccountBootstrap: async () => ({ conversationScope: null, accountPresence: null }) }));
 vi.mock('../../server/network-scope', () => ({ networkScope: () => 'PUBLIC_MAINNET' }));
 // BUILD-ADMIN-AI-PROVIDERS-001: the layout reads the configured mode through the provider module (an Anthropic-only live Copilot reads live).
 vi.mock('../../server/copilot-providers', () => ({ copilotConfiguredMode: h.copilotConfiguredMode }));
