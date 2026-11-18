@@ -190,3 +190,26 @@
   .ux-page :is(.ux-button,.ux-button-small,.ux-link,.ux-chip,.ux-row-toggle,.ux-menu-list>*,.ux-details>summary){min-height:44px}
   .ux-page :is(.ux-icon-button,.history-actions>button.workspace-action){min-width:44px;min-height:44px}
 }
+
+/* BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (History): All · Workflows · Received · Sent, and the wallet's on-chain movements in the existing
+   History language (panel, list rows, tags). Received amounts are green with a "+"; sent amounts carry a minus sign in the ink color. */
+.ux-page .history-views{margin:4px 0 16px}
+.ux-page .history-activity{margin-top:16px}
+.ux-page .wallet-activity{display:grid;gap:10px;padding:18px}
+.ux-page .wallet-activity .ux-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.ux-page .wallet-activity .ux-panel-head>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ux-page .wallet-activity h2{margin:0}
+.ux-page .wallet-activity-row{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:12px;align-items:start;padding:12px 0}
+.ux-page .wallet-activity-icon{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--neutral-soft);color:var(--neutral-ink)}
+.ux-page .wallet-activity-row[data-direction="IN"] .wallet-activity-icon{background:var(--success-surface);color:var(--success)}
+.ux-page .wallet-activity-main{min-width:0;display:grid;gap:4px}
+.ux-page .wallet-activity-main p{margin:0}
+.ux-page .wallet-activity-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ux-page .wallet-activity-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;color:var(--muted);font-size:12px;min-width:0}
+.ux-page .wallet-activity-meta code{font-size:11px;overflow-wrap:anywhere}
+.ux-page .wallet-activity-network{display:inline-flex;align-items:center;gap:4px}
+.ux-page .wallet-activity-network img,.ux-page .wallet-activity-amount img{width:16px;height:16px}
+.ux-page .wallet-activity-amount{display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:600;white-space:nowrap;color:var(--ink)}
+.ux-page .wallet-activity-amount[data-direction="IN"]{color:var(--success)}
+.ux-page .wallet-activity-coverage{margin:0;padding-left:18px;color:var(--muted);font-size:12px;display:grid;gap:4px}
+@media(max-width:560px){.ux-page .wallet-activity-row{grid-template-columns:28px minmax(0,1fr)}.ux-page .wallet-activity-amount{grid-column:2;white-space:normal;overflow-wrap:anywhere}}

@@ -17,7 +17,7 @@ const step = (id: string, operations: LifecycleOperation[], label = ''): Lifecyc
   provider: null, tokens: [], state: 'waiting', label, operations });
 function lifecycle(steps: LifecycleStep[], extra: Partial<ExecutionLifecycle> = {}, reconciled: readonly string[] = []): ExecutionLifecycle {
   return { started: true, restored: false, local: false, matchesWorkflow: true, steps, active: null, completed: 0, label: '', message: '', state: 'active', runKey: 'run-1',
-    fingerprint: '', busy: false, stepEvidence: Object.fromEntries(steps.map(s => [s.id, { reconciled: reconciled.includes(s.id) }])) as unknown as ExecutionLifecycle['stepEvidence'], ...extra };
+    fingerprint: '', busy: false, stepEvidence: Object.fromEntries(steps.map(s => [s.id, { reconciled: reconciled.includes(s.id) }])), ...extra } as unknown as ExecutionLifecycle;
 }
 const visuals = (execution: ReturnType<typeof lifecycleCanvasExecution>) => execution && Object.fromEntries(Object.entries(execution.nodes).map(([id, node]) => [id, node.visual]));
 
@@ -96,12 +96,12 @@ describe('Live Canvas: one runtime executing the workflow (lifecycle steps are t
     const f = reviewFixture(), run = 'run' in f.source.state ? f.source.state.run : null;
     const live = projectExecutionLifecycle(f.workflow, f.context, { kind: 'public', state: { ...f.source.state,
       run: { ...run, quote: { ...run!.quote, chainId: 42161, ownerReview: { account: f.wallet.account, nonce: '7' } }, outcome: null,
-        attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: null, receipt: { gasCostWei: '1' } }] } } } as ExecutionLifecycleSource);
+        attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: null, receipt: { gasCostWei: '1' } }] } } } as unknown as ExecutionLifecycleSource);
     const execution = lifecycleCanvasExecution(f.workflow, live)!;
     const node = f.workflow.nodes.find(n => !n.actionType.startsWith('mock-'))!.nodeId;
     expect(execution.nodes[node]).toMatchObject({ visual: 'wallet', phase: 'AWAITING_AUTHORIZATION' });
     const swapped = projectExecutionLifecycle(f.workflow, f.context, { kind: 'public', state: { ...f.source.state, run: { ...run, outcome: null,
-      attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: '1' }, { step: 'swap', state: 'SUBMITTED', txHash: other }] } } } as ExecutionLifecycleSource);
+      attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: '1' }, { step: 'swap', state: 'SUBMITTED', txHash: other }] } } } as unknown as ExecutionLifecycleSource);
     expect(lifecycleCanvasExecution(f.workflow, swapped)!.nodes[node]!.visual).not.toBe('done');
   });
 });

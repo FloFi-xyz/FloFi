@@ -104,7 +104,8 @@ function localSolanaMode(env: Env): PortfolioMode {
   return env.GRYLOO_JUPITER === 'live' || env.GRYLOO_SOLANA_TRANSFER === 'live' ? 'live' : 'off';
 }
 /** The flows that carry each network's deployment gate; the first enabled one decides. A hosted deployment never reads a harness. */
-async function defaultMode(network: PortfolioNetworkId, env: Env): Promise<PortfolioMode> {
+/** The deployment's enablement of a network (also read by the wallet activity, `wallet-activity.ts`). */
+export async function defaultMode(network: PortfolioNetworkId, env: Env): Promise<PortfolioMode> {
   let mode: PortfolioMode;
   if (network === 'solana') {
     const modes = await Promise.all((['jupiter-swap', 'solana-transfer'] as const).map(flow => cloudFlowMode(flow, env)));

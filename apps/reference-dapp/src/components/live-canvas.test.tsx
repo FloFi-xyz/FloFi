@@ -93,8 +93,8 @@ describe('Live Canvas on the existing read-only Canvas', () => {
     }
   });
   it('a waiting step keeps the neutral card (no badge); a failed one is labeled, not only colored', () => {
-    const failed: CanvasExecution = { ...execution(['failed', 'waiting', 'waiting']) };
-    failed.nodes[Object.keys(failed.nodes)[0]!] = { visual: 'failed', phase: 'FAILED', text: { key: 'Failed', args: [] } };
+    const base = execution(['failed', 'waiting', 'waiting']), first = Object.keys(base.nodes)[0]!;
+    const failed: CanvasExecution = { ...base, nodes: { ...base.nodes, [first]: { visual: 'failed', phase: 'FAILED', text: { key: 'Failed', args: [] } } } };
     const { html } = render({ execution: failed });
     expect(html.match(/canvas-execution-badge"/g)).toHaveLength(1);
     expect(html).toContain('data-visual="failed"'); expect(html).toContain('Execution status: Failed');

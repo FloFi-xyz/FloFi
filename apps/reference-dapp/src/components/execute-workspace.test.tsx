@@ -255,8 +255,8 @@ describe('BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a live run stays on the C
   function liveRun(state: string): ExecuteWorkspaceProps {
     const data = fixture(), hash = '0x' + 'a'.repeat(64);
     const run = 'run' in data.source.state ? data.source.state.run : {};
-    const source = { ...data.source, state: { ...data.source.state, run: { ...run, attempts: [{ step: 'swap', state, txHash: ['PENDING', 'CONFIRMED', 'REVERTED'].includes(state) ? hash : null }] } } } as ExecutionLifecycleSource;
-    const progress = projectExecutionLifecycle(data.workflow, data.context, source);
+    const source = { ...data.source, state: { ...data.source.state, run: { ...run, attempts: [{ step: 'swap', state, txHash: ['PENDING', 'CONFIRMED', 'REVERTED'].includes(state) ? hash : null }] } } } as unknown as typeof data.source;
+    const progress = projectExecutionLifecycle(data.workflow, data.context, source as unknown as ExecutionLifecycleSource);
     return { ...data, source, progress, execution: { ...data.execution, started: true, check: vi.fn() }, canvasExecution: lifecycleCanvasExecution(data.workflow, progress) };
   }
   it('keeps the Canvas as the execution view with its actions; the step timeline is collapsed under Execution details', () => {
