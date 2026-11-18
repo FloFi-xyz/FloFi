@@ -802,8 +802,11 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // BUILD-BASE-001: on an official-catalog network the editable picker also searches the whole validated catalog (swaps and pools: ERC-20s).
   const catalogNetwork = card.actionSelection && card.actionSelection.tokens[tokenPanel || 'source'].length > 1 ? networkIdentity(tokenNetwork) : null;
   const searchAction = card.actionSelection?.selection.action;
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-05): searching "ETH"/"Ether"/"Ethereum" on a swap finds the native coin — the same rule as
+  // `profileHasToken`'s native-swap side (a native swap or a WETH9 wrap/unwrap, never WETH). Pools stay ERC-20 only.
   const tokenSearch = tokenPanel && catalogNetwork?.catalog && (searchAction === 'swap' || searchAction === 'pool' || (searchAction === 'transfer' && tokenPanel === 'source'))
-    ? { chain: catalogNetwork.chain, accept: (asset: CanonicalAsset) => searchAction === 'transfer' || asset.kind === 'ERC20',
+    ? { chain: catalogNetwork.chain, accept: (asset: CanonicalAsset) => searchAction === 'transfer' || asset.kind === 'ERC20'
+      || (searchAction === 'swap' && asset.kind === 'NATIVE' && asset.symbol === 'ETH'),
       onSelect: (symbol: string) => card.actionSelection!.onToken(tokenPanel, symbol) } : undefined;
   const tokens = tokenPanel && tokenSymbol && <AssetNetworkPicker key={tokenPanel + tokenNetwork} id={tokenPanelId} side={tokenPanel} symbol={tokenSymbol} network={tokenNetwork}
     tokens={tokenOptions} networks={card.actionSelection?.networks ?? []} onCollapse={collapseTokens} search={tokenSearch} lending={tokenPanel === 'source' ? card.actionSelection?.lending : undefined}

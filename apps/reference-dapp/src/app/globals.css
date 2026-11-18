@@ -507,6 +507,8 @@
 .composer-fiat-value:empty{display:block;min-height:13px}
 .composer-token-chip{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:4px 9px 4px 5px;border:1px solid var(--accent-line);border-radius:999px;background:var(--paper);color:var(--blue)}
 .composer-amount-box .composer-amount-token{font-size:12px;font-weight:600}
+/* BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-06): a long asset identifier never overflows its chip or the card; the full value stays in the title/technical details. */
+.composer-token-chip .composer-amount-token{max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .composer-token-avatar{position:relative;flex:none;width:22px;height:22px;border-radius:50%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);place-items:center;background:var(--brand-disc);font-size:11px;font-weight:600}
 .composer-token-avatar>.brand-icon{min-width:0;min-height:0;max-width:100%;max-height:100%}
 .brand-icon{display:block;width:100%;height:100%;object-fit:contain;filter:none}
@@ -955,6 +957,8 @@
 .composer-token-options .composer-token-chip{font-size:12px}
 .composer-bridge-picker{padding:6px 5px 6px 9px}
 .composer-bridge-picker-column:first-child{width:280px;max-height:320px;overflow-y:auto;overscroll-behavior:contain}
+/* FIX-06: one scroll container only — the Tokens column scrolls; the search results inside it never add a second, nested scrollbar. */
+.composer-bridge-picker-column:first-child .composer-stock-results{max-height:none;overflow-y:visible}
 .composer-bridge-picker-columns{display:grid;grid-template-columns:max-content max-content;align-items:start;gap:6px}
 .composer-bridge-picker-column+ .composer-bridge-picker-column{border-left:1px solid var(--accent-line);padding-left:6px}
 .composer-bridge-picker-heading{display:block;margin:0 8px 5px;color:var(--muted);font-size:10px;font-weight:600;line-height:1.4;letter-spacing:.03em}

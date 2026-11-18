@@ -120,11 +120,17 @@ export function createUniversalBridgeFromInput(nodeId: string, input: UniversalB
 export type UniversalBridgeDetails = { readonly source: UniversalNetworkKey; readonly destination: UniversalNetworkKey; readonly sourceLabel: string; readonly destinationLabel: string;
   readonly inputSymbol: string; readonly outputSymbol: string; readonly inputDecimals: number; readonly outputDecimals: number; readonly amount: string;
   readonly amountUnits: string; readonly recipient: string; readonly slippage: string; readonly routing: UniversalBridgeRouting; readonly fields: UniversalBridgeFields };
+/**
+ * BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-06): a truthful, abbreviated identifier for an asset the loaded catalogs cannot name — never a
+ * guessed or substituted symbol. The full contract reference stays available in the technical details and in the node itself.
+ */
+export const abbreviatedAssetReference = (address: string, decimals: number): string =>
+  address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}@${decimals}` : `${address}@${decimals}`;
 const symbolOf = (key: UniversalNetworkKey, asset: UniversalAssetRef) => {
   const network = UNIVERSAL_NETWORKS[key];
   if (asset.kind === 'NATIVE') return network.native.symbol;
-  if (network.ecosystem === 'SOLANA') return Object.values(SOLANA_MAINNET_TOKENS).find(t => t.mint === asset.address)?.symbol ?? solanaDisplayAsset(asset.address)?.symbol ?? `${asset.address}@${asset.decimals}`;
-  return resolveNetworkAsset(network.chain, { address: asset.address })?.symbol ?? `${asset.address}@${asset.decimals}`;
+  if (network.ecosystem === 'SOLANA') return Object.values(SOLANA_MAINNET_TOKENS).find(t => t.mint === asset.address)?.symbol ?? solanaDisplayAsset(asset.address)?.symbol ?? abbreviatedAssetReference(asset.address, asset.decimals);
+  return resolveNetworkAsset(network.chain, { address: asset.address })?.symbol ?? abbreviatedAssetReference(asset.address, asset.decimals);
 };
 const routingOf = (fields: UniversalBridgeFields): UniversalBridgeRouting =>
   (Object.keys(UNIVERSAL_BRIDGE_ROUTING) as UniversalBridgeRouting[]).find(k => UNIVERSAL_BRIDGE_ROUTING[k].selection === fields.selection &&

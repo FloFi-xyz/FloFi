@@ -67,6 +67,14 @@ describe('BUILD-FLOFI-BUILDER-UX-002 Editor overview and card status', () => {
     expect(editorOverview(state.workflow, context, lintWorkflow(state.workflow, context), { setup: { id: 'setup-9', action: 'Bridge' } }).steps.at(-1)).toMatchObject({ nodeId: 'setup-9', step: 3, action: 'Bridge' });
   });
 
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-08): the header lists each network once, by canonical chain identity, never per alias string.
+  it('deduplicates "Arbitrum" (Router label) and "Arbitrum One" (catalog label) into one canonical entry', () => {
+    let state = apply(initialEditor(), { type: 'ADD_CRYPTO_ACTION', input: { selection: { action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, amount: '1', slippage: '100' } });
+    state = apply(state, { type: 'ADD_ROUTER_BRIDGE', input: { source: 'Arbitrum', destination: 'Base', token: 'USDC', amount: '1', recipient: '', slippage: '100', routing: 'AUTO' } });
+    const overview = editorOverview(state.workflow, context, null);
+    expect(overview.networks).toEqual(['Arbitrum One', 'Base']);
+  });
+
   it('has a Portuguese label for every status it can show', () => {
     for (const label of [...Object.values(CARD_STATUS_LABEL), ...Object.values(EDITOR_STATE_LABEL), ...Object.values(EDITOR_STATE_DETAIL), CONFIGURED_DETAIL, 'Not applied to the workflow yet.',
       UNREVIEWED_DETAIL, EDITOR_INVALID_DETAIL, 'Check this step’s slippage limit.', 'The slippage limit is above what FloFi accepts for review.', 'Set one slippage limit for this step.'])

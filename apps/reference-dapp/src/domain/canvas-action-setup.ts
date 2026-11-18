@@ -20,7 +20,7 @@ import { checkRecipient } from './recipient-address';
 import { checkDestinationAddress } from './destination-wallet';
 import { UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
-import { createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf, resolveUniversalAsset, universalKeyOfCanvasLabel, UNIVERSAL_CANVAS_LABEL } from './universal-bridge-authoring';
+import { abbreviatedAssetReference, createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf, resolveUniversalAsset, universalKeyOfCanvasLabel, UNIVERSAL_CANVAS_LABEL } from './universal-bridge-authoring';
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 /** `cryptoRecipient` (UX-001): the Send card's typed "To" text, committed only as the transfer's canonical `recipient` on Apply. */
@@ -64,10 +64,13 @@ export function bridgePairLabel(networks: CanvasBridgeNetworks): string {
   const tokens = routerTokensOf(networks);
   return tokens ? `${tokens.token} → ${tokens.destinationToken}` : 'USDC → USDC';
 }
-/** Display metadata never substitutes for the selected network-bound identity. */
+/** Display metadata never substitutes for the selected network-bound identity. FIX-06: an asset the loaded catalogs cannot name shows a
+ * truthful abbreviated reference (never the full contract overflowing the card, never a guessed symbol). */
 export function bridgeAssetLabel(network: string, reference: string): string {
-  try { const { symbol } = resolveUniversalAsset(universalKeyOfCanvasLabel(network)!, reference); return symbol === 'TOKEN' ? reference : symbol; }
-  catch { return reference; }
+  const abbreviated = (value: string) => { const explicit = /^([^@\s]+)@([0-9]{1,2})$/.exec(value.trim());
+    return explicit ? abbreviatedAssetReference(explicit[1]!, Number(explicit[2])) : value; };
+  try { const { symbol } = resolveUniversalAsset(universalKeyOfCanvasLabel(network)!, reference); return symbol === 'TOKEN' ? abbreviated(reference) : symbol; }
+  catch { return abbreviated(reference); }
 }
 export function universalCanvasNetworks(details: NonNullable<ReturnType<typeof universalBridgeDetails>>): CanvasBridgeNetworks {
   const input = universalInputOf(details);

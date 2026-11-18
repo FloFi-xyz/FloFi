@@ -411,9 +411,12 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   // (BUILD-BASE-001: Robinhood Chain and Base). The hook re-renders the Canvas when any catalog registers.
   const catalog = useNetworkCatalog();
   // UX-007: a network chosen in a card's picker loads its token metadata before any amount is typed (stable, reused across keystrokes).
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-06): a universal bridge node's `chainId` is its SOURCE chain only; its destination network's
+  // catalog is loaded too, so the Bridge card shows the destination token's symbol instead of a raw contract reference.
+  const bridgeDestinationChains = workflow.nodes.map(node => universalBridgeDetails(node)?.fields.destinationChain).filter(Boolean).join();
   const shownCatalogs = CATALOG_NETWORK_IDENTITIES.filter(network => actionSetup?.cryptoSelection?.network === network.name ||
     Object.values(cryptoSelections).some(selection => selection.network === network.name) ||
-    workflow.nodes.some(node => node.chainId === network.chain)).map(network => network.chain).join();
+    workflow.nodes.some(node => node.chainId === network.chain) || bridgeDestinationChains.split(',').includes(network.chain)).map(network => network.chain).join();
   useEffect(() => { for (const chain of shownCatalogs ? shownCatalogs.split(',') : []) void ensureNetworkCatalog(false, chain); }, [shownCatalogs]);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>(() => selectedId ? [selectedId] : []);
   const selectedIdsRef = useRef<readonly string[]>(selectedId ? [selectedId] : []);

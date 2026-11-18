@@ -3,6 +3,7 @@ import type { ReviewContext, ReviewResult } from '@defi-workflow-engine/referenc
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerNodeState, composerSummary } from './composer-presentation';
 import { canvasCardFlow } from './canvas-card-summary';
+import { networkIdentity } from './network-registry';
 
 /**
  * BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the discreet status a Canvas step card states, its Editor header and footer summary,
@@ -86,11 +87,19 @@ export function editorOverview(workflow: Workflow, context: ReviewContext, revie
     return { nodeId: node.nodeId, step: index + 1, action: summary.action, flow: draft ? null : canvasCardFlow(summary),
       status: canvasCardStatus(composerNodeState(review, node.nodeId), draft) };
   });
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-08): one entry per canonical chain identity, never per display string — different sources write
+  // "Arbitrum" and "Arbitrum One" for eip155:42161; the header shows the registry's canonical name once. Unknown labels keep string identity.
   const networks: string[] = [];
+  const seen = new Set<string>();
   for (const node of composerActions(workflow)) {
     for (const side of composerSummary(workflow, node, context).chain.split(' → ')) {
       const name = networkName(side);
-      if (name && name !== 'Network not specified' && !networks.includes(name)) networks.push(name);
+      if (!name || name === 'Network not specified') continue;
+      const identity = networkIdentity(name);
+      const key = identity?.chain ?? name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      networks.push(identity?.name ?? name);
     }
   }
   // A card being set up is listed after the workflow's steps, as the Canvas numbers it; it is a draft until applied.

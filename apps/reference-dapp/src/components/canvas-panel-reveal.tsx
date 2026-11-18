@@ -27,6 +27,18 @@ export function revealOffset(box: Box, pane: Box, limit: number, safeTop = PANEL
   if (!(overflow > 0)) return 0;
   return Math.max(0, Math.min(overflow, box.top - (pane.top + safeTop)));
 }
+/** Side margin a revealed panel keeps from the canvas edges (FIX-06: a picker opened near the right edge was clipped by the canvas). */
+export const PANEL_SAFE_SIDE = 16;
+/**
+ * The leftward pan (screen pixels, ≥ 0) that brings `box` inside the pane's right margin, without moving its left edge past
+ * `pane.left + safeSide`. A box wider than the pane is panned as far as that allows; a box already inside moves nothing.
+ */
+export function revealOffsetX(box: Box, pane: Box, safeSide = PANEL_SAFE_SIDE): number {
+  if (box.left === undefined || box.right === undefined || pane.left === undefined || pane.right === undefined) return 0;
+  const overflow = box.right - (pane.right - safeSide);
+  if (!(overflow > 0)) return 0;
+  return Math.max(0, Math.min(overflow, box.left - (pane.left + safeSide)));
+}
 /** The lowest bottom edge `box` may reach: the bottom margin, or above any bottom control that overlaps it horizontally. */
 export function revealLimit(box: Box, pane: Box, controls: readonly Box[], safeBottom = PANEL_SAFE_BOTTOM): number {
   let limit = pane.bottom - safeBottom;
@@ -63,10 +75,11 @@ export function PanelRevealer() {
       const controls = Array.from(root.querySelectorAll<HTMLElement>('.react-flow__panel.bottom'), control => control.getBoundingClientRect())
         .filter(rect => rect.width > 0 && rect.height > 0);
       const offset = revealOffset(box, pane, revealLimit(box, pane, controls));
-      if (offset < 1) return;
+      const offsetX = revealOffsetX(box, pane);
+      if (offset < 1 && offsetX < 1) return;
       const viewport = getViewport();
       const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      void setViewport({ ...viewport, y: viewport.y - offset }, { duration: reduced ? 0 : 180 });
+      void setViewport({ ...viewport, x: viewport.x - offsetX, y: viewport.y - offset }, { duration: reduced ? 0 : 180 });
     };
     return () => { reveal.current = null; };
   }, [reveal, getViewport, setViewport, store]);
