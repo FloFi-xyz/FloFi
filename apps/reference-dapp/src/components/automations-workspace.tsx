@@ -425,13 +425,9 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
     load();
     return () => { generation.current++; };
   }, [ownerKey, load]);
-  // A wallet proven AFTER the page loaded reads the overview again (the first read already covered a wallet proven before it).
-  const provenBefore = useRef(proof?.proven ?? null);
-  useEffect(() => {
-    const before = provenBefore.current;
-    provenBefore.current = proof?.proven ?? null;
-    if (enabled && owner && proof?.proven && proof.proven !== before) void refresh(true);
-  }, [enabled, owner, proof?.proven, refresh]);
+  // The overview is read again after a proof only while the page waits for that verification (never for a session the first read already
+  // covered); a server that still refuses keeps `verificationRequired`, so this cannot loop.
+  useEffect(() => { if (enabled && owner && proof?.proven && verificationRequired) void refresh(true); }, [enabled, owner, proof?.proven, verificationRequired, refresh]);
   useEffect(() => {
     if (!enabled || !owner) return;
     const timer = setInterval(() => { void refresh(); }, 30_000);
@@ -472,8 +468,10 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       {overview && owner && <span className="automation-session">{t('Wallet session verified')} · <code>{owner.address.slice(0, 6)}…{owner.address.slice(-4)}</code></span>}</header>
     <p className="workspace-notice" role="status">{t(notice)}</p>
     {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh(true)}>{t('Retry')}</button></div>}
-    {enabled === null && availabilityIssue ? <div className="ux-panel ux-notice automation-availability-issue" role="status"><p>{t('Automations are temporarily unavailable. This is not a change to your automations.')}</p>
-        <button type="button" className="ux-button ux-button-small" onClick={load}>{t('Retry')}</button></div>
+    {enabled === null && availabilityIssue ? <div className="ux-panel ux-notice automation-availability-issue" role="status">
+        {/* A FloFi access (Flight) refusal says what it is: retrying cannot change it. Anything else is temporary. */}
+        {/^BETA_/.test(availabilityIssue) ? <p>{text.error(availabilityIssue)}</p> : <><p>{t('Automations are temporarily unavailable. This is not a change to your automations.')}</p>
+        <button type="button" className="ux-button ux-button-small" onClick={load}>{t('Retry')}</button></>}</div>
       : enabled === null ? <div className="ux-panel ux-list-empty automation-loading" role="status" aria-busy="true"><p>{t('Loading automations…')}</p></div>
       // P0 approved UX (board 12): a deployment without automations shows one "Coming soon" state, never a form or a disabled control.
       : !enabled ? <section className="ux-panel ux-empty automation-coming-soon" aria-label={t('Automations')}><StatusTag tone="soon">{t('Coming soon')}</StatusTag>
@@ -545,10 +543,14 @@ export function AutomationInbox({ owner: ownerProp, proven, open }: { owner: Wor
   useEffect(() => {
     if (!owner || !proven) { setCount(0); return; }
     let live = true;
-    // One GET with availability and the overview together (shared with the workspace's own read), outside the Server Action queue.
+    // One GET outside the Server Action queue: availability and the overview together until the deployment is known to serve automations,
+    // then the overview alone on each poll.
+    let enabled = false;
     const load = async () => {
-      const snapshot = await automationSnapshot(owner).catch(() => null);
-      if (live && snapshot?.availability?.enabled && snapshot.overview?.ok) setCount(snapshot.overview.value.pending.length);
+      const snapshot = await automationSnapshot(owner, enabled ? 'overview' : 'all').catch(() => null);
+      if (!live || !snapshot) return;
+      if (snapshot.availability) enabled = snapshot.availability.enabled;
+      if (enabled && snapshot.overview?.ok) setCount(snapshot.overview.value.pending.length);
     };
     void load();
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);

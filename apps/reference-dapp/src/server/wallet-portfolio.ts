@@ -103,8 +103,10 @@ function localSolanaMode(env: Env): PortfolioMode {
   if (env.GRYLOO_JUPITER_HARNESS === 'MOCKED_LOOPBACK_ONLY' || env.GRYLOO_SOLANA_TRANSFER_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
   return env.GRYLOO_JUPITER === 'live' || env.GRYLOO_SOLANA_TRANSFER === 'live' ? 'live' : 'off';
 }
-/** The flows that carry each network's deployment gate; the first enabled one decides. A hosted deployment never reads a harness. */
-/** The deployment's enablement of a network (also read by the wallet activity, `wallet-activity.ts`). */
+/**
+ * The flows that carry each network's deployment gate; the first enabled one decides. A hosted deployment never reads a harness. Also read by
+ * the History's wallet activity (`wallet-activity.ts`).
+ */
 export async function defaultMode(network: PortfolioNetworkId, env: Env): Promise<PortfolioMode> {
   let mode: PortfolioMode;
   if (network === 'solana') {

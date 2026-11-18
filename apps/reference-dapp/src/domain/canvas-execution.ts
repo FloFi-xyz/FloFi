@@ -123,6 +123,8 @@ export function sequenceCanvasExecution(workflow: CanvasWorkflow, sequence: Sequ
 /** The run view fields this projection reads (client-safe; `workflow-runs/service.ts` `RunView`). */
 export type RunLike = {
   readonly workflowRunId: string; readonly state: string; readonly mode: string | null; readonly stepCount: number;
+  /** The run's own next owner action and current step (RunView), so a card asks for the owner only when the run does. */
+  readonly currentStep?: number; readonly nextAction?: string;
   readonly steps: readonly { readonly index: number; readonly state: string; readonly code: string | null }[];
   readonly groups: readonly { readonly index: number; readonly steps: readonly [number, number]; readonly chain: string; readonly state: string; readonly signed: boolean;
     readonly code: string | null; readonly delivery?: { readonly step: number; readonly chain: string; readonly state: string } | null }[];
@@ -130,6 +132,7 @@ export type RunLike = {
 /** Group states (USER_FUNDED) whose own words say where the group's steps stand. */
 const GROUP_VISUAL: Readonly<Record<string, readonly [CanvasExecutionVisual, string, ExecutionPhase | null]>> = {
   AUTHORIZED: ['pending', 'Confirmed in your wallet', 'SUBMITTED'], SUBMITTED: ['pending', 'Sent to the network', 'SUBMITTED'], EXPIRED: ['attention', 'Expired', null],
+  UNCERTAIN: ['attention', 'Outcome pending', 'OUTCOME_UNKNOWN'],
 };
 const OPEN_RUN = ['PENDING', 'RUNNING', 'ATTENTION'];
 const TERMINAL_RUN = ['COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED'];
@@ -141,33 +144,45 @@ const ANSWERED: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RE
  */
 const batchUnanswered = (item: { readonly state: string; readonly code: string | null } | undefined) => Boolean(item && item.code === WALLET_BATCH_OUTCOME_UNKNOWN && !ANSWERED.includes(item.state));
 const UNANSWERED_TEXT = "Its batch may have executed before it expired; check your wallet's activity";
-/** One whole-workflow run step. `prompting`: the Editor is asking the owner's wallet for this run right now (its current group). */
-export function runNodeExecution(run: RunLike, step: RunLike['steps'][number], prompting = false): CanvasNodeExecution {
+const UNRECORDED_TEXT = "Your wallet may already have sent this batch. Check your wallet's activity before ending the workflow: ending it does not stop a batch already on chain.";
+/**
+ * One whole-workflow run step, in the Editor run panel's own words (`stepText`, `GROUP_STATE`): a prepared group reads "Waiting for your wallet"
+ * whatever this tab is doing; `unrecorded` (this browser handed the group's batch to the wallet and has no recorded answer) reads as possibly
+ * executed; an owner step on its signing page is in progress (never "confirm in wallet" for hours); the owner's authorization is asked for only
+ * where the run itself waits for it (`nextAction` on its current step).
+ */
+export function runNodeExecution(run: RunLike, step: RunLike['steps'][number], unrecorded = false): CanvasNodeExecution {
   const phased = runStepPhase(run, step);
   if (phased) return { visual: visualOfPhase(phased.phase), phase: phased.phase,
     text: phased.network && EXECUTION_PHASE_LABEL[phased.phase].includes('{0}') ? text(EXECUTION_PHASE_LABEL[phased.phase], [phased.network]) : phaseText(phased.phase) };
   const group = run.mode === 'USER_FUNDED' ? run.groups.find(g => g.steps[0] <= step.index && step.index <= g.steps[1]) : undefined;
   if (step.state !== 'RECONCILED' && (batchUnanswered(step) || !ANSWERED.includes(step.state) && batchUnanswered(group)))
     return { visual: 'attention', phase: 'OUTCOME_UNKNOWN', text: text(UNANSWERED_TEXT) };
+  if (unrecorded && group?.state === 'PREPARED' && !ANSWERED.includes(step.state))
+    return { visual: 'attention', phase: 'OUTCOME_UNKNOWN', text: text(UNRECORDED_TEXT) };
+  const current = run.currentStep === step.index && OPEN_RUN.includes(run.state);
   switch (step.state) {
     case 'FAILED': return { visual: 'failed', phase: 'FAILED', text: text('Failed') };
     case 'UNCERTAIN': return { visual: 'attention', phase: 'OUTCOME_UNKNOWN', text: text('Outcome pending') };
     case 'BLOCKED': return { visual: 'attention', phase: null, text: text('Stopped before submission') };
-    case 'AWAITING_OWNER': return { visual: 'wallet', phase: 'SENT_TO_WALLET', text: text('In your wallet') };
+    case 'AWAITING_OWNER': return { visual: 'pending', phase: 'SUBMITTED', text: text('In your wallet') };
     case 'DELEGATED': {
       if (!group) return { visual: 'pending', phase: 'SUBMITTED', text: text('Authorized') };
       const known = GROUP_VISUAL[group.state];
       if (known) return { visual: known[0], phase: known[2], text: text(known[1]) };
       if (group.signed) return { visual: 'pending', phase: 'SUBMITTED', text: text('Signed in your wallet') };
       if (!OPEN_RUN.includes(run.state)) return { visual: 'attention', phase: null, text: text('Not signed') };
-      // A group not prepared yet is signed only when it is due (e.g. after an earlier delivery): nothing is asked of the wallet now.
-      if (group.state !== 'PREPARED') return { visual: 'waiting', phase: null, text: text('Not signed yet') };
-      return prompting ? { visual: 'wallet', phase: 'SENT_TO_WALLET', text: text('Waiting for your wallet') }
-        : { visual: 'authorize', phase: 'AWAITING_AUTHORIZATION', text: text('Waiting for your authorization') };
+      if (group.state === 'PREPARED') return { visual: 'wallet', phase: 'SENT_TO_WALLET', text: text('Waiting for your wallet') };
+      // A group that is due waits for the owner's authorization in FloFi; a later one is signed only when it is due.
+      if (run.nextAction === 'OWNER_SIGNS_GROUP' && run.groups.some(g => g === group && g.steps[0] <= (run.currentStep ?? -1) && (run.currentStep ?? -1) <= g.steps[1]))
+        return { visual: 'authorize', phase: 'AWAITING_AUTHORIZATION', text: text('Waiting for your authorization') };
+      return { visual: 'waiting', phase: null, text: text('Not signed yet') };
     }
     case 'READY': case 'PENDING': {
-      // A prepared group handed to the owner's wallet by this Editor right now is in the wallet; otherwise the step waits its turn.
-      if (prompting && group?.state === 'PREPARED') return { visual: 'wallet', phase: 'SENT_TO_WALLET', text: text('Waiting for your wallet') };
+      if (group?.state === 'PREPARED') return { visual: 'wallet', phase: 'SENT_TO_WALLET', text: text('Waiting for your wallet') };
+      // The run waits for the owner on this very step (its own signing page, or its group's authorization).
+      if (current && (run.nextAction === 'OWNER_SIGNS_STEP' || run.nextAction === 'OWNER_SIGNS_GROUP'))
+        return { visual: 'authorize', phase: 'AWAITING_AUTHORIZATION', text: text('Waiting for your authorization') };
       return step.state === 'READY' ? { visual: 'waiting', phase: null, text: text('Ready for your signature') } : WAITING;
     }
     case 'SKIPPED': return { visual: 'waiting', phase: null, text: text('Not run') };
@@ -180,14 +195,14 @@ export function runNodeExecution(run: RunLike, step: RunLike['steps'][number], p
  * record); a run of any other identity or revision, or whose step count differs from this workflow's sequence, colors nothing.
  */
 export function runCanvasExecution(workflow: CanvasWorkflow, order: readonly { readonly nodeId: string }[], run: RunLike | null | undefined,
-  authorizedFor: { readonly workflowId: string; readonly revision: number } | null | undefined, prompting = false): CanvasExecution | null {
+  authorizedFor: { readonly workflowId: string; readonly revision: number } | null | undefined, unrecorded = false): CanvasExecution | null {
   if (!run || !authorizedFor || authorizedFor.workflowId !== workflow.workflowId || authorizedFor.revision !== workflow.revision) return null;
   if (run.stepCount !== order.length || run.steps.length !== order.length) return null;
   const nodes: Record<string, CanvasNodeExecution> = {};
   for (const step of run.steps) {
     const node = order[step.index];
     if (!node) return null;
-    nodes[node.nodeId] = runNodeExecution(run, step, prompting);
+    nodes[node.nodeId] = runNodeExecution(run, step, unrecorded);
   }
   const started = Object.values(nodes).some(node => node.visual !== 'waiting') || run.state !== 'PENDING';
   return { key: `run:${run.workflowRunId}`, workflowId: workflow.workflowId, revision: workflow.revision, nodes, started,

@@ -119,11 +119,11 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     position: positions[node.nodeId]!,
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending || narrow,
       summary: composerSummary(workflow, node, context),
-      ...execution ? { execution: step ?? { visual: 'waiting', phase: null, text: { key: 'Waiting', args: [] } } } : {},
+      ...execution ? { execution: step ?? { visual: 'waiting', phase: null, text: { key: 'Waiting', args: [] } }, quoteFrozen: true } : {},
       // P0 workflow execution: Execute shows the same per-step quote as Create and Simulate (keyed by the step alone, so it is the cached answer,
       // not a new one), marked as an estimate or as expired — never a blank '—' for a value FloFi already knows. Signing never uses it.
-      // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a card whose step has started executing keeps the estimate it shows and asks for no new one
-      // (`useLiveQuote` frozen, from its execution state); a step still waiting keeps its live estimate, as before.
+      // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: while the workflow executes here, every card keeps the estimate it shows and asks for no new
+      // one (`quoteFrozen`): the execution view adds no quote traffic. The Build Canvas keeps live estimates on steps still waiting.
       ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} } };
   }), [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution]);

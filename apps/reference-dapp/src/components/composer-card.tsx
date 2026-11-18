@@ -535,6 +535,8 @@ export type ComposerCardData = {
    * (`domain/canvas-execution.ts`). Presentation only: a border, a tint and a compact badge; the card's content, size and position are unchanged.
    */
   execution?: CanvasNodeExecution;
+  /** The view shows a running workflow (Execute): every card keeps its estimate and asks for no new quote while it runs. */
+  quoteFrozen?: boolean;
 } & ({ inspection: true } | { inspection?: false; validation: ReturnType<typeof composerNodeState> });
 
 /** Shared UX-002 card; inspection has no authoring or simulation-result status. */
@@ -545,7 +547,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const quoteOwner = quoteNode?.chainId.startsWith('solana:') ? card.estimateSolanaOwner ?? card.estimateOwner : card.estimateEvmOwner ?? card.estimateOwner;
   const quoteDestination = quoteNode?.chainId.startsWith('solana:') ? card.estimateEvmOwner : card.estimateSolanaOwner;
   // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: once this step executes, its estimate is kept as shown and never asked again.
-  const quoteFrozen = Boolean(card.execution && card.execution.visual !== 'waiting');
+  const quoteFrozen = Boolean(card.quoteFrozen || card.execution && card.execution.visual !== 'waiting');
   const quote = useLiveQuote(['Swap', 'Stocks', 'Bridge'].includes(card.summary.action) ? card.estimateWorkflow : undefined,
     card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined, quoteFrozen);
   const estimate = quote.status === 'ready' ? quote.estimate : null;

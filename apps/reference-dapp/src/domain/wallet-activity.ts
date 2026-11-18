@@ -39,6 +39,12 @@ export type ActivityCoverage = { readonly network: ActivityNetworkId; readonly n
   readonly code: string | null; readonly covers: readonly ActivityCategory[]; readonly missing: readonly ActivityCategory[] };
 export type WalletActivityPage = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: readonly ActivityCoverage[];
   /** Opaque continuation (null: nothing more on any covered network). */ readonly cursor: string | null;
+  /**
+   * The page is complete only for movements at or after this time: a network or address with more history has not been read further back yet,
+   * so an older row may still be missing between rows already read. Null: complete (every stream exhausted). The History shows older rows once
+   * later pages reach them.
+   */
+  readonly completeAfter: string | null;
   /** Movements of tokens outside the verified catalogs, not shown. */ readonly hidden: number;
   readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED'; readonly observedAt: string };
 
@@ -70,9 +76,17 @@ export const transactionKey = (transaction: string) => /^0x[0-9a-fA-F]{64}$/.tes
  * What a History view lists: newest first, without duplicates, filtered by direction. `recorded`: transactions a FloFi execution record of this
  * wallet carries — in the All view they are left to that record (shown once, as the workflow), in Received/Sent they are listed and marked FloFi.
  */
-export function activityRows(transfers: readonly WalletTransfer[], filter: ActivityFilter, recorded: ReadonlySet<string> = new Set()) {
+export function activityRows(transfers: readonly WalletTransfer[], filter: ActivityFilter, recorded: ReadonlySet<string> = new Set(), completeAfter: string | null = null) {
   const seen = new Set<string>();
-  const unique = transfers.filter(t => !seen.has(t.id) && Boolean(seen.add(t.id)));
+  // Legs of one transaction may arrive on different pages (incoming and outgoing are read separately): a transaction that moved the wallet's
+  // assets both ways is one interaction across everything loaded, never two ordinary transfers.
+  const directions = new Map<string, Set<WalletTransfer['direction']>>();
+  for (const t of transfers) { const key = `${t.chain}:${t.transaction}`; directions.set(key, (directions.get(key) ?? new Set()).add(t.direction)); }
+  const frontier = completeAfter ? Date.parse(completeAfter) : null;
+  const unique = transfers.filter(t => !seen.has(t.id) && Boolean(seen.add(t.id)))
+    .map(t => { const d = directions.get(`${t.chain}:${t.transaction}`)!; return d.has('IN') && d.has('OUT') && t.kind !== 'INTERACTION' ? { ...t, kind: 'INTERACTION' as const } : t; })
+    // Only what every stream has been read down to is shown; older rows wait for the next page (never a silent gap).
+    .filter(t => frontier === null || (t.timestamp !== null && Date.parse(t.timestamp) >= frontier));
   const time = (t: WalletTransfer) => t.timestamp ? Date.parse(t.timestamp) : 0;
   return unique.filter(t => filter === 'ALL' ? !recorded.has(transactionKey(t.transaction)) : filter === 'IN' ? t.direction === 'IN' || t.direction === 'SELF' : t.direction === 'OUT' || t.direction === 'SELF')
     .sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id))

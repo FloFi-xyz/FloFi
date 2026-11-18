@@ -673,7 +673,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // when a step's state changes.
   const ownWorkflowRun = workflowRunHere.started && !workflowRunHere.following ? workflowRunHere.run : null;
   const canvasExecutionNow = (ownWorkflowRun ? runCanvasExecution(state.workflow, sequenceOrder(state.workflow), ownWorkflowRun, workflowRunHere.authorizedFor,
-      ['authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)) : null)
+      workflowRunHere.unrecorded) : null)
     ?? (sequence ? sequenceCanvasExecution(state.workflow, sequence, liveExecution) : lifecycleCanvasExecution(state.workflow, liveExecution));
   const canvasExecutionKey = canvasExecutionNow ? JSON.stringify(canvasExecutionNow) : null;
   const canvasExecution = useMemo(() => canvasExecutionNow, [canvasExecutionKey]);

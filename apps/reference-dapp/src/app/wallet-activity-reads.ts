@@ -14,7 +14,7 @@ export function walletActivity(account: string, cursor: string | null = null): P
   const shared = inflight.get(key);
   if (shared) return shared;
   // The wallet and its continuation are headers, never part of the URL (they would reach access logs).
-  const request = fetch('/api/dashboard/activity', { method: 'GET', cache: 'no-store', credentials: 'same-origin',
+  const request = fetch('/api/dashboard/activity', { method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(65_000),
     headers: { 'x-flofi-account': account, ...cursor ? { 'x-flofi-cursor': cursor } : {} } })
     .then(async response => {
       const body = await response.json().catch(() => ({})) as { ok?: unknown; value?: unknown; code?: unknown };

@@ -15,7 +15,7 @@ import { dateLabel } from './dashboard/dashboard-view';
 import { StatusTag } from './dashboard/dashboard-status';
 
 type Loaded = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: readonly ActivityCoverage[]; readonly cursor: string | null;
-  readonly hidden: number; readonly provenance: WalletActivityPage['provenance'] };
+  readonly completeAfter: string | null; readonly hidden: number; readonly provenance: WalletActivityPage['provenance'] };
 const KIND_LABEL = { TRANSFER: null, INTERACTION: 'Contract interaction', MINT: 'Minted', BURN: 'Burned' } as const;
 const COVERAGE_TEXT: Readonly<Record<ActivityCoverage['status'], string | null>> = { COVERED: null, PARTIAL: '{0}: ETH moved by contracts (internal transfers) is not listed.',
   UNSUPPORTED: '{0}: wallet activity is not available on this network yet.', UNAVAILABLE: '{0}: activity could not be loaded right now. This does not mean there is none.', OFF: null };
@@ -69,7 +69,7 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     setState({ account, status: cursor ? 'more' : 'loading', code: null });
     walletActivity(account, cursor).then(page => {
       if (request !== generation.current) return; // another wallet or page was asked since: this answer is stale
-      setLoaded(previous => ({ account, cursor: page.cursor, provenance: page.provenance,
+      setLoaded(previous => ({ account, cursor: page.cursor, provenance: page.provenance, completeAfter: page.completeAfter ?? null,
         transfers: cursor && previous?.account === account ? [...previous.transfers, ...page.transfers] : page.transfers,
         // The first page states each network's coverage; a later page only updates a network it could (or could no longer) read.
         coverage: cursor && previous?.account === account ? previous.coverage.map(c => page.coverage.find(p => p.network === c.network && p.status === 'UNAVAILABLE') ?? c) : page.coverage,
@@ -88,12 +88,14 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     return () => { if (refreshRef.current === reload) refreshRef.current = null; };
   }, [refreshRef, load]);
   const shown = loaded?.account === account ? loaded : null;
-  const rows = shown ? activityRows(shown.transfers, filter, recorded) : [];
+  const rows = shown ? activityRows(shown.transfers, filter, recorded, shown.cursor ? shown.completeAfter : null) : [];
+  // Rows older than what every stream was read down to wait for the next page, so no silent gap ever appears between listed rows.
+  const waiting = shown ? activityRows(shown.transfers, filter, recorded).length - rows.length : 0;
   const status = state.account === account ? state.status : 'loading';
   const notes = shown?.coverage.filter(c => COVERAGE_TEXT[c.status]) ?? [];
   // Honest empty states: no network could be read is not "no activity", and movements already shown as workflows are not "nothing".
   const readable = Boolean(shown?.coverage.some(c => c.status === 'COVERED' || c.status === 'PARTIAL'));
-  const onlyWorkflows = Boolean(shown && filter === 'ALL' && !rows.length && shown.transfers.length);
+  const onlyWorkflows = Boolean(shown && filter === 'ALL' && !rows.length && !waiting && shown.transfers.length);
   const heading = filter === 'IN' ? 'Received' : filter === 'OUT' ? 'Sent' : 'Wallet activity';
   return <section className="ux-panel wallet-activity" aria-labelledby="wallet-activity-heading" aria-busy={status === 'loading' || status === 'more'}>
     <div className="ux-panel-head"><div><h2 id="wallet-activity-heading">{t(heading)}</h2>
@@ -106,13 +108,14 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
       : state.code === 'ACTIVITY_RATE_LIMITED' ? 'Wallet activity was refreshed many times in a short period. Try again in a minute.'
       : 'Wallet activity is temporarily unavailable. Your FloFi workflow history is not affected.')}</p>
       <button type="button" className="ux-button ux-button-small" onClick={() => load(state.code !== 'ACTIVITY_SIGN_IN_REQUIRED' && shown?.cursor && shown.transfers.length ? shown.cursor : null)}>{t('Retry')}</button></div>}
-    {shown && (rows.length ? <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>
+    {shown && (rows.length || waiting ? rows.length > 0 && <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>
       : <p className="ux-panel-text wallet-activity-empty">{t(!readable ? 'Wallet activity could not be read on any network right now. This does not mean there is none.'
         : onlyWorkflows ? 'The recent movements of this wallet are your FloFi workflows above. Open Received or Sent to see each transfer.'
         : filter === 'IN' ? 'No received transfers found on the covered networks.' : filter === 'OUT' ? 'No sent transfers found on the covered networks.'
         : 'No wallet activity found on the covered networks.')}</p>)}
     {shown && notes.length > 0 && <ul className="wallet-activity-coverage" aria-label={t('Network coverage')}>{notes.map(c => <li key={c.network}>{t(COVERAGE_TEXT[c.status]!, c.name)}</li>)}</ul>}
     {shown && shown.hidden > 0 && <p className="muted wallet-activity-hidden">{t(shown.hidden === 1 ? '1 movement of an unverified token is hidden.' : '{0} movements of unverified tokens are hidden.', String(shown.hidden))}</p>}
+    {shown?.cursor && waiting > 0 && <p className="muted wallet-activity-more">{t(waiting === 1 ? '1 older movement appears when more activity is loaded.' : '{0} older movements appear when more activity is loaded.', String(waiting))}</p>}
     {shown?.cursor && <div className="ux-list-footer"><button type="button" className="ux-button ux-button-small" disabled={status === 'more'} onClick={() => load(shown.cursor)}>
       {t(status === 'more' ? 'Loading wallet activity…' : 'Load more activity')}</button></div>}
   </section>;

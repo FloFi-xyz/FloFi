@@ -151,6 +151,23 @@ describe('Automation management server authorization', () => {
     page(); await flush(); page(); await flush(); page(); await flush();
     expect(f.reads).toEqual(['all']); expect(f.overview).toHaveBeenCalledOnce(); expect(textOf(page())).toContain('Wallet session verified');
   });
+  it('a proof that arrives after the first read (session still checking) asks nothing more; a proof that the page waited for reads once', async () => {
+    const page = (proven: string | null) => host.render(() => AutomationsWorkspace({ owner, proof: { proven } as NonNullable<Parameters<typeof AutomationsWorkspace>[0]['proof']> }));
+    page(null); await flush(); page(null); await flush(); page(owner.address); await flush(); page(owner.address); await flush();
+    expect(f.reads).toEqual(['all']);
+    host.unmount(); host = new HookHarness(); f.reads = []; f.overview.mockReset();
+    f.overview.mockResolvedValueOnce({ ok: false, code: 'WALLET_SESSION_REQUIRED' }).mockResolvedValue({ ok: true, value: overview });
+    page(null); await flush(); page(null); await flush();
+    expect(textOf(page(null))).toContain('Verify wallet ownership to use automations.');
+    page(owner.address); await flush(); page(owner.address); await flush();
+    expect(f.reads).toEqual(['all', 'overview']); expect(textOf(page(owner.address))).toContain('Wallet session verified');
+  });
+  it('a FloFi access refusal is said as such, without a Retry that cannot change it', async () => {
+    f.availability = new Error('BETA_WALLET_NOT_LINKED'); work(); await flush();
+    const tree = work(), text = textOf(tree);
+    expect(text).not.toContain('temporarily unavailable'); expect(text).not.toContain('Coming soon');
+    expect(nodes(tree).some(e => e.type === 'button' && textOf(e) === 'Retry')).toBe(false);
+  });
   it('a temporary availability failure offers Retry — never the "Coming soon" disabled state — and Retry recovers', async () => {
     f.availability = new Error('AUTOMATION_UNAVAILABLE'); work(); await flush();
     let tree = work(); let text = textOf(tree);

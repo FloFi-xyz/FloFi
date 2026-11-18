@@ -78,18 +78,16 @@ describe('Live Canvas on the existing read-only Canvas', () => {
     expect(finished.graph.edges[0]).toMatchObject({ className: 'canvas-execution-edge canvas-execution-edge-done', style: { stroke: 'var(--canvas-exec-done)' } });
     expect(finished.html).toContain('Execution result');
   });
-  it('a card whose step started keeps its estimate and asks for no new quote; a waiting step keeps its live estimate', () => {
+  it('while the workflow executes, every card keeps its estimate and asks for no new quote (the plan before it still does)', () => {
     const before = render();
     const planned = fixture.quotes;
     expect(planned).toBeGreaterThan(0);
-    // The card data is the same (its estimate inputs are kept): only the quote hook is frozen for a started step.
+    // The card data is the same (its estimate inputs are kept): only the quote hook is frozen.
     const quoted = before.graph.nodes.filter(n => n.data.estimateWorkflow).map(n => n.id);
     fixture.quotes = 0;
-    const waiting = render({ execution: execution(['pending', 'waiting', 'waiting']) });
-    expect(waiting.graph.nodes.filter(n => n.data.estimateWorkflow).map(n => n.id)).toEqual(quoted);
-    expect(fixture.quotes).toBe(planned);
-    fixture.quotes = 0;
-    render({ execution: execution(['done', 'done', 'pending']) });
+    const running = render({ execution: execution(['pending', 'waiting', 'waiting']) });
+    expect(running.graph.nodes.filter(n => n.data.estimateWorkflow).map(n => n.id)).toEqual(quoted);
+    expect(running.graph.nodes.every(n => n.data.quoteFrozen === true)).toBe(true);
     expect(fixture.quotes).toBe(0);
   });
   it('ignores a record of another revision or workflow: no state, no badge, the plan as before', () => {

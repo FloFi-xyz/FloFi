@@ -179,3 +179,64 @@ describe('History rows', () => {
     expect(activityRows(page.transfers, 'IN', recorded)).toEqual([expect.objectContaining({ flofi: false })]);
   });
 });
+
+describe('review hardening (flofi-protocol-integrations)', () => {
+  it('a page is complete only down to the newest oldest-read time of streams with more history; older rows wait for the next page', async () => {
+    const page = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: {
+      IN: [transfer(1, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T10:00:00Z'), transfer(2, peer, owner, 'erc20', 2n, USDC, 6, '2026-11-17T09:00:00Z')],
+      OUT: [transfer(3, owner, peer, 'erc20', 3n, USDC, 6, '2026-11-10T09:00:00Z')], pageKey: 'more' } }), { mode: async n => n === 'base' ? 'live' : 'off' }));
+    expect(page.completeAfter).toBe('2026-11-17T09:00:00.000Z');
+    // The OUT row of a week earlier is held back: rows newer than it on the busier stream may not have been read yet.
+    expect(activityRows(page.transfers, 'ALL', new Set(), page.completeAfter).map(r => r.transfer.transaction)).toEqual([h(1), h(2)]);
+    expect(activityRows(page.transfers, 'ALL').length).toBe(3);
+  });
+  it('legs of one swap that arrive on different pages are one interaction across everything loaded', () => {
+    const base = { network: 'base' as const, networkName: 'Base', chain: 'eip155:8453', category: 'TOKEN' as const, counterparty: pool, transaction: h(9), explorerUrl: null,
+      timestamp: '2026-11-17T10:00:00.000Z', block: '1', status: 'CONFIRMED' as const, kind: 'TRANSFER' as const };
+    const legs = [{ ...base, id: 'a', direction: 'OUT' as const, asset: { symbol: 'USDC', decimals: 6, address: USDC, logo: null }, amount: '1' },
+      { ...base, id: 'b', direction: 'IN' as const, asset: { symbol: 'WETH', decimals: 18, address: WETH, logo: null }, amount: '2' }];
+    expect(activityRows(legs, 'ALL').map(r => r.transfer.kind)).toEqual(['INTERACTION', 'INTERACTION']);
+  });
+  it('the Alchemy transport: fixed host per network, key only in a Bearer header, read method only, closed codes, bounded call budget', async () => {
+    const calls: [string, RequestInit][] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => { calls.push([url, init]);
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { transfers: [] } }), { status: 200, headers: { 'content-type': 'application/json' } }); }));
+    const { alchemyTransport, ACTIVITY_ALCHEMY_CALLS_PER_MINUTE } = await import('./wallet-activity');
+    const call = alchemyTransport({ GRYLOO_ALCHEMY_API_KEY: 'k'.repeat(32) })!;
+    await call('arbitrum-one', { toAddress: owner });
+    expect(calls[0]![0]).toBe('https://arb-mainnet.g.alchemy.com/v2'); expect(calls[0]![0]).not.toContain('kkkk');
+    expect((calls[0]![1].headers as Record<string, string>).authorization).toBe(`Bearer ${'k'.repeat(32)}`);
+    expect(JSON.parse(String(calls[0]![1].body))).toEqual({ jsonrpc: '2.0', id: 1, method: 'alchemy_getAssetTransfers', params: [{ toAddress: owner }] });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 429, message: 'limit' } }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    await expect(call('base', {})).rejects.toThrow('ACTIVITY_PROVIDER_RATE_LIMITED');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } })));
+    await expect(call('base', {})).rejects.toThrow('ACTIVITY_PROVIDER_INVALID');
+    for (let i = 0; i < ACTIVITY_ALCHEMY_CALLS_PER_MINUTE; i++) await call('base', {}).catch(() => undefined);
+    await expect(call('base', {})).rejects.toThrow('ACTIVITY_PROVIDER_BUDGET_EXCEEDED');
+    expect(alchemyTransport({})).toBeNull();
+    vi.unstubAllGlobals();
+  });
+  it('a malformed continuation from the provider is an invalid answer, never "no more history"', async () => {
+    const page = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: { IN: [], pageKey: 'bad key with spaces' } }), { mode: async n => n === 'base' ? 'live' : 'off' }));
+    expect(page.coverage.find(c => c.network === 'base')).toMatchObject({ status: 'UNAVAILABLE', code: 'ACTIVITY_PROVIDER_INVALID' });
+  });
+  it('Solana: failed transactions are never fetched, an unreadable one marks the network partial, a scaled Token-2022 amount is hidden', async () => {
+    const wallet = 'Fq9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const sig = (c: string) => c.repeat(88), fetched: string[] = [];
+    const rpc: SolanaRpc = async (method: string, params: readonly unknown[]) => {
+      if (method === 'getTokenAccountsByOwner') return { value: [] };
+      if (method === 'getSignaturesForAddress') return [{ signature: sig('A'), slot: 3, err: { fail: 1 } }, { signature: sig('B'), slot: 2, err: null }, { signature: sig('C'), slot: 1, err: null }];
+      if (method === 'getTransaction') { fetched.push(String(params[0]).slice(0, 1));
+        return params[0] === sig('B') ? null : { slot: 1, blockTime: 1, meta: { err: null, fee: 0, preBalances: [1], postBalances: [1],
+          preTokenBalances: [{ accountIndex: 0, mint, owner: wallet, uiTokenAmount: { amount: '1000000', decimals: 6, uiAmountString: '2' } }],
+          postTokenBalances: [{ accountIndex: 0, mint, owner: wallet, uiTokenAmount: { amount: '3000000', decimals: 6, uiAmountString: '6' } }] },
+          transaction: { message: { accountKeys: [{ pubkey: wallet }], instructions: [] } } }; }
+      throw new Error('UNEXPECTED_' + method);
+    };
+    const catalog: SolanaAssetCatalog = { assets: [{ symbol: 'USDC', name: 'USD Coin', mint, decimals: 6, native: false, logoUrl: null }], fetchedAt: '', source: 'test', contentSha256: '', excludedRecords: 0 };
+    const page = await readWalletActivity({ account: wallet }, {}, { cache: null, cursorKey, mode: async () => 'live', solanaRpc: () => rpc, solanaCatalog: async () => catalog });
+    expect(fetched).toEqual(['B', 'C']);
+    expect(page.coverage[0]).toMatchObject({ status: 'PARTIAL', code: 'SOLANA_TRANSACTION_UNREADABLE' });
+    expect(page.transfers).toEqual([]); expect(page.hidden).toBe(1);
+  });
+});

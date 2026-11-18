@@ -65,8 +65,17 @@ not mean there is none."). No network is ever presented as an empty history when
 - **FloFi workflow** is shown only when a loaded FloFi execution record carries the same transaction; in All those movements are left to the
   workflow record (deduplicated), in Received/Sent they are listed and marked.
 - Bounded: 20 transfers per network and direction per page (Alchemy `maxCount`), 10 signatures per Solana address, 12 Solana transactions per
-  page, a 10 s budget with each network isolated, an opaque wallet-bound cursor, in-flight request joining and a 30 s per-wallet cache (5 s while a
-  network is unavailable). EVM transfers are "Confirmed" (included in a block); Solana uses the cluster's `confirmed`/`finalized` status.
+  page (failed transactions are never fetched), a 10 s budget per network that aborts the remaining reads, in-flight request joining, a 30 s
+  per-wallet cache (5 s while a network is unavailable), at most 12 uncached reads per wallet per minute and 90 Alchemy activity calls per minute
+  per server instance (so History can never take the shared key's throughput from the bridge read failover). One paced Solana client per endpoint
+  is shared by all reads. EVM transfers are "Confirmed" (included in a block); Solana uses the cluster's `confirmed`/`finalized` status.
+- The continuation travels in a header (`x-flofi-cursor`), never in a URL, and is bound to its wallet by a server-keyed MAC: it names no wallet in
+  clear and cannot be forged to drive provider reads.
+- No silent gaps: incoming and outgoing (and each Solana address) are read as separate streams, so a page is only complete down to the newest of
+  the oldest times read on streams with more history (`completeAfter`); older rows wait for the next page ("N older movements appear when more
+  activity is loaded"). Legs of one transaction that arrive on different pages are re-classified together (a swap is never two transfers).
+- Solana Token-2022 mints whose display amount differs from their base amount (Scaled UI Amount, interest-bearing) are counted as hidden instead of
+  shown with a base-unit amount; a transaction the node cannot return marks Solana PARTIAL.
 
 ### Limitations and what would remove them
 
@@ -76,8 +85,12 @@ not mean there is none."). No network is ever presented as an empty history when
 - **Internal native transfers on Base/Arbitrum One**: the Alchemy Transfers API lists `internal` on Ethereum only; covering them needs a trace
   provider (`debug_traceTransaction`/`trace_filter` capable plan) — a cost decision.
 - **Provider cost**: each History open reads at most 6 Alchemy calls (2 per EVM network, ~150 compute units each on Alchemy's pricing); cached 30 s.
-- **Solana**: incoming transfers into token accounts beyond the first 6 verified-mint accounts are not listed (reported as Partial); Token-2022
-  amounts are base units of the mint's decimals (Scaled UI Amount display rules are not applied in activity).
+- **Solana**: incoming transfers into token accounts beyond the first 6 verified-mint accounts are not listed (reported as Partial); scaled or
+  interest-bearing Token-2022 movements are hidden (counted); receipts into token accounts the wallet has since closed are not found; on the default
+  public RPC a page needs ~20 sequential paced calls and may exceed the 10 s budget (shown as unavailable, never empty) — a dedicated RPC
+  (`GRYLOO_SOLANA_RPC_URL`, already supported) avoids it.
+- **Network gates**: a deployment-gate read that fails reports the network as OFF (the portfolio's existing gate semantics).
+- **NFTs** (ERC-721/1155) are not part of wallet activity.
 - **Origin deduplication** is as complete as the loaded execution records' attempts (records whose attempts were not read are not matched; the
   transfer then appears without a FloFi mark — never mislabeled).
 - External bridges/swaps of other apps are labeled from chain data only (a one-way receipt from a relayer reads as "Received from …").

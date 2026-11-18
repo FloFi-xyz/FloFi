@@ -17,7 +17,8 @@ export function automationSnapshot(owner: WorkflowOwner | null, scope: 'all' | '
   const key = `${scope}|${owner ? `${owner.namespace}:${owner.address}` : ''}`;
   const shared = inflight.get(key);
   if (shared && !fresh) return shared;
-  const request = fetch(`/api/automations/overview${scope === 'overview' ? '?scope=overview' : ''}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin',
+  // Bounded: a stalled read ends (the route's own budget is 60 s), so the page shows Retry instead of loading forever.
+  const request = fetch(`/api/automations/overview${scope === 'overview' ? '?scope=overview' : ''}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(65_000),
     headers: owner ? { 'x-flofi-account': owner.address } : {} })
     .then(async response => {
       const body = await response.json().catch(() => ({})) as { ok?: unknown; value?: unknown; code?: unknown };

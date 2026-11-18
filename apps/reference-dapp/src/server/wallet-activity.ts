@@ -131,28 +131,46 @@ function withDeadline<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, 
 const checkAborted = (signal: AbortSignal) => { if (signal.aborted) throw new Error('ACTIVITY_TIME_BUDGET_EXCEEDED'); };
 
 // ── EVM (Alchemy Transfers API) ───────────────────────────────────────────────────────────────
+/**
+ * Activity calls on the shared Alchemy key per minute in this server instance. The key also serves other read paths (the bridge read failover):
+ * history reads stop well before they could take its throughput — a network over this budget reads as UNAVAILABLE for that page.
+ */
+export const ACTIVITY_ALCHEMY_CALLS_PER_MINUTE = 90;
+const alchemyCalls: number[] = [];
+function admitAlchemyCall(now = Date.now()) {
+  while (alchemyCalls.length && now - alchemyCalls[0]! >= 60_000) alchemyCalls.shift();
+  if (alchemyCalls.length >= ACTIVITY_ALCHEMY_CALLS_PER_MINUTE) throw new Error('ACTIVITY_PROVIDER_BUDGET_EXCEEDED');
+  alchemyCalls.push(now);
+}
 /** The deployment's Alchemy transport: one fixed host per network, the key in a Bearer header (never in a URL or a log), read method only. */
 export function alchemyTransport(env: Env): AlchemyCall | null {
   const key = env.GRYLOO_ALCHEMY_API_KEY;
   if (!key) return null;
   return async (network, params, signal) => {
+    admitAlchemyCall();
     const response = await fetch(`https://${ALCHEMY[network]}.g.alchemy.com/v2`, { method: 'POST', cache: 'no-store', redirect: 'error',
       signal: signal ? AbortSignal.any([AbortSignal.timeout(8_000), signal]) : AbortSignal.timeout(8_000),
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'alchemy_getAssetTransfers', params: [params] }) });
     if (response.status === 429) throw new Error('ACTIVITY_PROVIDER_RATE_LIMITED');
     if (Number(response.headers.get('content-length') ?? 0) > 2_097_152) throw new Error('ACTIVITY_PROVIDER_RESPONSE_TOO_LARGE');
+    if (!/^application\/json\b/i.test(response.headers.get('content-type') ?? '')) throw new Error('ACTIVITY_PROVIDER_INVALID');
     const text = await response.text();
     if (text.length > 2_097_152) throw new Error('ACTIVITY_PROVIDER_RESPONSE_TOO_LARGE');
     let body: unknown;
     try { body = JSON.parse(text); } catch { throw new Error('ACTIVITY_PROVIDER_INVALID'); }
-    if (!response.ok || !body || typeof body !== 'object' || 'error' in body || !('result' in body)) throw new Error('ACTIVITY_PROVIDER_UNAVAILABLE');
+    const rpcError = body && typeof body === 'object' && 'error' in body ? (body as { error?: { code?: unknown } }).error : undefined;
+    if (rpcError && (rpcError.code === 429 || rpcError.code === -32005)) throw new Error('ACTIVITY_PROVIDER_RATE_LIMITED');
+    if (!response.ok || !body || typeof body !== 'object' || rpcError || !('result' in body)) throw new Error('ACTIVITY_PROVIDER_UNAVAILABLE');
     return (body as { result: unknown }).result;
   };
 }
 type AlchemyTransfer = { blockNum?: unknown; uniqueId?: unknown; hash?: unknown; from?: unknown; to?: unknown; category?: unknown;
   rawContract?: { value?: unknown; address?: unknown; decimal?: unknown } | null; metadata?: { blockTimestamp?: unknown } | null };
-type ReadResult = { readonly legs: ActivityLeg[]; readonly hidden: number; readonly streams: Record<string, string | null>; readonly coverage: ActivityCoverage };
+/** `frontier`: the newest of the oldest times read on each stream that has more history (null: none left), see `completeAfter`. */
+type ReadResult = { readonly legs: ActivityLeg[]; readonly hidden: number; readonly streams: Record<string, string | null>; readonly coverage: ActivityCoverage;
+  readonly frontier: number | null };
+const later = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
 
 async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: AlchemyCall, catalog: Promise<AssetCatalog>, previous: Streams | null, signal: AbortSignal): Promise<ReadResult> {
   const runtime = CATALOG_NETWORKS[network];
@@ -160,7 +178,7 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
   const native = listed.assets.find(asset => asset.kind === 'NATIVE');
   const tokens = new Map(listed.assets.filter(asset => asset.kind === 'ERC20' && asset.address).map(asset => [asset.address!.toLowerCase(), asset] as const));
   const legs: ActivityLeg[] = [], streams: Record<string, string | null> = {};
-  let hidden = 0;
+  let hidden = 0, frontier: number | null = null;
   for (const direction of ['IN', 'OUT'] as const) {
     const key = `${network}:${direction}`, before = previous ? previous[key] : undefined;
     // A stream already exhausted on an earlier page is not read again.
@@ -170,7 +188,13 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
       category: CATEGORIES[network], withMetadata: true, excludeZeroValue: true, maxCount: `0x${ACTIVITY_PAGE.toString(16)}`, order: 'desc', ...before ? { pageKey: before } : {} }, signal);
     const value = result as { transfers?: unknown; pageKey?: unknown } | null;
     if (!value || !Array.isArray(value.transfers) || value.transfers.length > ACTIVITY_PAGE * 2) throw new Error('ACTIVITY_PROVIDER_INVALID');
-    streams[key] = typeof value.pageKey === 'string' && PAGE_KEY.test(value.pageKey) ? value.pageKey : null;
+    // A continuation the provider sends must be usable: one that is not is a malformed answer, never "no more history".
+    if (value.pageKey !== undefined && value.pageKey !== null && !(typeof value.pageKey === 'string' && PAGE_KEY.test(value.pageKey))) throw new Error('ACTIVITY_PROVIDER_INVALID');
+    streams[key] = typeof value.pageKey === 'string' ? value.pageKey : null;
+    if (streams[key]) {
+      const oldest = (value.transfers as AlchemyTransfer[]).map(t => typeof t.metadata?.blockTimestamp === 'string' ? Date.parse(t.metadata.blockTimestamp) : NaN).filter(Number.isFinite);
+      if (oldest.length) frontier = later(frontier, Math.min(...oldest));
+    }
     for (const raw of value.transfers as AlchemyTransfer[]) {
       const hash = typeof raw.hash === 'string' && HASH.test(raw.hash) ? raw.hash.toLowerCase() : null;
       const from = typeof raw.from === 'string' && ADDRESS.test(raw.from) ? raw.from.toLowerCase() : null;
@@ -197,23 +221,33 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
     }
   }
   const covers: ActivityCategory[] = network === 'ethereum' ? ['NATIVE', 'INTERNAL', 'TOKEN'] : ['NATIVE', 'TOKEN'];
-  return { legs, hidden, streams, coverage: { network, name: ACTIVITY_NAME[network], status: network === 'ethereum' ? 'COVERED' : 'PARTIAL',
+  return { legs, hidden, streams, frontier, coverage: { network, name: ACTIVITY_NAME[network], status: network === 'ethereum' ? 'COVERED' : 'PARTIAL',
     code: network === 'ethereum' ? null : 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED', covers, missing: network === 'ethereum' ? [] : ['INTERNAL'] } };
 }
 
 // ── Solana ───────────────────────────────────────────────────────────────────────────────────
 const WSOL_MINT = SOLANA_MAINNET_TOKENS.SOL.mint;
 type ParsedKey = { pubkey?: unknown };
-type TokenBalance = { accountIndex?: unknown; mint?: unknown; owner?: unknown; programId?: unknown; uiTokenAmount?: { amount?: unknown; decimals?: unknown } };
+type TokenBalance = { accountIndex?: unknown; mint?: unknown; owner?: unknown; programId?: unknown; uiTokenAmount?: { amount?: unknown; decimals?: unknown; uiAmountString?: unknown } };
+/** Base units as a plain decimal string ("1500000", 6 → "1.5"), for comparing with the RPC's own display amount. */
+const plainUnits = (units: bigint, decimals: number) => {
+  const whole = units / 10n ** BigInt(decimals), fraction = (units % 10n ** BigInt(decimals)).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+};
+/** One paced client per Solana endpoint for the whole process: concurrent History reads share its pacing (as the portfolio's reads do). */
+const solanaClients = new Map<string, SolanaRpc>();
+const sharedSolanaRpc = (url: string) => { let rpc = solanaClients.get(url); if (!rpc) { rpc = createSolanaRpc(url, false); solanaClients.set(url, rpc); } return rpc; };
 type ParsedInstruction = { program?: unknown; parsed?: { type?: unknown; info?: Record<string, unknown> } };
 type SolanaTransaction = { slot?: unknown; blockTime?: unknown; meta?: { err?: unknown; fee?: unknown; preBalances?: unknown; postBalances?: unknown;
   preTokenBalances?: unknown; postTokenBalances?: unknown; innerInstructions?: unknown } | null; transaction?: { message?: { accountKeys?: unknown; instructions?: unknown } } };
 const integer = (value: unknown): bigint | null => typeof value === 'number' && Number.isSafeInteger(value) ? BigInt(value) : typeof value === 'string' && /^\d{1,30}$/.test(value) ? BigInt(value) : null;
 
 async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<SolanaAssetCatalog>, previous: Streams | null, signal: AbortSignal): Promise<ReadResult> {
-  const verified = new Map((await catalog).assets.map(asset => [asset.mint, asset] as const));
+  // The catalog loads (or is served from its process cache) while the token accounts are read.
+  const verifiedLoad = catalog.then(value => new Map(value.assets.map(asset => [asset.mint, asset] as const)));
+  verifiedLoad.catch(() => undefined);
   // The wallet's token accounts of verified mints: an incoming SPL / Token-2022 transfer names the token account, not the wallet.
-  const accounts: { address: string; mint: string }[] = [];
+  const held: { address: string; mint: string }[] = [];
   for (const programId of [JUPITER_SOLANA_MAINNET.programs.token, SOLANA_TOKEN_2022_PROGRAM]) {
     checkAborted(signal);
     const result = await rpc('getTokenAccountsByOwner', [owner, { programId }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
@@ -222,13 +256,15 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     for (const entry of value as { pubkey?: unknown; account?: { data?: { parsed?: { info?: { mint?: unknown; owner?: unknown } } } } }[]) {
       const info = entry.account?.data?.parsed?.info, mint = info?.mint;
       if (typeof entry.pubkey !== 'string' || !BASE58.test(entry.pubkey) || typeof mint !== 'string' || info?.owner !== owner) continue;
-      if (verified.has(mint) || mint === WSOL_MINT) accounts.push({ address: entry.pubkey, mint });
+      held.push({ address: entry.pubkey, mint });
     }
   }
+  const verified = await verifiedLoad;
+  const accounts = held.filter(account => verified.has(account.mint) || account.mint === WSOL_MINT);
   const ranked = accounts.sort((a, b) => Number(b.mint === SOLANA_MAINNET_TOKENS.USDC.mint) - Number(a.mint === SOLANA_MAINNET_TOKENS.USDC.mint)
     || Number(b.mint === SOLANA_MAINNET_TOKENS.USDT.mint) - Number(a.mint === SOLANA_MAINNET_TOKENS.USDT.mint) || a.address.localeCompare(b.address));
   const sources = [owner, ...ranked.slice(0, SOLANA_MAX_TOKEN_ACCOUNTS).map(account => account.address)];
-  const found: { signature: string; slot: number; source: string; finalized: boolean }[] = [];
+  const found: { signature: string; slot: number; source: string; rank: number; finalized: boolean; failed: boolean; time: number | null }[] = [];
   const exhausted = new Set<string>();
   const streams: Record<string, string | null> = {};
   for (const source of sources) {
@@ -238,13 +274,16 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     const result = await rpc('getSignaturesForAddress', [source, { limit: SOLANA_SIGNATURES_PER_ADDRESS, commitment: 'confirmed', ...before && before !== FROM_NEWEST ? { before } : {} }]);
     if (!Array.isArray(result) || result.length > SOLANA_SIGNATURES_PER_ADDRESS) throw new Error('SOLANA_RPC_INVALID');
     if (result.length < SOLANA_SIGNATURES_PER_ADDRESS) exhausted.add(source);
-    for (const item of result as { signature?: unknown; slot?: unknown; err?: unknown; confirmationStatus?: unknown }[]) {
+    for (const [rank, item] of (result as { signature?: unknown; slot?: unknown; err?: unknown; confirmationStatus?: unknown; blockTime?: unknown }[]).entries()) {
       if (typeof item.signature !== 'string' || !SIGNATURE.test(item.signature) || typeof item.slot !== 'number') throw new Error('SOLANA_RPC_INVALID');
-      // A failed transaction moved nothing but its fee: it is not activity.
-      found.push({ signature: item.signature, slot: item.slot, source, finalized: item.confirmationStatus === 'finalized' && (item.err === null || item.err === undefined) });
+      // A failed transaction moved nothing but its fee: it keeps its place in the page, and is never fetched.
+      const failed = item.err !== null && item.err !== undefined;
+      found.push({ signature: item.signature, slot: item.slot, source, rank, finalized: item.confirmationStatus === 'finalized' && !failed, failed,
+        time: typeof item.blockTime === 'number' ? item.blockTime * 1000 : null });
     }
   }
-  const unique = [...new Map(found.map(item => [item.signature, item] as const)).values()].sort((a, b) => b.slot - a.slot || a.signature.localeCompare(b.signature));
+  // Newest slot first; within a slot, each address's own order (so what a page takes from an address is always a prefix of its list).
+  const unique = [...new Map(found.map(item => [item.signature, item] as const)).values()].sort((a, b) => b.slot - a.slot || a.rank - b.rank || a.source.localeCompare(b.source));
   const page = unique.slice(0, SOLANA_TRANSACTIONS_PER_PAGE);
   // Each address continues after the last of its signatures this page includes; signatures read but not shown are read again next time.
   for (const source of sources) {
@@ -254,12 +293,23 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     streams[key] = shown.length === own.length ? exhausted.has(source) ? null : own.at(-1)?.signature ?? null
       : shown.at(-1)?.signature ?? (previous?.[key] ?? FROM_NEWEST);
   }
+  // Complete only down to the newest of the oldest times read on addresses with more history (see `completeAfter`).
+  let frontier: number | null = null;
+  for (const source of sources) if (streams[`solana:${source}`]) {
+    const shownTimes = page.filter(item => item.source === source && item.time !== null).map(item => item.time!);
+    const ownTimes = found.filter(item => item.source === source && item.time !== null).map(item => item.time!);
+    const times = shownTimes.length ? shownTimes : ownTimes;
+    if (times.length) frontier = later(frontier, Math.min(...times));
+  }
   const legs: ActivityLeg[] = [];
-  let hidden = 0;
+  let hidden = 0, unreadable = 0;
   for (const item of page) {
+    if (item.failed) continue;
     checkAborted(signal);
     const tx = await rpc('getTransaction', [item.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]) as SolanaTransaction | null;
-    if (!tx?.meta || tx.meta.err) continue;
+    // A transaction the node cannot return yet (or returns malformed) is reported (PARTIAL), never silently treated as no movement.
+    if (!tx?.meta) { unreadable++; continue; }
+    if (tx.meta.err) continue;
     const keys = Array.isArray(tx.transaction?.message?.accountKeys) ? (tx.transaction!.message!.accountKeys as ParsedKey[]).map(k => typeof k.pubkey === 'string' ? k.pubkey : typeof k === 'string' ? k as string : '') : [];
     const instructions = [...Array.isArray(tx.transaction?.message?.instructions) ? tx.transaction!.message!.instructions as ParsedInstruction[] : [],
       ...Array.isArray(tx.meta.innerInstructions) ? (tx.meta.innerInstructions as { instructions?: unknown }[]).flatMap(inner => Array.isArray(inner.instructions) ? inner.instructions as ParsedInstruction[] : []) : []];
@@ -283,18 +333,23 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     const ownerOf = new Map<string, string>();
     for (const b of [...balances(tx.meta.preTokenBalances), ...balances(tx.meta.postTokenBalances)])
       if (typeof b.accountIndex === 'number' && typeof b.owner === 'string') ownerOf.set(keys[b.accountIndex] ?? '', b.owner);
-    const deltas = new Map<string, { delta: bigint; decimals: number }>();
+    const deltas = new Map<string, { delta: bigint; decimals: number; scaled: boolean }>();
     for (const [sign, list] of [[-1n, tx.meta.preTokenBalances], [1n, tx.meta.postTokenBalances]] as const) for (const b of balances(list)) {
       const amount = integer(b.uiTokenAmount?.amount);
       if (b.owner !== owner || typeof b.mint !== 'string' || amount === null || typeof b.uiTokenAmount?.decimals !== 'number') continue;
-      const current = deltas.get(b.mint) ?? { delta: 0n, decimals: b.uiTokenAmount.decimals };
-      deltas.set(b.mint, { delta: current.delta + sign * amount, decimals: current.decimals });
+      // A Token-2022 mint whose display amount is not its base amount (Scaled UI Amount, interest-bearing) cannot be shown honestly from base
+      // units here: it is counted as hidden rather than shown with a wrong amount.
+      const ui = b.uiTokenAmount.uiAmountString;
+      const scaled = typeof ui === 'string' && /^\d+(\.\d+)?$/.test(ui) && ui.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '') !== plainUnits(amount, b.uiTokenAmount.decimals);
+      const current = deltas.get(b.mint) ?? { delta: 0n, decimals: b.uiTokenAmount.decimals, scaled: false };
+      deltas.set(b.mint, { delta: current.delta + sign * amount, decimals: current.decimals, scaled: current.scaled || scaled });
     }
-    for (const [mint, { delta, decimals }] of deltas) {
+    for (const [mint, { delta, decimals, scaled }] of deltas) {
       if (delta === 0n) continue;
       const known = verified.get(mint);
-      if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals) { hidden++; continue; }
+      if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals || scaled) { hidden++; continue; }
       const transfer = instructions.find(ix => (ix.program === 'spl-token' || ix.program === 'spl-token-2022') && ['transfer', 'transferChecked'].includes(String(ix.parsed?.type))
+        && (ix.parsed?.info?.mint === undefined || ix.parsed.info.mint === mint)
         && (delta > 0n ? ownerOf.get(String(ix.parsed?.info?.destination)) === owner : ownerOf.get(String(ix.parsed?.info?.source)) === owner || ix.parsed?.info?.authority === owner));
       const other = transfer ? delta > 0n ? ownerOf.get(String(transfer.parsed!.info!.source)) ?? String(transfer.parsed!.info!.authority ?? '') : ownerOf.get(String(transfer.parsed!.info!.destination)) ?? null : null;
       legs.push({ ...base, id: `${base.chain}:${item.signature}:${mint}`, direction: delta > 0n ? 'IN' : 'OUT', category: 'TOKEN',
@@ -303,7 +358,8 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     }
   }
   const limited = accounts.length > SOLANA_MAX_TOKEN_ACCOUNTS;
-  return { legs, hidden, streams, coverage: { network: 'solana', name: 'Solana', status: limited ? 'PARTIAL' : 'COVERED', code: limited ? 'SOLANA_TOKEN_ACCOUNT_LIMIT' : null,
+  const partial = limited ? 'SOLANA_TOKEN_ACCOUNT_LIMIT' : unreadable ? 'SOLANA_TRANSACTION_UNREADABLE' : null;
+  return { legs, hidden, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: partial ? 'PARTIAL' : 'COVERED', code: partial,
     covers: ['NATIVE', 'TOKEN'], missing: [] } };
 }
 
@@ -349,7 +405,7 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
     if (network === 'robinhood') return unsupported(network, 'ACTIVITY_SOURCE_NOT_CONFIGURED');
     try {
       if (network === 'solana') {
-        const rpc = seams.solanaRpc ? seams.solanaRpc() : createSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_RPC_CONFIGURATION_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc, false);
+        const rpc = seams.solanaRpc ? seams.solanaRpc() : sharedSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_RPC_CONFIGURATION_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc);
         const catalog = seams.solanaCatalog ? seams.solanaCatalog() : loadSolanaCatalog();
         return await withDeadline(signal => readSolana(account.address, rpc, catalog, previous, signal), budget, 'ACTIVITY_TIME_BUDGET_EXCEEDED');
       }
@@ -360,15 +416,16 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
     } catch (error) { return unavailable(network, codeOf(error, 'ACTIVITY_READ_FAILED')); }
   }));
   const legs: ActivityLeg[] = [], coverage: ActivityCoverage[] = [], streams: Record<string, string | null> = {};
-  let hidden = 0;
+  let hidden = 0, frontier: number | null = null;
   for (const result of results) {
-    if ('legs' in result) { legs.push(...result.legs); coverage.push(result.coverage); hidden += result.hidden; Object.assign(streams, result.streams); }
+    if ('legs' in result) { legs.push(...result.legs); coverage.push(result.coverage); hidden += result.hidden; Object.assign(streams, result.streams); frontier = later(frontier, result.frontier); }
     else coverage.push(result);
   }
   // A network unavailable on this page keeps its continuation, so the next page tries it again.
   if (previous) for (const [k, v] of Object.entries(previous)) if (!(k in streams) && coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))) streams[k] = v;
   const more = Object.values(streams).some(v => v !== null);
   return { account: account.address, transfers: classifyLegs(legs), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey) : null, hidden,
+    completeAfter: more && frontier !== null ? new Date(frontier).toISOString() : null,
     provenance: 'PUBLIC_MAINNET', observedAt: nowDate.toISOString() };
 }
 
@@ -397,5 +454,5 @@ function mockedActivity(account: ActivityAccount, now: Date): WalletActivityPage
       { network: 'arbitrum-one', name: 'Arbitrum One', status: 'PARTIAL', code: 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED', covers: ['NATIVE', 'TOKEN'], missing: ['INTERNAL'] },
       unsupported('robinhood', 'ACTIVITY_SOURCE_NOT_CONFIGURED')]
     : [{ network: 'solana', name: 'Solana', status: 'COVERED', code: null, covers: ['NATIVE', 'TOKEN'], missing: [] }];
-  return { account: account.address, transfers: classifyLegs(legs), coverage, cursor: null, hidden: 1, provenance: 'MOCKED', observedAt: now.toISOString() };
+  return { account: account.address, transfers: classifyLegs(legs), coverage, cursor: null, completeAfter: null, hidden: 1, provenance: 'MOCKED', observedAt: now.toISOString() };
 }

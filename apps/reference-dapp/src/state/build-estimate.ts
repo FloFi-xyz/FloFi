@@ -145,8 +145,10 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     return () => { cancel(); clearTimeout(expire); };
   }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh, frozen]);
   if (!quotable) return { status: 'idle' };
-  // A frozen card that never had an answer for this snapshot shows none (never "calculating": nothing is asked).
+  // A frozen card that never had an answer for this snapshot shows none (never "calculating": nothing is asked); an answer it keeps past its
+  // expiry is marked expired (no refresh is asked while frozen).
   if (frozen && result?.key !== scope && expired?.key !== scope) return { status: 'idle' };
+  if (frozen && result?.key === scope && result.estimate && Date.parse(result.estimate.expiresAt) <= Date.now()) return { status: 'expired', estimate: result.estimate };
   if (result?.key !== scope) return expired?.key === scope ? { status: 'expired', estimate: expired.estimate } : { status: 'calculating' };
   return result.estimate ? { status: 'ready', estimate: result.estimate } : result.failed ? { status: 'unavailable', ...result.failure ? { code: result.failure.code, ...result.failure.correlationId ? { correlationId: result.failure.correlationId } : {},
     ...result.failure.discovery ? { discovery: result.failure.discovery } : {} } : {} } : { status: 'idle' };

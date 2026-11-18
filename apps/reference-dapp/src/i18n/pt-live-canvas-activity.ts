@@ -30,6 +30,8 @@ export const portugueseLiveCanvasActivity: Readonly<Record<string, string>> = {
   'Network coverage': 'Cobertura por rede', '1 movement of an unverified token is hidden.': '1 movimentação de um token não verificado está oculta.',
   '{0} movements of unverified tokens are hidden.': '{0} movimentações de tokens não verificados estão ocultas.',
   'Wallet activity was refreshed many times in a short period. Try again in a minute.': 'A atividade da carteira foi atualizada muitas vezes em pouco tempo. Tente novamente em um minuto.',
+  '1 older movement appears when more activity is loaded.': '1 movimentação mais antiga aparece ao carregar mais atividade.',
+  '{0} older movements appear when more activity is loaded.': '{0} movimentações mais antigas aparecem ao carregar mais atividade.',
   // Automations loading
   'Automations are temporarily unavailable. This is not a change to your automations.': 'As automações estão temporariamente indisponíveis. Isso não altera suas automações.',
 };

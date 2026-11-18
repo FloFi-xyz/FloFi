@@ -137,10 +137,23 @@ describe('Live Canvas: a whole-workflow run', () => {
     const r = runCanvasExecution(workflow, order, run(['RECONCILED', 'DELEGATED', 'PENDING'], [group('SUBMITTED', true)]), authorized)!;
     // A step still PENDING in the run's own record has not been sent: it stays neutral whatever its group shows.
     expect(visuals(r)).toEqual({ swap: 'done', bridge: 'pending', transfer: 'waiting' });
+    // A prepared group reads as the panel says it: waiting for the owner's wallet.
     const waiting = runCanvasExecution(workflow, order, run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('PREPARED')]), authorized)!;
-    expect(visuals(waiting)).toEqual({ swap: 'authorize', bridge: 'authorize', transfer: 'authorize' });
-    // Only while this Editor is asking the wallet does the card say "Confirm in wallet".
-    expect(visuals(runCanvasExecution(workflow, order, run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('PREPARED')]), authorized, true))).toEqual({ swap: 'wallet', bridge: 'wallet', transfer: 'wallet' });
+    expect(visuals(waiting)).toEqual({ swap: 'wallet', bridge: 'wallet', transfer: 'wallet' }); expect(waiting.nodes.swap!.text.key).toBe('Waiting for your wallet');
+    // A batch this browser handed to the wallet without a recorded answer may already be executing: never "waiting" for the owner.
+    const handed = runCanvasExecution(workflow, order, run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('PREPARED')]), authorized, true)!;
+    expect(visuals(handed)).toEqual({ swap: 'attention', bridge: 'attention', transfer: 'attention' }); expect(handed.nodes.swap!.phase).toBe('OUTCOME_UNKNOWN');
+    // A due group asks for the owner's authorization in FloFi; an owner step on its signing page is in progress (never "confirm in wallet" for hours).
+    const due = runCanvasExecution(workflow, order, run(['RECONCILED', 'DELEGATED', 'DELEGATED'], [{ ...group('RECONCILED', true), steps: [0, 0] }, { ...group('PLANNED'), index: 1, steps: [1, 2] }],
+      { currentStep: 1, nextAction: 'OWNER_SIGNS_GROUP' }), authorized)!;
+    expect(visuals(due)).toEqual({ swap: 'done', bridge: 'authorize', transfer: 'authorize' });
+    const owner = runCanvasExecution(workflow, order, run(['RECONCILED', 'AWAITING_OWNER', 'PENDING'], [], { mode: 'CONFIRM_EACH_STEP', currentStep: 1, nextAction: 'WAITING_FOR_RECONCILIATION' }), authorized)!;
+    expect(visuals(owner)).toEqual({ swap: 'done', bridge: 'pending', transfer: 'waiting' });
+    const ready = runCanvasExecution(workflow, order, run(['RECONCILED', 'READY', 'PENDING'], [], { mode: 'CONFIRM_EACH_STEP', currentStep: 1, nextAction: 'OWNER_SIGNS_STEP' }), authorized)!;
+    expect(visuals(ready)).toEqual({ swap: 'done', bridge: 'authorize', transfer: 'waiting' });
+    // A signed group whose reconciliation could not complete is an outcome still being observed (amber), never blue progress.
+    const uncertain = runCanvasExecution(workflow, order, run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('UNCERTAIN', true)], { state: 'ATTENTION' }), authorized)!;
+    expect(visuals(uncertain)).toEqual({ swap: 'attention', bridge: 'attention', transfer: 'attention' });
     // A later group signed only when due asks nothing of the wallet yet.
     const later = runCanvasExecution(workflow, order, run(['RECONCILED', 'DELEGATED', 'DELEGATED'], [{ ...group('RECONCILED', true), steps: [0, 0] }, { ...group('PLANNED'), index: 1, steps: [1, 2] }]), authorized)!;
     expect(visuals(later)).toEqual({ swap: 'done', bridge: 'waiting', transfer: 'waiting' }); expect(later.nodes.bridge!.text.key).toBe('Not signed yet');
@@ -166,9 +179,9 @@ describe('Live Canvas: a whole-workflow run', () => {
       expect(e.settled).toBe(false);
     }
   });
-  it('a group handed to the wallet by this Editor right now reads as in the wallet', () => {
-    const r = runCanvasExecution(workflow, order, run(['READY', 'PENDING', 'PENDING'], [group('PREPARED')], { mode: 'USER_FUNDED' }), authorized, true)!;
-    expect(r.nodes.swap!.visual).toBe('wallet');
+  it('steps of a prepared group read as waiting for the wallet, whatever their own state', () => {
+    const r = runCanvasExecution(workflow, order, run(['READY', 'PENDING', 'PENDING'], [group('PREPARED')], { mode: 'USER_FUNDED' }), authorized)!;
+    expect(visuals(r)).toEqual({ swap: 'wallet', bridge: 'wallet', transfer: 'wallet' });
   });
   it('colors nothing for another workflow or revision, an unauthorized view or a different number of steps', () => {
     const r = run(['RECONCILED', 'DELEGATED', 'PENDING']);
