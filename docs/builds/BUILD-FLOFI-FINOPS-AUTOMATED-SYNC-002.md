@@ -73,7 +73,7 @@ The replay fixture `apps/reference-dapp/src/server/testdata/universal/relay-nati
   subsystem happened to install it) and logs its enabled/ineligible state. Parameter properties removed from three modules the worker and
   admin CLI now load (plain-Node type stripping refuses them).
 - `admin/support/historical-reconciliation.ts` + `admin-cli reconcile-history` (§6).
-- Tests: closed incident replay (15 cases), callTracer mutation cases, callTracer-only reconciliation on Base/Ethereum/Robinhood with a
+- Tests: closed incident replay (14 cases), callTracer mutation cases, callTracer-only reconciliation on Base/Ethereum/Robinhood with a
   rotated solver, swap and liquidity depth gates, lifecycle propagation (Canvas operation, history), historical reconciliation on
   PostgreSQL, and the generated matrix.
 
