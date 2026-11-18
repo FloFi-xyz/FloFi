@@ -7,6 +7,7 @@ import { flightWalletAccess } from '../app/flight-wallet-action';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
+import { universalBridgeDetails } from '../domain/universal-bridge-authoring';
 import { ownerByRecord } from '../domain/sequence-restore';
 import { shortAddress } from '../accounts/account-model';
 import { presentSequence, sequenceFundingMessage, sequenceUnservedMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
@@ -402,9 +403,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
   // BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the Editor runs a sequence in the confirm-each-step mode; the note names that mode explicitly
   // (authorizing a whole workflow once is the delegated mode of a workflow run, never claimed here).
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): a funded bridge's route can only be quoted after the funding step reconciles (the provider
+  // answers for the real delivered amount), so that limitation is stated truthfully BEFORE the owner authorizes the funding step.
+  const dependentBridgeAhead = Boolean(sequence && !sequence.finished && sequence.steps.some((step, index) => index > sequence.cursor &&
+    step.funding.some(f => f.fundedBy === sequence.cursor) && universalBridgeDetails(state.workflow.nodes.find(node => node.nodeId === step.nodeId) ?? { actionType: 'none' })));
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
     : tr('Confirm each step · Step {0} of {1}: {2}. Each step is simulated, reviewed and confirmed in your wallet on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
-      tr(sequencePresentation.steps[sequencePresentation.current - 1]?.action ?? 'Action')) : null;
+      tr(sequencePresentation.steps[sequencePresentation.current - 1]?.action ?? 'Action'))
+      + (dependentBridgeAhead ? ' ' + tr('A later bridge step is quoted by its provider only after this step delivers, so its route for the exact delivered amount cannot be guaranteed yet; providers can refuse very small amounts. A completed step is never repeated.') : '') : null;
   function openSimulationControls() {
     const details = document.querySelector<HTMLDetailsElement>('.simulation-technical');
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }
@@ -447,7 +453,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     let simulation: Promise<unknown> | undefined;
     try {
       if (flightSigner) {
-        const access = await flightWalletAccess(flightSigner).catch(() => null);
+        // FIX-09: a Flight check that never answers never leaves the simulation locked on "Simulating workflow…"; the runtime's own
+        // authorization checks still protect execution (an unanswered read fails open exactly like a failed one, as before).
+        const access = await Promise.race([flightWalletAccess(flightSigner).catch(() => null),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 20_000))]);
         if (access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code, workflowId: state.workflow.workflowId }); return; }
       }
       setFlightBlock(null);
@@ -696,6 +705,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
     bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
+      // FIX-07: the same invariant as the auto-continue effect — these runtimes' simulations may open a wallet request, so only the owner starts them.
+      manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
       simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: open Execute and choose Review whole workflow, then Authorize workflow.'

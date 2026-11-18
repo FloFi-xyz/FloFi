@@ -73,6 +73,12 @@ export type ConversationBridge = LifecycleView & {
   readonly networkAction?: { readonly label: string; readonly labelIn?: (language: ConversationLanguage) => string; readonly network?: string; readonly disabled: boolean; request(): void } | undefined;
   readonly connectWallet: () => void; readonly startNewWorkflow?: (() => void) | undefined;
   /**
+   * BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-07): this step's simulation may open a wallet request by itself (the universal bridge's SIWE
+   * sign-in; the Router without a session), so FloFi never starts it on its own — the same invariant the shell's auto-continue keeps. The
+   * owner's own answer (Review) starts it instead.
+   */
+  readonly manualSimulation?: boolean | undefined;
+  /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: amounts typed on Canvas cards and never applied (they block every simulation), and the existing card actions that
    * apply (`apply: true`) or discard one. The returned text is why an apply was refused (nothing changed), else null.
    */
@@ -895,6 +901,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (!sequence.finished && bridge.source.state.busy) {
         reviewLock.current = { scope: next.scope, key: bridge.authorization.key, sawBusy: true, settled: false, language: next.language, continuation: false };
         say(next.scope, next.language, (_, c) => c.stepSimulatingNext(sequence.current));
+      } else if (!sequence.finished && bridge.manualSimulation) {
+        // FIX-07 (production 2026-11-18: swap RECONCILED, bridge stuck on "Simulando o fluxo…"): the universal bridge's simulation starts with a
+        // SIWE wallet sign-in, which only the owner's own action may open — auto-starting it outside a user gesture left the wallet prompt
+        // suppressed and the simulation busy forever. FloFi says the step is ready; the owner's answer (Review) starts it.
+        say(next.scope, next.language, (language, c) => [c.stepReadyNext(sequence.current), { options: [c.review] }]);
       } else if (!sequence.finished) startReview(next.scope, next.language);
       return;
     }

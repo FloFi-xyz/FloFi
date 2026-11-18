@@ -176,6 +176,10 @@ export function simulationError(error: string): string {
   // P0 hotfix (FIX 3, 2026-11-13): Relay answers a WETH bridge with a native-ETH order through its own router contracts, which FloFi does not verify.
   if (error === 'RELAY_WRAPPED_NATIVE_INPUT_UNSUPPORTED') return 'FloFi cannot bridge WETH on this route: the bridge provider converts it to native ETH through contracts FloFi does not verify, so this step was not simulated or sent. Bridge ETH (unwrap the WETH first) or USDC instead.';
   if (/^(?:BRIDGE_|RELAY_|LIFI_|ACROSS_|MAYAN_|ROUTER_|UNIVERSAL_)?NO_EXECUTABLE_ROUTE$/.test(error)) return 'No bridge route that FloFi can verify and execute is available for this amount right now, so this step was not simulated or sent. Try again later or change the amount.';
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): a simulation never waits forever — an unanswered wallet sign-in or quote read becomes this
+  // refusal (nothing was signed or sent) and the owner can simply try again.
+  if (error === 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT') return 'Your wallet did not answer the sign-in request, so this step was not simulated and nothing was signed or sent. Open your wallet and choose Review to try again.';
+  if (error === 'UNIVERSAL_SIMULATION_TIMEOUT') return 'The bridge provider did not answer in time, so this step was not simulated and nothing was signed or sent. Try again in a moment.';
   // An Aave reserve short of liquidity (or collateral) is not the owner's balance: it keeps the lending sentence, before the balance rule.
   if (/^(?:BORROW|WITHDRAW)_INSUFFICIENT_LIQUIDITY$|LIQUIDITY_(?:UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_COLLATERAL/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident B): a single owner-wallet swap pays its network fee in the network's own ETH. FloFi's USDC fee

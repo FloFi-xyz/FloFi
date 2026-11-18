@@ -350,6 +350,31 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     reviewedPatch = { ...reviewed(), sequence: next }; lifecycle(reviewedPatch); chat = render();
     expect(last(chat).question).toBe('Do you confirm step 2 of 2?');
   });
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-07, production 2026-11-18: swap RECONCILED, bridge stuck on "Simulando o fluxo…"): a next step whose
+  // simulation may open a wallet request (the universal bridge's SIWE sign-in) is never started by FloFi itself — the owner's own answer starts it.
+  it('FIX-07: a manual-simulation next step is announced and waits for the owner; Review starts it as the owner\'s own action', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const sequence = { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: false };
+    reviewedPatch = { sequence }; lifecycle(reviewedPatch);
+    await say('Review workflow');
+    reviewedPatch = { ...reviewed(), sequence }; lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm'); await say('Yes, execute');
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush();
+    const simulated = simulate.mock.calls.length;
+    const next = { ...sequence, current: 2, steps: [{ ...SEQUENCE_STEPS[0]!, state: 'COMPLETED' as const, delivered: '0.0042 WETH' },
+      { ...SEQUENCE_STEPS[1]!, state: 'CURRENT' as const, funding: { from: 1, cap: '0.001 WETH', bound: '0.001 WETH' } }] };
+    reviewedPatch = { sequence: next, manualSimulation: true }; lifecycle(reviewedPatch); render(); await flush();
+    let chat = render();
+    // The completed step stays completed and is never repeated; nothing was auto-simulated.
+    expect(chat.messages.some(message => message.text === 'Step 1 of 2 is completed and reconciled: it delivered 0.0042 WETH.')).toBe(true);
+    expect(last(chat).text).toBe('Step 2 is ready to simulate. Its simulation may ask your wallet to sign in (no funds move), so it starts only when you choose Review.');
+    expect(last(chat).options).toEqual(['Review workflow']);
+    expect(simulate.mock.calls.length).toBe(simulated);
+    // The owner's own answer starts step 2's Review (a user-initiated wallet request, never FloFi's own).
+    chat = await say('Review workflow');
+    expect(simulate.mock.calls.length).toBe(simulated + 1);
+  });
   it('BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: after a final completed result the side chat offers to keep building, modify or start anew; nothing is simulated', async () => {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     await say('Review workflow');

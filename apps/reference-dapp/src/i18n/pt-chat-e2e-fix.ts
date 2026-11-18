@@ -18,6 +18,9 @@ export const portugueseChatE2eFix: Readonly<Record<string, string>> = {
   'Step {0} cannot spend the amount step {1} delivered: the step refuses that amount.': 'A etapa {0} não pode gastar o valor que a etapa {1} entregou: a etapa recusa esse valor.',
   'Step {0} ({1} on {2}) cannot run on this deployment: its provider is not available here. Nothing was simulated or sent.':
     'A etapa {0} ({1} em {2}) não pode ser executada nesta implantação: o provedor não está disponível aqui. Nada foi simulado nem enviado.',
+  // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): the dependent-bridge limitation, stated before the funding step is authorized.
+  'A later bridge step is quoted by its provider only after this step delivers, so its route for the exact delivered amount cannot be guaranteed yet; providers can refuse very small amounts. A completed step is never repeated.':
+    'Uma etapa de ponte posterior só é cotada pelo provedor depois que esta etapa entregar, então a rota para o valor exato entregue ainda não pode ser garantida; provedores podem recusar valores muito pequenos. Uma etapa concluída nunca é repetida.',
   'Confirm each step · Step {0} of {1}: {2}. Each step is simulated, reviewed and confirmed in your wallet on its own, in order; this result covers this step only.':
     'Confirmar cada etapa · Etapa {0} de {1}: {2}. Cada etapa é simulada, revisada e confirmada na sua carteira separadamente, em ordem; este resultado cobre apenas esta etapa.',
   'All {0} steps of this workflow are completed and reconciled.': 'As {0} etapas deste fluxo foram concluídas e reconciliadas.',
