@@ -1,8 +1,8 @@
 # BUILD-FLOFI-BETA-REGRESSION-FIX-001 — Beta Mainnet regression and execution continuity
 
-**Date:** 2026-11-18  
-**Branch:** `cursor/build-beta-regression-fix-001`  
-**Base:** `origin/main` at `32b79986` (PR #213 Live Canvas / execution lifecycle)  
+**Date:** 2026-11-18
+**Branch:** `cursor/build-beta-regression-fix-001`
+**Base:** `origin/main` at `32b79986` (PR #213 Live Canvas / execution lifecycle)
 **Scope:** restore nine previously certified Beta Mainnet behaviours (FIX-01…FIX-09). No new financial capability, fee model, wallet ownership, access control, environment variable, dependency upgrade or production mutation. No real transaction was signed, submitted or broadcast from this session.
 
 Evidence levels: **CODE** = reproduced against current main before the fix and covered by deterministic tests after it; **MOCKED** = controlled fixtures / bounded timeouts in unit and store tests; **BROWSER** = guarded loopback profiles when run; **PRODUCTION** = owner-reported journeys (screenshots / narrative only — not financial certification).
@@ -81,6 +81,8 @@ Guarded browser profiles and CircleCI remain the certification authority; local 
 | CircleCI / Vercel Preview | After PR open — not claimed green here |
 
 Note: Cursor’s default Node on PATH can be 24.22.1 and fails the schema pin; local certification used `$HOME/.nvm/versions/node/v24.21.0/bin` first.
+
+CircleCI `governance` on `ff786285` failed solely on `git diff --check` trailing whitespace in this file (lines 3–5). Specialist-review ledger / Cursor Task compatibility was not the failing gate: `agent_guard.py review` is advisory/local (Claude Code hooks); CircleCI governance runs unittest + `governance_lite.py` + whitespace checks only.
 
 Specialist reviews ran via Cursor Task (flofi-chat, frontend-ux, workflow, bridge, wallet-execution, security). Claude Code hook ledger (`agent_guard.py review`) does not observe Cursor Task runs; findings and resolutions are recorded in §C above.
 
