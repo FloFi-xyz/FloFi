@@ -19,7 +19,7 @@ import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
 import { ECOSYSTEM_LABEL } from '../wallet/wallet-registry';
 import { addProviderCard, cardProviderStatus, removeProviderCard, type CardEntryStatus } from '../app/card-action';
 import { parseCardFrameMessage, type CardParentMessage } from './card-frame-protocol';
-import { DeleteAccount, ExportWalletDialog } from './account/account-wallets';
+import { DeleteAccount, ExportWalletDialog, isPrivyExportPending } from './account/account-wallets';
 import { accountMessage } from './account/account-messages';
 import { accountState, removeAccountWallet, renameAccountWallet, type AccountState } from '../app/account-action';
 import { exportActions, isLegacyWallet, WALLET_LABEL_MAX } from '../accounts/account-model';
@@ -147,7 +147,10 @@ function WalletCredentialCard({ entry, busy, accountView, onConnect, onDisconnec
   const menu: MenuItem[] = [
     { key: 'copy', label: tr('Copy address'), ariaLabel: tr('Copy {0} address', entry.label), onSelect: () => void copyAddress() },
     ...entry.saved || account ? [{ key: 'rename', label: tr('Rename'), ariaLabel: tr('Rename {0}', entry.label), onSelect: () => { setDraft(entry.label); setRenameError(''); setMode('rename'); } }] : [],
-    ...account && accountView && exportActions(account).length > 0 ? [{ key: 'export', label: tr('Export'), ariaLabel: tr('Export {0}', entry.label), onSelect: () => setExporting(true) }] : [],
+    ...account && accountView && exportActions(account).length > 0 ? [{ key: 'export', label: tr('Export'), ariaLabel: tr('Export {0}', entry.label), onSelect: () => {
+      if (isPrivyExportPending()) { onStatus(accountMessage('PRIVY_EXPORT_IN_PROGRESS')); return; }
+      setExporting(true);
+    } }] : [],
     ...entry.active ? [{ key: 'disconnect', label: tr('Disconnect'), ariaLabel: tr('Disconnect {0}', entry.label), disabled: busy, onSelect: onDisconnect }] : [],
     // BUILD-FLOFI-PRIVY-UX-001: wallets FloFi's provider keeps (Privy, legacy FloFi Wallet) stay in the account (account-store.ts removeWallet).
     ...removable ? [{ key: 'remove', label: tr('Remove'), ariaLabel: tr('Remove {0}', entry.label), tone: 'danger' as const, onSelect: () => { setRenameError(''); setMode('remove'); } }] : [],

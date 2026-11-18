@@ -26,6 +26,11 @@ import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
 import styles from './account.module.css';
 
+const PRIVY_EXPORT_WAIT_MS = 45_000;
+// Privy's export promise resolves on dismissal. Keep a lock across wallet cards and route changes,
+// even if FloFi stops waiting for an SDK invocation that might still open its secure modal.
+let privyExportPending = false;
+export const isPrivyExportPending = () => privyExportPending;
 
 /**
  * The export entry point. It never shows a secret itself: a Privy wallet's key appears only in Privy's own export screen; a legacy
@@ -40,28 +45,77 @@ export function ExportWalletDialog({ wallet, state, onClose }: { wallet: Account
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [handedOff, setHandedOff] = useState(false);
+  const wait = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useRef(false);
+  const inProgress = useRef(false);
   const actions = exportActions(wallet);
   const ready = legacy ? state.availability.legacyWallets && legacyChannel.configured : Boolean(privy?.ready && privy.authenticated);
   useEffect(() => {
+    mounted.current = true;
     const element = dialog.current, previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (element && !element.open) element.showModal();
-    return () => { if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+    return () => {
+      mounted.current = false;
+      if (wait.current !== null) clearTimeout(wait.current);
+      if (element?.open) element.close();
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
   }, []);
   useEffect(() => { if (legacy && state.availability.legacyWallets) void syncFloFiWallets({ force: true }); }, [legacy, state.availability.legacyWallets]);
-  function open(kind: 'private-key' | 'recovery-phrase') {
-    if (busy) return;
-    setBusy(true); setError(null); setDone(false);
-    if (!legacy) {
-      void privy!.exportWallet(wallet.ecosystem, wallet.address).then(() => setDone(true),
-        cause => setError(cause instanceof Error ? cause.message : 'PRIVY_WALLET_EXPORT_FAILED')).finally(() => setBusy(false));
+  async function openPrivy() {
+    if (!privy || privyExportPending) {
+      setError('PRIVY_EXPORT_IN_PROGRESS');
       return;
     }
-    // Legacy FloFi Wallet: opened in this click (popups need the gesture), then asked to export there.
-    try { openFloFiWallet(); } catch (cause) { setBusy(false); setError(cause instanceof Error ? cause.message : 'FLOFI_WALLET_NOT_OPEN'); return; }
-    void requestFloFiWallet({ op: 'export', walletId: wallet.id, kind }).then(() => setDone(true),
-      cause => setError(cause instanceof Error ? cause.message : 'MANAGED_EXPORT_UNAVAILABLE')).finally(() => setBusy(false));
+    privyExportPending = true;
+    const element = dialog.current;
+    // Privy's modal is outside this native dialog. Closing the browser's top layer gives it focus
+    // and pointer access. Call the SDK in the initiating click, before awaiting anything.
+    element?.close();
+    setHandedOff(true);
+    wait.current = setTimeout(() => {
+      setBusy(false);
+      setError('PRIVY_EXPORT_TIMEOUT');
+    }, PRIVY_EXPORT_WAIT_MS);
+    try {
+      await privy.exportWallet(wallet.ecosystem, wallet.address);
+      if (mounted.current) { setError(null); setDone(true); }
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : 'PRIVY_WALLET_EXPORT_FAILED');
+    } finally {
+      if (wait.current !== null) clearTimeout(wait.current);
+      wait.current = null;
+      privyExportPending = false;
+      if (mounted.current) {
+        setHandedOff(false);
+        if (element?.isConnected && !element.open) element.showModal();
+      }
+    }
   }
-  return <dialog ref={dialog} className={styles.frameDialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }}>
+  async function open(kind: 'private-key' | 'recovery-phrase') {
+    if (!ready || inProgress.current) return;
+    inProgress.current = true;
+    setBusy(true); setError(null); setDone(false);
+    try {
+      if (!legacy) { await openPrivy(); return; }
+      // The separate legacy window needs this click's browser gesture.
+      openFloFiWallet();
+      await requestFloFiWallet({ op: 'export', walletId: wallet.id, kind });
+      if (mounted.current) setDone(true);
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : 'MANAGED_EXPORT_UNAVAILABLE');
+    } finally {
+      inProgress.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+  return <>{handedOff && <div className="workspace-inline-form">
+    {busy && <p role="status">{t('Continue in the export screen…')}</p>}
+    {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
+    <button type="button" className="workspace-action" onClick={onClose}>{t('Close')}</button>
+  </div>}
+  <dialog ref={dialog} className={styles.frameDialog} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }}>
     <div className={styles.frameBody}>
       <button type="button" className={styles.close} aria-label={t('Close')} onClick={onClose}><AccountIcon name="close" size={16}/></button>
       <h2 id={titleId}>{t('Export wallet')}</h2>
@@ -74,9 +128,9 @@ export function ExportWalletDialog({ wallet, state, onClose }: { wallet: Account
         : 'Export happens in Privy’s own secure screen. The key is shown only there; FloFi never sees it.')}</p>
       {!ready && <p className={styles.small} role="status">{t(accountMessage(legacy ? 'MANAGED_WALLETS_NOT_CONFIGURED' : 'PRIVY_SESSION_REQUIRED'))}</p>}
       <div className={styles.exportActions}>
-        {actions.includes('private-key') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => open('private-key')}>
+        {actions.includes('private-key') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => void open('private-key')}>
           <AccountIcon name="key" size={18}/>{t(legacy ? 'Export private key in FloFi Wallet' : 'Export private key')}</button>}
-        {actions.includes('recovery-phrase') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => open('recovery-phrase')}>
+        {actions.includes('recovery-phrase') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => void open('recovery-phrase')}>
           <AccountIcon name="phrase" size={18}/>{t('Export recovery phrase in FloFi Wallet')}</button>}
       </div>
       {busy && <p className={styles.status} role="status">{t(legacy ? 'Continue in FloFi Wallet…' : 'Continue in the export screen…')}</p>}
@@ -84,7 +138,7 @@ export function ExportWalletDialog({ wallet, state, onClose }: { wallet: Account
       {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
       <p className={styles.protected}><AccountIcon name="lock" size={14}/>{t('Protected by')} <strong>{legacy ? 'Turnkey' : 'Privy'}</strong></p>
     </div>
-  </dialog>;
+  </dialog></>;
 }
 
 /** Deleting the FloFi account: explicit confirmation, a recent sign-in, and an honest statement of what is and is not deleted. */

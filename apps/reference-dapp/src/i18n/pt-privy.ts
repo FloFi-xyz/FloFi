@@ -33,6 +33,10 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
     'Esta carteira foi criada na FloFi Wallet anterior. A exportação acontece lá, numa janela segura separada: você a desbloqueia de novo, confirma, e o segredo aparece só dentro do quadro seguro da Turnkey. Para continuar a usá-la no FloFi, importe a chave depois em Adicionar carteiras.',
   'Export happens in Privy’s own secure screen. The key is shown only there; FloFi never sees it.': 'A exportação acontece na tela segura da própria Privy. A chave aparece só ali; o FloFi nunca a vê.',
   'Export private key': 'Exportar chave privada', 'Continue in the export screen…': 'Continue na tela de exportação…', 'Export screen closed.': 'Tela de exportação fechada.',
+  'The wallet provider could not complete export. Try again.': 'O provedor da carteira não conseguiu concluir a exportação. Tente novamente.',
+  'Finish or close the export already open in this tab.': 'Conclua ou feche a exportação já aberta nesta aba.',
+  'The export is taking longer than expected. If the secure screen never opens, save your work and reload this tab before trying again.': 'A exportação está demorando mais que o esperado. Se a tela segura não abrir, salve seu trabalho e recarregue esta aba antes de tentar novamente.',
+  'Your browser blocked the wallet window. Allow pop-ups for FloFi, then try again.': 'O navegador bloqueou a janela da carteira. Permita pop-ups para a FloFi e tente novamente.',
   'Managed by Privy': 'Gerenciada pela Privy',
   'Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.': 'Assina com sua carteira FloFi (Privy), depois que você revisa a transação no FloFi.',
   'Wallets created or imported in FloFi are not deleted: they stay with their provider and their funds are unchanged. Export them first if you want to keep using them elsewhere.':

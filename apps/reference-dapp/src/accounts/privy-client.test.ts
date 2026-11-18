@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { ARBITRUM_ONE, ETHEREUM_MAINNET, ROBINHOOD_CHAIN_MAINNET } from '@defi-workflow-engine/action-registry';
 import { embeddedWallets, floFiPrivyConfig, PRIVY_EVM_CHAINS, privyErrorCode, privyOwnSolanaWallets, signerDocument } from './privy-client';
 import { signerPolicy } from './signer-pages';
-import { floFiPrivyWalletIssue, privyCanSign, type FloFiPrivy, type PrivySigningReadiness } from './privy-context';
+import { floFiPrivyWalletIssue, privyCanSign, privyExportErrorCode, type FloFiPrivy, type PrivySigningReadiness } from './privy-context';
 import { PRIVY_CONNECT_SOURCES } from './privy-hosts';
 
 describe('FloFi’s Privy configuration', () => {
@@ -63,6 +63,12 @@ describe('FloFi’s Privy configuration', () => {
 });
 
 describe('Privy errors and wallets', () => {
+  it('reports export cancellation, blocked popups and generic failures through allowlisted codes', () => {
+    expect(privyExportErrorCode(new Error('User exited the modal'))).toBe('PRIVY_USER_CANCELLED');
+    expect(privyExportErrorCode(new Error('Popup was blocked by browser'))).toBe('FLOFI_WALLET_POPUP_BLOCKED');
+    expect(privyExportErrorCode(new Error('UNRECOGNIZED_PROVIDER_DETAIL'))).toBe('PRIVY_WALLET_EXPORT_FAILED');
+    expect(privyExportErrorCode(new Error('private key: harmless-fixture-marker'))).toBe('PRIVY_WALLET_EXPORT_FAILED');
+  });
   it('maps provider errors to FloFi codes without ever echoing the provider’s text', () => {
     expect(privyErrorCode(new Error('User exited the modal before submitting'))).toBe('PRIVY_USER_CANCELLED');
     expect(privyErrorCode(new Error('User already has an embedded wallet'))).toBe('PRIVY_WALLET_LIMIT');

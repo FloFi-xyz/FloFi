@@ -281,6 +281,70 @@ test('Google sign-in, then one click per ecosystem creates a real Privy wallet, 
     .toEqual([{ onboarding: 'COMPLETED' }]);
 });
 
+test('embedded export hands focus to the provider and recovers after cancel, close and failure', async ({ page, context }) => {
+  await setup(page, { google: 'e2e-export' });
+  await googleSignIn(page);
+  await expect(page).toHaveURL('/onboarding/wallets');
+  await card(page, 'evm').getByRole('button', { name: /Create wallet/ }).click();
+  await card(page, 'solana').getByRole('button', { name: /Create wallet/ }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page).toHaveURL('/app');
+  await page.goto('/app/credentials');
+  const wallets = page.getByRole('region', { name: 'Wallets', exact: true });
+  const evm = wallets.getByRole('article', { name: /, Ethereum$/ });
+  const solana = wallets.getByRole('article', { name: /, Solana$/ });
+  const menu = evm.getByRole('button', { name: /More actions/ });
+  const confirmation = page.getByRole('dialog', { name: 'Export wallet', exact: true });
+  const provider = privyDialog(page);
+  const before = await privyStats();
+
+  await menu.click();
+  await evm.getByRole('menuitem', { name: /^Export / }).click();
+  await confirmation.getByRole('button', { name: 'Export private key', exact: true }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(provider).toHaveCount(1);
+  // The emulator does not make the rest of the page inert. Exercise the duplicate guard.
+  await solana.getByRole('button', { name: /More actions/ }).click();
+  await solana.getByRole('menuitem', { name: /^Export / }).click();
+  await expect(provider).toHaveCount(1);
+  await expect(confirmation).toBeHidden();
+  await provider.getByRole('button', { name: 'Cancel' }).click();
+  await expect(confirmation.getByRole('alert')).toContainText('You closed the window');
+  await expect(confirmation.getByRole('button', { name: 'Export private key', exact: true })).toBeEnabled();
+
+  await confirmation.getByRole('button', { name: 'Export private key', exact: true }).click();
+  await provider.getByRole('button', { name: 'Approve' }).click();
+  await expect(confirmation.getByRole('status')).toHaveText('Export screen closed.');
+  expect(await privyStats()).toMatchObject({ exports: before.exports + 1 });
+
+  await context.route('**/__privy-e2e/wallets/export', route => route.fulfill({ status: 503,
+    contentType: 'application/json', body: JSON.stringify({ error: 'UNRECOGNIZED_PROVIDER_DETAIL' }) }));
+  await confirmation.getByRole('button', { name: 'Export private key', exact: true }).click();
+  await provider.getByRole('button', { name: 'Approve' }).click();
+  await expect(confirmation.getByRole('alert')).toHaveText('The wallet provider could not complete export. Try again.');
+  await expect(page.getByText('UNRECOGNIZED_PROVIDER_DETAIL')).toHaveCount(0);
+  await confirmation.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(menu).toBeFocused();
+  expect(context.pages()).toHaveLength(1);
+
+  await page.clock.install();
+  await page.evaluate(() => {
+    const driver = (window as unknown as { __FLOFI_PRIVY_E2E__: { exportWallet(): Promise<void> } }).__FLOFI_PRIVY_E2E__;
+    driver.exportWallet = () => new Promise(() => undefined);
+  });
+  await menu.click();
+  await evm.getByRole('menuitem', { name: /^Export / }).click();
+  await confirmation.getByRole('button', { name: 'Export private key', exact: true }).click();
+  await page.clock.fastForward(45_001);
+  await expect(evm.getByRole('alert')).toContainText('If the secure screen never opens');
+  await expect(evm.getByText('Continue in the export screen…')).toHaveCount(0);
+  await evm.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(menu).toBeFocused();
+  await menu.click();
+  await evm.getByRole('menuitem', { name: /^Export / }).click();
+  await expect(confirmation).toHaveCount(0);
+});
+
 test('Import key: a dedicated FloFi screen per ecosystem; the key goes only to Privy and never to FloFi, its storage or its database', async ({ page, context }) => {
   await setup(page, { google: 'e2e-ana' });
   const sent = recordAppRequests(context);
@@ -760,6 +824,15 @@ test('a legacy FloFi Wallet (Turnkey) wallet stays listed with its address, expo
   const legacy = page.getByRole('region', { name: 'Wallets', exact: true }).locator('article', { hasText: address.slice(0, 6) });
   await expect(legacy).toContainText('Legacy FloFi Wallet');
   await expect(legacy).toContainText('Wallets created in the earlier FloFi Wallet can be exported, not used to sign.');
+  await page.evaluate(() => { window.open = () => null; });
+  await legacy.getByRole('button', { name: /More actions/ }).click();
+  await legacy.getByRole('menuitem', { name: /^Export / }).click();
+  const exportDialog = page.getByRole('dialog', { name: 'Export wallet', exact: true });
+  const exportKey = exportDialog.getByRole('button', { name: 'Export private key in FloFi Wallet', exact: true });
+  await exportKey.click();
+  await expect(exportDialog.getByRole('alert')).toContainText('Allow pop-ups for FloFi');
+  await expect(exportKey).toBeEnabled();
+  await exportDialog.getByRole('button', { name: 'Close', exact: true }).click();
   await page.goto('/onboarding/wallets');
   await expect(card(page, 'evm').locator(`[data-wallet-address="${address}"]`)).toContainText('Legacy FloFi Wallet');
   expect(await query('SELECT provider, origin, export, provider_resource FROM flofi_account_wallets WHERE address=$1', [address]))
