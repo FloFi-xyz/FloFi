@@ -9,7 +9,7 @@ import { finopsCopy } from './finops-copy';
 const RANGE_NAMES: Record<PeriodFilter['preset'], string> = {
   current: 'Current month', previous: 'Previous month', '7d': 'Last 7 days', '30d': 'Last 30 days', custom: 'Custom dates',
 };
-const qualityTone = { VERIFIED: 'ok', METERED: 'info', ESTIMATED: 'info', PARTIAL: 'warn', UNAVAILABLE: 'neutral' } as const;
+const qualityTone = { VERIFIED: 'ok', PROVIDER_REPORTED: 'info', METERED: 'info', ESTIMATED: 'info', PARTIAL: 'warn', UNAVAILABLE: 'neutral' } as const;
 const SURFACE = { WEB: 'Web', TELEGRAM: 'Telegram', WHATSAPP: 'WhatsApp', CHANNEL: 'Channel Core' } as const;
 export function FinopsFilters({ filter, action, language }: { filter: PeriodFilter; action: string; language: Language }) {
   const { copy } = finopsCopy(language);
@@ -178,7 +178,7 @@ export function FinopsCoverage({ language }: { language: Language }) {
   const { copy } = finopsCopy(language);
   return <Section id="finops-coverage" title={copy("Data quality and methodology")}>
     <dl className="admin-finops-assumptions">
-      {Object.entries({ VERIFIED: 'Provider-confirmed billing or reconciled accounting record', METERED: 'Measured usage and an applicable rate',
+      {Object.entries({ VERIFIED: 'Provider-confirmed billing or reconciled accounting record', PROVIDER_REPORTED: 'Cost reported by the provider\'s billing API, not yet reconciled with an invoice', METERED: 'Measured usage and an applicable rate',
         ESTIMATED: 'Model or stated assumption', PARTIAL: 'Known subset of the required inputs', UNAVAILABLE: 'Insufficient input or access' })
         .map(([key, label]) => <div key={key}><dt>{key}</dt><dd>{copy(label)}</dd></div>)}
     </dl>

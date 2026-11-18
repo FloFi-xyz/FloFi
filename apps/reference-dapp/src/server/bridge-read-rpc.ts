@@ -20,13 +20,16 @@ export function bridgeRpcUrls(chainId: number, primary: string, env: Env): reado
   return urls;
 }
 
+const TRACE_METHODS = new Set(['trace_transaction', 'debug_traceTransaction']);
 export function failoverReadRpc(providers: readonly Rpc[], chainId: number): Rpc {
   if (!providers.length || providers.length > 4) throw Error('ROUTER_RPC_CONFIGURATION_INVALID');
   const clients = providers.map(rpc => chainBoundRpc(rpc, chainId));
   const bound = new Set<number>();
-  let preferred = 0, preferredTrace = 0;
+  // Trace namespaces are optional node features: each keeps its own preferred path.
+  let preferred = 0;
+  const preferredTrace = new Map<string, number>();
   return async (method, params, context) => {
-    const tracing = method === 'trace_transaction', start = tracing ? preferredTrace : preferred;
+    const tracing = TRACE_METHODS.has(method), start = tracing ? preferredTrace.get(method) ?? 0 : preferred;
     for (let turn = 0; turn < clients.length; turn++) {
       const index = (start + turn) % clients.length, rpc = clients[index]!;
       try {
@@ -35,9 +38,10 @@ export function failoverReadRpc(providers: readonly Rpc[], chainId: number): Rpc
         const read = (m: string, p: readonly unknown[]) => context ? rpc(m, p, context) : rpc(m, p);
         if (method !== 'eth_chainId' && !bound.has(index)) { await read('eth_chainId', []); bound.add(index); }
         const result = await read(method, params);
-        if (tracing && (!Array.isArray(result) || result.length === 0)) throw Error('PUBLIC_RPC_RESPONSE_INVALID');
+        if (tracing && (method === 'trace_transaction' ? !Array.isArray(result) || result.length === 0 : !result || typeof result !== 'object' || Array.isArray(result)))
+          throw Error('PUBLIC_RPC_RESPONSE_INVALID');
         if (method === 'eth_chainId') bound.add(index);
-        if (tracing) preferredTrace = index;
+        if (tracing) preferredTrace.set(method, index);
         else preferred = index;
         return result;
       } catch (cause) {

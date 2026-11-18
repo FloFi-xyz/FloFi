@@ -38,7 +38,7 @@ const WITHDRAWAL = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5
 export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: () => number; tokens: Record<string, number>; wrapped?: Record<string, 'WETH9' | 'MINT_BURN'> }) {
   const state = { head: 5_000, safeLag: 2, hashes: new Map<number, string>(), times: new Map<number, number>(), balances: new Map<string, bigint>(), allowances: new Map<string, bigint>(),
     native: new Map<string, bigint>(), nonces: new Map<string, number>(), pending: new Map<string, number>(), code: new Map<string, string>([[d.relayDepository, MOCK_DEPOSITORY_CODE]]),
-    receipts: new Map<string, Receipt>(), txs: new Map<string, Record<string, unknown>>(), blockTxs: new Map<number, string[]>(), traces: new Map<string, unknown>(),
+    receipts: new Map<string, Receipt>(), txs: new Map<string, Record<string, unknown>>(), blockTxs: new Map<number, string[]>(), traces: new Map<string, unknown>(), callTraces: new Map<string, unknown>(),
     snapshots: new Map<number, { nonces: Map<string, number>; balances: Map<string, bigint>; native: Map<string, bigint> }>(), gasUsed: 90_000n, baseFee: 1_000_000n,
     simulateFails: false, depositRevert: false };
   for (const token of Object.keys(options.tokens)) state.code.set(token, MOCK_TOKEN_CODE);
@@ -143,6 +143,9 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
       state.traces.set(h, input.via ? [root,
         { ...trace, traceAddress: [0], subtraces: 0, action: { from: to, to, input: '0x', value, callType: 'call' } },
         { ...trace, traceAddress: [1], subtraces: 0, action: { from: to, to: input.recipient, input: '0x', value, callType: 'call' } }] : [root]);
+      // The same execution as geth's callTracer reports it (debug_traceTransaction), as on Arbitrum Nitro and Orbit nodes.
+      const frame = (from: string, frameTo: string, frameInput: string) => ({ type: 'CALL', from, to: frameTo, input: frameInput, value, gas: '0x0', gasUsed: '0x0', output: '0x' });
+      state.callTraces.set(h, { ...frame(solver, to, data), ...input.via ? { calls: [frame(to, to, '0x'), frame(to, input.recipient, '0x')] } : {} });
     }
     return h;
   }
@@ -187,6 +190,7 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
       case 'eth_getTransactionReceipt': return state.receipts.get(String(p[0]).toLowerCase()) ?? null;
       case 'eth_getTransactionByHash': return state.txs.get(String(p[0]).toLowerCase()) ?? null;
       case 'trace_transaction': return state.traces.get(String(p[0]).toLowerCase()) ?? null;
+      case 'debug_traceTransaction': return state.callTraces.get(String(p[0]).toLowerCase()) ?? null;
       case 'eth_getLogs': {
         const f = p[0] as { address: string; fromBlock: string; toBlock: string };
         const from = Number(BigInt(f.fromBlock)), to = Number(BigInt(f.toBlock)), out: unknown[] = [];

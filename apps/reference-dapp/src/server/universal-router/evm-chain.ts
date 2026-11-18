@@ -225,6 +225,52 @@ function nativeMovements(raw: unknown, tx: Record<string, unknown>, receipt: Rec
   return movements;
 }
 
+/**
+ * Geth `callTracer` frames (debug_traceTransaction), the only trace format on
+ * Arbitrum Nitro, Orbit chains and several providers. The root frame must be
+ * this exact transaction; a frame with `error` reverted with its subtree.
+ */
+function callTracerMovements(raw: unknown, tx: Record<string, unknown>): NativeMovement[] {
+  if (!isObject(raw)) return fail('UNIVERSAL_TRACE_INVALID');
+  const movements: NativeMovement[] = [];
+  let frames = 0;
+  // A value-moving frame must state its value; only DELEGATECALL and STATICCALL may omit it.
+  const value = (v: unknown, required: boolean) => v === undefined && !required ? 0n : traceQuantity(v);
+  const visit = (frame: unknown, path: number[], reverted: boolean) => {
+    if (!isObject(frame) || ++frames > 2_048 || path.length > 64 || typeof frame.type !== 'string') return fail('UNIVERSAL_TRACE_INVALID');
+    if (frame.error !== undefined && (typeof frame.error !== 'string' || !frame.error)) return fail('UNIVERSAL_TRACE_INVALID');
+    const ignored = reverted || frame.error !== undefined, key = path.join('.'), type = frame.type.toUpperCase();
+    const from = hex(frame.from), to = frame.to === undefined ? null : hex(frame.to);
+    const amount = value(frame.value, ['CALL', 'CALLCODE', 'CREATE', 'CREATE2', 'SELFDESTRUCT'].includes(type));
+    if (!ADDRESS.test(from) || to !== null && !ADDRESS.test(to)) return fail('UNIVERSAL_TRACE_INVALID');
+    if (!path.length && (type !== 'CALL' || ignored || from !== hex(tx.from) || to !== hex(tx.to) || amount !== quantity(tx.value)
+        || hex(frame.input) !== hex(tx.input))) return fail('UNIVERSAL_TRACE_INVALID');
+    if (type === 'CALL') { if (to === null) return fail('UNIVERSAL_TRACE_INVALID'); if (!ignored) movements.push({ path: key, kind: 'call', from, to, value: amount.toString() }); }
+    else if (type === 'CREATE' || type === 'CREATE2') { if (!ignored && to !== null) movements.push({ path: key, kind: 'create', from, to, value: amount.toString() }); }
+    else if (type === 'SELFDESTRUCT') { if (to === null) return fail('UNIVERSAL_TRACE_INVALID'); if (!ignored) movements.push({ path: key, kind: 'suicide', from, to, value: amount.toString() }); }
+    // CALLCODE and DELEGATECALL run foreign code in the caller's own balance context (no net movement); STATICCALL cannot move value.
+    else if (!['CALLCODE', 'DELEGATECALL', 'STATICCALL'].includes(type)) return fail('UNIVERSAL_TRACE_INVALID');
+    if (frame.calls === undefined) return;
+    if (!Array.isArray(frame.calls)) return fail('UNIVERSAL_TRACE_INVALID');
+    frame.calls.forEach((child, index) => visit(child, [...path, index], ignored));
+  };
+  visit(raw, [], false);
+  return movements;
+}
+
+/**
+ * Either trace namespace can prove a native movement; each response is validated against the canonical transaction before use. The
+ * callTracer is consulted only when no Parity trace is served: a Parity trace that contradicts the receipt (another block, position or
+ * an incomplete tree) is a reorganization or provider-divergence signal and fails closed instead.
+ */
+async function tracedMovements(rpc: Rpc, hash: string, tx: Record<string, unknown>, receipt: Record<string, unknown>): Promise<NativeMovement[]> {
+  let parity: unknown;
+  try { parity = await rpc('trace_transaction', [hash]); } catch { parity = null; }
+  if (parity === null || parity === undefined || Array.isArray(parity) && parity.length === 0)
+    return callTracerMovements(await rpc('debug_traceTransaction', [hash, { tracer: 'callTracer' }]), tx);
+  return nativeMovements(parity, tx, receipt);
+}
+
 type EvmCreditInput = { hash: string; chainId: number; recipient: string; token: string | null; minimum: bigint; orderId: string;
   nativeAuthority: { solver: string; settlement?: UniversalEvmDeployment['relaySettlement'] } };
 
@@ -246,7 +292,7 @@ export async function verifyEvmCredit(rpc: Rpc, input: EvmCreditInput): Promise<
       || t.chainId !== undefined && quantity(t.chainId) !== BigInt(input.chainId)) return { ok: false, reason: 'NOT_CANONICAL' };
   const logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as EvmLog[] : [];
   const data = hex(t.input), id = input.orderId.slice(2);
-  let orderBound = false;
+  let orderBound: boolean;
   let amount = 0n;
   let movements: NativeMovement[] | undefined;
   if (input.token) {
@@ -275,7 +321,7 @@ export async function verifyEvmCredit(rpc: Rpc, input: EvmCreditInput): Promise<
       && quantity(raw.gasUsed) <= 23_000n && await rpc('eth_getCode', [to, { blockHash, requireCanonical: true }]).catch(() => null) === '0x';
     if (direct) amount = quantity(t.value);
     else {
-      try { movements = nativeMovements(await rpc('trace_transaction', [input.hash]), t, raw); }
+      try { movements = await tracedMovements(rpc, input.hash, t, raw); }
       catch { return { ok: false, reason: 'UNVERIFIABLE_NATIVE' }; }
       for (const m of movements) {
         // A contract created in this transaction can burn its own balance

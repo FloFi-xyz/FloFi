@@ -82,7 +82,7 @@ export function normalizeOpenAiPage(input: unknown, project: string, period: Per
       reference: 'OpenAI Costs API project scoped', currency, net: decimal(net), coverage: 'FULL' }, true));
   }
   const next = input.has_more ? input.next_page : null;
-  if (next !== null && (typeof next !== 'string' || !/^[a-zA-Z0-9_-]{1,512}$/.test(next))) throw invalid();
+  if (next !== null && (typeof next !== 'string' || !/^[a-zA-Z0-9_=-]{1,512}$/.test(next))) throw invalid();
   if (input.has_more && !next) throw invalid();
   return { entries, next, days };
 }

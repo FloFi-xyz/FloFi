@@ -8,6 +8,9 @@ import { fetchBillingEntries, normalizeOpenAiPage } from './providers';
 import { METRIC_LABELS, REPORT_LIMITATIONS } from './report';
 import { modelScenario, parseScenario, SCENARIO_FIELDS } from './scenario';
 import { finopsCopy } from '../../components/admin/finops-copy';
+import { readFileSync } from 'node:fs';
+import { FINANCIAL_INTEGRATION_COPY, FINANCIAL_LIMITATION_LABELS, FINANCIAL_SYNC_ERROR_LABELS } from './sync-labels';
+import { financialSyncPeriods } from './sync-store';
 
 const NOW = new Date('2026-11-18T15:00:00Z');
 const period: Period = { from: '2026-11-01', to: '2026-12-01' };
@@ -18,9 +21,34 @@ const entry = (overrides: Record<string, unknown> = {}, id = '1'): LedgerRecord 
 const amount = (records: LedgerRecord[], input = period) => totalsFor(records, input, true).find(total => total.id === 'openai');
 
 describe('FinOps periods and costs', () => {
+  it('reports synced provider costs as PROVIDER_REPORTED and lets an invoice supersede them in any environment', () => {
+    const synced: LedgerRecord = { ...validateEntry({ ...row, source: 'PROVIDER_COST', environment: 'shared', net: '40', reference: 'Vercel FOCUS' }, true),
+      id: 'synced', updatedAt: NOW.toISOString() };
+    expect(amount([synced])).toMatchObject({ amount: '40', quality: 'PROVIDER_REPORTED' });
+    // The operator imports the bill with the form's default environment: counted once, as the bill.
+    const invoice = entry({ net: '55' }, 'invoice');
+    expect(amount([synced, invoice])).toMatchObject({ amount: '55', quality: 'VERIFIED' });
+    expect(selectRecords([synced, invoice]).map(row => row.id)).toEqual(['invoice']);
+    // A usage estimate in another environment is not a provider cost and keeps its own environment rule.
+    expect(selectRecords([invoice, entry({ source: 'USAGE', environment: 'preview', net: '3' }, 'usage')]).map(row => row.id).sort()).toEqual(['invoice', 'usage']);
+  });
+
+  it('re-reads the previous month right after it closes, then weekly', () => {
+    const dec1 = new Date('2026-12-01T06:00:00Z'), dec3 = new Date('2026-12-03T06:00:00Z');
+    expect(financialSyncPeriods(dec1, new Date('2026-11-28T00:00:00Z'))).toEqual([{ period: { from: '2026-11-01', to: '2026-12-01' }, historical: true }]);
+    expect(financialSyncPeriods(dec3, new Date('2026-12-01T06:05:00Z'))).toEqual([{ period: { from: '2026-12-01', to: '2026-12-03' }, historical: false }]);
+  });
+  it('labels every coverage limitation an automatic provider adapter can record', () => {
+    const codes = ['sync-ai-providers.ts', 'sync-circleci.ts', 'sync-infra-providers.ts'].flatMap(file =>
+      [...readFileSync(new URL('./' + file, import.meta.url), 'utf8').matchAll(/'((?:NEON|RAILWAY|VERCEL|OPENAI|ANTHROPIC|ALCHEMY|CIRCLECI)_[A-Z0-9_]+)'/g)]
+        .map(match => match[1]!)).filter(code => !/_(?:API_KEY|API_TOKEN|BILLING_TOKEN|USAGE_KEY|COMPUTE_UNIT)$/.test(code));
+    expect(codes.length).toBeGreaterThan(20);
+    expect(codes.filter(code => !Object.hasOwn(FINANCIAL_LIMITATION_LABELS, code))).toEqual([]);
+  });
   it('localizes investor methodology, KPI labels and scenario assumptions using the application language', () => {
     const en = finopsCopy('EN'), pt = finopsCopy('PT');
-    const copy = [...Object.values(METRIC_LABELS), ...REPORT_LIMITATIONS, ...Object.values(SCENARIO_FIELDS).map(field => field.label)];
+    const copy = [...Object.values(METRIC_LABELS), ...REPORT_LIMITATIONS, ...Object.values(SCENARIO_FIELDS).map(field => field.label),
+      ...Object.values(FINANCIAL_LIMITATION_LABELS), ...Object.values(FINANCIAL_SYNC_ERROR_LABELS), ...FINANCIAL_INTEGRATION_COPY];
     for (const message of copy) {
       expect(en.copy(message)).toBe(message);
       expect(pt.copy(message), message).not.toBe(message);

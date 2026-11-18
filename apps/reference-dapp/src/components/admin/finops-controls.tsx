@@ -10,6 +10,7 @@ import { Kpi } from './admin-ui';
 import { useLocale } from '../../i18n/locale';
 import { finopsCopy } from './finops-copy';
 import type { FinopsReport } from '../../admin/finops/report';
+import { FINANCIAL_LIMITATION_LABELS, FINANCIAL_SYNC_ERROR_LABELS, MANUAL_ONLY_FINANCIAL_PROVIDERS } from '../../admin/finops/sync-labels';
 
 export type RelativeFilter = { range: string; from?: string; to?: string };
 const ERRORS: Readonly<Record<string, string>> = {
@@ -20,10 +21,7 @@ const ERRORS: Readonly<Record<string, string>> = {
   FINOPS_PROVIDER_RETRY_LATER: 'The billing provider requested a wait. Try again later.',
   FINOPS_SYNC_RATE_LIMITED: 'Too many synchronization requests. Wait a minute before trying again.',
   FINOPS_SYNC_SUPERSEDED: 'A newer synchronization for this period finished first. Refresh to view its records.',
-  FINOPS_SYNC_SCHEMA_REQUIRED: 'Automatic synchronization is awaiting database activation.',
-  FINOPS_PROVIDER_FORBIDDEN: 'The provider refused access. Check the billing permission.',
-  FINOPS_PROVIDER_RATE_LIMITED: 'The provider limited requests. FloFi will retry.',
-  FINOPS_PROVIDER_RESPONSE_INVALID: 'The provider returned data FloFi could not verify.',
+  ...FINANCIAL_SYNC_ERROR_LABELS,
   FINOPS_EXPORT_UNAVAILABLE: 'The report is temporarily unavailable.',
 };
 const message = (code: string) => ERRORS[code] ?? 'The request could not be completed. Your saved records are preserved.';
@@ -62,20 +60,23 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
     {csrf && <div className="admin-actions"><button type="button" className="admin-button" disabled={busy || !integrations.providers.some(provider => provider.configured)}
       onClick={() => void queue('all')}>{copy('Sync all')}</button></div>}
     {feedback && <p className="admin-alert" role={feedback.error ? 'alert' : 'status'} data-tone={feedback.error ? 'bad' : 'ok'}>{feedback.text}</p>}
+    <p>{copy('Metered usage and estimates are shown separately from recorded costs.')}</p>
     <div className="admin-table-wrap"><table className="admin-table" aria-label={copy('Financial integrations')}>
       <thead><tr>{['Provider', 'Connection', 'Current-period cost', 'Last successful sync', 'Next scheduled sync', 'Data quality', 'Historical coverage', ...(csrf ? ['Actions'] : [])]
         .map(label => <th key={label} scope="col">{copy(label)}</th>)}</tr></thead>
       <tbody>{integrations.providers.map(provider => {
         const recent = provider.coverage[0];
         const stale = Boolean(provider.lastSuccess && provider.nextSync && Date.parse(provider.nextSync) < Date.now() && !provider.active);
-        const status = provider.active ? 'Synchronizing' : !provider.configured ? 'Not configured' : provider.errorCode ? 'Needs attention'
+        const manual = MANUAL_ONLY_FINANCIAL_PROVIDERS.includes(provider.id);
+        const limitation = (code: string) => copy(FINANCIAL_LIMITATION_LABELS[code] ?? code);
+        const status = provider.active ? 'Synchronizing' : manual ? 'Manual records only' : !provider.configured ? 'Not configured' : provider.errorCode ? 'Needs attention'
           : stale ? 'Stale' : provider.lastSuccess ? 'Connected' : 'Ready to synchronize';
-        return <tr key={provider.id}><th scope="row">{provider.name}</th>
+        return <tr key={provider.id}><th scope="row">{copy(provider.name)}</th>
           <td>{copy(status)}{provider.errorCode && <p>{copy(message(provider.errorCode))}</p>}</td>
           <td>{money(provider.cost.amount)}{provider.cost.amount !== null && <p>{copy(provider.cost.quality)}</p>}</td>
           <td>{time(provider.lastSuccess)}</td><td>{time(provider.nextSync)}</td>
           <td>{recent ? copy(recent.quality) : copy('Unavailable')}{recent?.limitations.length ? <details><summary>{copy('Coverage limitations')}</summary>
-            <ul>{recent.limitations.map(limitation => <li key={limitation}>{copy(limitation)}</li>)}</ul></details> : null}</td>
+            <ul>{recent.limitations.map(code => <li key={code}>{limitation(code)}</li>)}</ul></details> : null}</td>
           <td>{provider.coverage.length > 0 ? <details><summary>{copy('{0} synchronized periods', count(provider.coverage.length))}</summary>
             <ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>{coverage.period.from} – {coverage.period.to} · {copy(coverage.quality)}
               {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>

@@ -1653,6 +1653,34 @@
     "app.admin.finops.pg": {
       "path": "apps/reference-dapp/src/admin/finops/finops.pg.test.ts",
       "stage": "postgres"
+    },
+    "app.admin.finops-sync-infra": {
+      "path": "apps/reference-dapp/src/admin/finops/sync-infra-providers.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.finops-sync-ai": {
+      "path": "apps/reference-dapp/src/admin/finops/sync-ai-providers.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.finops-sync-circleci": {
+      "path": "apps/reference-dapp/src/admin/finops/sync-circleci.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.finops-sync.pg": {
+      "path": "apps/reference-dapp/src/admin/finops/sync-engine.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.server.universal-router.incident-replay": {
+      "path": "apps/reference-dapp/src/server/universal-router/incident-replay.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.support.historical-reconciliation.pg": {
+      "path": "apps/reference-dapp/src/admin/support/historical-reconciliation.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.platform.settlement-regression-matrix": {
+      "path": "apps/reference-dapp/src/platform/settlement-regression-matrix.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1797,7 +1825,12 @@
     "app.components.defi-positions",
     "app.server.defi-positions",
     "app.server.jupiter-http",
-    "app.admin.finops-economics"
+    "app.admin.finops-economics",
+    "app.admin.finops-sync-infra",
+    "app.admin.finops-sync-ai",
+    "app.admin.finops-sync-circleci",
+    "app.server.universal-router.incident-replay",
+    "app.platform.settlement-regression-matrix"
   ],
   "modules": [
     {
@@ -2287,7 +2320,16 @@
         "apps/reference-dapp/src/admin/finops/providers.ts",
         "apps/reference-dapp/src/admin/finops/report.ts",
         "apps/reference-dapp/src/admin/finops/scenario.ts",
-        "apps/reference-dapp/src/admin/finops/store.ts"
+        "apps/reference-dapp/src/admin/finops/store.ts",
+        "apps/reference-dapp/src/admin/finops/sync-ai-providers.ts",
+        "apps/reference-dapp/src/admin/finops/sync-circleci.ts",
+        "apps/reference-dapp/src/admin/finops/sync-engine.ts",
+        "apps/reference-dapp/src/admin/finops/sync-infra-providers.ts",
+        "apps/reference-dapp/src/admin/finops/sync-labels.ts",
+        "apps/reference-dapp/src/admin/finops/sync-providers.ts",
+        "apps/reference-dapp/src/admin/finops/sync-store.ts",
+        "apps/reference-dapp/src/admin/finops/sync-transport.ts",
+        "apps/reference-dapp/backend/finops-worker.ts"
       ],
       "suites": [
         "app.admin.analytics.workflows",
@@ -2298,11 +2340,16 @@
         "app.server.copilot-metrics.pg",
         "app.admin.finops-economics",
         "app.admin.finops.pg",
-        "app.e2e.admin-console"
+        "app.admin.finops-sync-infra",
+        "app.admin.finops-sync-ai",
+        "app.admin.finops-sync-circleci",
+        "app.admin.finops-sync.pg",
+        "app.e2e.admin-console",
+        "app.backend.plain-node-closure"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
-        "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence."
+        "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence. Automatic provider adapters are verified against recorded response shapes from current provider references, not live provider accounts; provider entitlements and project attribution require operator evidence at activation."
       ]
     },
     {
@@ -2358,7 +2405,8 @@
         "apps/reference-dapp/src/app/admin/support/incident/page.tsx",
         "apps/reference-dapp/src/app/admin/support/page.tsx",
         "apps/reference-dapp/src/components/admin/support-console.tsx",
-        "apps/reference-dapp/src/admin/support/nonce-conflict-view.ts"
+        "apps/reference-dapp/src/admin/support/nonce-conflict-view.ts",
+        "apps/reference-dapp/src/admin/support/historical-reconciliation.ts"
       ],
       "suites": [
         "app.admin.http.pg",
@@ -2367,7 +2415,8 @@
         "app.admin.support-lifecycle",
         "app.backend.support-recovery-cloud.pg",
         "app.backend.nonce-conflict-cloud.pg",
-        "app.server.nonce-conflict"
+        "app.server.nonce-conflict",
+        "app.admin.support.historical-reconciliation.pg"
       ],
       "gaps": [
         "Recovery is proven against loopback PostgreSQL, the real worker reconcile handler and a MOCKED chain; no production incident or public network was exercised.",
@@ -5361,7 +5410,8 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.platform.settlement-regression-matrix"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -6916,7 +6966,8 @@
         "apps/reference-dapp/src/server/universal-router/solana-chain.ts",
         "apps/reference-dapp/src/server/universal-router/types.ts",
         "apps/reference-dapp/src/server/universal-router/wrapped-native.ts",
-        "apps/reference-dapp/src/server/universal-router/nonce-check.ts"
+        "apps/reference-dapp/src/server/universal-router/nonce-check.ts",
+        "apps/reference-dapp/src/server/testdata/universal/relay-native-fill-base-2026-11-18.json"
       ],
       "suites": [
         "app.server.router-service",
@@ -6926,7 +6977,9 @@
         "reference-reconciler.bridge",
         "app.server.universal-router.discovery",
         "app.server.bridge-build-estimate",
-        "app.server.router-capability"
+        "app.server.router-capability",
+        "app.server.universal-router.incident-replay",
+        "app.platform.settlement-regression-matrix"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -8617,6 +8670,8 @@
     "app.backend.nonce-conflict-cloud.pg",
     "app.admin.support-privacy.pg",
     "app.backend.workflow-run-worker-startup.pg",
-    "app.admin.finops.pg"
+    "app.admin.finops.pg",
+    "app.admin.finops-sync.pg",
+    "app.admin.support.historical-reconciliation.pg"
   ]
 }

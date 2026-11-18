@@ -31,7 +31,8 @@ function usageMeters(csvs: readonly string[], period: Period): FinancialMeter[] 
   const jobs = new Set<string>(), workflows = new Set<string>();
   function add(metric: string, unit: string, service: string, amount: bigint) {
     const key = JSON.stringify([metric, unit, service]), previous = totals.get(key)?.amount ?? 0n;
-    if (totals.size > 4_000 && !totals.has(key)) return invalid();
+    // The engine and schema 30 accept at most 3,000 meters per snapshot.
+    if (totals.size >= 3_000 && !totals.has(key)) return invalid();
     totals.set(key, { amount: previous + amount, unit, metric, service });
   }
   for (const csv of csvs) {
@@ -53,7 +54,7 @@ function usageMeters(csvs: readonly string[], period: Period): FinancialMeter[] 
       if (jobs.size > 90_000) return invalid();
       const job = field('job_name'), workflowName = field('workflow_name'), executor = field('executor'), resource = field('resource_class');
       if (![job, workflowName, executor, resource].every(value => safeLabel.test(value) || value === '')) return invalid();
-      const service = [workflowName || 'workflow', job || 'job', executor || 'executor unavailable', resource || 'class unavailable'].join(' / ').slice(0, 200);
+      const service = [workflowName || 'workflow', job || 'job', executor || 'executor unavailable', resource || 'class unavailable'].join(' / ').slice(0, 128).trimEnd();
       const numeric = (name: string) => {
         const n = field(name);
         if (!/^\d{1,10}(\.\d{1,8})?$/.test(n)) return invalid();

@@ -225,18 +225,12 @@ async function main(): Promise<void> {
   // Billing uses a separate one-connection pool and single-item loop. Neither
   // a provider call nor FinOps setup is awaited by execution reconciliation.
   if (process.env.FLOFI_FINOPS_SYNC === 'enabled' && !workerStopRequested) {
-    void Promise.all([import('../src/admin/finops/sync-engine.ts'), import('../src/admin/finops/sync-providers.ts')])
-      .then(([engine, { financialAdapters }]) => {
-        if (workerStopRequested || !engine.financialSyncEnabled(process.env, config.tenantId)) return;
-        engine.financialSyncHours(process.env);
-        const billingDb = createDatabase({ connectionString: config.databaseUrl, maxConnections: 1, applicationName: 'flofi-finops-sync' });
-        try {
-          const loop = engine.startFinancialSync({ host: { db: billingDb, tenantId: config.tenantId }, env: process.env, adapters: financialAdapters, logger });
-          financialSync = { stop: () => loop.stop().finally(() => billingDb.close()) };
-        } catch (cause) {
-          void billingDb.close().catch(() => undefined);
-          throw cause;
-        }
+    void import('./finops-worker.ts')
+      .then(async ({ loadFinancialSync }) => {
+        if (workerStopRequested) return;
+        const loop = await loadFinancialSync(process.env, { databaseUrl: config.databaseUrl, tenantId: config.tenantId, logger });
+        if (loop && workerStopRequested) await loop.stop();
+        else financialSync = loop;
       })
       .catch((error: unknown) => logger.warn('finops.worker_disabled', disabledFields(loadFailed('FINOPS_WORKER_LOAD_FAILED')(error))));
   }

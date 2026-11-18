@@ -6,7 +6,7 @@ import { beginBillingSync, FinopsConflictError, FinopsSupersededError, ledgerMis
 import { configuredBillingScopes, fetchBillingEntries } from './providers.ts';
 import { investorCsv, readFinopsReport } from './report.ts';
 import { parseScenario } from './scenario.ts';
-import { isFinancialProviderId, queueFinancialSync } from './sync-store.ts';
+import { isFinancialProviderId, queueFinancialSync, readFinancialSync } from './sync-store.ts';
 
 type Options = AdminHttpOptions & { readonly fetch?: typeof fetch };
 const failed = (status: number, code: string, details: Record<string, unknown> = {}) => json(status, { ok: false, code, ...details });
@@ -29,6 +29,12 @@ export async function handleFinopsImport(request: Request, options: Options = {}
   if (body.action === 'sync') {
     const env = options.env ?? process.env, scope = body.scope, filter = finopsPeriod(base.now, body);
     if (!isScopeId(scope) || !filter.valid) return failed(400, 'FINOPS_REQUEST_INVALID');
+    // Once automatic synchronization is active (schema 30), provider calls belong to the worker alone: billing credentials are never
+    // needed by the web process. The legacy request-time sync remains only for a schema-29 database.
+    // Only an explicit schema-29 answer (the table is missing) allows it; a failed status read fails closed.
+    let automatic: boolean;
+    try { automatic = (await readFinancialSync(base.host)).available; } catch { return failed(503, 'FINOPS_SYNC_STORE_UNAVAILABLE'); }
+    if (automatic) return failed(409, 'FINOPS_SYNC_AUTOMATIC');
     if (!configuredBillingScopes(env, base.host.tenantId).includes(scope)) return failed(409, 'FINOPS_PROVIDER_NOT_CONFIGURED');
     // Billing buckets are retrieved for closed UTC days. Today's charge may still change.
     const today = isoDay(base.now), period = { ...filter.period, to: filter.period.to < today ? filter.period.to : today };

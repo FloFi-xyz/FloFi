@@ -65,7 +65,8 @@ describe('HOTFIX the backend closure loads on plain Node (Railway API, worker an
     const local = (file: string) => relative(APP, file).split(sep).join('/');
     // The walk reaches the opt-in subsystems' dynamic imports, including the module that disabled the workflow-run worker.
     for (const reached of ['backend/workflow-run-worker.ts', 'src/workflow-runs/worker.ts', 'src/gas-sponsorship/paymaster-service.ts',
-      'backend/automation-worker.ts', 'backend/delegation-worker.ts', 'backend/flight-email-worker.ts', 'backend/load-failure.ts'])
+      'backend/automation-worker.ts', 'backend/delegation-worker.ts', 'backend/flight-email-worker.ts', 'backend/load-failure.ts',
+      'backend/finops-worker.ts', 'src/admin/finops/sync-engine.ts', 'src/admin/finops/sync-providers.ts'])
       expect([...modules.keys()].map(local)).toContain(reached);
     expect(modules.size).toBeGreaterThan(200);
     expect([...modules].filter(([, refusal]) => refusal).map(([file, refusal]) => `${local(file)}: ${refusal}`)).toEqual([]);
@@ -89,6 +90,21 @@ describe('HOTFIX the backend closure loads on plain Node (Railway API, worker an
     expect(result).toEqual({ code: 0, stdout: expect.any(String) });
     expect(JSON.parse(result.stdout.trim())).toEqual({ kinds: ['workflow-run.advance'], sweep: 'function',
       capabilities: { userFunded: 'USER_FUNDED_NOT_ENABLED', delegation: false }, off: { disabled: 'WORKFLOW_RUNS_NOT_ENABLED', reason: null } });
+  });
+
+  it('plain Node loads the FinOps billing loop on its own, as main.ts does, without another subsystem installing source resolution', async () => {
+    const result = await run(`
+      const { loadFinancialSync } = await import('./backend/finops-worker.ts');
+      const events = [];
+      const logger = { info(event, fields) { events.push([event, fields]); }, warn(event, fields) { events.push([event, fields]); }, error() {} };
+      const input = { databaseUrl: 'postgres://nobody@127.0.0.1:1/none', tenantId: 'default', logger };
+      const ineligible = await loadFinancialSync({ FLOFI_FINOPS_SYNC: 'enabled', FLOFI_FINOPS_BILLING_TENANT: 'other' }, input);
+      const loop = await loadFinancialSync({ FLOFI_FINOPS_SYNC: 'enabled', FLOFI_FINOPS_BILLING_TENANT: 'default', FLOFI_FINOPS_CIRCLECI_BILLING_TOKEN: 'inert' }, input);
+      await loop.stop();
+      console.log(JSON.stringify({ ineligible, events }));`);
+    expect(result).toEqual({ code: 0, stdout: expect.any(String) });
+    expect(JSON.parse(result.stdout.trim())).toEqual({ ineligible: null, events: [['finops.worker_ineligible', { code: 'FINOPS_BILLING_TENANT_MISMATCH' }],
+      ['finops.worker_enabled', { providers: 'circleci', hours: 24 }]] });
   });
 
   it('plain Node loads the paymaster proxy module itself (its JSON-RPC refusal codes are covered by gas-sponsorship.test.ts)', async () => {

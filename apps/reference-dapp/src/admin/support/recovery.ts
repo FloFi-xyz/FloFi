@@ -30,7 +30,9 @@ export const RECOVERY_RATE_WINDOW_MS = 600_000, RECOVERY_RATE_LIMIT = 30, REFUSA
 export const RUN_ID = /^(?!0[xX])[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,64}$/, STATE_TOKEN = /^[0-9a-f]{32}$/;
 
 export class RecoveryRefusal extends Error {
-  constructor(readonly code: string, readonly status: number, readonly reason: string | null = null) { super(code); }
+  // Explicit fields: the admin CLI loads this module on plain Node (type stripping refuses parameter properties).
+  readonly code: string; readonly status: number; readonly reason: string | null;
+  constructor(code: string, status: number, reason: string | null = null) { super(code); this.code = code; this.status = status; this.reason = reason; }
 }
 type Host = { readonly db: Database; readonly tenantId: string };
 type FactsRow = { run_id: string; flow: string; status: string; needs_observation: boolean; attention_required: boolean; has_evidence: boolean; log_version: string;

@@ -24,7 +24,7 @@
  */
 import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
 import { createHash, randomBytes } from 'node:crypto';
-import { ARBITRUM_ONE, catalogAsset, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
+import { ARBITRUM_ONE, ARBITRUM_ONE_TRANSFER, BASE_MAINNET_TRANSFER, catalogAsset, ETHEREUM_MAINNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
   uniswapCatalogDeployment, uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUniswapLiquidityWorkflow } from '@defi-workflow-engine/reference-linter';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
@@ -146,6 +146,9 @@ const catalogRun = (id: string) => Object.values(CATALOG_RUN_PREFIX).some(prefix
 const runChainMatches = (id: string, chainId: number) => catalogRun(id) ? id.startsWith(`${CATALOG_RUN_PREFIX[chainId]}-`) : !uniswapCatalogDeployment(chainId);
 
 function fail(code: string): never { throw new Error(code); }
+/** The confirmation depth a transfer on the same mainnet waits for (BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002 P0). */
+export const MAINNET_LIQUIDITY_CONFIRMATIONS: Readonly<Record<number, number>> = Object.freeze(Object.fromEntries([BASE_MAINNET_TRANSFER, ARBITRUM_ONE_TRANSFER,
+  ETHEREUM_MAINNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER].map(transfer => [transfer.chainId, transfer.minimumConfirmations])));
 function isObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
 function hex(value: unknown): string { if (typeof value !== 'string' || !/^0x[0-9a-fA-F]*$/.test(value)) fail('UNISWAP_RPC_INVALID'); return value.toLowerCase(); }
 function quantity(value: unknown): bigint { const h = hex(value); if (h === '0x') fail('UNISWAP_RPC_INVALID'); return BigInt(h); }
@@ -251,6 +254,7 @@ export function uniswapNeedsObservation(value: unknown): boolean {
  */
 export function createUniswapLiquidityService(input: { readonly storage: ExecutionStorage; readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>;
   readonly provenance: UniswapProvenance; readonly executionEnabled?: boolean; readonly now?: () => Date;
+  /** MOCKED only: the confirmation depth tests use. PUBLIC_MAINNET always uses the network's transfer depth. */ readonly confirmations?: number;
   /** MOCKED harness only: the synthetic chain's code pins. A public run always uses the profile's verified pins. */
   readonly mockedCodePins?: Readonly<Record<'factory' | 'positionManager' | 'pool', string>>;
   readonly catalog?: { readonly catalogFor: (chain: string) => Promise<AssetCatalog>;
@@ -632,6 +636,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       }
       throw cause;
     }
+    // BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002 P0: a public mainnet position is recorded only at the network's confirmation depth.
+    const depth = provenance === 'PUBLIC_MAINNET' ? MAINNET_LIQUIDITY_CONFIRMATIONS[profile.chainId] ?? fail('UNISWAP_PROFILE_INVALID')
+      : provenance === 'MOCKED' ? input.confirmations ?? 0 : 0;
+    if (depth > 1 && Number(quantity(await rpc('eth_blockNumber', []))) - verified.blockNumber + 1 < depth)
+      return record.error === 'UNISWAP_AWAITING_CONFIRMATIONS' ? record : save({ ...record, error: 'UNISWAP_AWAITING_CONFIRMATIONS' });
     const execution = verified.gasUsed * verified.effectiveGasPrice;
     const receipt: UniswapReceipt = { transactionHash: hash, status: verified.status, blockNumber: verified.blockNumber, blockHash: hex(raw.blockHash),
       from: verified.txFrom, gasUsed: verified.gasUsed.toString(), effectiveGasPrice: verified.effectiveGasPrice.toString(), l1FeeWei: verified.l1Fee.toString(),

@@ -95,6 +95,7 @@ const allExpenses = (scope: (typeof FINOPS_SCOPES)[keyof typeof FINOPS_SCOPES]) 
 export const REPORT_LIMITATIONS = [
   'Reports use UTC periods with an inclusive first day and an exclusive end boundary. Indivisible billing records spanning a boundary are excluded.',
   'Higher-authority invoice records supersede overlapping provider reports and estimates for the same service and environment. No estimate is added to a bill.',
+  'An invoice or accounting record also supersedes overlapping provider-reported costs of the same service in any environment. Provider-reported costs are shown as PROVIDER_REPORTED until reconciled.',
   'Missing provider coverage or exchange rates are unavailable. A partial total is the sum of covered amounts. Currency conversion uses the entry’s documented USD per unit rate.',
   'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
   'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
@@ -142,17 +143,21 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
     : unavailable('Complete cost coverage is required to calculate an actual break-even revenue target.');
   const monthToDate = consolidate(totalsFor(month.records, current, month.complete), allExpenses, billing);
   const previousMonth = consolidate(totalsFor(prior.records, previous, prior.complete), allExpenses, billing);
-  const monthlyChange = monthToDate.quality !== 'PARTIAL' && previousMonth.quality !== 'PARTIAL'
-    ? difference(monthToDate, previousMonth, 'Current observed month less the previous full month.')
+  // Like for like: this month's closed days against the same number of days at the start of the previous month.
+  const priorSameDays = { from: previous.from, to: addDays(previous.from, Math.min(elapsed, periodDays(previous))) };
+  const previousToDate = consolidate(totalsFor(prior.records, priorSameDays, prior.complete), allExpenses, billing);
+  const monthlyChange = elapsed > 0 && knownClosed.quality !== 'PARTIAL' && previousToDate.quality !== 'PARTIAL'
+    ? difference(knownClosed, previousToDate, 'Closed days of this month less the same number of days of the previous month.')
     : unavailable('Comparable periods with complete coverage are required for a monthly cost change.');
   const metrics = { monthToDate, previousMonth, monthlyChange, projected, aiCost, variable, infrastructure, overall, costPerActive, costPerChat, costPerSimulated,
     costPerCompleted, directSimulated, directCompleted, revenue, contribution, result, breakEvenRevenue };
   const currentTotals = totalsFor(month.records, current, month.complete);
   const providerRows = await Promise.all(integrations.providers.map(async provider => {
-    const name = FINANCIAL_PROVIDER_NAMES[provider.id];
-    const cost = consolidate(currentTotals, scope => scope.provider === (provider.id === 'alchemy' ? 'RPC providers' : name), billing);
-    const latest = provider.coverage.find(coverage => coverage.period.from < period.to && coverage.period.to > period.from);
-    const meters = latest ? await readFinancialMeters(host, provider.id, latest.period.from).catch(() => []) : [];
+    // Alchemy reports compute units only; its cost cell is the whole RPC scope (any RPC invoice), labelled as such.
+    const name = provider.id === 'alchemy' ? 'Alchemy (RPC providers total)' : FINANCIAL_PROVIDER_NAMES[provider.id];
+    const cost = consolidate(currentTotals, scope => scope.provider === (provider.id === 'alchemy' ? 'RPC providers' : FINANCIAL_PROVIDER_NAMES[provider.id]), billing);
+    const overlapping = provider.coverage.filter(coverage => coverage.period.from < period.to && coverage.period.to > period.from).slice(0, 3);
+    const meters = (await Promise.all(overlapping.map(coverage => readFinancialMeters(host, provider.id, coverage.period.from).catch(() => [])))).flat();
     // A selected period can intersect a provider's monthly aggregate without
     // containing it. Include only meters whose whole period fits.
     return { ...provider, name, cost, meters: meters.filter(meter => meter.period.from >= period.from && meter.period.to <= period.to) };
@@ -165,7 +170,7 @@ export type FinopsReport = Awaited<ReturnType<typeof readFinopsReport>>;
 export type MetricId = keyof FinopsReport['metrics'];
 export const METRIC_LABELS: Record<MetricId, string> = {
   monthToDate: 'Month-to-date infrastructure and operating costs', previousMonth: 'Previous month infrastructure and operating costs',
-  monthlyChange: 'Observed month-to-month cost difference',
+  monthlyChange: 'Observed month-to-month cost difference (same days)',
   projected: 'Projected end-of-month costs', aiCost: 'Provider and ledger AI costs', variable: 'Variable operating costs',
   infrastructure: 'Fixed and shared expenses', overall: 'Infrastructure and operating costs', costPerActive: 'Cost per active user',
   costPerChat: 'Allocated cost per observed chat interaction', costPerSimulated: 'Allocated cost per simulated workflow',
@@ -237,8 +242,11 @@ export function investorCsv(report: FinopsReport, scenario: Scenario | null = nu
       coverage.quality, coverage.limitations.join(', '), coverage.collectedAt]);
   }
   for (const provider of report.integrations.providers) for (const meter of provider.meters) {
+    // Meters are detail, never additive: a USD meter repeats a provider cost row (or an estimate kept out of the totals).
+    const money = meter.unit === 'USD', estimate = meter.metric.includes('estimate');
     rows.push(['financial meters', provider.id + ' / ' + meter.service + ' / ' + meter.metric, meter.period.from, meter.period.to, meter.amount,
-      meter.unit, meter.metric.includes('estimate') ? 'ESTIMATED' : 'METERED', meter.basis ?? 'Scoped provider usage API', provider.lastSuccess]);
+      meter.unit, estimate ? 'ESTIMATED' : money ? 'PROVIDER_REPORTED' : 'METERED',
+      (money ? 'Not additive: detail of provider costs. ' : '') + (meter.basis ?? 'Scoped provider usage API'), provider.lastSuccess]);
   }
   for (const limitation of REPORT_LIMITATIONS) rows.push(['methodology', limitation, period.from, period.to, null, null, null, null, null]);
   return writeFinopsCsv(rows);

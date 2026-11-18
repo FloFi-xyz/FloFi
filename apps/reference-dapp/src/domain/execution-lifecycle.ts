@@ -242,11 +242,13 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       add('destination', nodeId, r.refund ? 'Refund' : 'Destination delivery', r.refund?.chainId ?? r.review.route.destinationChain, destinationState,
         r.destination?.transactionHash ?? r.refund?.transactionHash ?? null, r.verdict === 'RECONCILED');
       const op = operations.at(-1)!;
+      // Settled or divergent outcomes first; then, while pending, the most specific unverified claim; a recovery without one needs attention.
       if (r.verdict === 'REFUNDED') op.label = 'Refunded';
+      else if (r.verdict === 'DIVERGENT') op.label = 'Manual attention required';
       else if (r.verdict === 'PENDING' && r.lastHint?.status === 'REFUNDED') op.label = 'Refund pending verification';
       else if (r.verdict === 'PENDING' && r.destination) op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
-      else if (r.phase === 'RECOVERY_REQUIRED' || r.verdict === 'DIVERGENT') op.label = 'Manual attention required';
       else if (r.verdict === 'PENDING' && r.lastHint?.status === 'FILLED') op.label = 'Provider reports delivery · awaiting independent verification';
+      else if (r.phase === 'RECOVERY_REQUIRED') op.label = 'Manual attention required';
       else if (destinationState === 'PENDING') phrase(op, 'AWAITING_DESTINATION');
       break;
     }

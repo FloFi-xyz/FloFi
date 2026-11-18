@@ -30,7 +30,9 @@ const PROVIDER_CODES = new Set([...TRANSIENT_CODES, 'FINOPS_PROVIDER_NOT_CONFIGU
   'FINOPS_PROVIDER_ACCESS_DENIED', 'FINOPS_PROVIDER_NOT_ENTITLED', 'FINOPS_PROVIDER_SCOPE_MISMATCH', 'FINOPS_PROVIDER_RESPONSE_INVALID',
   'FINOPS_PROVIDER_POLL_LIMIT', 'FINOPS_PROVIDER_PERIOD_UNAVAILABLE', 'FINOPS_PROVIDER_FORBIDDEN', 'FINOPS_PROVIDER_EXPORT_FAILED',
   'FINOPS_PERIOD_CONFLICT']);
-const SAFE_DIMENSION = /^[A-Za-z0-9][A-Za-z0-9 ._:/@+()-]{0,127}$/;
+// Labels only: no '@' or '+' (email-shaped), and an address-shaped value is refused below; meters are aggregates without identities.
+const SAFE_DIMENSION = /^[A-Za-z0-9][A-Za-z0-9 ._:/()-]{0,127}$/;
+const IDENTITY_SHAPED = /0x[0-9a-fA-F]{40}/;
 const SAFE_AMOUNT = /^-?(?:0|[1-9]\d{0,29})(?:\.\d{1,12})?$/;
 const SAFE_REASON = /^[A-Z][A-Z0-9_]{2,63}$/;
 const SAFE_CURSOR = /^[A-Za-z0-9._:-]{1,512}$/;
@@ -78,7 +80,7 @@ function validateResult(id: FinancialProviderId, requested: Period, result: Fina
   facts.clear();
   const meters = result.meters.map(({ scope, environment, project, service, metric, unit, amount, period, basis }) => {
     if (!allowed.includes(scope) || !FINOPS_ENVIRONMENTS.includes(environment) || !within(requested, period)
-      || ![project, service, metric, unit].every(part => typeof part === 'string' && SAFE_DIMENSION.test(part))
+      || ![project, service, metric, unit].every(part => typeof part === 'string' && SAFE_DIMENSION.test(part) && !IDENTITY_SHAPED.test(part))
       || typeof amount !== 'string' || !SAFE_AMOUNT.test(amount) || basis !== undefined && !SAFE_DIMENSION.test(basis)) throw invalid();
     const key = JSON.stringify([scope, environment, project, service, metric, unit, period.from, period.to, basis]);
     if (facts.has(key)) throw invalid();
@@ -159,7 +161,12 @@ export function startFinancialSync(input: Parameters<typeof createFinancialSyncE
     timer = setTimeout(() => {
       current = engine.runOnce(shutdown.signal).then(
         worked => schedule(worked ? 1_000 : 60_000),
-        () => { input.logger.warn('finops.sync_tick_failed', { code: 'FINOPS_SYNC_STORE_UNAVAILABLE' }); schedule(60_000); });
+        (cause: unknown) => {
+          // A closed FINOPS_* code is logged as is; anything else (a driver error) is never logged verbatim.
+          const code = cause instanceof Error && /^FINOPS_[A-Z0-9_]{3,64}$/.test(cause.message) ? cause.message : 'FINOPS_SYNC_STORE_UNAVAILABLE';
+          input.logger.warn('finops.sync_tick_failed', { code });
+          schedule(60_000);
+        });
     }, delay);
     timer.unref();
   }

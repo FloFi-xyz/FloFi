@@ -14,6 +14,8 @@ export async function requestFinancial(url: URL, init: RequestInit, fetcher: typ
       await response.body?.cancel().catch(() => undefined);
       const code = response.status === 401 || response.status === 403 ? 'FINOPS_PROVIDER_FORBIDDEN'
         : response.status === 404 ? 'FINOPS_PROVIDER_NO_COST_DATA' : response.status === 429 ? 'FINOPS_PROVIDER_RATE_LIMITED'
+          // An expired pagination cursor (Anthropic analytics after a data refresh): restart the whole read later.
+          : response.status === 410 ? 'FINOPS_PROVIDER_RETRY_LATER'
           : response.status >= 500 ? 'FINOPS_PROVIDER_UNAVAILABLE' : 'FINOPS_PROVIDER_RESPONSE_INVALID';
       throw new Error(code);
     }
@@ -36,7 +38,9 @@ export async function requestFinancial(url: URL, init: RequestInit, fetcher: typ
   } catch (cause) {
     // Provider bodies, URLs, credentials and transport exception text never
     // reach the worker's durable status or the admin response.
-    if (cause instanceof Error && /^FINOPS_PROVIDER_(FORBIDDEN|NO_COST_DATA|RATE_LIMITED|UNAVAILABLE|RESPONSE_INVALID)$/.test(cause.message)) throw cause;
+    if (cause instanceof Error && /^FINOPS_PROVIDER_(FORBIDDEN|NO_COST_DATA|RATE_LIMITED|RETRY_LATER|UNAVAILABLE|RESPONSE_INVALID)$/.test(cause.message)) throw cause;
+    // The transport cause is deliberately dropped: its text can carry the request URL or a provider body.
+    // eslint-disable-next-line preserve-caught-error
     throw new Error('FINOPS_PROVIDER_UNAVAILABLE');
   }
 }

@@ -43,12 +43,13 @@ const month = (at: Date, offset: number) => isoDay(new Date(Date.UTC(at.getUTCFu
 /**
  * Initial backfill walks the current month and two closed months. Refreshes
  * recompute the current month to catch credits and corrections, plus the
- * previous billing month once a week. On day one there are no closed current days.
+ * previous billing month once a week and once right after it closes. On day one there are no closed current days.
  */
 export function financialSyncPeriods(now: Date, previousReview: Date | null): { period: Period; historical: boolean }[] {
   const current = month(now, 0), today = isoDay(now);
   const periods = current < today ? [{ period: { from: current, to: today }, historical: false }] : [];
-  if (previousReview === null || now.getTime() - previousReview.getTime() >= 7 * 24 * HOUR) {
+  // Also right after a month closes: its last days were never collected as closed days of the current month.
+  if (previousReview === null || now.getTime() - previousReview.getTime() >= 7 * 24 * HOUR || isoDay(previousReview) < current) {
     periods.push({ period: { from: month(now, -1), to: current }, historical: true });
   }
   if (previousReview === null) periods.push({ period: { from: month(now, -2), to: month(now, -1) }, historical: true });

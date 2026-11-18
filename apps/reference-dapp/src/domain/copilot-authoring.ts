@@ -314,7 +314,8 @@ const nameNamed = (text: string, asset: CanonicalAsset) => {
   return matches.some(match => !(networkIdentity(name) || catalogNetworkOfChatName(name)) || !/(?:\b(?:on|in|at|na|no|em|da|de|do|from|to|para|pra|network|rede|chain))\s+(?:(?:the|a|o)\s+)?$/i.test(text.slice(0, match.index)));
 };
 
-class Stop { constructor(readonly outcome: CopilotOutcome) {} }
+/** Explicit field: reachable from the plain-Node admin CLI (type stripping refuses parameter properties). */
+class Stop { readonly outcome: CopilotOutcome; constructor(outcome: CopilotOutcome) { this.outcome = outcome; } }
 const ask = (missing: CopilotAuthoringMissing[], question: string, options: readonly string[] = [], deposit?: string, extra: { readonly code?: string; readonly pool?: PoolRef } = {}): never => {
   throw new Stop({ kind: 'CLARIFICATION', missing, question, options, ...deposit ? { deposit } : {}, ...extra.code ? { code: extra.code } : {}, ...extra.pool ? { pool: extra.pool } : {} });
 };

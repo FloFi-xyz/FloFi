@@ -12,7 +12,7 @@ import { readNotAnswered } from './public-testnet-rpc.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { ARBITRUM_ONE, baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE, ARBITRUM_ONE_TRANSFER, BASE_MAINNET_TRANSFER, ETHEREUM_MAINNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, erc7710, ownerAccountCode, toHex } from '@defi-workflow-engine/reference-compiler';
 import { catalogSwapKind, hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -296,6 +296,18 @@ const poolData = (a: string, b: string, p: PairSwapProfile) => callData('0x1698e
 const quoteData = (a: string, b: string, amount: bigint, fee: number) => callData('0xc6a5026a', addrWord(a), addrWord(b),
   word(amount), word(BigInt(fee)), word(0n));
 /** The swap profile of a run's quote; a persisted chain without a profile is corrupt. */
+/**
+ * BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002 P0: a public mainnet swap is reconciled at the same confirmation depth as a transfer on that
+ * network. Until then its receipt is re-read (and re-checked for canonical inclusion) on every observation; nothing is recorded.
+ */
+export const MAINNET_SWAP_CONFIRMATIONS: Readonly<Record<number, number>> = Object.freeze(Object.fromEntries([BASE_MAINNET_TRANSFER, ARBITRUM_ONE_TRANSFER,
+  ETHEREUM_MAINNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER].map(profile => [profile.chainId, profile.minimumConfirmations])));
+/** Public or unlabelled catalog runs use the mainnet depth (fail closed); only a MOCKED runtime may inject its own for tests. */
+function swapConfirmations(P: SwapProfile, provenance: 'PUBLIC_MAINNET' | 'MOCKED' | undefined, runtime: CatalogSwapRuntime | undefined): number {
+  if (P.kind !== 'CATALOG') return 0;
+  if (provenance === 'MOCKED') return runtime?.confirmations?.[P.chainId] ?? 0;
+  return MAINNET_SWAP_CONFIRMATIONS[P.chainId] ?? fail('PUBLIC_STORE_CORRUPT');
+}
 const profileOf = (chainId: number): SwapProfile => swapProfile(chainId) ?? fail('PUBLIC_STORE_CORRUPT');
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -1002,6 +1014,9 @@ function createGaslessExecution({ rpcFor, now, catalog, persistence, quote, quot
       try { await canonicalInclusion(rpc, raw, tx, txHash, blockNumber); }
       catch (cause) { if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL') continue; throw cause; }
       if (status === 0) { reverted = txHash; continue; }
+      // The same confirmation depth as an owner-sent swap: until then the attempt stays active and nothing is reconciled.
+      const depth = swapConfirmations(P, run.quote.provenance, catalog);
+      if (depth > 1 && Number(quantity(await rpc('eth_blockNumber', []))) - blockNumber + 1 < depth) return save(withGasless(run, current));
       return reconcile(run, current, binding, P, rpc, raw, tx, txHash, relayer, blockNumber);
     }
     const deadlinePassed = now().getTime() > (binding.trade.deadline + 60) * 1000;
@@ -1130,6 +1145,8 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
  */
 export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promise<AssetCatalog>; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED';
   readonly codePins?: Partial<Record<string, string>>; readonly executionEnabled: boolean;
+  /** MOCKED only: a confirmation depth per chain id for tests. PUBLIC_MAINNET always uses the transfer profile's depth. */
+  readonly confirmations?: Readonly<Partial<Record<number, number>>>;
   /** BUILD-FLOFI-EXECUTION-PERFORMANCE-001: verified immutable deployment facts; undefined = the process cache on public mainnets, null = off. */
   readonly deploymentFacts?: DeploymentFactCache | null;
   /**
@@ -1846,6 +1863,9 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           throw cause;
         }
         const { direct, delegated, delegationDepth, txFrom, txTo, txInput, status, blockNumber, gasUsed, effectiveGasPrice, l1Fee, nonce } = verified;
+        // Until the receipt is deep enough nothing is recorded: the attempt keeps its state and the next observation re-verifies it.
+        const depth = swapConfirmations(P, run.quote.provenance, catalog);
+        if (depth > 1 && Number(quantity(await rpc('eth_blockNumber', []))) - blockNumber + 1 < depth) return run;
         const review = run.quote.ownerReview;
         // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a MetaMask Smart Account (an EIP-7702 delegated EOA) may hand the reviewed call to a relayer,
         // which redeems the owner's delegation through the Delegation Manager and pays the network fee. For an owner-bound swap this is accepted

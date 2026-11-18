@@ -34,10 +34,12 @@ const referenceWorkflow = (amount: string): SemanticWorkflow =>
   ({ schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 1, nodes: [createSwapNode('node-002', 'USDC_TO_WETH', amount, '50', cryptoReviewContext('Base'))], resourceEdges: [] });
 
 let clock = T0, catalog: AssetCatalog, chain: RobinhoodMockChain, usdc: CanonicalAsset, weth: CanonicalAsset, cbbtc: CanonicalAsset;
-function service(options: { executionEnabled?: boolean; catalogFor?: () => Promise<AssetCatalog> } = {}): PublicTestnetService {
+function service(options: { executionEnabled?: boolean; catalogFor?: () => Promise<AssetCatalog>; confirmations?: number } = {}): PublicTestnetService {
   const dir = mkdtempSync(join(tmpdir(), 'flofi-base-swap-')); dirs.push(dir);
+  const runtime = mockCatalogRuntime(options.catalogFor ?? catalog, options.executionEnabled ?? true);
   return createPublicTestnetService({ rpc: async () => { throw new Error('PUBLIC_NETWORK_UNAVAILABLE'); }, rpcs: { 'eip155:8453': chain.rpc },
-    journalDir: dir, idPrefix: 'bas', now: () => new Date(clock), catalog: mockCatalogRuntime(options.catalogFor ?? catalog, options.executionEnabled ?? true) });
+    journalDir: dir, idPrefix: 'bas', now: () => new Date(clock),
+    catalog: options.confirmations ? { ...runtime, confirmations: { 8453: options.confirmations } } : runtime });
 }
 beforeEach(() => {
   clock = T0;
@@ -123,6 +125,24 @@ describe('BUILD-BASE-001 Base mainnet swap: owner execution, L1 fee and reconcil
     expect(done.outcome).toMatchObject({ inputSpent: '100000000', outputReceived: '100000' });
     expect(done.outcome!.evidence).toMatchObject({ environment: 'MOCKED', outcome: 'RECONCILED' });
     expect(chain.balance(cbbtc.address!, owner)).toBe(100_000n);
+  });
+  it('records the swap outcome only at the network confirmation depth, re-reading the receipt until then', async () => {
+    const s = service({ confirmations: 2 }), id = (await s.prepare(catalogSwapWorkflow(usdc, cbbtc, '100000000'))).quote.executionId;
+    s.review(id, s.load(id).quote.manifestHash);
+    const approval = await s.begin(id, owner);
+    s.report(id, approval.attempt.attemptId, { kind: 'HASH', txHash: wallet(approval.tx) });
+    expect((await s.observe(id)).attempts.at(-1)?.state).toBe('HASH');
+    chain.mine();
+    expect((await s.observe(id)).attempts.at(-1)?.state).toBe('CONFIRMED');
+    clock += 5_000;
+    s.review(id, (await s.refresh(id)).quote.manifestHash);
+    const swap = await s.begin(id, owner);
+    s.report(id, swap.attempt.attemptId, { kind: 'HASH', txHash: wallet(swap.tx) });
+    const shallow = await s.observe(id);
+    expect(shallow.outcome).toBeNull();
+    expect(shallow.attempts.at(-1)).toMatchObject({ state: 'HASH', txHash: expect.any(String) });
+    chain.mine();
+    expect((await s.observe(id)).outcome).toMatchObject({ inputSpent: '100000000', outputReceived: '100000', evidence: { outcome: 'RECONCILED' } });
   });
   it('keeps an uncertain wallet result observation-only', async () => {
     chain.state.allowances.set(`${usdc.address}:${owner}:${UNI.router}`, 10n ** 12n);

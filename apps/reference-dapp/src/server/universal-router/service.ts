@@ -843,7 +843,20 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         const block = await rpc('eth_getBlockByNumber', [evm.tag(d.position.height), false]);
         if (!isObject(block)) fail('UNIVERSAL_RPC_INVALID');
         if (evm.hex((block as Record<string, unknown>).hash) !== d.blockHash) return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
-        if (!d.final && d.position.height <= await evm.evmSafeHead(rpc)) record = { ...record, destination: { ...d, final: true } };
+        if (!d.final && d.position.height <= await evm.evmSafeHead(rpc)) {
+          // A native credit proven from a trace (possibly served by a fallback node, and a callTracer frame carries no block hash) is
+          // derived again from the now-final block before it can become evidence. A trace that is temporarily unavailable keeps waiting.
+          if (d.token === 'native') {
+            const route = record.review.route;
+            const again = await verifyCredit(d.chainId, d.transactionHash, d.recipient, route.outputToken, BigInt(route.minimumOutput), route.order, true);
+            if (!again.ok) {
+              if (['UNVERIFIABLE_NATIVE', 'NOT_CANONICAL'].includes(again.reason)) return save({ ...record, error: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE' });
+              return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
+            }
+            if (again.delivery.amount !== d.amount || again.delivery.blockHash !== d.blockHash) return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
+          }
+          record = { ...record, destination: { ...d, final: true }, error: null };
+        }
       }
     }
     if (record.source!.final && record.destination?.final) {

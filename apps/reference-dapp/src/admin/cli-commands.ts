@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { CERTIFIED_FORWARD_MIGRATIONS, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { indexRunFacts } from './analytics/indexer.ts';
+import { historicalReconciliation } from './support/historical-reconciliation.ts';
+import { supportPrivacyConfig } from './support/privacy.ts';
 import { createAdminStore, type AdminRole } from './store.ts';
 import { activateRetention, applyRetention, completePrivacyRequest, decidePrivacyRequest, openPrivacyRequest, placeLegalHold, privacyAccess, privacyErase,
   releaseLegalHold, REQUEST_KINDS, RETENTION_POLICIES, retentionReport, revokeRetention, walletSubject, type RequestKind, type RetentionPolicy } from './privacy-ops.ts';
@@ -14,7 +16,7 @@ import { activateRetention, applyRetention, completePrivacyRequest, decidePrivac
  * FLOFI_ADMIN_SESSION_SECRET in the operator's environment and never print it.
  */
 export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit', 'index', 'retention-report', 'retention-activate', 'retention-revoke', 'retention-apply',
-  'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate'] as const;
+  'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate', 'reconcile-history'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -61,13 +63,22 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
       if (!activateSync && (target.rows[0]?.version ?? 0) > 29) return { applied: await migrate(db, migrations) };
       const identities = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.slice(0, activateSync ? 2 : 1);
       if (identities?.length !== (activateSync ? 2 : 1)) throw new Error('FINOPS_MIGRATION_NOT_CERTIFIED');
-      const migrationsToApply = await Promise.all(identities.map(async identity => {
+      // A later release that ships 0029/0030 in its own migration list applies them as ordinary migrations; never twice.
+      const migrationsToApply = await Promise.all(identities.filter(identity => !migrations.some(shipped => shipped.version === identity.version)).map(async identity => {
         const filename = String(identity.version).padStart(4, '0') + '_' + identity.name + '.sql';
         const sql = await readFile(new URL('../../../../packages/cloud-runtime/test/fixtures/' + filename, import.meta.url), 'utf8');
         if (createHash('sha256').update(sql).digest('hex') !== identity.sha256) throw new Error('FINOPS_MIGRATION_DIGEST_MISMATCH');
         return { ...identity, sql };
       }));
       return { applied: await migrate(db, [...migrations, ...migrationsToApply]) };
+    }
+    // BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002 P0: dry run unless --apply; then only the audited, read-only resume-observation recovery per run.
+    case 'reconcile-history': {
+      const apply = values.apply === true;
+      return { reconciliation: await historicalReconciliation({ db, tenantId }, { flow: flag('flow') ?? 'crosschain-universal',
+        ...flag('code') ? { codes: flag('code')!.split(',').map(code => code.trim()) } : {}, limit: limitOf(flag('limit'), 100, 500), now: io.now(),
+        ...apply ? { apply: { approvalRef: required(flag('approval-ref'), 'approval-ref'), reason: required(flag('reason'), 'reason'), actor: 'cli',
+          textRetentionDays: supportPrivacyConfig(io.env).textRetentionDays } } : {} }) };
     }
     // Read-only dry run: nothing is deleted.
     case 'retention-report': return { report: await retentionReport(db, tenantId, io.env, io.now()) };

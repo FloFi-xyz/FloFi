@@ -20,11 +20,13 @@ const count = (n: unknown): string => {
   return String(n);
 };
 
-async function pages(url: URL, init: RequestInit, fetcher: typeof fetch, signal: AbortSignal, accept: (row: unknown) => void) {
+async function pages(url: URL, init: RequestInit, fetcher: typeof fetch, signal: AbortSignal, accept: (row: unknown) => void,
+  meta: (page: Record<string, unknown>) => void = () => undefined) {
   const cursors = new Set<string>();
   for (let index = 0; index < 12; index++) {
     const page = financialJson(await requestFinancial(url, init, fetcher, signal));
     if (!financialObject(page) || !Array.isArray(page.data) || page.data.length > 2_000 || typeof page.has_more !== 'boolean') throw financialInvalid();
+    meta(page);
     for (const result of page.data) accept(result);
     if (!page.has_more) return;
     const cursor = page.next_page;
@@ -38,7 +40,8 @@ async function pages(url: URL, init: RequestInit, fetcher: typeof fetch, signal:
 const openAiUsage = {
   completions: { model: true, fields: { num_model_requests: 'requests', input_tokens: 'tokens', output_tokens: 'tokens', input_cached_tokens: 'tokens' } },
   embeddings: { model: true, fields: { num_model_requests: 'requests', input_tokens: 'tokens' } },
-  images: { model: true, fields: { num_images: 'images' } },
+  // The Images usage object reports `images` and `num_model_requests` (OpenAI Usage API reference, verified 2026-11-18).
+  images: { model: true, fields: { images: 'images', num_model_requests: 'requests' } },
   code_interpreter_sessions: { model: false, fields: { num_sessions: 'sessions' } },
   vector_stores: { model: false, fields: { usage_bytes: 'bytes' } },
 } as const;
@@ -86,6 +89,9 @@ const openai: FinancialSyncAdapter = {
   },
 };
 
+/** Developer platform API products (Usage and Cost Analytics API `products[]`, verified 2026-11-18). */
+export const ANTHROPIC_API_PRODUCTS = Object.freeze(['messages_api', 'message_batches_api', 'managed_agents_api'] as const);
+
 const anthropic: FinancialSyncAdapter = {
   id: 'anthropic',
   configured: env => Boolean(env.FLOFI_FINOPS_ANTHROPIC_ADMIN_KEY && /^wrkspc_[A-Za-z0-9_-]{1,100}$/.test(env.FLOFI_FINOPS_ANTHROPIC_WORKSPACE_ID ?? '')),
@@ -96,6 +102,8 @@ const anthropic: FinancialSyncAdapter = {
       'anthropic-beta': 'analytics-usage-cost-2026-08-24' };
     const costs = new Map<string, bigint>(), meters: FinancialMeter[] = [], seen = new Set<string>();
     const limitations = ['ANTHROPIC_COSTS_BEFORE_CREDITS'];
+    // Rows beyond the export watermark are incomplete (data is typically refreshed every four hours).
+    let refreshed: number | null = null;
     for (const type of ['cost', 'usage'] as const) {
       const url = new URL('https://api.anthropic.com/v1/organizations/analytics/' + type);
       url.search = new URLSearchParams({ starting_at: start(period.from), ending_at: start(period.to), time_bucket_width: '1d',
@@ -103,11 +111,16 @@ const anthropic: FinancialSyncAdapter = {
       url.searchParams.append('group_by[]', 'model');
       url.searchParams.append('group_by[]', 'product');
       if (type === 'cost') url.searchParams.append('group_by[]', 'cost_type');
+      for (const product of ANTHROPIC_API_PRODUCTS) url.searchParams.append('products[]', product);
       await pages(url, { headers }, fetcher, signal, raw => {
         if (!financialObject(raw) || !financialObject(raw.group) || typeof raw.starting_at !== 'string' || typeof raw.ending_at !== 'string') throw financialInvalid();
         if (raw.group.workspace_id !== project) { limitations.push('ANTHROPIC_UNATTRIBUTED_WORKSPACE_EXCLUDED'); return; }
-        // Exclude personal subscriptions, Claude Code, and other products.
-        if (raw.group.product !== null && raw.group.product !== 'api') return;
+        // Only the developer platform's API products are FloFi's operating cost. Seats, Chat, Claude Code, Console and other
+        // surfaces are excluded even if the filter were ignored. A null product (code execution) belongs to the API request.
+        if (raw.group.product !== null && !(ANTHROPIC_API_PRODUCTS as readonly unknown[]).includes(raw.group.product)) {
+          limitations.push('ANTHROPIC_NON_API_PRODUCTS_EXCLUDED');
+          return;
+        }
         const bucket = dayBucket(Date.parse(raw.starting_at) / 1_000, Date.parse(raw.ending_at) / 1_000, period);
         if (raw.group.model !== null && !label(raw.group.model)) throw financialInvalid();
         const service = raw.group.model === null ? 'Unattributed model' : String(raw.group.model);
@@ -140,7 +153,18 @@ const anthropic: FinancialSyncAdapter = {
         }
         if (financialObject(usage.server_tool_use) && usage.server_tool_use.web_search_requests !== undefined)
           add('web_search_requests', 'requests', count(usage.server_tool_use.web_search_requests));
+      }, page => {
+        const at = page.data_refreshed_at;
+        if (at === null || at === undefined) return;
+        if (typeof at !== 'string' || !Number.isFinite(Date.parse(at))) throw financialInvalid();
+        refreshed = refreshed === null ? Date.parse(at) : Math.min(refreshed, Date.parse(at));
       });
+    }
+    const complete = (bucket: Period) => refreshed !== null && Date.parse(start(bucket.to)) <= refreshed;
+    if ([...costs.keys()].some(day => !complete({ from: day, to: addDays(day, 1) })) || meters.some(m => !complete(m.period))) {
+      limitations.push('ANTHROPIC_DAYS_AFTER_EXPORT_WATERMARK_EXCLUDED');
+      for (const day of [...costs.keys()]) if (!complete({ from: day, to: addDays(day, 1) })) costs.delete(day);
+      meters.splice(0, meters.length, ...meters.filter(m => complete(m.period)));
     }
     const entries = [...costs.entries()].map(([day, amount]) => validateEntry({ scope: 'anthropic', environment: 'production', start: day, end: addDays(day, 1),
       source: 'PROVIDER_COST', reference: 'Anthropic workspace cost analytics before credits', currency: 'USD', net: decimal(amount), coverage: 'PARTIAL' }, true));
