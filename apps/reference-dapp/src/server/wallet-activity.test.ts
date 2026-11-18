@@ -504,4 +504,3 @@ describe('review hardening (round 4)', () => {
     expect(activityRows(all, 'ALL', new Set(), bounds.at(-1)!).map(r => r.transfer.timestamp)).toEqual(['2026-11-17T12:00:00.000Z', '2026-11-17T11:00:00.000Z', '2026-11-17T10:00:00.000Z', '2026-11-17T09:30:00.000Z']);
   });
 });
-
