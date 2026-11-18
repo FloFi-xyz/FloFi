@@ -13,8 +13,9 @@ export function walletActivity(account: string, cursor: string | null = null): P
   const key = `${account}|${cursor ?? ''}`;
   const shared = inflight.get(key);
   if (shared) return shared;
-  const query = cursor ? `?${new URLSearchParams({ cursor })}` : '';
-  const request = fetch(`/api/wallet/activity${query}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin', headers: { 'x-flofi-account': account } })
+  // The wallet and its continuation are headers, never part of the URL (they would reach access logs).
+  const request = fetch('/api/wallet/activity', { method: 'GET', cache: 'no-store', credentials: 'same-origin',
+    headers: { 'x-flofi-account': account, ...cursor ? { 'x-flofi-cursor': cursor } : {} } })
     .then(async response => {
       const body = await response.json().catch(() => ({})) as { ok?: unknown; value?: unknown; code?: unknown };
       if (!response.ok || body.ok !== true) throw new Error(typeof body.code === 'string' && /^[A-Z][A-Z0-9_]{2,80}$/.test(body.code) ? body.code : 'ACTIVITY_READ_UNAVAILABLE');

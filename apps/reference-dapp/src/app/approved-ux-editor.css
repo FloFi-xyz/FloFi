@@ -244,16 +244,17 @@
   --canvas-exec-failed:var(--red,#B42318);--canvas-exec-failed-tint:var(--danger-soft,#FDECEA)}
 :root[data-theme="dark"]{--canvas-exec-attention:var(--warning-text,#F5B94A);--canvas-exec-attention-ink:var(--warning-text,#F5B94A)}
 .composer-card[data-execution]{position:relative}
-.composer-card[data-execution]:not([data-execution="waiting"]){transition:none}
-.composer-card[data-execution="active"],.composer-card[data-execution="wallet"],.composer-card[data-execution="pending"]{border-color:var(--canvas-exec-active);box-shadow:0 0 0 1px var(--canvas-exec-active),0 6px 18px rgba(35,67,217,.12)}
+.composer-card[data-execution="active"],.composer-card[data-execution="wallet"],.composer-card[data-execution="authorize"],.composer-card[data-execution="pending"]{border-color:var(--canvas-exec-active);box-shadow:0 0 0 1px var(--canvas-exec-active),0 6px 18px rgba(35,67,217,.12)}
 .composer-card[data-execution="done"]{border-color:var(--canvas-exec-done);box-shadow:0 0 0 1px var(--canvas-exec-done);background:color-mix(in srgb,var(--canvas-exec-done-tint) 70%,var(--paper))}
 .composer-card[data-execution="attention"]{border-color:var(--canvas-exec-attention);box-shadow:0 0 0 1px var(--canvas-exec-attention);background:color-mix(in srgb,var(--canvas-exec-attention-tint) 70%,var(--paper))}
 .composer-card[data-execution="failed"]{border-color:var(--canvas-exec-failed);box-shadow:0 0 0 1px var(--canvas-exec-failed);background:color-mix(in srgb,var(--canvas-exec-failed-tint) 70%,var(--paper))}
 .canvas-execution-badge{position:absolute;top:-11px;right:12px;z-index:2;display:inline-flex;align-items:center;gap:4px;height:22px;max-width:calc(100% - 24px);padding:0 8px;border-radius:999px;
-  border:1px solid currentColor;background:var(--paper);font-size:11px;font-weight:600;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+  border:1px solid currentColor;background:var(--paper);font-size:11px;font-weight:600;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
+/* A vertical (stacked) card takes its incoming link at the top centre: the badge stays on the right half so it never covers the arrow. */
+.canvas-execution-badge[data-vertical]{max-width:calc(50% - 22px)}
 .canvas-execution-badge svg{flex:none}
 .canvas-execution-badge-label{overflow:hidden;text-overflow:ellipsis}
-.canvas-execution-badge[data-visual="active"],.canvas-execution-badge[data-visual="wallet"],.canvas-execution-badge[data-visual="pending"]{color:var(--canvas-exec-active)}
+.canvas-execution-badge[data-visual="active"],.canvas-execution-badge[data-visual="wallet"],.canvas-execution-badge[data-visual="authorize"],.canvas-execution-badge[data-visual="pending"]{color:var(--canvas-exec-active)}
 .canvas-execution-badge[data-visual="done"]{color:var(--canvas-exec-done)}
 .canvas-execution-badge[data-visual="attention"]{color:var(--canvas-exec-attention-ink)}
 .canvas-execution-badge[data-visual="failed"]{color:var(--canvas-exec-failed)}
@@ -261,16 +262,23 @@
 @media(prefers-reduced-motion:no-preference){
   .composer-card[data-execution]{transition:border-color 220ms ease,box-shadow 220ms ease,background-color 220ms ease}
   .composer-card[data-execution="active"],.composer-card[data-execution="wallet"]{animation:canvas-exec-pulse 1.8s ease-in-out infinite}
-  .canvas-execution-badge[data-visual="pending"] svg,.canvas-execution-spin{transform-origin:50% 50%;animation:canvas-exec-spin 1.6s linear infinite}
+  .canvas-execution-spin{transform-origin:50% 50%;animation:canvas-exec-spin 1.6s linear infinite}
   .canvas-execution-edge-active .react-flow__edge-path{stroke-dasharray:6 6;animation:canvas-exec-flow 1.2s linear infinite}
 }
 @keyframes canvas-exec-pulse{0%,100%{box-shadow:0 0 0 1px var(--canvas-exec-active),0 0 0 0 rgba(35,67,217,.18)}50%{box-shadow:0 0 0 1px var(--canvas-exec-active),0 0 0 5px rgba(35,67,217,.08)}}
 @keyframes canvas-exec-spin{to{transform:rotate(360deg)}}
 @keyframes canvas-exec-flow{to{stroke-dashoffset:-12}}
 @media(prefers-reduced-motion:reduce){.composer-card[data-execution],.canvas-execution-badge svg,.canvas-execution-spin,.canvas-execution-edge-active .react-flow__edge-path{animation:none;transition:none}}
-.canvas-execution-note{color:var(--ink);text-align:right}
-.execute-live-canvas{display:grid;gap:12px;min-width:0}
-.execution-details-disclosure{min-width:0}
-.execution-details-disclosure>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;cursor:pointer;font-weight:600}
+/* Execution details sit under the Canvas in the Execute grid's first column; the side summary spans both rows beside them. */
+.execute-workspace-grid>.execution-details-disclosure{grid-column:1;min-width:0}
+@media(min-width:901px){.execute-workspace-grid:not(.stage-grid-single):has(>.execution-details-disclosure)>.execution-summary{grid-row:span 2}}
+.execution-details-disclosure{min-width:0;margin:0;color:var(--ink)}
+.execution-details-disclosure>summary{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;min-height:40px;cursor:pointer;font-weight:600;list-style:none}
+.execution-details-disclosure>summary::-webkit-details-marker{display:none}
+.execution-details-disclosure>summary::before{content:"";width:7px;height:7px;border-right:1.8px solid currentColor;border-bottom:1.8px solid currentColor;transform:rotate(-45deg);margin:0 4px 0 2px}
+.execution-details-disclosure[open]>summary::before{transform:rotate(45deg)}
+@media(prefers-reduced-motion:no-preference){.execution-details-disclosure>summary::before{transition:transform 140ms ease}}
+@media(pointer:coarse){.execution-details-disclosure>summary{min-height:44px}}
 .execution-details-hint{font-weight:400;font-size:12px;color:var(--muted)}
-.execution-details-disclosure>.execution-plan{margin-top:10px}
+.execution-details-disclosure>.execution-plan{margin-top:6px;padding:24px;min-width:0}
+@media(max-width:900px){.execution-details-disclosure>.execution-plan{padding:20px}}

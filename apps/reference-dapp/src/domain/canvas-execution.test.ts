@@ -27,7 +27,8 @@ describe('Live Canvas: phases → visual states', () => {
     expect(EXECUTION_PHASES.filter(phase => visualOfPhase(phase) === 'done')).toEqual(['RECONCILED', 'COMPLETED']);
     expect(visualOfPhase('SUBMITTED')).toBe('pending'); expect(visualOfPhase('CONFIRMED_AT_SOURCE')).toBe('pending');
     expect(visualOfPhase('AWAITING_DESTINATION')).toBe('pending'); expect(visualOfPhase('DESTINATION_OBSERVED')).toBe('pending');
-    expect(visualOfPhase('SENT_TO_WALLET')).toBe('wallet'); expect(visualOfPhase('OUTCOME_UNKNOWN')).toBe('attention'); expect(visualOfPhase('FAILED')).toBe('failed');
+    expect(visualOfPhase('SENT_TO_WALLET')).toBe('wallet'); expect(visualOfPhase('AWAITING_AUTHORIZATION')).toBe('authorize');
+    expect(visualOfPhase('OUTCOME_UNKNOWN')).toBe('attention'); expect(visualOfPhase('FAILED')).toBe('failed');
     expect(visualOfPhase(null)).toBe('waiting'); expect(visualOfPhase('PREPARED')).toBe('waiting');
   });
 });
@@ -38,7 +39,7 @@ describe('Live Canvas: one runtime executing the workflow (lifecycle steps are t
     expect(visuals(lifecycleCanvasExecution(workflow, approving))).toEqual({ swap: 'wallet', bridge: 'waiting', transfer: 'waiting' });
     // The approval landed, the swap itself is not sent yet: the step waits for the owner, never green.
     const approved = lifecycle([step('swap', [op('approval', 'swap', 'confirmed', { approval: true }), op('swap', 'swap', 'waiting')]), step('bridge', []), step('transfer', [])]);
-    expect(lifecycleCanvasExecution(workflow, approved)!.nodes.swap).toMatchObject({ visual: 'wallet', phase: 'AWAITING_AUTHORIZATION' });
+    expect(lifecycleCanvasExecution(workflow, approved)!.nodes.swap).toMatchObject({ visual: 'authorize', phase: 'AWAITING_AUTHORIZATION' });
     const submitted = lifecycle([step('swap', [op('approval', 'swap', 'confirmed', { approval: true }), op('swap', 'swap', 'submitted')]), step('bridge', []), step('transfer', [])]);
     expect(lifecycleCanvasExecution(workflow, submitted)!.nodes.swap!.visual).toBe('pending');
     // Every receipt confirmed but the step is not reconciled yet: still in progress.
@@ -69,7 +70,10 @@ describe('Live Canvas: one runtime executing the workflow (lifecycle steps are t
     const live = lifecycle([step('swap', [op('swap', 'swap', 'confirmed')]), step('bridge', [op('deposit', 'bridge', 'uncertain')]), step('transfer', [op('send', 'transfer', 'failed')])], { state: 'uncertain' }, ['swap']);
     const execution = lifecycleCanvasExecution(workflow, live)!;
     expect(visuals(execution)).toEqual({ swap: 'done', bridge: 'attention', transfer: 'failed' });
-    expect(execution.settled).toBe(true);
+    // An outcome still being observed is never captioned as a result.
+    expect(execution.settled).toBe(false);
+    const ended = lifecycleCanvasExecution(workflow, lifecycle([step('swap', [op('swap', 'swap', 'confirmed')]), step('bridge', [op('deposit', 'bridge', 'failed')])], { state: 'attention' }, ['swap']))!;
+    expect(ended.settled).toBe(true); expect(ended.runKeys).toEqual(['run-1']);
   });
   it('a request being prepared or submitted after the owner’s click is active; a restored run is shown from its record alone', () => {
     const live = lifecycle([step('swap', [op('swap', 'swap', 'preparing')])]);
@@ -99,7 +103,7 @@ describe('Live Canvas: one runtime executing the workflow (lifecycle steps are t
         attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: null, receipt: { gasCostWei: '1' } }] } } } as unknown as ExecutionLifecycleSource);
     const execution = lifecycleCanvasExecution(f.workflow, live)!;
     const node = f.workflow.nodes.find(n => !n.actionType.startsWith('mock-'))!.nodeId;
-    expect(execution.nodes[node]).toMatchObject({ visual: 'wallet', phase: 'AWAITING_AUTHORIZATION' });
+    expect(execution.nodes[node]).toMatchObject({ visual: 'authorize', phase: 'AWAITING_AUTHORIZATION' });
     const swapped = projectExecutionLifecycle(f.workflow, f.context, { kind: 'public', state: { ...f.source.state, run: { ...run, outcome: null,
       attempts: [{ step: 'approval', state: 'CONFIRMED', txHash: hash, nativeAfter: '1' }, { step: 'swap', state: 'SUBMITTED', txHash: other }] } } } as unknown as ExecutionLifecycleSource);
     expect(lifecycleCanvasExecution(f.workflow, swapped)!.nodes[node]!.visual).not.toBe('done');
@@ -134,7 +138,12 @@ describe('Live Canvas: a whole-workflow run', () => {
     // A step still PENDING in the run's own record has not been sent: it stays neutral whatever its group shows.
     expect(visuals(r)).toEqual({ swap: 'done', bridge: 'pending', transfer: 'waiting' });
     const waiting = runCanvasExecution(workflow, order, run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('PREPARED')]), authorized)!;
-    expect(visuals(waiting)).toEqual({ swap: 'wallet', bridge: 'wallet', transfer: 'wallet' });
+    expect(visuals(waiting)).toEqual({ swap: 'authorize', bridge: 'authorize', transfer: 'authorize' });
+    // Only while this Editor is asking the wallet does the card say "Confirm in wallet".
+    expect(visuals(runCanvasExecution(workflow, order, run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('PREPARED')]), authorized, true))).toEqual({ swap: 'wallet', bridge: 'wallet', transfer: 'wallet' });
+    // A later group signed only when due asks nothing of the wallet yet.
+    const later = runCanvasExecution(workflow, order, run(['RECONCILED', 'DELEGATED', 'DELEGATED'], [{ ...group('RECONCILED', true), steps: [0, 0] }, { ...group('PLANNED'), index: 1, steps: [1, 2] }]), authorized)!;
+    expect(visuals(later)).toEqual({ swap: 'done', bridge: 'waiting', transfer: 'waiting' }); expect(later.nodes.bridge!.text.key).toBe('Not signed yet');
     const done = runCanvasExecution(workflow, order, run(['RECONCILED', 'RECONCILED', 'RECONCILED'], [group('RECONCILED', true)], { state: 'COMPLETED' }), authorized)!;
     expect(visuals(done)).toEqual({ swap: 'done', bridge: 'done', transfer: 'done' }); expect(done.settled).toBe(true);
   });
@@ -145,6 +154,17 @@ describe('Live Canvas: a whole-workflow run', () => {
     expect(late.nodes.bridge!.visual).toBe('attention');
     const failed = runCanvasExecution(workflow, order, run(['RECONCILED', 'FAILED', 'SKIPPED'], [group('FAILED', true)], { state: 'FAILED' }), authorized)!;
     expect(visuals(failed)).toEqual({ swap: 'done', bridge: 'failed', transfer: 'waiting' });
+  });
+  it('a batch handed to the wallet and never answered may have executed: never "not run" or "stopped before submission"', () => {
+    for (const state of ['SKIPPED', 'BLOCKED', 'DELEGATED']) {
+      const r = { ...run(['RECONCILED', state, state], [{ ...group('RECONCILED', true), steps: [0, 0] }, { ...group(state === 'DELEGATED' ? 'BLOCKED' : state, false), index: 1, steps: [1, 2], code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }], { state: state === 'SKIPPED' ? 'CANCELLED' : 'HALTED' }),
+        steps: [{ index: 0, state: 'RECONCILED', code: null }, { index: 1, state, code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }, { index: 2, state, code: null }] };
+      const e = runCanvasExecution(workflow, order, r, authorized)!;
+      expect(visuals(e)).toEqual({ swap: 'done', bridge: 'attention', transfer: 'attention' });
+      expect(e.nodes.bridge).toMatchObject({ phase: 'OUTCOME_UNKNOWN', text: { key: "Its batch may have executed before it expired; check your wallet's activity" } });
+      expect(edgeExecution(e, 'swap', 'bridge')).toBe('done'); expect(edgeExecution(e, 'bridge', 'transfer')).toBe('attention');
+      expect(e.settled).toBe(false);
+    }
   });
   it('a group handed to the wallet by this Editor right now reads as in the wallet', () => {
     const r = runCanvasExecution(workflow, order, run(['READY', 'PENDING', 'PENDING'], [group('PREPARED')], { mode: 'USER_FUNDED' }), authorized, true)!;

@@ -544,8 +544,10 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const quoteNode = card.estimateWorkflow?.nodes.find(n => n.nodeId === card.estimateNodeId);
   const quoteOwner = quoteNode?.chainId.startsWith('solana:') ? card.estimateSolanaOwner ?? card.estimateOwner : card.estimateEvmOwner ?? card.estimateOwner;
   const quoteDestination = quoteNode?.chainId.startsWith('solana:') ? card.estimateEvmOwner : card.estimateSolanaOwner;
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: once this step executes, its estimate is kept as shown and never asked again.
+  const quoteFrozen = Boolean(card.execution && card.execution.visual !== 'waiting');
   const quote = useLiveQuote(['Swap', 'Stocks', 'Bridge'].includes(card.summary.action) ? card.estimateWorkflow : undefined,
-    card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined);
+    card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined, quoteFrozen);
   const estimate = quote.status === 'ready' ? quote.estimate : null;
   // P0 workflow execution: an expired quote stays on the card, marked as expired, until its fresh answer replaces it (never a silent '—').
   const expiredEstimate = quote.status === 'expired' ? quote.estimate : null;
@@ -657,7 +659,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind} data-network-pending={networkPending || undefined}
     data-execution={card.execution?.visual}>
       <Handle id="input" type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={!card.inspection && Boolean(card.connectable)}/>
-      {execution && <CanvasExecutionBadge execution={execution}/>}
+      {execution && <CanvasExecutionBadge execution={execution} vertical={card.vertical}/>}
       <div className="composer-card-head">
       <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
       {poolCard ? null : <span className="composer-metadata">
@@ -677,7 +679,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly round token={pairDestination} network={destinationNetwork}
             {...estimate ?? expiredEstimate ? { amount: (estimate ?? expiredEstimate)!.expected } : {}} loading={quote.status === 'calculating'} hint={estimate ? 'Estimated output; simulate before review' : expiredEstimate ? 'Quote expired: updating' : 'Output estimate unavailable'} fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
-        {pairDestination && expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr('Quote expired: updating')}</span>}
+        {pairDestination && expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr(quoteFrozen ? 'Estimate from before execution' : 'Quote expired: updating')}</span>}
         {/* BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): the Simulate plan shows the same shared live quote as Build, or why there is none. */}
         {/* BUILD-FLOFI-UX-FIX-003: only a quote that could not be produced is explained, in plain words; provider names, quality labels and "calculating"
             text stay off the card (the destination box shows the estimate or a quiet placeholder). Fees, the chosen route and risks are shown at Review. */}
@@ -710,7 +712,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {card.networkSelection?.valid === false ? tr('Choose matching networks') : tr(buildEstimateFailureMessage(quote.status === 'unavailable' ? quote.code ?? 'ESTIMATE_UNAVAILABLE' : 'ESTIMATE_UNAVAILABLE'))}
           {card.networkSelection?.valid !== false && quote.status === 'unavailable' && buildEstimateFailureReference(quote.code) && <> <small className="composer-quote-reference">{tr('Reference {0}', buildEstimateFailureReference(quote.code)!)}</small></>}</span>}
         {card.networkSelection?.valid !== false && estimate?.bridge?.execution === 'QUOTE_ONLY' && <span className="composer-quote-note" role="status">{tr('Estimate only: FloFi cannot execute this route yet.')}</span>}
-        {expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr('Quote expired: updating')}</span>}
+        {expiredEstimate && <span className="composer-quote-note composer-quote-expired" role="status" data-quote-expired="true">{tr(quoteFrozen ? 'Estimate from before execution' : 'Quote expired: updating')}</span>}
         {!amountParts && card.networkSelection?.valid !== false && quote.status !== 'unavailable' && card.summary.amount && <span className="composer-quote-note">{tr(card.summary.amount)}</span>}
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>

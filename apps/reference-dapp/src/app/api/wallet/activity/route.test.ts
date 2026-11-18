@@ -17,7 +17,7 @@ const get = (query = '', headers: Record<string, string> = { 'sec-fetch-site': '
 describe('GET /api/wallet/activity', () => {
   beforeEach(() => { access.mockClear(); read.mockClear(); principals.mockClear(); });
   it('reads one page for a wallet this browser or the signed-in account holds, through the Flight boundary, never cached', async () => {
-    const response = await get('?cursor=abc');
+    const response = await get('', { 'sec-fetch-site': 'same-origin', 'x-flofi-account': owner, 'x-flofi-cursor': 'abc' });
     expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('no-store');
     expect(read).toHaveBeenCalledWith({ account: owner, cursor: 'abc' }); expect(access).toHaveBeenCalledTimes(1);
   });
@@ -26,9 +26,13 @@ describe('GET /api/wallet/activity', () => {
     expect(response.status).toBe(403); expect(await response.json()).toEqual({ ok: false, code: 'ACTIVITY_SIGN_IN_REQUIRED' }); expect(read).not.toHaveBeenCalled();
   });
   it.each([['', { 'sec-fetch-site': 'cross-site', 'x-flofi-account': owner }, 403], ['', { 'sec-fetch-site': 'same-origin' }, 400], [`?account=${owner}`, undefined, 400],
-    ['?cursor=bad cursor!', undefined, 400], ['?other=1', undefined, 400]] as const)('refuses a cross-origin or malformed request (%s)', async (query, headers, status) => {
+    ['?cursor=abc', undefined, 400], ['', { 'sec-fetch-site': 'same-origin', 'x-flofi-account': owner, 'x-flofi-cursor': 'bad cursor!' }, 400], ['?other=1', undefined, 400]] as const)('refuses a cross-origin or malformed request (%s)', async (query, headers, status) => {
     const response = await get(query, headers as Record<string, string> | undefined);
     expect(response.status).toBe(status); expect(read).not.toHaveBeenCalled();
+  });
+  it('a wallet over its read limit answers 429 with a closed code', async () => {
+    read.mockRejectedValueOnce(new Error('ACTIVITY_RATE_LIMITED'));
+    const response = await get(); expect(response.status).toBe(429); expect(await response.json()).toEqual({ ok: false, code: 'ACTIVITY_RATE_LIMITED' });
   });
   it('a provider failure answers a closed code, never a message', async () => {
     read.mockRejectedValueOnce(new Error('connect ECONNREFUSED 10.0.0.1:443'));

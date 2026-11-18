@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
-import { activityAccount, decodeCursor, readWalletActivity, type AlchemyCall, type WalletActivitySeams } from './wallet-activity';
+import { ACTIVITY_READS_PER_MINUTE, activityAccount, decodeCursor, encodeCursor, readWalletActivity, type AlchemyCall, type WalletActivitySeams } from './wallet-activity';
 import { activityRows, signedAmount } from '../domain/wallet-activity';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog';
 
@@ -26,7 +26,8 @@ function alchemyOf(lists: Record<string, { IN?: unknown[]; OUT?: unknown[]; page
     return { transfers: list[direction] ?? [], ...list.pageKey && !params.pageKey ? { pageKey: list.pageKey } : {} };
   };
 }
-const seams = (alchemy: AlchemyCall | null, extra: Partial<WalletActivitySeams> = {}): WalletActivitySeams => ({ alchemy, cache: null,
+const cursorKey = Buffer.alloc(32, 7);
+const seams = (alchemy: AlchemyCall | null, extra: Partial<WalletActivitySeams> = {}): WalletActivitySeams => ({ alchemy, cache: null, cursorKey,
   mode: async network => network === 'solana' ? 'off' : 'live', evmCatalog: async () => catalog(), now: () => new Date('2026-11-18T00:00:00Z'), ...extra });
 
 describe('EVM wallet activity (Alchemy Transfers API on the existing key)', () => {
@@ -81,16 +82,24 @@ describe('EVM wallet activity (Alchemy Transfers API on the existing key)', () =
   it('paginates per network and direction with a continuation bound to the wallet; exhausted streams are not read again', async () => {
     const calls: Record<string, unknown>[] = [];
     const first = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: { IN: [transfer(1, peer, owner, 'erc20', 1n, USDC)], pageKey: 'page-2' } }, calls)));
-    expect(first.cursor).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(decodeCursor(first.cursor, owner)).toEqual({ 'ethereum:IN': null, 'ethereum:OUT': null, 'base:IN': 'page-2', 'base:OUT': 'page-2', 'arbitrum-one:IN': null, 'arbitrum-one:OUT': null });
+    expect(first.cursor).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{24}$/);
+    // The continuation names no wallet in clear (it travels in a header, never in a URL).
+    expect(Buffer.from(first.cursor!.split('.')[0]!, 'base64url').toString()).not.toContain(owner.slice(2));
+    expect(decodeCursor(first.cursor, owner, cursorKey)).toEqual({ 'ethereum:IN': null, 'ethereum:OUT': null, 'base:IN': 'page-2', 'base:OUT': 'page-2', 'arbitrum-one:IN': null, 'arbitrum-one:OUT': null });
     calls.length = 0;
     const second = await readWalletActivity({ account: owner, cursor: first.cursor }, {}, seams(alchemyOf({}, calls)));
     expect(calls.map(c => [c.network, c.pageKey])).toEqual([['base', 'page-2'], ['base', 'page-2']]);
     expect(second.cursor).toBeNull();
-    // A continuation of another wallet, or a forged one, is refused.
-    expect(() => decodeCursor(first.cursor, peer)).toThrow('ACTIVITY_CURSOR_INVALID');
-    expect(() => decodeCursor('not base64!', owner)).toThrow('ACTIVITY_CURSOR_INVALID');
-    expect(() => decodeCursor(Buffer.from(JSON.stringify({ v: 1, a: owner, s: { 'evil:IN': 'x' } })).toString('base64url'), owner)).toThrow('ACTIVITY_CURSOR_INVALID');
+    // A continuation of another wallet, under another key, edited, forged or malformed, is refused before any provider read.
+    expect(() => decodeCursor(first.cursor, peer, cursorKey)).toThrow('ACTIVITY_CURSOR_INVALID');
+    expect(() => decodeCursor(first.cursor, owner, Buffer.alloc(32, 8))).toThrow('ACTIVITY_CURSOR_INVALID');
+    const [body, mac] = first.cursor!.split('.');
+    const edited = Buffer.from(JSON.stringify({ v: 2, s: { 'base:IN': 'page-99' } })).toString('base64url');
+    expect(() => decodeCursor(`${edited}.${mac}`, owner, cursorKey)).toThrow('ACTIVITY_CURSOR_INVALID');
+    expect(() => decodeCursor(`${body}`, owner, cursorKey)).toThrow('ACTIVITY_CURSOR_INVALID');
+    expect(() => decodeCursor('not base64!', owner, cursorKey)).toThrow('ACTIVITY_CURSOR_INVALID');
+    expect(() => decodeCursor(encodeCursor(owner, { 'evil:IN': 'x' }, cursorKey), owner, cursorKey)).toThrow('ACTIVITY_CURSOR_INVALID');
+    await expect(readWalletActivity({ account: owner, cursor: `${edited}.${mac}` }, {}, seams(alchemyOf({}, calls)))).rejects.toThrow('ACTIVITY_CURSOR_INVALID');
   });
   it('accepts only a wallet address (no zero address, no program id); joins concurrent reads and caches briefly', async () => {
     expect(() => activityAccount('0x' + '0'.repeat(40))).toThrow(); expect(() => activityAccount('hello')).toThrow();
@@ -99,6 +108,22 @@ describe('EVM wallet activity (Alchemy Transfers API on the existing key)', () =
     const cache = new Map();
     const [a, b] = await Promise.all([readWalletActivity({ account: owner }, {}, seams(alchemy, { cache })), readWalletActivity({ account: owner }, {}, seams(alchemy, { cache }))]);
     expect(a).toBe(b); expect(alchemy).toHaveBeenCalledTimes(6);
+  });
+  it('bounds uncached reads per wallet (cached pages do not count) and stops reading a network once its time budget is spent', async () => {
+    const limiter = new Map<string, number[]>(), cache = new Map();
+    const alchemy = vi.fn(alchemyOf({}));
+    await readWalletActivity({ account: owner }, {}, seams(alchemy, { limiter, cache }));
+    for (let i = 1; i < ACTIVITY_READS_PER_MINUTE; i++) await readWalletActivity({ account: owner }, {}, seams(alchemy, { limiter }));
+    // A cached page is still served; a new uncached read is refused with a closed code.
+    await expect(readWalletActivity({ account: owner }, {}, seams(alchemy, { limiter, cache }))).resolves.toBeTruthy();
+    await expect(readWalletActivity({ account: owner }, {}, seams(alchemy, { limiter }))).rejects.toThrow('ACTIVITY_RATE_LIMITED');
+    await expect(readWalletActivity({ account: peer }, {}, seams(alchemy, { limiter }))).resolves.toBeTruthy();
+    // A slow first request: once the budget ends, the network's second request is never sent.
+    const slow: AlchemyCall = vi.fn(async (_network, _params, signal) => { await new Promise(r => setTimeout(r, 60)); expect(signal).toBeDefined(); return { transfers: [] }; });
+    const page = await readWalletActivity({ account: owner }, {}, seams(slow, { budgetMs: 20, mode: async n => n === 'base' ? 'live' : 'off' }));
+    expect(page.coverage.find(c => c.network === 'base')).toMatchObject({ status: 'UNAVAILABLE', code: 'ACTIVITY_TIME_BUDGET_EXCEEDED' });
+    await new Promise(r => setTimeout(r, 100));
+    expect(slow).toHaveBeenCalledTimes(1);
   });
   it('the MOCKED harness is served only outside hosted deployments and says it is test data', async () => {
     const page = await readWalletActivity({ account: owner }, { GRYLOO_WALLET_ACTIVITY_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, { cache: null });

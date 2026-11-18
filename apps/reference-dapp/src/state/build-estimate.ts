@@ -73,7 +73,11 @@ export function sharedEstimate(scope: string, start: (signal: AbortSignal) => Pr
 /** Test seam: forget every answered snapshot. */
 export function clearLiveQuoteCache(): void { answered.clear(); inflight.clear(); }
 
-export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: string, owner?: string | null, destinationWallet?: string | null): LiveQuote {
+/**
+ * `frozen` (BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001): the step is executing. The card keeps the answer it already shows (or the one this tab
+ * already holds for the same snapshot) and asks nothing: no request, no refresh at expiry. Nothing about the execution reads this estimate.
+ */
+export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: string, owner?: string | null, destinationWallet?: string | null, frozen = false): LiveQuote {
   const projected = workflow ? quoteSnapshot(workflow, nodeId) : undefined;
   const serialized = projected ? JSON.stringify(projected) : null;
   // Catalog/layout renders may recreate the preview object. Only changed snapshot contents invalidate its request.
@@ -95,6 +99,11 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
   const quotable = Boolean(workflow && key && chain && provider);
   useEffect(() => {
     if (!snapshot || !key || !chain || !provider) return;
+    if (frozen) {
+      const known = recalled(scope);
+      if (known) setResult(current => current?.key === scope ? current : { key: scope, estimate: known, failed: false });
+      return;
+    }
     const ticket = ++generation.current;
     let expire: ReturnType<typeof setTimeout> | undefined;
     const accept = (estimate: BuildEstimate | null, failed: boolean, failure?: Extract<BuildEstimateResult, { ok: false }>) => {
@@ -134,7 +143,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
       accept(estimate, !estimate, response.ok ? { ok: false, code: 'ESTIMATE_RESPONSE_MISMATCH' } : response);
     });
     return () => { cancel(); clearTimeout(expire); };
-  }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh]);
+  }, [key, scope, snapshot, nodeId, owner, destinationWallet, chain, provider, refresh, frozen]);
   if (!quotable) return { status: 'idle' };
   if (result?.key !== scope) return expired?.key === scope ? { status: 'expired', estimate: expired.estimate } : { status: 'calculating' };
   return result.estimate ? { status: 'ready', estimate: result.estimate } : result.failed ? { status: 'unavailable', ...result.failure ? { code: result.failure.code, ...result.failure.correlationId ? { correlationId: result.failure.correlationId } : {},

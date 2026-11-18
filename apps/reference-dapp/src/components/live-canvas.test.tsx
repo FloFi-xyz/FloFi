@@ -17,7 +17,9 @@ type Graph = { nodes: { id: string; position: { x: number; y: number }; data: Re
   edges: { id: string; source: string; target: string; style: { stroke: string }; className?: string }[] };
 const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow>, graph: {} as Graph, quotes: 0 }));
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
-vi.mock('../state/build-estimate', () => ({ useLiveQuote: (workflow: unknown) => { if (workflow) fixture.quotes++; return { status: 'idle', estimate: null }; } }));
+// Counts the cards that may ask for a live quote (a frozen card keeps its estimate and asks nothing).
+vi.mock('../state/build-estimate', () => ({ useLiveQuote: (workflow: unknown, _node: string, _owner: unknown, _destination: unknown, frozen?: boolean) => {
+  if (workflow && !frozen) fixture.quotes++; return { status: 'idle', estimate: null }; } }));
 vi.mock('@xyflow/react', async () => {
   const React = await import('react');
   return {
@@ -43,7 +45,7 @@ const node = (visual: CanvasNodeExecution['visual']): CanvasNodeExecution => ({ 
 function execution(visuals: readonly CanvasNodeExecution['visual'][], revision = fixture.store.state.workflow.revision): CanvasExecution {
   const ids = composerActions(fixture.store.state.workflow).map(n => n.nodeId);
   return { key: 'lifecycle:run-1', workflowId: fixture.store.state.workflow.workflowId, revision, nodes: Object.fromEntries(ids.map((id, i) => [id, node(visuals[i] ?? 'waiting')])),
-    started: true, settled: !visuals.some(v => ['active', 'wallet', 'pending'].includes(v)) };
+    started: true, settled: !visuals.some(v => ['active', 'wallet', 'authorize', 'pending'].includes(v)), runKeys: ['run-1'] };
 }
 const render = (props: Partial<Parameters<typeof SimulateWorkflowCanvas>[0]> = {}) => {
   const html = renderToStaticMarkup(createElement(SimulateWorkflowCanvas, { workflowName: 'Supply, borrow and swap', stage: 'execute', ...props }));
@@ -76,12 +78,18 @@ describe('Live Canvas on the existing read-only Canvas', () => {
     expect(finished.graph.edges[0]).toMatchObject({ className: 'canvas-execution-edge canvas-execution-edge-done', style: { stroke: 'var(--canvas-exec-done)' } });
     expect(finished.html).toContain('Execution result');
   });
-  it('asks for no live quote while the workflow executes (the plan before it still does)', () => {
-    render();
+  it('a card whose step started keeps its estimate and asks for no new quote; a waiting step keeps its live estimate', () => {
+    const before = render();
     const planned = fixture.quotes;
     expect(planned).toBeGreaterThan(0);
+    // The card data is the same (its estimate inputs are kept): only the quote hook is frozen for a started step.
+    const quoted = before.graph.nodes.filter(n => n.data.estimateWorkflow).map(n => n.id);
     fixture.quotes = 0;
-    render({ execution: execution(['pending', 'waiting', 'waiting']) });
+    const waiting = render({ execution: execution(['pending', 'waiting', 'waiting']) });
+    expect(waiting.graph.nodes.filter(n => n.data.estimateWorkflow).map(n => n.id)).toEqual(quoted);
+    expect(fixture.quotes).toBe(planned);
+    fixture.quotes = 0;
+    render({ execution: execution(['done', 'done', 'pending']) });
     expect(fixture.quotes).toBe(0);
   });
   it('ignores a record of another revision or workflow: no state, no badge, the plan as before', () => {

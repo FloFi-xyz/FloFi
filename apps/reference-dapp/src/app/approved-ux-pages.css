@@ -194,8 +194,9 @@
 /* BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (History): All · Workflows · Received · Sent, and the wallet's on-chain movements in the existing
    History language (panel, list rows, tags). Received amounts are green with a "+"; sent amounts carry a minus sign in the ink color. */
 .ux-page .history-views{margin:4px 0 16px}
-.ux-page .history-activity{margin-top:16px}
-.ux-page .wallet-activity{display:grid;gap:10px;padding:18px}
+/* The workflow records keep the page's own spacing: their wrapper only exists to hide them behind Received and Sent. */
+.ux-page .history-workflows:not([hidden]){display:contents}
+.ux-page .wallet-activity{display:grid;gap:10px}
 .ux-page .wallet-activity .ux-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .ux-page .wallet-activity .ux-panel-head>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .ux-page .wallet-activity h2{margin:0}
@@ -212,4 +213,5 @@
 .ux-page .wallet-activity-amount{display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:600;white-space:nowrap;color:var(--ink)}
 .ux-page .wallet-activity-amount[data-direction="IN"]{color:var(--success)}
 .ux-page .wallet-activity-coverage{margin:0;padding-left:18px;color:var(--muted);font-size:12px;display:grid;gap:4px}
-@media(max-width:560px){.ux-page .wallet-activity-row{grid-template-columns:28px minmax(0,1fr)}.ux-page .wallet-activity-amount{grid-column:2;white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:560px){.ux-page .wallet-activity-row{grid-template-columns:28px minmax(0,1fr)}.ux-page .wallet-activity-icon{width:28px;height:28px}
+  .ux-page .wallet-activity-amount{grid-column:2;white-space:normal;overflow-wrap:anywhere}}

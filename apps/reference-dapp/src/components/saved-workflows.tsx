@@ -63,6 +63,7 @@ type HistoryView = (typeof HISTORY_VIEWS)[number][0];
 export function YourWorkflows({ list = null, busy = false, loading = false, error = null, connected = true, verification, records, create, open, refresh, changeHistory, activityAccount = null }: Partial<WorkflowNavigation>) {
   const { t } = useLocale();
   const refreshRecords = useRef<(() => void) | null>(null);
+  const refreshActivity = useRef<(() => void) | null>(null);
   // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the History's view. Workflow records stay mounted (and loaded) behind Received and Sent; the wallet
   // activity loads only once a view that shows it is opened, and is kept while the page lives.
   const [view, setView] = useState<HistoryView>('ALL');
@@ -91,7 +92,7 @@ export function YourWorkflows({ list = null, busy = false, loading = false, erro
   return <section className="ux-page saved-workflows workflows-hub" aria-label={t('Your workflows')}>
     <header className="ux-page-head"><div><h1>{t('Your workflows')}</h1><p>{t('Open a workflow to continue where you left off.')}</p></div>
       <div className="ux-page-head-actions">
-        {connected && <button type="button" className="ux-button ux-button-small" disabled={busy || loading} onClick={() => { refresh?.(); refreshRecords.current?.(); }}
+        {connected && <button type="button" className="ux-button ux-button-small" disabled={busy || loading} onClick={() => { refresh?.(); refreshRecords.current?.(); refreshActivity.current?.(); }}
           aria-label={t('Refresh workflows')}><span aria-hidden="true">↻</span> {t(loading ? 'Refreshing…' : 'Refresh')}</button>}
         {create && <button type="button" className="ux-button ux-button-primary" onClick={create}><DashboardIcon kind="plus"/>{t('Create workflow')}</button>}
       </div></header>
@@ -110,7 +111,8 @@ export function YourWorkflows({ list = null, busy = false, loading = false, erro
       {list?.hasMore && <p className="muted">{t('Showing up to 100 workflows.')}</p>}
       </div>
       {activityAccount && activityOpened && <div className="history-activity" hidden={view === 'WORKFLOWS'}>
-        <WalletActivity account={activityAccount} filter={view === 'IN' ? 'IN' : view === 'OUT' ? 'OUT' : 'ALL'} recorded={recorded}/></div>}
+        <WalletActivity account={activityAccount} filter={view === 'IN' ? 'IN' : view === 'OUT' ? 'OUT' : 'ALL'} recorded={recorded} refreshRef={refreshActivity}
+          epoch={error === 'WALLET_SESSION_REQUIRED' ? 'unverified' : 'verified'}/></div>}
     </>}
   </section>;
 }

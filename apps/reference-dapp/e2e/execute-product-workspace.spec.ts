@@ -619,12 +619,18 @@ test.describe('Live Canvas', () => {
   const boxes = (page: Page) => cards(page).evaluateAll(list => list.map(card => { const r = card.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }));
   for (const theme of ['light', 'dark'] as const) test(`${theme}: the same three cards progress neutral → blue → green without moving`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.evaluate(value => { document.documentElement.dataset.theme = value; window.flofiExecuteAcceptance.liveCanvas(true); window.flofiExecuteAcceptance.evidence('progress-0'); }, theme);
+    // The frame before the run (the execution plan) and during it is the same grid child with the same size: nothing jumps when the run starts.
+    const frame = () => page.locator('.simulate-canvas').evaluate(element => { const r = element.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; });
+    await page.evaluate(() => window.flofiExecuteAcceptance.liveCanvas(true));
+    const plan = await frame();
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; window.flofiExecuteAcceptance.evidence('progress-0'); }, theme);
     const graph = page.getByRole('region', { name: 'Execution workflow graph', exact: true });
     await expect(graph).toBeVisible(); await expect(cards(page)).toHaveCount(3);
     await expect(page.locator('.execution-timeline')).toBeHidden();
+    await expect(page.locator('.execution-details-disclosure')).not.toHaveAttribute('open', '');
     await expect.poll(() => states(page)).toEqual(['pending', 'waiting', 'waiting']);
     await expect(page.locator('.simulate-canvas')).toHaveAttribute('data-execution', 'live');
+    expect(await frame()).toEqual(plan);
     const first = await boxes(page);
     await page.screenshot({ path: `.tmp/live-canvas-0-${theme}.png` });
     const expected = [['done', 'pending', 'waiting'], ['done', 'done', 'pending'], ['done', 'done', 'done']];
@@ -640,10 +646,11 @@ test.describe('Live Canvas', () => {
     await expect(page.locator('.react-flow__edge.canvas-execution-edge-done')).toHaveCount(2);
     const green = await cards(page).first().evaluate(card => getComputedStyle(card).borderTopColor);
     expect(green).not.toBe(await page.locator('.simulate-canvas').evaluate(frame => getComputedStyle(frame).borderTopColor));
-    // Every recorded transaction stays reachable under Execution details.
+    // Every recorded transaction stays reachable under Execution details, which a final result opens by default; the owner can still close it.
     const details = page.locator('.execution-details-disclosure');
-    await details.locator('summary').click();
+    await expect(details).toHaveAttribute('open', '');
     await expect(page.getByRole('region', { name: 'Execution details', exact: true })).toContainText('Supply');
+    await details.locator('summary').click(); await expect(details).not.toHaveAttribute('open', '');
     expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
   });
   test('a failed step is red beside its completed dependency; nothing completed is reset; details open with the failure', async ({ page }) => {

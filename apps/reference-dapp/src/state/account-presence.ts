@@ -75,7 +75,9 @@ function subscribe(listener: () => void) { listeners.add(listener); return () =>
 export function useAccountPresence(enabled: boolean, initial: AccountPresence | null = null): { readonly presence: AccountPresence | null; readonly prefetch: () => void } {
   const key = PAGE_KEY;
   // The server-verified presence of this page's render, applied once before the first read (no request when it is known).
-  useState(() => { if (enabled) seedAccountPresence(key, initial); return null; });
+  // Stamped with the page's navigation start (when the server verified it), so its freshness window is never extended by a late mount; browser
+  // only, so server rendering never writes one request's presence into process state (flofi-security review).
+  useState(() => { if (enabled && typeof window !== 'undefined') seedAccountPresence(key, initial, typeof performance !== 'undefined' ? Math.round(performance.timeOrigin) : 0); return null; });
   const presence = useSyncExternalStore(subscribe, () => enabled ? knownAccountPresence(key) : null, () => null);
   const prefetch = useCallback(() => { if (enabled) void readAccountPresence(key).catch(() => undefined); }, [enabled, key]);
   useEffect(() => {

@@ -122,8 +122,9 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
       ...execution ? { execution: step ?? { visual: 'waiting', phase: null, text: { key: 'Waiting', args: [] } } } : {},
       // P0 workflow execution: Execute shows the same per-step quote as Create and Simulate (keyed by the step alone, so it is the cached answer,
       // not a new one), marked as an estimate or as expired — never a blank '—' for a value FloFi already knows. Signing never uses it.
-      // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: once the workflow executes, the cards ask for no live quote (no request while it runs).
-      ...!execution && ['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
+      // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a card whose step has started executing keeps the estimate it shows and asks for no new one
+      // (`useLiveQuote` frozen, from its execution state); a step still waiting keeps its live estimate, as before.
+      ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} } };
   }), [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution]);
   // BUILD-FLOFI-BUILDER-UX-002: the same link labels as the Build Canvas, so a link reads the same between Create and Simulate.

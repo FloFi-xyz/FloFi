@@ -262,9 +262,9 @@ describe('BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a live run stays on the C
   it('keeps the Canvas as the execution view with its actions; the step timeline is collapsed under Execution details', () => {
     const data = liveRun('PENDING'), html = render(data);
     expect(data.canvasExecution).not.toBeNull();
-    expect(html).toContain('<section aria-label="Execution plan">Approved strategy');
-    expect(html).toContain('class="execute-live-canvas"');
-    expect(html).toMatch(/<details class="shell-details execution-details-disclosure"><summary>Execution details/);
+    // The live Canvas is the grid's first child, as before the run (same sizing rules, nothing remounted); the details follow the summary.
+    expect(html).toMatch(/<div class="execute-workspace-grid"><section aria-label="Execution plan">Approved strategy/);
+    expect(html).toMatch(/<\/aside><details class="shell-details execution-details-disclosure"><summary>Execution details/);
     // Everything the timeline recorded stays reachable (hashes, step progression) inside the disclosure.
     expect(html).toContain('aria-label="Execution details"'); expect(html).toContain('Workflow step progression'); expect(html).toContain('0xaaaaaa…aaaaaa');
     // The recovery / confirmation control stays on the Canvas, once.
@@ -274,9 +274,9 @@ describe('BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a live run stays on the C
   it('opens the details at once when the outcome needs attention or a result exists', () => {
     for (const state of ['REVERTED', 'UNKNOWN', 'CONFIRMED']) expect(render(liveRun(state))).toMatch(/<details class="shell-details execution-details-disclosure" open="">/);
   });
-  it('keeps the timeline as the view when the record does not cover this Canvas workflow (another revision, or none)', () => {
+  it('keeps the timeline as the view when the Canvas execution does not include this live run (another run, or none)', () => {
     const data = liveRun('PENDING');
-    for (const canvasExecution of [null, { ...data.canvasExecution!, revision: data.workflow.revision + 1 }]) {
+    for (const canvasExecution of [null, { ...data.canvasExecution!, runKeys: [] }, { ...data.canvasExecution!, runKeys: ['another-run'] }]) {
       const html = render({ ...data, canvasExecution });
       expect(html).not.toContain('execution-details-disclosure'); expect(html).toContain('Workflow step progression'); expect(html).toContain('aria-label="Execution plan"');
     }

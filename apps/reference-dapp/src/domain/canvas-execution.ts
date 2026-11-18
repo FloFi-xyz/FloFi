@@ -20,9 +20,11 @@ import { EXECUTION_PHASE_LABEL, phaseCompletesStep, type ExecutionPhase } from '
 import type { ExecutionLifecycle, LifecycleStep } from './execution-lifecycle';
 import { lifecycleStepPhase, phaseText, stepReconciled, type PhaseText } from './workflow-progress';
 import { runStepPhase } from '../workflow-runs/run-step-phase';
+import { WALLET_BATCH_OUTCOME_UNKNOWN } from '../workflow-runs/state-machine';
+import { isFinalExecutionResult } from './execution-result';
 
 /** The visual state of one card. Presentation only: it is never written back to any execution record. */
-export const CANVAS_EXECUTION_VISUALS = ['waiting', 'active', 'wallet', 'pending', 'done', 'attention', 'failed'] as const;
+export const CANVAS_EXECUTION_VISUALS = ['waiting', 'active', 'wallet', 'authorize', 'pending', 'done', 'attention', 'failed'] as const;
 export type CanvasExecutionVisual = (typeof CANVAS_EXECUTION_VISUALS)[number];
 /** The visual state of one connection (a workflow dependency or resource edge). */
 export type CanvasEdgeVisual = 'waiting' | 'active' | 'done' | 'attention' | 'failed';
@@ -34,8 +36,10 @@ export type CanvasExecution = {
   readonly nodes: Readonly<Record<string, CanvasNodeExecution>>;
   /** Something of this workflow was handed to a wallet or a chain (or is recorded as such): the cards show their execution state. */
   readonly started: boolean;
-  /** The executing record's evidence ended: nothing is active any more (completed, failed or stopped). */
+  /** The executing record is final (its run ended): no step is in flight, waiting for the owner or still being observed. */
   readonly settled: boolean;
+  /** The current runtime run (`ExecutionLifecycle.runKey`) whose steps this execution includes, if any: Execute keeps the Canvas for that run only. */
+  readonly runKeys: readonly string[];
 };
 
 type CanvasWorkflow = { readonly workflowId: string; readonly revision: number; readonly nodes: readonly { readonly nodeId: string }[] };
@@ -51,7 +55,9 @@ export function visualOfPhase(phase: ExecutionPhase | null): CanvasExecutionVisu
   if (phaseCompletesStep(phase)) return 'done';
   if (phase === 'FAILED') return 'failed';
   if (phase === 'OUTCOME_UNKNOWN') return 'attention';
-  if (phase === 'SENT_TO_WALLET' || phase === 'AWAITING_AUTHORIZATION') return 'wallet';
+  if (phase === 'SENT_TO_WALLET') return 'wallet';
+  // The owner's next authorization, in FloFi first (nothing is in the wallet yet).
+  if (phase === 'AWAITING_AUTHORIZATION') return 'authorize';
   // SUBMITTED, CONFIRMED_AT_SOURCE, AWAITING_DESTINATION, DESTINATION_OBSERVED: sent, not yet reconciled.
   return 'pending';
 }
@@ -75,6 +81,8 @@ export function lifecycleNodeExecution(live: ExecutionLifecycle, step: Lifecycle
 }
 
 const ids = (workflow: CanvasWorkflow) => new Set(workflow.nodes.map(node => node.nodeId));
+const IN_FLIGHT: readonly CanvasExecutionVisual[] = ['active', 'wallet', 'authorize', 'pending'];
+const open = (nodes: Readonly<Record<string, CanvasNodeExecution>>) => Object.values(nodes).some(node => IN_FLIGHT.includes(node.visual) || node.phase === 'OUTCOME_UNKNOWN');
 
 /**
  * The Canvas execution of the current runtime's lifecycle, or null when that record is not THIS Canvas workflow's (another workflow or revision,
@@ -87,7 +95,7 @@ export function lifecycleCanvasExecution(workflow: CanvasWorkflow, live: Executi
   const nodes: Record<string, CanvasNodeExecution> = {};
   for (const step of live.steps) nodes[step.id] = lifecycleNodeExecution(live, step);
   return { key: `lifecycle:${live.runKey}`, workflowId: workflow.workflowId, revision: workflow.revision, nodes, started: true,
-    settled: !Object.values(nodes).some(node => ['active', 'wallet', 'pending'].includes(node.visual)) };
+    settled: isFinalExecutionResult(live) && !open(nodes), runKeys: [live.runKey] };
 }
 
 type SequenceLike = { readonly steps: readonly { readonly nodeId: string }[]; readonly cursor: number; readonly completed: readonly unknown[]; readonly finished: boolean };
@@ -107,8 +115,9 @@ export function sequenceCanvasExecution(workflow: CanvasWorkflow, sequence: Sequ
     nodes[step.nodeId] = index < sequence.completed.length ? { visual: 'done', phase: 'RECONCILED', text: text('Reconciled') }
       : ownLive && step.nodeId === current?.nodeId ? lifecycleNodeExecution(ownLive, ownLive.steps[0]!) : WAITING;
   });
+  // A step-by-step workflow between steps is not a result: it is final once every step completed, or its current run ended needing attention.
   return { key: `sequence:${workflow.workflowId}`, workflowId: workflow.workflowId, revision: workflow.revision, nodes, started: true,
-    settled: sequence.finished || !Object.values(nodes).some(node => ['active', 'wallet', 'pending'].includes(node.visual)) };
+    settled: sequence.finished || Boolean(ownLive && isFinalExecutionResult(ownLive) && ownLive.state === 'attention' && !open(nodes)), runKeys: ownLive?.runKey ? [ownLive.runKey] : [] };
 }
 
 /** The run view fields this projection reads (client-safe; `workflow-runs/service.ts` `RunView`). */
@@ -120,16 +129,26 @@ export type RunLike = {
 };
 /** Group states (USER_FUNDED) whose own words say where the group's steps stand. */
 const GROUP_VISUAL: Readonly<Record<string, readonly [CanvasExecutionVisual, string, ExecutionPhase | null]>> = {
-  PREPARED: ['wallet', 'Waiting for your wallet', 'SENT_TO_WALLET'], AUTHORIZED: ['pending', 'Confirmed in your wallet', 'SUBMITTED'],
-  SUBMITTED: ['pending', 'Sent to the network', 'SUBMITTED'], EXPIRED: ['attention', 'Expired', null],
+  AUTHORIZED: ['pending', 'Confirmed in your wallet', 'SUBMITTED'], SUBMITTED: ['pending', 'Sent to the network', 'SUBMITTED'], EXPIRED: ['attention', 'Expired', null],
 };
 const OPEN_RUN = ['PENDING', 'RUNNING', 'ATTENTION'];
+const TERMINAL_RUN = ['COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED'];
+/** States whose own words already say what the wallet answered or the chain decided (the Editor panel's `ANSWERED_STATES`). */
+const ANSWERED: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'];
+/**
+ * A step or group whose wallet batch was handed to the owner's wallet and never answered (WALLET_BATCH_OUTCOME_UNKNOWN): it may have executed. It is
+ * never shown as "not run" or "stopped before submission" — the Editor panel's rule (`batchUnanswered`, editor-workflow-run.tsx).
+ */
+const batchUnanswered = (item: { readonly state: string; readonly code: string | null } | undefined) => Boolean(item && item.code === WALLET_BATCH_OUTCOME_UNKNOWN && !ANSWERED.includes(item.state));
+const UNANSWERED_TEXT = "Its batch may have executed before it expired; check your wallet's activity";
 /** One whole-workflow run step. `prompting`: the Editor is asking the owner's wallet for this run right now (its current group). */
 export function runNodeExecution(run: RunLike, step: RunLike['steps'][number], prompting = false): CanvasNodeExecution {
   const phased = runStepPhase(run, step);
   if (phased) return { visual: visualOfPhase(phased.phase), phase: phased.phase,
     text: phased.network && EXECUTION_PHASE_LABEL[phased.phase].includes('{0}') ? text(EXECUTION_PHASE_LABEL[phased.phase], [phased.network]) : phaseText(phased.phase) };
   const group = run.mode === 'USER_FUNDED' ? run.groups.find(g => g.steps[0] <= step.index && step.index <= g.steps[1]) : undefined;
+  if (step.state !== 'RECONCILED' && (batchUnanswered(step) || !ANSWERED.includes(step.state) && batchUnanswered(group)))
+    return { visual: 'attention', phase: 'OUTCOME_UNKNOWN', text: text(UNANSWERED_TEXT) };
   switch (step.state) {
     case 'FAILED': return { visual: 'failed', phase: 'FAILED', text: text('Failed') };
     case 'UNCERTAIN': return { visual: 'attention', phase: 'OUTCOME_UNKNOWN', text: text('Outcome pending') };
@@ -138,10 +157,13 @@ export function runNodeExecution(run: RunLike, step: RunLike['steps'][number], p
     case 'DELEGATED': {
       if (!group) return { visual: 'pending', phase: 'SUBMITTED', text: text('Authorized') };
       const known = GROUP_VISUAL[group.state];
-      if (known && group.state !== 'PREPARED') return { visual: known[0], phase: known[2], text: text(known[1]) };
+      if (known) return { visual: known[0], phase: known[2], text: text(known[1]) };
       if (group.signed) return { visual: 'pending', phase: 'SUBMITTED', text: text('Signed in your wallet') };
-      return OPEN_RUN.includes(run.state) ? { visual: 'wallet', phase: 'AWAITING_AUTHORIZATION', text: text('Waiting for your wallet') }
-        : { visual: 'attention', phase: null, text: text('Not signed') };
+      if (!OPEN_RUN.includes(run.state)) return { visual: 'attention', phase: null, text: text('Not signed') };
+      // A group not prepared yet is signed only when it is due (e.g. after an earlier delivery): nothing is asked of the wallet now.
+      if (group.state !== 'PREPARED') return { visual: 'waiting', phase: null, text: text('Not signed yet') };
+      return prompting ? { visual: 'wallet', phase: 'SENT_TO_WALLET', text: text('Waiting for your wallet') }
+        : { visual: 'authorize', phase: 'AWAITING_AUTHORIZATION', text: text('Waiting for your authorization') };
     }
     case 'READY': case 'PENDING': {
       // A prepared group handed to the owner's wallet by this Editor right now is in the wallet; otherwise the step waits its turn.
@@ -169,7 +191,7 @@ export function runCanvasExecution(workflow: CanvasWorkflow, order: readonly { r
   }
   const started = Object.values(nodes).some(node => node.visual !== 'waiting') || run.state !== 'PENDING';
   return { key: `run:${run.workflowRunId}`, workflowId: workflow.workflowId, revision: workflow.revision, nodes, started,
-    settled: !OPEN_RUN.includes(run.state) && !Object.values(nodes).some(node => ['active', 'wallet', 'pending'].includes(node.visual)) };
+    settled: TERMINAL_RUN.includes(run.state) && !open(nodes), runKeys: [] };
 }
 
 /**
@@ -181,7 +203,7 @@ export function edgeExecution(execution: CanvasExecution | null | undefined, sou
   if (!from) return 'waiting';
   if (from === 'failed') return 'failed';
   if (from === 'attention') return 'attention';
-  if (from === 'done') return to && ['active', 'wallet', 'pending'].includes(to) ? 'active' : 'done';
+  if (from === 'done') return to && IN_FLIGHT.includes(to) ? 'active' : 'done';
   return 'waiting';
 }
 
@@ -192,5 +214,5 @@ export function canvasExecutionFor(execution: CanvasExecution | null | undefined
 
 /** The short label a card's execution badge reads (catalog key and parameters); the full phase words are its accessible description. */
 export const CANVAS_VISUAL_LABEL: Readonly<Record<CanvasExecutionVisual, string>> = Object.freeze({
-  waiting: 'Waiting', active: 'Executing', wallet: 'Confirm in wallet', pending: 'In progress', done: 'Completed', attention: 'Needs attention', failed: 'Failed',
+  waiting: 'Waiting', active: 'Executing', wallet: 'Confirm in wallet', authorize: 'Your authorization', pending: 'In progress', done: 'Completed', attention: 'Needs attention', failed: 'Failed',
 });

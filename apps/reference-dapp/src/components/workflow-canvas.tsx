@@ -874,14 +874,13 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     return projected;
   }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
-  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution state joins each card's data (no position, size or content change). While the
-  // workflow executes, its cards ask for no live quote.
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution state joins each card's data (no position, size or content change). A card whose
+  // step has started executing keeps the estimate it shows and asks for no new one (`useLiveQuote` frozen); a waiting step keeps its live estimate.
   const execution = canvasExecutionFor(executionInput, workflow);
   const shownNodes = useMemo<Node[]>(() => !execution ? projectedNodes : projectedNodes.map(node => {
     const step = execution.nodes[node.id];
     if (!step) return node;
     const data: Record<string, unknown> = { ...node.data, execution: step };
-    delete data.estimateWorkflow;
     const shown: Node = { ...node, data };
     if (step.visual !== 'waiting' && node.ariaLabel) shown.ariaLabel = `${node.ariaLabel} · ${tr(CANVAS_VISUAL_LABEL[step.visual])}`;
     return shown;
