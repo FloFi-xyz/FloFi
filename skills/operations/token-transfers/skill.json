@@ -1,0 +1,114 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/token-transfers",
+  "title": "Token standards and transfer review",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "transfer"
+  ],
+  "domains": [
+    "flofi-transfer-payments",
+    "flofi-wallet-execution",
+    "flofi-protocol-integrations",
+    "flofi-workflow",
+    "flofi-security"
+  ],
+  "dependsOn": [
+    "operations/execution"
+  ],
+  "appliesTo": {
+    "paths": [
+      "packages/reference-compiler/src/native-transfer.ts",
+      "packages/reference-compiler/src/solana-transfer.ts",
+      "apps/reference-dapp/src/server/*-transfer*",
+      "apps/reference-dapp/src/domain/*-transfer*",
+      "packages/reference-reconciler/src/*transfer*",
+      "apps/reference-dapp/src/user-funded/universal-batch.test.ts",
+      "packages/action-registry/src/solana-transfer.ts",
+      "packages/workflow-contracts/src/solana-transfer.ts",
+      "packages/reference-executor/src/solana-transfer.ts"
+    ],
+    "keywords": [
+      "token transfer",
+      "native transfer",
+      "erc-20",
+      "spl token",
+      "token-2022",
+      "smart account transfer",
+      "smart-account transfer",
+      "gasless transfer",
+      "solana transfer",
+      "swap-to-transfer",
+      "bridge-to-transfer",
+      "wallet-relayed transfer",
+      "transfer reconciliation"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.native-transfer",
+      "chainId": "eip155:1"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.token-transfer",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "solana.system-transfer",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "solana.spl-transfer",
+      "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ERCs/10eca3cea34986aeeac0af98ad061ab8928dc15d/ERCS/erc-20.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "10eca3cea34986aeeac0af98ad061ab8928dc15d",
+      "reviewedDigest": "sha256:50d0bdc535ed8987ac5c124cb5f9c39606806c97e909aae66ef4b747dd9c93dd",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "ERC-20 transfers, balance, optional metadata and allowance semantics. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-program/token/3d53b934b90d5b5d5716553fbcbf63aa20a07c70/README.md",
+      "publisher": "Solana Program",
+      "kind": "OFFICIAL_DOCS",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "3d53b934b90d5b5d5716553fbcbf63aa20a07c70",
+      "reviewedDigest": "sha256:2fc47bb4ca96fa1eed59a67f8f3d4fe80ded21cba086719a85e17689edb6a667",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Canonical SPL Token program. Apache-2.0 LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/solana-program/token-2022/875693f53c77534b46f0d06bdf781430870f8177/interface/src/extension/mod.rs",
+      "publisher": "Solana Program",
+      "kind": "OFFICIAL_SDK",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "875693f53c77534b46f0d06bdf781430870f8177",
+      "reviewedDigest": "sha256:d273a87617b06f4a813a2c3c3bbab8180a0a4c657d836a95475259eca9e40f5a",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Token-2022 extended mint and account state. Apache-2.0 LICENSE at the pinned revision."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:86b6cf05bdce6624acd7283f7b1bb67b3ea5a2c468d31d9723c7211e91cd1ad2",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

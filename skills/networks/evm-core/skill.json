@@ -2,7 +2,7 @@
   "format": "flofi.engineering-skill.v1",
   "id": "networks/evm-core",
   "title": "EVM transactions, fees, pinned reads and RPC pacing",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "networks": [
     "evm"
   ],
@@ -110,7 +110,7 @@
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:94860daf4a70e9346445d04352379f8ca3937cc371cefa3a94cff70397e94076",
+  "guidanceDigest": "sha256:f0e1d6fce9a456058a1539ba99307e3d8d24d975bf224a801140292a5a0ebd1d",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

@@ -1,0 +1,84 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "engineering/neon-postgresql",
+  "title": "Neon and PostgreSQL durability and schema compatibility",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-data-privacy",
+    "flofi-infrastructure-ci",
+    "flofi-workflow",
+    "flofi-automations",
+    "flofi-admin-analytics",
+    "flofi-security"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "packages/cloud-runtime/src/db.ts",
+      "packages/cloud-runtime/src/migrations.ts",
+      "packages/cloud-runtime/migrations/*",
+      "packages/cloud-runtime/test/*compatibility*",
+      "apps/reference-dapp/src/**/postgres-config.ts",
+      "apps/reference-dapp/backend/*schema*",
+      "docs/deploy/SCHEMA-COMPATIBILITY.md",
+      "packages/cloud-runtime/test/fixtures/*.sql"
+    ],
+    "keywords": [
+      "neon",
+      "postgresql",
+      "postgres",
+      "database migration",
+      "schema compatibility",
+      "connection pooling",
+      "database branch",
+      "sql deadlock"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/postgres/postgres/3a95588fef072ab22aa276d14065ad1bf6bcc976/doc/src/sgml/mvcc.sgml",
+      "publisher": "PostgreSQL Global Development Group",
+      "kind": "OFFICIAL_DOCS",
+      "license": "PostgreSQL",
+      "status": "VERIFIED",
+      "reviewedRevision": "3a95588fef072ab22aa276d14065ad1bf6bcc976",
+      "reviewedDigest": "sha256:4b7bf77ee0af4b86052330ff2421d567df3604b75fe7d4f522bec84fdea87340",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "PostgreSQL 18 isolation, row/advisory locks and concurrency. PostgreSQL COPYRIGHT at the pinned revision."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/neondatabase/serverless/788e13b6ec93bc98599eb6aaab737e423214693d/README.md",
+      "publisher": "Neon",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "788e13b6ec93bc98599eb6aaab737e423214693d",
+      "reviewedDigest": "sha256:b06ae8630b56a636aeb22d9fd9b4079ecf7777063da5439d6008c2c15e38136d",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Neon serverless connection and transaction models as general context. MIT LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://neon.com/docs/connect/connection-pooling",
+      "publisher": "Neon",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:05d51b77df70de084b5ff03e2224e7b1f871430c588f4cdc5f2e014379b99cc6",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Neon pooled endpoint and PgBouncer guidance. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:6ec4db7288d82ba5affa527a9e087b764b2d77fad1d460f9c873201027b0982e",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

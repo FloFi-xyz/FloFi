@@ -1,0 +1,91 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/account-abstraction",
+  "title": "Account abstraction and reviewed UserOperations",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "account-abstraction"
+  ],
+  "domains": [
+    "flofi-wallet-execution",
+    "flofi-security",
+    "flofi-workflow",
+    "flofi-protocol-integrations"
+  ],
+  "dependsOn": [
+    "networks/evm-core",
+    "operations/execution"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/user-funded/bundler*",
+      "apps/reference-dapp/src/user-funded/circle-*",
+      "apps/reference-dapp/src/user-funded/config.ts",
+      "apps/reference-dapp/src/user-funded/evm-*",
+      "apps/reference-dapp/src/server/smart-account-*",
+      "apps/reference-dapp/src/components/user-funded-browser*",
+      "packages/reference-compiler/src/erc4337.ts",
+      "packages/reference-compiler/test/erc4337.test.ts",
+      "packages/reference-compiler/test/eip7702-upgrade.test.ts"
+    ],
+    "keywords": [
+      "account abstraction",
+      "account-abstraction",
+      "smart account",
+      "smart-account",
+      "useroperation",
+      "useroperations",
+      "eip-7702",
+      "erc-4337",
+      "entrypoint",
+      "bundler",
+      "delegation revocation"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/EIPs/b055feec322fbc37e9d77a393a50b3ff56b31c92/EIPS/eip-7702.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "b055feec322fbc37e9d77a393a50b3ff56b31c92",
+      "reviewedDigest": "sha256:3d46953e13ebc7ebe229971b301ede853aad6e29f4faf4db1eb9a2085accde1b",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Delegate designation, valid chain scope, authorization nonce and clearing the designation. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ERCs/10eca3cea34986aeeac0af98ad061ab8928dc15d/ERCS/erc-4337.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "10eca3cea34986aeeac0af98ad061ab8928dc15d",
+      "reviewedDigest": "sha256:ea89a628d9340a1478e3e634e092480c42776b56362140092e612dbaac4b575a",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "UserOperation validation, EntryPoint, bundler and semi-abstracted nonce semantics. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/EIPs/b055feec322fbc37e9d77a393a50b3ff56b31c92/EIPS/eip-712.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "b055feec322fbc37e9d77a393a50b3ff56b31c92",
+      "reviewedDigest": "sha256:73012092bc495918eceab4e9519fb54f4d822657835e7a4d0919e8383442b685",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Structured-data signing and domain separation. The specification's Copyright section applies CC0-1.0."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:54a1e7ab5728c933569e54de70e93735f04981ac88df140911e7913cc62be5f2",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

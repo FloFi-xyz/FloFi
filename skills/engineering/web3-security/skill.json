@@ -1,0 +1,101 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "engineering/web3-security",
+  "title": "Web3 financial authority and incident regression review",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-security",
+    "flofi-wallet-execution",
+    "flofi-workflow",
+    "flofi-protocol-integrations",
+    "flofi-mcp",
+    "flofi-developers"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/mcp/oauth/*",
+      "apps/reference-dapp/src/mcp/handoff/*",
+      "apps/reference-dapp/src/mcp/*integrity*",
+      "apps/reference-dapp/src/accounts/account-service*",
+      "apps/reference-dapp/src/domain/wallet-nonce*",
+      "apps/reference-dapp/src/server/nonce-conflict*",
+      "apps/reference-dapp/src/state/review-authorization*",
+      "packages/workflow-contracts/src/invalidation.ts",
+      "docs/security/*",
+      "apps/reference-dapp/src/app/oauth/*",
+      "apps/reference-dapp/src/app/.well-known/*",
+      "apps/reference-dapp/src/accounts/privy-server*",
+      "apps/reference-dapp/src/accounts/account-session*",
+      "apps/reference-dapp/src/accounts/wallet-origin*",
+      "apps/reference-dapp/src/accounts/wallet-session*",
+      "apps/reference-dapp/src/server/managed-signing*",
+      "apps/reference-dapp/src/app/flofi-wallet-signing*",
+      "apps/reference-dapp/src/workflow-runs/authorization-plan*",
+      "apps/reference-dapp/src/developer/api.pg.test.ts",
+      "apps/reference-dapp/src/developer/service.ts",
+      "apps/reference-dapp/src/developer/store.ts"
+    ],
+    "keywords": [
+      "web3 security",
+      "payload integrity",
+      "replay prevention",
+      "signature replay",
+      "nonce conflict",
+      "tenant isolation",
+      "prompt injection",
+      "mcp authentication",
+      "mcp oauth",
+      "authorization regression",
+      "security incident",
+      "mcp auth"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/EIPs/b055feec322fbc37e9d77a393a50b3ff56b31c92/EIPS/eip-712.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "b055feec322fbc37e9d77a393a50b3ff56b31c92",
+      "reviewedDigest": "sha256:73012092bc495918eceab4e9519fb54f4d822657835e7a4d0919e8383442b685",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Typed-data domains and replay considerations. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ERCs/10eca3cea34986aeeac0af98ad061ab8928dc15d/ERCS/erc-1271.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "10eca3cea34986aeeac0af98ad061ab8928dc15d",
+      "reviewedDigest": "sha256:559359ed05951526279e89074e721bcdf69f67910ca353847b700ed5a637acd1",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Contract wallet signature validation and defined success value. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/OWASP/ASVS/82fb2f41cdb623e0b11e4d9a6b97c4306c1d119c/README.md",
+      "publisher": "OWASP",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC-BY-SA-4.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "82fb2f41cdb623e0b11e4d9a6b97c4306c1d119c",
+      "reviewedDigest": "sha256:350ad186037d78986564c8269498264a4d9e2b3895cfa5ab0f21eac0da86b227",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Application security verification framework. The pinned repository's LICENSE.md specifies CC BY-SA 4.0."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:5c46271eaad9beb9e98a77750546b5c287e3923eb7ebebfb3038fc55a98e6179",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

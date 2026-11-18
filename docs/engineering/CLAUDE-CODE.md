@@ -12,6 +12,7 @@ transaction agents. They are generated twins of the Codex roles in
 | Ownership, dependencies, suites, required regressions, gaps | `docs/engineering/coverage.json` | `agent_guard.py impact`/`domain`/`review`, both assistants |
 | Shared instructions and financial invariants | The identical preamble of every Codex role | Copied verbatim into each Claude twin |
 | Domain specialty and description | The Codex role | Copied verbatim into its Claude twin |
+| Engineering reference skills and selection | `skills/registry.json` and `scripts/skill_registry.py` | Both assistants through `agent_guard.py impact` and `domain` |
 
 No Claude file lists owned paths. The main session runs
 `python3 scripts/agent_guard.py domain <name> --base origin/main` and hands the live

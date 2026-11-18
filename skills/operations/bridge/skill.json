@@ -20,7 +20,8 @@
       "apps/reference-dapp/src/server/router-*",
       "apps/reference-dapp/src/state/universal-router-store.tsx",
       "apps/reference-dapp/src/components/universal-bridge-panel.tsx",
-      "apps/reference-dapp/src/domain/bridge-costs.ts"
+      "apps/reference-dapp/src/domain/bridge-costs.ts",
+      "packages/action-registry/src/crosschain-router.ts"
     ],
     "keywords": [
       "bridge",

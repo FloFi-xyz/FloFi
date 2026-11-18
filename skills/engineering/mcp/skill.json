@@ -1,0 +1,108 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "engineering/mcp",
+  "title": "MCP transport, OAuth and approval handoff",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-mcp",
+    "flofi-security",
+    "flofi-workflow",
+    "flofi-developers",
+    "flofi-channels",
+    "flofi-wallet-execution"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/mcp/*",
+      "apps/reference-dapp/src/app/api/mcp/*",
+      "apps/reference-dapp/src/app/.well-known/*",
+      "docs/deploy/MCP*.md",
+      "apps/reference-dapp/src/app/oauth/*",
+      "apps/reference-dapp/src/app/connections-action.ts",
+      "apps/reference-dapp/src/app/(product)/mcp/*",
+      "apps/reference-dapp/src/components/mcp-route-state.tsx",
+      "apps/reference-dapp/src/app/approve-action.ts"
+    ],
+    "keywords": [
+      "mcp",
+      "mcp authentication",
+      "mcp oauth",
+      "json-rpc",
+      "streamable http",
+      "protected resource metadata",
+      "mcp auth"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/38c84e9f93ad191d9eb26d92b945d17bd0efcaf3/docs/specification/2025-11-25/basic/transports.mdx",
+      "publisher": "Model Context Protocol",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "38c84e9f93ad191d9eb26d92b945d17bd0efcaf3",
+      "reviewedDigest": "sha256:85fa3959d672d7892c1e010bee8a1391f2e0853ca8c6b96f83bda73c5ea8e6c5",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Streamable HTTP and the handshake-era transport contract. MIT LICENSE at the release revision."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/38c84e9f93ad191d9eb26d92b945d17bd0efcaf3/docs/specification/2025-11-25/basic/authorization.mdx",
+      "publisher": "Model Context Protocol",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "38c84e9f93ad191d9eb26d92b945d17bd0efcaf3",
+      "reviewedDigest": "sha256:8182f6a204013b497369c2ad690ff313f8bd1d2ce9ebb68e8f5d0392aa348cb9",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "OAuth protected resource metadata, token audience and scope. MIT LICENSE at the release revision."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/docs/specification/2026-07-28/basic/versioning.mdx",
+      "publisher": "Model Context Protocol",
+      "kind": "OFFICIAL_DOCS",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "5f5440bb26a62e2cf3440b92da5a667efa03b267",
+      "reviewedDigest": "sha256:bc02f271700bdecd88034f2d7801eb09110a71d65876487378d94e48dfeb90dc",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "The 2026-07-28 specification page for modern per-request versioning and dual-era interoperability. The release LICENSE applies Apache-2.0 to new specification contributions."
+    },
+    {
+      "url": "https://modelcontextprotocol.io/extensions/apps/overview",
+      "publisher": "Model Context Protocol",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:f4969e125e21d02d559c481f6cc894d863dc936766be36d1d96547a5b9c1fc06",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official Apps extension overview. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http",
+      "publisher": "Model Context Protocol",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:8b60f5883a1c738b13f992f7c9f350db8d88f96d9a3400a2cad915534b0ab657",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Published modern Streamable HTTP spec. Retrieved and hashed. Exact immutable file and licence scope not reviewed."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:1448f61f26ce9bce6f124dc3b819c6374195e53542f243a53fc1ac4e480470a5",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

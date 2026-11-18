@@ -100,6 +100,15 @@ class AgentEvolutionTest(unittest.TestCase):
         self.assertEqual("review-required", report["maintenance"])
         self.assertEqual(["CLAUDE.md", "docs/DECISIONS.md"], report["engineeringDocChanges"])
 
+    def test_new_unowned_path_selects_engineering_knowledge(self):
+        path = "apps/reference-dapp/src/mcp/request-boundary.ts"
+        self.write(path, "new MCP boundary\n")
+        report = self.assess()
+        self.assertEqual([path], report["missingOwners"])
+        self.assertEqual([], report["capabilityCandidates"])
+        self.assertIn("engineering/mcp", report["suggestedSkills"])
+        self.assertIn("flofi-mcp", report["skillReviewDomains"]["engineering/mcp"])
+
     def test_inventory_reports_parity_staleness_and_upstream_results_without_editing(self):
         twin = ".claude/agents/flofi-swap.md"
         self.write(twin, "out of sync\n")

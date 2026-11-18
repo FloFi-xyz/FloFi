@@ -1,0 +1,104 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "engineering/ai-orchestration",
+  "title": "AI orchestration and Copilot provider boundaries",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-chat",
+    "flofi-admin-analytics",
+    "flofi-workflow",
+    "flofi-security",
+    "flofi-infrastructure-ci"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/copilot-*",
+      "apps/reference-dapp/src/server/anthropic-*",
+      "apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts",
+      "apps/reference-dapp/src/state/flofi-conversation.*",
+      "apps/reference-dapp/src/components/admin/copilot-settings-*",
+      "apps/reference-dapp/src/platform/copilot-tools.ts",
+      "apps/reference-dapp/src/channels/core/interpreter.ts",
+      "apps/reference-dapp/src/components/copilot-ai.tsx"
+    ],
+    "keywords": [
+      "ai orchestration",
+      "model routing",
+      "model fallback",
+      "structured outputs",
+      "prompt caching",
+      "tool calling",
+      "litellm",
+      "copilot provider",
+      "model compatibility",
+      "ai provider fallback",
+      "openai fallback",
+      "anthropic fallback",
+      "openai provider fallback",
+      "openai model provider fallback",
+      "anthropic provider fallback",
+      "anthropic model provider fallback",
+      "copilot provider fallback"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/openai/openai-node/b1d437885f3d3076a746a93e6950e29754bd6449/README.md",
+      "publisher": "OpenAI",
+      "kind": "OFFICIAL_DOCS",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "b1d437885f3d3076a746a93e6950e29754bd6449",
+      "reviewedDigest": "sha256:8cf814b6f272f795797087128d04669ad8bf8ea4521284128d486cf210f44303",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official Responses SDK overview. Apache-2.0 LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/3f13f60335f8bcf91a782785f4f16e4267c999ad/src/resources/messages/messages.ts",
+      "publisher": "Anthropic",
+      "kind": "OFFICIAL_SDK",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "3f13f60335f8bcf91a782785f4f16e4267c999ad",
+      "reviewedDigest": "sha256:bdd96274a9836d207d2636998ab152d3007fdc887adcd79bf924b317e19d3756",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Messages, tool and token usage fields. Apache-2.0 LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/structured-outputs.md",
+      "publisher": "OpenAI",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:81472086650746cbadd1bc0abed52ecc7b4f0736e77a8ec7f2c23ca014d7920e",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official Markdown Structured Outputs guide. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+      "publisher": "Anthropic",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:0bd6057b0da16a83b218abdf1e5768f3581e2057d8ae974838c27e56b117bf4a",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Current public Anthropic prompt caching guide. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:e32ed9912671dc0b90ccf1b65c69508ef96eea686a3ad7cb8af236b0f6c75f92",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

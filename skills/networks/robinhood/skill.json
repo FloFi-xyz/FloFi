@@ -1,0 +1,123 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "networks/robinhood",
+  "title": "Robinhood Chain and Stock Tokens",
+  "version": "1.0.0",
+  "networks": [
+    "robinhood"
+  ],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-protocol-integrations",
+    "flofi-swap",
+    "flofi-bridge",
+    "flofi-liquidity",
+    "flofi-transfer-payments",
+    "flofi-wallet-execution",
+    "flofi-security"
+  ],
+  "dependsOn": [
+    "networks/evm-core"
+  ],
+  "appliesTo": {
+    "paths": [
+      "packages/action-registry/src/robinhood-*",
+      "apps/reference-dapp/src/server/*robinhood*",
+      "apps/reference-dapp/src/domain/robinhood-*",
+      "apps/reference-dapp/src/engine/robinhood-*",
+      "docs/builds/BUILD-RH-*",
+      "packages/action-registry/src/crosschain-router.ts"
+    ],
+    "keywords": [
+      "robinhood",
+      "robinhood chain",
+      "4663",
+      "46630",
+      "usdg",
+      "stock token",
+      "stock tokens",
+      "erc-8056"
+    ]
+  },
+  "capabilities": [
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.swap.exact-input",
+      "adapterId": "weth9.wrap",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.liquidity.concentrated",
+      "adapterId": "uniswap.v3",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.native-transfer",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.transfer",
+      "adapterId": "evm.token-transfer",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router",
+      "chainId": "eip155:4663"
+    },
+    {
+      "actionType": "asset.bridge",
+      "adapterId": "flofi.router.universal",
+      "chainId": "eip155:4663"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ERCs/10eca3cea34986aeeac0af98ad061ab8928dc15d/ERCS/erc-8056.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "10eca3cea34986aeeac0af98ad061ab8928dc15d",
+      "reviewedDigest": "sha256:fa64d2cb20e2f15828cb8b5d7c5c83cc6fd07c2a84b07f804d216a89bd1e5848",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Draft shares-per-token multiplier standard by authors including a Robinhood contributor. It is standards context. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://docs.robinhood.com/chain/connecting/",
+      "publisher": "Robinhood",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:7c8e38d2eb86f7ca0125147688115642354cdd28ad9bd79026463a942216fdb1",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official connecting guide. Retrieved and hashed. Chain documentation terms reserve rights; no document reuse licence established."
+    },
+    {
+      "url": "https://docs.robinhood.com/chain/stock-token-apis/",
+      "publisher": "Robinhood",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:8f9ec8be346f17d4bb2bebddf91d28e2e78dfb992f60f123fd22aeab67a6ea4e",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official Stock Token pricing guide. Retrieved and hashed. Chain documentation terms reserve rights; no document reuse licence established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:3d3a7f2346a3a2554f05efd130f1e1399be157e27c831d1c97cf9761129cef2a",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

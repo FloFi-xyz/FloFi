@@ -1,0 +1,113 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "engineering/finops",
+  "title": "FinOps, cost evidence and unit economics",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-admin-analytics",
+    "flofi-payments-billing",
+    "flofi-infrastructure-ci",
+    "flofi-data-privacy"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/admin/finops/*",
+      "apps/reference-dapp/src/app/admin/*finops*",
+      "apps/reference-dapp/src/components/admin/finops-*",
+      "apps/reference-dapp/src/server/copilot-metrics*",
+      "packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql"
+    ],
+    "keywords": [
+      "finops",
+      "unit economics",
+      "provider costs",
+      "billing import",
+      "cost attribution",
+      "gross margin",
+      "revenue reconciliation",
+      "budget anomaly",
+      "cost per workflow",
+      "ai provider fallback",
+      "model fallback",
+      "openai fallback",
+      "anthropic fallback",
+      "openai provider fallback",
+      "openai model provider fallback",
+      "anthropic provider fallback",
+      "anthropic model provider fallback",
+      "copilot provider fallback"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/openai/openai-python/0d50c9daece1a4a0f4920f64b5ff90846b4e2050/src/openai/types/responses/response_usage.py",
+      "publisher": "OpenAI",
+      "kind": "OFFICIAL_SDK",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "0d50c9daece1a4a0f4920f64b5ff90846b4e2050",
+      "reviewedDigest": "sha256:202f0ed5af03395319f28db230665599b294457bb9e8f9d6c6181da5b6bb3923",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Responses usage and cache token categories. Apache-2.0 LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://vercel.com/docs/functions/usage-and-pricing",
+      "publisher": "Vercel",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:71af705885794b342f0b6f53964d1d3b1b65abc68294b59ef86b95f0861a6a78",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Functions billing meters. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://docs.railway.com/pricing/understanding-your-bill",
+      "publisher": "Railway",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:ea58fe75b2f03a49c83c96c0222aea7c0543745177d0ea66cc78321d898e708f",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Plan and resource invoice structure. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://neon.com/docs/introduction/plans",
+      "publisher": "Neon",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:a05a3904323791f5984b1a15abc5afcba997b25e6a2a5db4f42a180951a01e22",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Plan and resource categories. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs",
+      "publisher": "OpenAI",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:46c338216999822b397b14a7a519b23a22d94e313d09a0061a9a2a83c6305099",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Organization Costs API dimensions. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:3c91f16ff4b16eff1f5f1b35635bcf779030d77519aa501a765026c60a223bd7",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}
