@@ -7,6 +7,7 @@ import { reviewFixture, reviewNow, reviewSpender } from '../test-utils/review-fi
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from '../domain/execution-lifecycle';
 import { canvasAddCommand } from '../domain/canvas-authoring';
 import { editorReducer, initialEditor } from '../domain/editor';
+import { lifecycleCanvasExecution } from '../domain/canvas-execution';
 vi.mock('./simulate-workflow-canvas', () => ({ SimulateWorkflowCanvas: ({ workflowName, stage, primaryAction }: { workflowName: string; stage: string; primaryAction: ReactNode }) => createElement('section', { 'aria-label': stage === 'execute' ? 'Execution plan' : 'Workflow simulation' }, workflowName, primaryAction) }));
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(reviewNow); });
 afterEach(() => vi.useRealTimers());
@@ -247,5 +248,37 @@ describe('P0 hotfix (execution continuity): a step-by-step workflow continues in
     const html = render({ ...data, detailsOnly: true, progress: live, workflowProgress: progress(1, ['RECONCILED', 'AWAITING_AUTHORIZATION']) });
     expect(html).toContain('1 of 2 steps completed'); expect(html).not.toContain('steps confirmed');
     expect(html).toContain('data-workflow-progress="1/2"');
+  });
+});
+
+describe('BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a live run stays on the Canvas', () => {
+  function liveRun(state: string): ExecuteWorkspaceProps {
+    const data = fixture(), hash = '0x' + 'a'.repeat(64);
+    const run = 'run' in data.source.state ? data.source.state.run : {};
+    const source = { ...data.source, state: { ...data.source.state, run: { ...run, attempts: [{ step: 'swap', state, txHash: ['PENDING', 'CONFIRMED', 'REVERTED'].includes(state) ? hash : null }] } } } as ExecutionLifecycleSource;
+    const progress = projectExecutionLifecycle(data.workflow, data.context, source);
+    return { ...data, source, progress, execution: { ...data.execution, started: true, check: vi.fn() }, canvasExecution: lifecycleCanvasExecution(data.workflow, progress) };
+  }
+  it('keeps the Canvas as the execution view with its actions; the step timeline is collapsed under Execution details', () => {
+    const data = liveRun('PENDING'), html = render(data);
+    expect(data.canvasExecution).not.toBeNull();
+    expect(html).toContain('<section aria-label="Execution plan">Approved strategy');
+    expect(html).toContain('class="execute-live-canvas"');
+    expect(html).toMatch(/<details class="shell-details execution-details-disclosure"><summary>Execution details/);
+    // Everything the timeline recorded stays reachable (hashes, step progression) inside the disclosure.
+    expect(html).toContain('aria-label="Execution details"'); expect(html).toContain('Workflow step progression'); expect(html).toContain('0xaaaaaa…aaaaaa');
+    // The recovery / confirmation control stays on the Canvas, once.
+    expect(html.match(/>Check confirmation</g)).toHaveLength(1);
+    expect(html).not.toContain('>Authorize in wallet<'); expect(data.execution.start).not.toHaveBeenCalled();
+  });
+  it('opens the details at once when the outcome needs attention or a result exists', () => {
+    for (const state of ['REVERTED', 'UNKNOWN', 'CONFIRMED']) expect(render(liveRun(state))).toMatch(/<details class="shell-details execution-details-disclosure" open="">/);
+  });
+  it('keeps the timeline as the view when the record does not cover this Canvas workflow (another revision, or none)', () => {
+    const data = liveRun('PENDING');
+    for (const canvasExecution of [null, { ...data.canvasExecution!, revision: data.workflow.revision + 1 }]) {
+      const html = render({ ...data, canvasExecution });
+      expect(html).not.toContain('execution-details-disclosure'); expect(html).toContain('Workflow step progression'); expect(html).toContain('aria-label="Execution plan"');
+    }
   });
 });

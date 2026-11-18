@@ -157,6 +157,11 @@ export type EditorRunPhase = 'idle' | 'reviewing' | 'reviewed' | 'authorizing' |
 export type EditorWorkflowRunState = {
   readonly available: boolean; readonly phase: EditorRunPhase; readonly review: EditorExecutionReview | null; readonly error: string | null;
   readonly run: RunView | null;
+  /**
+   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the Canvas workflow (id and revision) this tab's OWN shown run was authorized for, from its stored
+   * record; null for no run, or an earlier visit's run being followed. Read-only presentation input (`domain/canvas-execution.ts`).
+   */
+  readonly authorizedFor?: { readonly workflowId: string; readonly revision: number } | null;
   /** What the wallet would be asked that the owner has not accepted in this tab: a minimum below the accepted one, or (no Review in memory,
    *  e.g. after a reload, or a step quoted only when due) a minimum or recipient never shown. Confirmed before the wallet is asked.
    *  Review UX1 (ADR-0010): `fee` — a Circle-paid group's USDC cap above the one the owner accepted (`code` CIRCLE_FEE_CAP_ROSE_CONFIRM, `index`
@@ -708,7 +713,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const grouped = Boolean(review && review.mode !== 'STEP_BY_STEP' && !review.refusal);
   // A followed earlier run is this tab's view only: it never counts as THIS workflow's run (its primary action and Review stay its own).
   const ownRun = Boolean(approvalId) && !following;
-  return { available: available && enabled, phase, review, error, run, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
+  const authorizedFor = ownRun && run && authorizedRevision.current !== null ? { workflowId: shownWorkflow.current, revision: authorizedRevision.current } : null;
+  return { available: available && enabled, phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
     canReview: available && enabled && evmWorkflow && !approvalId,
     visible: available && (enabled || Boolean(approvalId) || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
     stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)

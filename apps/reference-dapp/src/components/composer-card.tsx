@@ -32,6 +32,8 @@ import { ProposalReviewArtifact } from './proposal-review';
 import { usdLine, type UsdLine } from '../domain/usd-estimate';
 import type { CanvasCardParam } from '../domain/canvas-card-summary';
 import type { CardStatus } from '../domain/editor-overview';
+import type { CanvasNodeExecution } from '../domain/canvas-execution';
+import { CanvasExecutionBadge } from './canvas-execution-badge';
 
 export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void;
   /**
@@ -528,6 +530,11 @@ export type ComposerCardData = {
    * network. The card then shows as a draft: amber border, a dashed "Network?" chip, no received amount, and where to choose the network.
    */
   networkPending?: boolean;
+  /**
+   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: this step's execution state, from the authoritative record of the run on this exact workflow
+   * (`domain/canvas-execution.ts`). Presentation only: a border, a tint and a compact badge; the card's content, size and position are unchanged.
+   */
+  execution?: CanvasNodeExecution;
 } & ({ inspection: true } | { inspection?: false; validation: ReturnType<typeof composerNodeState> });
 
 /** Shared UX-002 card; inspection has no authoring or simulation-result status. */
@@ -646,8 +653,11 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const networkPending = !card.inspection && (Boolean(card.networkPending) || !card.summary.chain.trim() || card.summary.chain.trim() === 'Network not specified');
   // The provider · network line names networks without chain numbers (`Uniswap · Base`).
   const chainLabel = card.summary.chain.split(' → ').map(side => side.replace(/ \(\d+\)$/, '').trim()).join(' → ');
-  const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind} data-network-pending={networkPending || undefined}>
+  const execution = card.execution && card.execution.visual !== 'waiting' ? card.execution : undefined;
+  const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind} data-network-pending={networkPending || undefined}
+    data-execution={card.execution?.visual}>
       <Handle id="input" type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={!card.inspection && Boolean(card.connectable)}/>
+      {execution && <CanvasExecutionBadge execution={execution}/>}
       <div className="composer-card-head">
       <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
       {poolCard ? null : <span className="composer-metadata">

@@ -13,6 +13,11 @@ import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
+import { CANVAS_VISUAL_LABEL, canvasExecutionFor, edgeExecution, type CanvasEdgeVisual, type CanvasExecution } from '../domain/canvas-execution';
+
+/** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a connection's stroke for its execution state (the existing neutral line while waiting). */
+export const EDGE_STROKE: Readonly<Record<CanvasEdgeVisual, string>> = Object.freeze({ waiting: 'var(--edge-line)', active: 'var(--canvas-exec-active)',
+  done: 'var(--canvas-exec-done)', attention: 'var(--canvas-exec-attention)', failed: 'var(--canvas-exec-failed)' });
 
 const FIT_PADDING = { top: '32px', bottom: '136px', left: '32px', right: '32px' } as const;
 /** BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: the fitted workflow always ends above the bottom controls, whatever their measured height (a step
@@ -80,14 +85,21 @@ function InspectionViewport({ onState, padding }: { onState: (value: 'pending' |
  * frame is wide enough for both at a readable card size, under it otherwise (a CSS container query on the frame, so the first paint is final and
  * no script measures the window). One frame, one page scroll: never a third column between the Canvas and the FloFi Assistant, never over a card.
  */
-export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 'simulate', dock, dockLabel = 'Review', foot = true }: { workflowName: string; primaryAction?: ReactNode;
+export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 'simulate', dock, dockLabel = 'Review', foot = true, execution: executionInput = null, footNote = null }: { workflowName: string; primaryAction?: ReactNode;
   stage?: 'simulate' | 'execute'; dock?: ReactNode;
+  /**
+   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution of THIS workflow (its exact id and revision; anything else is ignored). The same
+   * cards and connections then show each step's state; their content, positions and sizes are unchanged and no live quote is requested.
+   */
+  execution?: CanvasExecution | null;
+  /** A short line the frame's caption shows while the execution is live (e.g. a restored run that sends nothing). */ footNote?: ReactNode;
   /** The frame's caption line ("Execution plan · Configured on the Canvas"); off where the docked Review already says what runs (board 06). */ foot?: boolean;
   /** The docked panel's landmark name; null when the docked content already names itself (e.g. Execute's status panel). */ dockLabel?: string | null }) {
   const { t: tr } = useLocale();
   const { state, context, canvasLayout, reviewError, actionSetup } = useWorkflow();
   const workflow = state.workflow;
   const actions = composerActions(workflow);
+  const execution = canvasExecutionFor(executionInput, workflow);
   const incomplete = Boolean(reviewError);
   const lending = isLendingComposition(workflow);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P0-07): swap and bridge steps show the same shared live quote as Build (display only).
@@ -100,22 +112,29 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     const setup = actionSetup ? canvasLayout?.[actionSetup.id] : undefined;
     return shownCanvasPositions(composerActions(workflow), canvasLayout ?? {}, { lending: isLendingComposition(workflow), occupied: setup ? [setup] : [] });
   }, [workflow, canvasLayout, actionSetup, narrow]);
-  const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => ({
-    id: node.nodeId, type: 'workflow', ariaLabel: tr('Step {0}: {1}', index + 1, tr(composerSummary(workflow, node, context).action)),
+  const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => {
+    const step = execution?.nodes[node.nodeId];
+    const name = tr('Step {0}: {1}', index + 1, tr(composerSummary(workflow, node, context).action));
+    return { id: node.nodeId, type: 'workflow', ariaLabel: step && step.visual !== 'waiting' ? `${name} · ${tr(CANVAS_VISUAL_LABEL[step.visual])}` : name,
     position: positions[node.nodeId]!,
     data: { composer: true, inspection: true, step: index + 1, selected: false, vertical: lending || narrow,
       summary: composerSummary(workflow, node, context),
+      ...execution ? { execution: step ?? { visual: 'waiting', phase: null, text: { key: 'Waiting', args: [] } } } : {},
       // P0 workflow execution: Execute shows the same per-step quote as Create and Simulate (keyed by the step alone, so it is the cached answer,
       // not a new one), marked as an estimate or as expired — never a blank '—' for a value FloFi already knows. Signing never uses it.
-      ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
-        estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} },
-  })), [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr]);
+      // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: once the workflow executes, the cards ask for no live quote (no request while it runs).
+      ...!execution && ['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
+        estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} } };
+  }), [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution]);
   // BUILD-FLOFI-BUILDER-UX-002: the same link labels as the Build Canvas, so a link reads the same between Create and Simulate.
-  const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target, label }) => ({
-    id, source, target, type: 'default', animated: false, label: tr(edgeLabel(label)), ariaLabel: tr(edgeAccessibleLabel(label)),
-    markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: 'var(--edge-line)' },
-    style: { stroke: 'var(--edge-line)', strokeWidth: 1.5 }, ...CANVAS_EDGE_LABEL,
-  })), [workflow, incomplete, tr]);
+  const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target, label }) => {
+    // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the same connection, colored by its dependency's record (never by position or order).
+    const visual = execution ? edgeExecution(execution, source, target) : 'waiting';
+    return { id, source, target, type: 'default', animated: false, label: tr(edgeLabel(label)), ariaLabel: tr(edgeAccessibleLabel(label)),
+      ...execution ? { className: `canvas-execution-edge canvas-execution-edge-${visual}`, data: { execution: visual } } : {},
+      markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: EDGE_STROKE[visual] },
+      style: { stroke: EDGE_STROKE[visual], strokeWidth: visual === 'waiting' ? 1.5 : 2 }, ...CANVAS_EDGE_LABEL };
+  }), [workflow, incomplete, tr, execution]);
   const [viewport, setViewport] = useState<'pending' | 'fitted'>('pending');
   const controls = useRef<HTMLDivElement>(null);
   const [controlsHeight, setControlsHeight] = useState(0);
@@ -135,7 +154,8 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   const surfaceStyle = useMemo<CSSProperties | undefined>(() => docked || narrow
     ? { minHeight: `${parseInt(padding.bottom, 10) + parseInt(padding.top, 10) + (rows - 1) * CANVAS_ROW + READABLE_CARD_HEIGHT_PX}px` } : undefined, [docked, narrow, padding, rows]);
   return <section ref={frame} className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}
-    data-docked={dock ? '' : undefined} data-steps={nodes.length} data-narrow={narrow ? '' : undefined} style={{ '--canvas-steps': nodes.length } as CSSProperties}>
+    data-docked={dock ? '' : undefined} data-steps={nodes.length} data-narrow={narrow ? '' : undefined} data-execution={execution ? execution.settled ? 'settled' : 'live' : undefined}
+    style={{ '--canvas-steps': nodes.length } as CSSProperties}>
     <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length === 1 ? '1 step' : '{0} steps', actions.length)}</span></div>
     <div className="simulate-canvas-body">
     <div className="flow-surface simulate-flow-surface" style={surfaceStyle} role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
@@ -157,6 +177,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     </div>
     {dock && (dockLabel ? <aside className="canvas-review-dock" aria-label={tr(dockLabel)}>{dock}</aside> : <div className="canvas-review-dock">{dock}</div>)}
     </div>
-    {foot && <div className="canvas-foot"><span>{tr(stage === 'execute' ? 'Execution plan' : 'Workflow preview')}</span><span>{tr("Configured on the Canvas")}</span></div>}
+    {foot && <div className="canvas-foot"><span>{tr(execution ? execution.settled ? 'Execution result' : 'Live execution' : stage === 'execute' ? 'Execution plan' : 'Workflow preview')}</span>
+      {execution && footNote ? <span className="canvas-execution-note">{footNote}</span> : <span>{tr("Configured on the Canvas")}</span>}</div>}
   </section>;
 }
