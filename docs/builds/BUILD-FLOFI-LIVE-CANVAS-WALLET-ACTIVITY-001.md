@@ -59,8 +59,9 @@ not mean there is none."). No network is ever presented as an empty history when
 ### Integrity
 
 - Only verified catalog assets are named (symbol and decimals from FloFi's catalogs, never from the provider); other tokens and decimal mismatches
-  are counted as hidden (spam protection). Each hidden movement carries a token-free key (chain, transaction, direction, log position or ordinal),
-  so a movement read again on a later page is counted once.
+  are counted as hidden (spam protection). Each hidden movement carries a token-free key (chain, transaction, direction, and its EVM log
+  position or its ordinal among the Solana transaction's changed balances, independent of the catalog of the moment), so a movement read again
+  on a later page, or by another server instance, is counted once.
 - A transaction that both sends and receives the wallet's assets (swap, liquidity, bridge leg) is one **Contract interaction**, never two transfers —
   also when the other side is an unverified (hidden) token: the page carries the direction of each hidden movement (`hiddenMoves`, never the token),
   so selling a memecoin for USDC is never shown as "Received USDC"; mint/burn and self-transfers are labeled; sender/recipient only where the chain
@@ -78,14 +79,18 @@ not mean there is none."). No network is ever presented as an empty history when
   clear and cannot be forged to drive provider reads.
 - No silent gaps: incoming and outgoing (and each Solana address) are read as separate streams, so a page is complete only strictly after the
   newest of the oldest times read on streams with more history (`completeAfter`); rows at or before it wait for the next page ("N older
-  movements appear when more activity is loaded"), since movements of one block or second can straddle a page. A Solana signature without a
-  block time takes the nearest newer one; an address whose signatures carry none holds the whole page back. Legs of one transaction that arrive on different pages are re-classified together (a swap is never two transfers). A
+  movements appear when more activity is loaded"), since movements of one block or second can straddle a page. A stream whose page carries no
+  time (an empty EVM page with a continuation, a Solana signature without a block time and no transaction time) keeps the previous page's bound,
+  carried in the authenticated continuation; only a first page with no time at all holds every row back. A network an earlier page read to the
+  end is not gated or read again, so a later gate failure can never call it "could not be loaded". Legs of one transaction that arrive on different pages are re-classified together (a swap is never two transfers). A
   Solana address continues after the last signature of the contiguous run of its list a page shows, so a page cut through a same-slot pair
   never skips a signature. Coverage across pages: a later read clears a network's "could not be loaded" note (and a later failure shows it), but
   a partial-coverage note of any page listed stays, in its own words per code (internal transfers, token-account limit, unreadable
-  transaction). Retry repeats exactly the request that failed (a failed refresh re-reads the newest, never the next page). A refusal meaning
+  transaction); Solana reports every reason that applies, not only the first. Retry repeats exactly the request that failed (a failed refresh re-reads the newest, never the next page). A refusal meaning
   FloFi no longer reads this wallet for this browser — not verified here (`ACTIVITY_SIGN_IN_REQUIRED`), session ended, another account, access
-  revoked, wallet not linked (`BETA_*` except the retryable access check) — clears what was loaded and names the reason.
+  revoked, wallet not linked (`BETA_*` except the retryable access check) — clears what was loaded and shows the Flight gate's own title and next
+  step (Sign in, Open Credentials, Open Board). The gate checks every wallet proven in this browser, so the panel never claims the refusal is
+  about the wallet on screen; Retry is hidden where nothing can change (access ended or closed).
 - Solana Token-2022 mints whose display amount differs from their base amount (Scaled UI Amount, interest-bearing) are counted as hidden instead of
   shown with a base-unit amount; a transaction the node cannot return marks Solana PARTIAL.
 

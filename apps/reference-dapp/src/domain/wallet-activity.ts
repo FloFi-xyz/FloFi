@@ -36,7 +36,9 @@ export type WalletTransfer = {
  * network is not enabled on this deployment.
  */
 export type ActivityCoverage = { readonly network: ActivityNetworkId; readonly name: string; readonly status: 'COVERED' | 'PARTIAL' | 'UNSUPPORTED' | 'UNAVAILABLE' | 'OFF';
-  readonly code: string | null; readonly covers: readonly ActivityCategory[]; readonly missing: readonly ActivityCategory[] };
+  readonly code: string | null;
+  /** Every reason a PARTIAL network is partial, when there are several (`code` is the first). */ readonly codes?: readonly string[];
+  readonly covers: readonly ActivityCategory[]; readonly missing: readonly ActivityCategory[] };
 export type WalletActivityPage = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: readonly ActivityCoverage[];
   /** Opaque continuation (null: nothing more on any covered network). */ readonly cursor: string | null;
   /**
@@ -97,7 +99,8 @@ const READ_STATUS: readonly ActivityCoverage['status'][] = ['COVERED', 'PARTIAL'
 export function mergeCoverage(state: CoverageState | null, page: readonly ActivityCoverage[]): CoverageState {
   const current = state ? state.current.map(c => page.find(p => p.network === c.network && READ_STATUS.includes(p.status)) ?? c) : [...page];
   const gaps = [...state?.gaps ?? []];
-  for (const p of page) if (p.status === 'PARTIAL' && !gaps.some(g => g.network === p.network && g.code === p.code)) gaps.push(p);
+  for (const p of page) if (p.status === 'PARTIAL') for (const code of p.codes?.length ? p.codes : [p.code])
+    if (!gaps.some(g => g.network === p.network && g.code === code)) gaps.push({ ...p, code });
   return { current, gaps };
 }
 

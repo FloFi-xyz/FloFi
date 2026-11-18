@@ -31,7 +31,7 @@ import { defaultMode, type PortfolioMode } from './wallet-portfolio.ts';
 import { cloudFlow } from './flow-runtime.ts';
 import { TEST_NETWORK_FLOW_REFUSAL } from './test-network-flows.ts';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog.ts';
-import { classifyLegs, hiddenMoveKey, type ActivityCategory, type ActivityCoverage, type ActivityLeg, type ActivityNetworkId, type WalletActivityPage,
+import { ACTIVITY_NETWORKS, classifyLegs, hiddenMoveKey, type ActivityCategory, type ActivityCoverage, type ActivityLeg, type ActivityNetworkId, type WalletActivityPage,
   type WalletTransfer } from '../domain/wallet-activity.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -91,12 +91,17 @@ type Streams = Readonly<Record<string, string | null>>;
  */
 export const activityCursorKey = (env: Env): Buffer => Buffer.from(hkdfSync('sha256', walletSessionKey(env), 'flofi', 'flofi/wallet-activity-cursor/v1', 32));
 const cursorMac = (key: Uint8Array, account: string, body: string) => createHmac('sha256', key).update(`flofi.wallet-activity-cursor.v2\0${account}\0${body}`).digest().subarray(0, 18);
-export function encodeCursor(account: string, streams: Streams, key: Uint8Array): string {
-  const body = Buffer.from(JSON.stringify({ v: 2, s: streams })).toString('base64url');
+/** `frontier`: the page's `completeAfter` (epoch ms), the bound a later page falls back to for a stream whose page carries no time. */
+export function encodeCursor(account: string, streams: Streams, key: Uint8Array, frontier: number | null = null): string {
+  const body = Buffer.from(JSON.stringify({ v: 2, s: streams, ...frontier === null ? {} : { f: frontier } })).toString('base64url');
   return `${body}.${cursorMac(key, account, body).toString('base64url')}`;
 }
 /** A continuation is bounded in size, authenticated for its wallet and validated; anything else is refused (never reinterpreted). */
 export function decodeCursor(cursor: string | null | undefined, account: string, key: Uint8Array): Streams | null {
+  return openCursor(cursor, account, key)?.streams ?? null;
+}
+type Continuation = { readonly streams: Streams; readonly frontier: number | null };
+function openCursor(cursor: string | null | undefined, account: string, key: Uint8Array): Continuation | null {
   if (cursor === null || cursor === undefined || cursor === '') return null;
   const [body, mac, extra] = cursor.split('.');
   if (cursor.length > MAX_CURSOR || extra !== undefined || !body || !mac || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]{24}$/.test(mac)) throw new Error('ACTIVITY_CURSOR_INVALID');
@@ -104,15 +109,16 @@ export function decodeCursor(cursor: string | null | undefined, account: string,
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new Error('ACTIVITY_CURSOR_INVALID');
   let value: unknown;
   try { value = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch { throw new Error('ACTIVITY_CURSOR_INVALID'); }
-  const v = value as { v?: unknown; s?: unknown };
+  const v = value as { v?: unknown; s?: unknown; f?: unknown };
   if (!v || v.v !== 2 || !v.s || typeof v.s !== 'object' || Array.isArray(v.s)) throw new Error('ACTIVITY_CURSOR_INVALID');
+  if (v.f !== undefined && !(typeof v.f === 'number' && Number.isSafeInteger(v.f) && v.f >= 0 && v.f <= UNKNOWN_TIME)) throw new Error('ACTIVITY_CURSOR_INVALID');
   const streams: Record<string, string | null> = {};
   for (const [key, page] of Object.entries(v.s as Record<string, unknown>)) {
     if (!/^(ethereum|base|arbitrum-one):(IN|OUT)$|^solana:[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(key) || !(page === null || page === FROM_NEWEST || typeof page === 'string' && (PAGE_KEY.test(page) || SIGNATURE.test(page))))
       throw new Error('ACTIVITY_CURSOR_INVALID');
     streams[key] = page;
   }
-  return streams;
+  return { streams, frontier: typeof v.f === 'number' ? v.f : null };
 }
 
 /**
@@ -186,7 +192,9 @@ type ReadResult = { readonly legs: ActivityLeg[]; readonly hiddenMoves: string[]
   readonly coverage: ActivityCoverage; readonly frontier: number | null };
 const later = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
 
-async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: AlchemyCall, catalog: Promise<AssetCatalog>, previous: Streams | null, signal: AbortSignal): Promise<ReadResult> {
+/** `previousFrontier`: the previous page's bound, for a stream with more history whose page carries no time (see `completeAfter`). */
+async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: AlchemyCall, catalog: Promise<AssetCatalog>, previous: Streams | null, signal: AbortSignal,
+  previousFrontier: number | null = null): Promise<ReadResult> {
   const runtime = CATALOG_NETWORKS[network];
   const listed = await catalog;
   const native = listed.assets.find(asset => asset.kind === 'NATIVE');
@@ -205,9 +213,11 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
     // A continuation the provider sends must be usable: one that is not is a malformed answer, never "no more history".
     if (value.pageKey !== undefined && value.pageKey !== null && !(typeof value.pageKey === 'string' && PAGE_KEY.test(value.pageKey))) throw new Error('ACTIVITY_PROVIDER_INVALID');
     streams[key] = typeof value.pageKey === 'string' ? value.pageKey : null;
+    // A stream with more history bounds the page by the oldest time it read; one whose page carries no time (empty, or without timestamps)
+    // keeps the previous page's bound (it has read nothing newer), or holds the whole page back on a first page.
     if (streams[key]) {
       const oldest = (value.transfers as AlchemyTransfer[]).map(t => typeof t.metadata?.blockTimestamp === 'string' ? Date.parse(t.metadata.blockTimestamp) : NaN).filter(Number.isFinite);
-      if (oldest.length) frontier = later(frontier, Math.min(...oldest));
+      frontier = later(frontier, oldest.length ? Math.min(...oldest) : previousFrontier ?? UNKNOWN_TIME);
     }
     for (const raw of value.transfers as AlchemyTransfer[]) {
       const hash = typeof raw.hash === 'string' && HASH.test(raw.hash) ? raw.hash.toLowerCase() : null;
@@ -258,7 +268,8 @@ type SolanaTransaction = { slot?: unknown; blockTime?: unknown; meta?: { err?: u
   preTokenBalances?: unknown; postTokenBalances?: unknown; innerInstructions?: unknown } | null; transaction?: { message?: { accountKeys?: unknown; instructions?: unknown } } };
 const integer = (value: unknown): bigint | null => typeof value === 'number' && Number.isSafeInteger(value) ? BigInt(value) : typeof value === 'string' && /^\d{1,30}$/.test(value) ? BigInt(value) : null;
 
-async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<SolanaAssetCatalog>, previous: Streams | null, signal: AbortSignal): Promise<ReadResult> {
+async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<SolanaAssetCatalog>, previous: Streams | null, signal: AbortSignal,
+  previousFrontier: number | null = null): Promise<ReadResult> {
   // The catalog loads (or is served from its process cache) while the token accounts are read.
   const verifiedLoad = catalog.then(value => new Map(value.assets.map(asset => [asset.mint, asset] as const)));
   verifiedLoad.catch(() => undefined);
@@ -304,25 +315,23 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
   // Each address continues after the last signature of the CONTIGUOUS run of its list this page shows (from its newest): a signature after a gap
   // (a same-slot tie the page cut through) is read again next time, never skipped; repeated ones are deduplicated by id.
   const onPage = new Set(page.map(item => item.signature));
-  let frontier: number | null = null;
+  /** Per address with more history: the index of the signature that bounds the page (see the frontier below). */
+  const edges: { own: typeof found; edge: number }[] = [];
   for (const source of sources) {
     const key = `solana:${source}`;
     if (streams[key] === null) continue;
     const own = found.filter(item => item.source === source), cut = own.findIndex(item => !onPage.has(item.signature));
     streams[key] = cut === -1 ? exhausted.has(source) ? null : own.at(-1)?.signature ?? null : cut === 0 ? previous?.[key] ?? FROM_NEWEST : own[cut - 1]!.signature;
-    // Complete only after the newest of the oldest times read on addresses with more history (see `completeAfter`): an address read through
-    // entirely is complete after its oldest read signature; one the page cut, after its first signature not shown. A signature without a block
-    // time takes the nearest newer one read (more conservative); an address with none at all holds the whole page back.
-    if (!streams[key]) continue;
-    const edge = cut === -1 ? own.length - 1 : cut;
-    frontier = later(frontier, own.slice(0, edge + 1).reverse().find(item => item.time !== null)?.time ?? UNKNOWN_TIME);
+    if (streams[key]) edges.push({ own, edge: cut === -1 ? own.length - 1 : cut });
   }
+  const blockTimes = new Map<string, number>();
   const legs: ActivityLeg[] = [], hiddenMoves: string[] = [];
   let unreadable = 0;
   for (const item of page) {
     if (item.failed) continue;
     checkAborted(signal);
     const tx = await rpc('getTransaction', [item.signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]) as SolanaTransaction | null;
+    if (typeof tx?.blockTime === 'number') blockTimes.set(item.signature, tx.blockTime * 1000);
     // A transaction the node cannot return yet (or returns malformed) is reported (PARTIAL), never silently treated as no movement.
     if (!tx?.meta) { unreadable++; continue; }
     if (tx.meta.err) continue;
@@ -360,13 +369,15 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
       const current = deltas.get(b.mint) ?? { delta: 0n, decimals: b.uiTokenAmount.decimals, scaled: false };
       deltas.set(b.mint, { delta: current.delta + sign * amount, decimals: current.decimals, scaled: current.scaled || scaled });
     }
-    let hiddenInTransaction = 0;
+    let ordinal = 0;
     for (const [mint, { delta, decimals, scaled }] of deltas) {
       if (delta === 0n) continue;
+      // Every changed balance takes its ordinal in the order the node stores them (fixed for a transaction), whether it is shown or not: a
+      // hidden movement's key never depends on the catalog of the moment, and never names its mint.
+      const position = ordinal++;
       const known = verified.get(mint);
-      // Counted by its ordinal within the transaction (the node returns its balances in a fixed order), never by its mint.
       if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals || scaled) {
-        hiddenMoves.push(hiddenMoveKey(base.chain, item.signature, delta > 0n ? 'IN' : 'OUT', String(hiddenInTransaction++))); continue; }
+        hiddenMoves.push(hiddenMoveKey(base.chain, item.signature, delta > 0n ? 'IN' : 'OUT', String(position))); continue; }
       const transfer = instructions.find(ix => (ix.program === 'spl-token' || ix.program === 'spl-token-2022') && ['transfer', 'transferChecked'].includes(String(ix.parsed?.type))
         && (ix.parsed?.info?.mint === undefined || ix.parsed.info.mint === mint)
         && (delta > 0n ? ownerOf.get(String(ix.parsed?.info?.destination)) === owner : ownerOf.get(String(ix.parsed?.info?.source)) === owner || ix.parsed?.info?.authority === owner));
@@ -376,10 +387,19 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
         amount: (delta > 0n ? delta : -delta).toString(), counterparty: other && BASE58.test(other) && other !== owner ? other : null, from: null, to: null });
     }
   }
-  const limited = accounts.length > SOLANA_MAX_TOKEN_ACCOUNTS;
-  const partial = limited ? 'SOLANA_TOKEN_ACCOUNT_LIMIT' : unreadable ? 'SOLANA_TRANSACTION_UNREADABLE' : null;
-  return { legs, hiddenMoves, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: partial ? 'PARTIAL' : 'COVERED', code: partial,
-    covers: ['NATIVE', 'TOKEN'], missing: [] } };
+  // Complete only after the newest of the oldest times read on addresses with more history (see `completeAfter`): an address read through
+  // entirely is bounded by its oldest read signature; one the page cut, by its first signature not shown. A signature without a time takes the
+  // nearest newer one of its address (from the signature list or the transaction read), else the previous page's bound; only a first page with
+  // no time at all holds every row back.
+  let frontier: number | null = null;
+  for (const { own, edge } of edges) {
+    const bound = own.slice(0, edge + 1).reverse().map(item => item.time ?? blockTimes.get(item.signature) ?? null).find(time => time !== null);
+    frontier = later(frontier, bound ?? previousFrontier ?? UNKNOWN_TIME);
+  }
+  // Every reason the network is partial is reported (the History keeps each in its own words).
+  const reasons = [...accounts.length > SOLANA_MAX_TOKEN_ACCOUNTS ? ['SOLANA_TOKEN_ACCOUNT_LIMIT'] : [], ...unreadable ? ['SOLANA_TRANSACTION_UNREADABLE'] : []];
+  return { legs, hiddenMoves, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: reasons.length ? 'PARTIAL' : 'COVERED', code: reasons[0] ?? null,
+    ...reasons.length > 1 ? { codes: reasons } : {}, covers: ['NATIVE', 'TOKEN'], missing: [] } };
 }
 
 /**
@@ -413,13 +433,13 @@ const processCache: WalletActivityCache = new Map();
 export async function readWalletActivity(input: { readonly account: string; readonly cursor?: string | null }, env: Env = process.env, seams: WalletActivitySeams = {}): Promise<WalletActivityPage> {
   const account = activityAccount(input.account);
   const cursorKey = seams.cursorKey ?? activityCursorKey(env);
-  const previous = decodeCursor(input.cursor, account.address, cursorKey);
+  const continuation = openCursor(input.cursor, account.address, cursorKey);
   const cache = seams.cache === undefined ? env === process.env ? processCache : null : seams.cache;
   const key = `${account.address}|${input.cursor ?? ''}`, now = Date.now();
   const hit = cache?.get(key);
   if (hit && now - hit.at < hit.ttlMs) return hit.value;
   admitRead(account.address, now, seams.limiter ?? (env === process.env ? recentReads : new Map()));
-  const value = readUncached(account, previous, env, seams, cursorKey);
+  const value = readUncached(account, continuation, env, seams, cursorKey);
   if (cache) {
     if (cache.size >= CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
     // Joined by every reader while in flight (however long its networks take within their budgets); once settled it stays fresh for 30 s
@@ -431,13 +451,19 @@ export async function readWalletActivity(input: { readonly account: string; read
   return value;
 }
 
-async function readUncached(account: ActivityAccount, previous: Streams | null, env: Env, seams: WalletActivitySeams, cursorKey: Uint8Array): Promise<WalletActivityPage> {
+async function readUncached(account: ActivityAccount, continuation: Continuation | null, env: Env, seams: WalletActivitySeams, cursorKey: Uint8Array): Promise<WalletActivityPage> {
+  const previous = continuation?.streams ?? null, previousFrontier = continuation?.frontier ?? null;
   const nowDate = (seams.now ?? (() => new Date()))(), budget = seams.budgetMs ?? BUDGET_MS;
   const harness = env.GRYLOO_WALLET_ACTIVITY_HARNESS === 'MOCKED_LOOPBACK_ONLY' && !isHostedDeployment(env);
   if (harness) return mockedActivity(account, nowDate);
   const mode = seams.mode ?? ((network: ActivityNetworkId, signal: AbortSignal) => activityGate(network, env, signal));
   const alchemy = seams.alchemy === undefined ? alchemyTransport(env) : seams.alchemy;
-  const networks: readonly ActivityNetworkId[] = account.ecosystem === 'evm' ? ['ethereum', 'base', 'arbitrum-one', 'robinhood'] : ['solana'];
+  // A network every stream of which an earlier page already read to the end is not read (nor gated) again: it has nothing more to list, and
+  // its earlier coverage stays as the History shows it.
+  const finished = (network: ActivityNetworkId) => Boolean(previous) && Object.keys(previous!).some(k => k.startsWith(`${network}:`))
+    && Object.entries(previous!).every(([k, v]) => !k.startsWith(`${network}:`) || v === null);
+  const networks: readonly ActivityNetworkId[] = (account.ecosystem === 'evm' ? ['ethereum', 'base', 'arbitrum-one', 'robinhood'] as const : ['solana'] as const)
+    .filter(network => !finished(network));
   // Each network's gate and read share its time budget: a slow gate can never hold the page past it.
   const results = await Promise.all(networks.map(network => withDeadline(async (signal): Promise<ReadResult | ActivityCoverage> => {
     let enabled: PortfolioMode;
@@ -449,12 +475,12 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
     if (network === 'solana') {
       const rpc = seams.solanaRpc ? seams.solanaRpc() : sharedSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_RPC_CONFIGURATION_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc);
       const catalog = seams.solanaCatalog ? seams.solanaCatalog() : loadSolanaCatalog();
-      return await readSolana(account.address, rpc, catalog, previous, signal);
+      return await readSolana(account.address, rpc, catalog, previous, signal, previousFrontier);
     }
     if (!alchemy) return unsupported(network, 'ACTIVITY_PROVIDER_NOT_CONFIGURED');
     const runtime = CATALOG_NETWORKS[network];
     const catalog = seams.evmCatalog ? seams.evmCatalog(network) : runtime.catalogFor('live')(runtime.chain);
-    return await readEvm(network, account.address, alchemy, catalog, previous, signal);
+    return await readEvm(network, account.address, alchemy, catalog, previous, signal, previousFrontier);
   }, budget, 'ACTIVITY_TIME_BUDGET_EXCEEDED').catch(error => unavailable(network, codeOf(error, 'ACTIVITY_READ_FAILED')))));
   const legs: ActivityLeg[] = [], hiddenMoves: string[] = [], coverage: ActivityCoverage[] = [], streams: Record<string, string | null> = {};
   let frontier: number | null = null;
@@ -463,12 +489,14 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
       frontier = later(frontier, result.frontier); }
     else coverage.push(result);
   }
-  // A network unavailable on this page keeps its continuation, so the next page tries it again.
-  if (previous) for (const [k, v] of Object.entries(previous)) if (!(k in streams) && coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))) streams[k] = v;
+  // A network unavailable on this page keeps its continuation, so the next page tries it again; a network already read to the end stays so.
+  if (previous) for (const [k, v] of Object.entries(previous)) if (!(k in streams) && (coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))
+    || v === null && ACTIVITY_NETWORKS.some(network => k.startsWith(`${network}:`) && finished(network)))) streams[k] = v;
   const more = Object.values(streams).some(v => v !== null);
   const moves = [...new Set(hiddenMoves)];
-  return { account: account.address, transfers: classifyLegs(legs, moves), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey) : null, hidden: moves.length, hiddenMoves: moves,
-    completeAfter: more && frontier !== null ? new Date(frontier).toISOString() : null,
+  const bound = more && frontier !== null ? frontier : null;
+  return { account: account.address, transfers: classifyLegs(legs, moves), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey, bound) : null, hidden: moves.length, hiddenMoves: moves,
+    completeAfter: bound === null ? null : new Date(bound).toISOString(),
     provenance: 'PUBLIC_MAINNET', observedAt: nowDate.toISOString() };
 }
 

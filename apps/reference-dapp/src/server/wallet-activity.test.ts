@@ -325,14 +325,18 @@ describe('review hardening (fix verification)', () => {
   const catalog: SolanaAssetCatalog = { assets: [{ symbol: 'USDC', name: 'USD Coin', mint, decimals: 6, native: false, logoUrl: null }], fetchedAt: '', source: 'test', contentSha256: '', excludedRecords: 0 };
   type Item = { signature: string; slot: number; err: null; blockTime?: number | null };
   /** A paged Solana stand-in: per-address signature lists honouring `before`; `spam` signatures received one unverified token. */
-  const solana = (walletList: Item[], ataList: Item[], spam: readonly string[] = []): SolanaRpc => async (method: string, params: readonly unknown[]) => {
+  /** `txTime`: the block time getTransaction returns (seconds; null: none); `balances`: the wallet's token balance changes per signature. */
+  const solana = (walletList: Item[], ataList: Item[], spam: readonly string[] = [], txTime: number | null = 1,
+    balances: Readonly<Record<string, readonly { mint: string; amount: string; decimals: number }[]>> = {}): SolanaRpc => async (method: string, params: readonly unknown[]) => {
     if (method === 'getTokenAccountsByOwner') return { value: (params[1] as { programId: string }).programId.startsWith('Tokenkeg') ? [{ pubkey: ata, account: { data: { parsed: { info: { mint, owner: wallet } } } } }] : [] };
     if (method === 'getSignaturesForAddress') {
       const list = params[0] === wallet ? walletList : ataList, options = params[1] as { before?: string; limit: number };
       return list.slice(options.before ? list.findIndex(item => item.signature === options.before) + 1 : 0).slice(0, options.limit);
     }
-    if (method === 'getTransaction') return { slot: 1, blockTime: 1, meta: { err: null, fee: 0, preBalances: [1, 0], postBalances: [1, 0],
-      preTokenBalances: [], postTokenBalances: spam.includes(params[0] as string) ? [{ accountIndex: 1, mint: spamMint, owner: wallet, uiTokenAmount: { amount: '5', decimals: 0 } }] : [] },
+    if (method === 'getTransaction') return { slot: 1, blockTime: txTime, meta: { err: null, fee: 0, preBalances: [1, 0], postBalances: [1, 0],
+      preTokenBalances: (balances[params[0] as string] ?? []).map(b => ({ accountIndex: 1, mint: b.mint, owner: wallet, uiTokenAmount: { amount: b.amount.startsWith('-') ? b.amount.slice(1) : '0', decimals: b.decimals } })),
+      postTokenBalances: spam.includes(params[0] as string) ? [{ accountIndex: 1, mint: spamMint, owner: wallet, uiTokenAmount: { amount: '5', decimals: 0 } }]
+        : (balances[params[0] as string] ?? []).map(b => ({ accountIndex: 1, mint: b.mint, owner: wallet, uiTokenAmount: { amount: b.amount.startsWith('-') ? '0' : b.amount, decimals: b.decimals } })) },
       transaction: { message: { accountKeys: [{ pubkey: 'Kk9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr' }, { pubkey: wallet }], instructions: [] } } };
     throw new Error('UNEXPECTED_' + method);
   };
@@ -352,12 +356,22 @@ describe('review hardening (fix verification)', () => {
     // The wallet has more history; its oldest read signature has no block time: the nearest newer one bounds the page.
     const walletList: Item[] = Array.from({ length: 11 }, (_, i) => ({ signature: sig('abcdefghijk'[i]!), slot: 100 - i, err: null, blockTime: i === 9 ? null : t(100 - i) }));
     const ataList: Item[] = [{ signature: sig('p'), slot: 60, err: null, blockTime: t(60) }, { signature: sig('q'), slot: 59, err: null, blockTime: t(59) }];
-    const page = await read(solana(walletList, ataList));
+    // (The transactions carry no time either here: the nearest newer signature of the address bounds the page.)
+    const page = await read(solana(walletList, ataList, [], null));
     expect(page.cursor).not.toBeNull();
     expect(page.completeAfter).toBe(new Date(t(92) * 1000).toISOString());
     // Without times at all, the address holds the whole page back rather than letting an older row through.
-    const blind = await read(solana(walletList.map(item => ({ ...item, blockTime: null })), ataList));
+    // Without a time in the signature list, the transaction read gives it (the edge was fetched).
+    const fromTransactions = await read(solana(walletList.map(item => ({ ...item, blockTime: null })), ataList, [], 1_763_000_500));
+    expect(fromTransactions.completeAfter).toBe(new Date(1_763_000_500 * 1000).toISOString());
+    // Without any time on a first page, every row waits; a later page keeps the previous page's bound instead of hiding what was shown.
+    const blind = await read(solana(walletList.map(item => ({ ...item, blockTime: null })), ataList, [], null));
     expect(Date.parse(blind.completeAfter!)).toBe(8.64e15);
+    const long: Item[] = Array.from({ length: 25 }, (_, i) => ({ signature: sig('abcdefghijkmnopqrstuvwxyz'[i]!), slot: 100 - i, err: null, blockTime: t(100 - i) }));
+    const bounded = await read(solana(long, ataList, [], null));
+    expect(bounded.completeAfter).toBe(new Date(t(91) * 1000).toISOString());
+    const later = await read(solana(long.map(item => ({ ...item, blockTime: null })), ataList, [], null), bounded.cursor);
+    expect(later.cursor).not.toBeNull(); expect(later.completeAfter).toBe(bounded.completeAfter);
   });
   it('Solana is enabled when either gate flow says so, even if the other cannot answer; unknown only when none says so', async () => {
     const signal = new AbortController().signal;
@@ -376,6 +390,77 @@ describe('review hardening (fix verification)', () => {
     const evm = mergeCoverage(mergeCoverage(null, [c('base', 'UNAVAILABLE'), c('robinhood', 'UNSUPPORTED')]), [c('base', 'PARTIAL', 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED'), c('robinhood', 'UNSUPPORTED')]);
     expect(evm.current.map(x => x.status)).toEqual(['PARTIAL', 'UNSUPPORTED']);
     expect(evm.gaps.map(x => x.code)).toEqual(['ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED']);
+  });
+});
+
+describe('review hardening (round 3)', () => {
+  const wallet = 'Fq9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const sig = (c: string) => c.repeat(88);
+  it('an EVM stream with more history whose page carries no time keeps the previous bound (rows never slip through a gap)', async () => {
+    let page = 0;
+    const alchemy: AlchemyCall = async (_network, params) => {
+      const direction = 'toAddress' in params ? 'IN' : 'OUT';
+      if (!params.pageKey) return direction === 'IN' ? { transfers: [transfer(1, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T10:00:00Z'), transfer(2, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T09:00:00Z')], pageKey: 'in-2' }
+        : { transfers: [transfer(3, owner, peer, 'erc20', 1n, USDC, 6, '2026-11-17T09:30:00Z')], pageKey: 'out-2' };
+      page++;
+      return direction === 'IN' ? { transfers: [transfer(4, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T08:00:00Z'), transfer(5, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T07:00:00Z')], pageKey: 'in-3' }
+        : { transfers: [], pageKey: 'out-3' };
+    };
+    const s = seams(alchemy, { mode: async n => n === 'base' ? 'live' : 'off' });
+    const first = await readWalletActivity({ account: owner }, {}, s);
+    expect(first.completeAfter).toBe('2026-11-17T09:30:00.000Z');
+    const second = await readWalletActivity({ account: owner, cursor: first.cursor }, {}, s);
+    expect(page).toBe(2);
+    // OUT read nothing newer on this page: the bound stays at 09:30, so 08:00 and 07:00 wait (an OUT movement at 08:30 may still come).
+    expect(second.completeAfter).toBe('2026-11-17T09:30:00.000Z');
+    expect(activityRows([...first.transfers, ...second.transfers], 'ALL', new Set(), second.completeAfter).map(r => r.transfer.transaction)).toEqual([h(1)]);
+  });
+  it('a network read to the end is not gated or read again, and stays finished; Solana reports every partial reason', async () => {
+    const gate = vi.fn(async (n: string) => n === 'base' || n === 'ethereum' ? 'live' as const : 'off' as const);
+    // Ethereum always has more history; Base is read to the end on the first page.
+    const alchemy: AlchemyCall = async (network, params) => network === 'ethereum' && 'toAddress' in params ? { transfers: [transfer(1, peer, owner, 'external', 1n, null, 18)], pageKey: 'more' }
+      : network === 'base' && 'toAddress' in params ? { transfers: [transfer(2, peer, owner, 'erc20', 1n, USDC)] } : { transfers: [] };
+    const first = await readWalletActivity({ account: owner }, {}, seams(alchemy, { mode: gate }));
+    expect(decodeCursor(first.cursor, owner, cursorKey)).toMatchObject({ 'base:IN': null, 'base:OUT': null, 'ethereum:IN': 'more' });
+    gate.mockClear();
+    const failing = vi.fn(async (n: string) => { if (n === 'base') throw new Error('gate down'); return n === 'ethereum' ? 'live' as const : 'off' as const; });
+    const second = await readWalletActivity({ account: owner, cursor: first.cursor }, {}, seams(alchemy, { mode: failing }));
+    // Base was finished: never gated again, so a failing gate cannot call it "could not be loaded"; its streams stay finished.
+    expect(failing.mock.calls.map(c => c[0])).not.toContain('base');
+    expect(second.coverage.map(c => c.network)).not.toContain('base');
+    expect(decodeCursor(second.cursor, owner, cursorKey)).toMatchObject({ 'base:IN': null, 'base:OUT': null });
+    // Solana with more than six verified token accounts and an unreadable transaction says both.
+    const accounts = Array.from({ length: 7 }, (_, i) => ({ pubkey: `${'ABCDEFG'[i]}z9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`, account: { data: { parsed: { info: { mint, owner: wallet } } } } }));
+    const rpc: SolanaRpc = async (method: string, params: readonly unknown[]) => {
+      if (method === 'getTokenAccountsByOwner') return { value: (params[1] as { programId: string }).programId.startsWith('Tokenkeg') ? accounts : [] };
+      if (method === 'getSignaturesForAddress') return params[0] === wallet ? [{ signature: sig('A'), slot: 5, err: null }] : [];
+      if (method === 'getTransaction') return null;
+      throw new Error('UNEXPECTED_' + method);
+    };
+    const catalog: SolanaAssetCatalog = { assets: [{ symbol: 'USDC', name: 'USD Coin', mint, decimals: 6, native: false, logoUrl: null }], fetchedAt: '', source: 'test', contentSha256: '', excludedRecords: 0 };
+    const sol = await readWalletActivity({ account: wallet }, {}, { cache: null, cursorKey, mode: async () => 'live', solanaRpc: () => rpc, solanaCatalog: async () => catalog });
+    expect(sol.coverage[0]).toMatchObject({ status: 'PARTIAL', code: 'SOLANA_TOKEN_ACCOUNT_LIMIT', codes: ['SOLANA_TOKEN_ACCOUNT_LIMIT', 'SOLANA_TRANSACTION_UNREADABLE'] });
+    expect(mergeCoverage(null, sol.coverage).gaps.map(g => g.code)).toEqual(['SOLANA_TOKEN_ACCOUNT_LIMIT', 'SOLANA_TRANSACTION_UNREADABLE']);
+  });
+  it('a hidden Solana movement keeps its key when the verified catalog changes', async () => {
+    const spamA = 'SpamA111111111111111111111111111111111111111', spamB = 'SpamB111111111111111111111111111111111111111';
+    const tx = { slot: 5, blockTime: 1, meta: { err: null, fee: 0, preBalances: [1], postBalances: [1],
+      preTokenBalances: [{ accountIndex: 1, mint: spamA, owner: wallet, uiTokenAmount: { amount: '9', decimals: 0 } }, { accountIndex: 2, mint: spamB, owner: wallet, uiTokenAmount: { amount: '0', decimals: 0 } }],
+      postTokenBalances: [{ accountIndex: 1, mint: spamA, owner: wallet, uiTokenAmount: { amount: '0', decimals: 0 } }, { accountIndex: 2, mint: spamB, owner: wallet, uiTokenAmount: { amount: '4', decimals: 0 } }] },
+      transaction: { message: { accountKeys: [{ pubkey: wallet }, { pubkey: 'Kk9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr' }, { pubkey: 'Hz9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr' }], instructions: [] } } };
+    const rpc: SolanaRpc = async (method: string, params: readonly unknown[]) => {
+      if (method === 'getTokenAccountsByOwner') return { value: [] };
+      if (method === 'getSignaturesForAddress') return params[0] === wallet ? [{ signature: sig('A'), slot: 5, err: null }] : [];
+      if (method === 'getTransaction') return tx;
+      throw new Error('UNEXPECTED_' + method);
+    };
+    const read = (assets: SolanaAssetCatalog['assets']) => readWalletActivity({ account: wallet }, {}, { cache: null, cursorKey, mode: async () => 'live', solanaRpc: () => rpc,
+      solanaCatalog: async () => ({ assets, fetchedAt: '', source: 'test', contentSha256: '', excludedRecords: 0 }) });
+    const before = await read([]), after = await read([{ symbol: 'AAA', name: 'A', mint: spamA, decimals: 0, native: false, logoUrl: null }]);
+    expect(before.hiddenMoves).toEqual([`${JUPITER_SOLANA_MAINNET.chain}:${sig('A')}:OUT:0`, `${JUPITER_SOLANA_MAINNET.chain}:${sig('A')}:IN:1`]);
+    // A became verified (shown); B keeps its key, so the union across reads still counts two movements, never three.
+    expect(after.hiddenMoves).toEqual([`${JUPITER_SOLANA_MAINNET.chain}:${sig('A')}:IN:1`]);
+    expect(new Set([...before.hiddenMoves, ...after.hiddenMoves]).size).toBe(2);
   });
 });
 

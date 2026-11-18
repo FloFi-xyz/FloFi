@@ -60,11 +60,21 @@ describe('History wallet activity panel', () => {
     await click(view(), 'Refresh wallet activity');
     const tree = view();
     expect(rows(tree)).toEqual([]);
-    expect(textOf(tree)).toContain('Sign in again'); expect(textOf(tree)).toContain('Wallet activity is shown only while you are signed in to FloFi with access to this wallet.');
+    // The gate's own reason and next step; never a claim that the wallet on screen lacks access.
+    expect(textOf(tree)).toContain('Sign in again'); expect(textOf(tree)).toContain('FloFi stopped reading wallet activity for this browser.');
+    expect(nodes(tree).find(e => e.type === 'a' && textOf(e.props.children) === 'Sign in')).toBeDefined();
     f.read.mockRejectedValueOnce(new Error('ACTIVITY_SIGN_IN_REQUIRED'));
     await click(tree, 'Retry');
     expect(f.read).toHaveBeenLastCalledWith(account, null);
     expect(textOf(view())).toContain('Verify this wallet above to see its activity.');
+    // A wallet not linked: the Credentials step; access that ended: nothing to retry.
+    f.read.mockRejectedValueOnce(new Error('BETA_WALLET_NOT_LINKED'));
+    await click(view(), 'Retry');
+    expect(nodes(view()).find(e => e.type === 'a' && textOf(e.props.children) === 'Open Credentials')).toBeDefined();
+    f.read.mockRejectedValueOnce(new Error('BETA_ACCESS_REVOKED'));
+    await click(view(), 'Retry');
+    expect(textOf(view())).toContain('Flight access ended');
+    expect(nodes(view()).some(e => e.type === 'button' && textOf(e.props.children) === 'Retry')).toBe(false);
   });
   it('Retry repeats exactly the request that failed: the next page after Load more, the newest after Refresh', async () => {
     f.read.mockResolvedValueOnce(page({ cursor: 'next-1' }));

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale } from '../i18n/locale';
 import { walletActivity } from '../app/wallet-activity-reads';
 import { activityRows, mergeCoverage, shortAddress, signedAmount, type ActivityCoverage, type ActivityFilter, type CoverageState, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
-import { flightRefusal } from '../domain/flight-refusal';
+import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 import { dateLabel } from './dashboard/dashboard-view';
 import { StatusTag } from './dashboard/dashboard-status';
@@ -128,11 +128,14 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     <p className="ux-panel-text">{t(filter === 'ALL' ? 'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. A transaction FloFi matches to a workflow record above is shown with that record, not repeated here.' : filter === 'IN'
       ? 'Tokens your wallet received, including transfers from other wallets and outside FloFi.' : 'Tokens your wallet sent, including transfers made outside FloFi.')}</p>
     {status === 'loading' && !shown && <p className="muted" role="status">{t('Loading wallet activity…')}</p>}
-    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(refusal.title)}</strong> {t('Wallet activity is shown only while you are signed in to FloFi with access to this wallet.')}</>
+    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(refusal.title)}</strong> {t('FloFi stopped reading wallet activity for this browser. Your FloFi workflow history is not affected.')}</>
       : t(state.code === 'ACTIVITY_SIGN_IN_REQUIRED' ? 'Verify this wallet above to see its activity.'
       : state.code === 'ACTIVITY_RATE_LIMITED' ? 'Wallet activity was refreshed many times in a short period. Try again in a minute.'
       : 'Wallet activity is temporarily unavailable. Your FloFi workflow history is not affected.')}</p>
-      <button type="button" className="ux-button ux-button-small" onClick={() => load(state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button></div>}
+      {/* The Flight refusal's own next step (it names the access the gate checked, never claims it is this wallet's); Retry only where it can help. */}
+      {refusal && FLIGHT_REFUSAL_HREF[refusal.action] && <a className="ux-button ux-button-small" href={FLIGHT_REFUSAL_HREF[refusal.action]!}>
+        {t(refusal.action === 'LINK_WALLET' ? 'Open Credentials' : refusal.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}
+      {refusal?.action !== 'NONE' && <button type="button" className="ux-button ux-button-small" onClick={() => load(state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button>}</div>}
     {shown && (rows.length || waiting ? rows.length > 0 && <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>
       : <p className="ux-panel-text wallet-activity-empty">{t(!readable ? 'Wallet activity could not be read on any network right now. This does not mean there is none.'
         : onlyWorkflows ? 'The recent movements of this wallet are your FloFi workflows above. Open Received or Sent to see each transfer.'
