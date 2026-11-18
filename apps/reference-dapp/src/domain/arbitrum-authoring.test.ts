@@ -155,6 +155,22 @@ describe('BUILD-FLOFI-BETA-REGRESSION-FIX-001: explicit networks, Ethereum-as-as
     // Collision filter: every common preposition counts as naming Arbitrum explicitly (the ARB token shares the name).
     expect(mentionedNetworks('troca 10 usdc por weth em arbitrum')).toContain('ARBITRUM');
     expect(mentionedNetworks('swap 10 usdc to weth in arbitrum')).toContain('ARBITRUM');
+    // Review findings (flofi-chat F2/F3): a scheduled or manner phrase after a destination keeps the network; an explicit network word after
+    // "por/for" keeps the network; a non-prepositional mention ("via Ethereum") still names the network despite the native-ETH alias.
+    expect(mentionedNetworks('send 1 USDC to ethereum at 9am')).toEqual(['ETHEREUM']);
+    expect(mentionedNetworks('bridge 1 usdc para ethereum em 5 minutos')).toEqual(['BASE', 'ETHEREUM'].filter(n => n === 'ETHEREUM'));
+    expect(mentionedNetworks('trocar usdc por ethereum mainnet')).toEqual(['ETHEREUM']);
+    expect(mentionedNetworks('Swap 2 USDC to WETH via Ethereum')).toEqual(['ETHEREUM']);
+  });
+
+  it('a model-misreported ARB is never grounded by the network word alone (review F1)', () => {
+    const copilot = new CopilotSession();
+    const reply = copilot.say('troca 10 usdc em arbitrum',
+      intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'ARB', amount: '10' }), 'PT'));
+    // "em arbitrum" names the network; it never also grounds the ARB token the user did not write. FloFi asks instead of proposing ARB.
+    expect(reply!.kind === 'CLARIFICATION' || reply!.kind === 'UNSUPPORTED').toBe(true);
+    expect(reply!.command).toBeUndefined();
+    expect(copilot.pending).toBeNull();
   });
 
   it('“na Ethereum” keeps the network and the swap receives native ETH there', () => {
