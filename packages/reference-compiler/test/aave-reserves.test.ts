@@ -2,7 +2,7 @@
 /** BUILD AAVE-V3-EXPANSION-001: live Aave reserve discovery against a scripted read-only Base market (no network). */
 import { describe, expect, it } from 'vitest';
 import { AAVE_V3_MARKETS } from '@defi-workflow-engine/action-registry';
-import { aaveRateApyPercent, discoverAaveReserves, MULTICALL3 } from '../src/index.js';
+import { aaveRateApyPercent, discoverAaveReserves, MULTICALL3, supplyCall } from '../src/index.js';
 import { createAaveMarketFixture, MAX_UINT256, MULTICALL3_ADDRESS, type AaveFixtureReserve } from './aave-market-fixture.ts';
 
 const market = AAVE_V3_MARKETS.find(m => m.chain === 'eip155:8453')!;
@@ -55,6 +55,18 @@ describe('BUILD AAVE-V3-EXPANSION-001 Aave reserve discovery', () => {
     // The E-Mode read failed: no account summary, and Borrow is not claimed available for this owner.
     expect(catalog.account).toBeUndefined();
     expect(catalog.reserves.find(r => r.symbol === 'USDC')).toMatchObject({ supply: { available: true }, borrow: { available: false, reason: 'ACCOUNT_STATE_UNKNOWN' } });
+  });
+  it('keeps malformed aToken balance responses unavailable instead of inventing a zero', async () => {
+    const { rpc } = harness(new Map([[usdc.asset, { config: config(6) }], [weth.asset, { config: config(18) }]]), { multicall: false });
+    for (const invalid of ['0x', '0x1']) {
+      const catalog = await discoverAaveReserves((method, params) => {
+        const query = params[0] as { to?: string; data?: string } | undefined;
+        return method === 'eth_call' && query?.to === usdc.aToken && query.data === supplyCall('balanceOf(address)', OWNER)
+          ? Promise.resolve(invalid) : rpc(method, params);
+      }, market.chain, OWNER);
+      expect(catalog.reserves.find(r => r.asset === usdc.asset)?.wallet).toBeUndefined();
+      expect(catalog.reserves.find(r => r.asset === weth.asset)?.wallet?.supplied).toBe('5');
+    }
   });
   it('fails closed on another chain or market', async () => {
     const { rpc } = harness(new Map(), { multicall: true });

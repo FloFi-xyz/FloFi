@@ -19,7 +19,7 @@
  *  - Each network is isolated (one failure leaves the others), the whole read has a time budget, and results are cached briefly per wallet.
  */
 import { CATALOG_NETWORKS, type CatalogNetworkId } from './catalog-networks.ts';
-import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ETHEREUM_BASE_ASSETS, JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog,
+import { AAVE_V3_MARKETS, ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ETHEREUM_BASE_ASSETS, JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS, underlyingShares, type AssetCatalog,
   type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { decodeRpcAccount, decodeSplTokenAccount, readSolanaAccounts, verifySolanaCluster, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { isSolanaPublicKey } from '@defi-workflow-engine/workflow-contracts';
@@ -196,10 +196,14 @@ function canonicalStablecoin(chain: string, address: string, decimals: number): 
   return known && known.decimals === decimals ? known.asset : null;
 }
 const ASSET_ORDER: Readonly<Record<CanonicalAsset['assetClass'], number>> = { NATIVE: 0, WRAPPED_NATIVE: 1, STABLECOIN: 2, STOCK_TOKEN: 3, TOKEN: 3 };
+/** Registered receipt and debt tokens are represented only in the separate DeFi positions scan. */
+const POSITION_TOKENS = new Set(AAVE_V3_MARKETS.flatMap(market => market.reserves.flatMap(reserve =>
+  [`${market.chain}:${reserve.aToken}`, `${market.chain}:${reserve.variableDebtToken}`])));
 /** The listed ERC-20s, featured and base assets first (so a capped catalog still checks the common ones). */
 function listedTokens(catalog: AssetCatalog): CanonicalAsset[] {
   const featured = new Map(catalog.featured.map((id, i) => [id, i] as const));
-  return catalog.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => asset.kind === 'ERC20' && asset.address !== null)
+  return catalog.assets.map((asset, index) => ({ asset, index })).filter(({ asset }) => asset.kind === 'ERC20' && asset.address !== null &&
+    !POSITION_TOKENS.has(`${catalog.chain}:${asset.address}`))
     .sort((a, b) => (featured.get(a.asset.id) ?? 1e6) - (featured.get(b.asset.id) ?? 1e6) ||
       ASSET_ORDER[a.asset.assetClass] - ASSET_ORDER[b.asset.assetClass] || a.index - b.index).map(({ asset }) => asset);
 }

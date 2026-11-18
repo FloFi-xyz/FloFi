@@ -37,12 +37,12 @@ function forgetListed(runId?: string) {
  * that need attention, in its one list); the Dashboard (`dashboard`) keeps the overview: what needs the owner, the current execution, the
  * wallet portfolio and one line of history.
  */
-export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, openWorkflow, signInPrompt, workflowProgress }: {
+export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, positions, openWorkflow, signInPrompt, workflowProgress }: {
   workflowName: string; progress: ExecutionLifecycle; recovery: ExecutionRecovery; wallet: ReviewWallet; context: ReviewContext;
   runId: string | null; build(): void; execute(): void; navigate(path: string): void;
   /** P0 approved UX (board 10): the Dashboard's "Create workflow" opens the Chat entry when the shell passes it (otherwise `build`). */
   create?: (() => void) | undefined;
-  mode?: 'dashboard' | 'records'; portfolio?: ReactNode; openWorkflow?: OpenWorkflow | undefined; signInPrompt?: boolean;
+  mode?: 'dashboard' | 'records'; portfolio?: ReactNode; positions?: ReactNode; openWorkflow?: OpenWorkflow | undefined; signInPrompt?: boolean;
   /** P0 hotfix (execution continuity): the whole workflow's step count for the current run (the same numbers as Execute and the Assistant). */
   workflowProgress?: { readonly completed: number; readonly total: number } | null;
 }) {
@@ -175,5 +175,5 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
     loading={loading} build={build} create={create} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}${mode === 'records' ? '#from-workflows' : ''}`)} verify={() => void verify()} verifying={verifying}
     verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}
-    mode={mode} portfolio={portfolio} openRecords={() => navigate('/app/workflows')} openWorkflow={openWorkflow} signInPrompt={Boolean(signInPrompt)}/>;
+    mode={mode} portfolio={portfolio} positions={positions} openRecords={() => navigate('/app/workflows')} openWorkflow={openWorkflow} signInPrompt={Boolean(signInPrompt)}/>;
 }

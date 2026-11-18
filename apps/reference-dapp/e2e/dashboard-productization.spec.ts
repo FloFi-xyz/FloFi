@@ -249,3 +249,18 @@ test('row buttons and status tags keep their text inside at every width and zoom
     }
   }
 });
+
+test('My DeFi Positions loads only on disclosure and distinguishes a disconnected wallet', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (request.url().endsWith('/api/dashboard/positions')) requests.push(request.url()); });
+  await page.goto('/app/dashboard');
+  await expect(page.getByRole('heading', { name: 'My DeFi Positions' })).toBeVisible();
+  expect(requests).toHaveLength(0);
+  const disclosure = page.locator('summary').filter({ hasText: 'My DeFi Positions' });
+  await disclosure.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toBeVisible();
+  expect(requests).toHaveLength(1);
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toHaveCount(0);
+});

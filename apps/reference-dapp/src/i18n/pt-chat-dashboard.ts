@@ -61,4 +61,40 @@ export const portugueseChatDashboard: Readonly<Record<string, string>> = {
   'Your executed history and the records that need attention appear here once this wallet is verified above.':
     'O seu histórico executado e os registros que precisam de atenção aparecem aqui assim que esta carteira for verificada acima.',
   'Counted from your most recent records; Your workflows loads the rest.': 'Contado a partir dos seus registros mais recentes; Seus fluxos carrega o restante.',
+  'My DeFi Positions': 'Minhas posições DeFi',
+  'Checking wallets for DeFi positions…': 'Verificando carteiras para posições DeFi…',
+  'Wallets are temporarily unavailable.': 'As carteiras estão temporariamente indisponíveis.',
+  'Verify or link this wallet to scan its DeFi positions.': 'Verifique ou vincule esta carteira para consultar suas posições DeFi.',
+  'Connect or link a wallet to view its DeFi positions.': 'Conecte ou vincule uma carteira para ver suas posições DeFi.',
+  'DeFi positions are separate from liquid wallet balances. Supplied assets, liquidity and debt are shown individually.':
+    'As posições DeFi são separadas dos saldos líquidos da carteira. Ativos fornecidos, liquidez e dívidas são exibidos individualmente.',
+  'Wallet to scan': 'Carteira para consultar',
+  'Select a wallet': 'Selecione uma carteira',
+  'Position scan coverage': 'Cobertura da consulta de posições',
+  'Aave V3 on Ethereum, Base and Arbitrum One covers registered reserves and variable debt.':
+    'Aave V3 na Ethereum, Base e Arbitrum One cobre reservas registradas e dívidas de taxa variável.',
+  'Uniswap V3 covers up to 20 directly held position NFTs per network on Ethereum, Base, Arbitrum One and Robinhood Chain.':
+    'Uniswap V3 cobre até 20 NFTs de posição mantidos diretamente por rede na Ethereum, Base, Arbitrum One e Robinhood Chain.',
+  'Orca covers standalone positions on the registered SOL/USDC Whirlpool on Solana, with up to 40 candidate tokens checked. Bundles and other pools are outside this scan.':
+    'Orca cobre posições individuais no Whirlpool SOL/USDC registrado na Solana e verifica até 40 tokens candidatos. Posições agrupadas e outros pools estão fora da consulta.',
+  'Recorded unclaimed amounts can include withdrawn principal. Newly accrued fees and rewards are outside this scan.':
+    'Valores a resgatar já registrados podem incluir principal retirado. Taxas e recompensas acumuladas recentemente estão fora da consulta.',
+  'Scanning DeFi positions…': 'Consultando posições DeFi…',
+  'DeFi positions are temporarily unavailable.': 'As posições DeFi estão temporariamente indisponíveis.',
+  'Partial scan. Some positions or amounts could not be read.': 'Consulta parcial. Algumas posições ou valores não puderam ser lidos.',
+  'Position data temporarily unavailable.': 'Dados da posição temporariamente indisponíveis.',
+  'Protocol unsupported on this network.': 'Protocolo sem suporte nesta rede.',
+  'Network is unavailable for position reads on this deployment.': 'A rede está indisponível para consultas de posições nesta implantação.',
+  'No positions found in this scan.': 'Nenhuma posição encontrada nesta consulta.',
+  'Last scanned {0}': 'Última consulta em {0}',
+  'Health factor: {0}': 'Fator de saúde: {0}',
+  'Liquidation threshold: {0}%': 'Limite de liquidação: {0}%',
+  'Enabled as collateral': 'Ativo habilitado como garantia',
+  'Supplied': 'Fornecido',
+  'Variable debt': 'Dívida de taxa variável',
+  'Liquidity position': 'Posição de liquidez',
+  '{0}: amount unavailable': '{0}: quantidade indisponível',
+  '≈ {0} (Chainlink)': '≈ {0} (Chainlink)',
+  'Price observed {0}': 'Preço observado em {0}',
+  '{0} {1} recorded unclaimed': '{0} {1} registrados e a resgatar',
 };

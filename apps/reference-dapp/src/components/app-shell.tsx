@@ -112,6 +112,7 @@ import { UniversalBridgePanel } from './universal-bridge-panel';
 import { useUniversalRouter } from '../state/universal-router-store';
 import { DashboardWorkspace } from './dashboard/dashboard-workspace';
 import { PortfolioWidget } from './dashboard/portfolio-widget';
+import { DefiPositions } from './dashboard/defi-positions';
 import { dashboardRoute as resolveDashboardRoute } from '../lib/dashboard/routes';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
 import { SecondaryProductWorkspace } from './secondary-product-workspace';
@@ -776,6 +777,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context}
       workflowProgress={workflowProgress} runId={dashboardRoute?.runId ?? null} portfolio={<PortfolioWidget evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
+      positions={<DefiPositions evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)} create={entry ? startNewChatWorkflow : undefined}/></main>
   </div>;
   // BUILD0-UX-001: Build 0 has no Canvas, chat panel or summary bar; its request continues in the same conversation, shown in Build 1.

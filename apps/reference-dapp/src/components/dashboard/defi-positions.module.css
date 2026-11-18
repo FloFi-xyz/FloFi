@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+.panel > summary > h2 { display: inline; }
+.content, .scans { display: grid; gap: .75rem; min-width: 0; }
+.content { padding-block-start: .75rem; }
+.scans { grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }
+.scans > section { min-width: 0; overflow-wrap: anywhere; }
+.wallet { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.wallet select { color: inherit; background: var(--surface); font: inherit; max-width: 100%; }
+.row { display: grid; gap: .25rem; padding: .5rem 0; }
+.row ul { padding-inline-start: 1rem; }
+.row small { display: block; }
+.row strong small { display: inline; }

@@ -78,7 +78,7 @@ function decodeAggregate3(value: unknown, count: number): (string | null)[] {
 async function readCalls(rpc: SupplyRpc, calls: readonly Call[], tag: string, batched: boolean): Promise<(string | null)[]> {
   if (!batched) {
     const out: (string | null)[] = [];
-    for (let i = 0; i < calls.length; i += 8) out.push(...await Promise.all(calls.slice(i, i + 8).map(call => rpc('eth_call', [call, tag]).then(rpcHex, () => null))));
+    for (let i = 0; i < calls.length; i += 8) out.push(...await Promise.all(calls.slice(i, i + 8).map(call => rpc('eth_call', [call, tag]).then(rpcHex).catch(() => null))));
     return out;
   }
   const out: (string | null)[] = [];
@@ -174,8 +174,10 @@ function statusOf(profile: AaveLendingProfile, listed: boolean, r: readonly (str
     priceSourceMatches: snapshotSource && address(r[6] ?? null) ? address(r[6] ?? null) === snapshotSource : null,
   };
   const complete = Boolean(reserve) && r.slice(1, 6).every(value => value !== null);
+  const walletWords = r.slice(7, 10);
+  const walletRead = withAccount && walletWords.length === 3 && walletWords.every(value => value !== null && /^0x[0-9a-f]{64}$/i.test(value));
   return { ...base, complete, supply: { available: reasonFor('supply', base, 0n) === null, reason: reasonFor('supply', base, 0n) },
     borrow: { available: reasonFor('borrow', base, eMode) === null, reason: reasonFor('borrow', base, eMode) },
-    ...withAccount && r.slice(7, 10).every(value => value !== null) ? { wallet: { balance: (uint(r[7] ?? null) ?? 0n).toString(), supplied: (uint(r[8] ?? null) ?? 0n).toString(), debt: (uint(r[9] ?? null) ?? 0n).toString(),
+    ...walletRead ? { wallet: { balance: BigInt(walletWords[0]!).toString(), supplied: BigInt(walletWords[1]!).toString(), debt: BigInt(walletWords[2]!).toString(),
       collateralEnabled: userConfiguration === null ? null : Boolean((userConfiguration >> (2n * BigInt(profile.reserveId) + 1n)) & 1n) } } : {} };
 }
