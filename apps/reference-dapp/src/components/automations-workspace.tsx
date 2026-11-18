@@ -394,10 +394,11 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
     if (result.ok) { setSnapshot({ owner: key, value: result.value }); setAccess({ owner: key, required: false }); setError(null); }
     else { if (result.code === 'WALLET_SESSION_REQUIRED') setSnapshot(null); setAccess({ owner: key, required: result.code === 'WALLET_SESSION_REQUIRED' }); if (result.code !== 'WALLET_SESSION_REQUIRED') setError(result.code); }
   }, []);
-  const refresh = useCallback(async () => {
+  // `fresh` after a mutation: the overview read must start after it (never join an earlier read still in flight).
+  const refresh = useCallback(async (fresh = false) => {
     if (!owner) return;
     const request = generation.current, sequence = ++refreshSequence.current, key = `${owner.namespace}:${owner.address}`;
-    const result = await automationSnapshot(owner, 'overview').then(value => value.overview ?? { ok: false as const, code: 'AUTOMATION_UNAVAILABLE' },
+    const result = await automationSnapshot(owner, 'overview', fresh).then(value => value.overview ?? { ok: false as const, code: 'AUTOMATION_UNAVAILABLE' },
       (cause: unknown) => ({ ok: false as const, code: cause instanceof Error ? cause.message : 'AUTOMATION_UNAVAILABLE' }));
     if (request !== generation.current || sequence !== refreshSequence.current) return;
     applyOverview(key, result);
@@ -429,7 +430,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
   useEffect(() => {
     const before = provenBefore.current;
     provenBefore.current = proof?.proven ?? null;
-    if (enabled && owner && proof?.proven && proof.proven !== before) void refresh();
+    if (enabled && owner && proof?.proven && proof.proven !== before) void refresh(true);
   }, [enabled, owner, proof?.proven, refresh]);
   useEffect(() => {
     if (!enabled || !owner) return;
@@ -448,7 +449,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       if (request !== generation.current) return false;
       if (!result.ok) { setError(result.code ?? 'AUTOMATION_UNAVAILABLE'); if (result.code === 'WALLET_SESSION_REQUIRED' && ownerKey) { setSnapshot(null); setAccess({ owner: ownerKey, required: true }); } return false; }
       if (done) setNotice(done);
-      await refresh();
+      await refresh(true);
       await refreshDelegation();
       return true;
     } catch { setError('AUTOMATION_UNAVAILABLE'); return false; } finally { operationLock.current = false; setBusy(false); }
@@ -470,7 +471,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       <p>{t('Routines that prepare proposals. You review and sign each one.')}</p></div>
       {overview && owner && <span className="automation-session">{t('Wallet session verified')} · <code>{owner.address.slice(0, 6)}…{owner.address.slice(-4)}</code></span>}</header>
     <p className="workspace-notice" role="status">{t(notice)}</p>
-    {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button></div>}
+    {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh(true)}>{t('Retry')}</button></div>}
     {enabled === null && availabilityIssue ? <div className="ux-panel ux-notice automation-availability-issue" role="status"><p>{t('Automations are temporarily unavailable. This is not a change to your automations.')}</p>
         <button type="button" className="ux-button ux-button-small" onClick={load}>{t('Retry')}</button></div>
       : enabled === null ? <div className="ux-panel ux-list-empty automation-loading" role="status" aria-busy="true"><p>{t('Loading automations…')}</p></div>
@@ -479,18 +480,18 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
         <h2>{t('Recurring buys, price triggers and daily watches')}</h2><p>{t('Automations are not enabled on this deployment.')}</p></section>
         : !owner ? <div className="ux-panel ux-list-empty"><p>{t('Connect a wallet from the header to use automations.')}</p></div>
           : verificationRequired ? <div className="ux-panel ux-list-empty"><p>{t('Verify wallet ownership to use automations.')}</p>{proof && <WalletProof namespace={owner.namespace} proof={{ ...proof, proven: null }}/>}</div>
-            : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button>}</div> : <>
+            : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="ux-button ux-button-small" onClick={() => void refresh(true)}>{t('Retry')}</button>}</div> : <>
               {/* Board 12: "Waiting for you" opens the page only while something waits; empty, the page starts with creating. */}
               {overview.pending.length > 0 && <section className="ux-panel ux-panel-attention automation-waiting" aria-labelledby="automation-pending">
                 <div className="ux-panel-head"><div><h2 id="automation-pending">{t('Waiting for you')}</h2><span className="ux-count">{overview.pending.length}</span></div>
-                  <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button></div>
+                  <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh(true)}>{t('Refresh')}</button></div>
                 <div className="automation-list">{overview.pending.map(o => <PendingCard key={o.occurrenceId} o={o} rule={byId.get(o.ruleId)} highlighted={o.occurrenceId === highlight}
                   capabilities={overview.capabilities} busy={busy} run={run} onPropose={command => onPropose?.(command)} owner={owner}/>)}</div>
               </section>}
               <section className="ux-panel automation-create-section" aria-labelledby="automation-create">
                 <div className="ux-panel-head"><div><h2 id="automation-create">{t('Create an automation')}</h2></div>{creating && !canvas && <button type="button" className="ux-button ux-button-small" onClick={() => setCreating(null)}>{t('Close')}</button>}</div>
                 {canvas ? <CanvasAutomation canvas={canvas} owner={owner} delegationReady={delegationReady} delegationBlocked={delegationBlocked ?? null}
-                  onAuthorized={() => { void refresh(); void refreshDelegation(); }} confirm={route => <CreateForm key={JSON.stringify(route)} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initial={{ name: canvas.name.slice(0, 80), source: 'ROUTE', asset: route.asset, side: route.side, network: route.network, amount: route.amount, slippageBps: String(route.slippageBps) }}/>}/>
+                  onAuthorized={() => { void refresh(true); void refreshDelegation(); }} confirm={route => <CreateForm key={JSON.stringify(route)} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initial={{ name: canvas.name.slice(0, 80), source: 'ROUTE', asset: route.asset, side: route.side, network: route.network, amount: route.amount, slippageBps: String(route.slippageBps) }}/>}/>
                   : <>
                     {!creating ? <><div className="automation-choices">{(['SCHEDULED_DCA', 'PRICE_TRIGGER', 'DAILY_WATCH'] as const).map(kind => {
                       const available = kind === 'SCHEDULED_DCA' ? overview.capabilities.routes.some(r => r.executable) : overview.capabilities.observable.length > 0;
@@ -509,7 +510,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
               </section>
               <section className="ux-panel" aria-labelledby="automation-rules">
                 <div className="ux-panel-head"><div><h2 id="automation-rules">{t('Your automations')}</h2><span className="ux-count">{live.length}</span></div>
-                  {overview.pending.length === 0 && <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button>}</div>
+                  {overview.pending.length === 0 && <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh(true)}>{t('Refresh')}</button>}</div>
                 {live.length ? <div className="automation-list">{live.map(rule => <RuleCard key={rule.ruleId} rule={rule} busy={busy} run={run} owner={owner}
                   onHistory={() => void loadHistory(rule.ruleId)}/>)}</div>
                   : <p className="ux-panel-text">{t('No automations yet. Choose a routine above.')}</p>}

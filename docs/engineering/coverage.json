@@ -1589,6 +1589,10 @@
     "app.app.api.account.presence.route": {
       "path": "apps/reference-dapp/src/app/api/account/presence/route.test.ts",
       "stage": "unit"
+    },
+    "app.app.automation-reads": {
+      "path": "apps/reference-dapp/src/app/automation-reads.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1724,7 +1728,8 @@
     "app.server.wallet-activity",
     "app.app.api.wallet.activity.route",
     "app.app.api.automations.overview.route",
-    "app.app.api.account.presence.route"
+    "app.app.api.account.presence.route",
+    "app.app.automation-reads"
   ],
   "modules": [
     {
@@ -2356,7 +2361,8 @@
         "app.automations.scheduler.pg",
         "app.backend.automation-production.pg",
         "app.automations.beta-access.pg",
-        "app.app.api.automations.overview.route"
+        "app.app.api.automations.overview.route",
+        "app.app.automation-reads"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."

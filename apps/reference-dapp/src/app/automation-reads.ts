@@ -12,10 +12,11 @@ export type { AutomationSnapshot };
 /** Codes after which this deployment genuinely does not serve automations ("Coming soon"); any other refusal is temporary. */
 export const AUTOMATIONS_OFF: ReadonlySet<string> = new Set(['AUTOMATIONS_NOT_ENABLED', 'AUTOMATION_CONFIGURATION_INVALID']);
 const inflight = new Map<string, Promise<AutomationSnapshot>>();
-export function automationSnapshot(owner: WorkflowOwner | null, scope: 'all' | 'overview' = 'all'): Promise<AutomationSnapshot> {
+/** `fresh`: never join a read that started earlier (after a mutation, an earlier read may predate it); later readers join this one instead. */
+export function automationSnapshot(owner: WorkflowOwner | null, scope: 'all' | 'overview' = 'all', fresh = false): Promise<AutomationSnapshot> {
   const key = `${scope}|${owner ? `${owner.namespace}:${owner.address}` : ''}`;
   const shared = inflight.get(key);
-  if (shared) return shared;
+  if (shared && !fresh) return shared;
   const request = fetch(`/api/automations/overview${scope === 'overview' ? '?scope=overview' : ''}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin',
     headers: owner ? { 'x-flofi-account': owner.address } : {} })
     .then(async response => {
