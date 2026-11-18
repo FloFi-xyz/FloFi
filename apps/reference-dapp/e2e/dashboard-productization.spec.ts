@@ -256,12 +256,13 @@ test('My DeFi Positions loads only on disclosure and distinguishes a disconnecte
   await page.goto('/app/dashboard');
   await expect(page.getByRole('heading', { name: 'My DeFi Positions' })).toBeVisible();
   expect(requests).toHaveLength(0);
-  const disclosure = page.locator('summary').filter({ hasText: 'My DeFi Positions' });
+  const disclosure = page.getByRole('button', { name: 'My DeFi Positions', exact: true });
+  await expect(disclosure).toBeEnabled();
   await disclosure.press('Enter');
-  await expect(disclosure.locator('..')).toHaveAttribute('open', '');
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toBeVisible();
   expect(requests).toHaveLength(1);
   await disclosure.press('Enter');
-  await expect(disclosure.locator('..')).not.toHaveAttribute('open', '');
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toHaveCount(0);
 });

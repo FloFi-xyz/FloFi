@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
-.panel > summary > h2 { display: inline; }
+.disclosure { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.disclosure::before { content: ''; flex: none; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+.disclosure[aria-expanded='true']::before { transform: rotate(45deg); }
 .content, .scans { display: grid; gap: .75rem; min-width: 0; }
 .content { padding-block-start: .75rem; }
 .scans { grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }

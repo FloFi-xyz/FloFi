@@ -13,7 +13,7 @@ afterEach(() => vi.useRealTimers());
 describe('Dashboard positions rendering', () => {
   it('discloses the read-only section in EN and PT before loading wallets', () => {
     const english = renderToStaticMarkup(<DefiPositions evm={null} solana={null}/>);
-    expect(english).toContain('<summary><h2>My DeFi Positions</h2></summary>');
+    expect(english).toMatch(/<h2[^>]*><button type="button"[^>]*aria-expanded="false"[^>]*aria-controls="[^"]+"[^>]*>My DeFi Positions<\/button><\/h2>/);
     expect(english).not.toContain('Checking wallets');
     const portuguese = renderToStaticMarkup(<LocaleProvider initialLanguage="PT"><DefiPositions evm={null} solana={null}/></LocaleProvider>);
     expect(portuguese).toContain('Minhas posições DeFi');

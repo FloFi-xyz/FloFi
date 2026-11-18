@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { positionsWalletKey, type PositionScan, type PositionWallet } from '../../domain/defi-positions';
 import { WALLET_PROOF_CHANGED } from '../../domain/wallet-proof-events';
 import { formatObservedAt, formatTokenAmount, formatUsdValue, shortAddress } from '../../domain/wallet-portfolio';
@@ -18,20 +18,23 @@ async function read<T>(signal: AbortSignal, wallet?: PositionWallet): Promise<T>
 
 export function DefiPositions({ evm, solana }: { evm: string | null; solana: string | null }) {
   const { t } = useLocale();
-  const disclosure = useRef<HTMLDetailsElement>(null);
+  const heading = useId(), content = useId();
+  const [ready, setReady] = useState(false);
   const [opened, setOpened] = useState(false);
   const [proofVersion, setProofVersion] = useState(0);
   useEffect(() => {
-    // The native disclosure can be opened before hydration attaches the toggle listener.
-    setOpened(disclosure.current?.open ?? false);
+    setReady(true);
     const invalidate = () => setProofVersion(version => version + 1);
     window.addEventListener(WALLET_PROOF_CHANGED, invalidate);
     return () => window.removeEventListener(WALLET_PROOF_CHANGED, invalidate);
   }, []);
-  return <details ref={disclosure} className={`ux-panel ux-details ${styles.panel}`} onToggle={event => setOpened(event.currentTarget.open)}>
-    <summary><h2>{t('My DeFi Positions')}</h2></summary>
-    {opened && <PositionsContent key={JSON.stringify([evm, solana, proofVersion])} evm={evm} solana={solana}/>}
-  </details>;
+  return <section className="ux-panel" aria-labelledby={heading}>
+    <h2 id={heading}><button type="button" className={styles.disclosure} disabled={!ready} aria-busy={!ready} aria-expanded={opened} aria-controls={content}
+      onClick={() => setOpened(value => !value)}>{t('My DeFi Positions')}</button></h2>
+    <div id={content} hidden={!opened}>
+      {opened && <PositionsContent key={JSON.stringify([evm, solana, proofVersion])} evm={evm} solana={solana}/>}
+    </div>
+  </section>;
 }
 
 function PositionsContent({ evm, solana }: { evm: string | null; solana: string | null }) {
