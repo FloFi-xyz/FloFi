@@ -171,7 +171,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
             takes its own line above the buttons, so no width, locale or note can make the navigator and the actions overlap. */}
         <Panel ref={controls} position="bottom-right" className="simulation-canvas-controls">
           <CanvasNavigator embedded fitViewOptions={{ padding }} compactBelow={1024}/>
-          {primaryAction && <div className="canvas-primary-action simulation-canvas-actions">{primaryAction}</div>}
+          {primaryAction && <div className={`canvas-primary-action simulation-canvas-actions${execution ? ' execution-lifecycle-actions' : ''}`}>{primaryAction}</div>}
         </Panel>
       </ReactFlow>
       {nodes.length === 0 && <div className="simulation-workflow-empty"><strong>{tr(incomplete ? 'Check your workflow' : 'Add an action to your workflow')}</strong><p>{tr(incomplete ? stage === 'execute' ? 'Complete its configuration on the Canvas before executing.' : 'Complete its configuration on the Canvas before simulating.' : stage === 'execute' ? 'Create a workflow in the Editor first.' : 'Create your strategy on the Canvas, then return here to simulate it.')}</p></div>}
