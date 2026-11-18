@@ -371,3 +371,22 @@
 @media (max-width:800px){.root{--hero-height:780px}}
 @media (min-width:601px) and (max-width:800px){.ribbonArtwork{top:-25px}}
 @media (max-width:600px){.root{--hero-height:730px}.ribbonArtwork{top:98px}.heroWordBehind{z-index:3}.heroWordAbove{display:none}}
+
+/* Selene's pinned scroll stage, rebuilt with the approved FloFi layers. */
+.heroStage{--hero-height:100svh;--hero-progress:0;--hero-rise:0;--hero-exit:0;--hero-veil:1;--hero-copy-exit:0;position:relative;height:440svh;isolation:isolate}
+.heroStage .hero{position:sticky;top:0;height:100svh;min-height:0;overflow:hidden;background:linear-gradient(165deg,#eff7ff 0%,#fff 58%,#eef8ff 100%)}
+.heroStage .heroDepth{position:absolute;z-index:0;inset:-10%;pointer-events:none;background:radial-gradient(ellipse 52% 55% at 50% 36%,rgba(194,220,255,.56),transparent 75%),radial-gradient(ellipse 36% 40% at 8% 72%,rgba(35,67,217,.14),transparent 80%),radial-gradient(ellipse 32% 40% at 91% 70%,rgba(35,67,217,.12),transparent 80%);transform:translate3d(0,calc(var(--hero-progress) * -5svh),0) scale(calc(1 + var(--hero-progress) * .08));will-change:transform}
+.heroStage .heroBackdrop{transform:translate3d(0,calc(var(--hero-progress) * -3svh),0)}
+.heroStage .ribbonArtwork{height:100%;animation:none;transform:translate3d(0,calc(var(--hero-rise) * -12svh - var(--hero-exit) * 24svh),0) rotate(calc(var(--hero-progress) * 2deg)) scale(calc(1 + var(--hero-rise) * .07));opacity:calc(1 - var(--hero-exit));will-change:transform,opacity}
+.heroStage .ribbonArtwork img{animation:none}
+.heroStage .heroWord{animation:none;transform:translate3d(-50%,calc(var(--hero-rise) * -5svh - var(--hero-exit) * 19svh),0) scale(calc(1 + var(--hero-rise) * .08));opacity:calc(1 - var(--hero-exit));will-change:transform,opacity}
+.heroStage .heroMascot{animation:none;transform:translate3d(calc(var(--hero-rise) * 5vw),calc(var(--hero-rise) * -9svh - var(--hero-exit) * 32svh),0) scale(calc(1 + var(--hero-rise) * .15));opacity:calc(1 - var(--hero-exit));will-change:transform,opacity}
+.heroStage .heroBubble{animation:none;transform:translate3d(calc(var(--hero-rise) * -3vw),calc(var(--hero-rise) * -5svh - var(--hero-exit) * 25svh),0) scale(calc(1 + var(--hero-rise) * .06));opacity:calc(1 - var(--hero-exit));will-change:transform,opacity}
+.heroStage .heroBottom{z-index:9;animation:none;transform:translate3d(-50%,calc(var(--hero-rise) * -2svh - var(--hero-exit) * 9svh),0);opacity:calc(1 - var(--hero-copy-exit));will-change:transform,opacity}
+.heroVeil{position:absolute;z-index:4;inset:0;pointer-events:none;background:radial-gradient(ellipse 62% 50% at 15% 40%,rgba(214,234,255,.62),transparent 75%),radial-gradient(ellipse 58% 60% at 85% 56%,rgba(193,215,255,.52),transparent 73%);opacity:calc(var(--hero-veil) * .55);transform:translate3d(0,calc(var(--hero-progress) * -18svh),0);will-change:transform,opacity}
+.heroHandoff{position:absolute;z-index:8;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(239,247,255,.12),#eef8ff 72%,#fff);transform:translate3d(0,calc((1 - var(--hero-exit)) * 100%),0);will-change:transform}
+.heroHandoff span{position:absolute;left:50%;bottom:13%;transform:translateX(-50%);color:var(--navy);font-size:clamp(11px,1.2vw,15px);font-weight:700;letter-spacing:.2em;white-space:nowrap;opacity:var(--hero-exit)}
+.heroStage .scrollHint{display:block;bottom:25px;opacity:calc(1 - var(--hero-progress) * 3);color:#344b70}
+@media (max-width:800px){.heroStage{height:360svh}.heroStage .ribbonArtwork{height:100%;left:-22%;width:144%}}
+@media (max-width:600px){.heroStage{height:320svh}.heroStage .heroWord{top:19%}.heroStage .ribbonArtwork{top:14%;left:-40%;width:180%;height:60%;mask-image:linear-gradient(to bottom,#000 0%,#000 72%,transparent 100%)}.heroStage .heroMascot{left:4%;top:34%;width:30vw;min-width:105px}.heroStage .heroBubble{left:76%;top:35%;width:20vw;min-width:70px}.heroStage .heroBottom{bottom:7%}.heroStage .scrollHint{right:18px;bottom:15px}}
+@media (prefers-reduced-motion:reduce){.heroStage{height:100svh}.heroStage .heroDepth,.heroStage .heroBackdrop,.heroStage .ribbonArtwork,.heroStage .heroWord,.heroStage .heroMascot,.heroStage .heroBubble,.heroStage .heroBottom,.heroVeil,.heroHandoff{transform:none!important;opacity:1!important;will-change:auto}.heroVeil{opacity:.2!important}.heroHandoff{display:none}.heroStage .heroBottom{transform:translateX(-50%)!important}.heroStage .heroWord{transform:translateX(-50%)!important}}

@@ -32,7 +32,7 @@ function FeatureArt({ kind }: { kind: 'swap' | 'transfer' | 'strategy' }) {
 export default function Landing07Page() {
   const [locale, setLocale] = useState<Landing07Locale>('pt');
   const t = landing07Copy[locale];
-  const ribbonScene = useRef<HTMLDivElement>(null);
+  const heroStage = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     try {
@@ -48,17 +48,41 @@ export default function Landing07Page() {
   }, [locale, t]);
 
   useEffect(() => {
-    const root = ribbonScene.current;
+    const root = heroStage.current;
     if (!root) return;
+    const heroCopy = root.querySelector<HTMLElement>(`.${styles.heroBottom}`);
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0;
+    let lastProgress = Number.NaN;
+    // Selene's pinned-section progress and staged ranges, applied directly to
+    // FloFi's existing transparent brand layers without React scroll renders.
+    const clamp = (value: number) => Math.max(0, Math.min(1, value));
+    const range = (value: number, start: number, end: number) => clamp((value - start) / (end - start));
+    const easeOutCubic = (value: number) => 1 - (1 - value) ** 3;
     const update = () => {
       frame = 0;
-      if (reduced.matches) { root.style.setProperty('--ribbon-shift', '0px'); root.style.setProperty('--ribbon-tilt', '0deg'); return; }
+      if (reduced.matches) {
+        lastProgress = Number.NaN;
+        root.style.removeProperty('--hero-progress');
+        root.style.removeProperty('--hero-rise');
+        root.style.removeProperty('--hero-exit');
+        root.style.removeProperty('--hero-veil');
+        root.style.removeProperty('--hero-copy-exit');
+        if (heroCopy) heroCopy.inert = false;
+        return;
+      }
       const bounds = root.getBoundingClientRect();
-      const progress = Math.max(0, Math.min(1, -bounds.top / Math.max(1, bounds.height - window.innerHeight)));
-      root.style.setProperty('--ribbon-shift', `${Math.round(progress * Math.min(95, window.innerHeight * .12))}px`);
-      root.style.setProperty('--ribbon-tilt', `${(progress * 2.2).toFixed(1)}deg`);
+      const progress = clamp(-bounds.top / Math.max(1, bounds.height - window.innerHeight));
+      if (Math.abs(progress - lastProgress) < .0001) return;
+      lastProgress = progress;
+      const rise = easeOutCubic(range(progress, .04, .58));
+      const exit = range(progress, .72, 1);
+      root.style.setProperty('--hero-progress', progress.toFixed(4));
+      root.style.setProperty('--hero-rise', rise.toFixed(4));
+      root.style.setProperty('--hero-exit', exit.toFixed(4));
+      root.style.setProperty('--hero-veil', (1 - range(progress, 0, .18)).toFixed(4));
+      root.style.setProperty('--hero-copy-exit', range(progress, .9, .99).toFixed(4));
+      if (heroCopy) heroCopy.inert = progress >= .99;
     };
     const request = () => { if (!frame) frame = window.requestAnimationFrame(update); };
     update();
@@ -91,15 +115,20 @@ export default function Landing07Page() {
     </div></header>
 
     <main id="main" tabIndex={-1}>
-      <div ref={ribbonScene} className={styles.ribbonScene}>
-        <div className={styles.ribbonArtwork} aria-hidden="true"><Image src="/landing07/ribbon-reference-v2.png" alt="" width={1672} height={941} priority sizes="(max-width: 700px) 900px, 100vw" /><i className={styles.ribbonSpark}/><i className={styles.ribbonSpark}/></div>
-        <div className={styles.heroMascot} aria-hidden="true"><Image src="/landing07/mascot-reference-v2.png" alt="" width={1516} height={1038} priority sizes="(max-width: 700px) 120px, 18vw" /></div>
-        <div className={styles.heroBubble} aria-hidden="true"><Image src="/landing07/bubble-reference-v2.png" alt="" width={1536} height={1024} priority sizes="(max-width: 700px) 80px, 12vw" /></div>
-        <section className={styles.hero} id="inicio" aria-labelledby="hero-title"><div className={styles.heroBackdrop} aria-hidden="true"/><div className={styles.heroInner}>
+      <div className={styles.ribbonScene}>
+        <div ref={heroStage} className={styles.heroStage}>
+        <section className={styles.hero} id="inicio" aria-labelledby="hero-title"><div className={styles.heroBackdrop} aria-hidden="true"/>
+          <div className={styles.heroDepth} aria-hidden="true"/>
+          <div className={styles.ribbonArtwork} aria-hidden="true"><Image src="/landing07/ribbon-reference-v2.png" alt="" width={1672} height={941} priority sizes="(max-width: 700px) 900px, 100vw" /><i className={styles.ribbonSpark}/><i className={styles.ribbonSpark}/></div>
+          <div className={styles.heroMascot} aria-hidden="true"><Image src="/landing07/mascot-reference-v2.png" alt="" width={1516} height={1038} priority sizes="(max-width: 700px) 120px, 18vw" /></div>
+          <div className={styles.heroBubble} aria-hidden="true"><Image src="/landing07/bubble-reference-v2.png" alt="" width={1536} height={1024} priority sizes="(max-width: 700px) 80px, 12vw" /></div>
+          <div className={styles.heroVeil} aria-hidden="true"/>
+          <div className={styles.heroInner}>
           <h1 id="hero-title" className={`${styles.heroWord} ${styles.heroWordBehind}`}>FLOFI</h1>
           <span className={`${styles.heroWord} ${styles.heroWordAbove}`} aria-hidden="true"><span className={styles.heroHiddenF}>F</span>LOFI</span>
           <div className={styles.heroBottom}><h2>{t.heroTitle}</h2><p>{t.heroBody}</p><div className={styles.heroActions}><a href="/login" className={styles.primaryButton}>{t.heroStart}<Arrow /></a><a href="#como-funciona" className={styles.secondaryButton}>{t.heroHow}<Arrow diagonal /></a></div><small>{t.heroNote}</small></div>
-        </div><span className={styles.heroIndex}>01 / 06</span><span className={styles.scrollHint} aria-hidden="true">SCROLL ↓</span></section>
+        </div><span className={styles.heroIndex}>01 / 06</span><span className={styles.scrollHint} aria-hidden="true">SCROLL ↓</span><div className={styles.heroHandoff} aria-hidden="true"><span>{locale === 'pt' ? 'CONTINUE EXPLORANDO' : 'KEEP EXPLORING'} ↓</span></div></section>
+        </div>
         <section className={styles.evolution} aria-labelledby="evolution-title"><div className={styles.evolutionInner}>
           <p className={styles.sectionNumber}>02 / 06</p>
           <h2 id="evolution-title"><span data-landing07-reveal>{t.evolutionOne}</span><span data-landing07-reveal>{t.evolutionTwo}</span></h2>
