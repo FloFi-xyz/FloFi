@@ -17,9 +17,18 @@ test.beforeAll(async () => {
   for (const [name, path] of Object.entries({ 'node:crypto': 'crypto-browserify/index.js', buffer: 'buffer/index.js', 'node:buffer': 'buffer/index.js', stream: 'stream-browserify/index.js', events: 'events/events.js', string_decoder: 'string_decoder/string_decoder.js', util: 'util/util.js', vm: 'vm-browserify/index.js', process: 'process/browser.js' })) {
     aliases[name] = fileURLToPath(new URL(`${compiled}${path}`, import.meta.url));
   }
+  // FIX-01 loads missing catalogs through the existing client store → server action. The acceptance harness never reaches Postgres: stub that
+  // action the same way as portfolio-action so Vite does not pull `pg` (and break on the compiled `util` → `util/types` alias).
   const result = await build({ root: fileURLToPath(new URL('../../../', import.meta.url)), configFile: false, logLevel: 'error', resolve: { alias: aliases },
-    plugins: [{ name: 'fixture-portfolio-provider', enforce: 'pre', resolveId(id) { if (id.endsWith('/app/portfolio-action')) return '\0portfolio-fixture'; },
-      load(id) { if (id === '\0portfolio-fixture') return 'export const walletPortfolio = input => window.__flofiAmountShortcutsPortfolio(input);'; } }],
+    plugins: [{ name: 'fixture-portfolio-provider', enforce: 'pre',
+      resolveId(id) {
+        if (id.endsWith('/app/portfolio-action')) return '\0portfolio-fixture';
+        if (id.endsWith('/app/asset-catalog-action')) return '\0catalog-fixture';
+      },
+      load(id) {
+        if (id === '\0portfolio-fixture') return 'export const walletPortfolio = input => window.__flofiAmountShortcutsPortfolio(input);';
+        if (id === '\0catalog-fixture') return 'export const loadNetworkAssetCatalog = async () => ({ ok: false, code: "ASSET_CATALOG_UNAVAILABLE" });';
+      } }],
     define: { 'process.env.NODE_ENV': '"production"', __dirname: '"/"', global: 'globalThis' },
     build: { write: false, minify: false, rolldownOptions: { transform: { inject: { Buffer: ['buffer', 'Buffer'], process: 'process' } } },
       lib: { entry: fileURLToPath(new URL('../src/test-utils/amount-shortcuts-acceptance-harness.tsx', import.meta.url)), name: 'FloFiAmountShortcuts', formats: ['iife'] } } });
