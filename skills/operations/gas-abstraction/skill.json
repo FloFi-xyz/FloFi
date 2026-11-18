@@ -1,0 +1,94 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/gas-abstraction",
+  "title": "Gas abstraction and payer selection",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "gas-abstraction"
+  ],
+  "domains": [
+    "flofi-wallet-execution",
+    "flofi-protocol-integrations",
+    "flofi-swap",
+    "flofi-transfer-payments",
+    "flofi-security",
+    "flofi-workflow",
+    "flofi-payments-billing"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/gas-abstraction/*",
+      "apps/reference-dapp/src/gas-sponsorship/*",
+      "apps/reference-dapp/src/server/zeroex-gasless/*",
+      "apps/reference-dapp/src/server/solana-transfer-kora*",
+      "apps/reference-dapp/src/user-funded/circle-*",
+      "apps/reference-dapp/src/user-funded/gas-payer*",
+      "apps/reference-dapp/src/user-funded/gasless-*",
+      "docs/deploy/GAS-SPONSORSHIP.md",
+      "docs/adr/ADR-0010*",
+      "apps/reference-dapp/src/server/robinhood-mainnet.ts",
+      "apps/reference-dapp/src/wallet/solana-wallet-kora.test.ts",
+      "packages/reference-compiler/src/kora.ts",
+      "packages/reference-compiler/src/circle-paymaster.ts",
+      "packages/reference-compiler/test/kora.test.ts",
+      "packages/reference-compiler/test/circle-paymaster.test.ts"
+    ],
+    "keywords": [
+      "gas abstraction",
+      "gas-abstraction",
+      "gasless",
+      "paymaster",
+      "kora",
+      "sponsorship",
+      "fee payer",
+      "token-paid gas"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/solana-foundation/kora/ad167489ae0b83a68414abef520fba7ee325a6dd/README.md",
+      "publisher": "Solana Foundation",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "ad167489ae0b83a68414abef520fba7ee325a6dd",
+      "reviewedDigest": "sha256:f6c7bd89979cb178149350741d238075e2e734fb0952881de28036516f9cc87b",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Kora RPC fee payer and fee-token model. The source explicitly states the MIT licence; hosted Pimlico rules are separate."
+    },
+    {
+      "url": "https://developers.circle.com/paymaster",
+      "publisher": "Circle",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:c71f57f941e035f14b476f199b4d343a2078da3c365d45699708e92988829f6b",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Published Circle Paymaster guide. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://docs.pimlico.io/guides/how-to/solana/privy",
+      "publisher": "Pimlico",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:55c800e28d6b4784dc216b2bf718aa61621fe94f050c9c2a81a0033fc2aaad43",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Published Pimlico Solana/Privy guide. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:13fba845f98b16d979df5b4a4a8ebc715ab2aaabf17a81d99cb01c6ee3a1ef8d",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

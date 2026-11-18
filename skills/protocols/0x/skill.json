@@ -1,0 +1,95 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "protocols/0x",
+  "title": "0x Swap and Gasless API contracts",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [
+    "0x"
+  ],
+  "operations": [
+    "swap"
+  ],
+  "domains": [
+    "flofi-swap",
+    "flofi-protocol-integrations",
+    "flofi-wallet-execution",
+    "flofi-security"
+  ],
+  "dependsOn": [
+    "operations/swap"
+  ],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/server/zeroex-gasless/*",
+      "apps/reference-dapp/src/wallet/zeroex-gasless-*",
+      "apps/reference-dapp/src/server/robinhood-mainnet.ts",
+      "apps/reference-dapp/src/server/testdata/zeroex/*",
+      "packages/reference-compiler/test/fixtures/zeroex-*"
+    ],
+    "keywords": [
+      "0x",
+      "zeroex",
+      "0x gasless",
+      "robinhood gasless",
+      "gasless swap on robinhood",
+      "metatxn settler"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/Uniswap/permit2/cc56ad0f3439c502c246fc5cfcc3db92bb8b7219/src/SignatureTransfer.sol",
+      "publisher": "Uniswap Labs",
+      "kind": "OFFICIAL_SDK",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "cc56ad0f3439c502c246fc5cfcc3db92bb8b7219",
+      "reviewedDigest": "sha256:234effebbe1e7ad7a3c791ea2b411f8e90993b758479817eb32c8767ea62ee8d",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Permit2 witness binding and unordered nonce consumption. MIT file header and repository LICENSE."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/0xProject/0x-settler/ad7c844c6a2a263ae6ba6c72700534aae9bb4a48/README.md",
+      "publisher": "0x",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "ad7c844c6a2a263ae6ba6c72700534aae9bb4a48",
+      "reviewedDigest": "sha256:c09b4490d166fa599ec1d79057bd5e6f454e4bc2d61432602d8bc77d4b3b4bf8",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official Settler registry and Permit2 context. Pinned and hashed. README licence not established at this revision."
+    },
+    {
+      "url": "https://docs.0x.org/docs/introduction/supported-chains",
+      "publisher": "0x",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:ab1bac2e6a94f470a8ce386332e6ba2ac4037b5727f86e5be67df1e23a78b85e",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Vendor-wide network and API availability. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://docs.0x.org/evm/gasless-api/introduction",
+      "publisher": "0x",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:b5c5f9f13469dbee5bc97cf560f447726a0807265fefa3273420d4fc27f2a457",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official Gasless API contracts. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:03d096aee373d1c198214eaca834ddc0c43641f6d783a1a6dbde6c60de6b66df",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

@@ -1,0 +1,10 @@
+---
+name: neon-postgresql
+description: Review FloFi PostgreSQL compatibility, Neon connection lifecycle and durable transactional state.
+---
+
+# Neon and PostgreSQL
+
+- Keep each PostgreSQL transaction on one checked-out connection. FloFi's short READ COMMITTED transaction helper has bounded retry for serialization/deadlock. Keep external effects outside retryable callbacks and prove row ownership, uniqueness and idempotent transitions with concurrent tests. Choose row or advisory locks for the relevant invariant. Check indexes against scoped predicates and measured query plans. [DB helpers](../../../packages/cloud-runtime/src/db.ts) · [Migration checks](../../../packages/cloud-runtime/src/migrations.ts)
+- Neon separates compute from storage and offers pooled endpoints and branches. Use the configured per-runtime pool and connection lifecycle. Shared runtime pools and short serverless pools have different limits. Verify transaction-pooling constraints before relying on session state. Migration connections and preview databases have separate owner-controlled contracts. A branch or restore's available history, recovery time and access isolation depend on environment configuration. Verify those limits before asserting recovery. Treat S3-compatible artifacts and retention as a separate storage boundary. [Cloud runbook](../../../docs/deploy/CLOUD.md)
+- Compare exact migration version, name and digest and certify both rollout directions for Web, API and worker. The baseline runtime ships through 0028. FinOps 0029 has a separate owner activation and compatibility check. Older certified runtimes can serve the exact certified newer schema without rewriting it. Newer runtimes refuse a behind database until the authorized schema process runs. Keep migration history intact, preserve tenant-scoped durable workflow and attempt state, and verify deletion, privacy, audit and legal-hold behavior. [Schema compatibility](../../../docs/deploy/SCHEMA-COMPATIBILITY.md) · [Compatibility regression](../../../packages/cloud-runtime/test/forward-compatibility.pg.test.ts) · [FinOps fixture test](../../../apps/reference-dapp/src/admin/finops/finops.pg.test.ts)

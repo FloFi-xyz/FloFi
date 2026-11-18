@@ -1,6 +1,6 @@
 {
   "format": "flofi.engineering-skill-registry.v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publishers": {
     "Jupiter": {
       "urlPrefixes": [
@@ -81,6 +81,104 @@
         "https://raw.githubusercontent.com/ethereum/EIPs/",
         "https://raw.githubusercontent.com/ethereum/ERCs/"
       ]
+    },
+    "Robinhood": {
+      "urlPrefixes": [
+        "https://docs.robinhood.com/chain/"
+      ]
+    },
+    "0x": {
+      "urlPrefixes": [
+        "https://docs.0x.org/",
+        "https://raw.githubusercontent.com/0xProject/0x-settler/"
+      ]
+    },
+    "Circle": {
+      "urlPrefixes": [
+        "https://developers.circle.com/",
+        "https://www.circle.com/"
+      ]
+    },
+    "Pimlico": {
+      "urlPrefixes": [
+        "https://docs.pimlico.io/"
+      ]
+    },
+    "Privy": {
+      "urlPrefixes": [
+        "https://docs.privy.io/"
+      ]
+    },
+    "Wallet Standard": {
+      "urlPrefixes": [
+        "https://raw.githubusercontent.com/wallet-standard/wallet-standard/"
+      ]
+    },
+    "Solana Program": {
+      "urlPrefixes": [
+        "https://raw.githubusercontent.com/solana-program/token/",
+        "https://raw.githubusercontent.com/solana-program/token-2022/"
+      ]
+    },
+    "Model Context Protocol": {
+      "urlPrefixes": [
+        "https://modelcontextprotocol.io/",
+        "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/"
+      ]
+    },
+    "OpenAI": {
+      "urlPrefixes": [
+        "https://developers.openai.com/",
+        "https://raw.githubusercontent.com/openai/openai-python/",
+        "https://raw.githubusercontent.com/openai/openai-node/"
+      ]
+    },
+    "Anthropic": {
+      "urlPrefixes": [
+        "https://platform.claude.com/",
+        "https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/"
+      ]
+    },
+    "Vercel": {
+      "urlPrefixes": [
+        "https://vercel.com/docs/"
+      ]
+    },
+    "Railway": {
+      "urlPrefixes": [
+        "https://docs.railway.com/"
+      ]
+    },
+    "Neon": {
+      "urlPrefixes": [
+        "https://neon.com/docs/",
+        "https://raw.githubusercontent.com/neondatabase/serverless/"
+      ]
+    },
+    "PostgreSQL Global Development Group": {
+      "urlPrefixes": [
+        "https://raw.githubusercontent.com/postgres/postgres/"
+      ]
+    },
+    "Node.js": {
+      "urlPrefixes": [
+        "https://raw.githubusercontent.com/nodejs/node/"
+      ]
+    },
+    "GitHub": {
+      "urlPrefixes": [
+        "https://raw.githubusercontent.com/github/docs/"
+      ]
+    },
+    "CircleCI": {
+      "urlPrefixes": [
+        "https://circleci.com/docs/"
+      ]
+    },
+    "OWASP": {
+      "urlPrefixes": [
+        "https://raw.githubusercontent.com/OWASP/ASVS/"
+      ]
     }
   },
   "skills": [
@@ -100,6 +198,18 @@
     "operations/bridge",
     "operations/liquidity",
     "operations/lending",
-    "operations/execution"
+    "operations/execution",
+    "networks/robinhood",
+    "protocols/0x",
+    "operations/account-abstraction",
+    "operations/gas-abstraction",
+    "operations/wallet-infrastructure",
+    "operations/token-transfers",
+    "engineering/mcp",
+    "engineering/ai-orchestration",
+    "engineering/finops",
+    "engineering/web3-security",
+    "engineering/neon-postgresql",
+    "engineering/infrastructure-cicd"
   ]
 }

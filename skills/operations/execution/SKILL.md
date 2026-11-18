@@ -1,26 +1,24 @@
 # Execution and reconciliation (FloFi engineering skill)
 
 ## Authority
+- For network-specific transaction checks, use [EVM core](../../networks/evm-core/SKILL.md) or
+  [Solana](../../networks/solana/SKILL.md) according to the affected path.
 - One economic attempt per authorized action. The Privy path: `floFiSigningGate` matches the exact bytes to the
   reviewed attempt and claims its single signature on the server; Privy then shows its own confirmation
   (`showWalletUIs: true`); FloFi re-checks the signed bytes before it broadcasts them once.
 - A cancel in Privy spends that attempt (fail-closed); the person simulates again. Never re-sign silently, never
   retry a rejected or unknown signature, never create a new attempt behind the person's back.
 - Bind the account, provider, chain, workflow revision, exact reviewed payload and fee payer through handoff.
-  Recheck live EIP-7702 delegate code. An ERC-20 relay receipt can prove transfer without consuming the owner's
-  transaction nonce. The journal must preserve that distinction.
+  Recheck current authorization state before signing. Use [account abstraction](../account-abstraction/SKILL.md)
+  for delegate and UserOperation checks and [token transfers](../token-transfers/SKILL.md) for wallet relay proofs.
 - `CONFIRM_EACH_STEP` is the baseline workflow plan. `USER_FUNDED` depends on the registered flow and actual
   wallet capability. The retired executor-funded delegation has legacy read/revoke behavior. Automation
   `CONFIRM_EACH_TIME` triggers create an occurrence for approval.
 
-## Gas
-- Read `gas-abstraction/config.ts` and `gas-abstraction/mechanism.ts` for conditional paths. Native gas takes
-  priority when covered or unknown. Confirmed shortages can select Circle owner-paid USDC on Ethereum, Base
-  and Arbitrum, Pimlico Kora owner-paid USDC/USDT on Solana mainnet, or eligible 0x gasless ERC-20 swaps on
-  Robinhood. Deployment and action/wallet gates apply. Operator sponsorship is separately controlled.
-- Bind eligible currency, fee payer, fee ceilings and signature interactions to Review. First-use Circle
-  for an eligible plain FloFi Wallet needs explicit EIP-7702 upgrade consent and an additional signature.
-  Recheck native fees, including applicable chain data fees. A payer or payload change requires a fresh Review.
+## Fees
+- Bind the fee currency, payer, ceilings and signature interactions to Review. Recheck applicable chain
+  fees. A changed payer, material economics or changed payload requires applicable fresh Review.
+  Use [gas abstraction](../gas-abstraction/SKILL.md) for the native-first policy and provider eligibility.
 
 ## Status
 - Canonical lifecycle (`domain/canonical-execution-status.ts`): AUTHORIZATION_PENDING → SUBMITTED → HASH_KNOWN →

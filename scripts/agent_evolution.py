@@ -87,7 +87,7 @@ def assess(root, base, today, upstream=None):
     roles = sorted(path for path in changed if path.startswith((".codex/agents/", ".claude/agents/")))
     skill_files = sorted(path for path in changed if path.startswith("skills/"))
     _, skills = registry.load(root)
-    selected_skills = sorted(row["id"] for row in registry.select(root, paths=sorted(set(changed_sources + capabilities)))["skills"])
+    selected_skills = sorted(row["id"] for row in registry.select(root, paths=sorted(changed))["skills"])
     skill_patterns = [pattern for skill in skills.values() if skill for pattern in skill["appliesTo"]["paths"]]
     unmatched_capabilities = [path for path in capabilities
                               if not any(fnmatch.fnmatchcase(path, pattern) for pattern in skill_patterns)]
@@ -105,7 +105,7 @@ def assess(root, base, today, upstream=None):
                                         or re.fullmatch(r"UNREACHABLE: [A-Za-z][A-Za-z0-9]*", state)):
                 upstream_actions.append(f"{skill}: {state} {url}")
                 upstream_skills.add(skill)
-    skill_review_ids = changed_skills | upstream_skills | {note.split(":", 1)[0] for note in skill_notes}
+    skill_review_ids = set(selected_skills) | changed_skills | upstream_skills | {note.split(":", 1)[0] for note in skill_notes}
     codex_dir = root / ".codex/agents"
     claude_dir = root / ".claude/agents"
     codex_files = list(codex_dir.glob("*.toml"))

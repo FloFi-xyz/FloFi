@@ -14,7 +14,7 @@ suites. Keep at most three specialists active and give each the relevant diff.
 | `sourceChanges`, `roleChanges`, `engineeringDocChanges` | Compare current source and tests with the role and engineering guidance. Remove obsolete claims, or record why existing guidance still holds. A changed document does not resolve the signal by itself. |
 | `regressionChanges`, `unlinkedChangedTests`, `missingSuites`, `suiteContractChanges`, `requiredSuiteChanges`, `coverageGaps` | Read the affected assertions. Preserve required cases, map relevant regressions or record the gap, and capture reusable failure modes in the most relevant guidance. |
 | `inventoryChanges`, `missingOwners`, `staleOwners` | Review exact source ownership, dependencies and suite links in `coverage.json` with the affected domains. Regenerate `COVERAGE.md` after reviewed edits. |
-| `suggestedSkills`, `skillReviewDomains`, `skillReviewNotes`, `upstreamActions` | Check scope, applicability, provenance and license with the registered owners. Inspect changed and unavailable sources. Treat pending references as leads until reviewed. |
+| `suggestedSkills`, `skillReviewDomains`, `skillReviewNotes`, `upstreamActions` | Check scope, applicability, provenance and license with the registered owners. Selection uses every changed path, including new files and tests. The report lists missing owners independently. Inspect changed and unavailable sources and treat pending references as leads until reviewed. |
 | `claudeParity` | Inspect `agent_guard.py claude-agents`, review the proposed diff, regenerate with `--overwrite`, then run the guard. |
 
 The report uses local Git, the existing inventory, path patterns, registry
@@ -47,7 +47,9 @@ checkout. To reproduce the same date-dependent results, pass `--as-of YYYY-MM-DD
      --upstream-report "$review_dir/upstream.json" > "$review_dir/changes.json"
    ```
 
-3. Assign the open findings to affected domains. Check publisher release notes
+3. Assign the open findings to affected domains. The verifier enumerates all
+   registered network, protocol, operation and engineering skills. Check
+   publisher release notes
    and source history for newer revisions because a digest for a pinned commit
    only checks that commit. Investigate unavailable responses and mutable pages
    before changing pins. Review facts and licensing independently, write

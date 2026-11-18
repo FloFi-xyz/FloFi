@@ -40,8 +40,8 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 engineering skills and the capab
   });
   it('the networks those capabilities run on stay discoverable through the existing Capability API (no second registry)', () => {
     const profiles = networkCapabilityProfiles(networkScope({}));
-    // Ethereum, Base, Arbitrum One and Solana: the public product's mainnets a skill names must each have a Capability API profile with actions.
-    for (const chain of ['eip155:1', 'eip155:8453', 'eip155:42161', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']) {
+    // Each current public mainnet has a Capability API profile with actions and is referenced by at least one skill.
+    for (const chain of ['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:4663', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']) {
       expect(skills.some(s => s.capabilities.some(c => c.chainId === chain)), chain).toBe(true);
       const key = networkIdentity(chain)?.key, profile = profiles.find(p => p.key === key);
       expect(profile?.actions.length, chain).toBeGreaterThan(0);
@@ -50,7 +50,7 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 engineering skills and the capab
   it('no runtime source imports, reads or executes the skills registry', () => {
     const runtime = ['apps/reference-dapp/src', 'apps/reference-dapp/backend', 'packages'].flatMap(dir => files(join(ROOT, dir)));
     expect(runtime.length).toBeGreaterThan(100);
-    const offenders = runtime.filter(path => /skills\/(registry\.json|networks\/|protocols\/|operations\/)|skill_registry/.test(readFileSync(path, 'utf8')))
+    const offenders = runtime.filter(path => /skills\/(registry\.json|(?:networks|protocols|operations|engineering)\/)|skill_registry/.test(readFileSync(path, 'utf8')))
       .map(path => relative(ROOT, path));
     expect(offenders).toEqual([]);
   });

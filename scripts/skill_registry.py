@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""FloFi multichain engineering skills registry (BUILD-FLOFI-EXECUTION-PERFORMANCE-001).
+"""FloFi engineering skills registry.
 
-Versioned, reviewed protocol and network knowledge for the existing 19 engineering
+Versioned, reviewed technical knowledge for the existing 19 engineering
 specialists. A skill is reference material: a FloFi-written guidance file plus a
 manifest recording where the knowledge came from (official docs, SDKs or skills),
 the reviewed revision/digest, its licence and which FloFi domains, paths and
@@ -43,10 +43,11 @@ REGISTRY = "skills/registry.json"
 SKILL_FORMAT = "flofi.engineering-skill.v1"
 REGISTRY_FORMAT = "flofi.engineering-skill-registry.v1"
 AUTHORITY = "ENGINEERING_REFERENCE_ONLY"
-CATEGORIES = ("networks", "protocols", "operations")
+CATEGORIES = ("networks", "protocols", "operations", "engineering")
 NETWORKS = frozenset({"evm", "ethereum", "base", "arbitrum-one", "solana", "robinhood"})
-PROTOCOLS = frozenset({"uniswap", "aave", "jupiter", "orca", "across", "lifi", "relay", "mayan"})
-OPERATIONS = frozenset({"swap", "bridge", "liquidity", "lending", "execution", "transfer"})
+PROTOCOLS = frozenset({"uniswap", "aave", "jupiter", "orca", "across", "lifi", "relay", "mayan", "0x"})
+OPERATIONS = frozenset({"swap", "bridge", "liquidity", "lending", "execution", "transfer",
+                        "account-abstraction", "gas-abstraction", "wallet-infrastructure"})
 SOURCE_KINDS = frozenset({"OFFICIAL_DOCS", "OFFICIAL_SDK", "OFFICIAL_SKILL", "THIRD_PARTY"})
 SOURCE_STATUSES = frozenset({"VERIFIED", "PENDING_VERIFICATION", "REJECTED"})
 SKILL_KEYS = frozenset({"format", "id", "title", "version", "networks", "protocols", "operations", "domains",
@@ -59,7 +60,7 @@ SEMVER = re.compile(r"^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HOST = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
-KEYWORD = re.compile(r"^[a-z0-9][a-z0-9.+_-]{1,40}$")
+KEYWORD = re.compile(r"^[a-z0-9][a-z0-9.+_-]*(?: [a-z0-9][a-z0-9.+_-]*)*$")
 # Guidance is FloFi-written review knowledge. It must never ask anyone to run piped remote scripts,
 # disclose key material, or move funds; the registry is reference-only.
 UNSAFE_GUIDANCE = (
@@ -85,7 +86,7 @@ def unsafe_guidance(text):
 
 MAX_FETCH_BYTES = 2 * 1024 * 1024
 MAX_CONCURRENT_REVIEWS = 3
-KIND_ORDER = {"networks": 0, "protocols": 1, "operations": 2}
+KIND_ORDER = {category: i for i, category in enumerate(CATEGORIES)}
 
 
 def _guard():
@@ -105,6 +106,15 @@ def normalized_digest(body):
     text = body.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
     text = "\n".join(line.rstrip() for line in text.split("\n")).strip() + "\n"
     return "sha256:" + hashlib.sha256(text.encode()).hexdigest()
+
+
+def _review_date(value):
+    if not isinstance(value, str) or not DATE.fullmatch(value):
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def load(root=ROOT):
@@ -220,8 +230,9 @@ def _validate_skill(root, skill_id, skill, skills, hosts, domains):
     applies = skill.get("appliesTo")
     if not isinstance(applies, dict) or set(applies) != {"paths", "keywords"} or not _strings(applies.get("paths")) \
             or not _strings(applies.get("keywords"), pattern=KEYWORD) \
+            or any(not 2 <= len(k) <= 41 for k in applies.get("keywords", [])) \
             or any(p.startswith("/") or ".." in p.split("/") for p in applies.get("paths", [])):
-        errors.append(f"{where}: appliesTo needs relative path globs and lowercase keywords")
+        errors.append(f"{where}: appliesTo needs relative path globs and lowercase keywords or phrases")
     capabilities = skill.get("capabilities")
     if not isinstance(capabilities, list) or any(not isinstance(c, dict) or set(c) != CAPABILITY_KEYS
                                                  or not all(isinstance(c[k], str) and c[k] for k in CAPABILITY_KEYS)
@@ -289,13 +300,15 @@ def _validate_source(where, source, hosts, verified_official):
         errors.append(f"{where}: license must be null (not yet determined) or an SPDX-style name")
     reviewed = [source.get("reviewedRevision"), source.get("reviewedDigest"), source.get("reviewedAt")]
     if status == "VERIFIED":
-        if not DIGEST.fullmatch(str(reviewed[1])) or not DATE.fullmatch(str(reviewed[2])):
-            errors.append(f"{where}: VERIFIED needs reviewedDigest (sha256:...) and reviewedAt (YYYY-MM-DD)")
+        if not reviewed[0]:
+            errors.append(f"{where}: VERIFIED needs a reviewedRevision")
+        if not DIGEST.fullmatch(str(reviewed[1])) or _review_date(reviewed[2]) is None:
+            errors.append(f"{where}: VERIFIED needs reviewedDigest (sha256:...) and a valid reviewedAt (YYYY-MM-DD)")
         if source.get("license") is None:
             errors.append(f"{where}: VERIFIED needs a recorded licence")
     elif (reviewed[1] is None) != (reviewed[2] is None) or reviewed[1] is not None and (
-            not DIGEST.fullmatch(str(reviewed[1])) or not DATE.fullmatch(str(reviewed[2]))):
-        errors.append(f"{where}: a pinned digest needs both reviewedDigest (sha256:...) and reviewedAt (YYYY-MM-DD)")
+            not DIGEST.fullmatch(str(reviewed[1])) or _review_date(reviewed[2]) is None):
+        errors.append(f"{where}: a pinned digest needs reviewedDigest (sha256:...) and a valid reviewedAt (YYYY-MM-DD)")
     if status == "REJECTED" and reviewed[1] is not None:
         errors.append(f"{where}: a REJECTED source is not pinned")
     if reviewed[0] is not None and not (isinstance(reviewed[0], str) and 1 <= len(reviewed[0]) <= 120):
@@ -348,8 +361,8 @@ def warnings(root=ROOT, today=None):
                 notes.append(f"{skill_id}: {url} is PENDING_VERIFICATION (reference only until reviewed and pinned)")
             elif status == "REJECTED":
                 notes.append(f"{skill_id}: {url} is REJECTED and never selected as guidance")
-            elif status == "VERIFIED" and DATE.fullmatch(str(source.get("reviewedAt"))):
-                age = (today - dt.date.fromisoformat(source["reviewedAt"])).days
+            elif status == "VERIFIED" and (reviewed := _review_date(source.get("reviewedAt"))):
+                age = (today - reviewed).days
                 if age > skill.get("reviewIntervalDays", 90):
                     notes.append(f"{skill_id}: {url} review is {age} days old (interval {skill['reviewIntervalDays']})")
     return notes
@@ -357,9 +370,9 @@ def warnings(root=ROOT, today=None):
 
 # --- Selection -------------------------------------------------------------------------------------------------
 
-def _tokens(text):
-    # Sentence punctuation is not part of a keyword ("…via Uniswap." names `uniswap`).
-    return {token.rstrip(".+_-") for token in re.findall(r"[a-z0-9][a-z0-9.+_-]*", text.lower())} - {""}
+def _task_words(text):
+    # Keep word order for phrases and ignore trailing punctuation, as in "via Uniswap."
+    return " " + " ".join(token.rstrip(".+_-") for token in re.findall(r"[a-z0-9][a-z0-9.+_-]*", text.lower())) + " "
 
 
 def select(root=ROOT, paths=(), task="", networks=(), protocols=(), operations=(), domains_filter=None):
@@ -370,7 +383,7 @@ def select(root=ROOT, paths=(), task="", networks=(), protocols=(), operations=(
     """
     _, skills = load(root)
     valid = {k: v for k, v in skills.items() if isinstance(v, dict)}
-    words = _tokens(task)
+    words = _task_words(task)
     reasons = {}
 
     def mark(skill_id, reason):
@@ -379,10 +392,11 @@ def select(root=ROOT, paths=(), task="", networks=(), protocols=(), operations=(
     for skill_id, skill in valid.items():
         applies = skill.get("appliesTo", {})
         for path in paths:
-            if any(fnmatch.fnmatchcase(path, pattern) for pattern in applies.get("paths", [])):
+            if path in (f"skills/{skill_id}/SKILL.md", f"skills/{skill_id}/skill.json") or any(
+                    fnmatch.fnmatchcase(path, pattern) for pattern in applies.get("paths", [])):
                 mark(skill_id, f"path {path}")
         for keyword in applies.get("keywords", []):
-            if keyword in words:
+            if f" {keyword} " in words:
                 mark(skill_id, f"task keyword '{keyword}'")
         for facet, wanted in (("networks", networks), ("protocols", protocols), ("operations", operations)):
             for value in wanted:
@@ -470,8 +484,8 @@ def check_upstream(root=ROOT, snapshot=None, fetch=None, today=None):
                 state = "UNPINNED" if not pinned else "UNCHANGED" if observed == pinned else "CHANGED"
             elif not state.startswith("UNREACHABLE") and not pinned:
                 state = "UNPINNED"
-            if state == "UNCHANGED" and DATE.fullmatch(str(source.get("reviewedAt"))):
-                if (today - dt.date.fromisoformat(source["reviewedAt"])).days > skill.get("reviewIntervalDays", 90):
+            if state == "UNCHANGED" and (reviewed := _review_date(source.get("reviewedAt"))):
+                if (today - reviewed).days > skill.get("reviewIntervalDays", 90):
                     state = "STALE"
             rows.append({"skill": skill_id, "url": url, "status": source.get("status"), "pinned": pinned,
                          "observed": observed, "state": state})
@@ -513,11 +527,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "verify":
         errors = validate()
-        for note in warnings():
-            print("warning: " + note)
         if errors:
             print("\n".join(errors), file=sys.stderr)
             return 1
+        for note in warnings():
+            print("warning: " + note)
         _, skills = load()
         print(f"Skills registry: PASS ({len(skills)} skills; reference-only engineering knowledge, not authority)")
         return 0

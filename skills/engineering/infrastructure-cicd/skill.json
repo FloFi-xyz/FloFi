@@ -1,0 +1,113 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "engineering/infrastructure-cicd",
+  "title": "Infrastructure, deployment and certification",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [],
+  "domains": [
+    "flofi-infrastructure-ci",
+    "flofi-data-privacy",
+    "flofi-security",
+    "flofi-automations"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      ".circleci/*",
+      ".github/workflows/*",
+      "deploy/railway/*",
+      "deploy/vercel/*",
+      "apps/reference-dapp/vercel.json",
+      "apps/reference-dapp/backend/*",
+      "apps/reference-dapp/src/server/flow-runtime*",
+      "docs/engineering/CI.md",
+      "docs/deploy/CLOUD.md",
+      "docs/deploy/SCHEMA-COMPATIBILITY.md",
+      "packages/cloud-runtime/src/migrations.ts",
+      "packages/cloud-runtime/migrations/*",
+      "scripts/ci_*",
+      "scripts/bootstrap-ci.py",
+      "scripts/governance_lite.py",
+      "packages/cloud-runtime/test/fixtures/*.sql",
+      "packages/cloud-runtime/src/http.ts",
+      "packages/cloud-runtime/test/http-drain.test.ts",
+      "apps/reference-dapp/src/app/api/flofi/readiness/route.ts",
+      "apps/reference-dapp/src/server/cloud-api-client.ts"
+    ],
+    "keywords": [
+      "deployment failure",
+      "deployment provenance",
+      "deployment rollback",
+      "railway",
+      "vercel",
+      "circleci",
+      "ci cd",
+      "ci-cd",
+      "database migration",
+      "native node typescript",
+      "graceful shutdown",
+      "deployment infrastructure",
+      "ci infrastructure",
+      "postgresql migration",
+      "postgres migration"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/nodejs/node/221ffa5df3013056d72bada8a68f878576ec6019/doc/api/typescript.md",
+      "publisher": "Node.js",
+      "kind": "OFFICIAL_DOCS",
+      "license": "MIT",
+      "status": "VERIFIED",
+      "reviewedRevision": "221ffa5df3013056d72bada8a68f878576ec6019",
+      "reviewedDigest": "sha256:18e94f6c3c71210e548d5b1f5261d23f3fe8f71c438c584f7bad9a187677841c",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Node.js v24 type stripping and module/runtime import constraints. Node.js LICENSE applies MIT to first-party material."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/github/docs/1f9d8455c5531588d858d6e4e1bf194155b5aff1/content/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches.md",
+      "publisher": "GitHub",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC-BY-4.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "1f9d8455c5531588d858d6e4e1bf194155b5aff1",
+      "reviewedDigest": "sha256:52c7c02847bc2ef84f3db2291960a6fdf29d410dc6f03db7fe73712a23bd5f84",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Protected branch and required status check behavior. CC BY 4.0 LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://docs.railway.com/deployments/healthchecks",
+      "publisher": "Railway",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:d2673f51fc87e07a3c0fcc828882ef24820f7d4f79657b14fd1d8b34a205fde2",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Official health/readiness behavior. Retrieved and hashed. Document reuse licence not established."
+    },
+    {
+      "url": "https://circleci.com/docs/guides/orchestrate/workflows/",
+      "publisher": "CircleCI",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:feac7933def3c337ab6eb3c7defbe6c2a31c3c010cd09e5278682ecc9152d993",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Workflow dependencies and orchestration. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:f497becb5d9a4d2707471a61224938eb6aa06f08289d6158741bb0c28281cc09",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

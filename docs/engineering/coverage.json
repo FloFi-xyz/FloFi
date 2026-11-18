@@ -7357,6 +7357,129 @@
       ]
     },
     {
+      "id": "skills--admin-analytics",
+      "primary": "flofi-admin-analytics",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-infrastructure-ci",
+        "flofi-payments-billing"
+      ],
+      "sources": [
+        "skills/engineering/finops/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--chat",
+      "primary": "flofi-chat",
+      "dependencies": [
+        "flofi-admin-analytics",
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/engineering/ai-orchestration/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--data-privacy",
+      "primary": "flofi-data-privacy",
+      "dependencies": [
+        "flofi-admin-analytics",
+        "flofi-automations",
+        "flofi-infrastructure-ci",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/engineering/neon-postgresql/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--infrastructure-ci",
+      "primary": "flofi-infrastructure-ci",
+      "dependencies": [
+        "flofi-automations",
+        "flofi-data-privacy",
+        "flofi-security"
+      ],
+      "sources": [
+        "skills/engineering/infrastructure-cicd/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--mcp",
+      "primary": "flofi-mcp",
+      "dependencies": [
+        "flofi-channels",
+        "flofi-developers",
+        "flofi-security",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/engineering/mcp/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--network-providers",
+      "primary": "flofi-protocol-integrations",
+      "dependencies": [
+        "flofi-bridge",
+        "flofi-liquidity",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-transfer-payments",
+        "flofi-wallet-execution"
+      ],
+      "sources": [
+        "skills/networks/robinhood/skill.json",
+        "skills/protocols/0x/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
       "id": "skills--protocol-integrations",
       "primary": "flofi-protocol-integrations",
       "dependencies": [
@@ -7397,6 +7520,74 @@
       "gaps": [
         "Eleven official documentation sites (and the third-party Arbitrum guide) were unreachable from the build session: they stay PENDING_VERIFICATION until fetched, reviewed, licensed and pinned. Jupiter and Arbitrum documentation repositories state no licence, so their pinned files are PENDING_VERIFICATION (change detection active).",
         "Upstream checks run on demand (`skill_registry.py check-upstream --fetch`); no scheduled job runs them."
+      ]
+    },
+    {
+      "id": "skills--security",
+      "primary": "flofi-security",
+      "dependencies": [
+        "flofi-developers",
+        "flofi-mcp",
+        "flofi-protocol-integrations",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/engineering/web3-security/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--transfer-payments",
+      "primary": "flofi-transfer-payments",
+      "dependencies": [
+        "flofi-protocol-integrations",
+        "flofi-security",
+        "flofi-wallet-execution",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/operations/token-transfers/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
+      ]
+    },
+    {
+      "id": "skills--wallet-execution",
+      "primary": "flofi-wallet-execution",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-mcp",
+        "flofi-payments-billing",
+        "flofi-protocol-integrations",
+        "flofi-security",
+        "flofi-swap",
+        "flofi-transfer-payments",
+        "flofi-workflow"
+      ],
+      "sources": [
+        "skills/operations/account-abstraction/skill.json",
+        "skills/operations/gas-abstraction/skill.json",
+        "skills/operations/wallet-infrastructure/skill.json"
+      ],
+      "suites": [
+        "scripts.test_ci_skill_registry",
+        "app.platform.engineering-skills"
+      ],
+      "gaps": [
+        "Upstream sources with unresolved licensing or availability remain advisory and are tracked in the manifests."
       ]
     },
     {

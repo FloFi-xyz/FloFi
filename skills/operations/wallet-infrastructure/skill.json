@@ -1,0 +1,110 @@
+{
+  "format": "flofi.engineering-skill.v1",
+  "id": "operations/wallet-infrastructure",
+  "title": "Wallet providers, identity and wallet sessions",
+  "version": "1.0.0",
+  "networks": [],
+  "protocols": [],
+  "operations": [
+    "wallet-infrastructure"
+  ],
+  "domains": [
+    "flofi-wallet-execution",
+    "flofi-security",
+    "flofi-mcp",
+    "flofi-frontend-ux",
+    "flofi-data-privacy"
+  ],
+  "dependsOn": [],
+  "appliesTo": {
+    "paths": [
+      "apps/reference-dapp/src/accounts/*",
+      "apps/reference-dapp/src/wallet/*provider*",
+      "apps/reference-dapp/src/wallet/evm-discovery*",
+      "apps/reference-dapp/src/wallet/*solana-wallet*",
+      "apps/reference-dapp/src/wallet/flofi-privy-*",
+      "apps/reference-dapp/src/components/account/*",
+      "apps/reference-dapp/src/mcp/oauth/*",
+      "apps/reference-dapp/src/accounts/wallet-host*",
+      "apps/reference-dapp/src/wallet/eip1193*",
+      "apps/reference-dapp/src/state/wallet-connection*",
+      "apps/reference-dapp/src/server/smart-account-*",
+      "apps/reference-dapp/src/app/oauth/*",
+      "apps/reference-dapp/src/app/.well-known/*",
+      "apps/reference-dapp/src/app/connections-action.ts",
+      "apps/reference-dapp/src/app/wallet-session-action.ts"
+    ],
+    "keywords": [
+      "wallet infrastructure",
+      "wallet connection",
+      "wallet linking",
+      "wallet mismatch",
+      "embedded wallet",
+      "privy",
+      "eip-1193",
+      "eip-6963",
+      "wallet standard",
+      "smart account",
+      "smart-account",
+      "mcp authentication",
+      "mcp oauth",
+      "mcp auth"
+    ]
+  },
+  "capabilities": [],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/EIPs/b055feec322fbc37e9d77a393a50b3ff56b31c92/EIPS/eip-1193.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "b055feec322fbc37e9d77a393a50b3ff56b31c92",
+      "reviewedDigest": "sha256:a3b5bca210b6818321c95279b9a47622343cb0eb51db058f1326b5e25ee4040d",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Provider request and connection, accounts and chain events. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/EIPs/b055feec322fbc37e9d77a393a50b3ff56b31c92/EIPS/eip-6963.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "b055feec322fbc37e9d77a393a50b3ff56b31c92",
+      "reviewedDigest": "sha256:38b6861b625c1447df70967a62200cfefe2ec7086550a52384f6cb537ef282ed",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Multi-provider announcement and discovery. The specification's Copyright section applies CC0-1.0."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/wallet-standard/wallet-standard/c49b56d60fbac2e68e0f3536707fa33030652f9e/packages/core/base/src/wallet.ts",
+      "publisher": "Wallet Standard",
+      "kind": "OFFICIAL_SDK",
+      "license": "Apache-2.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "c49b56d60fbac2e68e0f3536707fa33030652f9e",
+      "reviewedDigest": "sha256:2942b5f5c9db4b0f2ec863b6432fe0637a50540f7f705fea93472afe2d1d53b8",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Wallet Standard base wallet, account and feature interfaces. Apache-2.0 LICENSE at the pinned revision."
+    },
+    {
+      "url": "https://docs.privy.io/wallets/overview",
+      "publisher": "Privy",
+      "kind": "OFFICIAL_DOCS",
+      "license": null,
+      "status": "PENDING_VERIFICATION",
+      "reviewedRevision": "site snapshot 2026-11-18",
+      "reviewedDigest": "sha256:c49a4062983b15f415adcfed90a1efc886df2558295ff5f997e46da681558cde",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Embedded wallet provider guide. Retrieved and hashed. Document reuse licence not established."
+    }
+  ],
+  "guidance": "SKILL.md",
+  "guidanceDigest": "sha256:7180db67c07b275494fe0c65ca58213438ae2f2292c61367336ca75f740d996c",
+  "reviewIntervalDays": 90,
+  "authority": "ENGINEERING_REFERENCE_ONLY",
+  "performance": []
+}

@@ -8,7 +8,9 @@ contracts; see [the Claude Code guide](CLAUDE-CODE.md).
 
 Resolve current capability claims from the source, runtime gates and regression
 contracts. The latest cross-domain audit and its evidence are in the
-[Agent Evolution build report](BUILD-FLOFI-AGENT-EVOLUTION-001-REPORT.md).
+[Agent Evolution build report](BUILD-FLOFI-AGENT-EVOLUTION-001-REPORT.md). The
+skills expansion to 29 reference skills is in
+[BUILD-FLOFI-SKILLS-EXPANSION-002](BUILD-FLOFI-SKILLS-EXPANSION-002-REPORT.md).
 
 ## Ownership and review
 
@@ -75,14 +77,13 @@ CLI's intentional HTTP rejection is not an agent/model test. The command fails
 if the installed CLI cannot discover the roles. Verified with Codex 0.170.0.
 Project trust/managed settings can restrict availability; do not weaken them.
 
-## Multichain engineering skills
+## Engineering skills
 
-[skills/](../../skills/README.md) holds versioned network and protocol knowledge (EVM core, Ethereum, Base, Arbitrum,
-Solana; Uniswap, Aave, Jupiter, Orca, Across, LI.FI, Relay; swap, bridge, liquidity, lending and execution). `impact`
-and `domain` list the skills that apply to the changed paths, so the main session hands each read-only specialist the
-`SKILL.md` files to Read with its domain contract. Skills are reference knowledge with recorded, digest-pinned sources;
-they add no agent, no runtime dependency and no financial authority. `check` validates them; `skill_registry.py
-check-upstream --fetch` detects upstream changes and proposes updates for normal review.
+[skills/](../../skills/README.md) holds versioned network, protocol, operation and engineering knowledge. `impact`
+and `domain` list skills for changed paths. Main gives each read-only specialist the relevant `SKILL.md` paths and
+domain contract. `skill_registry.py select --task "MCP authentication regression"` can select guidance before work
+creates a diff. `check` validates the shared reference registry offline, and `skill_registry.py check-upstream --fetch`
+observes changes in the linked public sources for normal review.
 The [weekly maintenance procedure](AGENT-EVOLUTION.md) combines those results with
 the local inventory, coverage gaps and twin parity.
 

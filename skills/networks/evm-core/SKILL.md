@@ -5,8 +5,8 @@ capability registry and deterministic tests remain the evidence.
 
 ## Transactions and fees
 - The managed direct-send path uses EIP-1559 (type 2) transactions. Review binds the chain and nonce
-  and bounds gas and fees before signing (`server/managed-signing.ts`). Conditional smart account
-  paths use separate reviewed UserOperations and, when required, explicit EIP-7702 authorization.
+  and bounds gas and fees before signing (`server/managed-signing.ts`). For reviewed UserOperations,
+  use the [account abstraction skill](../../operations/account-abstraction/SKILL.md).
 - The reviewed transaction carries the account's next pending nonce. Re-read a lagging wallet nonce within
   the bounded window in `domain/wallet-nonce.ts`. Refuse an ahead, unreadable or still-mismatched nonce.
   Reconcile an ambiguous submission before enabling a new attempt.

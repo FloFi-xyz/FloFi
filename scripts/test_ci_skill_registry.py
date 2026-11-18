@@ -55,6 +55,30 @@ class SkillRegistry(unittest.TestCase):
             pinned = [s for s in skill["sources"] if s["kind"] != "THIRD_PARTY" and s["reviewedDigest"]]
             self.assertTrue(pinned, skill_id)
 
+    def test_expansion_domains_and_reference_only_capabilities(self):
+        _, loaded = skills.load(ROOT)
+        expected = {
+            "networks/robinhood": "flofi-protocol-integrations",
+            "protocols/0x": "flofi-swap",
+            "operations/account-abstraction": "flofi-wallet-execution",
+            "operations/gas-abstraction": "flofi-wallet-execution",
+            "operations/wallet-infrastructure": "flofi-wallet-execution",
+            "operations/token-transfers": "flofi-transfer-payments",
+            "engineering/mcp": "flofi-mcp",
+            "engineering/ai-orchestration": "flofi-chat",
+            "engineering/finops": "flofi-admin-analytics",
+            "engineering/web3-security": "flofi-security",
+            "engineering/neon-postgresql": "flofi-data-privacy",
+            "engineering/infrastructure-cicd": "flofi-infrastructure-ci",
+        }
+        for skill_id, primary in expected.items():
+            with self.subTest(skill=skill_id):
+                skill = loaded[skill_id]
+                self.assertIn(primary, skill["domains"])
+                self.assertTrue(any(s["status"] == "VERIFIED" for s in skill["sources"]))
+                if skill_id.startswith("engineering/") or skill_id == "protocols/0x":
+                    self.assertEqual([], skill["capabilities"])
+
     def test_an_unreviewed_guidance_edit_is_detected(self):
         path = self.root / "skills/protocols/jupiter/SKILL.md"
         path.write_text(path.read_text() + "\nEnable mode=fast everywhere.\n")
@@ -101,6 +125,41 @@ class SkillRegistry(unittest.TestCase):
         (self.root / "skills/protocols/stray/skill.json").write_text("{}")
         self.assertTrue(any("not listed" in e for e in self.errors()))
 
+    def test_expansion_manifest_provenance_errors_are_diagnostic(self):
+        skill_id = "engineering/mcp"
+        original = self.manifest(skill_id)
+        for field, value, expected in [
+            ("reviewedDigest", None, "VERIFIED needs reviewedDigest"),
+            ("reviewedRevision", None, "VERIFIED needs a reviewedRevision"),
+            ("reviewedAt", "2026-02-30", "valid reviewedAt"),
+            ("publisher", "Unofficial mirror", "not under an official Unofficial mirror location"),
+            ("url", "https://raw.githubusercontent.com/modelcontextprotocol-archive/modelcontextprotocol/a/spec.md",
+             "not under an official Model Context Protocol location"),
+        ]:
+            with self.subTest(field=field):
+                bad = copy.deepcopy(original)
+                bad["sources"][0][field] = value
+                self.write(skill_id, bad)
+                self.assertTrue(any(expected in error for error in self.errors()))
+        bad = copy.deepcopy(original)
+        bad["appliesTo"]["keywords"] = ["MCP auth", "mcp  oauth"]
+        self.write(skill_id, bad)
+        self.assertTrue(any("lowercase keywords or phrases" in error for error in self.errors()))
+        self.write(skill_id, original)
+        self.assertEqual([], self.errors())
+
+    def test_expansion_source_staleness_is_advisory(self):
+        skill_id = "engineering/mcp"
+        manifest = self.manifest(skill_id)
+        source = manifest["sources"][0]
+        today = dt.date.fromisoformat(source["reviewedAt"]) + dt.timedelta(days=manifest["reviewIntervalDays"] + 1)
+        observed = {source["url"]: source["reviewedDigest"]}.get
+        rows = skills.check_upstream(self.root, fetch=observed, today=today)
+        self.assertEqual("STALE", next(row["state"] for row in rows if row["url"] == source["url"]))
+        self.assertTrue(any(note.startswith(skill_id) and "days old" in note
+                            for note in skills.warnings(self.root, today=today)))
+        self.assertEqual([], self.errors())
+
     def test_unsafe_guidance_is_refused_but_rules_stating_never_are_not(self):
         self.assertEqual(skills.unsafe_guidance("Never paste a private key or seed phrase anywhere."), [])
         self.assertEqual(skills.unsafe_guidance("Paste your seed phrase to continue."), ["asks for key material"])
@@ -132,6 +191,62 @@ class SkillRegistry(unittest.TestCase):
         self.assertIn("protocols/jupiter", [row["id"] for row in selection["skills"]])
         self.assertTrue(all(row["guidance"].startswith("skills/") and row["guidance"].endswith("/SKILL.md") for row in selection["skills"]))
         self.assertIsNone(guard.skill_selection(["x"], root=self.root / "absent"))
+
+    def test_expansion_task_selection_is_focused(self):
+        examples = {
+            "Solana gasless transfer": {"networks/solana", "operations/gas-abstraction", "operations/token-transfers",
+                                       "operations/execution"},
+            "Robinhood gasless swap": {"networks/robinhood", "networks/evm-core", "protocols/0x", "operations/swap",
+                                       "operations/gas-abstraction"},
+            "Smart Account transfer": {"networks/evm-core", "operations/account-abstraction", "operations/execution",
+                                       "operations/token-transfers", "operations/wallet-infrastructure"},
+            "MCP authentication regression": {"engineering/mcp", "engineering/web3-security",
+                                              "operations/wallet-infrastructure"},
+            "AI provider fallback": {"engineering/ai-orchestration", "engineering/finops"},
+            "Database migration": {"engineering/neon-postgresql", "engineering/infrastructure-cicd"},
+            "Deployment failure": {"engineering/infrastructure-cicd"},
+        }
+        for task, expected in examples.items():
+            with self.subTest(task=task):
+                result = skills.select(ROOT, task=task)
+                self.assertEqual(expected, {row["id"] for row in result["skills"]})
+                self.assertEqual(result, skills.select(ROOT, task=task.lower() + "."))
+                self.assertTrue(all(len(batch) <= 3 for batch in result["reviewBatches"]))
+        for task, excluded in {
+            "Solana RPC provider fallback": {"engineering/ai-orchestration", "engineering/finops", "protocols/0x"},
+            "Wallet infrastructure": {"engineering/infrastructure-cicd"},
+            "Revise the landing page illustration": {"engineering/infrastructure-cicd"},
+        }.items():
+            with self.subTest(task=task):
+                self.assertFalse(excluded & {row["id"] for row in skills.select(ROOT, task=task)["skills"]})
+        self.assertEqual([], skills.select(ROOT, paths=["README.md"])["skills"])
+
+    def test_expansion_path_routing_and_domain_filter(self):
+        for path, expected in {
+            "apps/reference-dapp/src/server/robinhood-mainnet.ts": {"networks/robinhood", "protocols/0x",
+                                                                  "operations/gas-abstraction"},
+            "packages/reference-compiler/src/kora.ts": {"operations/gas-abstraction"},
+            "packages/reference-compiler/src/erc4337.ts": {"operations/account-abstraction"},
+            "packages/action-registry/src/solana-transfer.ts": {"operations/token-transfers"},
+            "apps/reference-dapp/src/state/wallet-connection.ts": {"operations/wallet-infrastructure"},
+            "apps/reference-dapp/src/app/oauth/token/route.ts": {"engineering/mcp", "engineering/web3-security",
+                                                                "operations/wallet-infrastructure"},
+            "apps/reference-dapp/src/server/managed-signing.ts": {"engineering/web3-security"},
+            "packages/cloud-runtime/src/http.ts": {"engineering/infrastructure-cicd"},
+            "packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql": {"engineering/finops",
+                "engineering/neon-postgresql", "engineering/infrastructure-cicd"},
+            "skills/engineering/finops/SKILL.md": {"engineering/finops"},
+        }.items():
+            with self.subTest(path=path):
+                self.assertTrue(expected <= {row["id"] for row in skills.select(ROOT, paths=[path])["skills"]})
+        selection = guard.skill_selection(["skills/engineering/finops/SKILL.md"], "flofi-swap", root=ROOT)
+        self.assertEqual([], selection["skills"])
+        for facet, value, skill_id in (
+            ("networks", "robinhood", "networks/robinhood"),
+            ("protocols", "0x", "protocols/0x"),
+            ("operations", "account-abstraction", "operations/account-abstraction"),
+        ):
+            self.assertIn(skill_id, {row["id"] for row in skills.select(ROOT, **{facet: [value]})["skills"]})
 
     def test_upstream_change_detection_is_offline_and_proposal_only(self):
         manifest = self.manifest("protocols/jupiter")
