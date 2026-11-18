@@ -110,6 +110,19 @@ describe('BUILD-FLOFI-BETA-REGRESSION-FIX-001: explicit networks, Ethereum-as-as
     }
   });
 
+  it('a model-phrased amount question on an open action carries the same shortcut metadata (FIX-01)', () => {
+    const copilot = new CopilotSession();
+    const first = copilot.say('Trocar USDC por ethereum na arbitrum',
+      intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'ETH' }), 'PT'));
+    expect(first).toMatchObject({ kind: 'CLARIFICATION' });
+    // The reply is prose the engine cannot read locally; the model asks for the amount in its own words. The structured draft still says
+    // what is awaited, so the shortcuts are offered exactly as under the engine's own question.
+    const asked = copilot.say('pode ser, quanto você sugere?', intent.clarify(['amount'], 'Quanto USDC você quer trocar?', [], 'PT'));
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', text: 'Quanto USDC você quer trocar?' });
+    expect(awaitingAmount(copilot.state)).toMatchObject({ field: 'amount', action: 'SWAP', asset: 'USDC', network: 'ARBITRUM' });
+    expect(copilot.say('1')).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 1 USDC to ETH on Arbitrum One slippage 100 bps' });
+  });
+
   it('the model may normalize the asset as "Ethereum"; it still authors native ETH, never WETH (FIX-04)', () => {
     const copilot = new CopilotSession();
     const proposed = copilot.say('Trocar 1 USDC por ethereum na arbitrum',
