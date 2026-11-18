@@ -11,6 +11,7 @@
  *   end-sessions                                                          ends every open admin session (grants stay)
  *   audit         [--limit 50]                                            the latest admin audit events (closed codes and ids only)
  *   index         [--limit 2000]                                          fills the analytics facts cache from executed runs' records (read-only on runs)
+ *   finops-migrate                                                       applies certified 0029 from a built checkout after certificate rollout
  *
  * BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 — privacy procedures (docs/deploy/ADMIN.md#privacy-and-retention). Nothing is deleted without an
  * approval reference; a wallet is read from standard input (`--wallet-stdin`), never from an argument.
@@ -30,9 +31,10 @@
  */
 import { parseArgs } from 'node:util';
 import { assertSchemaCompatible, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
-import { deploymentTenant } from '../src/server/deployment.ts';
+import { deploymentEnvironment, deploymentTenant } from '../src/server/deployment.ts';
 import { ADMIN_COMMANDS, runAdminCommand, type AdminCommand } from '../src/admin/cli-commands.ts';
 import { adminConfig } from '../src/admin/config.ts';
+import { assertDedicatedPreviewDatabase } from './preview-migration.ts';
 
 /** The wallet of a data-subject request: the first line of standard input (so it never reaches shell history or the process list). */
 async function readWallet(): Promise<string> {
@@ -65,6 +67,9 @@ async function main(): Promise<void> {
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });
   try {
+    if (command === 'finops-migrate' && (values['preview-branch'] || deploymentEnvironment(process.env) === 'preview')) {
+      await assertDedicatedPreviewDatabase(db);
+    }
     await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);
     await ensureTenant(db, tenantId);
     const out = await runAdminCommand(command as AdminCommand, values, db, tenantId, { env: process.env, adminKey, wallet: readWallet, now: () => new Date() });

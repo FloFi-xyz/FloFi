@@ -53,6 +53,36 @@ export async function persistCopilotInterpretation(host: CopilotMetricsHost, rec
     tool_rounds: counter(record.toolRounds, 16) }, now);
 }
 
+const BILLING_COUNTERS = ['requests', 'successes', 'duration_ms', 'input_tokens', 'input_samples', 'output_tokens', 'output_samples',
+  'cached_input_tokens', 'cached_input_samples', 'cache_write_tokens', 'cache_write_samples', 'reasoning_tokens', 'reasoning_samples'] as const;
+
+/** The optional FinOps schema augments the existing operational aggregates. Replays and pre-admission failures send no samples. */
+export async function persistCopilotBilling(host: CopilotMetricsHost, record: CopilotTelemetry, now: Date = new Date()): Promise<void> {
+  if (record.mode !== 'live' || !record.billingRequests?.length) return;
+  const day = now.toISOString().slice(0, 10);
+  const oldest = new Date(now.getTime() - (COPILOT_METRICS_RETENTION_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
+  const tokenCounts = (value: number | null) => value !== null && Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000 ? [value, 1] : [0, 0];
+  try {
+    await host.db.transaction(async tx => {
+      await tx.query("SET LOCAL statement_timeout = '750ms'");
+      await tx.query('DELETE FROM finops_ai_daily_usage WHERE tenant_id = $1 AND day < $2::date', [host.tenantId, oldest]);
+      const changes = BILLING_COUNTERS.map(column => `${column} = finops_ai_daily_usage.${column} + EXCLUDED.${column}`).join(', ');
+      const parameters = BILLING_COUNTERS.map((_, i) => `$${i + 6}`).join(', ');
+      // Consistent order also bounds contention when concurrent turns use different models across tool rounds.
+      const requests = [...record.billingRequests!].sort((left, right) => (left.model ?? '').localeCompare(right.model ?? ''));
+      for (const sample of requests) {
+        await tx.query(`INSERT INTO finops_ai_daily_usage (tenant_id, day, surface, provider, model, ${BILLING_COUNTERS.join(', ')})
+          VALUES ($1, $2::date, $3, $4, $5, ${parameters}) ON CONFLICT (tenant_id, day, surface, provider, model)
+          DO UPDATE SET ${changes}, updated_at = clock_timestamp()`, [host.tenantId, day, sample.surface, sample.provider, sample.model ?? '',
+          1, Number(sample.succeeded), counter(sample.durationMs, 3_600_000), ...tokenCounts(sample.inputTokens), ...tokenCounts(sample.outputTokens),
+          ...tokenCounts(sample.cachedInputTokens), ...tokenCounts(sample.cacheWriteTokens), ...tokenCounts(sample.reasoningTokens)]);
+      }
+    });
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === '42P01')) throw error;
+  }
+}
+
 export async function persistCopilotTurn(host: CopilotMetricsHost, mode: CopilotMetricsMode, record: TurnMetrics, provenance: 'CLIENT' | 'SERVER', now: Date = new Date()): Promise<void> {
   const parsed = parseTurnMetrics(record);
   if (!parsed || !['live', 'replay'].includes(mode) || (provenance === 'CLIENT' && parsed.surface !== 'WEB') || !['CLIENT', 'SERVER'].includes(provenance))

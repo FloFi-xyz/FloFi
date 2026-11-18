@@ -50,10 +50,7 @@ export async function copilotAnalytics(host: CopilotMetricsHost, params: { reado
   const from = new Date(to.getTime() - days * 86_400_000), oldest = new Date(to.getTime() - COPILOT_METRICS_RETENTION_DAYS * 86_400_000);
   // Retention is scoped to this tenant, including periods without new requests.
   await host.db.query('DELETE FROM copilot_daily_metrics WHERE tenant_id = $1 AND day < $2::date', [host.tenantId, oldest.toISOString().slice(0, 10)]);
-  const result = await host.db.query<Record<string, unknown>>(`SELECT day::text, surface, provenance, kind, model, outcome, ${COUNTERS.join(', ')} FROM copilot_daily_metrics
-    WHERE tenant_id = $1 AND day >= $2::date AND day < $3::date AND mode = $4 ORDER BY day DESC, surface, provenance, kind, model, outcome`,
-  [host.tenantId, from.toISOString().slice(0, 10), to.toISOString().slice(0, 10), mode]);
-  const rows = result.rows.map(row => ({ ...row, ...Object.fromEntries(COUNTERS.map(key => [key, Number(row[key])])) }) as CopilotMetricRow);
+  const { rows } = await readCopilotMetrics(host, from.toISOString().slice(0, 10), to.toISOString().slice(0, 10), mode);
   const interpretations = rows.filter(row => row.kind === 'INTERPRETATION' && row.provenance === 'SERVER'), turns = rows.filter(row => row.kind === 'TURN');
   const sum = (records: readonly CopilotMetricRow[], key: (typeof COUNTERS)[number]) => records.reduce((total, row) => total + row[key], 0);
   return { days, mode, from: from.toISOString(), to: to.toISOString(), rows, interpretations: sum(interpretations, 'events'),
@@ -62,6 +59,19 @@ export async function copilotAnalytics(host: CopilotMetricsHost, params: { reado
     mismatches: sum(turns, 'mismatches'), clarifications: sum(turns, 'clarifications'), inputTokens: sum(interpretations, 'input_tokens'),
     outputTokens: sum(interpretations, 'output_tokens'), reasoningTokens: sum(interpretations, 'reasoning_tokens'), tokenSamples: sum(interpretations, 'input_samples'),
     ...costOf(modelUsage(rows, mode)) };
+}
+
+/** Shared range reader for Admin Analytics and FinOps. This path performs no maintenance writes. */
+export async function readCopilotMetrics(host: CopilotMetricsHost, from: string, to: string, mode: CopilotMetricsMode, serverOnly = false) {
+  const result = await host.db.query<Record<string, unknown>>(`SELECT day::text, surface, provenance, kind, model, outcome,
+     updated_at, ${COUNTERS.join(', ')} FROM copilot_daily_metrics
+    WHERE tenant_id = $1 AND day >= $2::date AND day < $3::date AND mode = $4 AND (NOT $5::boolean OR provenance = 'SERVER')
+    ORDER BY day DESC, surface, provenance, kind, model, outcome
+    LIMIT $6`, [host.tenantId, from, to, mode, serverOnly, serverOnly ? 20_001 : null]);
+  const rows = result.rows.slice(0, serverOnly ? 20_000 : undefined).map(row => ({
+    ...row, updated_at: row.updated_at as Date, ...Object.fromEntries(COUNTERS.map(key => [key, Number(row[key])])),
+  })) as (CopilotMetricRow & { updated_at: Date })[];
+  return { rows, truncated: serverOnly && result.rows.length > 20_000 };
 }
 function costOf(usage: readonly ModelUsage[]): { usage: readonly ModelUsage[]; estimatedCostUsd: number | null; unpricedRequests: number; unreportedRequests: number } {
   const priced = usage.filter(line => line.estimatedCostUsd !== null);

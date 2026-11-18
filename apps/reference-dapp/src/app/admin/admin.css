@@ -270,3 +270,20 @@ html:has(.admin-root),html:has(.admin-root) body{background:#f8fafd}
   .admin-timeline li{grid-template-columns:22px minmax(0,1fr)}
   .admin-timeline li > :nth-child(3){grid-column:2}
 }
+
+.admin-finops-print{display:grid;gap:16px}
+.admin-finops-assumptions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:12px}
+.admin-finops-assumptions dt{color:var(--a-muted);font-weight:600;font-size:.85rem}
+.admin-finops-assumptions dd{margin:0}
+.admin-finops-print meter{display:block;width:100%;min-width:90px}
+@media print{
+  html:has(.admin-finops-print),html:has(.admin-finops-print) body{background:#fff}
+  .admin-root:has(.admin-finops-print){--a-paper:#fff;--a-soft:#f4f7fb;--a-line:#cbd5e1;--a-ink:#111;--a-muted:#334155;color-scheme:light;background:#fff}
+  .admin-layout:has(.admin-finops-print){display:block}
+  .admin-finops-no-print,.admin-layout:has(.admin-finops-print) :is(.admin-nav,.admin-skip,.admin-header-actions){display:none!important}
+  .admin-main:has(.admin-finops-print){padding:0;max-width:none}
+  .admin-finops-print .admin-card{break-inside:auto}
+  .admin-finops-print :is(.admin-kpi,tr,figure){break-inside:avoid}
+  .admin-finops-print .admin-table-wrap{overflow:visible}
+  .admin-finops-print :is(.admin-table td,.admin-table th){font-size:9pt;overflow-wrap:anywhere}
+}

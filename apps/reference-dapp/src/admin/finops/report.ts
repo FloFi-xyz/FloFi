@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import type { AdminHost } from '../host.ts';
+import { readAiEconomics } from './ai.ts';
+import { addDays, consolidate, decimal, difference, divide, endOfMonth, FINOPS_SCOPES, finopsPeriod, isoDay, perUnit,
+  periodDays, selectRecords, totalsFor, unavailable, units, type Indicator, type LedgerRecord, type Period } from './economics.ts';
+import { ledgerMissing, readLedger, readSyncState } from './store.ts';
+import { writeFinopsCsv } from './csv.ts';
+import { modelScenario, SCENARIO_FIELDS, SCENARIO_PRESETS, scenarioKeys, type Scenario } from './scenario.ts';
+
+export type WorkflowEconomics = {
+  created: number; completed: number; failed: number; abandoned: number; advanced: number; averageSteps: number | null; newest: string | null;
+  dimensions: { action: string; network: string; protocol: string; count: number }[];
+};
+async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<WorkflowEconomics> {
+  // Keep this cohort separate from execution_runs, where each component can also have its own record. Mainnet intent does not prove settlement.
+  return host.db.transaction(async tx => {
+    await tx.query("SET LOCAL statement_timeout = '4000'");
+    const params = [host.tenantId, period.from + 'T00:00:00Z', period.to + 'T00:00:00Z'];
+    const { rows: [data] } = await tx.query<{ created: number; completed: number; failed: number; abandoned: number;
+      advanced: number; average_steps: number | null; newest: Date | null }>(`SELECT
+      count(*) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3)::integer AS created,
+      count(*) FILTER (WHERE r.completed_at >= $2 AND r.completed_at < $3 AND NOT EXISTS (
+        SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id
+          AND s.outcome->'evidence'->>'environment' IN ('MOCKED','PUBLIC_TESTNET','PUBLIC_DEVNET','REPLAY','LOCAL_FORK')))::integer AS completed,
+      count(*) FILTER (WHERE r.state IN ('FAILED','HALTED') AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS failed,
+      count(*) FILTER (WHERE r.state IN ('CANCELLED','EXPIRED') AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS abandoned,
+      count(*) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3 AND r.mode IS NOT NULL)::integer AS advanced,
+      avg(r.step_count) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3)::float AS average_steps,
+      max(r.updated_at) AS newest
+      FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
+      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at < $3 AND r.updated_at >= $2`, params);
+    // The plan already provides bounded operation/network/protocol identifiers. No resource, amount, wallet or transaction is selected.
+    const { rows } = await tx.query<{ action: string; network: string; protocol: string; count: number }>(`SELECT
+      substr(step->>'action', 1, 48) AS action, substr(step->>'network', 1, 48) AS network, substr(step->>'protocol', 1, 48) AS protocol, count(*)::integer
+      FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(h.plan->'steps') = 'array' THEN h.plan->'steps' ELSE '[]'::jsonb END) step
+      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at >= $2 AND r.created_at < $3
+      GROUP BY 1, 2, 3 ORDER BY 4 DESC, 1, 2, 3 LIMIT 100`, params);
+    return { created: data!.created, completed: data!.completed, failed: data!.failed, abandoned: data!.abandoned, advanced: data!.advanced,
+      averageSteps: data!.average_steps, newest: data!.newest?.toISOString() ?? null,
+      dimensions: rows.filter(row => [row.action, row.network, row.protocol].every(value => typeof value === 'string' && /^[a-z0-9_-]{1,48}$/i.test(value))) };
+  });
+}
+
+type Ledger = { status: 'available' | 'missing' | 'failed'; records: LedgerRecord[]; complete: boolean };
+async function readCosts(host: AdminHost, period: Period): Promise<Ledger> {
+  try { return { status: 'available', ...await readLedger(host, period) }; }
+  catch (error) { return { status: ledgerMissing(error) ? 'missing' : 'failed', records: [], complete: false }; }
+}
+const samePeriod = (a: Period, b: Period) => a.from === b.from && a.to === b.to;
+const allExpenses = (scope: (typeof FINOPS_SCOPES)[keyof typeof FINOPS_SCOPES]) => scope.category !== 'revenue';
+export const REPORT_LIMITATIONS = [
+  'Reports use UTC periods with an inclusive first day and an exclusive end boundary. Indivisible billing records spanning a boundary are excluded.',
+  'Higher-authority invoice records supersede overlapping provider reports and estimates for the same service and environment. No estimate is added to a bill.',
+  'Missing provider coverage or exchange rates are unavailable. A partial total is the sum of covered amounts. Currency conversion uses the entry’s documented USD per unit rate.',
+  'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
+  'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
+  'The infrastructure-adjusted result excludes corporate expenses outside the available ledger and is an operating indicator.',
+] as const;
+
+export async function readFinopsReport(host: AdminHost, period: Period, now: Date) {
+  const current = finopsPeriod(now, {}).period, previous = finopsPeriod(now, { range: 'previous' }).period;
+  const ledgerPromise = readCosts(host, period);
+  const [ledger, month, prior, ai, workflow, sync] = await Promise.all([
+    ledgerPromise, samePeriod(current, period) ? ledgerPromise : readCosts(host, current),
+    samePeriod(previous, period) ? ledgerPromise : readCosts(host, previous), readAiEconomics(host, period, now).catch(() => null),
+    readWorkflowEconomics(host, period).catch(() => null), readSyncState(host).catch(() => []),
+  ]);
+  const totals = totalsFor(ledger.records, period, ledger.complete);
+  const billing = 'Net scoped provider costs and reconciled invoices, including applicable credits, discounts and taxes.';
+  const overall = consolidate(totals, allExpenses, billing);
+  const infrastructure = consolidate(totals, scope => allExpenses(scope) && !scope.variable, billing);
+  const aiCost = consolidate(totals, scope => scope.category === 'ai', billing);
+  const variable = consolidate(totals, scope => scope.variable, billing);
+  const revenue = consolidate(totals, scope => scope.category === 'revenue', 'Administrator-reconciled platform fee accounting records.');
+  const contribution = difference(revenue, variable, 'Reconciled revenue less identified variable operating costs.');
+  const result = difference(revenue, overall, 'Reconciled revenue less identified variable, fixed and shared operating costs.');
+  const closed = { from: current.from, to: isoDay(now) };
+  const elapsed = periodDays(closed);
+  const knownClosed = consolidate(totalsFor(month.records, closed, month.complete), allExpenses, billing);
+  const projectionSource = 'Covered closed UTC days in this month × calendar-month days ÷ elapsed days. Expenses are assumed to accrue linearly.';
+  const projected = elapsed > 0 && knownClosed.amount !== null
+    ? { amount: decimal(divide(units(knownClosed.amount) * BigInt(periodDays({ from: current.from, to: endOfMonth(now) })), BigInt(elapsed))),
+      quality: (knownClosed.quality === 'PARTIAL' ? 'PARTIAL' : 'ESTIMATED') as Indicator['quality'], source: projectionSource }
+    : unavailable(projectionSource);
+  const costPerChat = perUnit(overall, ai?.chats.observed ?? 0, 'Period expenses ÷ recorded Web interpretations and Channel Core turns. Other interactions may be missing.', false);
+  const costPerCompleted = perUnit(overall, workflow?.completed ?? 0, 'Period expenses ÷ recorded completions in the canonical mainnet workflow cohort.', false);
+  const costPerActive = unavailable('Cross-channel distinct active user denominator is unavailable.');
+  const directSimulated = unavailable('Workflow-linked direct costs and complete successful simulation counts are unavailable.');
+  const directCompleted = unavailable('Workflow-linked direct costs are unavailable.');
+  const costPerSimulated = unavailable('Cross-surface successful simulation denominator is unavailable.');
+  const breakEvenRevenue = overall.amount !== null && overall.quality !== 'PARTIAL'
+    ? { ...overall, source: 'Reconciled revenue required to cover the selected period’s recorded operating costs.' }
+    : unavailable('Complete cost coverage is required to calculate an actual break-even revenue target.');
+  const monthToDate = consolidate(totalsFor(month.records, current, month.complete), allExpenses, billing);
+  const previousMonth = consolidate(totalsFor(prior.records, previous, prior.complete), allExpenses, billing);
+  const metrics = { monthToDate, previousMonth, projected, aiCost, variable, infrastructure, overall, costPerActive, costPerChat, costPerSimulated,
+    costPerCompleted, directSimulated, directCompleted, revenue, contribution, result, breakEvenRevenue };
+  const selected = new Set((selectRecords(ledger.records)).map(record => record.id));
+  return { period, current, previous, metrics, ai, workflow, sync, totals, ledger: { status: ledger.status, complete: ledger.complete,
+    records: ledger.records.map(row => ({ ...row, selected: selected.has(row.id) })) } };
+}
+export type FinopsReport = Awaited<ReturnType<typeof readFinopsReport>>;
+export type MetricId = keyof FinopsReport['metrics'];
+export const METRIC_LABELS: Record<MetricId, string> = {
+  monthToDate: 'Month-to-date infrastructure and operating costs', previousMonth: 'Previous month infrastructure and operating costs',
+  projected: 'Projected end-of-month costs', aiCost: 'Provider and ledger AI costs', variable: 'Variable operating costs',
+  infrastructure: 'Fixed and shared expenses', overall: 'Infrastructure and operating costs', costPerActive: 'Cost per active user',
+  costPerChat: 'Allocated cost per observed chat interaction', costPerSimulated: 'Allocated cost per simulated workflow',
+  costPerCompleted: 'Fully allocated cost per completed workflow', directSimulated: 'Direct cost per simulated workflow',
+  directCompleted: 'Direct cost per completed workflow', revenue: 'Reconciled collected revenue', contribution: 'Contribution margin',
+  result: 'Infrastructure-adjusted operating result', breakEvenRevenue: 'Break-even revenue target',
+};
+
+export function metricPeriod(report: FinopsReport, key: MetricId): Period {
+  if (key === 'monthToDate') return report.current;
+  if (key === 'previousMonth') return report.previous;
+  if (key === 'projected') return { from: report.current.from, to: endOfMonth(new Date(report.current.from + 'T00:00:00Z')) };
+  return report.period;
+}
+
+export function investorCsv(report: FinopsReport, scenario: Scenario | null = null): string {
+  const { ai, workflow, period } = report;
+  const rows: (string | number | null)[][] = [['section','indicator','start_utc','end_utc_exclusive','amount','unit','quality','source','freshness_utc']];
+  for (const key of Object.keys(METRIC_LABELS) as MetricId[]) {
+    const metric = report.metrics[key], range = metricPeriod(report, key);
+    rows.push(['overview', METRIC_LABELS[key], range.from, range.to, metric.amount, 'USD', metric.quality, metric.source, null]);
+  }
+  for (const total of report.totals) {
+    const scope = FINOPS_SCOPES[total.id];
+    rows.push(['providers', scope.provider + ' / ' + scope.name, period.from, period.to, total.amount, 'USD', total.quality,
+      total.sources.join(', ') || 'No available scoped record', total.updatedAt]);
+  }
+  if (ai) {
+    rows.push(['AI', 'Estimated list-price sample', period.from, period.to, ai.costEstimate.amount, 'USD', ai.costEstimate.quality, ai.costEstimate.source, ai.freshness]);
+    for (const { usage, estimate, pricedRequests } of ai.models) {
+      const model = /^(?:gpt-|o[1-9](?:-|$)|claude-)[a-z0-9.-]{0,90}$/i.test(usage.model) ? usage.model : 'Unknown response model';
+      rows.push(['AI', [usage.provider, model, usage.surface].join(' / '), period.from, period.to,
+        estimate?.toFixed(8) ?? null, 'USD', estimate === null ? 'UNAVAILABLE' : pricedRequests === usage.requests ? 'ESTIMATED' : 'PARTIAL',
+        'Reported provider calls priced with versioned standard rates', ai.freshness]);
+    }
+    for (const [label, amount] of [['Recorded provider calls', ai.calls.requests], ['Reported input samples', ai.calls.inputSamples], ['Reported output samples', ai.calls.outputSamples],
+      ['Observed chat interactions', ai.chats.observed], ['Tool calls', ai.toolCalls], ['Tool failures', ai.toolFailures],
+      ['Mean provider latency (ms)', ai.calls.meanLatency]] as const) {
+      rows.push(['AI coverage', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Server aggregates', ai.freshness]);
+    }
+    for (const day of ai.daily) rows.push(['AI daily', 'Daily list-price estimate', day.day, addDays(day.day, 1),
+      day.estimate?.toFixed(8) ?? null, 'USD', day.estimate === null ? 'UNAVAILABLE' : day.pricedRequests === day.requests ? 'ESTIMATED' : 'PARTIAL',
+      `${day.pricedRequests} priced of ${day.requests} recorded provider calls`, ai.freshness]);
+  }
+  if (scenario) {
+    for (const key of scenarioKeys) rows.push(['scenario assumptions', SCENARIO_FIELDS[key].label, null, null, scenario[key], null, 'ESTIMATED', 'Administrator-entered assumption', null]);
+    for (const users of new Set([scenario.users, ...SCENARIO_PRESETS])) {
+      const model = modelScenario({ ...scenario, users });
+      for (const [label, amount, unit] of [
+        ['Workflows initiated', model.workflows, 'count'], ['Workflows completed', model.completed, 'count'], ['Chats', model.chats, 'count'],
+        ['AI spend', model.ai, 'USD'], ['Workflow spend', model.workflow, 'USD'], ['Gas sponsorship', model.gas, 'USD'],
+        ['Total operating costs', model.total, 'USD'], ['Collected fee revenue', model.revenue, 'USD'], ['Contribution', model.contribution, 'USD'],
+        ['Infrastructure-adjusted result', model.result, 'USD'], ['Break-even workflow volume', model.breakEvenWorkflows, 'count'],
+      ] as const) rows.push(['scenario results', users + ' users / ' + label, null, null, amount, unit, 'ESTIMATED', 'Scenario assumptions', null]);
+    }
+  }
+  if (workflow) {
+    for (const [label, amount] of [['Created', workflow.created], ['Completed and reconciled', workflow.completed], ['Failed or halted', workflow.failed],
+      ['Cancelled or expired', workflow.abandoned], ['Average steps', workflow.averageSteps]] as const) {
+      rows.push(['workflows', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Canonical mainnet workflow runs', workflow.newest]);
+    }
+  }
+  for (const limitation of REPORT_LIMITATIONS) rows.push(['methodology', limitation, period.from, period.to, null, null, null, null, null]);
+  return writeFinopsCsv(rows);
+}
+export const inclusiveEnd = (period: Period) => addDays(period.to, -1);

@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COPILOT_REPLAY_FORMAT_V2, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, copilotConfig, copilotTelemetrySink, copilotTuning, createCopilotLimiter,
   createOpenAITransport, createReplayTransport, interpretCopilotV2, parseCopilotReplay, type CopilotLimiter, type CopilotModelSettings,
-  type CopilotTelemetry, type CopilotTransport } from '../../server/copilot-service.ts';
+  type AiBillingSurface, type CopilotTelemetry, type CopilotTransport } from '../../server/copilot-service.ts';
 import type { ChannelInterpreter } from './conversation.ts';
 import { createProviderTransport } from '../../server/copilot-providers.ts';
 type CopilotProvider = Parameters<typeof createProviderTransport>[0];
@@ -39,10 +39,12 @@ function sharedLimiter(): CopilotLimiter {
 
 /** The interpreter this deployment allows for channels, or null (exact commands only). `transport` is a test seam for replayed answers. */
 export function channelInterpreter(env: Env, options: { readonly enabled: boolean; readonly transport?: CopilotTransport; readonly live?: ChannelLiveCopilot;
+  readonly billingSurface?: Exclude<AiBillingSurface, 'WEB'>;
   /** Awaited durable server telemetry, supplied only by the authenticated entry point. */ readonly metrics?: (record: CopilotTelemetry) => Promise<void>;
   /** BUILD-FLOFI-INTELLIGENCE-001: test seam for the read-only tools (default: this deployment's, `copilotToolkit`). */ readonly toolkit?: CopilotToolkit | null } =
   { enabled: true }): ChannelInterpreter | null {
   if (!options.enabled) return null;
+  const billingSurface = options.billingSurface ?? 'CHANNEL';
   // Entry points inject the authenticated server's read-only provider toolkit. Core has no flow runtime or transaction authority.
   // A standalone interpreter without server wiring keeps registry-only tools. None with FLOFI_COPILOT_TOOLS=off.
   const toolkit = options.toolkit !== undefined ? options.toolkit : copilotToolsEnabled(env) ? copilotToolkitOf(scopeOfEnv(env), {}) : null;
@@ -67,6 +69,7 @@ export function channelInterpreter(env: Env, options: { readonly enabled: boolea
       const { provider, apiKey, settings } = resolved;
       return interpret(request, { transport: createProviderTransport(provider, apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
         mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'), glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
+        billing: { provider, surface: billingSurface },
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort } });
     };
   }
@@ -75,6 +78,7 @@ export function channelInterpreter(env: Env, options: { readonly enabled: boolea
     const transport = createOpenAITransport(config.apiKey, fetch, { timeoutMs: tuning.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
     return (request, options) => interpret(request, { transport, mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'),
       glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
+      billing: { provider: 'OPENAI', surface: billingSurface },
       settings: { model: config.model, temperature: config.temperature, maxOutputTokens: tuning.maxOutputTokens, reasoningEffort: tuning.reasoningEffort } });
   }
   return async (request, options) => {

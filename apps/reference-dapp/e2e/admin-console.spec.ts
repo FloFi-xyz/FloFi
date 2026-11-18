@@ -195,14 +195,46 @@ test('admin console: refusal until granted, overview with network distribution, 
     await expect(page.getByRole('table').last()).toContainText('ADMIN_SIGN_IN');
     await expect(page.getByRole('table').last()).not.toContainText('ADMIN_COPILOT_SETTINGS_SAVED');
 
+    await nav.getByRole('link', { name: 'FinOps & Unit Economics' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'FinOps & Unit Economics' })).toBeVisible();
+    await expect(page.getByText('Billing ledger unavailable.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('table', { name: 'Provider cost breakdown' }).getByRole('row', { name: /Railway.*flofi-api/ })).toContainText('UNAVAILABLE');
+    await page.getByLabel('Period', { exact: true }).selectOption('previous');
+    await page.getByRole('button', { name: 'Apply period' }).click();
+    await page.waitForURL(url => url.searchParams.get('range') === 'previous');
+    await page.getByRole('link', { name: 'Investor reporting' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Investor Reporting' })).toBeVisible();
+    const exportResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/admin/api/finops/export');
+    const investorDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download investor CSV' }).click();
+    const report = await exportResponse;
+    expect(report.status()).toBe(200);
+    const file = await investorDownload;
+    expect(file.suggestedFilename()).toBe('flofi-finops-report.csv');
+    const contents = await readFile((await file.path())!, 'utf8');
+    expect(contents).toContain('"quality","source","freshness_utc"');
+    expect(contents).not.toContain(operator.address);
+    await page.emulateMedia({ media: 'print' });
+    await expect(nav).toBeHidden();
+    await expect(page.getByRole('article', { name: 'Investor financial report' })).toBeVisible();
+    await page.emulateMedia({ media: 'screen' });
+    await page.evaluate(() => { document.cookie = 'flofi_language=PT; Path=/; SameSite=Lax'; });
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: 'Relatório para investidores' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Baixar CSV para investidores' })).toBeVisible();
+
     await page.getByRole('button', { name: 'Sign out' }).click();
     await page.waitForURL(url => url.pathname === '/admin/login');
     await page.goto('/admin/ai-settings');
     expect(new URL(page.url()).pathname).toBe('/admin/login');
     await page.goto('/admin/ai-analytics');
     expect(new URL(page.url()).pathname).toBe('/admin/login');
+    await page.goto('/admin/finops/report');
+    await expect(page).toHaveURL(/\/admin\/login$/);
+    await expect(page.getByRole('article', { name: 'Relatório financeiro para investidores' })).toHaveCount(0);
     const kinds = (await db.query<{ kind: string; outcome: string }>(`SELECT kind, outcome FROM admin_audit_events ORDER BY event_id`)).rows.map(r => `${r.kind}:${r.outcome}`);
-    expect(kinds).toEqual(['ADMIN_SIGN_IN:REFUSED', 'ADMIN_PRINCIPAL_GRANTED:OK', 'ADMIN_SIGN_IN:OK', 'ADMIN_COPILOT_SETTINGS_SAVED:OK', 'ADMIN_SIGN_OUT:OK']);
+    expect(kinds).toEqual(['ADMIN_SIGN_IN:REFUSED', 'ADMIN_PRINCIPAL_GRANTED:OK', 'ADMIN_SIGN_IN:OK', 'ADMIN_COPILOT_SETTINGS_SAVED:OK',
+      'ADMIN_FINOPS_EXPORTED:OK', 'ADMIN_SIGN_OUT:OK']);
     expect(errors).toEqual([]);
     networkGuard.assertClean();
   } finally { await db.close(); }
