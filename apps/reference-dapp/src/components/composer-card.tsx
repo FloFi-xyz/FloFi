@@ -87,7 +87,7 @@ function TokenChip({ symbol, network, markNetwork, address }: { symbol: string; 
       {/* The badge names the network without its chain number (board 16 §9); the icon still resolves from the network as given. */}
       {network !== undefined && <span className="composer-network-badge" role="img" aria-label={tr(`${network.replace(/ \(\d+\)$/, '')} network`)} title={network.replace(/ \(\d+\)$/, '')}><NetworkBrandIcon network={network}/></span>}
     </span>
-    <span className="composer-amount-token">{symbol}</span>
+    <span className="composer-amount-token" title={symbol}>{symbol}</span>
   </span>;
 }
 

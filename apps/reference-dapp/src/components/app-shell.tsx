@@ -8,6 +8,7 @@ import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { universalBridgeDetails } from '../domain/universal-bridge-authoring';
+import { routerDetails } from '../domain/router-authoring';
 import { ownerByRecord } from '../domain/sequence-restore';
 import { shortAddress } from '../accounts/account-model';
 import { presentSequence, sequenceFundingMessage, sequenceUnservedMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
@@ -405,8 +406,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // (authorizing a whole workflow once is the delegated mode of a workflow run, never claimed here).
   // BUILD-FLOFI-BETA-REGRESSION-FIX-001 (FIX-09): a funded bridge's route can only be quoted after the funding step reconciles (the provider
   // answers for the real delivered amount), so that limitation is stated truthfully BEFORE the owner authorizes the funding step.
-  const dependentBridgeAhead = Boolean(sequence && !sequence.finished && sequence.steps.some((step, index) => index > sequence.cursor &&
-    step.funding.some(f => f.fundedBy === sequence.cursor) && universalBridgeDetails(state.workflow.nodes.find(node => node.nodeId === step.nodeId) ?? { actionType: 'none' })));
+  // FIX-09 review (flofi-bridge): a funded certified Router bridge has the same quote-after-delivery limitation as a universal one.
+  const dependentBridgeAhead = Boolean(sequence && !sequence.finished && sequence.steps.some((step, index) => {
+    if (index <= sequence.cursor || !step.funding.some(f => f.fundedBy === sequence.cursor)) return false;
+    const node = state.workflow.nodes.find(entry => entry.nodeId === step.nodeId);
+    return Boolean(node && (universalBridgeDetails(node) || routerDetails(node)));
+  }));
   const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
     : tr('Confirm each step · Step {0} of {1}: {2}. Each step is simulated, reviewed and confirmed in your wallet on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
       tr(sequencePresentation.steps[sequencePresentation.current - 1]?.action ?? 'Action'))
