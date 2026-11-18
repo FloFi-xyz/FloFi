@@ -10,7 +10,7 @@ export const portugueseLiveCanvasActivity: Readonly<Record<string, string>> = {
   // History: wallet activity
   'History view': 'Visualização do histórico', 'Wallet activity': 'Atividade da carteira', 'Sent': 'Enviado',
   'Refresh wallet activity': 'Atualizar atividade da carteira', 'Loading wallet activity…': 'Carregando a atividade da carteira…', 'Load more activity': 'Carregar mais atividade',
-  'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. Transactions of your FloFi workflows are shown with their workflow above.': 'Tokens que sua carteira recebeu e enviou nas redes suportadas, incluindo transferências feitas fora da FloFi. As transações dos seus fluxos da FloFi aparecem com o fluxo acima.',
+  'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. A transaction FloFi matches to a workflow record above is shown with that record, not repeated here.': 'Tokens que sua carteira recebeu e enviou nas redes suportadas, incluindo transferências feitas fora da FloFi. Uma transação que a FloFi associa a um registro de fluxo acima aparece nesse registro, sem repetir aqui.',
   'Tokens your wallet received, including transfers from other wallets and outside FloFi.': 'Tokens que sua carteira recebeu, incluindo transferências de outras carteiras e de fora da FloFi.',
   'Tokens your wallet sent, including transfers made outside FloFi.': 'Tokens que sua carteira enviou, incluindo transferências feitas fora da FloFi.',
   'Contract interaction': 'Interação com contrato', 'Minted': 'Emitido', 'Burned': 'Queimado', 'FloFi workflow': 'Fluxo da FloFi', 'Finalized': 'Finalizado',

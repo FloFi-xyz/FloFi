@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { withFlightAccess } from '../../../../server/flight-access';
-import { automationAvailability, automationOperation } from '../../../../server/automation-operation';
+import { automationAvailability, automationAvailabilityIsLocal, automationOperation } from '../../../../server/automation-operation';
 import type { OverviewView } from '../../../../automations/views';
 
 /**
@@ -12,7 +12,9 @@ import type { OverviewView } from '../../../../automations/views';
  * The same boundary and reads as the actions it replaces for reading: the Flight boundary (`withFlightAccess`), `automationAvailability()` and
  * the owner-scoped `automationOperation('overview')`, which re-verifies the owner server-side (proven in this browser or held by the signed-in
  * account) — the header is only a selection hint. A same-origin browser fetch only; never cached. Every mutation stays a Server Action.
- * `scope=overview` (background refreshes) skips the availability read.
+ * `scope=overview` (background refreshes) skips the availability read; `scope=availability` (the proposals notice until automations are known to be
+ * served) reads availability alone, as the notice did before. Where availability needs no request (the runtime's own configuration), it is read
+ * first and a deployment without automations never reads the owner's overview.
  */
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -27,11 +29,16 @@ export async function GET(request: Request) {
   const site = request.headers.get('sec-fetch-site');
   if (site !== null && site !== 'same-origin') return refuse('AUTOMATION_CROSS_ORIGIN_REFUSED', 403);
   const query = new URL(request.url).searchParams, scope = query.get('scope') ?? 'all', account = request.headers.get('x-flofi-account');
-  if ([...query.keys()].some(key => key !== 'scope') || !['all', 'overview'].includes(scope) || account !== null && !EVM.test(account) && !SOLANA.test(account)
-    || scope === 'overview' && account === null) return refuse('AUTOMATION_REQUEST_INVALID', 400);
+  if ([...query.keys()].some(key => key !== 'scope') || !['all', 'overview', 'availability'].includes(scope) || account !== null && !EVM.test(account) && !SOLANA.test(account)
+    || scope === 'overview' && account === null || scope === 'availability' && account !== null) return refuse('AUTOMATION_REQUEST_INVALID', 400);
   const owner = account === null ? null : EVM.test(account) ? { namespace: 'eip155' as const, address: account.toLowerCase() } : { namespace: 'solana' as const, address: account };
   try {
     const value = await withFlightAccess<AutomationSnapshot>(async () => {
+      if (scope === 'availability') return { availability: await automationAvailability(), overview: null };
+      if (scope === 'all' && automationAvailabilityIsLocal()) {
+        const availability = await automationAvailability();
+        return { availability, overview: availability.enabled && owner ? await automationOperation<OverviewView>('overview', [], owner) : null };
+      }
       const [availability, overview] = await Promise.all([scope === 'all' ? automationAvailability() : Promise.resolve(null),
         owner ? automationOperation<OverviewView>('overview', [], owner) : Promise.resolve(null)]);
       return { availability, overview };

@@ -28,6 +28,8 @@ import { isHostedDeployment } from './deployment.ts';
 import { createHmac, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { walletSessionKey } from './wallet-session.ts';
 import { defaultMode, type PortfolioMode } from './wallet-portfolio.ts';
+import { cloudFlow } from './flow-runtime.ts';
+import { TEST_NETWORK_FLOW_REFUSAL } from './test-network-flows.ts';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog.ts';
 import { classifyLegs, type ActivityCategory, type ActivityCoverage, type ActivityLeg, type ActivityNetworkId, type WalletActivityPage,
   type WalletTransfer } from '../domain/wallet-activity.ts';
@@ -36,6 +38,8 @@ type Env = Readonly<Record<string, string | undefined>>;
 type EvmActivityNetwork = Exclude<CatalogNetworkId, 'robinhood'>;
 export const ACTIVITY_PAGE = 20, SOLANA_SIGNATURES_PER_ADDRESS = 10, SOLANA_TRANSACTIONS_PER_PAGE = 12, SOLANA_MAX_TOKEN_ACCOUNTS = 6;
 const BUDGET_MS = 10_000, CACHE_COMPLETE_MS = 30_000, CACHE_INCOMPLETE_MS = 5_000, CACHE_ENTRIES = 200, MAX_CURSOR = 4096;
+/** A read in flight is joined until it settles (bounded by the route's own 60 s limit), however long its networks take within their budgets. */
+const CACHE_PENDING_MS = 60_000;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const codeOf = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
 const HASH = /^0x[0-9a-fA-F]{64}$/, ADDRESS = /^0x[0-9a-fA-F]{40}$/, HEX = /^0x[0-9a-fA-F]{1,64}$/, SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -56,7 +60,8 @@ const ACTIVITY_NAME: Readonly<Record<ActivityNetworkId, string>> = Object.freeze
 export type AlchemyCall = (network: EvmActivityNetwork, params: Readonly<Record<string, unknown>>, signal?: AbortSignal) => Promise<unknown>;
 export type WalletActivityCache = Map<string, { readonly at: number; readonly ttlMs: number; readonly value: Promise<WalletActivityPage> }>;
 export type WalletActivitySeams = {
-  readonly mode?: (network: ActivityNetworkId) => Promise<PortfolioMode>;
+  /** The network's deployment gate; `signal` ends with the network's time budget. */
+  readonly mode?: (network: ActivityNetworkId, signal: AbortSignal) => Promise<PortfolioMode>;
   readonly alchemy?: AlchemyCall | null;
   readonly evmCatalog?: (network: EvmActivityNetwork) => Promise<AssetCatalog>;
   readonly solanaRpc?: () => SolanaRpc;
@@ -168,8 +173,8 @@ export function alchemyTransport(env: Env): AlchemyCall | null {
 type AlchemyTransfer = { blockNum?: unknown; uniqueId?: unknown; hash?: unknown; from?: unknown; to?: unknown; category?: unknown;
   rawContract?: { value?: unknown; address?: unknown; decimal?: unknown } | null; metadata?: { blockTimestamp?: unknown } | null };
 /** `frontier`: the newest of the oldest times read on each stream that has more history (null: none left), see `completeAfter`. */
-type ReadResult = { readonly legs: ActivityLeg[]; readonly hidden: number; readonly streams: Record<string, string | null>; readonly coverage: ActivityCoverage;
-  readonly frontier: number | null };
+type ReadResult = { readonly legs: ActivityLeg[]; readonly hidden: number; readonly hiddenMoves: string[]; readonly streams: Record<string, string | null>;
+  readonly coverage: ActivityCoverage; readonly frontier: number | null };
 const later = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
 
 async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: AlchemyCall, catalog: Promise<AssetCatalog>, previous: Streams | null, signal: AbortSignal): Promise<ReadResult> {
@@ -177,7 +182,7 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
   const listed = await catalog;
   const native = listed.assets.find(asset => asset.kind === 'NATIVE');
   const tokens = new Map(listed.assets.filter(asset => asset.kind === 'ERC20' && asset.address).map(asset => [asset.address!.toLowerCase(), asset] as const));
-  const legs: ActivityLeg[] = [], streams: Record<string, string | null> = {};
+  const legs: ActivityLeg[] = [], hiddenMoves: string[] = [], streams: Record<string, string | null> = {};
   let hidden = 0, frontier: number | null = null;
   for (const direction of ['IN', 'OUT'] as const) {
     const key = `${network}:${direction}`, before = previous ? previous[key] : undefined;
@@ -203,25 +208,26 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
       if (!hash || (from !== owner && to !== owner) || units === null || units === 0n) continue;
       const category = raw.category === 'external' ? 'NATIVE' : raw.category === 'internal' ? 'INTERNAL' : raw.category === 'erc20' ? 'TOKEN' : null;
       if (!category) continue;
+      const self = from === owner && to === owner, moved = self ? 'SELF' : to === owner ? 'IN' : 'OUT';
       let asset: WalletTransfer['asset'];
       if (category === 'TOKEN') {
         const address = typeof raw.rawContract?.address === 'string' && ADDRESS.test(raw.rawContract.address) ? raw.rawContract.address.toLowerCase() : null;
         const known = address ? tokens.get(address) : undefined;
         const decimals = typeof raw.rawContract?.decimal === 'string' && HEX.test(raw.rawContract.decimal) ? Number(BigInt(raw.rawContract.decimal)) : null;
         // Spam protection: a token outside the verified catalog, or whose decimals disagree with it, is counted and never named.
-        if (!known || (decimals !== null && decimals !== known.decimals)) { hidden++; continue; }
+        // Its direction is kept (never the token), so the transaction's visible legs are classified with it.
+        if (!known || (decimals !== null && decimals !== known.decimals)) { hidden++; hiddenMoves.push(`${runtime.chain}:${hash}:${moved}`); continue; }
         asset = { symbol: known.symbol, decimals: known.decimals, address: known.address!.toLowerCase(), logo: known.logoUrl };
       } else asset = { symbol: native?.symbol ?? 'ETH', decimals: native?.decimals ?? 18, address: null, logo: native?.logoUrl ?? null };
-      const self = from === owner && to === owner;
       const unique = typeof raw.uniqueId === 'string' && raw.uniqueId.length <= 200 ? raw.uniqueId : `${hash}:${category}:${legs.length}`;
-      legs.push({ id: `${runtime.chain}:${unique}`, network, networkName: runtime.name, chain: runtime.chain, direction: self ? 'SELF' : to === owner ? 'IN' : 'OUT', category, asset,
+      legs.push({ id: `${runtime.chain}:${unique}`, network, networkName: runtime.name, chain: runtime.chain, direction: moved, category, asset,
         amount: units.toString(), counterparty: self ? null : to === owner ? from : to, transaction: hash, explorerUrl: explorerTx(EXPLORER[network], hash),
         timestamp: typeof raw.metadata?.blockTimestamp === 'string' && !Number.isNaN(Date.parse(raw.metadata.blockTimestamp)) ? new Date(raw.metadata.blockTimestamp).toISOString() : null,
         block: typeof raw.blockNum === 'string' && HEX.test(raw.blockNum) ? BigInt(raw.blockNum).toString() : null, status: 'CONFIRMED', from, to });
     }
   }
   const covers: ActivityCategory[] = network === 'ethereum' ? ['NATIVE', 'INTERNAL', 'TOKEN'] : ['NATIVE', 'TOKEN'];
-  return { legs, hidden, streams, frontier, coverage: { network, name: ACTIVITY_NAME[network], status: network === 'ethereum' ? 'COVERED' : 'PARTIAL',
+  return { legs, hidden, hiddenMoves, streams, frontier, coverage: { network, name: ACTIVITY_NAME[network], status: network === 'ethereum' ? 'COVERED' : 'PARTIAL',
     code: network === 'ethereum' ? null : 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED', covers, missing: network === 'ethereum' ? [] : ['INTERNAL'] } };
 }
 
@@ -285,23 +291,22 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
   // Newest slot first; within a slot, each address's own order (so what a page takes from an address is always a prefix of its list).
   const unique = [...new Map(found.map(item => [item.signature, item] as const)).values()].sort((a, b) => b.slot - a.slot || a.rank - b.rank || a.source.localeCompare(b.source));
   const page = unique.slice(0, SOLANA_TRANSACTIONS_PER_PAGE);
-  // Each address continues after the last of its signatures this page includes; signatures read but not shown are read again next time.
+  // Each address continues after the last signature of the CONTIGUOUS run of its list this page shows (from its newest): a signature after a gap
+  // (a same-slot tie the page cut through) is read again next time, never skipped; repeated ones are deduplicated by id.
+  const onPage = new Set(page.map(item => item.signature));
+  let frontier: number | null = null;
   for (const source of sources) {
     const key = `solana:${source}`;
     if (streams[key] === null) continue;
-    const own = found.filter(item => item.source === source), shown = own.filter(item => page.some(p => p.signature === item.signature));
-    streams[key] = shown.length === own.length ? exhausted.has(source) ? null : own.at(-1)?.signature ?? null
-      : shown.at(-1)?.signature ?? (previous?.[key] ?? FROM_NEWEST);
+    const own = found.filter(item => item.source === source), cut = own.findIndex(item => !onPage.has(item.signature));
+    streams[key] = cut === -1 ? exhausted.has(source) ? null : own.at(-1)?.signature ?? null : cut === 0 ? previous?.[key] ?? FROM_NEWEST : own[cut - 1]!.signature;
+    // Complete only down to the newest of the oldest times read on addresses with more history (see `completeAfter`): an address read through
+    // entirely is complete to its oldest read signature; one the page cut is complete to its first signature not shown.
+    if (!streams[key]) continue;
+    const edge = cut === -1 ? own.at(-1) : own[cut];
+    if (edge?.time !== null && edge?.time !== undefined) frontier = later(frontier, edge.time);
   }
-  // Complete only down to the newest of the oldest times read on addresses with more history (see `completeAfter`).
-  let frontier: number | null = null;
-  for (const source of sources) if (streams[`solana:${source}`]) {
-    const shownTimes = page.filter(item => item.source === source && item.time !== null).map(item => item.time!);
-    const ownTimes = found.filter(item => item.source === source && item.time !== null).map(item => item.time!);
-    const times = shownTimes.length ? shownTimes : ownTimes;
-    if (times.length) frontier = later(frontier, Math.min(...times));
-  }
-  const legs: ActivityLeg[] = [];
+  const legs: ActivityLeg[] = [], hiddenMoves: string[] = [];
   let hidden = 0, unreadable = 0;
   for (const item of page) {
     if (item.failed) continue;
@@ -347,7 +352,7 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     for (const [mint, { delta, decimals, scaled }] of deltas) {
       if (delta === 0n) continue;
       const known = verified.get(mint);
-      if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals || scaled) { hidden++; continue; }
+      if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals || scaled) { hidden++; hiddenMoves.push(`${base.chain}:${item.signature}:${delta > 0n ? 'IN' : 'OUT'}`); continue; }
       const transfer = instructions.find(ix => (ix.program === 'spl-token' || ix.program === 'spl-token-2022') && ['transfer', 'transferChecked'].includes(String(ix.parsed?.type))
         && (ix.parsed?.info?.mint === undefined || ix.parsed.info.mint === mint)
         && (delta > 0n ? ownerOf.get(String(ix.parsed?.info?.destination)) === owner : ownerOf.get(String(ix.parsed?.info?.source)) === owner || ix.parsed?.info?.authority === owner));
@@ -359,8 +364,24 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
   }
   const limited = accounts.length > SOLANA_MAX_TOKEN_ACCOUNTS;
   const partial = limited ? 'SOLANA_TOKEN_ACCOUNT_LIMIT' : unreadable ? 'SOLANA_TRANSACTION_UNREADABLE' : null;
-  return { legs, hidden, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: partial ? 'PARTIAL' : 'COVERED', code: partial,
+  return { legs, hidden, hiddenMoves, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: partial ? 'PARTIAL' : 'COVERED', code: partial,
     covers: ['NATIVE', 'TOKEN'], missing: [] } };
+}
+
+/**
+ * A network's deployment gate as the History reads it: the portfolio's own composition (`defaultMode`), except that a gate the runtime could not
+ * answer (a failed or abandoned call) is unknown — the network reads as UNAVAILABLE ("could not be loaded"), never as a deliberate off that
+ * silently drops it from the page. A flow the deployment refuses (test networks) or a runtime without configuration stays off. One attempt,
+ * abandoned when the network's time budget ends.
+ */
+export function activityGate(network: ActivityNetworkId, env: Env, signal: AbortSignal, call: typeof cloudFlow = cloudFlow): Promise<PortfolioMode> {
+  return defaultMode(network, env, async (flow, flowEnv) => {
+    const result = await call<unknown>(flow, 'mode', [], { env: flowEnv, signal, maxAttempts: 1 });
+    if (result === null) return null;
+    if (result.ok) return result.value === 'live' || result.value === 'harness' ? result.value : 'off';
+    if (result.code === TEST_NETWORK_FLOW_REFUSAL || result.code === 'CLOUD_RUNTIME_NOT_CONFIGURED') return 'off';
+    throw new Error('ACTIVITY_NETWORK_GATE_UNAVAILABLE');
+  });
 }
 
 // ── The page ─────────────────────────────────────────────────────────────────────────────────
@@ -382,7 +403,9 @@ export async function readWalletActivity(input: { readonly account: string; read
   const value = readUncached(account, previous, env, seams, cursorKey);
   if (cache) {
     if (cache.size >= CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
-    cache.set(key, { at: now, ttlMs: CACHE_INCOMPLETE_MS, value });
+    // Joined by every reader while in flight (however long its networks take within their budgets); once settled it stays fresh for 30 s
+    // (5 s when a network was unavailable), and a failed read is forgotten at once.
+    cache.set(key, { at: now, ttlMs: CACHE_PENDING_MS, value });
     void value.then(page => { if (cache.get(key)?.value === value) cache.set(key, { at: now, ttlMs: page.coverage.some(c => c.status === 'UNAVAILABLE') ? CACHE_INCOMPLETE_MS : CACHE_COMPLETE_MS, value }); },
       () => { if (cache.get(key)?.value === value) cache.delete(key); });
   }
@@ -393,38 +416,39 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
   const nowDate = (seams.now ?? (() => new Date()))(), budget = seams.budgetMs ?? BUDGET_MS;
   const harness = env.GRYLOO_WALLET_ACTIVITY_HARNESS === 'MOCKED_LOOPBACK_ONLY' && !isHostedDeployment(env);
   if (harness) return mockedActivity(account, nowDate);
-  const mode = seams.mode ?? ((network: ActivityNetworkId) => network === 'solana' ? defaultMode('solana', env) : defaultMode(network, env));
+  const mode = seams.mode ?? ((network: ActivityNetworkId, signal: AbortSignal) => activityGate(network, env, signal));
   const alchemy = seams.alchemy === undefined ? alchemyTransport(env) : seams.alchemy;
   const networks: readonly ActivityNetworkId[] = account.ecosystem === 'evm' ? ['ethereum', 'base', 'arbitrum-one', 'robinhood'] : ['solana'];
-  const results = await Promise.all(networks.map(async (network): Promise<ReadResult | ActivityCoverage> => {
+  // Each network's gate and read share its time budget: a slow gate can never hold the page past it.
+  const results = await Promise.all(networks.map(network => withDeadline(async (signal): Promise<ReadResult | ActivityCoverage> => {
     let enabled: PortfolioMode;
-    try { enabled = await mode(network); } catch { return unavailable(network, 'ACTIVITY_NETWORK_GATE_UNAVAILABLE'); }
+    try { enabled = await mode(network, signal); } catch { checkAborted(signal); return unavailable(network, 'ACTIVITY_NETWORK_GATE_UNAVAILABLE'); }
     if (enabled === 'off') return off(network);
     // The loopback harness of a network has no recorded history: never presented as an empty one.
     if (enabled === 'harness') return unsupported(network, 'ACTIVITY_HARNESS_NOT_RECORDED');
     if (network === 'robinhood') return unsupported(network, 'ACTIVITY_SOURCE_NOT_CONFIGURED');
-    try {
-      if (network === 'solana') {
-        const rpc = seams.solanaRpc ? seams.solanaRpc() : sharedSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_RPC_CONFIGURATION_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc);
-        const catalog = seams.solanaCatalog ? seams.solanaCatalog() : loadSolanaCatalog();
-        return await withDeadline(signal => readSolana(account.address, rpc, catalog, previous, signal), budget, 'ACTIVITY_TIME_BUDGET_EXCEEDED');
-      }
-      if (!alchemy) return unsupported(network, 'ACTIVITY_PROVIDER_NOT_CONFIGURED');
-      const runtime = CATALOG_NETWORKS[network];
-      const catalog = seams.evmCatalog ? seams.evmCatalog(network) : runtime.catalogFor('live')(runtime.chain);
-      return await withDeadline(signal => readEvm(network, account.address, alchemy, catalog, previous, signal), budget, 'ACTIVITY_TIME_BUDGET_EXCEEDED');
-    } catch (error) { return unavailable(network, codeOf(error, 'ACTIVITY_READ_FAILED')); }
-  }));
-  const legs: ActivityLeg[] = [], coverage: ActivityCoverage[] = [], streams: Record<string, string | null> = {};
+    if (network === 'solana') {
+      const rpc = seams.solanaRpc ? seams.solanaRpc() : sharedSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_RPC_CONFIGURATION_INVALID') ?? JUPITER_SOLANA_MAINNET.rpc);
+      const catalog = seams.solanaCatalog ? seams.solanaCatalog() : loadSolanaCatalog();
+      return await readSolana(account.address, rpc, catalog, previous, signal);
+    }
+    if (!alchemy) return unsupported(network, 'ACTIVITY_PROVIDER_NOT_CONFIGURED');
+    const runtime = CATALOG_NETWORKS[network];
+    const catalog = seams.evmCatalog ? seams.evmCatalog(network) : runtime.catalogFor('live')(runtime.chain);
+    return await readEvm(network, account.address, alchemy, catalog, previous, signal);
+  }, budget, 'ACTIVITY_TIME_BUDGET_EXCEEDED').catch(error => unavailable(network, codeOf(error, 'ACTIVITY_READ_FAILED')))));
+  const legs: ActivityLeg[] = [], hiddenMoves: string[] = [], coverage: ActivityCoverage[] = [], streams: Record<string, string | null> = {};
   let hidden = 0, frontier: number | null = null;
   for (const result of results) {
-    if ('legs' in result) { legs.push(...result.legs); coverage.push(result.coverage); hidden += result.hidden; Object.assign(streams, result.streams); frontier = later(frontier, result.frontier); }
+    if ('legs' in result) { legs.push(...result.legs); hiddenMoves.push(...result.hiddenMoves); coverage.push(result.coverage); hidden += result.hidden; Object.assign(streams, result.streams);
+      frontier = later(frontier, result.frontier); }
     else coverage.push(result);
   }
   // A network unavailable on this page keeps its continuation, so the next page tries it again.
   if (previous) for (const [k, v] of Object.entries(previous)) if (!(k in streams) && coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))) streams[k] = v;
   const more = Object.values(streams).some(v => v !== null);
-  return { account: account.address, transfers: classifyLegs(legs), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey) : null, hidden,
+  const moves = [...new Set(hiddenMoves)];
+  return { account: account.address, transfers: classifyLegs(legs, moves), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey) : null, hidden, hiddenMoves: moves,
     completeAfter: more && frontier !== null ? new Date(frontier).toISOString() : null,
     provenance: 'PUBLIC_MAINNET', observedAt: nowDate.toISOString() };
 }

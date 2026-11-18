@@ -205,8 +205,23 @@ export function runCanvasExecution(workflow: CanvasWorkflow, order: readonly { r
     nodes[node.nodeId] = runNodeExecution(run, step, unrecorded);
   }
   const started = Object.values(nodes).some(node => node.visual !== 'waiting') || run.state !== 'PENDING';
+  // A terminal run is FloFi's final word on it: nothing more is observed, so it is a result even where a step's outcome stays unknown (an
+  // unanswered wallet batch of an ended run keeps its amber "may have executed" words); it is live only while a step is still in flight.
   return { key: `run:${run.workflowRunId}`, workflowId: workflow.workflowId, revision: workflow.revision, nodes, started,
-    settled: TERMINAL_RUN.includes(run.state) && !open(nodes), runKeys: [] };
+    settled: TERMINAL_RUN.includes(run.state) && !Object.values(nodes).some(node => IN_FLIGHT.includes(node.visual)), runKeys: [] };
+}
+
+/**
+ * The execution the Canvas shows, from the records the shell already follows (`app-shell.tsx`): the whole-workflow run this tab authorized for
+ * this exact workflow revision, else the step-by-step sequence, else the current runtime's lifecycle. `run` is the shell's own run (never one it
+ * only follows); `order` is `sequenceOrder(workflow)`. A record that is not this workflow's colors nothing, so a stale run falls through to the
+ * records after it and never wins over them.
+ */
+export function shellCanvasExecution(workflow: CanvasWorkflow, records: { readonly run: RunLike | null; readonly order: readonly { readonly nodeId: string }[];
+  readonly authorizedFor: { readonly workflowId: string; readonly revision: number } | null | undefined; readonly unrecorded: boolean;
+  readonly sequence: SequenceLike | null | undefined; readonly live: ExecutionLifecycle | null | undefined }): CanvasExecution | null {
+  return (records.run ? runCanvasExecution(workflow, records.order, records.run, records.authorizedFor, records.unrecorded) : null)
+    ?? (records.sequence ? sequenceCanvasExecution(workflow, records.sequence, records.live) : lifecycleCanvasExecution(workflow, records.live));
 }
 
 /**

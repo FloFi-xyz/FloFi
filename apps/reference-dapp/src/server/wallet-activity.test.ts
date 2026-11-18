@@ -3,7 +3,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
-import { ACTIVITY_READS_PER_MINUTE, activityAccount, decodeCursor, encodeCursor, readWalletActivity, type AlchemyCall, type WalletActivitySeams } from './wallet-activity';
+import { ACTIVITY_READS_PER_MINUTE, activityAccount, activityGate, decodeCursor, encodeCursor, readWalletActivity, type AlchemyCall, type WalletActivityCache, type WalletActivitySeams } from './wallet-activity';
+import type { cloudFlow } from './flow-runtime';
 import { activityRows, signedAmount } from '../domain/wallet-activity';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog';
 
@@ -240,3 +241,79 @@ describe('review hardening (flofi-protocol-integrations)', () => {
     expect(page.transfers).toEqual([]); expect(page.hidden).toBe(1);
   });
 });
+
+describe('review hardening (multi-lens)', () => {
+  it('a transaction that also moved an unverified token the other way is a contract interaction, never a plain receipt (the token stays unnamed)', async () => {
+    const page = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: {
+      IN: [transfer(5, pool, owner, 'erc20', 500_000_000n, USDC)], OUT: [{ ...transfer(5, owner, pool, 'erc20', 10n ** 21n, SPAM, 18), uniqueId: `${h(5)}:log:77` }] } })));
+    expect(page.transfers.map(t => [t.direction, t.asset.symbol, t.kind])).toEqual([['IN', 'USDC', 'INTERACTION']]);
+    expect(page.hidden).toBe(1); expect(page.hiddenMoves).toEqual([`eip155:8453:${h(5)}:OUT`]);
+    expect(JSON.stringify(page)).not.toContain(SPAM.slice(2));
+    // Its hidden leg read on another page still makes the visible one an interaction across everything loaded.
+    const single = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: { IN: [transfer(5, pool, owner, 'erc20', 500_000_000n, USDC)] } })));
+    expect(single.transfers[0]!.kind).toBe('TRANSFER');
+    expect(activityRows(single.transfers, 'IN', new Set(), null, page.hiddenMoves!).map(r => r.transfer.kind)).toEqual(['INTERACTION']);
+  });
+  it('a network gate the runtime cannot answer is unavailable (never silently off) and shares the network’s time budget', async () => {
+    const hanging = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({}), { budgetMs: 30, mode: async n => n === 'base' ? new Promise<never>(() => undefined) : 'off' }));
+    expect(hanging.coverage.find(c => c.network === 'base')).toMatchObject({ status: 'UNAVAILABLE', code: 'ACTIVITY_TIME_BUDGET_EXCEEDED' });
+    const failing = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({}), { mode: async n => { if (n === 'base') throw new Error('x'); return 'off'; } }));
+    expect(failing.coverage.find(c => c.network === 'base')).toMatchObject({ status: 'UNAVAILABLE', code: 'ACTIVITY_NETWORK_GATE_UNAVAILABLE' });
+    const call = (result: unknown) => vi.fn(async () => result) as unknown as typeof cloudFlow;
+    const signal = new AbortController().signal;
+    await expect(activityGate('base', {}, signal, call({ ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' }))).rejects.toThrow('ACTIVITY_NETWORK_GATE_UNAVAILABLE');
+    await expect(activityGate('base', {}, signal, call({ ok: false, code: 'TEST_NETWORK_NOT_AVAILABLE' }))).resolves.toBe('off');
+    await expect(activityGate('base', {}, signal, call({ ok: true, value: 'live' }))).resolves.toBe('live');
+    await expect(activityGate('base', {}, signal, call({ ok: true, value: 'off' }))).resolves.toBe('off');
+    const asked = call({ ok: true, value: 'live' });
+    await activityGate('solana', {}, signal, asked);
+    // One attempt per flow, abandoned with the network's budget.
+    expect(asked).toHaveBeenCalledWith('jupiter-swap', 'mode', [], expect.objectContaining({ signal, maxAttempts: 1 }));
+  });
+  it('a read in flight is joined however long it takes; a settled one is fresh for its own lifetime', async () => {
+    const cache: WalletActivityCache = new Map();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const mode = vi.fn(async () => { await gate; return 'off' as const; });
+    const now = vi.spyOn(Date, 'now');
+    try {
+      const t0 = 1_800_000_000_000;
+      now.mockReturnValue(t0);
+      const first = readWalletActivity({ account: owner }, {}, seams(alchemyOf({}), { cache, mode }));
+      now.mockReturnValue(t0 + 9_000);
+      const second = readWalletActivity({ account: owner }, {}, seams(alchemyOf({}), { cache, mode }));
+      release();
+      expect(await second).toEqual(await first);
+      expect(mode).toHaveBeenCalledTimes(4);
+    } finally { now.mockRestore(); }
+  });
+  it('Solana: a page cut through a same-slot pair never skips the signature before the gap', async () => {
+    const wallet = 'Fq9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', ata = 'Hz9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    const sig = (c: string) => c.repeat(88);
+    // The wallet: eight newer signatures, then X and Y in the same slot (X newer). Its token account lists Y too, earlier in its own list.
+    const walletList = [...'abcdefgh'].map((c, i) => ({ signature: sig(c), slot: 100 - i, err: null })).concat([{ signature: sig('X'), slot: 50, err: null }, { signature: sig('Y'), slot: 50, err: null }]);
+    const ataList = [...'pqr'].map((c, i) => ({ signature: sig(c), slot: 99 - i, err: null })).concat([{ signature: sig('Y'), slot: 50, err: null }]);
+    const rpc: SolanaRpc = async (method: string, params: readonly unknown[]) => {
+      if (method === 'getTokenAccountsByOwner') return { value: (params[1] as { programId: string }).programId.startsWith('Tokenkeg') ? [{ pubkey: ata, account: { data: { parsed: { info: { mint, owner: wallet } } } } }] : [] };
+      if (method === 'getSignaturesForAddress') {
+        const list = params[0] === wallet ? walletList : ataList, options = params[1] as { before?: string; limit: number };
+        return list.slice(options.before ? list.findIndex(item => item.signature === options.before) + 1 : 0).slice(0, options.limit);
+      }
+      if (method === 'getTransaction') {
+        const received = params[0] === sig('X') ? 7n : 0n;
+        return { slot: 50, blockTime: 1, meta: { err: null, fee: 0, preBalances: [1, 0], postBalances: [1, Number(received)], preTokenBalances: [], postTokenBalances: [] },
+          transaction: { message: { accountKeys: [{ pubkey: 'Kk9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr' }, { pubkey: wallet }], instructions: [] } } };
+      }
+      throw new Error('UNEXPECTED_' + method);
+    };
+    const catalog: SolanaAssetCatalog = { assets: [{ symbol: 'USDC', name: 'USD Coin', mint, decimals: 6, native: false, logoUrl: null }], fetchedAt: '', source: 'test', contentSha256: '', excludedRecords: 0 };
+    const read = (cursor: string | null) => readWalletActivity({ account: wallet, cursor }, {}, { cache: null, cursorKey, mode: async () => 'live', solanaRpc: () => rpc, solanaCatalog: async () => catalog });
+    const first = await read(null);
+    expect(first.transfers.some(t => t.transaction === sig('X'))).toBe(false);
+    // The wallet's stream continues after the last signature before the gap (h), so X is read again — never after Y.
+    expect(decodeCursor(first.cursor, wallet, cursorKey)![`solana:${wallet}`]).toBe(sig('h'));
+    const second = await read(first.cursor);
+    expect(second.transfers.filter(t => t.transaction === sig('X')).map(t => [t.direction, t.amount])).toEqual([['IN', '7']]);
+  });
+});
+

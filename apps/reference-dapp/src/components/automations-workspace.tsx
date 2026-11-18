@@ -543,14 +543,17 @@ export function AutomationInbox({ owner: ownerProp, proven, open }: { owner: Wor
   useEffect(() => {
     if (!owner || !proven) { setCount(0); return; }
     let live = true;
-    // One GET outside the Server Action queue: availability and the overview together until the deployment is known to serve automations,
-    // then the overview alone on each poll.
+    // One GET outside the Server Action queue: availability alone until the deployment is known to serve automations (a deployment without them
+    // is never asked for the owner's overview), then the overview alone on each poll.
     let enabled = false;
     const load = async () => {
-      const snapshot = await automationSnapshot(owner, enabled ? 'overview' : 'all').catch(() => null);
+      const wasEnabled = enabled;
+      const snapshot = await automationSnapshot(owner, enabled ? 'overview' : 'availability').catch(() => null);
       if (!live || !snapshot) return;
       if (snapshot.availability) enabled = snapshot.availability.enabled;
       if (enabled && snapshot.overview?.ok) setCount(snapshot.overview.value.pending.length);
+      // Just learned that automations are served: the overview is read now, not a minute later.
+      if (enabled && !wasEnabled && live) void load();
     };
     void load();
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);

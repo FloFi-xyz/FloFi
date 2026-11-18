@@ -75,6 +75,12 @@ export async function automationAvailability(seams: Pick<Seams, 'transport' | 'e
   } catch (cause) { return { enabled: false, code: failure(cause).code }; }
 }
 
+/**
+ * Whether this runtime answers `automationAvailability()` from its own configuration (no request): a reader can then learn it first and skip the
+ * owner's overview on a deployment that serves no automations, at no cost to an enabled one. On the remote runtime the API answers.
+ */
+export const automationAvailabilityIsLocal = (env: Env = process.env) => flowRuntimeKind(env) !== 'remote';
+
 /** Whether `/approve` must forward this approval secret to the API: an automation link on the remote runtime (other kinds are unchanged). */
 export const remoteAutomationApproval = (secret: unknown, env: Env = process.env) =>
   flowRuntimeKind(env) === 'remote' && typeof secret === 'string' && secret.startsWith(AUTOMATION_LINK_PREFIX);

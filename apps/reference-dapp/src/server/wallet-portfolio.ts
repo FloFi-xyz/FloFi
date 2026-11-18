@@ -107,14 +107,16 @@ function localSolanaMode(env: Env): PortfolioMode {
  * The flows that carry each network's deployment gate; the first enabled one decides. A hosted deployment never reads a harness. Also read by
  * the History's wallet activity (`wallet-activity.ts`).
  */
-export async function defaultMode(network: PortfolioNetworkId, env: Env): Promise<PortfolioMode> {
+export async function defaultMode(network: PortfolioNetworkId, env: Env,
+  /** How one flow's gate is read (default: `cloudFlowMode`, where any runtime failure reads as off); the History reads it stricter. */
+  flowMode: (flow: Parameters<typeof cloudFlowMode>[0], env: Env) => ReturnType<typeof cloudFlowMode> = cloudFlowMode): Promise<PortfolioMode> {
   let mode: PortfolioMode;
   if (network === 'solana') {
-    const modes = await Promise.all((['jupiter-swap', 'solana-transfer'] as const).map(flow => cloudFlowMode(flow, env)));
+    const modes = await Promise.all((['jupiter-swap', 'solana-transfer'] as const).map(flow => flowMode(flow, env)));
     mode = modes.every(m => m === null) ? localSolanaMode(env) : modes.find(m => m && m !== 'off') ?? 'off';
   } else {
     const runtime = CATALOG_NETWORKS[network];
-    mode = (await cloudFlowMode(runtime.flows.swap, env)) ?? runtime.mode(env);
+    mode = (await flowMode(runtime.flows.swap, env)) ?? runtime.mode(env);
   }
   return mode === 'harness' && isHostedDeployment(env) ? 'off' : mode;
 }

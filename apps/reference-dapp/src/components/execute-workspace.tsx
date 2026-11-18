@@ -98,7 +98,9 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   // Execution details: closed while the run progresses (the Canvas shows it), open once a result or something that needs attention exists; the
   // owner's own choice is kept for this run.
   const [detailsChoice, setDetailsChoice] = useState<{ readonly key: string; readonly open: boolean } | null>(null);
-  const detailsKey = canvasLive?.key ?? '';
+  // The owner's open/closed choice belongs to one run: a later step of a step-by-step workflow (a new run) starts from the default again, so its
+  // result or failure is never hidden behind a choice made for an earlier step.
+  const detailsKey = canvasLive && live?.runKey ? live.runKey : '';
   const detailsOpen = detailsChoice?.key === detailsKey ? detailsChoice.open : Boolean(result) || Boolean(live && ['attention', 'uncertain'].includes(live.state));
   const progress = props.workflowProgress ?? null, continuation = !live && props.continuation ? props.continuation : null;
   // N is the WHOLE workflow's number of steps (a sequence step's own run has one); without a workflow view the run's own count stays.

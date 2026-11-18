@@ -2,7 +2,7 @@
 /** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the Canvas cards' execution states come from authoritative records only, keyed by node id. */
 import { describe, expect, it } from 'vitest';
 import { projectExecutionLifecycle, type ExecutionLifecycle, type ExecutionLifecycleSource, type LifecycleOperation, type LifecycleState, type LifecycleStep } from './execution-lifecycle';
-import { canvasExecutionFor, edgeExecution, lifecycleCanvasExecution, runCanvasExecution, sequenceCanvasExecution, visualOfPhase, type RunLike } from './canvas-execution';
+import { canvasExecutionFor, edgeExecution, lifecycleCanvasExecution, runCanvasExecution, sequenceCanvasExecution, shellCanvasExecution, visualOfPhase, type RunLike } from './canvas-execution';
 import { EXECUTION_PHASES } from './execution-phase';
 import { reviewFixture } from '../test-utils/review-fixture';
 
@@ -176,7 +176,8 @@ describe('Live Canvas: a whole-workflow run', () => {
       expect(visuals(e)).toEqual({ swap: 'done', bridge: 'attention', transfer: 'attention' });
       expect(e.nodes.bridge).toMatchObject({ phase: 'OUTCOME_UNKNOWN', text: { key: "Its batch may have executed before it expired; check your wallet's activity" } });
       expect(edgeExecution(e, 'swap', 'bridge')).toBe('done'); expect(edgeExecution(e, 'bridge', 'transfer')).toBe('attention');
-      expect(e.settled).toBe(false);
+      // An ended (CANCELLED) run is FloFi's final record: a result with its amber steps, never "live"; a HALTED run can still resume.
+      expect(e.settled).toBe(state === 'SKIPPED');
     }
   });
   it('steps of a prepared group read as waiting for the wallet, whatever their own state', () => {
@@ -189,6 +190,22 @@ describe('Live Canvas: a whole-workflow run', () => {
     expect(runCanvasExecution(workflow, order, r, { workflowId: 'wf-2', revision: 3 })).toBeNull();
     expect(runCanvasExecution(workflow, order, r, null)).toBeNull();
     expect(runCanvasExecution(workflow, order.slice(0, 2), r, authorized)).toBeNull();
+  });
+  it('the shell shows its own authorized run first, else the step-by-step sequence, else the lifecycle; a stale run never wins', () => {
+    const r = run(['RECONCILED', 'DELEGATED', 'PENDING'], [group('SUBMITTED', true)]);
+    const live = lifecycle([step('swap', [op('swap', 'swap', 'pending')]), step('bridge', []), step('transfer', [])]);
+    const sequence = { steps: order, cursor: 1, completed: [{}], finished: false };
+    const records = { run: r, order, authorizedFor: authorized, unrecorded: false, sequence: null, live };
+    expect(shellCanvasExecution(workflow, records)!.key).toBe('run:wfr_1');
+    expect(visuals(shellCanvasExecution(workflow, records))).toEqual({ swap: 'done', bridge: 'pending', transfer: 'waiting' });
+    // The Editor's "handed to the wallet, answer unrecorded" reaches the cards.
+    expect(shellCanvasExecution(workflow, { ...records, run: run(['DELEGATED', 'DELEGATED', 'DELEGATED'], [group('PREPARED')]), unrecorded: true })!.nodes.swap!.phase).toBe('OUTCOME_UNKNOWN');
+    // A run authorized for another revision (or not this tab's) colors nothing: the records after it are shown instead.
+    expect(shellCanvasExecution(workflow, { ...records, authorizedFor: { workflowId: 'wf-1', revision: 2 } })!.key).toBe('lifecycle:run-1');
+    expect(shellCanvasExecution(workflow, { ...records, run: null, sequence })!.key).toBe('sequence:wf-1');
+    expect(shellCanvasExecution(workflow, { ...records, run: null })!.key).toBe('lifecycle:run-1');
+    expect(shellCanvasExecution(workflow, { ...records, run: null, live: lifecycle(live.steps, { matchesWorkflow: false }) })).toBeNull();
+    expect(shellCanvasExecution(workflow, { ...records, run: null, live: null })).toBeNull();
   });
 });
 

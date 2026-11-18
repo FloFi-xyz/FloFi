@@ -662,10 +662,15 @@ test.describe('Live Canvas', () => {
     await page.screenshot({ path: '.tmp/live-canvas-failed.png' });
   });
   test('reduced motion stops the execution animation; phones keep the page within the screen', async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.evaluate(() => { window.flofiExecuteAcceptance.liveCanvas(true); window.flofiExecuteAcceptance.evidence('progress-1'); });
     await expect.poll(() => states(page)).toEqual(['done', 'pending', 'waiting']);
-    expect(await page.locator('.composer-card[data-execution="pending"] .canvas-execution-badge svg').evaluate(svg => getComputedStyle(svg).animationName)).toBe('none');
+    // The connection into the step in flight animates when motion is allowed, and stops under the reduced-motion preference.
+    const flowing = page.locator('.react-flow__edge.canvas-execution-edge-active path.react-flow__edge-path').first();
+    const animation = () => flowing.evaluate(path => getComputedStyle(path).animationName);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(animation).toBe('canvas-exec-flow');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect.poll(animation).toBe('none');
     await page.setViewportSize({ width: 390, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: '.tmp/live-canvas-mobile.png', fullPage: true });

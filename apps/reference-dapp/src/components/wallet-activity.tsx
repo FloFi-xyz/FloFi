@@ -15,7 +15,9 @@ import { dateLabel } from './dashboard/dashboard-view';
 import { StatusTag } from './dashboard/dashboard-status';
 
 type Loaded = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: readonly ActivityCoverage[]; readonly cursor: string | null;
-  readonly completeAfter: string | null; readonly hidden: number; readonly provenance: WalletActivityPage['provenance'] };
+  readonly completeAfter: string | null; readonly hidden: number; readonly hiddenMoves: readonly string[]; readonly provenance: WalletActivityPage['provenance'] };
+/** A network's coverage as the later page states it whenever that page read it (or could not): an older note never outlives a newer read. */
+const READ_STATUS: readonly ActivityCoverage['status'][] = ['COVERED', 'PARTIAL', 'UNAVAILABLE'];
 const KIND_LABEL = { TRANSFER: null, INTERACTION: 'Contract interaction', MINT: 'Minted', BURN: 'Burned' } as const;
 const COVERAGE_TEXT: Readonly<Record<ActivityCoverage['status'], string | null>> = { COVERED: null, PARTIAL: '{0}: ETH moved by contracts (internal transfers) is not listed.',
   UNSUPPORTED: '{0}: wallet activity is not available on this network yet.', UNAVAILABLE: '{0}: activity could not be loaded right now. This does not mean there is none.', OFF: null };
@@ -62,22 +64,30 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
   /** The page's own Refresh also re-reads the activity. */ refreshRef?: { current: (() => void) | null } }) {
   const { t } = useLocale();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [state, setState] = useState<{ readonly account: string; readonly status: 'loading' | 'more' | 'ready' | 'error'; readonly code: string | null }>({ account, status: 'loading', code: null });
+  // `cursor`: the page the last request asked for, so Retry repeats exactly that request (a failed refresh re-reads the newest, never the next page).
+  const [state, setState] = useState<{ readonly account: string; readonly status: 'loading' | 'more' | 'ready' | 'error'; readonly code: string | null; readonly cursor: string | null }>(
+    { account, status: 'loading', code: null, cursor: null });
   const generation = useRef(0);
   const load = useCallback((cursor: string | null) => {
     const request = ++generation.current;
-    setState({ account, status: cursor ? 'more' : 'loading', code: null });
+    setState({ account, status: cursor ? 'more' : 'loading', code: null, cursor });
     walletActivity(account, cursor).then(page => {
       if (request !== generation.current) return; // another wallet or page was asked since: this answer is stale
-      setLoaded(previous => ({ account, cursor: page.cursor, provenance: page.provenance, completeAfter: page.completeAfter ?? null,
-        transfers: cursor && previous?.account === account ? [...previous.transfers, ...page.transfers] : page.transfers,
-        // The first page states each network's coverage; a later page only updates a network it could (or could no longer) read.
-        coverage: cursor && previous?.account === account ? previous.coverage.map(c => page.coverage.find(p => p.network === c.network && p.status === 'UNAVAILABLE') ?? c) : page.coverage,
-        hidden: (cursor && previous?.account === account ? previous.hidden : 0) + page.hidden }));
-      setState({ account, status: 'ready', code: null });
+      setLoaded(previous => {
+        const more = Boolean(cursor && previous?.account === account);
+        return { account, cursor: page.cursor, provenance: page.provenance, completeAfter: page.completeAfter ?? null,
+          transfers: more ? [...previous!.transfers, ...page.transfers] : page.transfers,
+          // The first page states each network's coverage; a later page that read a network (or failed to) states it from then on.
+          coverage: more ? previous!.coverage.map(c => page.coverage.find(p => p.network === c.network && READ_STATUS.includes(p.status)) ?? c) : page.coverage,
+          hidden: (more ? previous!.hidden : 0) + page.hidden, hiddenMoves: [...more ? previous!.hiddenMoves : [], ...page.hiddenMoves ?? []] };
+      });
+      setState({ account, status: 'ready', code: null, cursor });
     }, (error: unknown) => {
       if (request !== generation.current) return;
-      setState({ account, status: 'error', code: error instanceof Error ? error.message : 'ACTIVITY_READ_UNAVAILABLE' });
+      const code = error instanceof Error ? error.message : 'ACTIVITY_READ_UNAVAILABLE';
+      // A wallet FloFi no longer reads for this browser (its session ended, another account signed in): nothing loaded earlier stays shown.
+      if (code === 'ACTIVITY_SIGN_IN_REQUIRED') setLoaded(null);
+      setState({ account, status: 'error', code, cursor });
     });
   }, [account]);
   useEffect(() => { setLoaded(current => current?.account === account ? current : null); load(null); return () => { generation.current++; }; }, [account, load, epoch]);
@@ -88,9 +98,9 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     return () => { if (refreshRef.current === reload) refreshRef.current = null; };
   }, [refreshRef, load]);
   const shown = loaded?.account === account ? loaded : null;
-  const rows = shown ? activityRows(shown.transfers, filter, recorded, shown.cursor ? shown.completeAfter : null) : [];
+  const rows = shown ? activityRows(shown.transfers, filter, recorded, shown.cursor ? shown.completeAfter : null, shown.hiddenMoves) : [];
   // Rows older than what every stream was read down to wait for the next page, so no silent gap ever appears between listed rows.
-  const waiting = shown ? activityRows(shown.transfers, filter, recorded).length - rows.length : 0;
+  const waiting = shown ? activityRows(shown.transfers, filter, recorded, null, shown.hiddenMoves).length - rows.length : 0;
   const status = state.account === account ? state.status : 'loading';
   const notes = shown?.coverage.filter(c => COVERAGE_TEXT[c.status]) ?? [];
   // Honest empty states: no network could be read is not "no activity", and movements already shown as workflows are not "nothing".
@@ -101,13 +111,13 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     <div className="ux-panel-head"><div><h2 id="wallet-activity-heading">{t(heading)}</h2>
       {shown?.provenance === 'MOCKED' && <StatusTag tone="soon">{t('Test data (MOCKED)')}</StatusTag>}</div>
       <button type="button" className="ux-button ux-button-small" onClick={() => load(null)} disabled={status === 'loading'} aria-label={t('Refresh wallet activity')}>{t('Refresh')}</button></div>
-    <p className="ux-panel-text">{t(filter === 'ALL' ? 'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. Transactions of your FloFi workflows are shown with their workflow above.' : filter === 'IN'
+    <p className="ux-panel-text">{t(filter === 'ALL' ? 'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. A transaction FloFi matches to a workflow record above is shown with that record, not repeated here.' : filter === 'IN'
       ? 'Tokens your wallet received, including transfers from other wallets and outside FloFi.' : 'Tokens your wallet sent, including transfers made outside FloFi.')}</p>
     {status === 'loading' && !shown && <p className="muted" role="status">{t('Loading wallet activity…')}</p>}
     {status === 'error' && <div className="ux-notice" role="status"><p>{t(state.code === 'ACTIVITY_SIGN_IN_REQUIRED' ? 'Verify this wallet above to see its activity.'
       : state.code === 'ACTIVITY_RATE_LIMITED' ? 'Wallet activity was refreshed many times in a short period. Try again in a minute.'
       : 'Wallet activity is temporarily unavailable. Your FloFi workflow history is not affected.')}</p>
-      <button type="button" className="ux-button ux-button-small" onClick={() => load(state.code !== 'ACTIVITY_SIGN_IN_REQUIRED' && shown?.cursor && shown.transfers.length ? shown.cursor : null)}>{t('Retry')}</button></div>}
+      <button type="button" className="ux-button ux-button-small" onClick={() => load(state.code !== 'ACTIVITY_SIGN_IN_REQUIRED' && state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button></div>}
     {shown && (rows.length || waiting ? rows.length > 0 && <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>
       : <p className="ux-panel-text wallet-activity-empty">{t(!readable ? 'Wallet activity could not be read on any network right now. This does not mean there is none.'
         : onlyWorkflows ? 'The recent movements of this wallet are your FloFi workflows above. Open Received or Sent to see each transfer.'

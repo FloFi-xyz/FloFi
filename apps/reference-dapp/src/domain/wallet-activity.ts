@@ -46,6 +46,11 @@ export type WalletActivityPage = { readonly account: string; readonly transfers:
    */
   readonly completeAfter: string | null;
   /** Movements of tokens outside the verified catalogs, not shown. */ readonly hidden: number;
+  /**
+   * The direction each hidden movement took in its transaction (`<chain>:<transaction>:<IN|OUT|SELF>`, never the token): a visible leg whose
+   * transaction also moved an unverified token the other way is a contract interaction (a swap or liquidity exit), never a plain transfer.
+   */
+  readonly hiddenMoves?: readonly string[];
   readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED'; readonly observedAt: string };
 
 export const ZERO_EVM = '0x0000000000000000000000000000000000000000';
@@ -55,18 +60,26 @@ export type ActivityLeg = Omit<WalletTransfer, 'kind'> & { readonly from: string
  * The transaction-level kind of each leg: legs of one transaction that move the wallet's assets both ways are one interaction; a leg from the
  * zero address is a mint, to it a burn; anything else is a transfer.
  */
-export function classifyLegs(legs: readonly ActivityLeg[]): WalletTransfer[] {
-  const byTransaction = new Map<string, ActivityLeg[]>();
-  for (const leg of legs) {
-    const key = `${leg.chain}:${leg.transaction}`;
-    byTransaction.set(key, [...byTransaction.get(key) ?? [], leg]);
-  }
+export function classifyLegs(legs: readonly ActivityLeg[], hiddenMoves: readonly string[] = []): WalletTransfer[] {
+  const directions = movedDirections(legs, hiddenMoves);
   return legs.map(({ from, to, ...leg }) => {
-    const siblings = byTransaction.get(`${leg.chain}:${leg.transaction}`)!;
-    const both = siblings.some(s => s.direction === 'IN') && siblings.some(s => s.direction === 'OUT');
+    const moved = directions.get(`${leg.chain}:${leg.transaction}`)!;
+    const both = moved.has('IN') && moved.has('OUT');
     const kind: ActivityKind = both ? 'INTERACTION' : from === ZERO_EVM && leg.direction === 'IN' ? 'MINT' : to === ZERO_EVM && leg.direction === 'OUT' ? 'BURN' : 'TRANSFER';
     return { ...leg, kind };
   });
+}
+
+/** The directions each transaction moved the wallet's assets, visible legs and hidden (unverified-token) movements alike. */
+function movedDirections(legs: readonly Pick<WalletTransfer, 'chain' | 'transaction' | 'direction'>[], hiddenMoves: readonly string[]) {
+  const directions = new Map<string, Set<ActivityDirection>>();
+  const add = (key: string, direction: ActivityDirection) => directions.set(key, (directions.get(key) ?? new Set()).add(direction));
+  for (const leg of legs) add(`${leg.chain}:${leg.transaction}`, leg.direction);
+  for (const move of hiddenMoves) {
+    const at = move.lastIndexOf(':'), direction = move.slice(at + 1);
+    if (at > 0 && (direction === 'IN' || direction === 'OUT' || direction === 'SELF')) add(move.slice(0, at), direction);
+  }
+  return directions;
 }
 
 export type ActivityFilter = 'ALL' | 'IN' | 'OUT';
@@ -76,12 +89,12 @@ export const transactionKey = (transaction: string) => /^0x[0-9a-fA-F]{64}$/.tes
  * What a History view lists: newest first, without duplicates, filtered by direction. `recorded`: transactions a FloFi execution record of this
  * wallet carries — in the All view they are left to that record (shown once, as the workflow), in Received/Sent they are listed and marked FloFi.
  */
-export function activityRows(transfers: readonly WalletTransfer[], filter: ActivityFilter, recorded: ReadonlySet<string> = new Set(), completeAfter: string | null = null) {
+export function activityRows(transfers: readonly WalletTransfer[], filter: ActivityFilter, recorded: ReadonlySet<string> = new Set(), completeAfter: string | null = null,
+  hiddenMoves: readonly string[] = []) {
   const seen = new Set<string>();
   // Legs of one transaction may arrive on different pages (incoming and outgoing are read separately): a transaction that moved the wallet's
-  // assets both ways is one interaction across everything loaded, never two ordinary transfers.
-  const directions = new Map<string, Set<WalletTransfer['direction']>>();
-  for (const t of transfers) { const key = `${t.chain}:${t.transaction}`; directions.set(key, (directions.get(key) ?? new Set()).add(t.direction)); }
+  // assets both ways — a hidden unverified token included — is one interaction across everything loaded, never two ordinary transfers.
+  const directions = movedDirections(transfers, hiddenMoves);
   const frontier = completeAfter ? Date.parse(completeAfter) : null;
   const unique = transfers.filter(t => !seen.has(t.id) && Boolean(seen.add(t.id)))
     .map(t => { const d = directions.get(`${t.chain}:${t.transaction}`)!; return d.has('IN') && d.has('OUT') && t.kind !== 'INTERACTION' ? { ...t, kind: 'INTERACTION' as const } : t; })

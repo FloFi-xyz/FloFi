@@ -33,6 +33,13 @@ describe('automationSnapshot', () => {
     expect(await after).toBe(await fresh);
     expect(fetch.mock.calls.every(call => (call as unknown[])[0] === '/api/automations/overview?scope=overview')).toBe(true);
   });
+  it('availability alone is asked without any wallet', async () => {
+    const fetch = vi.fn(async () => answer({ availability: { enabled: false, code: 'AUTOMATIONS_NOT_ENABLED' }, overview: null }));
+    vi.stubGlobal('fetch', fetch);
+    await automationSnapshot(owner, 'availability');
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/automations/overview?scope=availability'); expect(init.headers).toEqual({});
+  });
   it('rejects with the route’s closed code, or a generic one; a failed read is not cached', async () => {
     const fetch = vi.fn(async () => answer({ ok: false, code: 'BETA_SESSION_REQUIRED' }, 403));
     vi.stubGlobal('fetch', fetch);

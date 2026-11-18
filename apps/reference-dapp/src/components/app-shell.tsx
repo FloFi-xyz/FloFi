@@ -66,7 +66,7 @@ import { restoredLocalExecutionKind } from '../domain/execution-recovery';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
 import { executionContinuation } from '../domain/conversation-lifecycle';
 import { runReconciled, workflowProgressView } from '../domain/workflow-progress';
-import { lifecycleCanvasExecution, runCanvasExecution, sequenceCanvasExecution } from '../domain/canvas-execution';
+import { shellCanvasExecution } from '../domain/canvas-execution';
 import type { SequenceContinuation } from './workflow-progress-panel';
 import { ReviewAuthorizationDetails } from './review-workspace';
 import { workflowBoundAuthorization } from '../domain/review-presentation';
@@ -672,9 +672,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // made for it; a record of another workflow or revision colors nothing (`domain/canvas-execution.ts`). Kept by value, so the cards re-render only
   // when a step's state changes.
   const ownWorkflowRun = workflowRunHere.started && !workflowRunHere.following ? workflowRunHere.run : null;
-  const canvasExecutionNow = (ownWorkflowRun ? runCanvasExecution(state.workflow, sequenceOrder(state.workflow), ownWorkflowRun, workflowRunHere.authorizedFor,
-      workflowRunHere.unrecorded) : null)
-    ?? (sequence ? sequenceCanvasExecution(state.workflow, sequence, liveExecution) : lifecycleCanvasExecution(state.workflow, liveExecution));
+  const canvasExecutionNow = shellCanvasExecution(state.workflow, { run: ownWorkflowRun, order: ownWorkflowRun ? sequenceOrder(state.workflow) : [],
+    authorizedFor: workflowRunHere.authorizedFor, unrecorded: workflowRunHere.unrecorded, sequence, live: liveExecution });
   const canvasExecutionKey = canvasExecutionNow ? JSON.stringify(canvasExecutionNow) : null;
   const canvasExecution = useMemo(() => canvasExecutionNow, [canvasExecutionKey]);
   // Locked while the wallet is being asked (every prompting phase, the first Authorize included) or while this workflow's own run is open and

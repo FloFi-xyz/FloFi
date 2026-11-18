@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { HookHarness, deferred } from '../test-utils/hook-harness';
-import { AutomationsWorkspace, CreateForm, bpsToPercent, percentToBps } from './automations-workspace';
+import { AutomationInbox, AutomationsWorkspace, CreateForm, bpsToPercent, percentToBps } from './automations-workspace';
 import type { CapabilityView, OverviewView } from '../automations/views';
 const f = vi.hoisted(() => ({ overview: vi.fn(), create: vi.fn(), history: vi.fn(), enabled: true, availability: null as null | { enabled: boolean; code: string | null } | Error,
   reads: [] as string[] }));
@@ -10,11 +10,11 @@ vi.mock('react', async original => ({ ...await original<typeof import('react')>(
 // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the reads go through ONE GET (`app/automation-reads.ts`): availability (first read only) and the
 // owner's overview together. This stand-in answers them from the same fixtures the Server Actions used to.
 vi.mock('../app/automation-reads', () => ({ AUTOMATIONS_OFF: new Set(['AUTOMATIONS_NOT_ENABLED', 'AUTOMATION_CONFIGURATION_INVALID']),
-  automationSnapshot: async (o: unknown, scope: 'all' | 'overview' = 'all') => {
+  automationSnapshot: async (o: unknown, scope: 'all' | 'overview' | 'availability' = 'all') => {
     f.reads.push(scope);
-    if (scope === 'all' && f.availability instanceof Error) throw f.availability;
-    const availability = scope === 'all' ? f.availability ?? { enabled: f.enabled, code: f.enabled ? null : 'AUTOMATIONS_NOT_ENABLED' } : null;
-    return { availability, overview: o ? await f.overview(o) : null };
+    if (scope !== 'overview' && f.availability instanceof Error) throw f.availability;
+    const availability = scope !== 'overview' ? f.availability ?? { enabled: f.enabled, code: f.enabled ? null : 'AUTOMATIONS_NOT_ENABLED' } : null;
+    return { availability, overview: o && scope !== 'availability' ? await f.overview(o) : null };
   } }));
 vi.mock('../app/automation-action', () => ({ createAutomation: f.create, automationHistory: f.history,
   changeAutomationState: vi.fn(), createTelegramLinkCode: vi.fn(), dismissAutomationOccurrence: vi.fn(), openAutomationOccurrence: vi.fn(), prepareWatchProposal: vi.fn(), rebindAutomation: vi.fn(), unlinkTelegram: vi.fn() }));
@@ -178,4 +178,17 @@ describe('Automation management server authorization', () => {
     expect(textOf(work())).toContain('Wallet session verified');
   });
   it('disables unsupported landing choices when policy and price source are unavailable', async () => { f.overview.mockResolvedValue({ ok: true, value: { ...overview, capabilities: { ...capabilities, routes: [], observable: [], priceSource: 'off' } } }); work(); await flush(); work(); await flush(); const tree = work(); for (const choice of nodes(tree).filter(e => e.props.className === 'automation-choice')) expect(choice.props.disabled).toBe(true); expect(textOf(tree)).toContain('A verified price source is required'); });
+});
+
+describe('Automation proposals notice', () => {
+  it('asks availability alone while automations are not served (never the owner overview); reads the overview once they are', async () => {
+    f.enabled = false;
+    host.render(() => AutomationInbox({ owner, proven: true, open: vi.fn() })); await flush();
+    expect(f.reads).toEqual(['availability']); expect(f.overview).not.toHaveBeenCalled();
+    host.unmount(); host = new HookHarness(); f.reads = []; f.enabled = true;
+    f.overview.mockResolvedValue({ ok: true, value: { ...overview, pending: [{ id: 'p1' }] } });
+    host.render(() => AutomationInbox({ owner, proven: true, open: vi.fn() })); await flush();
+    expect(f.reads).toEqual(['availability', 'overview']); expect(f.overview).toHaveBeenCalledOnce();
+    expect(textOf(host.render(() => AutomationInbox({ owner, proven: true, open: vi.fn() })))).toContain('1 automation proposal is waiting for you.');
+  });
 });
