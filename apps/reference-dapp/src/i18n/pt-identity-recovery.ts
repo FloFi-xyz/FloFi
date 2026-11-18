@@ -13,6 +13,20 @@ export const portugueseIdentityRecovery: Readonly<Record<string, string>> = {
   'Linked. You can now sign in with it.': 'Vinculado. Agora você pode entrar com ele.',
   // Authentication UX & Login Regression Fix (item 6): the step after a link, and after closing a duplicate.
   'Continue to my account': 'Continuar para minha conta',
+  // Authentication UX & Login Regression Fix: shorter sign-in and Sign-in methods copy.
+  'Sign in again with any method of this account.': 'Entre de novo com qualquer método desta conta.',
+  'Use the sign-in for the account you want to keep.': 'Use o login da conta que você quer manter.',
+  'Not available yet': 'Ainda não disponível',
+  'If that account is empty, sign in with it and choose “Bring this sign-in to my other account”.':
+    'Se essa conta estiver vazia, entre nela e escolha “Levar este login para minha outra conta”.',
+  'That account signs in with {0}.': 'Essa conta usa {0} para entrar.',
+  'Getting sign-in ready…': 'Preparando o login…',
+  'Every method here opens this same account.': 'Cada método aqui abre esta mesma conta.',
+  'For your security, confirm it’s you first.': 'Por segurança, confirme primeiro que é você.',
+  'Add Google': 'Adicionar Google', 'Add email': 'Adicionar e-mail',
+  'Is this a second FloFi account?': 'Esta é uma segunda conta FloFi?',
+  'If you boarded with another sign-in, close this empty account and bring its sign-in there. You will sign in to the other account to confirm.':
+    'Se você embarcou com outro login, feche esta conta vazia e leve o login dela para lá. Você vai entrar na outra conta para confirmar.',
   'Nothing new was linked.': 'Nada novo foi vinculado.',
   'A sign-in method was linked at Privy before FloFi asked, so it was not added and does not open this account.': 'Um método de login foi vinculado na Privy antes de a FloFi pedir, então não foi adicionado e não abre esta conta.',
   'One FloFi account, several ways in. Every method you add opens this same account; adding one approves nothing and moves no funds.':

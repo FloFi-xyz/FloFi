@@ -91,6 +91,7 @@ export function nextPath(outcome: Pick<SignInOutcome, 'onboarding' | 'session' |
   return (outcome.walletOnboarding ?? outcome.onboarding === 'pending') ? '/onboarding/wallets' : safeReturnPath(returnTo);
 }
 /** A new sign-in in this browser supersedes the previous one: its server-side record is revoked (linking keeps the same session). */
-export async function supersede(host: AccountHost, previous: AccountSessionToken | null, next: AccountSessionToken): Promise<void> {
-  if (previous && previous.sessionId !== next.sessionId) await host.store.revokeSession(previous).catch(() => undefined);
+export async function supersede(host: AccountHost, previous: AccountSessionToken | null, next: AccountSessionToken): Promise<boolean> {
+  if (!previous || previous.sessionId === next.sessionId) return false;
+  return host.store.revokeSession(previous).then(() => true, () => false);
 }

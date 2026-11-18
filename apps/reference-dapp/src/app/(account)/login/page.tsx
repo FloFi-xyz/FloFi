@@ -5,7 +5,7 @@
  */
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { accountState, signInMethodsState } from '../../account-action';
+import { accountState } from '../../account-action';
 import { safeReturnPath } from '../../../accounts/account-session';
 import { needsWalletOnboarding } from '../../../accounts/account-model';
 import { SignInScreen } from '../../../components/account/sign-in';
@@ -25,8 +25,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
   // cookie, while the sign-in itself (a same-site server action) does, and the server checks the intent there (`privySignIn`).
   const reauth = one(params.reauth) === '1' && state.account !== null;
   const moveAsked = one(params.move) === '1';
-  const move = moveAsked ? (await signInMethodsState().catch(() => null))?.move ?? null : null;
   // A returning, still-valid session goes straight on, unless the page shows an error.
   if (state.account && !code && !reauth && !moveAsked) redirect(needsWalletOnboarding(state.account) ? '/onboarding/wallets' : returnTo);
-  return <SignInScreen state={state} initialError={code} returnTo={returnTo} mode={reauth ? 'reauth' : moveAsked ? 'move' : null} moving={move?.methods ?? []}/>;
+  return <SignInScreen state={state} initialError={code} returnTo={returnTo} mode={reauth ? 'reauth' : moveAsked ? 'move' : null}/>;
 }

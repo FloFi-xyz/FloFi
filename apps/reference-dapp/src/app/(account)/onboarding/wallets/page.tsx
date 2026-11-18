@@ -2,6 +2,7 @@
 /** BUILD-FLOFI-AUTH-WALLETS-001: `/onboarding/wallets`, create or import EVM and Solana wallets with the wallet provider. */
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
+import { isOtherAccountOfBoardedPerson } from '../../../../flight/other-account';
 import { accountState } from '../../../account-action';
 import { AddWallets } from '../../../../components/account/add-wallets';
 
@@ -10,5 +11,8 @@ export const metadata: Metadata = { title: 'FloFi · Add wallets', robots: { ind
 export default async function AddWalletsPage() {
   const state = await accountState();
   if (!state.account) redirect('/login?returnTo=%2Fonboarding%2Fwallets');
+  // Authentication UX & Login Regression Fix (P0): the person's OTHER account (no beta access of its own; its verified address is held by the
+  // boarded account) never creates or imports a wallet: that would make it impossible to close, and keep its sign-in out of the boarded account.
+  if (await isOtherAccountOfBoardedPerson(state.account.accountId, state.account.identities)) redirect('/board');
   return <AddWallets state={state}/>;
 }
