@@ -27,4 +27,6 @@ export const portugueseLiveCanvasActivity: Readonly<Record<string, string>> = {
   'No wallet activity found on the covered networks.': 'Nenhuma atividade da carteira encontrada nas redes cobertas.',
   'Network coverage': 'Cobertura por rede', '1 movement of an unverified token is hidden.': '1 movimentação de um token não verificado está oculta.',
   '{0} movements of unverified tokens are hidden.': '{0} movimentações de tokens não verificados estão ocultas.',
+  // Automations loading
+  'Automations are temporarily unavailable. This is not a change to your automations.': 'As automações estão temporariamente indisponíveis. Isso não altera suas automações.',
 };

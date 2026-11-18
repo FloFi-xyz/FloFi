@@ -13,11 +13,14 @@ import { projectExecutionEvidence } from '../domain/execution-evidence';
 import { createRouterNode } from '../domain/router-authoring';
 import { createAuthoredSupply } from '../domain/supply-authoring';
 import { baseAssetRegistry } from '@defi-workflow-engine/action-registry';
+import { lifecycleCanvasExecution } from '../domain/canvas-execution';
 
 type Lifecycle = 'wallet' | 'submitting' | 'submitted' | 'approval-pending' | 'approval-confirmed' | 'swap-pending' | 'swap-confirmed' | 'failed' | 'uncertain' | 'restored';
 type Transition = 'valid' | 'unapproved' | 'blocked' | 'wallet' | 'network' | 'unknown' | 'workflow';
-type EvidenceScenario = 'reconciled' | 'attention' | 'declined' | 'partial' | 'bridge-pending' | 'bridge-reconciled' | 'cow-pending' | 'cow-reconciled' | 'recovered';
-declare global { interface Window { flofiExecuteAcceptance: { transition(value: Transition): void; lifecycle(value: Lifecycle): void; evidence(value: EvidenceScenario): void; workflowName(value: string): void; holdStart(): void; binding(value: 'wallet' | 'network' | 'workflow' | 'disconnect'): void; checkOutcome(value: 'confirmed' | 'uncertain' | 'error'): void; finishCheck(): void; counts(): { executed: number; simulated: number; edited: number; checked: number } } } }
+type EvidenceScenario = 'reconciled' | 'attention' | 'declined' | 'partial' | 'bridge-pending' | 'bridge-reconciled' | 'cow-pending' | 'cow-reconciled' | 'recovered'
+  /** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a three-step workflow (Supply → Swap → Bridge) at each point of its recorded progress. */
+  | 'progress-0' | 'progress-1' | 'progress-2' | 'progress-3' | 'progress-failed';
+declare global { interface Window { flofiExecuteAcceptance: { transition(value: Transition): void; lifecycle(value: Lifecycle): void; evidence(value: EvidenceScenario): void; workflowName(value: string): void; holdStart(): void; binding(value: 'wallet' | 'network' | 'workflow' | 'disconnect'): void; checkOutcome(value: 'confirmed' | 'uncertain' | 'error'): void; finishCheck(): void; liveCanvas(on: boolean): void; counts(): { executed: number; simulated: number; edited: number; checked: number } } } }
 function acceptedFixture() { const value = reviewFixture(); value.authorization.accepted = true; return value; }
 function Harness() {
   const [fixture, setFixture] = useState(acceptedFixture);
@@ -29,10 +32,12 @@ function Harness() {
   const [started, setStarted] = useState(false);
   const [evidenceScenario, setEvidenceScenario] = useState<EvidenceScenario | null>(null);
   const [workflowName, setWorkflowName] = useState('Approved swap');
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: Execute receives the Canvas execution the shell computes (off: the previous timeline view).
+  const [liveCanvas, setLiveCanvas] = useState(false);
   const counts = useRef({ executed: 0, simulated: 0, edited: 0, checked: 0 });
   useEffect(() => {
     window.flofiExecuteAcceptance = {
-      workflowName: setWorkflowName,
+      workflowName: setWorkflowName, liveCanvas: setLiveCanvas,
       evidence: value => { setEvidenceScenario(value); setLifecycle('swap-confirmed'); setStarted(true); },
       binding: value => setFixture(current => ({ ...current, workflow: value === 'workflow' ? { ...current.workflow, revision: current.workflow.revision + 1 } : current.workflow, wallet: { ...current.wallet, ...(value === 'wallet' ? { account: reviewSpender, changed: true } : value === 'network' ? { chain: 'eip155:42161', environment: 'mainnet' as const, changed: true } : value === 'disconnect' ? { account: null, changed: true } : {}) } })),
       checkOutcome: value => { checkOutcome.current = value; }, finishCheck: () => finishCheck.current?.(),
@@ -79,7 +84,8 @@ function Harness() {
   } } : undefined;
   return <ExecuteAcceptanceWorkflowProvider workflow={workflow} context={fixture.context}><ExecuteWorkspace {...fixture} workflow={workflow} workflowName={workflowName} {...(progress && recovery ? { progress, recovery } : {})} authorization={fixture.authorization}
     execution={{ ready: true, started: started || Boolean(lifecycle), next: lifecycle === 'approval-confirmed' ? () => { counts.current.executed += 1; } : null, nextLabel: 'Continue to swap', check: () => {}, start: () => { counts.current.executed += 1; if (!holdStart.current) setStarted(true); }, prompt: 'Confirm the reviewed transaction in your wallet.', expiresAt: null }}
-    backToBuild={() => { counts.current.edited += 1; }} backToSimulate={() => { counts.current.simulated += 1; }}/></ExecuteAcceptanceWorkflowProvider>
+    backToBuild={() => { counts.current.edited += 1; }} backToSimulate={() => { counts.current.simulated += 1; }}
+    {...liveCanvas ? { canvasExecution: lifecycleCanvasExecution(workflow, progress) } : {}}/></ExecuteAcceptanceWorkflowProvider>
 }
 // Normalized recorded-data fixtures for presentation acceptance only. No RPC or
 // signatures are exercised, and no fixture is imported by production routes.
@@ -100,6 +106,18 @@ function evidenceFixture(scenario: EvidenceScenario, fixture: ReturnType<typeof 
     quote: { chainId: 'eip155:8453', quoteId: 'provider-quote-' + 'q'.repeat(180), owner: fixture.wallet.account, sellToken: 'address' in baseAssetRegistry.USDC.asset ? baseAssetRegistry.USDC.asset.address : '', buyToken: 'address' in baseAssetRegistry.WETH.asset ? baseAssetRegistry.WETH.asset.address : '', sellAmount: '100000000', buyAmount: '25000000000000000' },
     observed: { uid: '0x' + 'd'.repeat(112), executedSellAmount: '100000000', executedBuyAmount: '24300000000000000' },
   }, evidence: scenario === 'cow-reconciled' ? { bundle: { ...evidenceBundle, environment: 'MOCKED' } } : null } } } as unknown as ExecutionLifecycleSource;
+  if (scenario.startsWith('progress-')) {
+    const supply = createAuthoredSupply('supply', { network: 'Base Sepolia', asset: 'USDC', amount: '100', beneficiary: fixture.authorization.owner! });
+    const swap = { ...node, nodeId: 'canvas-swap', dependencies: [supply.nodeId] };
+    const bridge = { ...createRouterNode('bridge', { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: '5', recipient: '', slippage: '50', routing: 'AUTO' }), dependencies: [swap.nodeId] };
+    const workflow = { ...fixture.workflow, nodes: [supply, swap, bridge], resourceEdges: [] };
+    const done = scenario === 'progress-failed' ? 1 : Number(scenario.slice(-1));
+    const steps = [['SUPPLY', supply.nodeId, b], ['SWAP', swap.nodeId, c], ['BRIDGE', bridge.nodeId, a]] as const;
+    const attempts = steps.flatMap(([step, , hash], index) => index < done ? [{ id: step, step, state: 'CONFIRMED', hash, reconciled: true }]
+      : index === done && scenario === 'progress-failed' ? [{ id: step, step, state: 'REVERTED', hash, reconciled: false }] : index === done ? [{ id: step, step, state: 'PENDING', hash, reconciled: false }] : []);
+    return { kind: 'lending', state: { recovered: false, record: { id: 'acceptance-live-canvas', provenance: 'PUBLIC_TESTNET', reviews: [{ workflow, commitment: 'recorded-review', fields: { owner: fixture.wallet.account },
+      manifest: { owner: { chainId: 'eip155:84532' } }, calls: steps.map(([id, nodeId]) => ({ id, nodeId })) }], attempts, observations: [], journal: { entries: [] } } } } as unknown as ExecutionLifecycleSource;
+  }
   if (scenario === 'partial' || scenario === 'recovered') {
     const supply = createAuthoredSupply('supply', { network: 'Base Sepolia', asset: 'USDC', amount: '100', beneficiary: fixture.authorization.owner! });
     const workflow = { ...fixture.workflow, nodes: [supply, { ...node, nodeId: 'later-swap', dependencies: [supply.nodeId] }], resourceEdges: [] };
