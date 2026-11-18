@@ -14,8 +14,9 @@ import { test, expect, proveConnectedEvmWallet } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
 
 const SAMPLES = 5;
-const automationRead = (request: Request) => request.url().includes('/api/automations/overview')
-  || request.method() === 'POST' && new URL(request.url()).pathname === '/app/automations' && Boolean(request.headers()['next-action']);
+/** The automation reads this build sends as GET requests, and every Server Action the page posts (they are dispatched one at a time per client). */
+const automationGet = (request: Request) => request.url().includes('/api/automations/overview');
+const serverAction = (request: Request) => request.method() === 'POST' && Boolean(request.headers()['next-action']);
 const presenceRead = (request: Request) => request.url().includes('/api/account/presence');
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
 
@@ -30,20 +31,20 @@ test.describe('loading performance (measurement)', () => {
     await proveConnectedEvmWallet(page, workspace, owner.address);
     const useful = workspace.getByRole('heading', { name: 'Create an automation', exact: true });
     await expect(useful).toBeVisible({ timeout: 30_000 });
-    const automations: { ms: number; structureMs: number; reads: number }[] = [];
+    const automations: { ms: number; structureMs: number; automationGets: number; serverActions: number }[] = [];
     for (let i = 0; i < SAMPLES; i++) {
-      const reads: Request[] = [];
-      const listen = (request: Request) => { if (automationRead(request)) reads.push(request); };
+      const gets: Request[] = [], actions: Request[] = [];
+      const listen = (request: Request) => { if (automationGet(request)) gets.push(request); if (serverAction(request)) actions.push(request); };
       page.on('request', listen);
       const start = Date.now();
       await page.goto('/app/automations', { waitUntil: 'commit' });
       await expect(page.getByRole('heading', { name: 'Automations', exact: true, level: 1 })).toBeVisible({ timeout: 30_000 });
       const structureMs = Date.now() - start;
       await expect(useful).toBeVisible({ timeout: 30_000 });
-      automations.push({ ms: Date.now() - start, structureMs, reads: reads.length });
+      const ms = Date.now() - start, actionsUntilUseful = actions.length;
       // Let any late duplicate read show up before the next sample.
       await page.waitForTimeout(1_500);
-      automations.at(-1)!.reads = reads.length;
+      automations.push({ ms, structureMs, automationGets: gets.length, serverActions: actionsUntilUseful });
       page.off('request', listen);
     }
     const account: { ms: number; reads: number }[] = [];
@@ -63,10 +64,11 @@ test.describe('loading performance (measurement)', () => {
       page.off('request', listen);
     }
     const result = { automations, account, summary: { automationsMedianMs: median(automations.map(s => s.ms)), automationsStructureMedianMs: median(automations.map(s => s.structureMs)),
-      automationReadsPerOpen: Math.max(...automations.map(s => s.reads)), myAccountMedianMs: median(account.map(s => s.ms)) } };
+      automationGetsPerOpen: Math.max(...automations.map(s => s.automationGets)), serverActionsBeforeUsefulMedian: median(automations.map(s => s.serverActions)),
+      myAccountMedianMs: median(account.map(s => s.ms)), presenceReads: account.reduce((n, s) => n + s.reads, 0) } };
     mkdirSync('.tmp', { recursive: true });
     writeFileSync(`.tmp/loading-performance-${process.env.FLOFI_PERF_LABEL ?? 'build'}.json`, JSON.stringify(result, null, 2));
     console.log('LOADING_PERFORMANCE', JSON.stringify(result.summary));
-    expect(automations.every(s => s.reads >= 1)).toBe(true);
+    expect(automations.every(s => s.ms > 0)).toBe(true);
   });
 });
