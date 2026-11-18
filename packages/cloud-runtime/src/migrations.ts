@@ -80,6 +80,12 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // FinOps is optional at v28. Only a tenant-scoped, append-only ledger is added by 0029.
+    base: { version: 28, name: 'saved_recipients', sha256: 'ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f' },
+    migrations: [{ version: 29, name: 'finops_ledger', sha256: '9c04f837b7409622b6b485a21facafb25ce1d579ea2bd492ae859e71795c8de7' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#21-certificate-0029_finops_ledger',
+  },
+  {
     // BUILD-FLOFI-UNIFIED-COPILOT-001 (Release A): the v27 build keeps working on a database with 0028 — one new table, flofi_account_recipients
     // (an account's saved recipients: public addresses and names), with a foreign key to flofi_accounts ON DELETE CASCADE; nothing pre-existing
     // changes. This certificate must be deployed to every database consumer BEFORE any build that ships 0028 migrates.

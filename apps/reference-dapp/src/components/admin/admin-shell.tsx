@@ -16,6 +16,7 @@ export const ADMIN_NAV_GROUPS = [
   { id: 'monitor', label: 'Monitor', items: [
     { id: 'overview', href: '/admin', label: 'Overview', hint: 'Activity and outcomes at a glance' },
     { id: 'health', href: '/admin/health', label: 'System Health', hint: 'Services, queues and incidents' },
+    { id: 'finops', href: '/admin/finops', label: 'FinOps & Unit Economics', hint: 'Infrastructure costs and unit economics' },
   ] },
   { id: 'operations', label: 'Operations', items: [
     { id: 'support', href: '/admin/support', label: 'Support & Recovery', hint: 'Incidents, diagnostics and safe recovery' },

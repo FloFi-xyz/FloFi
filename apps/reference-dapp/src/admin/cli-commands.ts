@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-ADMIN-001: the operator CLI's commands (`backend/admin-cli.ts`), importable by tests without starting the process. */
-import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { CERTIFIED_FORWARD_MIGRATIONS, loadMigrations, migrate, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { indexRunFacts } from './analytics/indexer.ts';
 import { createAdminStore, type AdminRole } from './store.ts';
 import { activateRetention, applyRetention, completePrivacyRequest, decidePrivacyRequest, openPrivacyRequest, placeLegalHold, privacyAccess, privacyErase,
@@ -12,7 +14,7 @@ import { activateRetention, applyRetention, completePrivacyRequest, decidePrivac
  * FLOFI_ADMIN_SESSION_SECRET in the operator's environment and never print it.
  */
 export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit', 'index', 'retention-report', 'retention-activate', 'retention-revoke', 'retention-apply',
-  'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete'] as const;
+  'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -49,6 +51,14 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'audit': return { events: await store.recentAudit(limitOf(flag('limit'), 50, 200)) };
     // Reads run logs and writes only the derived analytics cache; never touches an execution.
     case 'index': return { index: await indexRunFacts(db, tenantId, { limit: limitOf(flag('limit'), 2_000, 50_000), budgetMs: 10 * 60_000 }) };
+    case 'finops-migrate': {
+      const identity = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.find(item => item.name === 'finops_ledger');
+      if (!identity) throw new Error('FINOPS_MIGRATION_NOT_CERTIFIED');
+      const sql = await readFile(new URL('../../../../packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql', import.meta.url), 'utf8');
+      if (createHash('sha256').update(sql).digest('hex') !== identity.sha256) throw new Error('FINOPS_MIGRATION_DIGEST_MISMATCH');
+      const migrations = await loadMigrations();
+      return { applied: await migrate(db, [...migrations, { ...identity, sql }]) };
+    }
     // Read-only dry run: nothing is deleted.
     case 'retention-report': return { report: await retentionReport(db, tenantId, io.env, io.now()) };
     case 'retention-activate': return { activation: await activateRetention(db, tenantId, policyOf(flag('policy')), Number(required(flag('days'), 'days')),

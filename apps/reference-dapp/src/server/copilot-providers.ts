@@ -294,7 +294,8 @@ export function responsesBodyFromAnthropic(text: string, options: { readonly pro
   const usage = record(message.usage) ? message.usage : {};
   const input = [count(usage.input_tokens), count(usage.cache_creation_input_tokens), count(usage.cache_read_input_tokens)];
   const shared = { model: typeof message.model === 'string' && MODEL.test(message.model) ? message.model : null,
-    usage: { input_tokens: input[0] === null ? null : input.reduce<number>((total, value) => total + (value ?? 0), 0), output_tokens: count(usage.output_tokens) } };
+    usage: { input_tokens: input[0] === null ? null : input.reduce<number>((total, value) => total + (value ?? 0), 0), output_tokens: count(usage.output_tokens),
+      input_tokens_details: { cached_tokens: input[2], cache_write_tokens: input[1] } } };
   if (stop === 'refusal') return JSON.stringify({ ...shared, status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'refusal', refusal: '' }] }] });
   if (stop === 'max_tokens' || stop === 'model_context_window_exceeded' || stop === 'pause_turn')
     return JSON.stringify({ ...shared, status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output: [] });

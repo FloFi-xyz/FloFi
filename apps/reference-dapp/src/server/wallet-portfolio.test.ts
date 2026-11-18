@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { toChecksumAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_MARKETS, toChecksumAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { base58Decode, base58Encode, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import type { PriceFeedAsset, PriceSource } from '../automations/price-source.ts';
 import { clockAccount, interestBearing, metadataPointer, scaledUiAmount, token2022Mint } from '../test-utils/token-2022-fixtures.ts';
@@ -97,6 +97,16 @@ function seams(options: { modes?: Partial<Record<PortfolioNetworkId, PortfolioMo
 const base = (balances: EvmChain['balances'], native = 0n, extra: Partial<EvmChain> = {}): EvmChain => ({ chainId: 8453, native, balances, ...extra });
 
 describe('wallet portfolio: EVM reads through one Multicall3 aggregate', () => {
+  it('keeps registered Aave receipt and debt tokens out of liquid holdings by chain and address', async () => {
+    const reserve = AAVE_V3_MARKETS.find(market => market.chain === 'eip155:8453')!.primary;
+    const receipt = asset('base', 'aUSDC', reserve.aToken, 6), debt = asset('base', 'debtUSDC', reserve.variableDebtToken, 6);
+    const ordinary = asset('base', 'aUSDC', DAI, 18);
+    const portfolio = await readWalletPortfolio({ evm: OWNER, solana: null }, {}, seams({
+      modes: { base: 'live' }, catalogs: { base: catalog('base', [receipt, debt, ordinary]) },
+      chains: { base: base({ [receipt.address!]: 2_000_000n, [debt.address!]: 500_000n, [DAI]: 3n }) },
+    }));
+    expect(portfolio.holdings.map(holding => holding.address)).toEqual([DAI]);
+  });
   it('reads native and listed balances at one block, omits zero balances and values only ETH/WETH at the verified price', async () => {
     const log: { method: string; params: readonly unknown[] }[] = [];
     const portfolio = await readWalletPortfolio({ evm: OWNER.toUpperCase().replace('0X', '0x'), solana: null }, {}, seams({ modes: { base: 'live' }, log,

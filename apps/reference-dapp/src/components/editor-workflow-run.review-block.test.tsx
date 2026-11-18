@@ -78,7 +78,7 @@ describe('board 06: the Review before authorization', () => {
     expect(visible(html)).not.toContain('<button');
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('<button type="button" class="quiet review-block-again">Review again</button>');
-    // Expired: the footer offers "Review again", so the block has no second one.
+    // Expired: the footer offers "Simulate again", so the block has no second one.
     expect(render(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) }))).not.toContain('<button');
     // A refusal asks for a fresh quote: the quiet control sits beside the amber line.
     expect(visible(render(state({ error: 'SWAP_MINIMUM_NOT_MET' })))).toMatch(/class="review-block-alert" role="alert">[^<]*<button type="button" class="quiet review-block-again">Review again<\/button><\/p>/);
@@ -90,13 +90,15 @@ describe('board 06: the Review before authorization', () => {
     expect(primary(state({ review: null, phase: 'idle' }))).toBe('<button type="button" class="primary">Review whole workflow</button>');
     expect(primary(state({ review: null, phase: 'reviewing' }))).toContain('disabled="" aria-busy="true">Reviewing the whole workflow…</button>');
     // Expired prices or a Review that cannot be grouped: the one action reviews again (Authorize would only be refused).
-    expect(primary(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) }))).toContain('>Review again</button>');
+    expect(primary(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) }))).toContain('>Simulate again</button>');
     expect(primary(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) }), 'PT')).toContain('>Revisar novamente</button>');
     expect(primary(state({ canReview: false }))).toBe('');
   });
   it('states what invalidates it in ONE amber line at the top; a missing native fee is board 07 instead', () => {
-    const expired = visible(render(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) })));
+    const expired = render(state({ review: swapBridgeReview({ validUntil: '2020-01-01T00:01:00.000Z' }) }));
     expect(expired).toMatch(/^<section[^>]*data-review-state="attention"><p class="review-block-alert" role="alert">The reviewed prices expired\. Review the workflow again to refresh them\.<\/p><p class="eyebrow">/);
+    expect(expired).toContain('Simulate again to refresh network fees and token permissions before review.');
+    expect(expired).not.toMatch(/You are authorizing|Network fee, at most|Minimum you receive/);
     const refused = visible(render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) })));
     expect(refused.match(/review-block-alert/g)).toHaveLength(1);
     expect(refused).toContain('step 2 would fail on chain now');
@@ -143,7 +145,7 @@ describe('board 06: the Review before authorization', () => {
   });
   it('while the Review is prepared it says so, in the same block', () => {
     const html = render(state({ review: null, phase: 'reviewing' }));
-    expect(html).toContain('<h3>Review the whole workflow</h3><p class="review-panel-status" role="status">Reviewing the whole workflow…</p>');
+    expect(html).toContain('<h3>Workflow simulation</h3><p class="review-panel-status" role="status">Reviewing the whole workflow…</p>');
     expect(html).not.toContain('<button');
   });
 });

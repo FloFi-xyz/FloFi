@@ -3,6 +3,14 @@ import type { Workflow } from './initial-workflow';
 
 export type CanvasPosition = { x: number; y: number; actionType: string };
 export type CanvasLayout = Record<string, CanvasPosition>;
+export type CanvasViewport = { readonly x: number; readonly y: number; readonly zoom: number };
+/** Translate a manual viewport between panes without moving any nodes. */
+export const viewportCenter = (view: CanvasViewport, width: number, height: number): CanvasViewport => ({
+  x: (width / 2 - view.x) / view.zoom, y: (height / 2 - view.y) / view.zoom, zoom: view.zoom,
+});
+export const viewportAtCenter = (center: CanvasViewport, width: number, height: number): CanvasViewport => ({
+  x: width / 2 - center.x * center.zoom, y: height / 2 - center.y * center.zoom, zoom: center.zoom,
+});
 export const canvasLayoutKey = (workflowId: string) => `gryloo:canvas:${workflowId}`;
 /** BUILD-FLOFI-BUILDER-UX-002: reading-order slots, three per row, with room between cards for a linked step's arrow and its label. */
 export const CANVAS_COLUMN = 320, CANVAS_ROW = 300;

@@ -74,7 +74,7 @@ type WheelGesture = { readonly last: number; readonly kind: 'scroll' | 'zoom' | 
  * One gesture keeps its first decision, so a list scrolled to its end does not start zooming mid-gesture. Nothing here moves a card: only the
  * viewport changes, never a node's stored position. Outside the Canvas (the page, the chat) wheel events are untouched.
  */
-export function CanvasWheelNavigation() {
+export function CanvasWheelNavigation({ onViewportChange }: { onViewportChange?: (view: Viewport) => void } = {}) {
   const store = useStoreApi();
   // Subscribed, so the listener attaches whenever React Flow has its root (never silently missing it).
   const root = useStore((state: ReactFlowState) => state.domNode);
@@ -107,11 +107,11 @@ export function CanvasWheelNavigation() {
       if (kind !== 'zoom') return;
       const { minZoom, maxZoom } = store.getState(), box = root.getBoundingClientRect();
       const viewport = getViewport(), next = zoomAtPoint(viewport, { x: event.clientX - box.left, y: event.clientY - box.top }, wheelZoomFactor(sample), minZoom, maxZoom);
-      if (next !== viewport) void setViewport(next);
+      if (next !== viewport) { void setViewport(next); onViewportChange?.(next); }
     };
     surface.addEventListener('wheel', listener, { capture: true, passive: false });
     return () => surface.removeEventListener('wheel', listener, { capture: true });
-  }, [root, store, getViewport, setViewport]);
+  }, [root, store, getViewport, setViewport, onViewportChange]);
   return null;
 }
 /**
@@ -127,7 +127,7 @@ export const CANVAS_PRO_OPTIONS: ProOptions = Object.freeze({ hideAttribution: t
  * card never sits under the controls. `steps` is kept for callers and changes nothing.
  * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `embedded` renders the navigator as an ordinary flow element inside a caller's own panel (the
  * Simulate/Execute plan's bottom controls), so its position comes from layout, never from an offset computed against other controls. */
-export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-right', embedded = false }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean }) {
+export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-right', embedded = false, onViewportChange, onFit }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean; onViewportChange?: (view: Viewport) => void; onFit?: () => void }) {
   const { t: tr } = useLocale();
   const zoom = useStore((state: ReactFlowState) => state.transform[2]);
   const minZoom = useStore((state: ReactFlowState) => state.minZoom);
@@ -137,20 +137,21 @@ export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position =
   const measured = useStore((state: ReactFlowState) => state.width > 0);
   const compact = useStore((state: ReactFlowState) => state.width < compactBelow);
   const narrow = useStore((state: ReactFlowState) => state.width < 400);
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, getViewport } = useReactFlow();
   const reduced = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const remember = () => onViewportChange?.(getViewport());
 
   const Container = embedded ? 'div' : Panel;
   return <Container {...embedded ? {} : { position }} className={`canvas-navigator nodrag nopan nowheel${embedded ? ' canvas-navigator-embedded' : ''}`} role="group" aria-label={tr("Canvas navigator")}
     data-measured={measured} data-compact={measured && compact} data-narrow={measured && narrow}>
-    <button type="button" className="canvas-navigator-fit" aria-label={tr("Fit workflow")} title={tr("Fit workflow")} onClick={() => { void fitView(fitViewOptions); }}>
+    <button type="button" className="canvas-navigator-fit" aria-label={tr("Fit workflow")} title={tr("Fit workflow")} onClick={() => { onFit?.(); void fitView(fitViewOptions); }}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
       </svg>
     </button>
     <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom out')} title={tr('Zoom out')} disabled={zoom <= minZoom + 0.001}
-      onClick={() => { void zoomOut({ duration: reduced() ? 0 : 120 }); }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+      onClick={() => { void zoomOut({ duration: reduced() ? 0 : 120 }).then(remember); }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12"/></svg></button>
     <button type="button" className="canvas-navigator-step" aria-label={tr('Zoom in')} title={tr('Zoom in')} disabled={zoom >= maxZoom - 0.001}
-      onClick={() => { void zoomIn({ duration: reduced() ? 0 : 120 }); }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>
+      onClick={() => { void zoomIn({ duration: reduced() ? 0 : 120 }).then(remember); }}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>
   </Container>;
 }

@@ -165,3 +165,12 @@ export function privyErrorCode(cause: unknown, fallback = 'PRIVY_REQUEST_FAILED'
   if (/cannot_link_more_of_type/.test(text)) return 'FLOFI_SIGN_IN_METHOD_ALREADY_LINKED';
   return PRIVY_CODES.find(([pattern]) => pattern.test(text))?.[1] ?? fallback;
 }
+
+/** Export surfaces consume a fixed set of codes. Never propagate provider error objects or messages. */
+export function privyExportErrorCode(cause: unknown): string {
+  const code = privyErrorCode(cause, 'PRIVY_WALLET_EXPORT_FAILED');
+  const detail = cause instanceof Error ? cause.message : '';
+  if (code === 'FLOFI_WALLET_POPUP_BLOCKED' || /popup.*block|block.*popup/i.test(detail)) return 'FLOFI_WALLET_POPUP_BLOCKED';
+  if (code === 'PRIVY_USER_CANCELLED' || code === 'PRIVY_SESSION_REQUIRED' || code === 'FLOFI_WALLET_ACCOUNT_MISMATCH') return code;
+  return 'PRIVY_WALLET_EXPORT_FAILED';
+}

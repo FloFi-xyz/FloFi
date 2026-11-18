@@ -25,7 +25,7 @@ import type { PrivyBrowserConfig } from './privy-server';
 import { signerPolicy } from './signer-pages';
 import { PRIVY_WALLET_LIST } from './privy-hosts';
 import { usePathname } from 'next/navigation';
-import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyCanSign, privyErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy,
+import { createLoginChannel, FloFiAccountsContext as AccountsContext, FloFiPrivyContext as Context, privyCanSign, privyErrorCode, privyExportErrorCode, Registrar, useFloFiPrivy, type FloFiPrivy,
   type PrivyEmbedded, type PrivyLinkResult, type PrivyLoginEvent, type PrivyReview } from './privy-context';
 export { currentFloFiPrivy, FloFiPrivyContext, privyErrorCode, useAccountsOffered, useFloFiPrivy, type FloFiPrivy, type PrivyEmbedded, type PrivyEvmTransaction,
   type PrivyLoginEvent, type PrivyReview } from './privy-context';
@@ -213,8 +213,12 @@ function PrivyBridge({ children, page }: { children: ReactNode; page: string }) 
         const wallet = ecosystem === 'evm' ? await importEvm({ privateKey }) : await importSolana({ privateKey });
         return { address: ecosystem === 'evm' ? wallet.address.toLowerCase() : wallet.address };
       }, 'PRIVY_WALLET_IMPORT_FAILED'),
-      exportWallet: (ecosystem, address) => wrap(async () => { own(ecosystem, address); await (ecosystem === 'evm' ? exportEvm({ address }) : exportSolana({ address })); },
-        'PRIVY_WALLET_EXPORT_FAILED'),
+      exportWallet: async (ecosystem, address) => {
+        try {
+          own(ecosystem, address);
+          await (ecosystem === 'evm' ? exportEvm({ address }) : exportSolana({ address }));
+        } catch (cause) { fail(privyExportErrorCode(cause)); }
+      },
       signEvmTransaction: (address, tx, review) => wrap(async () => {
         own('evm', address);
         const { signature } = await signEvm({ from: address, to: tx.to, value: tx.value, data: tx.data, chainId: tx.chainId, nonce: tx.nonce, gasLimit: tx.gas,
@@ -321,7 +325,10 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
     return { ...snapshot, canSign, getAccessToken: driver.getAccessToken, onLogin: listener => logins.current.subscribe(listener), onLoginError: driver.onLoginError, loginWithWallet: driver.loginWithWallet,
       logout: driver.logout, loginWithOAuth: wrap(driver.loginWithOAuth, 'PRIVY_SIGN_IN_FAILED'), sendEmailCode: wrap(driver.sendEmailCode, 'PRIVY_EMAIL_CODE_FAILED'),
       loginWithEmailCode: wrap(driver.loginWithEmailCode, 'PRIVY_EMAIL_CODE_INVALID'), createWallet: wrap(driver.createWallet, 'PRIVY_WALLET_CREATE_FAILED'),
-      importWallet: wrap(driver.importWallet, 'PRIVY_WALLET_IMPORT_FAILED'), exportWallet: wrap(driver.exportWallet, 'PRIVY_WALLET_EXPORT_FAILED'),
+      importWallet: wrap(driver.importWallet, 'PRIVY_WALLET_IMPORT_FAILED'), exportWallet: async (ecosystem, address) => {
+        try { await driver.exportWallet(ecosystem, address); }
+        catch (cause) { fail(privyExportErrorCode(cause)); }
+      },
       signEvmTransaction: wrap(driver.signEvmTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signEvmMessage: wrap(driver.signEvmMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       signEvmTypedData: driver.signEvmTypedData ? wrap(driver.signEvmTypedData, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') : async () => fail('PRIVY_UNAVAILABLE'),
       signEvmAuthorization: driver.signEvmAuthorization ? wrap(driver.signEvmAuthorization, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') : async () => fail('PRIVY_UNAVAILABLE'),

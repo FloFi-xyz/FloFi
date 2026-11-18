@@ -8,6 +8,7 @@ import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr
 import type { Page, Route } from '@playwright/test';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { openBuilder } from './build-entry-navigation';
+import { setCanvasSwapSourceToUsdc } from './composer-authoring-fixtures';
 
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
 type Ir = { revision: number; nodes: { nodeId: string; actionType: string; dependencies: string[]; chainId: string }[] };
@@ -31,6 +32,8 @@ async function addSwap(page: Page, amount: string) {
   const before = await page.locator('.build-flow-surface .react-flow__node').count();
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card').last();
+  // Both swaps in this connection fixture spend USDC. Set the second card's input explicitly.
+  if (before > 0) await setCanvasSwapSourceToUsdc(card);
   const field = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await field.fill(amount); await field.press('Enter');
   await expect(page.locator('.build-flow-surface .react-flow__node')).toHaveCount(before + 1);

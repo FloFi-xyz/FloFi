@@ -111,6 +111,26 @@ describe('V2 response', () => {
 });
 
 describe('V2 interpretation, limits and telemetry', () => {
+  it('meters provider responses even when intent validation fails, and preserves missing usage', async () => {
+    const records: CopilotTelemetry[] = [];
+    const billing = { provider: 'OPENAI', surface: 'WEB' } as const;
+    const telemetry = (record: CopilotTelemetry) => records.push(record);
+    const transport = async () => answer('malformed intent', 200, { usage: { input_tokens: 20, output_tokens: 8,
+      input_tokens_details: { cached_tokens: 12 }, output_tokens_details: { reasoning_tokens: 3 } } });
+    const result = await interpretCopilotV2(request(), { transport, settings, mode: 'live', billing, telemetry });
+    expect(result).toMatchObject({ ok: false });
+    expect(records[0]?.billingRequests).toEqual([{ ...billing, model: 'test-model-2026', succeeded: true, durationMs: expect.any(Number),
+      inputTokens: 20, outputTokens: 8, cachedInputTokens: 12, cacheWriteTokens: null, reasoningTokens: 3 }]);
+    const failed = async () => { throw new Error('arbitrary upstream detail'); };
+    await interpretCopilotV2(request(), { transport: failed, settings, mode: 'live', billing, telemetry });
+    expect(records[1]?.billingRequests).toEqual([{ ...billing, model: null, succeeded: false, durationMs: expect.any(Number),
+      inputTokens: null, outputTokens: null, cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null }]);
+    await interpretCopilotV2(request(), { transport, settings, mode: 'replay', billing, telemetry });
+    expect(records[2]?.billingRequests).toBeUndefined();
+    const lines: string[] = [];
+    copilotTelemetrySink({}, 'live', line => lines.push(line))!(records[0]!);
+    expect(lines[0]).not.toContain('billingRequests');
+  });
   it('reports metadata only and maps a bounded Retry-After', async () => {
     const records: CopilotTelemetry[] = [];
     let clock = 100;

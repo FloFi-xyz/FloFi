@@ -60,5 +60,5 @@ export function projectCanvasAction(props: ExecutionControlsState, controls: {
   const review = projectReview(props.workflow, props.context, props.source, props.authorization, props.wallet, now, props.invalidWorkflow);
   if (review.status === 'approved') return { kind: 'execute', label: AUTHORIZE_LABEL, disabled: !props.execution.ready };
   if (props.authorization.key && !['expired', 'invalidated'].includes(review.status) && !review.simulationBlocked) return { kind: 'approve', label: AUTHORIZE_LABEL, disabled: !review.canApprove };
-  return { kind: 'simulate', label: props.authorization.key ? 'Simulate again' : 'Simulate workflow', disabled: Boolean(props.invalidWorkflow) };
+  return { kind: 'simulate', label: props.authorization.key || review.status === 'expired' ? 'Simulate again' : 'Simulate workflow', disabled: Boolean(props.invalidWorkflow) };
 }

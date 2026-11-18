@@ -11,7 +11,7 @@ import { universalBridgeDetails, universalAssetResolves, universalKeyOfCanvasLab
 import { universalCanvasNetworks } from './canvas-action-setup';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
-import { defaultPoolRange, lendingAction, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
+import { defaultPoolRange, followOnSelection, lendingAction, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
@@ -20,6 +20,7 @@ import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSe
 import { transferDetails } from './robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from './recipient-address';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
+import type { WalletEnvironment } from '../wallet/environment';
 
 type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections; readonly recipientInputs: CanvasRecipientInputs };
 export type EditorHistory = { readonly editor: EditorState; readonly layout: CanvasLayout;
@@ -30,7 +31,7 @@ export type EditorHistory = { readonly editor: EditorState; readonly layout: Can
   readonly recipientInputs: CanvasRecipientInputs;
   readonly past: readonly Snapshot[]; readonly future: readonly Snapshot[] };
 export type HistoryAction =
-  | { readonly type: 'EDIT_CRYPTO_SELECTION'; readonly id: string; readonly selection: CryptoSelection; readonly context: ReviewContext; readonly beneficiary?: string }
+  | { readonly type: 'EDIT_CRYPTO_SELECTION'; readonly id: string; readonly selection: CryptoSelection; readonly context: ReviewContext; readonly beneficiary?: string; readonly automatic?: boolean }
   | { readonly type: 'RESTORE_WORKFLOW'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'ADOPT_DRAFT_IDENTITY'; readonly workflowId: string }
   /** P0 hotfix (execution continuity): the Editor's Canvas this browser remembered (`editor-persistence.ts`), put back on the untouched initial Canvas. */
@@ -43,7 +44,7 @@ export type HistoryAction =
   /** BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a recovered, still-pending Uniswap v3 liquidity run's own workflow. */
   | { readonly type: 'RESTORE_LIQUIDITY_CANVAS'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'COMMAND'; readonly command: Command; readonly context: ReviewContext; readonly position?: { x: number; y: number }; readonly authoringId?: string; readonly authoringAmount?: string }
-  | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string }
+  | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string; readonly environment?: WalletEnvironment }
   /** BUILD-RH-002: the Stocks card — a Robinhood Chain catalog swap from USDG into the first featured Stock Token. */
   | { readonly type: 'START_STOCKS_SETUP'; readonly position: { x: number; y: number } }
   | { readonly type: 'EDIT_POOL_SETUP'; readonly id: string; readonly input: UniswapLiquidityInput }
@@ -126,6 +127,11 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     else if (action.action === 'supply' || action.action === 'borrow' || action.action === 'repay')
       actionSetup = { id, action: action.action, amount: '0', beneficiary: action.beneficiary! };
     else actionSetup = { id, action: action.action, amount: '0' };
+    const suggestion = action.action !== 'bridge' ? followOnSelection(state.editor.workflow, action.action, action.environment) : null;
+    if (suggestion) {
+      actionSetup = { ...actionSetup, ...(suggestion.selection ? { cryptoSelection: suggestion.selection } : {}), ...(suggestion.issue ? { followOnIssue: suggestion.issue } : {}) };
+      if (actionSetup.action === 'pool' && suggestion.selection) actionSetup = { ...actionSetup, input: { ...actionSetup.input, ...defaultPoolRange(suggestion.selection.network) } };
+    }
     return { ...state, actionSetup, setupSerial: state.setupSerial + 1,
       layout: { ...pinnedLayout(state.editor.workflow, state.layout, null), [id]: { ...action.position, actionType: action.action === 'swap' ? 'asset.swap.exact-input' : action.action === 'bridge' ? 'asset.bridge' : action.action } },
       past: [...state.past, snapshot(state)], future: [] };
@@ -144,7 +150,8 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const node = state.editor.workflow.nodes.find(node => node.nodeId === action.id);
     if (setup ? setup.action !== action.selection.action : !node || !canSelectCryptoAssets(node, state.editor.workflow) || cryptoInputOf(node)?.selection.action !== action.selection.action) return state;
     const current = setup?.cryptoSelection ?? state.cryptoSelections[action.id];
-    if (JSON.stringify(current) === JSON.stringify(action.selection)) return state;
+    const resolvedFollowOn = setup?.followOnIssue && !action.automatic;
+    if (JSON.stringify(current) === JSON.stringify(action.selection) && !resolvedFollowOn) return state;
     // P0 workflow execution: picking the step's own saved reserve/network again is no edit at all — the draft is dropped (an amount typed meanwhile
     // stays a draft only if it differs from the saved one), so the card shows the saved step instead of an edit waiting to be applied.
     const saved = !setup && node ? cryptoInputOf(node) : null;
@@ -160,7 +167,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     // so the amount is entered again for the new asset; it is never carried over and re-read in other units.
     const previous = current ?? (node ? cryptoInputOf(node)?.selection : undefined);
     const newAsset = Boolean(previous) && lendingAction(action.selection.action) && previous!.from !== action.selection.from;
-    return { ...state, ...(setup ? { actionSetup: { ...setup, cryptoSelection: action.selection, ...(newAsset ? { amount: '0' } : {}), ...(action.beneficiary ? { cryptoBeneficiary: action.beneficiary } : {}), ...(poolInput ? { input: poolInput } : {}) } as CanvasActionSetup } : {
+    return { ...state, ...(setup ? { actionSetup: { ...setup, cryptoSelection: action.selection, ...(resolvedFollowOn ? { followOnIssue: undefined } : {}), ...(newAsset ? { amount: '0' } : {}), ...(action.beneficiary ? { cryptoBeneficiary: action.beneficiary } : {}), ...(poolInput ? { input: poolInput } : {}) } as CanvasActionSetup } : {
       cryptoSelections: { ...state.cryptoSelections, [action.id]: action.selection },
       amountInputs: { ...state.amountInputs, [action.id]: newAsset ? '' : state.amountInputs[action.id] ?? cryptoInputOf(node!)!.amount },
     }), past: [...state.past, snapshot(state)], future: [] };

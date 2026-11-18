@@ -971,3 +971,18 @@ are unavailable in production (RECIPIENTS_UNAVAILABLE; the Credentials section s
 `packages/cloud-runtime/migrations/0028_saved_recipients.sql` (byte-identical to the fixture, SHA-256 `ee73e909…a64f`) and its
 `SHIPPED_MIGRATIONS` entry. `packages/cloud-runtime/test/saved-recipients-migration.pg.test.ts` proves 27 → 28 and rehearses the documented
 controlled Neon procedure. Suites that assumed head 27 now use the v27 history. Neon is migrated by the owner before Release B merges.
+
+## 21 Certificate 0029_finops_ledger
+
+Migration 0029 creates one tenant-scoped, append-only cost ledger with two indexes and a trigger using the existing append-only
+function. It does not alter existing data, tables, indexes, or execution semantics. The FinOps console works on schema 28 with
+billing data and mutations unavailable, and reads the ledger on schema 29. No public request reads the ledger. The optional aggregate AI usage table is also additive and has no user identity fields. The SQL in
+`packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql` is the certificate-pinned migration.
+
+This release continues to ship schema 28 for normal Railway pre-deploy and Vercel preview bootstrap. An operator can apply 0029
+after all database consumers use the certificate-bearing release. From its reviewed, built source checkout, point the admin CLI
+at the intended database using the existing server-only `DATABASE_URL` and run
+`node apps/reference-dapp/backend/admin-cli.ts finops-migrate --tenant default` for the default tenant. For an isolated preview,
+use the existing preview database and pass `--preview-branch <branch>` instead. The command verifies the certificate digest and uses
+the standard migration runner, lock and ledger; reruns are safe. Earlier builds without the certificate refuse schema 29, so any
+rollback after applying 0029 must retain the certificate. Leave the ledger in place.

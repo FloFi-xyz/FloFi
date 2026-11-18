@@ -9,6 +9,7 @@ import { CONTEXT_CARD_LIMITS, type CopilotContextCard } from '../domain/intellig
 import { factNumbers, groundedProse } from '../domain/intelligence/grounding';
 import type { TurnMetrics } from '../domain/intelligence/turn-metrics';
 import type { CopilotToolkit } from '../platform/copilot-tools.ts';
+import type { CopilotProvider } from './copilot-settings.ts';
 export type { CopilotToolkit };
 
 export type { CopilotMode };
@@ -413,6 +414,36 @@ export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: 
 }
 export type CopilotUsage = { readonly inputTokens: number | null; readonly outputTokens: number | null; readonly reasoningTokens: number | null };
 function count(value: unknown): number | null { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null; }
+
+export type AiBillingSurface = 'WEB' | 'TELEGRAM' | 'WHATSAPP' | 'CHANNEL';
+export type BillingRequest = CopilotUsage & { readonly provider: CopilotProvider; readonly surface: AiBillingSurface;
+  readonly model: string | null; readonly cachedInputTokens: number | null; readonly cacheWriteTokens: number | null;
+  readonly succeeded: boolean; readonly durationMs: number };
+
+/** A transport attempt may be billable even if its answer fails intent validation. Read usage only from the bounded provider response. */
+function billingRequest(response: CopilotHttpResponse | null, dimensions: Pick<BillingRequest, 'provider' | 'surface'>, durationMs: number): BillingRequest {
+  const empty = { ...dimensions, durationMs, succeeded: false, model: null, inputTokens: null, outputTokens: null,
+    cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null };
+  if (!response || response.status < 200 || response.status >= 300 || response.body.length > COPILOT_SERVER_LIMITS.maxResponseBytes) return empty;
+  try {
+    const record = JSON.parse(response.body) as { status?: unknown; model?: string; usage?: {
+      input_tokens?: unknown; output_tokens?: unknown; input_tokens_details?: { cached_tokens?: unknown; cache_write_tokens?: unknown;
+        ttl_30m_tokens?: unknown; ttl_12h_tokens?: unknown }; output_tokens_details?: { reasoning_tokens?: unknown } } } | null;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return empty;
+    const usage = record.usage, details = usage?.input_tokens_details;
+    const cachedInputTokens = count(details?.cached_tokens);
+    const writes30m = count(details?.ttl_30m_tokens), writes12h = count(details?.ttl_12h_tokens);
+    const cacheWriteTokens = dimensions.provider === 'ANTHROPIC' ? count(details?.cache_write_tokens)
+      : writes30m === null && writes12h === null ? null : (writes30m ?? 0) + (writes12h ?? 0);
+    // Anthropic's translated total has all three input dimensions only when cache usage is reported.
+    const inputTokens = dimensions.provider === 'ANTHROPIC' && (cachedInputTokens === null || cacheWriteTokens === null) ? null : count(usage?.input_tokens);
+    return { ...dimensions, durationMs, succeeded: record.status !== 'failed',
+      model: typeof record.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(record.model) ? record.model : null,
+      inputTokens, outputTokens: count(usage?.output_tokens), cachedInputTokens, cacheWriteTokens,
+      reasoningTokens: count(usage?.output_tokens_details?.reasoning_tokens) };
+  } catch { return empty; }
+}
+
 /** V2 extraction: the V1 checks, plus a failed response, a content-filter stop, token usage and the model the API reports. */
 export function readCopilotResponseV2(response: CopilotHttpResponse): { readonly intent: CopilotIntentV2; readonly usage: CopilotUsage; readonly responseModel: string | null } {
   if (response.status >= 200 && response.status < 300 && typeof response.body === 'string' && response.body.length <= COPILOT_SERVER_LIMITS.maxResponseBytes) {
@@ -449,7 +480,8 @@ export type CopilotTelemetry = { readonly event: 'flofi.copilot.interpret'; read
   readonly toolCalls?: number; readonly toolCategories?: readonly string[]; readonly toolFailures?: number; readonly toolRounds?: number; readonly answerGrounding?: string;
   /** Whether the request carried FloFi's context card, and the engine's own content-free counters for the open request. */
   readonly contextCard?: boolean;
-  /** Which surface asked (FloFi's chat or Channel Core), when the caller says. */ readonly surface?: 'WEB' | 'CHANNEL' };
+  /** Which surface asked (FloFi's chat or Channel Core), when the caller says. */ readonly surface?: 'WEB' | 'CHANNEL';
+  readonly billingRequests?: readonly BillingRequest[] };
 /** Provider-specific outcomes and the existing public code each is shown as. */
 export const PUBLIC_CODES: Readonly<Record<string, string>> = Object.freeze({ COPILOT_UPSTREAM_BILLING: 'COPILOT_UPSTREAM_UNAVAILABLE',
   COPILOT_UPSTREAM_MODEL_UNAVAILABLE: 'COPILOT_UPSTREAM_UNAVAILABLE', COPILOT_REQUEST_INVALID: 'COPILOT_UPSTREAM_REJECTED', COPILOT_PARAMETER_UNSUPPORTED: 'COPILOT_UPSTREAM_REJECTED' });
@@ -457,15 +489,27 @@ export type CopilotResultV2 = { readonly ok: true; readonly intent: CopilotInten
   | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
 export async function interpretCopilotV2(input: unknown, deps: { readonly transport: CopilotTransport; readonly settings: CopilotModelSettings; readonly mode: 'live' | 'replay';
   readonly limiter?: CopilotLimiter; readonly telemetry?: ((record: CopilotTelemetry) => void) | undefined; readonly now?: () => number;
+  /** The server-selected provider and the authenticated entry point. No request parameters contribute to attribution. */
+  readonly billing?: Pick<BillingRequest, 'provider' | 'surface'>;
   /** BUILD-CHAT-LEARNING-001: the rendered glossary for this request (`copilot-glossary.ts`), or none. */ readonly glossary?: string | null;
   /** BUILD-FLOFI-INTELLIGENCE-001: FloFi's read-only tools for this turn (`copilot-tools.ts`); absent, the turn is one request without tools. */
   readonly toolkit?: CopilotToolkit | null; readonly orchestration?: Partial<Record<keyof typeof COPILOT_ORCHESTRATION_LIMITS, number>>; readonly surface?: 'WEB' | 'CHANNEL' }): Promise<CopilotResultV2> {
   const now = deps.now ?? (() => performance.now()), started = now(), glossary = deps.glossary ?? null;
+  const billing = deps.mode === 'live' && deps.telemetry ? deps.billing : undefined;
+  const billingRequests: BillingRequest[] = [];
+  async function callProvider(body: string) {
+    if (!billing) return deps.transport({ body });
+    const start = now();
+    let result: CopilotHttpResponse | null = null;
+    try { result = await deps.transport({ body }); return result; }
+    finally { billingRequests.push(billingRequest(result, billing, Math.max(0, Math.round(now() - start)))); }
+  }
   let messages: CopilotThreadMessage[] = [];
   const report = (outcome: string, extra: Partial<CopilotTelemetry> = {}) => deps.telemetry?.({ event: 'flofi.copilot.interpret', protocol: 'v2', mode: deps.mode,
     model: deps.settings.model, outcome, intentKind: null, topic: null, durationMs: Math.max(0, Math.round(now() - started)), messages: messages.length,
     userTurns: messages.filter(message => message.role === 'user').length, inputTokens: null, outputTokens: null, reasoningTokens: null, responseModel: null,
-    ...glossary ? { glossaryLines: glossary.split('\n').length - 1 } : {}, ...deps.surface ? { surface: deps.surface } : {}, ...extra });
+    ...glossary ? { glossaryLines: glossary.split('\n').length - 1 } : {}, ...deps.surface ? { surface: deps.surface } : {},
+    ...billingRequests.length ? { billingRequests } : {}, ...extra });
   let context: ReturnType<typeof requestContext> = { card: null, key: null };
   // P0 hotfix (locale contract): every tool runs in the person's interface language (the request's reply language, which the server action
   // resolves from the language cookie), so the facts and FloFi's own explanations the model may quote are already in that language. Without
@@ -489,7 +533,7 @@ export async function interpretCopilotV2(input: unknown, deps: { readonly transp
       // Out of rounds, calls or time: the model must answer now, without tools.
       const exhausted = round >= limits.maxRounds || trace.calls >= limits.maxToolCalls || now() - started > limits.deadlineMs;
       const body = { ...base, input: items, ...toolkit ? { tool_choice: exhausted ? 'none' : 'auto' } : {} };
-      response = await deps.transport({ body: JSON.stringify(body) });
+      response = await callProvider(JSON.stringify(body));
       const calls = toolkit ? readToolRound(response) : null;
       if (!calls) break;
       if (exhausted) fail('COPILOT_RESPONSE_INVALID');
@@ -539,5 +583,5 @@ export function logCopilotTurn(env: Env, mode: 'live' | 'replay', record: TurnMe
 export function copilotTelemetrySink(env: Env, mode: 'live' | 'replay', log: (line: string) => void = line => console.info(line)): ((record: CopilotTelemetry) => void) | undefined {
   const setting = env.FLOFI_COPILOT_TELEMETRY?.trim();
   if (setting === 'off' || (setting !== 'log' && mode !== 'live')) return undefined;
-  return record => log(JSON.stringify(record));
+  return record => log(JSON.stringify({ ...record, billingRequests: undefined }));
 }

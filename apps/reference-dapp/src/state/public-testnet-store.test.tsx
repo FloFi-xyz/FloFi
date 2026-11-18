@@ -52,6 +52,30 @@ describe('public swap durable recovery and explicit fresh Review', () => {
     expect(publicPrepare).toHaveBeenCalledExactlyOnceWith(composed.workflow, '0x1111111111111111111111111111111111111111');
     expect(publicBegin).not.toHaveBeenCalled(); expect(publicReport).not.toHaveBeenCalled();
   });
+  it('deduplicates concurrent simulation clicks and does not adopt a superseded response', async () => {
+    const composed = composeStrategy({ action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' });
+    if (!composed.ok) throw Error(composed.code);
+    const original = composed.workflow as Workflow;
+    f.workflow = original;
+    vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
+    vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
+    f.session.mockResolvedValue({ account: '0x1111111111111111111111111111111111111111', chainId: '0xa4b1' });
+    const delayed = deferred<Awaited<ReturnType<typeof publicPrepare>>>();
+    vi.mocked(publicPrepare).mockReturnValueOnce(delayed.promise);
+    read(); await settle(); store.simulate(); store.simulate(); await settle();
+    expect(publicPrepare).toHaveBeenCalledTimes(1);
+    const edited = { ...original, revision: original.revision + 1 };
+    f.workflow = edited; read();
+    delayed.resolve({ ok: true, value: { ...run, workflow: composed.workflow as PublicRun['workflow'] } });
+    await settle();
+    expect(store).toMatchObject({ busy: null, error: null, run: null });
+    const newest: PublicRun = { ...run, workflow: edited as PublicRun['workflow'], quote: { ...run.quote, revision: edited.revision, chainId: 42161 } };
+    vi.mocked(publicPrepare).mockResolvedValueOnce({ ok: true, value: newest });
+    store.simulate(); await settle();
+    expect(store.run).toEqual(newest);
+    expect(publicPrepare).toHaveBeenCalledTimes(2);
+    expect(publicBegin).not.toHaveBeenCalled(); expect(publicReport).not.toHaveBeenCalled();
+  });
   it('reports a browser-saved hash after an UNKNOWN wallet result during recovery', async () => {
     const attemptId = run.quote.executionId + '.swap.1', hash = '0x' + 'a'.repeat(64);
     run = { ...run, attempts: [{ step: 'swap', state: 'UNKNOWN', attemptId, txHash: null }] } as unknown as PublicRun;

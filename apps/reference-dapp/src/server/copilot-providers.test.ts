@@ -253,7 +253,7 @@ describe('Anthropic answers through the shared Copilot boundary', () => {
     expect(body.status).toBe('completed');
     expect(body.output[0]).toMatchObject({ type: 'reasoning', encrypted_content: expect.stringMatching(new RegExp(`^${ANTHROPIC_ECHO.replace('.', '\\.')}`)) });
     expect(body.output[1]).toEqual({ type: 'function_call', call_id: 'toolu_1', name: 'get_wallet_context', arguments: '{}' });
-    expect(body.usage).toEqual({ input_tokens: 900, output_tokens: 120 });
+    expect(body.usage).toEqual({ input_tokens: 900, output_tokens: 120, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } });
   });
 });
 

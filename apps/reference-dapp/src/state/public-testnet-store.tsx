@@ -244,8 +244,11 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       setRun(current => current?.quote.executionId === observed.quote.executionId ? observed : current);
       if (observed.attempts.at(-1)?.nativeAfter === null) throw new Error('APPROVAL_NOT_RECONCILED');
     }
-    const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
-      await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account ?? gasOwner?.account));
+    if (workflowRef.current !== workflow) return;
+    const result = resumeApproval ? await publicRefresh(run!.quote.executionId) :
+      await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account ?? gasOwner?.account);
+    if (workflowRef.current !== workflow) return;
+    const prepared = unwrap(result);
     localStorage.setItem(KEY, prepared.quote.executionId); markTab(prepared.quote.executionId);
     journey.mark('review_ready'); journeyRef.current = journey;
     setSource(workflow as unknown as SemanticWorkflow); setRecoveryOnly(false); setRun(prepared);

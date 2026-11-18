@@ -166,14 +166,14 @@ export function WorkflowList({ attention, saved, executed, known, more = false, 
 }
 
 export function DashboardView({ account, connection, runs, hasMore, loading, build, create, openRun, verify, verifying, verificationIssue, refresh, history, loadMore, loadingMore, pageIssue,
-  mode = 'dashboard', portfolio, openRecords, openWorkflow, signInPrompt }: {
+  mode = 'dashboard', portfolio, positions, openRecords, openWorkflow, signInPrompt }: {
   account: string | null; connection: DashboardConnection | null; runs: DashboardRunView[]; hasMore: boolean; loading: boolean;
   loadMore?: () => void; loadingMore?: boolean; pageIssue?: string | null;
   build(): void; openRun(runId: string): void; verify(): void; verifying: boolean; verificationIssue: string | null; refresh(): void;
   /** P0 approved UX (board 10): "Create workflow" opens the Chat entry where the shell provides it; otherwise `build`. */
   create?: (() => void) | undefined;
   history?: RunHistory;
-  mode?: 'dashboard' | 'records'; portfolio?: ReactNode; openRecords?: (() => void) | undefined; openWorkflow?: OpenWorkflow | undefined;
+  mode?: 'dashboard' | 'records'; portfolio?: ReactNode; positions?: ReactNode; openRecords?: (() => void) | undefined; openWorkflow?: OpenWorkflow | undefined;
   /** Records mode: another prompt on the page already asks for this wallet's proof (both ecosystems); the history notice then says so only. */
   signInPrompt?: boolean;
 }) {
@@ -263,5 +263,6 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
         {(loading || connection !== 'CONNECTED' || verificationIssue) && <div className="ux-history-notices">{notices}</div>}
       </section>
     </>}
+    {positions}
   </div>;
 }

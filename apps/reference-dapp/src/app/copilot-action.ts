@@ -3,6 +3,7 @@
 import { withFlightAccess } from '../server/flight-access';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { after } from 'next/server';
 import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createReplayTransport, interpretCopilot,
   interpretCopilotV2, parseCopilotReplay, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, type CopilotLimiter, type CopilotMode, type CopilotResult, type CopilotResultV2,
   type CopilotTelemetry } from '../server/copilot-service';
@@ -15,7 +16,7 @@ import { memoryPrincipals } from '../server/history-principals';
 import { copilotToolkit } from '../server/copilot-toolkit';
 import { logCopilotTurn } from '../server/copilot-service';
 import { parseTurnMetrics } from '../domain/intelligence/turn-metrics';
-import { copilotMetricsEnabled, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store';
+import { copilotMetricsEnabled, persistCopilotBilling, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store';
 import { platformStateHost } from '../server/platform-state-host';
 import { actionLanguage } from '../server/request-language';
 
@@ -81,6 +82,15 @@ async function interpretWithMetrics(input: unknown, deps: Parameters<typeof inte
   if (!copilotMetricsEnabled(process.env, deps.mode)) return interpretCopilotV2(input, deps);
   const records: CopilotTelemetry[] = [];
   const result = await interpretCopilotV2(input, { ...deps, telemetry: record => { deps.telemetry?.(record); records.push(record); } });
+  if (records.some(record => record.billingRequests?.length)) {
+    const at = new Date();
+    const persist = () => recordCopilotMetrics(async () => {
+      const host = await platformStateHost(process.env);
+      for (const record of records) await persistCopilotBilling(host, record, at);
+    });
+    try { after(persist); }
+    catch { await persist(); } // In-process operator and test callers have no Next request lifecycle.
+  }
   if (records.length) await recordCopilotMetrics(async () => {
     const host = await platformStateHost(process.env);
     for (const record of records) await persistCopilotInterpretation(host, record);
@@ -118,7 +128,8 @@ export async function copilotInterpret(raw: unknown, options?: unknown): Promise
       const learning = await learningFor(input, options);
       const result = await interpretWithMetrics(input, { transport: createProviderTransport(provider, apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
-        mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live'), glossary: learning?.glossary ?? null, toolkit: copilotToolkit(process.env), surface: 'WEB' });
+        mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live'), glossary: learning?.glossary ?? null,
+        toolkit: copilotToolkit(process.env), surface: 'WEB', billing: { provider, surface: 'WEB' } });
       await learning?.record(result);
       return result;
     }

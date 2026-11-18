@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
-import { cryptoNetworks, selectCryptoNetwork, selectCryptoToken, cryptoTokenOptions, createCryptoActionNode, cryptoInputOf, validCryptoSelection, cryptoReviewContext, canSelectCryptoAssets, type CryptoAction } from './crypto-action-picker';
+import { cryptoNetworks, selectCryptoNetwork, selectCryptoToken, cryptoTokenOptions, createCryptoActionNode, cryptoInputOf, validCryptoSelection, cryptoReviewContext, canSelectCryptoAssets, followOnSelection, type CryptoAction } from './crypto-action-picker';
 import { editorReducer, initialEditor } from './editor';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { canvasAmountCommand, actionReviewValue } from './canvas-action-setup';
+import { createUniversalBridgeFromInput } from './universal-bridge-authoring';
 import { classifyWalletEnvironment } from '../wallet/environment';
 import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
@@ -14,6 +15,35 @@ afterAll(() => resetNetworkCatalogs());
 
 const owner = '0x1111111111111111111111111111111111111111', context = cryptoReviewContext('Base Sepolia');
 const actions: CryptoAction[] = ['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw'];
+const workflowWith = (...nodes: ReturnType<typeof createCryptoActionNode>[]) => ({ ...initialEditor().workflow, nodes });
+
+describe('new actions inherit the unique predecessor’s canonical output', () => {
+  it('seeds Send from an Arbitrum swap and keeps an explicit replacement when editing the new card', () => {
+    const swap = createCryptoActionNode('swap', { selection: { action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, amount: '1', slippage: '50' });
+    const workflow = workflowWith(swap), history = { ...initialEditorHistory(), editor: { workflow, error: null } };
+    const started = editorHistoryReducer(history, { type: 'START_ACTION_SETUP', action: 'transfer', position: { x: 5, y: 10 }, environment: 'mainnet' });
+    expect(started.actionSetup?.cryptoSelection).toEqual({ action: 'transfer', network: 'Arbitrum One', from: 'WETH' });
+    const manual = { action: 'transfer' as const, network: 'Base', from: 'USDC' };
+    const edited = editorHistoryReducer(started, { type: 'EDIT_CRYPTO_SELECTION', id: started.actionSetup!.id, selection: manual, context });
+    expect(edited.actionSetup?.cryptoSelection).toEqual(manual);
+    expect(edited.editor.workflow).toBe(workflow);
+  });
+
+  it('matches a lending reserve by address and decimals', () => {
+    const swap = createCryptoActionNode('swap', { selection: { action: 'swap', network: 'Base', from: 'USDC', to: 'WETH' }, amount: '1', slippage: '50' });
+    expect(followOnSelection(workflowWith(swap), 'supply', 'mainnet')).toEqual({ selection: { action: 'supply', network: 'Base', from: 'WETH' } });
+    const wrong = { ...swap, inputs: swap.inputs.map(input => input.name === 'asset-out' && input.kind === 'ASSET'
+      ? { ...input, value: { ...input.value, decimals: 6 } } : input) };
+    expect(followOnSelection(workflowWith(wrong), 'supply', 'mainnet')).toMatchObject({ issue: 'asset' });
+  });
+
+  it.each([['arbitrum-one', 'Arbitrum One'], ['solana', 'Solana']] as const)('uses the declared %s delivery, rather than the Base source', (destination, network) => {
+    const bridge = createUniversalBridgeFromInput('bridge', { source: 'base', destination, inputAsset: 'USDC', outputAsset: 'USDC', amount: '1', recipient: '', slippage: '50', routing: 'BEST' });
+    expect(followOnSelection(workflowWith(bridge), 'transfer', 'mainnet')).toEqual({ selection: { action: 'transfer', network, from: 'USDC' } });
+    if (destination === 'solana') expect(followOnSelection(workflowWith(bridge), 'supply', 'mainnet')).toEqual({ issue: 'network' });
+    expect(followOnSelection(workflowWith(bridge, { ...bridge, nodeId: 'separate' }), 'transfer', 'mainnet')).toEqual({ issue: 'ambiguous' });
+  });
+});
 function input(action: CryptoAction, network: string) { return { selection: selectCryptoNetwork(action, network), amount: '0.1', secondAmount: '0.01', slippage: '50', beneficiary: owner }; }
 function assetChains(node: ReturnType<typeof createCryptoActionNode>) {
   const chains: string[] = [];

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Disposable PostgreSQL: real aggregate concurrency, retention, provenance and tenant boundaries. No provider or wallet calls. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ensureTenant } from '@defi-workflow-engine/cloud-runtime';
+import { readFile } from 'node:fs/promises';
+import { CERTIFIED_FORWARD_MIGRATIONS, ensureTenant, loadMigrations, migrate } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { copilotAnalytics } from '../admin/analytics/copilot';
 import type { TurnMetrics } from '../domain/intelligence/turn-metrics';
 import type { CopilotTelemetry } from './copilot-service';
-import { persistCopilotInterpretation, persistCopilotTurn } from './copilot-metrics-store';
+import { persistCopilotBilling, persistCopilotInterpretation, persistCopilotTurn } from './copilot-metrics-store';
 
 let t: TestDatabase;
 const at = new Date('2026-10-30T12:00:00Z');
@@ -58,5 +59,21 @@ describe('durable copilot metrics', () => {
     expect((await copilotAnalytics(host(), { days: '9000', mode: 'invented' }, at))).toMatchObject({ days: 30, mode: 'live' });
     await persistCopilotInterpretation(host(), interpretation, at);
     expect((await t.db.query('SELECT 1 FROM copilot_daily_metrics WHERE tenant_id=$1 AND day<$2::date', ['default', '2026-08-02'])).rows).toHaveLength(0);
+  });
+
+  it('records exact request and sample counts on the optional schema without copying identities or replay', async () => {
+    const record: CopilotTelemetry = { ...interpretation, billingRequests: [{ provider: 'OPENAI', surface: 'TELEGRAM', model: 'canonical-provider-model',
+      succeeded: true, durationMs: 75, inputTokens: 100, outputTokens: 20, reasoningTokens: 1, cachedInputTokens: 20, cacheWriteTokens: null }] };
+    await expect(persistCopilotBilling(host(), record, at)).resolves.toBeUndefined();
+    const identity = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)!.migrations.find(item => item.name === 'finops_ledger')!;
+    const sql = await readFile(new URL('../../../../packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql', import.meta.url), 'utf8');
+    await migrate(t.db, [...await loadMigrations(), { ...identity, sql }]);
+    await t.db.query('DELETE FROM finops_ai_daily_usage'); // The test database can already be on the certified-ahead schema.
+    await Promise.all([persistCopilotBilling(host(), record, at), persistCopilotBilling(host(), record, at),
+      persistCopilotBilling(host('other'), record, at), persistCopilotBilling(host(), { ...record, mode: 'replay' }, at)]);
+    const { rows } = await t.db.query(`SELECT provider, surface, model, requests::int, successes::int, cached_input_tokens::int,
+      cached_input_samples::int, cache_write_samples::int, reasoning_tokens::int FROM finops_ai_daily_usage WHERE tenant_id=$1`, ['default']);
+    expect(rows).toEqual([{ provider: 'OPENAI', surface: 'TELEGRAM', model: 'canonical-provider-model', requests: 2, successes: 2,
+      cached_input_tokens: 40, cached_input_samples: 2, cache_write_samples: 0, reasoning_tokens: 2 }]);
   });
 });

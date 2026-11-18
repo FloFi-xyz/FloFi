@@ -2,6 +2,11 @@
 export const portugueseReview: Readonly<Record<string, string>> = {
   'Canvas navigator': 'Navegador do Canvas', 'Fit workflow': 'Enquadrar fluxo', 'Canvas zoom': 'Zoom do Canvas', 'Zoom {0}. Reset to 100%': 'Zoom {0}. Repor a 100%', 'Reset zoom to 100%': 'Repor zoom a 100%',
   'Workflow simulation': 'Simulação do fluxo', 'Execution workflow graph': 'Grafo de execução do fluxo', 'Simulation workflow graph': 'Grafo de simulação do fluxo',
+  'Simulation checks expected outcomes and costs before anything is signed or sent.': 'A simulação verifica os resultados esperados e os custos antes de qualquer assinatura ou envio.',
+  'Simulate again to refresh network fees and token permissions before review.': 'Simule novamente para atualizar as taxas de rede e as permissões de tokens antes da revisão.',
+  'Aggregator': 'Agregador', 'Route segment': 'Trecho da rota', 'Estimate from {0}': 'Estimativa de {0}',
+  'Jupiter did not answer in time. Simulate again in a moment.': 'A Jupiter não respondeu a tempo. Aguarde um momento e simule novamente.',
+  'Jupiter is limiting requests. Wait a moment and simulate again.': 'A Jupiter está limitando as solicitações. Aguarde um momento e simule novamente.',
   'Check your workflow': 'Verifique o seu fluxo', 'Add an action to your workflow': 'Adicione uma ação ao seu fluxo',
   'Complete its configuration on the Canvas before executing.': 'Conclua a configuração no Canvas antes de executar.', 'Complete its configuration on the Canvas before simulating.': 'Conclua a configuração no Canvas antes de simular.',
   'Create your strategy on the Canvas, then return here to simulate it.': 'Crie a estratégia no Canvas e volte aqui para a simular.', 'Workflow preview': 'Pré-visualização do fluxo', 'Configured on the Canvas': 'Configurado no Canvas',

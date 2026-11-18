@@ -13,8 +13,7 @@ import styles from './portfolio-widget.module.css';
  * The Dashboard wallet ("Your wallet", P0 approved UX board 10): the priced total, the top holdings, one network dropdown, and the price-source
  * caveats in a collapsed "About the values"; it expands in place into the wallet's identity, the Assets table and the network allocation
  * (BUILD-FLOFI-UX-005: the per-network read list is no longer shown; partial reads stay noted). Every figure is a real read
- * (`app/portfolio-action.ts`); no balance, price or total is ever filled in. Only an Assets view exists: FloFi has no verified source for
- * wallet transactions, DeFi positions or perpetuals.
+ * (`app/portfolio-action.ts`), scoped to the wallet's liquid assets. The Dashboard reads DeFi positions separately.
  */
 const TITLE_ID = 'dashboard-portfolio-title', DETAILS_ID = 'dashboard-portfolio-details';
 

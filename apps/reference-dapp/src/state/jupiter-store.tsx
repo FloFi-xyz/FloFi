@@ -270,9 +270,11 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     // server-side and stays listed in Dashboard.
     const journey = createJourney({ operation: 'swap', network: JOURNEY_CHAIN[network], provider: 'Jupiter' });
     journey.mark('review_requested');
-    const owner = (await ensureSession()).account.address, snapshot = latest.current;
-    const result = await runtime.simulate(snapshot, owner); if (!result.ok) throw new Error(result.code);
-    if (latest.current !== snapshot) throw new Error(`${runtime.prefix}_SEMANTIC_REVISION_CHANGED`);
+    const snapshot = latest.current, owner = (await ensureSession()).account.address;
+    if (latest.current !== snapshot) return;
+    const result = await runtime.simulate(snapshot, owner);
+    if (latest.current !== snapshot || latestSession.current?.account.address !== owner) return;
+    if (!result.ok) throw new Error(result.code);
     accept(result.value); setRecovered(false);
     journey.mark('review_ready'); journeyRef.current = journey;
   }); }

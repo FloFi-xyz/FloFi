@@ -112,6 +112,7 @@ import { UniversalBridgePanel } from './universal-bridge-panel';
 import { useUniversalRouter } from '../state/universal-router-store';
 import { DashboardWorkspace } from './dashboard/dashboard-workspace';
 import { PortfolioWidget } from './dashboard/portfolio-widget';
+import { DefiPositions } from './dashboard/defi-positions';
 import { dashboardRoute as resolveDashboardRoute } from '../lib/dashboard/routes';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
 import { SecondaryProductWorkspace } from './secondary-product-workspace';
@@ -449,6 +450,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // BUILD-SOLANA-TRANSFER-UX-001: a proposal loaded for one proven wallet is authorized by that same signer only. A different connected
   // account is never substituted: its simulation and Review would bind another owner, so the action waits for the right wallet.
   const signer = reviewBinding.wallet.account;
+  const simulationRequest = { workflow: state.workflow, runtime: runtimeWorkflow, signer, kind: simulationSource.kind, incomplete: Boolean(authoringIncomplete) };
+  const currentSimulationRequest = useRef(simulationRequest);
+  currentSimulationRequest.current = simulationRequest;
   // P0: Flight first, for the same wallet the API binds; the runtime simulates only when that wallet may act (a refusal is a value, not a throw).
   const simulateAgain = async (): Promise<void> => {
     if (preflight.current) return; // a click while Flight is being asked starts nothing more
@@ -457,13 +461,19 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     preflight.current = true; setPreflighting(true);
     let simulation: Promise<unknown> | undefined;
     try {
+      let access: Awaited<ReturnType<typeof flightWalletAccess>> | null = null;
       if (flightSigner) {
         // FIX-09: a Flight check that never answers never leaves the simulation locked on "Simulating workflow…"; the runtime's own
         // authorization checks still protect execution (an unanswered read fails open exactly like a failed one, as before).
-        const access = await Promise.race([flightWalletAccess(flightSigner).catch(() => null),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 20_000))]);
-        if (access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code, workflowId: state.workflow.workflowId }); return; }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try { access = await Promise.race([flightWalletAccess(flightSigner).catch(() => null),
+          new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 20_000); })]); }
+        finally { clearTimeout(timer); }
       }
+      const latest = currentSimulationRequest.current;
+      if (latest.incomplete || latest.workflow !== simulationRequest.workflow || latest.runtime !== simulationRequest.runtime ||
+        latest.signer !== simulationRequest.signer || latest.kind !== simulationRequest.kind) return;
+      if (flightSigner && access && !access.ok) { setFlightBlock({ owner: flightSigner, code: access.code, workflowId: state.workflow.workflowId }); return; }
       setFlightBlock(null);
       // Started before the lock lifts, so the runtime's own busy state takes over in the same update (no enabled gap between the two).
       simulation = Promise.resolve(simulateRuntime());
@@ -620,7 +630,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <button type="button" className="primary" data-lifecycle-action="workflow-run"
       disabled={(!workflowRunHere.started && Boolean(authoringIncomplete)) || ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(workflowRunHere.phase)}
       onClick={() => { setTab('Execute'); if (workflowRunHere.canReview && !workflowRunHere.review) void workflowRunHere.startReview(); }}>
-      {tr(workflowRunHere.started || workflowRunHere.following ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : 'Review whole workflow')}</button>
+      {tr(workflowRunHere.started || workflowRunHere.following ? 'Open workflow progress' : workflowRunHere.review ? 'Open the workflow review' : tab === 'Simulate' ? 'Simulate workflow' : 'Review whole workflow')}</button>
   </div>;
   const simulateActionFor = (note: string | null) => groupedPrimary ? groupedAction : sequenceRestore ? <div className="canvas-lifecycle-control sequence-restore-control">
       <p role="status">{sequenceIssue}</p>
@@ -776,6 +786,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context}
       workflowProgress={workflowProgress} runId={dashboardRoute?.runId ?? null} portfolio={<PortfolioWidget evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
+      positions={<DefiPositions evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)} create={entry ? startNewChatWorkflow : undefined}/></main>
   </div>;
   // BUILD0-UX-001: Build 0 has no Canvas, chat panel or summary bar; its request continues in the same conversation, shown in Build 1.
@@ -840,7 +851,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={chatFirst ? undefined : () => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview}
           simulateAction={chatFirst ? undefined : simulateAction}
-          renderPanel={chatFirst ? technical => <ReviewSummaryPanel workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet}
+          panelLabel={canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Review' : 'Workflow simulation'}
+          renderPanel={chatFirst ? technical => <ReviewSummaryPanel canvasWorkflow={state.workflow} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet}
             invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason} sequenceNote={sequenceNote} technical={technical}/> : undefined}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}

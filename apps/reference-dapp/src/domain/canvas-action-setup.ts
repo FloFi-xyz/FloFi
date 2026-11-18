@@ -15,7 +15,7 @@ import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, create
 import { lendingDetails, lendingNodeInput } from './lending-authoring';
 import { createAuthoredTransfer, transferDetails } from './robinhood-transfer-authoring';
 import { singleAmountProposalTarget } from './composer-presentation';
-import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
+import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput, type FollowOnSelection } from './crypto-action-picker';
 import { checkRecipient } from './recipient-address';
 import { checkDestinationAddress } from './destination-wallet';
 import { UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
@@ -24,7 +24,7 @@ import { abbreviatedAssetReference, createUniversalBridgeFromInput, universalBri
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 /** `cryptoRecipient` (UX-001): the Send card's typed "To" text, committed only as the transfer's canonical `recipient` on Apply. */
-export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string; readonly cryptoRecipient?: string } &
+export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string; readonly cryptoRecipient?: string; readonly followOnIssue?: FollowOnSelection['issue'] } &
   ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } |
   /** `stocks`: the Stocks card (BUILD-RH-002): a Robinhood Chain catalog swap that buys a Stock Token with USDG. */
   { readonly action: 'swap'; readonly direction?: Direction; readonly stocks?: true } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
@@ -158,6 +158,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
   /** Set when an amount-only edit is rebuilt from the action's own crypto input: everything but the amount must come back unchanged. */
   let amountOnly: { readonly before: Workflow['nodes'][number]; readonly input: CryptoActionInput } | null = null;
   if (setup?.id === id) {
+    if (setup.followOnIssue) throw new Error('FOLLOW_ON_SELECTION_REQUIRED');
     if (setup.cryptoSelection) {
       const input: CryptoActionInput = cryptoSetupInput(setup);
       // A Send to a recipient-capable network requires its typed destination; owner-only networks stay CONNECTED_OWNER.
@@ -272,6 +273,12 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
   return command;
 }
 
+export const FOLLOW_ON_SELECTION_MESSAGES = {
+  network: 'The previous step delivers to a network this action does not support. Choose a supported network.',
+  asset: 'This action cannot use the previous step’s output asset. Choose a supported asset.',
+  ambiguous: 'More than one step could come before this action. Choose its network and asset.',
+} as const;
+
 /** P0 catalog reliability: what an owner can do when a Canvas edit is refused (the card's Cancel button or Escape, and its Settings button). */
 const KEEP_OR_SETTINGS = 'Your workflow was not changed. Press Cancel to keep the current amount, or open the action\u2019s Settings.';
 /**
@@ -305,6 +312,7 @@ export function canvasAmountMessage(cause: unknown, network?: string | null) {
   const raw = cause instanceof Error ? cause.message : '';
   // The Universal Router's own asset/network codes carry a `UNIVERSAL_` prefix; they mean the same as the Canvas codes below.
   const code = raw.startsWith('UNIVERSAL_') ? raw.slice('UNIVERSAL_'.length) : raw;
+  if (code === 'FOLLOW_ON_SELECTION_REQUIRED') return 'Choose a compatible network and asset for this action.';
   if (code === 'TRANSFER_RECIPIENT_REQUIRED') return 'Enter the recipient address.';
   // BUILD-FLOFI-MAINNET-EXEC-002: a bridge's destination wallet typed for its destination network.
   if (raw === 'DESTINATION_REQUIRED') return 'Enter the destination wallet address.';

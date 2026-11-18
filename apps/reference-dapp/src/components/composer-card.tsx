@@ -552,7 +552,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined, quoteFrozen);
   const estimate = quote.status === 'ready' ? quote.estimate : null;
   // P0 workflow execution: an expired quote stays on the card, marked as expired, until its fresh answer replaces it (never a silent '—').
-  const expiredEstimate = quote.status === 'expired' ? quote.estimate : null;
+  const expiredEstimate = quote.status === 'expired' && (!card.inspection || quoteFrozen) ? quote.estimate : null;
   const usdState ={ status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const [amountError, setAmountError] = useState<string | null>(null);
@@ -665,7 +665,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       <div className="composer-card-head">
       <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
       {poolCard ? null : <span className="composer-metadata">
-        <span className="composer-provider">{tr(card.summary.provider.replace(/Cross-chain Router/g, 'Router') || 'Provider not specified')}</span>
+        <span className="composer-provider" title={estimate?.provider ? tr('Estimate from {0}', estimate.provider) : undefined}>
+          {tr(estimate?.provider || card.summary.provider.replace(/Cross-chain Router/g, 'Router') || 'Provider not specified')}</span>
         {networkPending ? <>{tr(' · ')}<span className="composer-network-pending-chip">{tr('Network?')}</span></>
           : <>{tr(' · ')}<span className="composer-chain">{tr(chainLabel)}</span></>}
       </span>}

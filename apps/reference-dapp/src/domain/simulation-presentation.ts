@@ -30,6 +30,8 @@ import { flightRefusalMessage, flightRefusalTitleOf } from './flight-refusal';
 import { gaslessUnavailableReason, INCLUDED_NETWORK_FEE_LABEL, SIGNATURES_LABEL, ZEROX_FEE_LABEL } from './gas-payment';
 import { walletNonceMessage } from './wallet-nonce';
 import { basisPointsLabel, bridgeIncludedCost, HIGH_BRIDGE_COST_BASIS_POINTS } from './bridge-costs';
+import { shellChainLabel } from './product-shell';
+import { networkIdentity } from './network-registry';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -180,6 +182,8 @@ export function simulationError(error: string): string {
   // refusal (nothing was signed or sent) and the owner can simply try again.
   if (error === 'UNIVERSAL_WALLET_SIGNIN_TIMEOUT') return 'Your wallet did not answer the sign-in request, so this step was not simulated and nothing was signed or sent. Open your wallet and choose Review to try again.';
   if (error === 'UNIVERSAL_SIMULATION_TIMEOUT') return 'The bridge provider did not answer in time, so this step was not simulated and nothing was signed or sent. Try again in a moment.';
+  if (error === 'JUPITER_QUOTE_TIMEOUT') return 'Jupiter did not answer in time. Simulate again in a moment.';
+  if (error === 'JUPITER_RATE_LIMITED') return 'Jupiter is limiting requests. Wait a moment and simulate again.';
   // An Aave reserve short of liquidity (or collateral) is not the owner's balance: it keeps the lending sentence, before the balance rule.
   if (/^(?:BORROW|WITHDRAW)_INSUFFICIENT_LIQUIDITY$|LIQUIDITY_(?:UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_COLLATERAL/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident B): a single owner-wallet swap pays its network fee in the network's own ETH. FloFi's USDC fee
@@ -258,6 +262,7 @@ const seconds = (value: string | number) => Number(value) * 1000;
 const live = (provenance: string) => ['PUBLIC_MAINNET', 'PUBLIC_TESTNET', 'PUBLIC_DEVNET', 'FORK_REPRODUCED', 'LIVE_READ_ONLY'].includes(provenance);
 const decimals = (symbol: string) => symbol === 'USDC' ? 6 : 18;
 const solanaSymbol = (symbol: string, cluster: string) => cluster === 'devnet' && symbol === 'USDC' ? 'devUSDC' : symbol;
+const routeNetwork = (chain: string) => networkIdentity(chain)?.name ?? shellChainLabel(chain);
 
 export function projectSimulation(workflow: Workflow, context: ReviewContext, source?: SimulationSource, now = Date.now()): SimulationPresentation {
   const steps: SimulationStep[] = composerActions(workflow).map((node, index) => {
@@ -383,7 +388,12 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const route = q.route, s = step(q.nodeId);
       const chosen = [simulationProvider(q.selection.selected), simulationProvider(route.underlyingProtocol)].filter((name, i, all) => name && all.indexOf(name) === i).join(' · ');
       result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(q.quote.expectedOutput, route.outputToken.decimals, route.outputToken.symbol), chosen || '—', simulationAmount(q.quote.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
-      if (s) s.resultLabel = 'Quoted destination output';
+      if (s) {
+        s.resultLabel = 'Quoted destination output';
+        for (const segment of route.steps ?? []) {
+          if (segment.protocol) s.details.push({ label: 'Route segment', value: `${segment.protocol} · ${routeNetwork(segment.fromChain)} → ${routeNetwork(segment.toChain)}` });
+        }
+      }
       networkFees(q.fees);
       const feeLabels = { INTEGRATOR: 'Provider fee', BRIDGE_RELAYER_CAPITAL: 'Bridge relayer fee', BRIDGE_DESTINATION_GAS: 'Destination delivery fee', BRIDGE_LP: 'Bridge liquidity fee', BRIDGE_OTHER: 'Bridge fee' };
       for (const f of route.fees) if (f.chainId === route.inputToken.chainId && f.token.toLowerCase() === route.inputToken.address.toLowerCase() && BigInt(f.amount) > 0n) {
@@ -401,7 +411,12 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const s = step(q.nodeId), provider = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' }[route.provider] ?? route.provider;
       result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(route.expectedOutput, route.outputToken.decimals, route.outputToken.symbol),
         provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
-      if (s) s.resultLabel = 'Quoted destination output';
+      if (s) {
+        s.resultLabel = 'Quoted destination output';
+        for (const segment of route.steps ?? []) {
+          if (segment.protocol) s.details.push({ label: 'Route segment', value: `${segment.protocol} · ${routeNetwork(segment.fromChain)} → ${routeNetwork(segment.toChain)}` });
+        }
+      }
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.', 'CEILING');
       // BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident E): when every included provider fee is in the input token, its total and share of the
       // amount sent are exact; the fees then read as parts of that one included total (as the Router's do), so nothing is counted twice.
@@ -501,8 +516,9 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       result(s, simulationAmount(q.simulationResult.inputSpent, q.input.decimals, tokenIn), simulationAmount(q.simulationResult.outputReceived, q.output.decimals, tokenOut), q.format === 'gryloo.jupiter-review.v1' ? 'Jupiter' : 'Orca Whirlpools', simulationAmount(q.quote.otherAmountThreshold, q.output.decimals, tokenOut), q.slippageBps);
       if (s) {
         s.resultLabel = 'Simulated output'; s.priceImpact = simulationPriceImpact(q.quote.priceImpactPct, q.format === 'gryloo.jupiter-review.v1');
+        if (q.format === 'gryloo.jupiter-review.v1') s.details.push({ label: 'Aggregator', value: 'Jupiter' });
         const providers = [...new Set(q.quote.routePlan.map(p => simulationProvider(p.label)).filter(Boolean))];
-        if (providers.length) s.details.push({ label: 'Route pools', value: providers.join(' → ') });
+        if (providers.length) s.details.push({ label: 'Route pools', value: providers.join(' · ') });
       }
       // ADR-0010 §4: with Pimlico's Kora fee payer the owner pays no SOL; the network fee is the exact token amount it repays (its ceiling).
       const kora = q.format === 'gryloo.jupiter-review.v1' ? q.gas : undefined;
