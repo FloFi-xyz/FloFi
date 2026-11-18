@@ -1605,6 +1605,30 @@
     "app.app.automation-reads": {
       "path": "apps/reference-dapp/src/app/automation-reads.test.ts",
       "stage": "unit"
+    },
+    "app.api.dashboard-positions": {
+      "path": "apps/reference-dapp/src/app/api/dashboard/positions/route.test.ts",
+      "stage": "unit"
+    },
+    "app.components.defi-positions": {
+      "path": "apps/reference-dapp/src/components/dashboard/defi-positions.test.tsx",
+      "stage": "unit"
+    },
+    "app.server.defi-positions": {
+      "path": "apps/reference-dapp/src/server/defi-positions.test.ts",
+      "stage": "unit"
+    },
+    "app.server.jupiter-http": {
+      "path": "apps/reference-dapp/src/server/jupiter-http.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.finops-economics": {
+      "path": "apps/reference-dapp/src/admin/finops/economics.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.finops.pg": {
+      "path": "apps/reference-dapp/src/admin/finops/finops.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -1744,7 +1768,12 @@
     "app.app.api.dashboard.activity.route",
     "app.app.api.automations.overview.route",
     "app.app.api.account.presence.route",
-    "app.app.automation-reads"
+    "app.app.automation-reads",
+    "app.api.dashboard-positions",
+    "app.components.defi-positions",
+    "app.server.defi-positions",
+    "app.server.jupiter-http",
+    "app.admin.finops-economics"
   ],
   "modules": [
     {
@@ -2225,7 +2254,15 @@
         "apps/reference-dapp/src/admin/page-context.ts",
         "apps/reference-dapp/src/admin/session.ts",
         "apps/reference-dapp/src/admin/settings-http.ts",
-        "apps/reference-dapp/src/admin/store.ts"
+        "apps/reference-dapp/src/admin/store.ts",
+        "apps/reference-dapp/src/admin/finops/ai.ts",
+        "apps/reference-dapp/src/admin/finops/csv.ts",
+        "apps/reference-dapp/src/admin/finops/economics.ts",
+        "apps/reference-dapp/src/admin/finops/http.ts",
+        "apps/reference-dapp/src/admin/finops/providers.ts",
+        "apps/reference-dapp/src/admin/finops/report.ts",
+        "apps/reference-dapp/src/admin/finops/scenario.ts",
+        "apps/reference-dapp/src/admin/finops/store.ts"
       ],
       "suites": [
         "app.admin.analytics.workflows",
@@ -2233,10 +2270,14 @@
         "app.admin.session",
         "app.admin.settings.pg",
         "app.server.copilot-metrics",
-        "app.server.copilot-metrics.pg"
+        "app.server.copilot-metrics.pg",
+        "app.admin.finops-economics",
+        "app.admin.finops.pg",
+        "app.e2e.admin-console"
       ],
       "gaps": [
-        "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
+        "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
+        "FinOps database, scope normalization and report regressions use disposable fixtures. Real provider billing credentials, invoice reconciliation, and coverage of legacy and external channels require operator evidence."
       ]
     },
     {
@@ -2333,7 +2374,12 @@
         "apps/reference-dapp/src/app/admin/layout.tsx",
         "apps/reference-dapp/src/app/admin/login/page.tsx",
         "apps/reference-dapp/src/app/admin/page.tsx",
-        "apps/reference-dapp/src/app/admin/workflows/page.tsx"
+        "apps/reference-dapp/src/app/admin/workflows/page.tsx",
+        "apps/reference-dapp/src/app/admin/api/finops/export/route.ts",
+        "apps/reference-dapp/src/app/admin/api/finops/import/route.ts",
+        "apps/reference-dapp/src/app/admin/finops/loading.tsx",
+        "apps/reference-dapp/src/app/admin/finops/page.tsx",
+        "apps/reference-dapp/src/app/admin/finops/report/page.tsx"
       ],
       "suites": [
         "app.admin.analytics.workflows",
@@ -2342,7 +2388,8 @@
         "app.admin.settings.pg",
         "app.server.copilot-metrics",
         "app.server.copilot-metrics.pg",
-        "app.e2e.admin-login-layout"
+        "app.e2e.admin-login-layout",
+        "app.e2e.admin-console"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -2876,7 +2923,8 @@
         "apps/reference-dapp/src/app/api/dashboard/history/route.ts",
         "apps/reference-dapp/src/app/dashboard-reads.ts",
         "apps/reference-dapp/src/app/api/dashboard/activity/route.ts",
-        "apps/reference-dapp/src/app/wallet-activity-reads.ts"
+        "apps/reference-dapp/src/app/wallet-activity-reads.ts",
+        "apps/reference-dapp/src/app/api/dashboard/positions/route.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -2889,7 +2937,8 @@
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
         "app.app.api.dashboard.history.route",
-        "app.app.api.dashboard.activity.route"
+        "app.app.api.dashboard.activity.route",
+        "app.api.dashboard-positions"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -3381,14 +3430,18 @@
         "apps/reference-dapp/src/components/admin/charts.tsx",
         "apps/reference-dapp/src/components/admin/copilot-settings-editor.tsx",
         "apps/reference-dapp/src/components/admin/data-notes.tsx",
-        "apps/reference-dapp/src/components/admin/learning-console.tsx"
+        "apps/reference-dapp/src/components/admin/learning-console.tsx",
+        "apps/reference-dapp/src/components/admin/finops-controls.tsx",
+        "apps/reference-dapp/src/components/admin/finops-views.tsx",
+        "apps/reference-dapp/src/components/admin/finops-copy.ts"
       ],
       "suites": [
         "app.admin.analytics.workflows",
         "app.admin.http.pg",
         "app.admin.session",
         "app.admin.settings.pg",
-        "app.e2e.admin-login-layout"
+        "app.e2e.admin-login-layout",
+        "app.e2e.admin-console"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -3649,7 +3702,9 @@
         "apps/reference-dapp/src/components/workflow-records.module.css",
         "apps/reference-dapp/src/components/workflow-run-panel.tsx",
         "apps/reference-dapp/src/components/canvas-execution-badge.tsx",
-        "apps/reference-dapp/src/components/wallet-activity.tsx"
+        "apps/reference-dapp/src/components/wallet-activity.tsx",
+        "apps/reference-dapp/src/components/dashboard/defi-positions.module.css",
+        "apps/reference-dapp/src/components/dashboard/defi-positions.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -3676,7 +3731,8 @@
         "app.components.live-canvas-build",
         "app.components.execute-details-choice",
         "app.server.wallet-activity",
-        "app.components.wallet-activity"
+        "app.components.wallet-activity",
+        "app.components.defi-positions"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4617,7 +4673,8 @@
         "apps/reference-dapp/src/domain/gas-payment.ts",
         "apps/reference-dapp/src/domain/settlement-sync.ts",
         "apps/reference-dapp/src/domain/canvas-execution.ts",
-        "apps/reference-dapp/src/domain/wallet-activity.ts"
+        "apps/reference-dapp/src/domain/wallet-activity.ts",
+        "apps/reference-dapp/src/domain/defi-positions.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -6943,7 +7000,8 @@
         "apps/reference-dapp/src/server/lending-composition-service.ts",
         "apps/reference-dapp/src/server/lending-rpc.ts",
         "apps/reference-dapp/src/server/supply-rpc.ts",
-        "apps/reference-dapp/src/server/supply-service.ts"
+        "apps/reference-dapp/src/server/supply-service.ts",
+        "apps/reference-dapp/src/server/defi-positions-evm.ts"
       ],
       "suites": [
         "app.server.lending-composition-service",
@@ -6951,7 +7009,8 @@
         "reference-compiler.repay",
         "reference-compiler.supply",
         "reference-compiler.withdraw",
-        "app.server.supply-service"
+        "app.server.supply-service",
+        "app.server.defi-positions"
       ],
       "gaps": [
         "Live Aave positions and real-wallet state transitions require separate acceptance on supported networks."
@@ -6973,7 +7032,8 @@
         "apps/reference-dapp/src/server/liquidity-service.ts",
         "apps/reference-dapp/src/server/orca-liquidity-service.ts",
         "apps/reference-dapp/src/server/uniswap-liquidity-mock.ts",
-        "apps/reference-dapp/src/server/uniswap-liquidity-service.ts"
+        "apps/reference-dapp/src/server/uniswap-liquidity-service.ts",
+        "apps/reference-dapp/src/server/defi-positions-solana.ts"
       ],
       "suites": [
         "app.server.copilot-pool-integration",
@@ -6985,7 +7045,8 @@
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
         "app.e2e.uniswap-liquidity-continuation",
-        "app.state.uniswap-liquidity-store"
+        "app.state.uniswap-liquidity-store",
+        "app.server.defi-positions"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7056,7 +7117,8 @@
         "apps/reference-dapp/src/server/solana-rpc.ts",
         "apps/reference-dapp/src/server/wallet-portfolio.ts",
         "apps/reference-dapp/src/server/solana-token-amount.ts",
-        "apps/reference-dapp/src/server/wallet-activity.ts"
+        "apps/reference-dapp/src/server/wallet-activity.ts",
+        "apps/reference-dapp/src/server/defi-positions.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
@@ -7066,10 +7128,12 @@
         "app.server.router-providers",
         "app.server.wallet-portfolio",
         "app.server.solana-token-amount",
-        "app.server.wallet-activity"
+        "app.server.wallet-activity",
+        "app.server.defi-positions"
       ],
       "gaps": [
-        "Catalog/discovery and offline provider responses do not certify provider uptime or real execution."
+        "Catalog/discovery and offline provider responses do not certify provider uptime or real execution.",
+        "Dashboard position discovery has bounded fixture coverage. Public RPC availability, protocol positions outside the audited scan scope and configured USD feed availability remain separate acceptance gaps."
       ]
     },
     {
@@ -7124,7 +7188,8 @@
         "reference-compiler.compile.fork",
         "reference-compiler.jupiter",
         "reference-compiler.native-eth",
-        "reference-compiler.orca-mainnet-liquidity"
+        "reference-compiler.orca-mainnet-liquidity",
+        "app.server.jupiter-http"
       ],
       "gaps": [
         "Public-wallet execution and live price/provider changes need separate acceptance; execution-boundary quote movement within the reviewed bounds is covered offline by BUILD-FLOFI-E2E-RELIABILITY-001 (superseding draft PR #137), not by mainnet evidence.",
@@ -8329,6 +8394,7 @@
     "app.workflow-runs.kora-gas-run.pg",
     "app.backend.nonce-conflict-cloud.pg",
     "app.admin.support-privacy.pg",
-    "app.backend.workflow-run-worker-startup.pg"
+    "app.backend.workflow-run-worker-startup.pg",
+    "app.admin.finops.pg"
   ]
 }
