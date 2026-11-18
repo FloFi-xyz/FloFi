@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, type Locator, type Page } from '@playwright/test';
 
-export async function selectCanvasSourceToken(page: Page, card: Locator, symbol: string) {
-  await card.getByRole('button', { name: 'Select source token', exact: true }).click();
-  const picker = page.getByRole('region', { name: 'Source token picker', exact: true });
-  await picker.locator('label', { has: page.getByRole('radio', { name: symbol, exact: true }) }).click();
-  await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
+/** Keep the USDC/WETH geometry fixture independent of the external token catalog. */
+export async function setCanvasSwapSourceToUsdc(card: Locator) {
+  const usdc = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
+  const weth = card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true });
+  await expect(usdc.or(weth)).toBeEditable();
+  if (await weth.isVisible()) await card.getByRole('button', { name: 'Switch From and To tokens', exact: true }).click();
+  await expect(usdc).toBeEditable();
 }
 
 /** Explicitly configure fixtures that exercise already-authored workflows. Toolbar creation itself stays unconfigured. */

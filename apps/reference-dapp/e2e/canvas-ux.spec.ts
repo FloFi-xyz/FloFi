@@ -2,7 +2,7 @@
 import { test, expect, installPassiveWallet, assertPassiveWallet, sendChatCommand, openSimulationDetails, readWorkflowIr } from './fixtures';
 import type { Page } from '@playwright/test';
 import { chooseWorkflowMenuItem, closeWorkflowMenu, continueToBuilder, openBuilder, openEditorSection, openWorkflowMenu, reloadBuilder, useDockedToolbar, useToolbarRail, workflowMenuItem, workflowMoreOptions } from './build-entry-navigation';
-import { selectCanvasSourceToken } from './composer-authoring-fixtures';
+import { setCanvasSwapSourceToUsdc } from './composer-authoring-fixtures';
 
 /** P0 approved UX (board 04): the zoom slider is gone; the navigator's Zoom out (−) steps the same engine zoom down. */
 const zoomOut = (graph: import('@playwright/test').Locator) => graph.locator('.canvas-navigator').getByRole('button', { name: 'Zoom out', exact: true }).click();
@@ -29,7 +29,7 @@ async function addFromToolbox(page: Page, action: string) {
     await card.getByRole('button', { name: 'Review', exact: true }).click();
     await card.getByRole('button', { name: 'Apply', exact: true }).click();
   } else {
-    if (action === 'swap' && before > 0) await selectCanvasSourceToken(page, card, 'USDC');
+    if (action === 'swap' && before > 0) await setCanvasSwapSourceToUsdc(card);
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   }
