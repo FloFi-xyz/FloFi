@@ -21,7 +21,7 @@ fan-in:  certification (small): `python3 scripts/ci-observe.py verify` (the ledg
 
 | Job | Runner | Work |
 | --- | --- | --- |
-| `governance` | small | governance unit tests, CI tests, `governance_lite.py`, whitespace over every commit the branch adds |
+| `governance` | small | governance unit tests, CI tests, `governance_lite.py`, whitespace over every commit the branch adds and the advisory engineering knowledge report |
 | `certification-build` | large, no database | the one production build of the revision, its function-trace gate (which also re-proves that contained advisories do not ship); `scripts/ci_build_artifact.py pack` |
 | `certification-supply-chain` | small | dependency security policy (whole graph; DEC-0058 containment), `pnpm audit --prod --audit-level low`, SBOM: a new upstream advisory blocks certification without hiding any other job's results |
 | `certification-checks` | large + PostgreSQL | typecheck, lint, schema drift, PostgreSQL suites, fork suite |
@@ -32,6 +32,11 @@ fan-in:  certification (small): `python3 scripts/ci-observe.py verify` (the ledg
 Every job keeps its own loopback ports and disposable PostgreSQL. Status contexts keep their names
 (`ci/circleci: governance`, `certification-checks`, `certification-browser-1`, `certification-browser-2`, `certification`); the
 new jobs add their own contexts. `certification` stays the gate: it only runs when every job passed, and it fails closed.
+
+After the governance gate, the engineering knowledge report uses the existing
+`origin/main` fetch on PR branches and the first parent on `main`. The report
+uses local Git data and adds no ledger stage. Review its recommendations with
+the PR diff. [Agent Evolution procedure](AGENT-EVOLUTION.md)
 
 ### The build artifact
 

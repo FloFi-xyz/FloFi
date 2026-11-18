@@ -2,7 +2,7 @@
   "format": "flofi.engineering-skill.v1",
   "id": "networks/evm-core",
   "title": "EVM transactions, fees, pinned reads and RPC pacing",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "networks": [
     "evm"
   ],
@@ -24,7 +24,12 @@
       "apps/reference-dapp/src/server/managed-signing.ts",
       "apps/reference-dapp/src/wallet/flofi-evm-provider.ts",
       "apps/reference-dapp/src/server/evm-catalog-runtime.ts",
-      "apps/reference-dapp/src/server/public-testnet-service.ts"
+      "apps/reference-dapp/src/server/public-testnet-service.ts",
+      "packages/action-registry/src/asset-registry.ts",
+      "apps/reference-dapp/src/domain/network-registry.ts",
+      "apps/reference-dapp/src/domain/network-scope.ts",
+      "apps/reference-dapp/src/domain/catalog-networks.ts",
+      "apps/reference-dapp/src/domain/wallet-nonce.ts"
     ],
     "keywords": [
       "evm",
@@ -105,7 +110,7 @@
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:215b81eaa96b838985e5f309704a7fa49ac0872426494a8200771775b43c1a14",
+  "guidanceDigest": "sha256:94860daf4a70e9346445d04352379f8ca3937cc371cefa3a94cff70397e94076",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

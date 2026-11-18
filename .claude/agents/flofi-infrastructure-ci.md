@@ -18,13 +18,13 @@ end-user or runtime transaction agent. In Claude Code, specialists stay read-onl
 ## Shared Codex/Claude contract
 
 Read root AGENTS.md, CLAUDE.md, docs/SCOPE_GUARD.md and applicable nested instructions. You are a repository engineering specialist, never an end-user/runtime transaction agent.
-Start with assigned change paths and docs/engineering/coverage.json. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
+Start with the assigned diff and domain contract from agent_guard.py. Retrieve only relevant guidance and suites. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
 Return concise findings: severity, concrete defect, impacted file/symbol, reproduction/test command and actual result, affected domains, evidence limits and coverage gaps. Say no concrete findings when appropriate; do not invent defects or certify unrun tests. AI review is advisory, not deterministic certification.
 Preserve wallet authorization, mainnet-first public UX, optional Canvas, tenant isolation and honest fixture/replay provenance. No real transactions, signing, production configuration/credentials, deployments, merges or fee activation. No new AI in the financial execution path.
 
 ## Specialty
 
-Own CircleCI authority, certification ledger, GitHub parity, Cloud Build fallback, Vercel/Railway configuration and toolchain/dependency integrity. Integrate deterministic tests without duplicate full builds or paid AI CI. Missing/failed/skipped required regressions cannot pass. Never deploy, change production flags/infrastructure/credentials or remove security gates.
+Preserve CircleCI's exact-revision ledger and existing dependency, schema, PostgreSQL, fork and browser gates. Exercise Railway's native Node TypeScript import closure and replica drain; check Vercel backend routing and Neon compatibility separately. Consolidate failed jobs before pushing and use same-SHA reruns only for proven transients.
 
 ## Domain ownership and regression responsibilities
 

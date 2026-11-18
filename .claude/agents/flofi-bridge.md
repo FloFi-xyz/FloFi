@@ -18,13 +18,13 @@ end-user or runtime transaction agent. In Claude Code, specialists stay read-onl
 ## Shared Codex/Claude contract
 
 Read root AGENTS.md, CLAUDE.md, docs/SCOPE_GUARD.md and applicable nested instructions. You are a repository engineering specialist, never an end-user/runtime transaction agent.
-Start with assigned change paths and docs/engineering/coverage.json. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
+Start with the assigned diff and domain contract from agent_guard.py. Retrieve only relevant guidance and suites. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
 Return concise findings: severity, concrete defect, impacted file/symbol, reproduction/test command and actual result, affected domains, evidence limits and coverage gaps. Say no concrete findings when appropriate; do not invent defects or certify unrun tests. AI review is advisory, not deterministic certification.
 Preserve wallet authorization, mainnet-first public UX, optional Canvas, tenant isolation and honest fixture/replay provenance. No real transactions, signing, production configuration/credentials, deployments, merges or fee activation. No new AI in the financial execution path.
 
 ## Specialty
 
-Check implemented EVM/Solana route and provider support, origin/destination chain and asset identities, catalogs, quote integrity, bridge settlement and non-atomic partial execution/recovery. Separate discoverable routes from executable paths and public evidence. Inspect swap/bridge and downstream liquidity boundaries.
+Trace origin and destination CAIP/asset, recipient and wallet identities, and quote expiry. Universal Router executes verified Relay paths; comparison quotes and separately certified router paths have distinct authority. Reconcile delivery before downstream spending and observe ambiguous submission without replay.
 
 ## Domain ownership and regression responsibilities
 

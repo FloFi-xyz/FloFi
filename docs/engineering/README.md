@@ -6,11 +6,9 @@ remain the product evidence, and CircleCI remains the certification authority.
 Claude Code uses 19 generated Read-only twins (no shell) of the same roles and
 contracts; see [the Claude Code guide](CLAUDE-CODE.md).
 
-The inventory was audited against main `9e95b5c55d3e51ccfa5929819d3f15039db09f59`.
-Current source and capability registries take precedence over old build reports.
-PR [#137](https://github.com/alrimarleskovar/FloFi/pull/137) was open and draft at
-implementation: its favorable Base requote fix and implementation files are not
-included here. Follow-up acceptance must include that fix after owner review.
+Resolve current capability claims from the source, runtime gates and regression
+contracts. The latest cross-domain audit and its evidence are in the
+[Agent Evolution build report](BUILD-FLOFI-AGENT-EVOLUTION-001-REPORT.md).
 
 ## Ownership and review
 
@@ -35,6 +33,7 @@ In a trusted Codex project, start a new session at the repo root:
 ```sh
 python3 scripts/agent_guard.py check
 python3 scripts/agent_guard.py impact --base origin/main
+python3 scripts/agent_evolution.py --base origin/main
 ```
 
 Ask: “Review this change with the affected FloFi specialists from the impact
@@ -43,6 +42,12 @@ active. Return reproducible defects and evidence gaps.” Codex can spawn the
 named project agents. Batch reviews when there are more affected domains than
 slots. Do not launch 19 reviews for every edit. Assign disjoint file ownership
 before authorizing edits; the main agent resolves integration conflicts.
+
+For each selected specialist, provide the merge base, its relevant changed
+paths and diff, and `python3 scripts/agent_guard.py domain <domain> --base origin/main`.
+Send only the selected guidance and suites needed for that review. Record the
+disposition of Agent Evolution recommendations in the PR, with links to any
+knowledge changes or the current evidence for retaining the existing guidance.
 
 Shared-core inventory rows expand financial/integration review. Changes to mapped
 test suites select their owners too. The impact command compares the explicit
@@ -67,7 +72,7 @@ The probe uses a disposable Codex home and a rejecting loopback endpoint. It
 inspects the actual spawn tool schema for all 19 names/descriptions, without a
 model response, external AI service, credentials or financial operations. The
 CLI's intentional HTTP rejection is not an agent/model test. The command fails
-if the installed CLI cannot discover the roles. Verified with Codex 0.163.0.
+if the installed CLI cannot discover the roles. Verified with Codex 0.170.0.
 Project trust/managed settings can restrict availability; do not weaken them.
 
 ## Multichain engineering skills
@@ -78,6 +83,8 @@ and `domain` list the skills that apply to the changed paths, so the main sessio
 `SKILL.md` files to Read with its domain contract. Skills are reference knowledge with recorded, digest-pinned sources;
 they add no agent, no runtime dependency and no financial authority. `check` validates them; `skill_registry.py
 check-upstream --fetch` detects upstream changes and proposes updates for normal review.
+The [weekly maintenance procedure](AGENT-EVOLUTION.md) combines those results with
+the local inventory, coverage gaps and twin parity.
 
 ## Maintaining the contract
 
@@ -119,8 +126,9 @@ The existing PostgreSQL CI run also emits JSON and runs
 | Mechanism | Runs automatically | What it establishes |
 | --- | --- | --- |
 | Agent TOML and ownership guard/self-tests | Existing Governance/Contracts CI | Exact 19-agent schema, bounded pool, complete explicit maintained-file inventory, valid dependencies, extant suites/gaps and current matrix |
-| New registry regression | Existing unit run | Every registered public execution capability retains wallet/network/artifact/simulation/authorization boundaries; unsupported identities fail; readiness never promotes evidence |
-| New cross-surface regression | Existing unit run | Scripted EN/PT clarification, actual Canvas reducer, channel canonicalization, direct engine and MCP share current hashes and native ETH/WETH identity; stale hashes and public testnets refuse |
+| Registry regression | Existing unit run | Every registered public execution capability retains wallet/network/artifact/simulation/authorization boundaries; unsupported identities fail; readiness never promotes evidence |
+| Cross-surface regression | Existing unit run | Scripted EN/PT clarification, actual Canvas reducer, channel canonicalization, direct engine and MCP share current hashes and native ETH/WETH identity; stale hashes and public testnets refuse |
+| Agent Evolution | CircleCI governance report and local command | Flags changed capability and regression surfaces, knowledge, ownership, gaps and parity for human review |
 | Required suite result verifier | Existing Unit/contract and PostgreSQL stages | Each designated suite appears exactly once, contains cases, and every case passed; skipped/todo/missing/failed cases fail the stage |
 | Existing PostgreSQL/fork/browser/security gates and ledger | Unchanged complete CI | Existing durability, isolation, browser, fork, dependency/audit/SBOM and certification requirements |
 | Claude twin parity, settings and hook self-tests | Existing Governance/Contracts CI | 19 generated read-only Claude agents match their Codex roles, exact hook settings, no local Claude state, guard and ledger behavior |

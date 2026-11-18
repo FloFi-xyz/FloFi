@@ -2,7 +2,7 @@
   "format": "flofi.engineering-skill.v1",
   "id": "operations/execution",
   "title": "Wallet authorization, submission, observation and reconciliation",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "networks": [],
   "protocols": [],
   "operations": [
@@ -11,7 +11,9 @@
   "domains": [
     "flofi-wallet-execution",
     "flofi-workflow",
-    "flofi-security"
+    "flofi-security",
+    "flofi-transfer-payments",
+    "flofi-automations"
   ],
   "dependsOn": [
     "networks/evm-core",
@@ -28,7 +30,19 @@
       "apps/reference-dapp/src/domain/observation-schedule.ts",
       "apps/reference-dapp/src/domain/canonical-execution-status.ts",
       "apps/reference-dapp/src/domain/journey-metrics.ts",
-      "apps/reference-dapp/src/server/journey-telemetry.ts"
+      "apps/reference-dapp/src/server/journey-telemetry.ts",
+      "packages/action-registry/src/execution-capabilities.ts",
+      "packages/workflow-contracts/src/invalidation.ts",
+      "apps/reference-dapp/src/gas-abstraction/*",
+      "apps/reference-dapp/src/gas-sponsorship/*",
+      "packages/reference-compiler/src/eip7702-upgrade.ts",
+      "packages/reference-compiler/src/native-transfer.ts",
+      "apps/reference-dapp/src/domain/wallet-nonce.ts",
+      "apps/reference-dapp/src/automations/*",
+      "apps/reference-dapp/src/server/*-transfer-service.ts",
+      "apps/reference-dapp/src/state/settlement-sync.ts",
+      "apps/reference-dapp/src/state/review-authorization.ts",
+      "apps/reference-dapp/src/server/nonce-conflict.ts"
     ],
     "keywords": [
       "submission",
@@ -38,7 +52,11 @@
       "privy",
       "signing",
       "observe",
-      "latency"
+      "latency",
+      "paymaster",
+      "useroperation",
+      "eip-7702",
+      "sponsorship"
     ]
   },
   "capabilities": [
@@ -77,10 +95,34 @@
       "reviewedAt": "2026-11-01",
       "crossCheckedAgainst": [],
       "notes": "Transaction lifecycle and expiry on Solana."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/EIPs/bbc3f95844c37612a2f1b9e7477990bb717ecfa0/EIPS/eip-7702.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "bbc3f95844c37612a2f1b9e7477990bb717ecfa0",
+      "reviewedDigest": "sha256:3d46953e13ebc7ebe229971b301ede853aad6e29f4faf4db1eb9a2085accde1b",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "Delegation designator and chain/nonce authorization. FloFi eligibility remains runtime-gated."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ethereum/ERCs/c8d8c2107f63c996fe8b60af20081d4d911e1f9d/ERCS/erc-4337.md",
+      "publisher": "Ethereum Improvement Proposals",
+      "kind": "OFFICIAL_DOCS",
+      "license": "CC0-1.0",
+      "status": "VERIFIED",
+      "reviewedRevision": "c8d8c2107f63c996fe8b60af20081d4d911e1f9d",
+      "reviewedDigest": "sha256:ea89a628d9340a1478e3e634e092480c42776b56362140092e612dbaac4b575a",
+      "reviewedAt": "2026-11-18",
+      "crossCheckedAgainst": [],
+      "notes": "UserOperation and paymaster roles. The specification does not establish FloFi support."
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:e2b37314482e3c0fe27f99e9721515f5db7760b86c4f0541f7db999aff719023",
+  "guidanceDigest": "sha256:8d7c2f3af7f9b890d2470bf43387a01a8a8bf8d08a580aad20674bb44faa2a24",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

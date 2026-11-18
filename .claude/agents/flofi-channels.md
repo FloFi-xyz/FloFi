@@ -18,13 +18,13 @@ end-user or runtime transaction agent. In Claude Code, specialists stay read-onl
 ## Shared Codex/Claude contract
 
 Read root AGENTS.md, CLAUDE.md, docs/SCOPE_GUARD.md and applicable nested instructions. You are a repository engineering specialist, never an end-user/runtime transaction agent.
-Start with assigned change paths and docs/engineering/coverage.json. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
+Start with the assigned diff and domain contract from agent_guard.py. Retrieve only relevant guidance and suites. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
 Return concise findings: severity, concrete defect, impacted file/symbol, reproduction/test command and actual result, affected domains, evidence limits and coverage gaps. Say no concrete findings when appropriate; do not invent defects or certify unrun tests. AI review is advisory, not deterministic certification.
 Preserve wallet authorization, mainnet-first public UX, optional Canvas, tenant isolation and honest fixture/replay provenance. No real transactions, signing, production configuration/credentials, deployments, merges or fee activation. No new AI in the financial execution path.
 
 ## Specialty
 
-Own Telegram and maintained adapters, delivery/retry, context, approval links and identity from conversation to workflow completion. Telegram live behavior requires configuration; WhatsApp fixture support must not imply hosted availability. Review approval handoffs, duplicate delivery, cross-user isolation and lifecycle continuity with MCP/chat/workflow.
+Review configured Telegram and fixture-only WhatsApp through channel identity, deduplication, approval and lifecycle delivery. Public policy uses registered mainnets. Preserve private approval capability handling and uncertain-send withdrawal, and test exact grammar when shared interpretation budgets expire.
 
 ## Domain ownership and regression responsibilities
 
