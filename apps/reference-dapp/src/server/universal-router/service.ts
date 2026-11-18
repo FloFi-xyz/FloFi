@@ -399,8 +399,16 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     });
   }
   /** One delivery (or refund) transaction belongs to exactly one run: two identical bridges never reconcile against the same fill. */
-  const claimSettlementTx = (kind: 'delivery' | 'refund', hash: string, id: string) =>
-    solanaTransactionClaim(input.storage, `${kind}-${hash.replace(/^0x/, '')}.xuni-settlement`, id, 'UNIVERSAL_SETTLEMENT_CLAIMED_BY_ANOTHER_RUN');
+  const claimSettlementTx = (kind: 'delivery' | 'refund', hash: string, id: string) => {
+    const name = hash.replace(/^0x/, '') + '.xuni-settlement';
+    const refusal = 'UNIVERSAL_SETTLEMENT_CLAIMED_BY_ANOTHER_RUN';
+    return input.storage.leases.hold('settlement-' + name, async () => {
+      // Read the original claim keys under one lease so an older delivery
+      // cannot be claimed again as a refund, or vice versa.
+      if (await input.storage.log.read(`${kind === 'delivery' ? 'refund' : 'delivery'}-${name}`) !== null) fail(refusal);
+      return solanaTransactionClaim(input.storage, `${kind}-${name}`, id, refusal);
+    });
+  };
 
   // --- EVM attempts -----------------------------------------------------------------------------------------------------
   async function assertRequestFees(review: UniversalReview, tx: EvmTx, rpc: Rpc, d: UniversalEvmDeployment, at: string, invalid: (code: string) => Promise<never>) {
@@ -704,19 +712,23 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   }
   const sameHint = (a: ProviderStatusHint | null, b: ProviderStatusHint | null) => canonical(a && { ...a, rawHash: null }) === canonical(b && { ...b, rawHash: null });
   type Credit = { ok: true; delivery: Omit<DestinationDelivery, 'discoveredBy' | 'final'>; final: boolean } | { ok: false; reason: string };
-  async function verifyCredit(chain: string, hash: string, recipient: string, token: UniversalToken, minimum: bigint, orderId: string): Promise<Credit> {
+  async function verifyCredit(chain: string, hash: string, recipient: string, token: UniversalToken, minimum: bigint, order: UniversalRoute['order'],
+    allowSettlementExecutor = false): Promise<Credit> {
     const network = universalNetworkOfChain(chain)!;
     if (network.ecosystem === 'EVM') {
       if (!/^0x[0-9a-f]{64}$/.test(hash)) return { ok: false, reason: 'INVALID_HASH' };
-      const { rpc } = evmOf(chain), check = await evm.verifyEvmCredit(rpc, { hash, recipient, token: token.address, minimum, orderId });
+      const { d, rpc } = evmOf(chain), check = await evm.verifyEvmCredit(rpc, { hash, chainId: d.chainId, recipient, token: token.address, minimum, orderId: order.orderId,
+        nativeAuthority: { solver: order.solver, ...allowSettlementExecutor && d.relaySettlement ? { settlement: d.relaySettlement } : {} } });
       if (!check.ok) return { ok: false, reason: check.reason };
       const safe = await evm.evmSafeHead(rpc);
+      const canonical = await rpc('eth_getBlockByNumber', [evm.tag(check.blockNumber), false]);
+      if (!isObject(canonical) || evm.hex(canonical.hash) !== check.blockHash) return { ok: false, reason: 'NOT_CANONICAL' };
       return { ok: true, final: check.blockNumber <= safe, delivery: { chainId: chain, transactionHash: hash, position: { kind: 'BLOCK', height: check.blockNumber },
         blockHash: check.blockHash, timestamp: check.timestamp, recipient, token: token.address ?? 'native', amount: check.amount.toString(), orderBound: check.orderBound,
         contentHash: check.contentHash } };
     }
     if (!/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(hash)) return { ok: false, reason: 'INVALID_HASH' };
-    const check = await sol.verifySolanaCredit(input.solanaRpc, { signature: hash, recipient, mint: token.address, minimum, orderId });
+    const check = await sol.verifySolanaCredit(input.solanaRpc, { signature: hash, recipient, mint: token.address, minimum, orderId: order.orderId });
     if (!check.ok) return { ok: false, reason: check.reason };
     return { ok: true, final: true, delivery: { chainId: chain, transactionHash: hash, position: { kind: 'SLOT', height: check.slot }, blockHash: null, timestamp: check.timestamp,
       recipient, token: token.address ?? 'native', amount: check.amount.toString(), orderBound: check.orderBound, contentHash: check.contentHash } };
@@ -728,34 +740,56 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   };
   async function findDelivery(record: UniversalRecord, h: ProviderStatusHint): Promise<{ delivery: DestinationDelivery } | { divergent: string } | { waiting: string }> {
     const route = record.review.route;
-    let waiting = 'UNIVERSAL_DESTINATION_PENDING';
+    let waiting: string | null = null, divergent: string | null = null;
     for (const hash of h.destinationTxHashes) {
-      const check = await verifyCredit(route.destinationChain, hash, route.recipient, route.outputToken, BigInt(route.minimumOutput), route.order.orderId);
+      const check = await verifyCredit(route.destinationChain, hash, route.recipient, route.outputToken, BigInt(route.minimumOutput), route.order, true);
       if (check.ok) {
-        try { await claimSettlementTx('delivery', hash, record.id); } catch { return { divergent: 'UNIVERSAL_DELIVERY_CLAIMED_BY_ANOTHER_RUN' }; }
+        try { await claimSettlementTx('delivery', hash, record.id); }
+        catch (cause) {
+          if (!(cause instanceof Error) || cause.message !== 'UNIVERSAL_SETTLEMENT_CLAIMED_BY_ANOTHER_RUN') throw cause;
+          divergent = 'UNIVERSAL_DELIVERY_CLAIMED_BY_ANOTHER_RUN';
+          continue;
+        }
         return { delivery: { ...check.delivery, discoveredBy: 'PROVIDER_HINT', final: check.final } };
       }
-      if (check.reason === 'BELOW_MINIMUM') return { divergent: 'UNIVERSAL_DELIVERY_BELOW_MINIMUM' };
-      if (check.reason === 'NO_CREDIT' || check.reason === 'REVERTED') return { divergent: 'UNIVERSAL_DELIVERY_RECIPIENT_MISMATCH' };
-      waiting = check.reason === 'UNVERIFIABLE_NATIVE' ? 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE' : 'UNIVERSAL_DELIVERY_AWAITING_FINALITY';
+      if (check.reason === 'BELOW_MINIMUM') divergent ??= 'UNIVERSAL_DELIVERY_BELOW_MINIMUM';
+      else if (check.reason === 'NO_CREDIT') divergent ??= 'UNIVERSAL_DELIVERY_RECIPIENT_MISMATCH';
+      else if (check.reason === 'UNVERIFIABLE_NATIVE') waiting = 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE';
+      else if (check.reason === 'UNBOUND_NATIVE') waiting ??= 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND';
+      else if (check.reason === 'NOT_CANONICAL') waiting ??= 'UNIVERSAL_DESTINATION_PENDING';
     }
-    return { waiting };
+    if (waiting) return { waiting };
+    return divergent ? { divergent } : { waiting: 'UNIVERSAL_DESTINATION_PENDING' };
   }
   /** A refund verified on chain: the order allows refunds to the owner on the source chain (input token) or to the recipient on the destination chain. */
   async function findRefund(record: UniversalRecord, h: ProviderStatusHint): Promise<UniversalRecord['refund']> {
     const route = record.review.route;
     // Review P1: an order paid in native ETH after the owner's own unwrap is refunded in what was paid (native), never in the wrapped token.
-    const candidates: (readonly [string, string, UniversalToken])[] = [...route.source.ecosystem === 'EVM' && route.source.unwrap
-      ? [[route.sourceChain, route.depositor, sourceNative(route.sourceChain)] as const] : [], [route.sourceChain, route.depositor, route.inputToken],
+    const paidIn = route.source.ecosystem === 'EVM' && route.source.unwrap ? sourceNative(route.sourceChain) : route.inputToken;
+    const candidates: (readonly [string, string, UniversalToken])[] = [[route.sourceChain, route.depositor, paidIn],
       [route.destinationChain, route.recipient, route.outputToken]];
+    const orderInputs = route.order.orderData.inputs, orderInput = Array.isArray(orderInputs) ? orderInputs[0] : null;
+    const refunds: unknown[] = isObject(orderInput) && Array.isArray(orderInput.refunds) ? orderInput.refunds : [];
     for (const hash of h.refundTxHashes) {
       for (const [chain, recipient, token] of candidates) {
         const network = universalNetworkOfChain(chain)!;
+        // A native transfer to the reviewed destination can look identical
+        // to a fill. Until the trace or a contract event asserts refund
+        // intent, a mutable provider label cannot distinguish them.
+        if (chain === route.destinationChain && token.kind === 'NATIVE' && network.ecosystem === 'EVM') continue;
         if (network.ecosystem === 'EVM' ? !/^0x[0-9a-f]{64}$/.test(hash) : !/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(hash)) continue;
+        const committed = refunds.filter(r => isObject(r) && r.chainId === network.providers.relay.slug);
+        if (!committed.length) continue;
+        const minimum = committed.reduce<bigint>((bound, r) => isObject(r) && typeof r.minimumAmount === 'string' && /^\d{1,78}$/.test(r.minimumAmount)
+          && BigInt(r.minimumAmount) > bound ? BigInt(r.minimumAmount) : bound, 1n);
         let check: Credit;
-        try { check = await verifyCredit(chain, hash, recipient, token, 1n, route.order.orderId); } catch { continue; }
-        if (check.ok && check.final) {
-          await claimSettlementTx('refund', hash, record.id);
+        try { check = await verifyCredit(chain, hash, recipient, token, minimum, route.order); } catch { continue; }
+        if (check.ok && check.final && check.delivery.orderBound) {
+          try { await claimSettlementTx('refund', hash, record.id); }
+          catch (cause) {
+            if (cause instanceof Error && cause.message === 'UNIVERSAL_SETTLEMENT_CLAIMED_BY_ANOTHER_RUN') continue;
+            throw cause;
+          }
           return { chainId: chain, transactionHash: hash, recipient, token: token.address ?? 'native', amount: check.delivery.amount };
         }
       }
@@ -764,11 +798,12 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   }
   async function sourceFinal(record: UniversalRecord): Promise<boolean | 'REORGANIZED'> {
     const s = record.source!;
-    if (s.final) return true;
-    const { rpc } = evmOf(s.chainId), safe = await evm.evmSafeHead(rpc);
-    if (s.position.height > safe) return false;
+    if (s.position.kind !== 'BLOCK') return s.final;
+    const { rpc } = evmOf(s.chainId);
+    if (!s.final && s.position.height > await evm.evmSafeHead(rpc)) return false;
     const block = await rpc('eth_getBlockByNumber', [evm.tag(s.position.height), false]);
-    return isObject(block) && evm.hex((block as Record<string, unknown>).hash) === s.blockHash ? true : 'REORGANIZED';
+    if (!isObject(block)) fail('UNIVERSAL_RPC_INVALID');
+    return evm.hex((block as Record<string, unknown>).hash) === s.blockHash ? true : 'REORGANIZED';
   }
   async function observeSettlement(record0: UniversalRecord): Promise<UniversalRecord> {
     let record = record0;
@@ -777,15 +812,18 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     if (finality && !record.source!.final) record = { ...record, source: { ...record.source!, final: true } };
     if (record.phase === 'SOURCE_CONFIRMED' && record.source!.final) record = transition(record, 'IN_FLIGHT');
     if (!record.destination) {
-      const h = await hint(record);
+      const fresh = await hint(record);
+      const h = !fresh || ['UNKNOWN', 'NOT_FOUND'].includes(fresh.status) && ['FILLED', 'REFUNDED'].includes(record.lastHint?.status ?? '')
+        ? record.lastHint ?? fresh : fresh;
       if (h && !sameHint(h, record.lastHint)) record = { ...record, lastHint: h };
+      const late = now().getTime() - Date.parse(record.source!.confirmedAt) > D.deliveryAttentionSeconds * 1000;
       if (h?.status === 'FILLED') {
         const found = await findDelivery(record, h);
         if ('divergent' in found) return save(divergent(record, found.divergent));
         if ('delivery' in found) record = await save({ ...transition(record, 'DESTINATION_OBSERVED'), destination: found.delivery, received: found.delivery.amount, error: null });
-        else return save({ ...record, error: found.waiting });
+        else return save({ ...late ? transition(record, 'RECOVERY_REQUIRED') : record, error: found.waiting });
       } else if (h?.status === 'REFUNDED') {
-        const refund = await findRefund(record, h);
+        const refund = record.source!.final ? await findRefund(record, h) : null;
         // Recovery is recorded before the refund, so the history shows the run left the normal settlement path first.
         if (record.phase !== 'RECOVERY_REQUIRED') record = await save({ ...transition(record, 'RECOVERY_REQUIRED'), error: 'UNIVERSAL_REFUND_NOT_OBSERVED' });
         if (refund) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', refund, error: null,
@@ -793,21 +831,19 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         return save({ ...record, error: 'UNIVERSAL_REFUND_NOT_OBSERVED' });
       } else {
         // No delivery yet: past the attention window (or a provider failure report) the run needs attention; it keeps observing and verifies a late fill or a refund.
-        const late = now().getTime() - Date.parse(record.source!.confirmedAt) > D.deliveryAttentionSeconds * 1000;
         if ((late || h?.status === 'FAILED') && record.phase !== 'RECOVERY_REQUIRED')
           return save({ ...transition(record, 'RECOVERY_REQUIRED'), error: h?.status === 'FAILED' ? 'UNIVERSAL_PROVIDER_REPORTED_FAILURE_REFUND_EXPECTED' : 'UNIVERSAL_DELIVERY_DELAYED' });
         return save({ ...record, error: h?.status === 'DELAYED' ? 'UNIVERSAL_DELIVERY_DELAYED' : record.phase === 'RECOVERY_REQUIRED' ? record.error : 'UNIVERSAL_DESTINATION_PENDING' });
       }
     }
-    if (record.destination && !record.destination.final) {
+    if (record.destination) {
       const d = record.destination;
       if (d.position.kind === 'BLOCK') {
-        const { rpc } = evmOf(d.chainId), safe = await evm.evmSafeHead(rpc);
-        if (d.position.height <= safe) {
-          const block = await rpc('eth_getBlockByNumber', [evm.tag(d.position.height), false]);
-          if (!isObject(block) || evm.hex((block as Record<string, unknown>).hash) !== d.blockHash) return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
-          record = { ...record, destination: { ...d, final: true } };
-        }
+        const { rpc } = evmOf(d.chainId);
+        const block = await rpc('eth_getBlockByNumber', [evm.tag(d.position.height), false]);
+        if (!isObject(block)) fail('UNIVERSAL_RPC_INVALID');
+        if (evm.hex((block as Record<string, unknown>).hash) !== d.blockHash) return save(divergent(record, 'UNIVERSAL_DESTINATION_REORGANIZED'));
+        if (!d.final && d.position.height <= await evm.evmSafeHead(rpc)) record = { ...record, destination: { ...d, final: true } };
       }
     }
     if (record.source!.final && record.destination?.final) {

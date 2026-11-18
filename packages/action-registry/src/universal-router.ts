@@ -22,7 +22,8 @@ import { JUPITER_SOLANA_MAINNET } from './jupiter-solana.js';
 export type UniversalEvmDeployment = { readonly chain: string; readonly chainId: number; readonly chainHex: string; readonly rpc: string; readonly explorer: string;
   /** OP Stack source: receipts carry an L1 data fee bounded through the GasPriceOracle. */ readonly l1DataFee: boolean;
   /** Arbitrum Nitro source: gas limits include L1 posting gas (folded into gasUsed). */ readonly nitro: boolean;
-  readonly relayDepository: string; readonly relayDepositoryCodeSha256: string };
+  readonly relayDepository: string; readonly relayDepositoryCodeSha256: string;
+  readonly relaySettlement?: { readonly router: string; readonly executors: readonly string[] } };
 export type UniversalSolanaDeployment = { readonly chain: string; readonly cluster: 'mainnet-beta'; readonly walletChain: 'solana:mainnet'; readonly genesisHash: string;
   readonly rpc: string; readonly explorer: string;
   readonly relayProgram: string; readonly relayProgramData: string; readonly relayUpgradeAuthority: string; readonly relayDeploymentSlot: number;
@@ -39,13 +40,21 @@ export type UniversalRouterDeployment = {
   /** No delivery after this long past the source confirmation: the run needs attention (it keeps observing; refunds are verified). */
   readonly deliveryAttentionSeconds: number;
 };
-const evm = (chain: string, chainId: number, rpc: string, explorer: string, codeSha256: string, flags: { l1DataFee?: boolean; nitro?: boolean } = {}): UniversalEvmDeployment =>
+const evm = (chain: string, chainId: number, rpc: string, explorer: string, codeSha256: string,
+  flags: { l1DataFee?: boolean; nitro?: boolean; relaySettlement?: UniversalEvmDeployment['relaySettlement'] } = {}): UniversalEvmDeployment =>
   Object.freeze({ chain, chainId, chainHex: '0x' + chainId.toString(16), rpc, explorer, l1DataFee: flags.l1DataFee === true, nitro: flags.nitro === true,
+    ...flags.relaySettlement ? { relaySettlement: flags.relaySettlement } : {},
     relayDepository: '0x4cd00e387622c35bddb9b4c962c136462338bc31', relayDepositoryCodeSha256: codeSha256 });
 export const UNIVERSAL_ROUTER_DEPLOYMENT: UniversalRouterDeployment = Object.freeze({
   adapterId: 'flofi.router.universal', protocol: 'relay-depository', environment: 'MAINNET',
   evm: Object.freeze({
-    'eip155:8453': evm('eip155:8453', 8453, 'https://mainnet.base.org', 'https://basescan.org/', 'e1aba2f59c0b4f5838d6f283db6e09631ef58f558107b7d42000c7f1252d1eda', { l1DataFee: true }),
+    'eip155:8453': evm('eip155:8453', 8453, 'https://mainnet.base.org', 'https://basescan.org/', 'e1aba2f59c0b4f5838d6f283db6e09631ef58f558107b7d42000c7f1252d1eda', {
+      l1DataFee: true,
+      // Relay GET /chains, Base solverAddresses and RelayRouter v3.2,
+      // checked against the incident's canonical transaction (2026-11-18).
+      relaySettlement: Object.freeze({ router: '0x0729e2a4716d9f7dd17858d5d504426d228697f7',
+        executors: Object.freeze(['0x6d0a66df5f4a32be3656f63750e0253eb59d9399']) }),
+    }),
     'eip155:42161': evm('eip155:42161', 42161, ARBITRUM_ONE.rpc, ARBITRUM_ONE.explorer, 'd78b7a01ce1c25dd2bb1d845c10f28acc520fac31ddf81c79eefce888a4a385f', { nitro: true }),
     'eip155:1': evm('eip155:1', 1, ETHEREUM_MAINNET.rpc, 'https://etherscan.io/', '9c1545d18e0f4e037338d9c0c50b360f9312868a866ace22d5310de968e6ae97'),
     // Robinhood Chain (Arbitrum Orbit) is priced exactly as the existing Robinhood routes are: no OP Stack L1 fee, gasUsed folds in L1 data gas.

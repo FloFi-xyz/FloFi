@@ -160,28 +160,97 @@ export async function evmCanonicalReceipt(rpc: Rpc, hash: string): Promise<(Reco
   const block = await rpc('eth_getBlockByNumber', [tag(Number(quantity(r.blockNumber))), false]);
   if (!isObject(block)) return null;
   const b = block as Record<string, unknown>;
-  if (hex(b.hash) !== blockHash || !Array.isArray(b.transactions) || !(b.transactions as unknown[]).some(e => String(isObject(e) ? (e as Record<string, unknown>).hash : e).toLowerCase() === hash))
-    return null;
+  if (!HASH.test(blockHash) || hex(b.hash) !== blockHash || !Array.isArray(b.transactions)) return null;
+  const position = r.transactionIndex === undefined ? null : Number(quantity(r.transactionIndex));
+  const hashes = b.transactions.map(e => String(isObject(e) ? e.hash : e).toLowerCase());
+  if (position === null ? !hashes.includes(hash) : hashes[position] !== hash) return null;
   return { ...r, timestamp: Number(quantity(b.timestamp)) };
 }
 
 export type DeliveryCheck = { ok: true; amount: bigint; blockNumber: number; blockHash: string; timestamp: number; orderBound: boolean; contentHash: string }
-  | { ok: false; reason: 'NOT_CANONICAL' | 'REVERTED' | 'NO_CREDIT' | 'BELOW_MINIMUM' | 'UNVERIFIABLE_NATIVE' };
+  | { ok: false; reason: 'NOT_CANONICAL' | 'REVERTED' | 'NO_CREDIT' | 'BELOW_MINIMUM' | 'UNVERIFIABLE_NATIVE' | 'UNBOUND_NATIVE' };
+
+type NativeMovement = { path: string; kind: 'call' | 'create' | 'suicide'; from: string; to: string; value: string };
+type TraceFrame = { path: number[]; children: number; reverted: boolean; movement: NativeMovement | null };
+const traceQuantity = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(value)
+  ? BigInt(value) : fail('UNIVERSAL_TRACE_INVALID');
+
+/** Validate complete, block-bound Parity-style traces before using any movement. */
+function nativeMovements(raw: unknown, tx: Record<string, unknown>, receipt: Record<string, unknown>): NativeMovement[] {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 2_048) return fail('UNIVERSAL_TRACE_INVALID');
+  const frames = new Map<string, TraceFrame>();
+  for (const entry of raw) {
+    if (!isObject(entry) || hex(entry.transactionHash) !== hex(tx.hash) || hex(entry.blockHash) !== hex(receipt.blockHash)
+        || entry.blockNumber !== Number(quantity(receipt.blockNumber)) || entry.transactionPosition !== Number(quantity(receipt.transactionIndex))
+        || !Array.isArray(entry.traceAddress) || entry.traceAddress.length > 64
+        || entry.traceAddress.some(index => !Number.isSafeInteger(index) || index < 0 || index >= raw.length)
+        || typeof entry.subtraces !== 'number' || !Number.isSafeInteger(entry.subtraces) || entry.subtraces < 0 || entry.subtraces >= raw.length
+        || !isObject(entry.action)) return fail('UNIVERSAL_TRACE_INVALID');
+    const path: number[] = entry.traceAddress, key = path.join('.'), a = entry.action;
+    if (frames.has(key) || (entry.error !== undefined && (typeof entry.error !== 'string' || !entry.error))) return fail('UNIVERSAL_TRACE_INVALID');
+    const reverted = entry.error !== undefined;
+    let movement: NativeMovement | null = null;
+    const move = (kind: NativeMovement['kind'], fromValue: unknown, toValue: unknown, value: unknown) => {
+      const from = hex(fromValue), to = hex(toValue);
+      if (!ADDRESS.test(from) || !ADDRESS.test(to)) return fail('UNIVERSAL_TRACE_INVALID');
+      return { path: key, kind, from, to, value: traceQuantity(value).toString() };
+    };
+    if (entry.type === 'call') {
+      if (!['call', 'callcode', 'delegatecall', 'staticcall'].includes(String(a.callType))) return fail('UNIVERSAL_TRACE_INVALID');
+      if (a.callType === 'call') movement = move('call', a.from, a.to, a.value);
+    } else if (entry.type === 'create') {
+      if (!reverted && isObject(entry.result)) movement = move('create', a.from, entry.result.address, a.value);
+    } else if (entry.type === 'suicide') {
+      movement = move('suicide', a.address, a.refundAddress, a.balance);
+    } else return fail('UNIVERSAL_TRACE_INVALID');
+    if (!reverted && entry.type !== 'suicide' && !isObject(entry.result)) return fail('UNIVERSAL_TRACE_INVALID');
+    if (!path.length && (entry.type !== 'call' || !movement || reverted || movement.from !== hex(tx.from)
+        || movement.to !== hex(tx.to) || BigInt(movement.value) !== quantity(tx.value) || hex(a.input) !== hex(tx.input)))
+      return fail('UNIVERSAL_TRACE_INVALID');
+    frames.set(key, { path, children: entry.subtraces, reverted, movement });
+  }
+  const root = frames.get('');
+  if (!root) return fail('UNIVERSAL_TRACE_INVALID');
+  const queue = [{ frame: root, reverted: false }], movements: NativeMovement[] = [];
+  for (const { frame, reverted } of queue) {
+    const ignored = reverted || frame.reverted;
+    if (!ignored && frame.movement) movements.push(frame.movement);
+    for (let index = 0; index < frame.children; index++) {
+      const child = frames.get([...frame.path, index].join('.'));
+      if (!child || queue.length >= frames.size) return fail('UNIVERSAL_TRACE_INVALID');
+      queue.push({ frame: child, reverted: ignored });
+    }
+  }
+  if (queue.length !== frames.size) return fail('UNIVERSAL_TRACE_INVALID');
+  return movements;
+}
+
+type EvmCreditInput = { hash: string; chainId: number; recipient: string; token: string | null; minimum: bigint; orderId: string;
+  nativeAuthority: { solver: string; settlement?: UniversalEvmDeployment['relaySettlement'] } };
+
 /**
- * Independent proof that one destination transaction credited `recipient` with `token` (null = native). ERC-20: net Transfer logs to
- * the recipient. Native: a direct value transfer to the recipient (Relay's native fills carry the order id as calldata). Whether the
- * order id appears in the transaction's calldata or logs is recorded as an additional binding.
+ * Native fills carry the order ID as direct calldata or as a suffix on a
+ * solver/committed fill-contract call. Only successful EVM value movements
+ * in that canonical transaction count towards a recipient's net credit.
  */
-export async function verifyEvmCredit(rpc: Rpc, input: { hash: string; recipient: string; token: string | null; minimum: bigint; orderId: string }): Promise<DeliveryCheck> {
+export async function verifyEvmCredit(rpc: Rpc, input: EvmCreditInput): Promise<DeliveryCheck> {
+  if (quantity(await rpc('eth_chainId', [])) !== BigInt(input.chainId)) fail('UNIVERSAL_WRONG_CHAIN');
   const raw = await evmCanonicalReceipt(rpc, input.hash);
   if (!raw) return { ok: false, reason: 'NOT_CANONICAL' };
   if (quantity(raw.status) !== 1n) return { ok: false, reason: 'REVERTED' };
   const tx = await rpc('eth_getTransactionByHash', [input.hash]);
   if (!isObject(tx)) return { ok: false, reason: 'NOT_CANONICAL' };
-  const t = tx as Record<string, unknown>, logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as EvmLog[] : [];
-  const id = input.orderId.slice(2), orderBound = hex(t.input).includes(id) || logs.some(l => String(l.data).toLowerCase().includes(id) || l.topics.some(x => String(x).toLowerCase() === input.orderId));
+  const t = tx, blockNumber = Number(quantity(raw.blockNumber)), blockHash = hex(raw.blockHash);
+  if (hex(t.hash) !== input.hash || hex(t.blockHash) !== blockHash || quantity(t.blockNumber) !== quantity(raw.blockNumber)
+      || raw.transactionIndex !== undefined && quantity(t.transactionIndex) !== quantity(raw.transactionIndex)
+      || t.chainId !== undefined && quantity(t.chainId) !== BigInt(input.chainId)) return { ok: false, reason: 'NOT_CANONICAL' };
+  const logs = Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as EvmLog[] : [];
+  const data = hex(t.input), id = input.orderId.slice(2);
+  let orderBound = false;
   let amount = 0n;
+  let movements: NativeMovement[] | undefined;
   if (input.token) {
+    orderBound = data.includes(id) || logs.some(l => String(l.data).toLowerCase().includes(id) || l.topics?.some(x => String(x).toLowerCase() === input.orderId));
     for (const l of logs) {
       if (String(l.address).toLowerCase() !== input.token || String(l.topics?.[0]).toLowerCase() !== RELAY_TOPICS.transfer || l.topics.length !== 3) continue;
       const from = '0x' + String(l.topics[1]).slice(26).toLowerCase(), to = '0x' + String(l.topics[2]).slice(26).toLowerCase(), value = BigInt(String(l.data));
@@ -190,12 +259,37 @@ export async function verifyEvmCredit(rpc: Rpc, input: { hash: string; recipient
     }
   } else {
     const to = typeof t.to === 'string' ? t.to.toLowerCase() : null;
-    if (to !== input.recipient) return { ok: false, reason: 'UNVERIFIABLE_NATIVE' };
-    amount = quantity(t.value);
+    const from = hex(t.from);
+    const solver = from === input.nativeAuthority.solver;
+    const settlement = input.nativeAuthority.settlement;
+    // Relay contract fills put a 32-byte order id after selector and ABI words.
+    const marked = data === input.orderId || (data.length >= 74 && (data.length - 10) % 64 === 0 && data.endsWith(id));
+    const relayExecutor = settlement && to === settlement.router && settlement.executors.includes(from) && data.startsWith('0xcd6e13f7');
+    orderBound = marked && (solver || Boolean(relayExecutor));
+    if (!orderBound) return { ok: false, reason: 'UNBOUND_NATIVE' };
+    if (from === input.recipient || to === null) return { ok: false, reason: 'UNVERIFIABLE_NATIVE' };
+    // The direct solver EOA transfer can be verified without archive-trace support.
+    // With at most one 32-byte calldata word and 23k gas used, execution
+    // cannot have paid for an outgoing value call or self-destruct.
+    const direct = solver && to === input.recipient && data === input.orderId && t.type !== '0x4'
+      && quantity(raw.gasUsed) <= 23_000n && await rpc('eth_getCode', [to, { blockHash, requireCanonical: true }]).catch(() => null) === '0x';
+    if (direct) amount = quantity(t.value);
+    else {
+      try { movements = nativeMovements(await rpc('trace_transaction', [input.hash]), t, raw); }
+      catch { return { ok: false, reason: 'UNVERIFIABLE_NATIVE' }; }
+      for (const m of movements) {
+        // A contract created in this transaction can burn its own balance
+        // with SELFDESTRUCT. Raw traces alone do not assert deletion semantics.
+        if (m.kind === 'suicide' && m.from === input.recipient && m.to === input.recipient && m.value !== '0')
+          return { ok: false, reason: 'UNVERIFIABLE_NATIVE' };
+        if (m.to === input.recipient) amount += BigInt(m.value);
+        if (m.from === input.recipient) amount -= BigInt(m.value);
+      }
+    }
   }
   if (amount <= 0n) return { ok: false, reason: 'NO_CREDIT' };
   if (amount < input.minimum) return { ok: false, reason: 'BELOW_MINIMUM' };
-  return { ok: true, amount, blockNumber: Number(quantity(raw.blockNumber)), blockHash: hex(raw.blockHash), timestamp: raw.timestamp, orderBound,
-    contentHash: '0x' + sha256Hex(JSON.stringify(raw)) };
+  return { ok: true, amount, blockNumber, blockHash, timestamp: raw.timestamp, orderBound,
+    contentHash: '0x' + sha256Hex(JSON.stringify(movements ? { receipt: raw, movements } : raw)) };
 }
 export const isEvmAddress = (value: unknown): value is string => typeof value === 'string' && ADDRESS.test(value);

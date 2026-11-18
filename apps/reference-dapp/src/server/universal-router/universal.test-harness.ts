@@ -38,7 +38,7 @@ const WITHDRAWAL = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5
 export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: () => number; tokens: Record<string, number>; wrapped?: Record<string, 'WETH9' | 'MINT_BURN'> }) {
   const state = { head: 5_000, safeLag: 2, hashes: new Map<number, string>(), times: new Map<number, number>(), balances: new Map<string, bigint>(), allowances: new Map<string, bigint>(),
     native: new Map<string, bigint>(), nonces: new Map<string, number>(), pending: new Map<string, number>(), code: new Map<string, string>([[d.relayDepository, MOCK_DEPOSITORY_CODE]]),
-    receipts: new Map<string, Receipt>(), txs: new Map<string, Record<string, unknown>>(), blockTxs: new Map<number, string[]>(),
+    receipts: new Map<string, Receipt>(), txs: new Map<string, Record<string, unknown>>(), blockTxs: new Map<number, string[]>(), traces: new Map<string, unknown>(),
     snapshots: new Map<number, { nonces: Map<string, number>; balances: Map<string, bigint>; native: Map<string, bigint> }>(), gasUsed: 90_000n, baseFee: 1_000_000n,
     simulateFails: false, depositRevert: false };
   for (const token of Object.keys(options.tokens)) state.code.set(token, MOCK_TOKEN_CODE);
@@ -124,16 +124,26 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
     },
   };
   /** The solver's delivery on this chain (ERC-20 Transfer to the recipient, or a direct native transfer carrying the order id). */
-  function deliver(input: { recipient: string; token: string | null; amount: bigint; orderId: string }): string {
-    const h = '0x' + sha(`${d.chain}-fill-${++txCounter}`), solver = '0xf70da97812cb96acdf810712aa562db8dfa3dbef';
+  function deliver(input: { recipient: string; token: string | null; amount: bigint; orderId: string; via?: string; sender?: string }): string {
+    const h = '0x' + sha(`${d.chain}-fill-${++txCounter}`), solver = input.sender ?? '0xf70da97812cb96acdf810712aa562db8dfa3dbef';
     mine();
     const logs = input.token ? [{ address: input.token, topics: [TRANSFER, '0x' + addrWord(solver), '0x' + addrWord(input.recipient)], data: '0x' + word(input.amount) }] : [];
     if (input.token) state.balances.set(key(input.token, input.recipient), (state.balances.get(key(input.token, input.recipient)) ?? 0n) + input.amount);
     else state.native.set(input.recipient.toLowerCase(), (state.native.get(input.recipient.toLowerCase()) ?? 0n) + input.amount);
-    record({ hash: h, from: solver, to: input.token ? '0x251e4b432d5c69d8f4d3d31aae4ae4f3c4816fc7' : input.recipient, input: input.token ? '0x6bf15957' + input.orderId.slice(2) : input.orderId,
-      value: tagN(input.token ? 0 : Number(input.amount)), nonce: '0x1', chainId: tagN(d.chainId), blockHash: hash(state.head), blockNumber: tagN(state.head) },
-      { transactionHash: h, status: '0x1', blockNumber: tagN(state.head), blockHash: hash(state.head), from: solver, to: input.recipient, gasUsed: '0x5208', effectiveGasPrice: '0x1',
+    const to = input.via ?? (input.token ? '0x251e4b432d5c69d8f4d3d31aae4ae4f3c4816fc7' : input.recipient);
+    const data = input.via ? '0xcd6e13f7' + input.orderId.slice(2) : input.token ? '0x6bf15957' + input.orderId.slice(2) : input.orderId;
+    const value = '0x' + (input.token ? 0n : input.amount).toString(16);
+    record({ hash: h, from: solver, to, input: data,
+      value, nonce: '0x1', chainId: tagN(d.chainId), blockHash: hash(state.head), blockNumber: tagN(state.head), transactionIndex: '0x0' },
+      { transactionHash: h, status: '0x1', blockNumber: tagN(state.head), blockHash: hash(state.head), transactionIndex: '0x0', from: solver, to, gasUsed: input.via ? '0xfb99' : '0x5208', effectiveGasPrice: '0x1',
         logs: logs.map((l, i) => ({ ...l, logIndex: tagN(i), transactionHash: h })) });
+    if (!input.token) {
+      const trace = { type: 'call', transactionHash: h, blockHash: hash(state.head), blockNumber: state.head, transactionPosition: 0, result: { output: '0x' } };
+      const root = { ...trace, traceAddress: [], subtraces: input.via ? 2 : 0, action: { from: solver, to, input: data, value, callType: 'call' } };
+      state.traces.set(h, input.via ? [root,
+        { ...trace, traceAddress: [0], subtraces: 0, action: { from: to, to, input: '0x', value, callType: 'call' } },
+        { ...trace, traceAddress: [1], subtraces: 0, action: { from: to, to: input.recipient, input: '0x', value, callType: 'call' } }] : [root]);
+    }
     return h;
   }
   const rpc: Rpc = async (method, params) => {
@@ -176,6 +186,7 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
       }
       case 'eth_getTransactionReceipt': return state.receipts.get(String(p[0]).toLowerCase()) ?? null;
       case 'eth_getTransactionByHash': return state.txs.get(String(p[0]).toLowerCase()) ?? null;
+      case 'trace_transaction': return state.traces.get(String(p[0]).toLowerCase()) ?? null;
       case 'eth_getLogs': {
         const f = p[0] as { address: string; fromBlock: string; toBlock: string };
         const from = Number(BigInt(f.fromBlock)), to = Number(BigInt(f.toBlock)), out: unknown[] = [];

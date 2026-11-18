@@ -6,6 +6,7 @@ import { beginBillingSync, FinopsConflictError, FinopsSupersededError, ledgerMis
 import { configuredBillingScopes, fetchBillingEntries } from './providers.ts';
 import { investorCsv, readFinopsReport } from './report.ts';
 import { parseScenario } from './scenario.ts';
+import { isFinancialProviderId, queueFinancialSync } from './sync-store.ts';
 
 type Options = AdminHttpOptions & { readonly fetch?: typeof fetch };
 const failed = (status: number, code: string, details: Record<string, unknown> = {}) => json(status, { ok: false, code, ...details });
@@ -16,6 +17,15 @@ export async function handleFinopsImport(request: Request, options: Options = {}
   const { context, request: base } = allowed, actor = context.principal.principalId;
   const body = await readJsonObject(request);
   if (!body) return failed(400, 'FINOPS_REQUEST_INVALID');
+  if (body.action === 'queue-sync') {
+    const provider = body.provider;
+    if (provider !== 'all' && !isFinancialProviderId(provider)) return failed(400, 'FINOPS_REQUEST_INVALID');
+    try { return json(202, { ok: true, ...await queueFinancialSync(base.host, actor, provider) }); }
+    catch (error) {
+      const code = codeOf(error, 'FINOPS_SYNC_FAILED');
+      return failed(['FINOPS_SYNC_SCHEMA_REQUIRED', 'FINOPS_PROVIDER_NOT_CONFIGURED'].includes(code) ? 409 : 503, code);
+    }
+  }
   if (body.action === 'sync') {
     const env = options.env ?? process.env, scope = body.scope, filter = finopsPeriod(base.now, body);
     if (!isScopeId(scope) || !filter.valid) return failed(400, 'FINOPS_REQUEST_INVALID');

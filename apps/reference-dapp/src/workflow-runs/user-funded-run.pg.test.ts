@@ -334,13 +334,20 @@ describe('BUILD-FLOFI-UNIVERSAL-WORKFLOW-002 user-funded workflow run (PostgreSQ
       const loaded = await workflowRunContinue(h.surface, approval.approvalId, [h.evm, h.sol]);
       expect(loaded.view.workflowRun!.step).toEqual({ index: 2, count: 3 });
       expect(loaded.view.workflowRun!.run.nextAction).toBe('WAITING_FOR_RECONCILIATION');
-      h.flows.ownerExecutes('crosschain-router-testnet', h.evm.address, loaded.workflow, 'RECONCILED');
+      const bridge = h.flows.ownerExecutes('crosschain-router-testnet', h.evm.address, loaded.workflow, 'RECONCILED');
+      const fill = '0x' + '25'.repeat(32);
+      bridge.recordExtras = { verdict: 'RECONCILED', review: { workflow: loaded.workflow, intent: { destinationChain: 'eip155:421614' } },
+        destination: { transactionHash: fill, safe: true } };
       await h.drain();
       const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       expect(run).toMatchObject({ state: 'COMPLETED', mode: 'USER_FUNDED' });
-      expect((await h.store.groups(run.runId)).map(g => g.state)).toEqual(['RECONCILED', 'RECONCILED']);
-      expect((await h.store.steps(run.runId)).map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'USER_FUNDED_GROUP'],
+      const groups = await h.store.groups(run.runId), steps = await h.store.steps(run.runId);
+      expect(groups.map(g => g.state)).toEqual(['RECONCILED', 'RECONCILED']);
+      expect(steps.map(s => [s.state, s.outcome?.kind])).toEqual([['RECONCILED', 'USER_FUNDED_GROUP'], ['RECONCILED', 'USER_FUNDED_GROUP'],
         ['RECONCILED', 'OWNER_RUN']]);
+      const transactions = [{ chain: BASE_SEPOLIA, hash: bridge.attempts[0]!.transactionHash }, { chain: 'eip155:421614', hash: fill }];
+      expect(steps[2]!.outcome?.transactions).toEqual(transactions);
+      expect(groups[1]!.outcome?.transactions).toEqual(transactions);
     } finally { await t.drop(); }
   });
 

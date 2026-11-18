@@ -14,7 +14,7 @@ import { activateRetention, applyRetention, completePrivacyRequest, decidePrivac
  * FLOFI_ADMIN_SESSION_SECRET in the operator's environment and never print it.
  */
 export const ADMIN_COMMANDS = ['grant', 'revoke', 'list', 'end-sessions', 'audit', 'index', 'retention-report', 'retention-activate', 'retention-revoke', 'retention-apply',
-  'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate'] as const;
+  'legal-hold', 'legal-hold-release', 'privacy-request', 'privacy-decide', 'privacy-access', 'privacy-erase', 'privacy-complete', 'finops-migrate', 'finops-sync-migrate'] as const;
 /** What the privacy commands need from the process, injected so tests never touch stdin or the environment. */
 export type AdminCommandIo = { readonly env: Readonly<Record<string, string | undefined>>; readonly adminKey: () => Buffer; readonly wallet: () => Promise<string>;
   readonly now: () => Date };
@@ -51,13 +51,23 @@ export async function runAdminCommand(command: AdminCommand, values: Readonly<Re
     case 'audit': return { events: await store.recentAudit(limitOf(flag('limit'), 50, 200)) };
     // Reads run logs and writes only the derived analytics cache; never touches an execution.
     case 'index': return { index: await indexRunFacts(db, tenantId, { limit: limitOf(flag('limit'), 2_000, 50_000), budgetMs: 10 * 60_000 }) };
-    case 'finops-migrate': {
-      const identity = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.find(item => item.name === 'finops_ledger');
-      if (!identity) throw new Error('FINOPS_MIGRATION_NOT_CERTIFIED');
-      const sql = await readFile(new URL('../../../../packages/cloud-runtime/test/fixtures/0029_finops_ledger.sql', import.meta.url), 'utf8');
-      if (createHash('sha256').update(sql).digest('hex') !== identity.sha256) throw new Error('FINOPS_MIGRATION_DIGEST_MISMATCH');
+    case 'finops-migrate':
+    case 'finops-sync-migrate': {
+      const activateSync = command === 'finops-sync-migrate';
+      const target = await db.query<{ version: number }>('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1');
+      if (activateSync && (target.rows[0]?.version ?? 0) < 29) throw new Error('FINOPS_LEDGER_NOT_MIGRATED');
       const migrations = await loadMigrations();
-      return { applied: await migrate(db, [...migrations, { ...identity, sql }]) };
+      // The 0029-only command verifies a newer certified schema and leaves it alone.
+      if (!activateSync && (target.rows[0]?.version ?? 0) > 29) return { applied: await migrate(db, migrations) };
+      const identities = CERTIFIED_FORWARD_MIGRATIONS.find(item => item.base.version === 28)?.migrations.slice(0, activateSync ? 2 : 1);
+      if (identities?.length !== (activateSync ? 2 : 1)) throw new Error('FINOPS_MIGRATION_NOT_CERTIFIED');
+      const migrationsToApply = await Promise.all(identities.map(async identity => {
+        const filename = String(identity.version).padStart(4, '0') + '_' + identity.name + '.sql';
+        const sql = await readFile(new URL('../../../../packages/cloud-runtime/test/fixtures/' + filename, import.meta.url), 'utf8');
+        if (createHash('sha256').update(sql).digest('hex') !== identity.sha256) throw new Error('FINOPS_MIGRATION_DIGEST_MISMATCH');
+        return { ...identity, sql };
+      }));
+      return { applied: await migrate(db, [...migrations, ...migrationsToApply]) };
     }
     // Read-only dry run: nothing is deleted.
     case 'retention-report': return { report: await retentionReport(db, tenantId, io.env, io.now()) };

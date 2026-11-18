@@ -54,6 +54,21 @@ it('rejects a wrong-chain fallback before any balance or receipt read', async ()
   await expect(rpc('eth_getTransactionReceipt', ['hash'])).rejects.toThrow('WRONG_PROVIDER_CHAIN');
   expect(wrong.mock.calls).toEqual([['eth_chainId', []]]);
 });
+it.each(['PUBLIC_RPC_RESPONSE_INVALID', null])('finds a trace-capable configured read path without switching ordinary reads (%s)', async unavailable => {
+  const primary = vi.fn(async (method: string) => {
+    if (method === 'trace_transaction') {
+      if (unavailable) throw Error(unavailable);
+      return null;
+    }
+    return method === 'eth_chainId' ? '0x2105' : '0x32';
+  });
+  const fallback = vi.fn(async (method: string) => method === 'eth_chainId' ? '0x2105' : [{ traceAddress: [] }]);
+  const rpc = failoverReadRpc([primary, fallback], 8453);
+  expect(await rpc('trace_transaction', ['hash'])).toEqual([{ traceAddress: [] }]);
+  expect(await rpc('eth_blockNumber', [])).toBe('0x32');
+  expect(await rpc('trace_transaction', ['hash'])).toEqual([{ traceAddress: [] }]);
+  expect(primary.mock.calls.filter(([method]) => method === 'trace_transaction')).toHaveLength(1);
+});
 it('uses existing server-side provider credentials and validates bounded HTTPS fallbacks without exposing them', () => {
   const urls = bridgeRpcUrls(8453, 'https://mainnet.base.org', { GRYLOO_ALCHEMY_API_KEY: 'fixture', GRYLOO_BASE_FALLBACK_RPC_URLS: 'https://base-rpc.publicnode.com' });
   expect(urls).toHaveLength(3);

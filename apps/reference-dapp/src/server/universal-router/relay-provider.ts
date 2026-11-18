@@ -193,8 +193,8 @@ export function normalizeRelayStatus(raw: unknown): ProviderStatusHint {
   if (refused) return { source: 'relay.status', status: refused.status === 404 ? 'NOT_FOUND' : 'UNKNOWN', sourceTxHashes: [], destinationTxHashes: [], refundTxHashes: [],
     failReason: null, rawHash: rawHash(raw) };
   const v = rec(raw, 'RELAY_STATUS_INVALID');
-  const hashes = (x: unknown) => Array.isArray(x) ? x.filter((h): h is string => typeof h === 'string' && /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/.test(h)).slice(0, 8)
-    .map(h => h.startsWith('0x') ? h.toLowerCase() : h) : [];
+  const hashes = (x: unknown) => Array.isArray(x) ? [...new Set(x.filter((h): h is string => typeof h === 'string'
+    && /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{64,90})$/.test(h)).map(h => h.startsWith('0x') ? h.toLowerCase() : h))].slice(0, 8) : [];
   const s = String(v.status ?? '');
   const status: ProviderStatus = s === 'success' ? 'FILLED' : s === 'refund' || s === 'refunded' ? 'REFUNDED' : s === 'failure' ? 'FAILED' : s === 'delayed' ? 'DELAYED'
     : s === 'waiting' ? 'WAITING' : s === 'pending' || s === 'submitted' ? 'PENDING' : 'UNKNOWN';

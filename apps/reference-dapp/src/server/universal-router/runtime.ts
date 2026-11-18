@@ -30,7 +30,7 @@ export function universalRouterMode(env: Env): UniversalRouterMode {
 }
 export const universalOwnerExecutionEnabled = (mode: 'live' | 'harness', env: Env) => mode === 'harness' || env.GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED';
 export const UNIVERSAL_EVM_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_getBalance',
-  'eth_getTransactionCount', 'eth_maxPriorityFeePerGas', 'eth_gasPrice', 'eth_estimateGas', 'eth_simulateV1', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getLogs']);
+  'eth_getTransactionCount', 'eth_maxPriorityFeePerGas', 'eth_gasPrice', 'eth_estimateGas', 'eth_simulateV1', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getLogs', 'trace_transaction']);
 export type UniversalRouterTransport = { readonly evmRpcs: Readonly<Record<string, Rpc>>; readonly solanaRpc: SolanaRpc; readonly http: UniversalHttp;
   readonly apis: { readonly relay?: string; readonly lifi?: string; readonly mayan?: string; readonly across?: string } };
 export type UniversalRouterRuntime = UniversalRouterTransport & { readonly provenance: UniversalProvenance; readonly executionEnabled: boolean;

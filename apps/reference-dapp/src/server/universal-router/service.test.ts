@@ -59,7 +59,7 @@ async function setup(options: { executionEnabled?: boolean; extraTokens?: Record
     symbol: (chainId, c) => c === '11111111111111111111111111111111' ? 'SOL' : c === '0x0000000000000000000000000000000000000000' ? 'ETH' : isWeth(c) ? 'WETH' : c === USDC.robinhood ? 'USDG' : 'USDC',
     ...options.wethPaidInNative ? { paidInNative: (_chainId: number, currency: string) => isWeth(currency) } : {} });
   const dir = await mkdtemp(join(tmpdir(), 'flofi-universal-'));
-  const service = createUniversalRouterService({ storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), evmRpcs: Object.fromEntries(Object.entries(evm).map(([c, m]) => [c, m.rpc])),
+  const restart = () => createUniversalRouterService({ storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), evmRpcs: Object.fromEntries(Object.entries(evm).map(([c, m]) => [c, m.rpc])),
     solanaRpc: solana.rpc, providers: { relay: createRelayProvider({ http: relayMock.http }) }, provenance: 'MOCKED', executionEnabled: options.executionEnabled ?? true,
     now: () => new Date(clock), mockedDeployment: D });
   const wallet = solanaTestWallet();
@@ -71,7 +71,7 @@ async function setup(options: { executionEnabled?: boolean; extraTokens?: Record
     if (options.wethPaidInNative) for (const t of Object.keys(weth(chain))) m.setToken(t, EVM_OWNER, 10n ** 16n);
   }
   const chainOf = (key: UniversalNetworkKey) => evm[UNIVERSAL_NETWORKS[key].chain]!;
-  return { service, evm, solana, relayMock, wallet, chainOf, storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), tick: (ms: number) => { clock += ms; }, now };
+  return { service: restart(), restart, evm, solana, relayMock, wallet, chainOf, storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), tick: (ms: number) => { clock += ms; }, now };
 }
 type Ctx = Awaited<ReturnType<typeof setup>>;
 async function reviewed(c: Ctx, w: SemanticWorkflow, owner: string, destinationWallet?: string) {
@@ -117,6 +117,92 @@ function financialView(record: UniversalRecord) {
   const progress = projectExecutionLifecycle(record.workflow as unknown as Workflow, createBaseSepoliaReviewContext(), source);
   return { progress, evidence: projectExecutionEvidence(source, progress) };
 }
+
+describe('native contract settlement', () => {
+  const relayRouter = '0x0729e2a4716d9f7dd17858d5d504426d228697f7';
+  const relayExecutor = '0x6d0a66df5f4a32be3656f63750e0253eb59d9399';
+  async function inFlight(code = '0xef0100' + '63'.repeat(20)) {
+    const c = await setup(), base = c.chainOf('base'), source = c.chainOf('arbitrum-one');
+    base.state.code.set(EVM_OWNER, code);
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS['arbitrum-one'].chain, destinationChain: UNIVERSAL_NETWORKS.base.chain,
+      inputAsset: native('arbitrum-one'), outputAsset: native('base'), amount: '500000000000000', recipient: 'CONNECTED_OWNER' });
+    const run = await reviewed(c, w, EVM_OWNER);
+    const confirmed = await executeEvm(c, source, run.id, w);
+    return { c, base, source, confirmed, route: confirmed.review.route };
+  }
+
+  it('recovers a persisted FILLED hint with a Base Relay executor trace after a restart', async () => {
+    const { c, base, source, confirmed, route } = await inFlight();
+    expect(confirmed.review.recipientHasCode).toBe(true);
+    const amount = BigInt(route.expectedOutput);
+    const hash = base.deliver({ recipient: EVM_OWNER, token: null, amount, orderId: route.order.orderId, via: relayRouter, sender: relayExecutor });
+    const trace = base.state.traces.get(hash);
+    base.state.traces.delete(hash);
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ error: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE',
+      verdict: 'PENDING', evidence: null, destination: null, lastHint: { status: 'FILLED' } });
+    c.tick(3_601_000);
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'RECOVERY_REQUIRED', verdict: 'PENDING' });
+    c.relayMock.setStatus(route.quote.id, { status: 'unknown' });
+    base.state.traces.set(hash, trace);
+    const restarted = c.restart();
+    expect(await restarted.observe(confirmed.id)).toMatchObject({ phase: 'DESTINATION_OBSERVED', verdict: 'PENDING', error: 'UNIVERSAL_AWAITING_FINALITY',
+      received: amount.toString(), evidence: null, destination: { orderBound: true, final: false } });
+    for (let i = 0; i < 3; i++) { source.mine(); base.mine(); }
+    const reconciled = await restarted.observe(confirmed.id);
+    expect(reconciled).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', received: amount.toString(), destination: { transactionHash: hash, final: true },
+      evidence: { received: amount.toString() }, attempts: confirmed.attempts });
+    expect((await c.restart().observe(confirmed.id)).evidence?.bundleHash).toBe(reconciled.evidence?.bundleHash);
+  });
+
+  it.each([
+    ['the trace reverted', 'reverted', 'UNIVERSAL_DELIVERY_RECIPIENT_MISMATCH'],
+    ['the call paid a different wallet', 'wrong', 'UNIVERSAL_DELIVERY_RECIPIENT_MISMATCH'],
+    ['the trace belongs to a different block', 'block', 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
+    ['a subtrace is missing', 'incomplete', 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE'],
+    ['a recipient forwards part of the credit', 'debit', 'UNIVERSAL_DELIVERY_BELOW_MINIMUM'],
+    ['the sender lacks solver authority', 'sender', 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'],
+    ['the tail identifies a different order', 'order', 'UNIVERSAL_DELIVERY_ORDER_NOT_BOUND'],
+  ])('withholds evidence when %s', async (_description, change, error) => {
+    const { c, base, confirmed, route } = await inFlight('0x6000');
+    const amount = BigInt(route.minimumOutput);
+    const hash = base.deliver({ recipient: change === 'wrong' ? EVM_RECIPIENT : EVM_OWNER, token: null, amount,
+      orderId: change === 'order' ? '0x' + 'a1'.repeat(32) : route.order.orderId, via: relayRouter,
+      ...(change === 'sender' ? { sender: EVM_RECIPIENT } : {}) });
+    type Frame = { action: { from: string; to: string; value: string }; traceAddress: number[]; subtraces: number; blockHash: string; error?: string };
+    const trace = base.state.traces.get(hash) as Frame[];
+    if (change === 'reverted') trace[2]!.error = 'Reverted';
+    if (change === 'block') trace[2]!.blockHash = '0x' + '22'.repeat(32);
+    if (change === 'incomplete') trace.pop();
+    if (change === 'debit') {
+      trace[2]!.subtraces = 1;
+      trace.push({ ...trace[2]!, traceAddress: [1, 0], subtraces: 0, action: { ...trace[2]!.action, from: EVM_OWNER, to: EVM_RECIPIENT, value: '0x1' } });
+    }
+    c.relayMock.setStatus(route.quote.id, { status: 'success', txHashes: [hash] });
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ error, evidence: null, destination: null });
+  });
+
+  it('observes a contract-mediated native refund after source and refund finality', async () => {
+    const { c, source, confirmed, route } = await inFlight();
+    const hash = source.deliver({ recipient: EVM_OWNER, token: null, amount: 499_000_000_000_000n, orderId: route.order.orderId, via: relayRouter });
+    c.relayMock.setStatus(route.quote.id, { status: 'refund', txHashes: [hash] });
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'RECOVERY_REQUIRED', verdict: 'PENDING', refund: null });
+    for (let i = 0; i < 3; i++) source.mine();
+    expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'REFUNDED', refund: { transactionHash: hash, token: 'native' }, destination: null, evidence: null });
+  });
+
+  it('rechecks a previously safe destination if the source was waiting for finality', async () => {
+    const { c, base, source, confirmed, route } = await inFlight();
+    const hash = base.deliver({ recipient: EVM_OWNER, token: null, amount: BigInt(route.expectedOutput), orderId: route.order.orderId, via: relayRouter });
+    c.relayMock.setStatus(route.quote.id, { status: 'success', txHashes: [hash] });
+    for (let i = 0; i < 3; i++) base.mine();
+    const observed = await c.service.observe(confirmed.id);
+    expect(observed).toMatchObject({ phase: 'DESTINATION_OBSERVED', source: { final: false }, destination: { final: true }, evidence: null });
+    base.state.hashes.set(observed.destination!.position.height, '0x' + '2b'.repeat(32));
+    for (let i = 0; i < 3; i++) source.mine();
+    expect(await c.restart().observe(confirmed.id)).toMatchObject({ verdict: 'DIVERGENT', error: 'UNIVERSAL_DESTINATION_REORGANIZED', evidence: null });
+  });
+});
 
 describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified delivery', () => {
   it('A. Solana USDC → Base USDC: one Solana signature, FloFi broadcasts once, Base delivery proven, evidence', async () => {

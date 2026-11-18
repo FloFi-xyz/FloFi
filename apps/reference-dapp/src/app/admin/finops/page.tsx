@@ -7,7 +7,7 @@ import { configuredBillingScopes } from '../../../admin/finops/providers';
 import { readFinopsReport } from '../../../admin/finops/report';
 import { AdminShell, AdminUnavailable } from '../../../components/admin/admin-shell';
 import { Section } from '../../../components/admin/admin-ui';
-import { FinopsImports, FinopsScenario } from '../../../components/admin/finops-controls';
+import { FinopsImports, FinopsIntegrations, FinopsScenario } from '../../../components/admin/finops-controls';
 import { FinopsAi, FinopsCoverage, FinopsFilters, FinopsInfrastructure, FinopsOverview, FinopsRevenue, FinopsWorkflow,
   finopsFilterQuery } from '../../../components/admin/finops-views';
 
@@ -25,13 +25,17 @@ export default async function FinopsPage({ searchParams }: { searchParams: Promi
     <FinopsFilters language={language} filter={filter} action="/admin/finops"/>
     <nav className="admin-actions admin-finops-no-print" aria-label={copy("FinOps sections")}>
       <a href="#finops-overview">{copy("Overview")}</a><a href="#finops-infrastructure">{copy("Infrastructure Costs")}</a><a href="#finops-ai">{copy("AI Economics")}</a>
+      <a href="#finops-integrations">{copy('Financial integrations')}</a>
       <a href="#finops-workflow">{copy("Workflow Economics")}</a><a href="#finops-revenue">{copy("Revenue & Margins")}</a><a href="#finops-growth">{copy("Growth Simulator")}</a>
     </nav>
     <FinopsOverview language={language} report={report}/>
+    <Section id="finops-integrations" title={copy('Financial integrations')}>
+      <FinopsIntegrations integrations={report.integrations} {...context.principal.role === 'OPERATOR' ? { csrf: context.csrf } : {}}/>
+    </Section>
     <FinopsInfrastructure language={language} report={report}/>
     {context.principal.role === 'OPERATOR' && report.ledger.status === 'available' ?
       <Section id="finops-imports" title={copy("Manage financial records")}><FinopsImports csrf={context.csrf}
-        adapters={configuredBillingScopes(process.env, host.tenantId)} filter={{ range: filter.preset, ...Object.fromEntries(query) }}/></Section>
+        adapters={report.integrations.available ? [] : configuredBillingScopes(process.env, host.tenantId)} filter={{ range: filter.preset, ...Object.fromEntries(query) }}/></Section>
       : null}
     <FinopsAi language={language} report={report}/>
     <FinopsWorkflow language={language} report={report}/>

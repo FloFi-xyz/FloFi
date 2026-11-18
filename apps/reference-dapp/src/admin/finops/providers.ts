@@ -7,7 +7,7 @@ type Credentials = { readonly key: string; readonly project: string };
 type BillingAdapter = {
   readonly scope: ScopeId;
   readonly credentials: (env: Env) => Credentials | null;
-  readonly read: (credentials: Credentials, period: Period, fetcher: typeof fetch) => Promise<Entry[]>;
+  readonly read: (credentials: Credentials, period: Period, fetcher: typeof fetch, signal?: AbortSignal) => Promise<Entry[]>;
 };
 
 const MAX_BYTES = 256_000;
@@ -93,13 +93,14 @@ const openAi: BillingAdapter = {
     const key = env.FLOFI_FINOPS_OPENAI_ADMIN_KEY?.trim(), project = env.FLOFI_FINOPS_OPENAI_PROJECT_ID?.trim();
     return key && key.length <= 1024 && project && /^proj_[A-Za-z0-9_-]{1,100}$/.test(project) ? { key, project } : null;
   },
-  async read({ key, project }, period, fetcher) {
+  async read({ key, project }, period, fetcher, signal) {
     const url = new URL('https://api.openai.com/v1/organization/costs');
     url.search = new URLSearchParams({
       start_time: String(Date.parse(period.from + 'T00:00:00Z') / 1000), end_time: String(Date.parse(period.to + 'T00:00:00Z') / 1000),
       bucket_width: '1d', limit: '180', 'project_ids[]': project, 'group_by[]': 'project_id',
     }).toString();
-    const overall = AbortSignal.timeout(12_000), days = new Set<string>(), cursors = new Set<string>(), entries: Entry[] = [];
+    const timeout = AbortSignal.timeout(12_000), overall = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const days = new Set<string>(), cursors = new Set<string>(), entries: Entry[] = [];
     for (let pageNo = 0; pageNo < 4; pageNo++) {
       const page = normalizeOpenAiPage(await getPage(url, { Authorization: 'Bearer ' + key }, fetcher, overall), project, period);
       if (page.days.some(day => days.has(day))) throw invalid();
@@ -113,6 +114,7 @@ const openAi: BillingAdapter = {
     throw invalid();
   },
 };
+export const openAiCostAdapter = openAi;
 
 const ADAPTERS: readonly BillingAdapter[] = [openAi];
 

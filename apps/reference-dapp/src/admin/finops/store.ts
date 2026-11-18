@@ -27,7 +27,7 @@ export function ledgerMissing(error: unknown) {
   return error instanceof Error && 'code' in error && error.code === '42P01';
 }
 
-async function writeRecord(tx: Queryable, tenantId: string, entry: Entry, replaceId?: string) {
+export async function writeRecord(tx: Queryable, tenantId: string, entry: Entry, replaceId?: string) {
   const { scope, environment, source, period } = entry, serialized = JSON.stringify(entry);
   const columns = [tenantId, scope, environment, source, period.from, period.to, serialized];
   const { rows } = await tx.query<{ id: string; exact: boolean; same: boolean }>(`SELECT DISTINCT ON (period_start, period_end)
