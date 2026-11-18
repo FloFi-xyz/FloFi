@@ -21,12 +21,27 @@ import { publicOrigin } from '../server/deployment';
 import { WALLET_SESSION_TTL_SECONDS } from '../server/wallet-session';
 import { ACCOUNT_REAUTH_SECONDS } from '../accounts/account-session';
 import { solanaSignOut, walletSignOut } from './wallet-session-action';
+import { isOtherAccountOfBoardedPerson, otherAccountDestination } from '../flight/other-account';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const failure = (cause: unknown, fallback = 'ACCOUNT_REQUEST_FAILED'): { ok: false; code: string } =>
   ({ ok: false, code: cause instanceof Error && CODE.test(cause.message) ? cause.message : fallback });
 const fail = (code: string): never => { throw new Error(code); };
+/**
+ * Authentication UX & Login Regression Fix: what happened to a sign-in, a move start or a session, as an enum or a FloFi code only (never an
+ * account id, an address, a token or a provider's text), so the step where a real sign-in stops can be told apart in the deployment's logs.
+ */
+type AccountEvent = { readonly event: 'account.sign_in'; readonly mode: 'sign-in' | 'reauth' | 'move'; readonly result: string; readonly created?: boolean;
+  readonly destination?: 'board' | 'onboarding' | 'app' | 'sign-in-methods' | 'other' }
+  | { readonly event: 'account.session_ended'; readonly reason: 'sign_out' | 'sign_out_everywhere' | 'move_started' | 'reauth_other_account' | 'move_handoff' | 'superseded' }
+  | { readonly event: 'account.move_start'; readonly result: string };
+const logAccount = (entry: AccountEvent) => console.info(JSON.stringify(entry));
+async function revokeAndLog(h: AccountHost, session: AccountSessionToken, reason: Extract<AccountEvent, { event: 'account.session_ended' }>['reason']) {
+  await h.store.revokeSession(session).then(() => logAccount({ event: 'account.session_ended', reason }), () => undefined);
+}
+const destinationKind = (path: string) => path.startsWith('/board') ? 'board' as const : path.startsWith('/onboarding') ? 'onboarding' as const
+  : path.startsWith('/app') ? 'app' as const : path.startsWith('/account/sign-in-methods') ? 'sign-in-methods' as const : 'other' as const;
 async function host(): Promise<AccountHost> {
   try { return await accountHost() ?? fail('ACCOUNTS_NOT_CONFIGURED'); } catch (error) { throw new Error(failure(error, 'ACCOUNTS_UNAVAILABLE').code, { cause: error }); }
 }
@@ -85,30 +100,49 @@ export async function accountPresence(): Promise<AccountPresence> {
  */
 export async function privySignIn(accessToken: string, returnTo = '/app', options: { readonly allowNew?: boolean; readonly mode?: 'reauth' | 'move' } = {}):
   Promise<Result<{ next: string; method: AccountSessionToken['method'] }> | { ok: false; code: 'ACCOUNT_EXISTS_FOR_EMAIL'; kinds: readonly IdentityKind[] }> {
+  const mode = options?.mode;
+  if (!options || typeof options !== 'object' || (mode !== undefined && mode !== 'reauth' && mode !== 'move'))
+    return { ok: false, code: 'ACCOUNT_REQUEST_FAILED' };
+  const logMode = mode ?? 'sign-in';
   try {
     const h = await host(), previous = await currentAccountSession(h);
     // A move sign-in needs this browser's own move intent (checked before anything is consumed).
-    const move = options.mode === 'move' ? await currentMoveIntent().catch(() => null) : null;
-    if (options.mode === 'move' && !move) return { ok: false, code: 'ACCOUNT_MOVE_EXPIRED' };
+    const move = mode === 'move' ? await currentMoveIntent().catch(() => null) : null;
+    if (mode === 'move' && !move) {
+      logAccount({ event: 'account.sign_in', mode: logMode, result: 'ACCOUNT_MOVE_EXPIRED' });
+      return { ok: false, code: 'ACCOUNT_MOVE_EXPIRED' };
+    }
     // A step-up or a move signs in to an existing account only: it never creates one the person did not ask for.
-    const outcome = await h.service.completePrivy(accessToken, { allowNew: options.allowNew === true, existingOnly: options.mode !== undefined }).catch((cause: unknown) => {
-      if (cause instanceof Error && cause.message === 'ACCOUNT_SIGN_IN_NO_ACCOUNT') throw new Error(options.mode === 'reauth' ? 'ACCOUNT_REAUTH_OTHER_ACCOUNT' : 'ACCOUNT_MOVE_TARGET_UNKNOWN');
+    const outcome = await h.service.completePrivy(accessToken, { allowNew: options.allowNew === true, existingOnly: mode !== undefined }).catch((cause: unknown) => {
+      if (cause instanceof Error && cause.message === 'ACCOUNT_SIGN_IN_NO_ACCOUNT') throw new Error(mode === 'reauth' ? 'ACCOUNT_REAUTH_OTHER_ACCOUNT' : 'ACCOUNT_MOVE_TARGET_UNKNOWN');
       throw cause;
     });
-    if (options.mode === 'reauth' && (!previous || previous.accountId !== outcome.session.accountId)) {
-      await h.store.revokeSession(outcome.session).catch(() => undefined);
+    if (mode === 'reauth' && (!previous || previous.accountId !== outcome.session.accountId)) {
+      await revokeAndLog(h, outcome.session, 'reauth_other_account');
+      logAccount({ event: 'account.sign_in', mode: 'reauth', result: 'ACCOUNT_REAUTH_OTHER_ACCOUNT' });
       return { ok: false, code: 'ACCOUNT_REAUTH_OTHER_ACCOUNT' };
     }
-    await supersede(h, previous, outcome.session);
+    if (await supersede(h, previous, outcome.session)) logAccount({ event: 'account.session_ended', reason: 'superseded' });
     await setAccountCookie(outcome.session);
     // A move intent belongs to the move sign-in (and the keeper's step-up while confirming it): any other sign-in in this browser ends it.
-    if (!move && options.mode !== 'reauth') await clearMoveCookie();
-    const next = move ? '/account/sign-in-methods' : options.mode === 'reauth' ? safeReturnPath(returnTo) : nextPath(outcome, 'sign-in', safeReturnPath(returnTo));
+    if (!move && mode !== 'reauth') await clearMoveCookie();
+    let next = move ? '/account/sign-in-methods' : mode === 'reauth' ? safeReturnPath(returnTo) : nextPath(outcome, 'sign-in', safeReturnPath(returnTo));
+    // Authentication UX & Login Regression Fix (P0): the person's OTHER account (no beta access, its verified address held by the boarded
+    // account) goes straight to /board's recovery, never through wallet onboarding (a wallet there would make it impossible to close).
+    if (!mode && otherAccountDestination(next) !== next) {
+      const view = await h.service.view(outcome.session).catch(() => null);
+      if (view && await isOtherAccountOfBoardedPerson(view.accountId, view.identities)) next = otherAccountDestination(next);
+    }
+    logAccount({ event: 'account.sign_in', mode: logMode, result: 'ok', created: outcome.created, destination: destinationKind(next) });
     // `method` is the server-verified sign-in method (public): the browser uses it only to restore the wallet it just authenticated with.
     return { ok: true, value: { next, method: outcome.session.method } };
   } catch (cause) {
-    if (cause instanceof ExistingAccountFound) return { ok: false, code: 'ACCOUNT_EXISTS_FOR_EMAIL', kinds: cause.kinds };
+    if (cause instanceof ExistingAccountFound) {
+      logAccount({ event: 'account.sign_in', mode: logMode, result: 'ACCOUNT_EXISTS_FOR_EMAIL' });
+      return { ok: false, code: 'ACCOUNT_EXISTS_FOR_EMAIL', kinds: cause.kinds };
+    }
     const result = failure(cause, 'PRIVY_SIGN_IN_FAILED');
+    logAccount({ event: 'account.sign_in', mode: logMode, result: result.code });
     // HOTFIX-FLOFI-PRODUCTION-RECOVERY-001: a failure without a FloFi code reached the person as the generic message with nothing in the logs.
     // Record its class only (never the token, the provider's text or an identity), so the failing step can be told apart.
     if (result.code === 'PRIVY_SIGN_IN_FAILED') console.warn(JSON.stringify({ event: 'account.privy_sign_in_failed',
@@ -161,12 +195,17 @@ export async function startAccountMove(): Promise<Result<{ readonly next: string
     const { host: h, session } = await signedIn();
     const intent = await h.service.startAccountMove(session);
     await setMoveCookie(intent);
-    await h.store.revokeSession(session).catch(() => undefined);
+    await revokeAndLog(h, session, 'move_started');
+    logAccount({ event: 'account.move_start', result: 'ok' });
     await clearAccountCookie();
     await walletSignOut().catch(() => undefined);
     await solanaSignOut().catch(() => undefined);
     return { ok: true, value: { next: '/login?move=1' } };
-  } catch (cause) { return failure(cause, 'ACCOUNT_MOVE_FAILED'); }
+  } catch (cause) {
+    const result = failure(cause, 'ACCOUNT_MOVE_FAILED');
+    logAccount({ event: 'account.move_start', result: result.code });
+    return result;
+  }
 }
 /**
  * The sign-in just completed at Privy would create a new account for an email another account already verified, and the person chose to bring
@@ -181,11 +220,15 @@ export async function privyMoveToExisting(accessToken: string): Promise<Result<{
     try {
       const intent = await h.service.startAccountMove(outcome.session);
       await setMoveCookie(intent);
+      logAccount({ event: 'account.move_start', result: 'ok' });
     } catch (cause) {
+      logAccount({ event: 'account.move_start', result: failure(cause, 'ACCOUNT_MOVE_FAILED').code });
       // The person asked to bring this sign-in to another account, not for a new one: an account created just now that cannot move is discarded.
       if (outcome.created) await h.store.discardEmptyAccount(outcome.session.accountId).catch(() => false);
       throw cause;
-    } finally { await h.store.revokeSession(outcome.session).catch(() => undefined); }
+    } finally {
+      await revokeAndLog(h, outcome.session, 'move_handoff');
+    }
     return { ok: true, value: { next: '/login?move=1' } };
   } catch (cause) { return failure(cause, 'ACCOUNT_MOVE_FAILED'); }
 }
@@ -228,7 +271,10 @@ export async function syncPrivyWallets(accessToken: string): Promise<Result<Priv
 export async function accountSignOut(everywhere = false): Promise<{ readonly next: string }> {
   try {
     const h = await accountHost(), session = await currentAccountSession(h);
-    if (h && session) await (everywhere ? h.store.revokeAllSessions(session.accountId) : h.store.revokeSession(session));
+    if (h && session) {
+      await (everywhere ? h.store.revokeAllSessions(session.accountId) : h.store.revokeSession(session));
+      logAccount({ event: 'account.session_ended', reason: everywhere ? 'sign_out_everywhere' : 'sign_out' });
+    }
   } catch { /* the cookies are cleared regardless */ }
   await clearAccountCookie();
   await clearMoveCookie().catch(() => undefined);

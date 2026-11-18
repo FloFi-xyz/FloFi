@@ -250,7 +250,8 @@ function PrivyBridge({ children, page }: { children: ReactNode; page: string }) 
   }, [privy, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signEvmTyped, signEvm7702, signSolana,
     signSolanaText, solanaWallet, solanaWallets, solanaReady, evmWalletsReady]);
   return <Context.Provider value={value}><Registrar/>
-    {page === '/login' && <LoginOAuthCompleter callbacks={callbacks} start={loginStart}/>}
+    {/* Privy's login completer can link an OAuth return to the active user. Wait for the session check before mounting it. */}
+    {page === '/login' && privy.ready && (!returning || !privy.authenticated) && <LoginOAuthCompleter callbacks={callbacks} start={loginStart}/>}
     {linkAllowed && <LinkCompleter start={linkStart} email={linkEmail} emit={result => links.current.emit(result)}/>}
     {children}</Context.Provider>;
 }

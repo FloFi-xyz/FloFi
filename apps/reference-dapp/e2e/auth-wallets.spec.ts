@@ -525,10 +525,34 @@ test('a Privy session left in the browser is never reused by /login on its own',
   await googleSignIn(page);
   await expect(page).toHaveURL(/\/(app|onboarding\/wallets)$/);
   const second = await privyToken(page);
+  expect(await privyAccepts(second)).toBe(true);
   await context.clearCookies({ name: 'flofi_account_session' });
-  await page.goto('/login?privy_oauth_code=e2e-crafted&privy_oauth_state=e2e-crafted');
+  // Hold the provider's logout response past the readiness timeout. Methods must stay disabled until Privy reports signed out.
+  const logout = Promise.withResolvers<void>();
+  await page.route('**/__privy-e2e/logout', async route => { await logout.promise; await route.fallback(); });
+  const google = page.getByRole('button', { name: 'Google', exact: true });
+  try {
+    await Promise.all([
+      page.waitForRequest('**/__privy-e2e/logout', { timeout: 15_000 }),
+      page.goto('/login?privy_oauth_code=e2e-crafted&privy_oauth_state=e2e-crafted'),
+    ]);
+    await expect(page).toHaveURL('/login');
+    await expect(google).toBeDisabled();
+    await expect(page.getByRole('alert').filter({ hasText: 'The wallet provider could not be reached' })).toBeVisible();
+    await expect(google).toBeDisabled();
+    expect(await privyAccepts(second)).toBe(true);
+  } finally { logout.resolve(); }
   await expect.poll(async () => privyAccepts(second)).toBe(false);
+  await expect(google).toBeEnabled();
   await expect(page.getByRole('group', { name: 'Sign-in methods' })).toBeVisible();
+  expect(await accountCookie(context)).toBeUndefined();
+
+  // The test provider never completes a redirect. FloFi abandons the old document, preserving the intended destination for the next attempt.
+  await page.goto('/login?returnTo=%2Fapp%2Fcredentials&privy_oauth_code=e2e-unanswered&privy_oauth_state=e2e-unanswered');
+  await expect(page.getByText('Signing you in…', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL('/login?returnTo=%2Fapp%2Fcredentials&error=PRIVY_SIGN_IN_INTERRUPTED', { timeout: 30_000 });
+  await expect(page.getByRole('alert').filter({ hasText: 'Sign-in was interrupted' })).toBeVisible();
+  await expect(google).toBeEnabled();
   expect(await accountCookie(context)).toBeUndefined();
 });
 

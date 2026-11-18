@@ -85,7 +85,6 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   // `open`: the mobile overlay. `expanded`: the desktop rail's names (UX-01). Only one of them applies at a time.
   const [open, setOpen] = useState(false);
   const compact = useMediaFlag(COMPACT_NAVIGATION_QUERY);
-  const floating = useMediaFlag(FLOATING_RAIL_QUERY);
   const expanded = useRailExpanded();
   // The rail's names and tags are visible (or about to be): only then are the availability tags read.
   const [engaged, setEngaged] = useState(false);
@@ -132,19 +131,23 @@ export function NavigationDrawer({ pathname, section = 'Build', onBuild, onChat,
   // collapses it (the press still reaches what it was meant for), and so does Escape from inside it, returning focus to the chevron. From
   // 1360 px it sits beside the workspace and stays as the owner left it.
   useEffect(() => {
-    if (compact || !floating || !expanded) return;
+    if (!expanded || typeof window.matchMedia !== 'function') return;
+    const compactScreen = window.matchMedia(COMPACT_NAVIGATION_QUERY);
+    const floatingScreen = window.matchMedia(FLOATING_RAIL_QUERY);
+    // CSS responds to a resize before React can run effect cleanup. Read the current viewport when handling input.
+    const railFloats = () => !compactScreen.matches && floatingScreen.matches;
     function outside(event: Event) {
-      if (event.target instanceof Node && !container.current?.contains(event.target)) setRailExpanded(false);
+      if (railFloats() && event.target instanceof Node && !container.current?.contains(event.target)) setRailExpanded(false);
     }
     function escape(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || !container.current?.contains(document.activeElement)) return;
+      if (event.key !== 'Escape' || !railFloats() || !container.current?.contains(document.activeElement)) return;
       setRailExpanded(false);
       trigger.current?.focus({ preventScroll: true });
     }
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
-  }, [compact, floating, expanded]);
+  }, [expanded]);
 
   // UX-01: the collapsed rail names each item beside it — after 300 ms on hover, at once on keyboard focus; leaving, Escape or scrolling hides
   // it. The same timing and look as the Canvas rail's tooltip; presentation only (every item keeps its accessible name).

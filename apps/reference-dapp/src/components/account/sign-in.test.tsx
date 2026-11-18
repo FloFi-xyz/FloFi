@@ -39,15 +39,21 @@ describe('sign-in availability', () => {
     const html = render(state({ accounts: true }), false);
     expect(Object.values(methods(html)).every(method => method.disabled)).toBe(true);
     expect(html).toContain('Sign-in isn&#x27;t configured on this deployment yet.');
-    expect(html).toContain('Methods shown as unavailable are not configured on this deployment yet.');
+    // Authentication UX & Login Regression Fix: the banner says it once; no second technical sentence.
+    expect(html).not.toContain('Methods shown as unavailable');
   });
 
-  it('with Privy configured, Google, Email and Web3 Wallet are offered; Apple only once it is enabled', () => {
+  it('with Privy configured, Google, Email and Web3 Wallet are offered (Apple only once it is enabled), each ready only once Privy is', () => {
     const html = render(state(all));
-    expect(methods(html)).toEqual({ Google: { disabled: false, title: null }, Email: { disabled: false, title: null }, 'Web3 Wallet': { disabled: false, title: null } });
+    // Authentication UX & Login Regression Fix (P0): the methods are offered but wait for Privy to load and for any Privy session left in the
+    // browser to end (an effect after the first paint): no "not available" reason, and the page says it is getting ready.
+    expect(methods(html)).toEqual({ Google: { disabled: true, title: null }, Email: { disabled: true, title: null }, 'Web3 Wallet': { disabled: true, title: null } });
+    expect(html).toContain('Getting sign-in ready…');
     expect(html).not.toContain('not configured on this deployment');
-    expect(html).toContain('FloFi stores your sign-in identities');
-    expect(methods(render(state({ ...all, apple: true }))).Apple).toEqual({ disabled: false, title: null });
+    // No technical explanation on the sign-in page (Privacy stays one click away).
+    expect(html).not.toContain('FloFi stores your sign-in identities');
+    expect(html).toMatch(/href="\/privacy">Privacy<\/a>/);
+    expect(methods(render(state({ ...all, apple: true }))).Apple).toEqual({ disabled: true, title: null });
   });
 
   it('never mentions the previous wallet provider', () => {

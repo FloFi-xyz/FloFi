@@ -19,7 +19,7 @@ import { sessionCookieName } from '../server/session-cookie';
 import type { AccountFlight, FlightStore } from './store';
 import { betaAccessMode, createBetaAccessStore } from './beta-access';
 import { platformStateHost } from '../server/platform-state-host';
-import { entryHolder } from './entry-holder';
+import { heldElsewhere as accountHeldElsewhere } from './held-elsewhere';
 import { requireFlightAccess, requireFlightProductAccess } from '../server/flight-access';
 
 const HEADERS = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-type': 'application/json; charset=utf-8' };
@@ -65,14 +65,10 @@ export type FlightState = {
 };
 /** Whether one of the person's strongly verified addresses is held by another account (see `FlightState.me.boardedElsewhere`). */
 async function heldElsewhere(person: FlightPerson): Promise<boolean> {
-  const emails = (person.strongEmails ?? []).slice(0, 4);
+  const emails = person.strongEmails ?? [];
   if (!emails.length) return false;
   const { db, tenantId } = await platformStateHost(process.env);
-  for (const email of emails) {
-    const holder = await entryHolder(db, tenantId, email);
-    if (holder?.accountId && holder.accountId !== person.accountId) return true;
-  }
-  return false;
+  return accountHeldElsewhere(db, tenantId, person.accountId, emails);
 }
 // The retention periods hold without traffic: the page prunes expired campaign records at most every five minutes per instance.
 const PRUNE_EVERY_MS = 5 * 60_000;

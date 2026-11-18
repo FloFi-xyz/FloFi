@@ -18,6 +18,7 @@ import { accessSecret } from './access';
 import { createAccessStore, type AccessStore } from './access-store';
 import { createEmailOutbox, emailLimitsFrom, type EmailOutbox } from './email/outbox';
 import { betaAccessMode } from './beta-access';
+import { strongEmailsOf } from './held-elsewhere';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -78,10 +79,7 @@ export async function flightPerson(env: Env = process.env): Promise<FlightPerson
   // The list's own address rule (`normalizeEmail`), so an address matched or stored here is one the operator can also erase.
   const emails = [...new Set(view.identities.filter(identity => identity.kind === 'email' || identity.kind === 'google' || identity.kind === 'apple')
     .map(identity => normalizeEmail(identity.label)).filter((email): email is string => email !== null))];
-  const strongEmails = [...new Set(view.identities.flatMap(identity => {
-    const email = normalizeEmail(identity.label);
-    return email && (identity.kind === 'email' || (identity.kind === 'google' && /@(?:gmail|googlemail)\.com$/.test(email))) ? [email] : [];
-  }))];
+  const strongEmails = strongEmailsOf(view.identities);
   return { accountId: view.accountId, emails, strongEmails };
 }
 
