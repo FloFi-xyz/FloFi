@@ -1578,8 +1578,16 @@
       "path": "apps/reference-dapp/src/components/live-canvas-build.test.tsx",
       "stage": "unit"
     },
+    "app.components.execute-details-choice": {
+      "path": "apps/reference-dapp/src/components/execute-details-choice.test.tsx",
+      "stage": "unit"
+    },
     "app.server.wallet-activity": {
       "path": "apps/reference-dapp/src/server/wallet-activity.test.ts",
+      "stage": "unit"
+    },
+    "app.components.wallet-activity": {
+      "path": "apps/reference-dapp/src/components/wallet-activity.test.tsx",
       "stage": "unit"
     },
     "app.app.api.dashboard.activity.route": {
@@ -1730,7 +1738,9 @@
     "app.domain.canvas-execution",
     "app.components.live-canvas",
     "app.components.live-canvas-build",
+    "app.components.execute-details-choice",
     "app.server.wallet-activity",
+    "app.components.wallet-activity",
     "app.app.api.dashboard.activity.route",
     "app.app.api.automations.overview.route",
     "app.app.api.account.presence.route",
@@ -3664,7 +3674,9 @@
         "app.domain.canvas-execution",
         "app.components.live-canvas",
         "app.components.live-canvas-build",
-        "app.server.wallet-activity"
+        "app.components.execute-details-choice",
+        "app.server.wallet-activity",
+        "app.components.wallet-activity"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."

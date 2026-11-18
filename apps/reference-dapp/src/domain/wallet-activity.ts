@@ -40,17 +40,18 @@ export type ActivityCoverage = { readonly network: ActivityNetworkId; readonly n
 export type WalletActivityPage = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: readonly ActivityCoverage[];
   /** Opaque continuation (null: nothing more on any covered network). */ readonly cursor: string | null;
   /**
-   * The page is complete only for movements at or after this time: a network or address with more history has not been read further back yet,
-   * so an older row may still be missing between rows already read. Null: complete (every stream exhausted). The History shows older rows once
-   * later pages reach them.
+   * The page is complete only for movements strictly after this time: a network or address with more history has not been read further back
+   * yet, so a row at or before it may still be missing between rows already read (movements of one block or second can straddle a page). Null:
+   * complete (every stream exhausted). The History shows older rows once later pages reach them.
    */
   readonly completeAfter: string | null;
-  /** Movements of tokens outside the verified catalogs, not shown. */ readonly hidden: number;
+  /** Movements of tokens outside the verified catalogs on this page, not shown (`hiddenMoves.length`). */ readonly hidden: number;
   /**
-   * The direction each hidden movement took in its transaction (`<chain>:<transaction>:<IN|OUT|SELF>`, never the token): a visible leg whose
-   * transaction also moved an unverified token the other way is a contract interaction (a swap or liquidity exit), never a plain transfer.
+   * One key per hidden movement, `<chain>:<transaction>:<IN|OUT|SELF>:<n>` (`n` tells movements of one transaction apart; never the token). A
+   * visible leg whose transaction also moved an unverified token the other way is a contract interaction (a swap or liquidity exit), never a
+   * plain transfer; and a movement read again on a later page is counted once.
    */
-  readonly hiddenMoves?: readonly string[];
+  readonly hiddenMoves: readonly string[];
   readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED'; readonly observedAt: string };
 
 export const ZERO_EVM = '0x0000000000000000000000000000000000000000';
@@ -76,10 +77,28 @@ function movedDirections(legs: readonly Pick<WalletTransfer, 'chain' | 'transact
   const add = (key: string, direction: ActivityDirection) => directions.set(key, (directions.get(key) ?? new Set()).add(direction));
   for (const leg of legs) add(`${leg.chain}:${leg.transaction}`, leg.direction);
   for (const move of hiddenMoves) {
-    const at = move.lastIndexOf(':'), direction = move.slice(at + 1);
-    if (at > 0 && (direction === 'IN' || direction === 'OUT' || direction === 'SELF')) add(move.slice(0, at), direction);
+    const parsed = HIDDEN_MOVE.exec(move);
+    if (parsed) add(parsed[1]!, parsed[2] as ActivityDirection);
   }
   return directions;
+}
+const HIDDEN_MOVE = /^(.+):(IN|OUT|SELF):([A-Za-z0-9.]{1,40})$/;
+/** The key of one hidden movement (see `hiddenMoves`); `n` is token-free (a log position or an ordinal within the transaction). */
+export const hiddenMoveKey = (chain: string, transaction: string, direction: ActivityDirection, n: string) => `${chain}:${transaction}:${direction}:${n}`;
+
+/**
+ * What the History says about each network across every page loaded. `current`: each network's latest state, a later page's whenever it read
+ * that network (a read that failed is unavailable now, one that worked clears an earlier "could not be loaded"). `gaps`: every partial-coverage
+ * note any loaded page reported (network and code), kept while their rows stay listed — a later page that covers its own range never erases a
+ * gap of an earlier one.
+ */
+export type CoverageState = { readonly current: readonly ActivityCoverage[]; readonly gaps: readonly ActivityCoverage[] };
+const READ_STATUS: readonly ActivityCoverage['status'][] = ['COVERED', 'PARTIAL', 'UNAVAILABLE'];
+export function mergeCoverage(state: CoverageState | null, page: readonly ActivityCoverage[]): CoverageState {
+  const current = state ? state.current.map(c => page.find(p => p.network === c.network && READ_STATUS.includes(p.status)) ?? c) : [...page];
+  const gaps = [...state?.gaps ?? []];
+  for (const p of page) if (p.status === 'PARTIAL' && !gaps.some(g => g.network === p.network && g.code === p.code)) gaps.push(p);
+  return { current, gaps };
 }
 
 export type ActivityFilter = 'ALL' | 'IN' | 'OUT';
@@ -98,8 +117,8 @@ export function activityRows(transfers: readonly WalletTransfer[], filter: Activ
   const frontier = completeAfter ? Date.parse(completeAfter) : null;
   const unique = transfers.filter(t => !seen.has(t.id) && Boolean(seen.add(t.id)))
     .map(t => { const d = directions.get(`${t.chain}:${t.transaction}`)!; return d.has('IN') && d.has('OUT') && t.kind !== 'INTERACTION' ? { ...t, kind: 'INTERACTION' as const } : t; })
-    // Only what every stream has been read down to is shown; older rows wait for the next page (never a silent gap).
-    .filter(t => frontier === null || (t.timestamp !== null && Date.parse(t.timestamp) >= frontier));
+    // Only what every stream has been read past is shown; rows at or before the frontier wait for the next page (never a silent gap).
+    .filter(t => frontier === null || (t.timestamp !== null && Date.parse(t.timestamp) > frontier));
   const time = (t: WalletTransfer) => t.timestamp ? Date.parse(t.timestamp) : 0;
   return unique.filter(t => filter === 'ALL' ? !recorded.has(transactionKey(t.transaction)) : filter === 'IN' ? t.direction === 'IN' || t.direction === 'SELF' : t.direction === 'OUT' || t.direction === 'SELF')
     .sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id))

@@ -9,18 +9,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale } from '../i18n/locale';
 import { walletActivity } from '../app/wallet-activity-reads';
-import { activityRows, shortAddress, signedAmount, type ActivityCoverage, type ActivityFilter, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
+import { activityRows, mergeCoverage, shortAddress, signedAmount, type ActivityCoverage, type ActivityFilter, type CoverageState, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
+import { flightRefusal } from '../domain/flight-refusal';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 import { dateLabel } from './dashboard/dashboard-view';
 import { StatusTag } from './dashboard/dashboard-status';
 
-type Loaded = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: readonly ActivityCoverage[]; readonly cursor: string | null;
-  readonly completeAfter: string | null; readonly hidden: number; readonly hiddenMoves: readonly string[]; readonly provenance: WalletActivityPage['provenance'] };
-/** A network's coverage as the later page states it whenever that page read it (or could not): an older note never outlives a newer read. */
-const READ_STATUS: readonly ActivityCoverage['status'][] = ['COVERED', 'PARTIAL', 'UNAVAILABLE'];
+/** `hiddenMoves`: every hidden movement of every page loaded, once each (a movement read again on a later page is not counted twice). */
+type Loaded = { readonly account: string; readonly transfers: readonly WalletTransfer[]; readonly coverage: CoverageState; readonly cursor: string | null;
+  readonly completeAfter: string | null; readonly hiddenMoves: readonly string[]; readonly provenance: WalletActivityPage['provenance'] };
 const KIND_LABEL = { TRANSFER: null, INTERACTION: 'Contract interaction', MINT: 'Minted', BURN: 'Burned' } as const;
-const COVERAGE_TEXT: Readonly<Record<ActivityCoverage['status'], string | null>> = { COVERED: null, PARTIAL: '{0}: ETH moved by contracts (internal transfers) is not listed.',
-  UNSUPPORTED: '{0}: wallet activity is not available on this network yet.', UNAVAILABLE: '{0}: activity could not be loaded right now. This does not mean there is none.', OFF: null };
+/** A network's state now (unsupported, or its latest read failed); partial coverage is said by its own code (`PARTIAL_TEXT`). */
+const STATUS_TEXT: Readonly<Partial<Record<ActivityCoverage['status'], string>>> = { UNSUPPORTED: '{0}: wallet activity is not available on this network yet.',
+  UNAVAILABLE: '{0}: activity could not be loaded right now. This does not mean there is none.' };
+const PARTIAL_TEXT: Readonly<Record<string, string>> = {
+  ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED: '{0}: ETH moved by contracts (internal transfers) is not listed.',
+  SOLANA_TOKEN_ACCOUNT_LIMIT: '{0}: only the first 6 token accounts of this wallet are read; tokens received in other token accounts are not listed.',
+  SOLANA_TRANSACTION_UNREADABLE: '{0}: some transactions could not be read right now, so their movements are not listed.',
+};
+const PARTIAL_FALLBACK = '{0}: part of the activity is not listed.';
+/**
+ * A refusal that means FloFi no longer reads this wallet for this browser (the wallet is not verified here, the FloFi session ended, another
+ * account signed in, access was revoked or the wallet is not linked): nothing loaded earlier stays on screen. A refusal whose own action is a
+ * retry (access could not be checked right now) is temporary.
+ */
+const refusedReader = (code: string | null) => code === 'ACTIVITY_SIGN_IN_REQUIRED' || Boolean(code && flightRefusal(code) && flightRefusal(code)!.action !== 'RETRY');
 
 function DirectionIcon({ direction }: { direction: WalletTransfer['direction'] }) {
   const common = { viewBox: '0 0 16 16', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
@@ -77,16 +90,14 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
         const more = Boolean(cursor && previous?.account === account);
         return { account, cursor: page.cursor, provenance: page.provenance, completeAfter: page.completeAfter ?? null,
           transfers: more ? [...previous!.transfers, ...page.transfers] : page.transfers,
-          // The first page states each network's coverage; a later page that read a network (or failed to) states it from then on.
-          coverage: more ? previous!.coverage.map(c => page.coverage.find(p => p.network === c.network && READ_STATUS.includes(p.status)) ?? c) : page.coverage,
-          hidden: (more ? previous!.hidden : 0) + page.hidden, hiddenMoves: [...more ? previous!.hiddenMoves : [], ...page.hiddenMoves ?? []] };
+          coverage: mergeCoverage(more ? previous!.coverage : null, page.coverage),
+          hiddenMoves: [...new Set([...more ? previous!.hiddenMoves : [], ...page.hiddenMoves ?? []])] };
       });
       setState({ account, status: 'ready', code: null, cursor });
     }, (error: unknown) => {
       if (request !== generation.current) return;
       const code = error instanceof Error ? error.message : 'ACTIVITY_READ_UNAVAILABLE';
-      // A wallet FloFi no longer reads for this browser (its session ended, another account signed in): nothing loaded earlier stays shown.
-      if (code === 'ACTIVITY_SIGN_IN_REQUIRED') setLoaded(null);
+      if (refusedReader(code)) setLoaded(null);
       setState({ account, status: 'error', code, cursor });
     });
   }, [account]);
@@ -102,9 +113,12 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
   // Rows older than what every stream was read down to wait for the next page, so no silent gap ever appears between listed rows.
   const waiting = shown ? activityRows(shown.transfers, filter, recorded, null, shown.hiddenMoves).length - rows.length : 0;
   const status = state.account === account ? state.status : 'loading';
-  const notes = shown?.coverage.filter(c => COVERAGE_TEXT[c.status]) ?? [];
+  const notes = shown ? [...shown.coverage.current.filter(c => STATUS_TEXT[c.status]).map(c => ({ key: `${c.network}:${c.status}`, text: STATUS_TEXT[c.status]!, name: c.name })),
+    ...shown.coverage.gaps.map(c => ({ key: `${c.network}:${c.code}`, text: PARTIAL_TEXT[c.code ?? ''] ?? PARTIAL_FALLBACK, name: c.name }))] : [];
+  const hidden = shown?.hiddenMoves.length ?? 0;
+  const refusal = state.account === account && state.status === 'error' && state.code !== 'ACTIVITY_SIGN_IN_REQUIRED' && refusedReader(state.code) ? flightRefusal(state.code) : null;
   // Honest empty states: no network could be read is not "no activity", and movements already shown as workflows are not "nothing".
-  const readable = Boolean(shown?.coverage.some(c => c.status === 'COVERED' || c.status === 'PARTIAL'));
+  const readable = Boolean(shown?.coverage.current.some(c => c.status === 'COVERED' || c.status === 'PARTIAL'));
   const onlyWorkflows = Boolean(shown && filter === 'ALL' && !rows.length && !waiting && shown.transfers.length);
   const heading = filter === 'IN' ? 'Received' : filter === 'OUT' ? 'Sent' : 'Wallet activity';
   return <section className="ux-panel wallet-activity" aria-labelledby="wallet-activity-heading" aria-busy={status === 'loading' || status === 'more'}>
@@ -114,17 +128,18 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     <p className="ux-panel-text">{t(filter === 'ALL' ? 'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. A transaction FloFi matches to a workflow record above is shown with that record, not repeated here.' : filter === 'IN'
       ? 'Tokens your wallet received, including transfers from other wallets and outside FloFi.' : 'Tokens your wallet sent, including transfers made outside FloFi.')}</p>
     {status === 'loading' && !shown && <p className="muted" role="status">{t('Loading wallet activity…')}</p>}
-    {status === 'error' && <div className="ux-notice" role="status"><p>{t(state.code === 'ACTIVITY_SIGN_IN_REQUIRED' ? 'Verify this wallet above to see its activity.'
+    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(refusal.title)}</strong> {t('Wallet activity is shown only while you are signed in to FloFi with access to this wallet.')}</>
+      : t(state.code === 'ACTIVITY_SIGN_IN_REQUIRED' ? 'Verify this wallet above to see its activity.'
       : state.code === 'ACTIVITY_RATE_LIMITED' ? 'Wallet activity was refreshed many times in a short period. Try again in a minute.'
       : 'Wallet activity is temporarily unavailable. Your FloFi workflow history is not affected.')}</p>
-      <button type="button" className="ux-button ux-button-small" onClick={() => load(state.code !== 'ACTIVITY_SIGN_IN_REQUIRED' && state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button></div>}
+      <button type="button" className="ux-button ux-button-small" onClick={() => load(state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button></div>}
     {shown && (rows.length || waiting ? rows.length > 0 && <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>
       : <p className="ux-panel-text wallet-activity-empty">{t(!readable ? 'Wallet activity could not be read on any network right now. This does not mean there is none.'
         : onlyWorkflows ? 'The recent movements of this wallet are your FloFi workflows above. Open Received or Sent to see each transfer.'
         : filter === 'IN' ? 'No received transfers found on the covered networks.' : filter === 'OUT' ? 'No sent transfers found on the covered networks.'
         : 'No wallet activity found on the covered networks.')}</p>)}
-    {shown && notes.length > 0 && <ul className="wallet-activity-coverage" aria-label={t('Network coverage')}>{notes.map(c => <li key={c.network}>{t(COVERAGE_TEXT[c.status]!, c.name)}</li>)}</ul>}
-    {shown && shown.hidden > 0 && <p className="muted wallet-activity-hidden">{t(shown.hidden === 1 ? '1 movement of an unverified token is hidden.' : '{0} movements of unverified tokens are hidden.', String(shown.hidden))}</p>}
+    {shown && notes.length > 0 && <ul className="wallet-activity-coverage" aria-label={t('Network coverage')}>{notes.map(note => <li key={note.key}>{t(note.text, note.name)}</li>)}</ul>}
+    {shown && hidden > 0 && <p className="muted wallet-activity-hidden">{t(hidden === 1 ? '1 movement of an unverified token is hidden.' : '{0} movements of unverified tokens are hidden.', String(hidden))}</p>}
     {shown?.cursor && waiting > 0 && <p className="muted wallet-activity-more">{t(waiting === 1 ? '1 older movement appears when more activity is loaded.' : '{0} older movements appear when more activity is loaded.', String(waiting))}</p>}
     {shown?.cursor && <div className="ux-list-footer"><button type="button" className="ux-button ux-button-small" disabled={status === 'more'} onClick={() => load(shown.cursor)}>
       {t(status === 'more' ? 'Loading wallet activity…' : 'Load more activity')}</button></div>}

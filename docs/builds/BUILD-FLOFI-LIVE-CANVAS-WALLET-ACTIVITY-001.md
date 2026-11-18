@@ -48,10 +48,10 @@ provider never delays FloFi's own records.
 | Network | Source (already configured) | Native | ERC-20 / SPL | Internal native (in contracts) | Token-2022 | Status shown |
 | --- | --- | --- | --- | --- | --- | --- |
 | Ethereum | Alchemy Transfers API (`GRYLOO_ALCHEMY_API_KEY`) | yes | yes | yes | — | Covered |
-| Base | Alchemy Transfers API | yes | yes | **not listed** | — | Partial ("transfers made inside contracts are not listed") |
-| Arbitrum One | Alchemy Transfers API | yes | yes | **not listed** | — | Partial |
+| Base | Alchemy Transfers API | yes | yes | **not listed** | — | Partial ("ETH moved by contracts (internal transfers) is not listed") |
+| Arbitrum One | Alchemy Transfers API | yes | yes | **not listed** | — | Partial (same note) |
 | Robinhood Chain | none configured | — | — | — | — | Not supported ("not available on this network yet") |
-| Solana | deployment Solana RPC (`GRYLOO_SOLANA_RPC_URL` or the pinned public RPC) | yes | yes (wallet + up to 6 token accounts of verified mints) | — | yes (base units) | Covered; Partial beyond 6 token accounts |
+| Solana | deployment Solana RPC (`GRYLOO_SOLANA_RPC_URL` or the pinned public RPC) | yes | yes (wallet + up to 6 token accounts of verified mints) | — | yes (base units) | Covered; Partial beyond 6 token accounts ("only the first 6 token accounts of this wallet are read…") or when a transaction cannot be read ("some transactions could not be read right now…") |
 
 A network the deployment does not enable is OFF; a failed or slow network is UNAVAILABLE on its own ("could not be loaded right now. This does
 not mean there is none."). No network is ever presented as an empty history when it could not be read.
@@ -59,7 +59,8 @@ not mean there is none."). No network is ever presented as an empty history when
 ### Integrity
 
 - Only verified catalog assets are named (symbol and decimals from FloFi's catalogs, never from the provider); other tokens and decimal mismatches
-  are counted as hidden (spam protection).
+  are counted as hidden (spam protection). Each hidden movement carries a token-free key (chain, transaction, direction, log position or ordinal),
+  so a movement read again on a later page is counted once.
 - A transaction that both sends and receives the wallet's assets (swap, liquidity, bridge leg) is one **Contract interaction**, never two transfers —
   also when the other side is an unverified (hidden) token: the page carries the direction of each hidden movement (`hiddenMoves`, never the token),
   so selling a memecoin for USDC is never shown as "Received USDC"; mint/burn and self-transfers are labeled; sender/recipient only where the chain
@@ -75,13 +76,16 @@ not mean there is none."). No network is ever presented as an empty history when
   is shared by all reads. EVM transfers are "Confirmed" (included in a block); Solana uses the cluster's `confirmed`/`finalized` status.
 - The continuation travels in a header (`x-flofi-cursor`), never in a URL, and is bound to its wallet by a server-keyed MAC: it names no wallet in
   clear and cannot be forged to drive provider reads.
-- No silent gaps: incoming and outgoing (and each Solana address) are read as separate streams, so a page is only complete down to the newest of
-  the oldest times read on streams with more history (`completeAfter`); older rows wait for the next page ("N older movements appear when more
-  activity is loaded"). Legs of one transaction that arrive on different pages are re-classified together (a swap is never two transfers). A
+- No silent gaps: incoming and outgoing (and each Solana address) are read as separate streams, so a page is complete only strictly after the
+  newest of the oldest times read on streams with more history (`completeAfter`); rows at or before it wait for the next page ("N older
+  movements appear when more activity is loaded"), since movements of one block or second can straddle a page. A Solana signature without a
+  block time takes the nearest newer one; an address whose signatures carry none holds the whole page back. Legs of one transaction that arrive on different pages are re-classified together (a swap is never two transfers). A
   Solana address continues after the last signature of the contiguous run of its list a page shows, so a page cut through a same-slot pair
-  never skips a signature. A later page's coverage replaces a network's earlier note whenever it read that network; Retry repeats exactly the
-  request that failed (a failed refresh re-reads the newest, never the next page); a wallet the server stops reading for this browser
-  (`ACTIVITY_SIGN_IN_REQUIRED`) clears what was loaded.
+  never skips a signature. Coverage across pages: a later read clears a network's "could not be loaded" note (and a later failure shows it), but
+  a partial-coverage note of any page listed stays, in its own words per code (internal transfers, token-account limit, unreadable
+  transaction). Retry repeats exactly the request that failed (a failed refresh re-reads the newest, never the next page). A refusal meaning
+  FloFi no longer reads this wallet for this browser — not verified here (`ACTIVITY_SIGN_IN_REQUIRED`), session ended, another account, access
+  revoked, wallet not linked (`BETA_*` except the retryable access check) — clears what was loaded and names the reason.
 - Solana Token-2022 mints whose display amount differs from their base amount (Scaled UI Amount, interest-bearing) are counted as hidden instead of
   shown with a base-unit amount; a transaction the node cannot return marks Solana PARTIAL.
 
@@ -98,7 +102,8 @@ not mean there is none."). No network is ever presented as an empty history when
   public RPC a page needs ~20 sequential paced calls and may exceed the 10 s budget (shown as unavailable, never empty) — a dedicated RPC
   (`GRYLOO_SOLANA_RPC_URL`, already supported) avoids it.
 - **Network gates**: a network the deployment deliberately does not enable (or refuses, e.g. test networks) is OFF and not listed; a gate read
-  the runtime cannot answer (failure or time budget) is UNAVAILABLE ("could not be loaded right now"), never OFF. The portfolio keeps its own
+  the runtime cannot answer (failure or time budget) is UNAVAILABLE ("could not be loaded right now"), never OFF. Solana, gated by two flows, is
+  enabled when either answers enabled, and unknown only when none does and one could not answer. The portfolio keeps its own
   fail-closed gate semantics unchanged (`defaultMode` only gained an optional reader).
 - **NFTs** (ERC-721/1155) are not part of wallet activity.
 - **Origin deduplication** is as complete as the loaded execution records' attempts. The History list reads attempts only for runs whose summary

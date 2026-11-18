@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the wallet activity reader is read-only, bounded, verified-assets-only and honest about coverage. */
 import { describe, expect, it, vi } from 'vitest';
-import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, type AssetCatalog } from '@defi-workflow-engine/action-registry';
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { ACTIVITY_READS_PER_MINUTE, activityAccount, activityGate, decodeCursor, encodeCursor, readWalletActivity, type AlchemyCall, type WalletActivityCache, type WalletActivitySeams } from './wallet-activity';
 import type { cloudFlow } from './flow-runtime';
-import { activityRows, signedAmount } from '../domain/wallet-activity';
+import { activityRows, mergeCoverage, signedAmount, type ActivityCoverage } from '../domain/wallet-activity';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog';
 
 const owner = '0x' + '1'.repeat(40), peer = '0x' + '2'.repeat(40), pool = '0x' + '3'.repeat(40);
@@ -187,8 +187,9 @@ describe('review hardening (flofi-protocol-integrations)', () => {
       IN: [transfer(1, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T10:00:00Z'), transfer(2, peer, owner, 'erc20', 2n, USDC, 6, '2026-11-17T09:00:00Z')],
       OUT: [transfer(3, owner, peer, 'erc20', 3n, USDC, 6, '2026-11-10T09:00:00Z')], pageKey: 'more' } }), { mode: async n => n === 'base' ? 'live' : 'off' }));
     expect(page.completeAfter).toBe('2026-11-17T09:00:00.000Z');
-    // The OUT row of a week earlier is held back: rows newer than it on the busier stream may not have been read yet.
-    expect(activityRows(page.transfers, 'ALL', new Set(), page.completeAfter).map(r => r.transfer.transaction)).toEqual([h(1), h(2)]);
+    // The OUT row of a week earlier is held back: rows newer than it on the busier stream may not have been read yet. So is the row AT the
+    // frontier: another movement of the same block may sit on the next page of its stream.
+    expect(activityRows(page.transfers, 'ALL', new Set(), page.completeAfter).map(r => r.transfer.transaction)).toEqual([h(1)]);
     expect(activityRows(page.transfers, 'ALL').length).toBe(3);
   });
   it('legs of one swap that arrive on different pages are one interaction across everything loaded', () => {
@@ -247,7 +248,7 @@ describe('review hardening (multi-lens)', () => {
     const page = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: {
       IN: [transfer(5, pool, owner, 'erc20', 500_000_000n, USDC)], OUT: [{ ...transfer(5, owner, pool, 'erc20', 10n ** 21n, SPAM, 18), uniqueId: `${h(5)}:log:77` }] } })));
     expect(page.transfers.map(t => [t.direction, t.asset.symbol, t.kind])).toEqual([['IN', 'USDC', 'INTERACTION']]);
-    expect(page.hidden).toBe(1); expect(page.hiddenMoves).toEqual([`eip155:8453:${h(5)}:OUT`]);
+    expect(page.hidden).toBe(1); expect(page.hiddenMoves).toEqual([`eip155:8453:${h(5)}:OUT:log.77`]);
     expect(JSON.stringify(page)).not.toContain(SPAM.slice(2));
     // Its hidden leg read on another page still makes the visible one an interaction across everything loaded.
     const single = await readWalletActivity({ account: owner }, {}, seams(alchemyOf({ base: { IN: [transfer(5, pool, owner, 'erc20', 500_000_000n, USDC)] } })));
@@ -314,6 +315,67 @@ describe('review hardening (multi-lens)', () => {
     expect(decodeCursor(first.cursor, wallet, cursorKey)![`solana:${wallet}`]).toBe(sig('h'));
     const second = await read(first.cursor);
     expect(second.transfers.filter(t => t.transaction === sig('X')).map(t => [t.direction, t.amount])).toEqual([['IN', '7']]);
+  });
+});
+
+describe('review hardening (fix verification)', () => {
+  const wallet = 'Fq9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', ata = 'Hz9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const spamMint = 'Spam1111111111111111111111111111111111111111';
+  const sig = (c: string) => c.repeat(88);
+  const catalog: SolanaAssetCatalog = { assets: [{ symbol: 'USDC', name: 'USD Coin', mint, decimals: 6, native: false, logoUrl: null }], fetchedAt: '', source: 'test', contentSha256: '', excludedRecords: 0 };
+  type Item = { signature: string; slot: number; err: null; blockTime?: number | null };
+  /** A paged Solana stand-in: per-address signature lists honouring `before`; `spam` signatures received one unverified token. */
+  const solana = (walletList: Item[], ataList: Item[], spam: readonly string[] = []): SolanaRpc => async (method: string, params: readonly unknown[]) => {
+    if (method === 'getTokenAccountsByOwner') return { value: (params[1] as { programId: string }).programId.startsWith('Tokenkeg') ? [{ pubkey: ata, account: { data: { parsed: { info: { mint, owner: wallet } } } } }] : [] };
+    if (method === 'getSignaturesForAddress') {
+      const list = params[0] === wallet ? walletList : ataList, options = params[1] as { before?: string; limit: number };
+      return list.slice(options.before ? list.findIndex(item => item.signature === options.before) + 1 : 0).slice(0, options.limit);
+    }
+    if (method === 'getTransaction') return { slot: 1, blockTime: 1, meta: { err: null, fee: 0, preBalances: [1, 0], postBalances: [1, 0],
+      preTokenBalances: [], postTokenBalances: spam.includes(params[0] as string) ? [{ accountIndex: 1, mint: spamMint, owner: wallet, uiTokenAmount: { amount: '5', decimals: 0 } }] : [] },
+      transaction: { message: { accountKeys: [{ pubkey: 'Kk9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr' }, { pubkey: wallet }], instructions: [] } } };
+    throw new Error('UNEXPECTED_' + method);
+  };
+  const read = (rpc: SolanaRpc, cursor: string | null = null) => readWalletActivity({ account: wallet, cursor }, {}, { cache: null, cursorKey, mode: async () => 'live', solanaRpc: () => rpc, solanaCatalog: async () => catalog });
+  it('a hidden movement read again on a later page is one movement (its key repeats; the History counts unique keys)', async () => {
+    const walletList = [...'abcdefgh'].map((c, i) => ({ signature: sig(c), slot: 100 - i, err: null })).concat([{ signature: sig('X'), slot: 50, err: null }, { signature: sig('Y'), slot: 50, err: null }]);
+    const ataList = [...'pqr'].map((c, i) => ({ signature: sig(c), slot: 99 - i, err: null })).concat([{ signature: sig('Y'), slot: 50, err: null }]);
+    const rpc = solana(walletList, ataList, [sig('Y')]);
+    const first = await read(rpc), second = await read(rpc, first.cursor);
+    // Y was on the first page and is read again after the gap: the same key, never a second movement.
+    expect(first.hiddenMoves).toEqual([`${JUPITER_SOLANA_MAINNET.chain}:${sig('Y')}:IN:0`]);
+    expect(second.hiddenMoves).toEqual(first.hiddenMoves);
+    expect(new Set([...first.hiddenMoves, ...second.hiddenMoves]).size).toBe(1);
+  });
+  it('a signature without a block time never drops its address from the frontier; a row at the frontier waits', async () => {
+    const t = (slot: number) => 1_763_000_000 + slot;
+    // The wallet has more history; its oldest read signature has no block time: the nearest newer one bounds the page.
+    const walletList: Item[] = Array.from({ length: 11 }, (_, i) => ({ signature: sig('abcdefghijk'[i]!), slot: 100 - i, err: null, blockTime: i === 9 ? null : t(100 - i) }));
+    const ataList: Item[] = [{ signature: sig('p'), slot: 60, err: null, blockTime: t(60) }, { signature: sig('q'), slot: 59, err: null, blockTime: t(59) }];
+    const page = await read(solana(walletList, ataList));
+    expect(page.cursor).not.toBeNull();
+    expect(page.completeAfter).toBe(new Date(t(92) * 1000).toISOString());
+    // Without times at all, the address holds the whole page back rather than letting an older row through.
+    const blind = await read(solana(walletList.map(item => ({ ...item, blockTime: null })), ataList));
+    expect(Date.parse(blind.completeAfter!)).toBe(8.64e15);
+  });
+  it('Solana is enabled when either gate flow says so, even if the other cannot answer; unknown only when none says so', async () => {
+    const signal = new AbortController().signal;
+    const answers = (jupiter: unknown, transfer: unknown) => vi.fn(async (flow: string) => flow === 'jupiter-swap' ? jupiter : transfer) as unknown as typeof cloudFlow;
+    await expect(activityGate('solana', {}, signal, answers({ ok: true, value: 'live' }, { ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' }))).resolves.toBe('live');
+    await expect(activityGate('solana', {}, signal, answers({ ok: true, value: 'off' }, { ok: false, code: 'CLOUD_RUNTIME_UNAVAILABLE' }))).rejects.toThrow('ACTIVITY_NETWORK_GATE_UNAVAILABLE');
+    await expect(activityGate('solana', {}, signal, answers({ ok: true, value: 'off' }, { ok: true, value: 'off' }))).resolves.toBe('off');
+  });
+  it('coverage across pages: a later read clears "could not be loaded", but never erases an earlier page’s partial gap', () => {
+    const c = (network: ActivityCoverage['network'], status: ActivityCoverage['status'], code: string | null = null): ActivityCoverage => ({ network, name: network, status, code, covers: [], missing: [] });
+    let state = mergeCoverage(null, [c('solana', 'PARTIAL', 'SOLANA_TRANSACTION_UNREADABLE')]);
+    state = mergeCoverage(state, [c('solana', 'UNAVAILABLE', 'ACTIVITY_TIME_BUDGET_EXCEEDED')]);
+    state = mergeCoverage(state, [c('solana', 'COVERED')]);
+    expect(state.current.map(x => x.status)).toEqual(['COVERED']);
+    expect(state.gaps.map(x => x.code)).toEqual(['SOLANA_TRANSACTION_UNREADABLE']);
+    const evm = mergeCoverage(mergeCoverage(null, [c('base', 'UNAVAILABLE'), c('robinhood', 'UNSUPPORTED')]), [c('base', 'PARTIAL', 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED'), c('robinhood', 'UNSUPPORTED')]);
+    expect(evm.current.map(x => x.status)).toEqual(['PARTIAL', 'UNSUPPORTED']);
+    expect(evm.gaps.map(x => x.code)).toEqual(['ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED']);
   });
 });
 

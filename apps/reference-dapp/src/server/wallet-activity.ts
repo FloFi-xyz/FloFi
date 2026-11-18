@@ -31,7 +31,7 @@ import { defaultMode, type PortfolioMode } from './wallet-portfolio.ts';
 import { cloudFlow } from './flow-runtime.ts';
 import { TEST_NETWORK_FLOW_REFUSAL } from './test-network-flows.ts';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog.ts';
-import { classifyLegs, type ActivityCategory, type ActivityCoverage, type ActivityLeg, type ActivityNetworkId, type WalletActivityPage,
+import { classifyLegs, hiddenMoveKey, type ActivityCategory, type ActivityCoverage, type ActivityLeg, type ActivityNetworkId, type WalletActivityPage,
   type WalletTransfer } from '../domain/wallet-activity.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -40,6 +40,8 @@ export const ACTIVITY_PAGE = 20, SOLANA_SIGNATURES_PER_ADDRESS = 10, SOLANA_TRAN
 const BUDGET_MS = 10_000, CACHE_COMPLETE_MS = 30_000, CACHE_INCOMPLETE_MS = 5_000, CACHE_ENTRIES = 200, MAX_CURSOR = 4096;
 /** A read in flight is joined until it settles (bounded by the route's own 60 s limit), however long its networks take within their budgets. */
 const CACHE_PENDING_MS = 60_000;
+/** The latest time a Date can hold: a stream whose read signatures carry no time at all holds every row of the page back. */
+const UNKNOWN_TIME = 8.64e15;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const codeOf = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
 const HASH = /^0x[0-9a-fA-F]{64}$/, ADDRESS = /^0x[0-9a-fA-F]{40}$/, HEX = /^0x[0-9a-fA-F]{1,64}$/, SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -170,10 +172,17 @@ export function alchemyTransport(env: Env): AlchemyCall | null {
     return (body as { result: unknown }).result;
   };
 }
+/** A token-free position of a transfer within its transaction (`log.12` from Alchemy's `<hash>:log:12`), or a stable fallback. */
+function logPosition(uniqueId: unknown, hash: string): string {
+  const id = typeof uniqueId === 'string' ? uniqueId.toLowerCase() : '';
+  const position = id.startsWith(`${hash}:`) ? id.slice(hash.length + 1).replace(/:/g, '.') : '';
+  return /^[a-z0-9.]{1,40}$/.test(position) ? position : 'tx';
+}
 type AlchemyTransfer = { blockNum?: unknown; uniqueId?: unknown; hash?: unknown; from?: unknown; to?: unknown; category?: unknown;
   rawContract?: { value?: unknown; address?: unknown; decimal?: unknown } | null; metadata?: { blockTimestamp?: unknown } | null };
 /** `frontier`: the newest of the oldest times read on each stream that has more history (null: none left), see `completeAfter`. */
-type ReadResult = { readonly legs: ActivityLeg[]; readonly hidden: number; readonly hiddenMoves: string[]; readonly streams: Record<string, string | null>;
+/** `hiddenMoves`: one key per hidden (unverified-token) movement, see `WalletActivityPage.hiddenMoves`. */
+type ReadResult = { readonly legs: ActivityLeg[]; readonly hiddenMoves: string[]; readonly streams: Record<string, string | null>;
   readonly coverage: ActivityCoverage; readonly frontier: number | null };
 const later = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
 
@@ -183,7 +192,7 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
   const native = listed.assets.find(asset => asset.kind === 'NATIVE');
   const tokens = new Map(listed.assets.filter(asset => asset.kind === 'ERC20' && asset.address).map(asset => [asset.address!.toLowerCase(), asset] as const));
   const legs: ActivityLeg[] = [], hiddenMoves: string[] = [], streams: Record<string, string | null> = {};
-  let hidden = 0, frontier: number | null = null;
+  let frontier: number | null = null;
   for (const direction of ['IN', 'OUT'] as const) {
     const key = `${network}:${direction}`, before = previous ? previous[key] : undefined;
     // A stream already exhausted on an earlier page is not read again.
@@ -215,8 +224,9 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
         const known = address ? tokens.get(address) : undefined;
         const decimals = typeof raw.rawContract?.decimal === 'string' && HEX.test(raw.rawContract.decimal) ? Number(BigInt(raw.rawContract.decimal)) : null;
         // Spam protection: a token outside the verified catalog, or whose decimals disagree with it, is counted and never named.
-        // Its direction is kept (never the token), so the transaction's visible legs are classified with it.
-        if (!known || (decimals !== null && decimals !== known.decimals)) { hidden++; hiddenMoves.push(`${runtime.chain}:${hash}:${moved}`); continue; }
+        // Its direction and log position are kept (never the token): the transaction's visible legs are classified with it, and a self-transfer
+        // listed by both streams is one movement.
+        if (!known || (decimals !== null && decimals !== known.decimals)) { hiddenMoves.push(hiddenMoveKey(runtime.chain, hash, moved, logPosition(raw.uniqueId, hash))); continue; }
         asset = { symbol: known.symbol, decimals: known.decimals, address: known.address!.toLowerCase(), logo: known.logoUrl };
       } else asset = { symbol: native?.symbol ?? 'ETH', decimals: native?.decimals ?? 18, address: null, logo: native?.logoUrl ?? null };
       const unique = typeof raw.uniqueId === 'string' && raw.uniqueId.length <= 200 ? raw.uniqueId : `${hash}:${category}:${legs.length}`;
@@ -227,7 +237,7 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
     }
   }
   const covers: ActivityCategory[] = network === 'ethereum' ? ['NATIVE', 'INTERNAL', 'TOKEN'] : ['NATIVE', 'TOKEN'];
-  return { legs, hidden, hiddenMoves, streams, frontier, coverage: { network, name: ACTIVITY_NAME[network], status: network === 'ethereum' ? 'COVERED' : 'PARTIAL',
+  return { legs, hiddenMoves, streams, frontier, coverage: { network, name: ACTIVITY_NAME[network], status: network === 'ethereum' ? 'COVERED' : 'PARTIAL',
     code: network === 'ethereum' ? null : 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED', covers, missing: network === 'ethereum' ? [] : ['INTERNAL'] } };
 }
 
@@ -300,14 +310,15 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
     if (streams[key] === null) continue;
     const own = found.filter(item => item.source === source), cut = own.findIndex(item => !onPage.has(item.signature));
     streams[key] = cut === -1 ? exhausted.has(source) ? null : own.at(-1)?.signature ?? null : cut === 0 ? previous?.[key] ?? FROM_NEWEST : own[cut - 1]!.signature;
-    // Complete only down to the newest of the oldest times read on addresses with more history (see `completeAfter`): an address read through
-    // entirely is complete to its oldest read signature; one the page cut is complete to its first signature not shown.
+    // Complete only after the newest of the oldest times read on addresses with more history (see `completeAfter`): an address read through
+    // entirely is complete after its oldest read signature; one the page cut, after its first signature not shown. A signature without a block
+    // time takes the nearest newer one read (more conservative); an address with none at all holds the whole page back.
     if (!streams[key]) continue;
-    const edge = cut === -1 ? own.at(-1) : own[cut];
-    if (edge?.time !== null && edge?.time !== undefined) frontier = later(frontier, edge.time);
+    const edge = cut === -1 ? own.length - 1 : cut;
+    frontier = later(frontier, own.slice(0, edge + 1).reverse().find(item => item.time !== null)?.time ?? UNKNOWN_TIME);
   }
   const legs: ActivityLeg[] = [], hiddenMoves: string[] = [];
-  let hidden = 0, unreadable = 0;
+  let unreadable = 0;
   for (const item of page) {
     if (item.failed) continue;
     checkAborted(signal);
@@ -349,10 +360,13 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
       const current = deltas.get(b.mint) ?? { delta: 0n, decimals: b.uiTokenAmount.decimals, scaled: false };
       deltas.set(b.mint, { delta: current.delta + sign * amount, decimals: current.decimals, scaled: current.scaled || scaled });
     }
+    let hiddenInTransaction = 0;
     for (const [mint, { delta, decimals, scaled }] of deltas) {
       if (delta === 0n) continue;
       const known = verified.get(mint);
-      if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals || scaled) { hidden++; hiddenMoves.push(`${base.chain}:${item.signature}:${delta > 0n ? 'IN' : 'OUT'}`); continue; }
+      // Counted by its ordinal within the transaction (the node returns its balances in a fixed order), never by its mint.
+      if (!known && mint !== WSOL_MINT || known && known.decimals !== decimals || scaled) {
+        hiddenMoves.push(hiddenMoveKey(base.chain, item.signature, delta > 0n ? 'IN' : 'OUT', String(hiddenInTransaction++))); continue; }
       const transfer = instructions.find(ix => (ix.program === 'spl-token' || ix.program === 'spl-token-2022') && ['transfer', 'transferChecked'].includes(String(ix.parsed?.type))
         && (ix.parsed?.info?.mint === undefined || ix.parsed.info.mint === mint)
         && (delta > 0n ? ownerOf.get(String(ix.parsed?.info?.destination)) === owner : ownerOf.get(String(ix.parsed?.info?.source)) === owner || ix.parsed?.info?.authority === owner));
@@ -364,7 +378,7 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
   }
   const limited = accounts.length > SOLANA_MAX_TOKEN_ACCOUNTS;
   const partial = limited ? 'SOLANA_TOKEN_ACCOUNT_LIMIT' : unreadable ? 'SOLANA_TRANSACTION_UNREADABLE' : null;
-  return { legs, hidden, hiddenMoves, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: partial ? 'PARTIAL' : 'COVERED', code: partial,
+  return { legs, hiddenMoves, streams, frontier, coverage: { network: 'solana', name: 'Solana', status: partial ? 'PARTIAL' : 'COVERED', code: partial,
     covers: ['NATIVE', 'TOKEN'], missing: [] } };
 }
 
@@ -374,14 +388,19 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
  * silently drops it from the page. A flow the deployment refuses (test networks) or a runtime without configuration stays off. One attempt,
  * abandoned when the network's time budget ends.
  */
-export function activityGate(network: ActivityNetworkId, env: Env, signal: AbortSignal, call: typeof cloudFlow = cloudFlow): Promise<PortfolioMode> {
-  return defaultMode(network, env, async (flow, flowEnv) => {
+export async function activityGate(network: ActivityNetworkId, env: Env, signal: AbortSignal, call: typeof cloudFlow = cloudFlow): Promise<PortfolioMode> {
+  // A network with two gate flows (Solana) is enabled when either answers enabled, even if the other could not answer; it is unknown only when
+  // none answered enabled and one could not answer.
+  let unanswered = false;
+  const mode = await defaultMode(network, env, async (flow, flowEnv) => {
     const result = await call<unknown>(flow, 'mode', [], { env: flowEnv, signal, maxAttempts: 1 });
     if (result === null) return null;
     if (result.ok) return result.value === 'live' || result.value === 'harness' ? result.value : 'off';
-    if (result.code === TEST_NETWORK_FLOW_REFUSAL || result.code === 'CLOUD_RUNTIME_NOT_CONFIGURED') return 'off';
-    throw new Error('ACTIVITY_NETWORK_GATE_UNAVAILABLE');
+    if (result.code !== TEST_NETWORK_FLOW_REFUSAL && result.code !== 'CLOUD_RUNTIME_NOT_CONFIGURED') unanswered = true;
+    return 'off';
   });
+  if (mode === 'off' && unanswered) throw new Error('ACTIVITY_NETWORK_GATE_UNAVAILABLE');
+  return mode;
 }
 
 // ── The page ─────────────────────────────────────────────────────────────────────────────────
@@ -438,9 +457,9 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
     return await readEvm(network, account.address, alchemy, catalog, previous, signal);
   }, budget, 'ACTIVITY_TIME_BUDGET_EXCEEDED').catch(error => unavailable(network, codeOf(error, 'ACTIVITY_READ_FAILED')))));
   const legs: ActivityLeg[] = [], hiddenMoves: string[] = [], coverage: ActivityCoverage[] = [], streams: Record<string, string | null> = {};
-  let hidden = 0, frontier: number | null = null;
+  let frontier: number | null = null;
   for (const result of results) {
-    if ('legs' in result) { legs.push(...result.legs); hiddenMoves.push(...result.hiddenMoves); coverage.push(result.coverage); hidden += result.hidden; Object.assign(streams, result.streams);
+    if ('legs' in result) { legs.push(...result.legs); hiddenMoves.push(...result.hiddenMoves); coverage.push(result.coverage); Object.assign(streams, result.streams);
       frontier = later(frontier, result.frontier); }
     else coverage.push(result);
   }
@@ -448,7 +467,7 @@ async function readUncached(account: ActivityAccount, previous: Streams | null, 
   if (previous) for (const [k, v] of Object.entries(previous)) if (!(k in streams) && coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))) streams[k] = v;
   const more = Object.values(streams).some(v => v !== null);
   const moves = [...new Set(hiddenMoves)];
-  return { account: account.address, transfers: classifyLegs(legs, moves), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey) : null, hidden, hiddenMoves: moves,
+  return { account: account.address, transfers: classifyLegs(legs, moves), coverage, cursor: more ? encodeCursor(account.address, streams, cursorKey) : null, hidden: moves.length, hiddenMoves: moves,
     completeAfter: more && frontier !== null ? new Date(frontier).toISOString() : null,
     provenance: 'PUBLIC_MAINNET', observedAt: nowDate.toISOString() };
 }
@@ -478,5 +497,8 @@ function mockedActivity(account: ActivityAccount, now: Date): WalletActivityPage
       { network: 'arbitrum-one', name: 'Arbitrum One', status: 'PARTIAL', code: 'ACTIVITY_INTERNAL_TRANSFERS_NOT_LISTED', covers: ['NATIVE', 'TOKEN'], missing: ['INTERNAL'] },
       unsupported('robinhood', 'ACTIVITY_SOURCE_NOT_CONFIGURED')]
     : [{ network: 'solana', name: 'Solana', status: 'COVERED', code: null, covers: ['NATIVE', 'TOKEN'], missing: [] }];
-  return { account: account.address, transfers: classifyLegs(legs), coverage, cursor: null, completeAfter: null, hidden: 1, provenance: 'MOCKED', observedAt: now.toISOString() };
+  // One unverified-token receipt of its own transaction (it changes no row's kind).
+  const hiddenMoves = [account.ecosystem === 'evm' ? hiddenMoveKey(BASE_MAINNET.chain, `0x${'4'.repeat(64)}`, 'IN', 'log.2') : hiddenMoveKey(JUPITER_SOLANA_MAINNET.chain, '6'.repeat(88), 'IN', '0')];
+  return { account: account.address, transfers: classifyLegs(legs, hiddenMoves), coverage, cursor: null, completeAfter: null, hidden: hiddenMoves.length, hiddenMoves,
+    provenance: 'MOCKED', observedAt: now.toISOString() };
 }
