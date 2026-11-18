@@ -39,3 +39,6 @@ dependencies), batched to the three-subagent limit, and never filters CI.
   content and never edits a manifest; `--proposal FILE` writes a review proposal for a normal pull request.
 - Editing a `SKILL.md` changes its digest: record it with `skill_registry.py digest <id>` in the same reviewed change.
 - New maintained files here must be listed in `docs/engineering/coverage.json` (module `skills--protocol-integrations`).
+
+Use the weekly maintenance procedure to combine upstream observations with
+ownership, parity and regression gap checks. [Agent Evolution](../docs/engineering/AGENT-EVOLUTION.md)

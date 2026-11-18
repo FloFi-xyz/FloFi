@@ -3,6 +3,9 @@
 - Lifecycle: live estimate (display only) → Simulate (fresh quote and simulation for the owner) → Review (Strategy
   Manifest) → Authorize → owner's wallet → FloFi broadcast or wallet send → observation → reconciliation.
 - An estimate is never a Review input. Review re-quotes for the owner.
+- Resolve native ETH and explicit WETH by chain and slot across chat and Canvas. Direct WETH9 conversion has its
+  own registered profile and reviewed identity. Jupiter Build is the mainnet swap profile on Solana. Orca's
+  devnet swap profile and mainnet liquidity profile are separate.
 - Uniswap V3 (EVM): the minimum output is exactly expected × (10 000 − slippage bps) / 10 000. `begin` re-quotes and
   always builds the REVIEWED transaction (route, minimum, deadline where the call carries one). Since
   BUILD-FLOFI-E2E-RELIABILITY-001 it refuses (`QUOTE_CHANGED_REVIEW_REQUIRED`) only a material change: the reviewed route

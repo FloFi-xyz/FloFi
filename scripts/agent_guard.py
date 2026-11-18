@@ -816,9 +816,10 @@ def skill_selection(changed, domain=None, root=ROOT):
             "reviewers": selected["reviewers"], "note": selected["note"]}
 
 
-def changed_paths(base, root=ROOT):
+def changed_paths(base, root=ROOT, *, include_renamed_sources=False):
     merge_base = subprocess.check_output(["git", "merge-base", "HEAD", base], cwd=root, text=True).strip()
-    changed = subprocess.check_output(["git", "diff", "--name-only", "-z", merge_base], cwd=root).decode().split("\0")
+    rename_options = ["--no-renames"] if include_renamed_sources else []
+    changed = subprocess.check_output(["git", "diff", *rename_options, "--name-only", "-z", merge_base], cwd=root).decode().split("\0")
     changed += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root).decode().split("\0")
     return merge_base, sorted(set(filter(None, changed)))
 

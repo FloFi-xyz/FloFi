@@ -234,6 +234,15 @@ jobs:
             # A push build of a branch sees only its last commit as HEAD^1 HEAD; check every commit the branch adds to main.
             git fetch --no-tags origin main
             git diff --check "$(git merge-base FETCH_HEAD HEAD)" HEAD
+      - run:
+          name: "Advisory engineering knowledge impact"
+          command: |
+            set -euo pipefail
+            base=FETCH_HEAD
+            if [ "${CIRCLE_BRANCH:-}" = main ]; then base=HEAD^1; fi
+            if ! python3 scripts/agent_evolution.py --base "$base"; then
+              echo "Engineering knowledge impact unavailable. Use the local maintenance procedure."
+            fi
   certification-build:
     executor: certification-no-database
     steps:

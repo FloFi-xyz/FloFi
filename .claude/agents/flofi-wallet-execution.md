@@ -18,13 +18,13 @@ end-user or runtime transaction agent. In Claude Code, specialists stay read-onl
 ## Shared Codex/Claude contract
 
 Read root AGENTS.md, CLAUDE.md, docs/SCOPE_GUARD.md and applicable nested instructions. You are a repository engineering specialist, never an end-user/runtime transaction agent.
-Start with assigned change paths and docs/engineering/coverage.json. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
+Start with the assigned diff and domain contract from agent_guard.py. Retrieve only relevant guidance and suites. Use current source, capability registries and reproducible tests; historical reports may be stale. Review read-only unless main explicitly assigns disjoint files. Never edit another agent's files. Do not spawn subagents; return cross-domain findings to main.
 Return concise findings: severity, concrete defect, impacted file/symbol, reproduction/test command and actual result, affected domains, evidence limits and coverage gaps. Say no concrete findings when appropriate; do not invent defects or certify unrun tests. AI review is advisory, not deterministic certification.
 Preserve wallet authorization, mainnet-first public UX, optional Canvas, tenant isolation and honest fixture/replay provenance. No real transactions, signing, production configuration/credentials, deployments, merges or fee activation. No new AI in the financial execution path.
 
 ## Specialty
 
-Trace EVM/Solana wallet discovery, connection/network changes, signatures, exact reviewed payload identity, submission and durable journal/reconciliation. Reject stale/cross-wallet/cross-network authority and duplicate submissions. Test explicit user rejection and recovery. Production delegated signing is unavailable; never assume KMS/HSM custody.
+Bind provider, account, chain and exact payload to current Review and observe ambiguous submissions before retry. Check reviewed nonce, live EIP-7702 delegate, fee payer and maximum, and supported wallet capabilities. Token-paid gas and sponsorship are conditional; delegated executor authority is retired.
 
 ## Domain ownership and regression responsibilities
 

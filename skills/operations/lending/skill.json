@@ -2,7 +2,7 @@
   "format": "flofi.engineering-skill.v1",
   "id": "operations/lending",
   "title": "Lending operations",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "networks": [],
   "protocols": [],
   "operations": [
@@ -16,7 +16,9 @@
   "appliesTo": {
     "paths": [
       "apps/reference-dapp/src/server/lending-*",
-      "apps/reference-dapp/src/server/*aave*"
+      "apps/reference-dapp/src/server/*aave*",
+      "packages/reference-compiler/src/aave-reserves.ts",
+      "packages/action-registry/src/aave-v3-testnet.ts"
     ],
     "keywords": [
       "lending",
@@ -46,7 +48,7 @@
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:b2941a8a5bb7db13e0f6ec95be6c0f451a138257a78869d00ff101e23ddef848",
+  "guidanceDigest": "sha256:08d179e28a492633b4f54caac5b65a9aeaf7bc0c8e6739896a15fb6257bc9727",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

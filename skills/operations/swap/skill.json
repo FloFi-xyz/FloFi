@@ -2,7 +2,7 @@
   "format": "flofi.engineering-skill.v1",
   "id": "operations/swap",
   "title": "Swap lifecycle and quote freshness",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "networks": [],
   "protocols": [],
   "operations": [
@@ -18,7 +18,9 @@
       "apps/reference-dapp/src/server/build-estimate*",
       "apps/reference-dapp/src/state/build-estimate.ts",
       "apps/reference-dapp/src/domain/build-estimate.ts",
-      "apps/reference-dapp/src/state/public-testnet-store.tsx"
+      "apps/reference-dapp/src/state/public-testnet-store.tsx",
+      "apps/reference-dapp/src/domain/copilot-authoring.ts",
+      "apps/reference-dapp/src/domain/canvas-action-setup.ts"
     ],
     "keywords": [
       "swap",
@@ -67,7 +69,7 @@
     }
   ],
   "guidance": "SKILL.md",
-  "guidanceDigest": "sha256:f42db8636f30f3151755952f45bc669f53c78b5afae299e55258886b8d219e81",
+  "guidanceDigest": "sha256:e1ca4118a43d9590e60156a3f63e9c9ba3133c63d2405303a19773485fdf3ec3",
   "reviewIntervalDays": 90,
   "authority": "ENGINEERING_REFERENCE_ONLY",
   "performance": [

@@ -42,10 +42,11 @@ roles in `.codex/agents/`; ownership, dependencies, suites and gaps come only fr
 relevant development work, the main session:
 
 1. Inspects `git status`, the diff and its base, then runs
-   `python3 scripts/agent_guard.py check` and `... impact --base origin/main`.
+   `python3 scripts/agent_guard.py check`, `... impact --base origin/main`
+   and `python3 scripts/agent_evolution.py --base origin/main`.
 2. Delegates independent reviews to the selected specialists. They can only Read,
    so main gives each the base, changed paths, relevant diff and its
-   `agent_guard.py domain` report, and runs any search or test they request:
+   `agent_guard.py domain` report and selected skills, and runs any search or test they request:
    flofi-workflow for shared financial core, flofi-security for authorization,
    wallet or identity, and flofi-mcp, flofi-channels and flofi-developers when
    shared contracts reach those entry points.

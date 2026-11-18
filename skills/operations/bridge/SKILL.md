@@ -9,3 +9,7 @@
   reconciled. Origin confirmation is not settlement; a provider's status is not completion.
 - Provider quotes in the legacy Router are independent and asked together, then folded in the reviewed preference
   order (selection unchanged).
+- Universal Router executes verified Relay Depository paths. Bind both chain/asset identities and the reviewed
+  recipient on refresh, including native/wrapped assets and Solana token accounts. Expiry or a provider change
+  requires the applicable fresh Review. Report included route fee, separate origin gas and any unsettled product
+  fee as distinct amounts.
