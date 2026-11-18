@@ -125,7 +125,9 @@ export type Known = Readonly<Record<Exclude<WorkflowCategory, 'ALL'>, boolean>>;
  * run by the page's Refresh.
  */
 export type WorkflowLibrary = { readonly saved: readonly WorkflowEntry[]; readonly executed: readonly WorkflowEntry[]; readonly known: boolean;
-  readonly savedEmpty: ReactNode; readonly refreshRecords: RefObject<(() => void) | null> };
+  readonly savedEmpty: ReactNode; readonly refreshRecords: RefObject<(() => void) | null>;
+  /** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the transaction hashes the loaded execution records carry (wallet activity deduplication). */
+  readonly reportTransactions?: (hashes: readonly string[]) => void };
 export const WorkflowLibraryContext = createContext<WorkflowLibrary | null>(null);
 
 const CATEGORIES: readonly (readonly [WorkflowCategory, string])[] = [['ALL', 'All'], ['ATTENTION', 'Needs attention'], ['SAVED', 'Saved'], ['EXECUTED', 'Executed']];
@@ -183,6 +185,9 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
     library.refreshRecords.current = refresh;
     return () => { if (library.refreshRecords.current === refresh) library.refreshRecords.current = null; };
   });
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the History's wallet activity learns which transactions these records already show.
+  const recordedHashes = runs.flatMap(view => view.run.attempts?.flatMap(attempt => attempt.transactionHash ? [attempt.transactionHash] : []) ?? []).join(',');
+  useEffect(() => { if (mode === 'records') library?.reportTransactions?.(recordedHashes ? recordedHashes.split(',') : []); }, [recordedHashes, mode, library?.reportTransactions]);
   const attention = runs.filter(needsAttention);
   const current = runs.filter(run => run.current);
   const executed = runs.filter(run => !needsAttention(run));

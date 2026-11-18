@@ -610,3 +610,79 @@ for (const width of [320, 375, 390, 430]) {
     expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
   });
 }
+
+// BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: with the shell's Canvas execution, Execute keeps the SAME Canvas during the run — the cards and their
+// links change color from the recorded state only, never move or resize — and the step timeline stays reachable under Execution details.
+test.describe('Live Canvas', () => {
+  const cards = (page: Page) => page.locator('.simulate-flow-surface .composer-card');
+  const states = (page: Page) => cards(page).evaluateAll(list => list.map(card => card.getAttribute('data-execution')));
+  const boxes = (page: Page) => cards(page).evaluateAll(list => list.map(card => { const r = card.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; }));
+  for (const theme of ['light', 'dark'] as const) test(`${theme}: the same three cards progress neutral → blue → green without moving`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    // The frame before the run (the execution plan) and during it is the same grid child with the same size: nothing jumps when the run starts.
+    const frame = () => page.locator('.simulate-canvas').evaluate(element => { const r = element.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; });
+    await page.evaluate(() => window.flofiExecuteAcceptance.liveCanvas(true));
+    const plan = await frame();
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; window.flofiExecuteAcceptance.evidence('progress-0'); }, theme);
+    const graph = page.getByRole('region', { name: 'Execution workflow graph', exact: true });
+    await expect(graph).toBeVisible(); await expect(cards(page)).toHaveCount(3);
+    await expect(page.locator('.execution-timeline')).toBeHidden();
+    await expect(page.locator('.execution-details-disclosure')).not.toHaveAttribute('open', '');
+    await expect.poll(() => states(page)).toEqual(['pending', 'waiting', 'waiting']);
+    await expect(page.locator('.simulate-canvas')).toHaveAttribute('data-execution', 'live');
+    expect(await frame()).toEqual(plan);
+    const first = await boxes(page);
+    await page.screenshot({ path: `.tmp/live-canvas-0-${theme}.png` });
+    const expected = [['done', 'pending', 'waiting'], ['done', 'done', 'pending'], ['done', 'done', 'done']];
+    for (const [index, scenario] of (['progress-1', 'progress-2', 'progress-3'] as const).entries()) {
+      await page.evaluate(value => window.flofiExecuteAcceptance.evidence(value), scenario);
+      await expect.poll(() => states(page)).toEqual(expected[index]);
+      // The same cards: same positions and sizes at every step.
+      expect(await boxes(page)).toEqual(first);
+      await page.screenshot({ path: `.tmp/live-canvas-${index + 1}-${theme}.png` });
+    }
+    await expect(page.locator('.simulate-canvas')).toHaveAttribute('data-execution', 'settled');
+    await expect(page.locator('.canvas-execution-badge[data-visual="done"]')).toHaveCount(3);
+    await expect(page.locator('.react-flow__edge.canvas-execution-edge-done')).toHaveCount(2);
+    const green = await cards(page).first().evaluate(card => getComputedStyle(card).borderTopColor);
+    expect(green).not.toBe(await page.locator('.simulate-canvas').evaluate(frame => getComputedStyle(frame).borderTopColor));
+    // Every recorded transaction stays reachable under Execution details, which a final result opens by default; the owner can still close it.
+    const details = page.locator('.execution-details-disclosure');
+    await expect(details).toHaveAttribute('open', '');
+    await expect(page.getByRole('region', { name: 'Execution details', exact: true })).toContainText('Supply');
+    await details.locator('summary').click(); await expect(details).not.toHaveAttribute('open', '');
+    expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
+  });
+  test('a failed step is red beside its completed dependency; nothing completed is reset; details open with the failure', async ({ page }) => {
+    await page.evaluate(() => { window.flofiExecuteAcceptance.liveCanvas(true); window.flofiExecuteAcceptance.evidence('progress-failed'); });
+    await expect.poll(() => states(page)).toEqual(['done', 'failed', 'waiting']);
+    await expect(page.locator('.react-flow__edge.canvas-execution-edge-failed')).toHaveCount(1);
+    await expect(page.locator('.execution-details-disclosure')).toHaveAttribute('open', '');
+    await expect(page.locator('.canvas-execution-badge[data-visual="failed"]')).toContainText('Failed');
+    await page.screenshot({ path: '.tmp/live-canvas-failed.png' });
+  });
+  test('reduced motion stops the execution animation; phones keep the page within the screen', async ({ page }) => {
+    await page.evaluate(() => { window.flofiExecuteAcceptance.liveCanvas(true); window.flofiExecuteAcceptance.evidence('progress-1'); });
+    await expect.poll(() => states(page)).toEqual(['done', 'pending', 'waiting']);
+    // The connection into the step in flight animates when motion is allowed, and stops under the reduced-motion preference.
+    const flowing = page.locator('.react-flow__edge.canvas-execution-edge-active path.react-flow__edge-path').first();
+    const animation = () => flowing.evaluate(path => getComputedStyle(path).animationName);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(animation).toBe('canvas-exec-flow');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect.poll(animation).toBe('none');
+    await page.setViewportSize({ width: 390, height: 900 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: '.tmp/live-canvas-mobile.png', fullPage: true });
+  });
+  test('without a Canvas execution covering the run, the timeline stays the view (chat-first and saved runs keep working)', async ({ page }) => {
+    await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('approval-pending'));
+    await expect(page.getByRole('region', { name: 'Execution plan', exact: true })).toContainText('Approve USDC');
+    await expect(page.locator('.execution-details-disclosure')).toHaveCount(0);
+    // The view before this build, for the same three-step record: the timeline replaces the Canvas.
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.evaluate(() => window.flofiExecuteAcceptance.evidence('progress-1'));
+    await expect(page.locator('.execution-timeline')).toBeVisible(); await expect(page.locator('.simulate-flow-surface')).toHaveCount(0);
+    await page.screenshot({ path: '.tmp/live-canvas-before-timeline.png' });
+  });
+});

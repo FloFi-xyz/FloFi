@@ -10,8 +10,19 @@
  * when the page observes a different Privy user, expires after a short time, and is read again when the tab becomes visible. Signing in, signing
  * out and deleting the account already load a fresh page, which starts empty.
  */
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { accountPresence, type AccountPresence } from '../app/account-action';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import type { AccountPresence } from '../app/account-action';
+
+/**
+ * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the presence read over `GET /api/account/presence` — the same verified read as the
+ * `accountPresence()` Server Action, but never queued behind the page's other actions. Any failure rejects (the safe fallback applies).
+ */
+export async function fetchAccountPresence(): Promise<AccountPresence> {
+  const response = await fetch('/api/account/presence', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+  const body = await response.json().catch(() => ({})) as { ok?: unknown; value?: { accounts?: unknown; signedIn?: unknown } };
+  if (!response.ok || body.ok !== true || typeof body.value?.accounts !== 'boolean' || typeof body.value.signedIn !== 'boolean') throw new Error('ACCOUNTS_UNAVAILABLE');
+  return { accounts: body.value.accounts, signedIn: body.value.signedIn };
+}
 
 export const ACCOUNT_PRESENCE_FRESH_MS = 30_000;
 /** One page, one browser session cookie: a session change this page observes calls `forgetAccountPresence` (the header does, on a Privy user change). */
@@ -23,7 +34,7 @@ const listeners = new Set<() => void>();
 const notify = () => { for (const listener of listeners) listener(); };
 
 /** The shared presence for `key` (one request in flight per key); a fresh value is returned without a request. */
-export function readAccountPresence(key: string, read: () => Promise<AccountPresence> = accountPresence, now = Date.now()): Promise<AccountPresence> {
+export function readAccountPresence(key: string, read: () => Promise<AccountPresence> = fetchAccountPresence, now = Date.now()): Promise<AccountPresence> {
   if (entry?.key === key && now - entry.at < ACCOUNT_PRESENCE_FRESH_MS) return Promise.resolve(entry.value);
   if (pending?.key === key) return pending.promise;
   const promise = read().then(value => {
@@ -39,16 +50,34 @@ export function readAccountPresence(key: string, read: () => Promise<AccountPres
 }
 /** The value known for `key`, or null (unknown: never another key's value). */
 export const knownAccountPresence = (key: string): AccountPresence | null => entry?.key === key ? entry.value : null;
-/** Forgets everything (tests, and a session change this page observes). */
-export function forgetAccountPresence(): void { entry = null; pending = null; notify(); }
+/** Forgets everything (tests, and a session change this page observes). A page's server-verified seed is never applied again after it. */
+export function forgetAccountPresence(): void { entry = null; pending = null; seeded = true; notify(); }
+/**
+ * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the presence the server verified when it rendered this page (`ProductBootstrap.accountPresence`),
+ * used once, as a fresh value, before any read of this page — so My Account is shown at the first open without a request. It never replaces a
+ * value this page read itself, and never applies after the page observed a session change.
+ */
+let seeded = false;
+export function seedAccountPresence(key: string, value: AccountPresence | null | undefined, now = Date.now()): void {
+  if (seeded) return;
+  seeded = true;
+  if (!value || entry || pending) return;
+  entry = { key, value, at: now };
+}
+/** Tests only: a new page. */
+export function resetAccountPresenceForTests(): void { entry = null; pending = null; seeded = false; }
 function subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
 
 /**
  * The presence for this page, prefetched when the browser is idle after mount (or at once through `prefetch`, e.g. on hover or focus of the gear),
  * re-read when the tab becomes visible again after it went stale. `enabled` false (accounts not offered, or the MCP approval page) reads nothing.
  */
-export function useAccountPresence(enabled: boolean): { readonly presence: AccountPresence | null; readonly prefetch: () => void } {
+export function useAccountPresence(enabled: boolean, initial: AccountPresence | null = null): { readonly presence: AccountPresence | null; readonly prefetch: () => void } {
   const key = PAGE_KEY;
+  // The server-verified presence of this page's render, applied once before the first read (no request when it is known).
+  // Stamped with the page's navigation start (when the server verified it), so its freshness window is never extended by a late mount; browser
+  // only, so server rendering never writes one request's presence into process state (flofi-security review).
+  useState(() => { if (enabled && typeof window !== 'undefined') seedAccountPresence(key, initial, typeof performance !== 'undefined' ? Math.round(performance.timeOrigin) : 0); return null; });
   const presence = useSyncExternalStore(subscribe, () => enabled ? knownAccountPresence(key) : null, () => null);
   const prefetch = useCallback(() => { if (enabled) void readAccountPresence(key).catch(() => undefined); }, [enabled, key]);
   useEffect(() => {

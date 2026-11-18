@@ -103,15 +103,20 @@ function localSolanaMode(env: Env): PortfolioMode {
   if (env.GRYLOO_JUPITER_HARNESS === 'MOCKED_LOOPBACK_ONLY' || env.GRYLOO_SOLANA_TRANSFER_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
   return env.GRYLOO_JUPITER === 'live' || env.GRYLOO_SOLANA_TRANSFER === 'live' ? 'live' : 'off';
 }
-/** The flows that carry each network's deployment gate; the first enabled one decides. A hosted deployment never reads a harness. */
-async function defaultMode(network: PortfolioNetworkId, env: Env): Promise<PortfolioMode> {
+/**
+ * The flows that carry each network's deployment gate; the first enabled one decides. A hosted deployment never reads a harness. Also read by
+ * the History's wallet activity (`wallet-activity.ts`).
+ */
+export async function defaultMode(network: PortfolioNetworkId, env: Env,
+  /** How one flow's gate is read (default: `cloudFlowMode`, where any runtime failure reads as off); the History reads it stricter. */
+  flowMode: (flow: Parameters<typeof cloudFlowMode>[0], env: Env) => ReturnType<typeof cloudFlowMode> = cloudFlowMode): Promise<PortfolioMode> {
   let mode: PortfolioMode;
   if (network === 'solana') {
-    const modes = await Promise.all((['jupiter-swap', 'solana-transfer'] as const).map(flow => cloudFlowMode(flow, env)));
+    const modes = await Promise.all((['jupiter-swap', 'solana-transfer'] as const).map(flow => flowMode(flow, env)));
     mode = modes.every(m => m === null) ? localSolanaMode(env) : modes.find(m => m && m !== 'off') ?? 'off';
   } else {
     const runtime = CATALOG_NETWORKS[network];
-    mode = (await cloudFlowMode(runtime.flows.swap, env)) ?? runtime.mode(env);
+    mode = (await flowMode(runtime.flows.swap, env)) ?? runtime.mode(env);
   }
   return mode === 'harness' && isHostedDeployment(env) ? 'off' : mode;
 }

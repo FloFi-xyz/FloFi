@@ -103,6 +103,26 @@ describe('UX-007 fast live quote feedback', () => {
     expect(read()).toEqual({ status: 'ready', estimate: value });
     expect(transport.mock.calls.every(call => call[0] === '/api/build-estimate')).toBe(true);
   });
+  it('BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: a frozen card (its step executing) keeps its answer, asks nothing, never refreshes and marks it expired', async () => {
+    const workflow = authored('5'), value = estimate(workflow);
+    transport.mockResolvedValue(response({ ok: true, estimate: value }));
+    let frozen = false;
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner', null, frozen));
+    read(); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS + 10); expect(read()).toEqual({ status: 'ready', estimate: value });
+    expect(transport).toHaveBeenCalledOnce();
+    frozen = true; read(); await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual({ status: 'ready', estimate: value });
+    // Past its expiry nothing is asked again; the kept answer is marked expired.
+    await vi.advanceTimersByTimeAsync(Date.parse(value.expiresAt) - Date.now() + 60_000);
+    expect(read()).toEqual({ status: 'expired', estimate: value });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+  it('a frozen card that never had an answer shows none and asks nothing (never "calculating")', async () => {
+    const workflow = authored('6');
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner', null, true));
+    read(); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS + 10);
+    expect(read()).toEqual({ status: 'idle' }); expect(transport).not.toHaveBeenCalled();
+  });
   it('coalesces rapid typing ("1", "10", "100") into one request for the latest amount', async () => {
     let workflow = authored('1'); transport.mockImplementation(async (_url: string, init: { body: string }) => response({ ok: true, estimate: estimate(JSON.parse(init.body).workflow) }));
     const read = () => host.render(() => useLiveQuote(workflow, 'node-002'));

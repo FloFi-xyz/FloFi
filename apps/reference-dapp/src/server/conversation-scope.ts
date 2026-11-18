@@ -17,11 +17,26 @@ export function conversationScopeOf(key: Uint8Array, tenantId: string, accountId
   return createHmac('sha256', key).update(`flofi.conversation-scope.v1\0${tenantId}\0${accountId}`).digest('base64url').slice(0, 32);
 }
 export async function currentConversationScope(env: Env = process.env): Promise<string | null> {
+  return (await currentAccountBootstrap(env)).conversationScope;
+}
+/**
+ * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (My Account): the SAME verified-session read also tells the page whether this deployment offers
+ * accounts and whether this browser holds a valid FloFi session — what the Settings menu's `accountPresence()` asks — so My Account is known
+ * with the page's first HTML instead of after a request queued behind the page's Server Actions. `accountPresence` null: not known (a failed
+ * read), and the menu reads it itself as before; never assumed signed in. No account data leaves the server.
+ */
+export async function currentAccountBootstrap(env: Env = process.env): Promise<{ readonly conversationScope: string | null;
+  readonly accountPresence: { readonly accounts: boolean; readonly signedIn: boolean } | null }> {
   try {
-    if (!env.DATABASE_URL) return null;
+    if (!env.DATABASE_URL) return { conversationScope: null, accountPresence: { accounts: false, signedIn: false } };
     const [{ accountHost, currentAccountSession }, { platformStateHost }] = await Promise.all([import('../accounts/account-host.ts'), import('./platform-state-host.ts')]);
-    const host = await accountHost(env), session = await currentAccountSession(host, env);
-    if (!host || !session) return null;
-    return conversationScopeOf(conversationScopeKey(env), (await platformStateHost(env)).tenantId, session.accountId);
-  } catch { return null; }
+    const host = await accountHost(env);
+    if (!host) return { conversationScope: null, accountPresence: { accounts: false, signedIn: false } };
+    const session = await currentAccountSession(host, env);
+    if (!session) return { conversationScope: null, accountPresence: { accounts: true, signedIn: false } };
+    // The chat scope needs the deployment's key; a key that cannot be derived keeps the chat in memory only, without hiding the verified session.
+    let conversationScope: string | null = null;
+    try { conversationScope = conversationScopeOf(conversationScopeKey(env), (await platformStateHost(env)).tenantId, session.accountId); } catch { conversationScope = null; }
+    return { conversationScope, accountPresence: { accounts: true, signedIn: true } };
+  } catch { return { conversationScope: null, accountPresence: null }; }
 }

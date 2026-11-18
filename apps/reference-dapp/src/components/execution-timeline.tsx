@@ -34,9 +34,10 @@ function StepEvidence({ evidence, action, values, facts }: { evidence: Execution
     </div>}
   </section>;
 }
-export function ExecutionTimeline({ progress, result, workflowName, backToBuild, checkingOperation, primaryAction, runContext = 'current' }: { primaryAction?: ReactNode; progress: ExecutionLifecycle; result?: ExecutionResult | null; workflowName: string; backToBuild?: () => void; checkingOperation?: string | null; runContext?: 'current' | 'saved' }) {
+export function ExecutionTimeline({ progress, result, workflowName, backToBuild, checkingOperation, primaryAction, runContext = 'current', embedded = false }: { primaryAction?: ReactNode; progress: ExecutionLifecycle; result?: ExecutionResult | null; workflowName: string; backToBuild?: () => void; checkingOperation?: string | null; runContext?: 'current' | 'saved';
+  /** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: shown as the Canvas's "Execution details" (the Canvas itself is the execution plan). */ embedded?: boolean }) {
   const { t: tr } = useLocale();
-  return <section className={`execution-plan panel${result ? ' execution-result-plan' : ''}`} aria-label={tr("Execution plan")}>
+  return <section className={`execution-plan panel${result ? ' execution-result-plan' : ''}${embedded ? ' execution-plan-details' : ''}`} aria-label={tr(embedded ? 'Execution details' : 'Execution plan')}>
     <div className="execution-plan-heading"><div><p className="eyebrow">{tr(result ? runContext === 'saved' ? 'SAVED RUN RESULT' : 'CURRENT RUN RESULT' : runContext === 'saved' ? 'SAVED EXECUTION PLAN' : 'EXECUTION PLAN')}</p><h2 title={workflowName}>{workflowName}</h2></div>{backToBuild && <button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button>}</div>
     {(result || runContext === 'saved') && <p className="execution-result-context">{tr("Step results ")}<span>{tr(runContext === 'saved' ? 'Saved run' : 'Current run')}{tr(" · Read-only")}</span></p>}
     {progress.local && <p className="execution-context">{tr("Local execution · no public-chain transactions")}</p>}

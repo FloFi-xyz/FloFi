@@ -45,7 +45,8 @@ import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import { counterpartSelection, invertCryptoSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, lendingAction, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
 import { actionReviewValue, amountEditNeedsReview, keptBridgeRecipient } from '../domain/canvas-action-setup';
-import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
+import { EDGE_STROKE, SimulateWorkflowCanvas } from './simulate-workflow-canvas';
+import { CANVAS_VISUAL_LABEL, canvasExecutionFor, edgeExecution, type CanvasExecution } from '../domain/canvas-execution';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
 import { canDeleteCanvasEdge, canDeleteCanvasNode, isTextEntry } from '../domain/canvas-keyboard';
 import { CANVAS_CLEARANCE, defaultCanvasPosition, shownCanvasPositions, readToolboxMode, saveToolboxMode, type ToolboxMode } from '../domain/canvas-layout';
@@ -385,7 +386,12 @@ type BuildCanvasProps = { environment?: WalletEnvironment; selectedId: string | 
    */
   runStatus?: string | null;
   /** BUILD-FLOFI-MAINNET-EXEC-002: the header's New workflow button (the shell's `startNewWorkflow`); absent: no button. */
-  onNewWorkflow?: (() => void) | undefined };
+  onNewWorkflow?: (() => void) | undefined;
+  /**
+   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution of THIS workflow (exact id and revision): the same cards and connections show each
+   * step's recorded state (`domain/canvas-execution.ts`). Presentation only; editing rules are unchanged (`runActive`).
+   */
+  execution?: CanvasExecution | null };
 const EMPTY_OVERLAY: ReadonlyMap<string, SimulationOverlay> = new Map();
 export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; workflowName: string; overlay?: ReadonlyMap<string, SimulationOverlay>; primaryAction?: ReactNode } | { mode: 'execute'; workflowName: string }) {
   if ('mode' in props && props.mode === 'simulate') return <SimulateWorkflowCanvas workflowName={props.workflowName} primaryAction={props.primaryAction}/>;
@@ -393,7 +399,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
   return <BuildCanvas {...props}/>;
 }
 
-function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, runStatus = null, onNewWorkflow }: BuildCanvasProps) {
+function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, runStatus = null, onNewWorkflow, execution: executionInput = null }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
     sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
@@ -868,23 +874,40 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
     return projected;
   }, [environment, state, workflow, sequence, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, destinations, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version, tr]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(projectedNodes);
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution state joins each card's data (no position, size or content change). A card whose
+  // step has started executing keeps the estimate it shows and asks for no new one (`useLiveQuote` frozen); a waiting step keeps its live estimate.
+  const execution = canvasExecutionFor(executionInput, workflow);
+  const shownNodes = useMemo<Node[]>(() => !execution ? projectedNodes : projectedNodes.map(node => {
+    const step = execution.nodes[node.id];
+    if (!step) return node;
+    const data: Record<string, unknown> = { ...node.data, execution: step };
+    const shown: Node = { ...node, data };
+    if (step.visual !== 'waiting' && node.ariaLabel) shown.ariaLabel = `${node.ariaLabel} · ${tr(CANVAS_VISUAL_LABEL[step.visual])}`;
+    return shown;
+  }), [projectedNodes, execution, tr]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(shownNodes);
   useLayoutEffect(() => {
-    setNodes(current => projectedNodes.map(node => {
+    setNodes(current => shownNodes.map(node => {
       const previous = current.find(item => item.id === node.id);
       return previous?.measured ? { ...node, measured: previous.measured } : node;
     }));
-  }, [projectedNodes, setNodes]);
+  }, [shownNodes, setNodes]);
   // Only the workflow's own links are drawn (composerConnections); BUILD-FLOFI-BUILDER-UX-002: as thin curves with a small arrow and a short label
   // that fits between cards ("Then" for a link that only orders two steps; a link that passes a value keeps its own). The full label names the edge.
-  const edges = useMemo(() => composerConnections(workflow).map(edge => ({ ...edge,
+  const edges = useMemo(() => composerConnections(workflow).map(edge => {
+    const selected = selectedEdge?.from === edge.source && selectedEdge?.to === edge.target;
+    // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: while this workflow executes, a link takes its dependency's recorded state.
+    const visual = execution ? edgeExecution(execution, edge.source, edge.target) : null;
+    const stroke = visual && visual !== 'waiting' ? EDGE_STROKE[visual] : selected ? 'var(--edge-active)' : 'var(--edge-line)';
+    return { ...edge,
     label: tr(edgeLabel(edge.label)), ariaLabel: tr(edgeAccessibleLabel(edge.label)),
     sourceHandle: 'output', targetHandle: 'input', type: 'default', animated: false,
-    markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 'var(--edge-active)' : 'var(--edge-line)' },
-    selected: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target,
-    style: { stroke: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 'var(--edge-active)' : 'var(--edge-line)', strokeWidth: selectedEdge?.from === edge.source && selectedEdge?.to === edge.target ? 2 : 1.5 },
+    ...visual ? { className: `canvas-execution-edge canvas-execution-edge-${visual}`, data: { execution: visual } } : {},
+    markerEnd: { type: MarkerType.ArrowClosed, width: 11, height: 11, color: stroke },
+    selected,
+    style: { stroke, strokeWidth: selected || visual && visual !== 'waiting' ? 2 : 1.5 },
     ...CANVAS_EDGE_LABEL,
-  })), [workflow, selectedEdge, tr]);
+  }; }), [workflow, selectedEdge, tr, execution]);
   function addAction(action: CanvasAction | 'stocks') {
     if (actionSetup) { selectNodes([actionSetup.id], actionSetup.id); setFeedback('Configure this action before adding another.'); return; }
     if (action === 'stocks') {
@@ -1030,7 +1053,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const shownName = workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName;
   const stepCount = tr(projectedNodes.length === 1 ? '{0} step' : '{0} steps', projectedNodes.length);
   const networkPending = Boolean(overview && overview.count > 0 && overview.networks.length === 0);
-  return <section className={`canvas panel ${isLendingComposition(workflow)?'lending-canvas':''}`} tabIndex={-1} aria-label={tr("Workflow canvas")} data-toolbox={toolboxMode} data-toolbox-ready={toolboxReady} data-run-active={runActive || undefined}>
+  return <section className={`canvas panel ${isLendingComposition(workflow)?'lending-canvas':''}`} tabIndex={-1} aria-label={tr("Workflow canvas")} data-toolbox={toolboxMode} data-toolbox-ready={toolboxReady} data-run-active={runActive || undefined} data-execution={execution ? execution.settled ? 'settled' : 'live' : undefined}>
     <div className="canvas-head build-canvas-head"><div className="canvas-head-main"><WorkflowName name={workflowName} shownName={shownName} rename={renameWorkflow} onNew={runActive ? undefined : onNewWorkflow}/>
       <div className="canvas-head-meta">
         {overview && overview.networks.length > 0 && <ul className="editor-network-chips" aria-label={tr('Workflow networks')}>{overview.networks.map(network => <li key={network}><span className="editor-network-icon" aria-hidden="true"><NetworkBrandIcon network={network}/></span>{tr(network)}</li>)}</ul>}

@@ -7,8 +7,9 @@
  * server action re-verifies the owner's wallet session, and the only way forward from a proposal is the shared approval flow.
  */
 import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { automationHistory, automationOverview, automationsAvailability, changeAutomationState, createAutomation, createTelegramLinkCode, dismissAutomationOccurrence,
+import { automationHistory, changeAutomationState, createAutomation, createTelegramLinkCode, dismissAutomationOccurrence,
   openAutomationOccurrence, prepareWatchProposal, rebindAutomation, unlinkTelegram } from '../app/automation-action';
+import { AUTOMATIONS_OFF, automationSnapshot, type AutomationSnapshot } from '../app/automation-reads';
 import type { CapabilityView, HistoryEntryView, LinkCodeView, ObservationView, OccurrenceView, OverviewView, RouteCapability, RuleHistoryView, RuleView } from '../automations/views';
 import type { Command } from '../domain/commands';
 import type { WorkflowOwner } from '../domain/saved-workflow';
@@ -382,22 +383,51 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
   const ownerKey = owner ? `${owner.namespace}:${owner.address}` : null;
   const overview = snapshot?.owner === ownerKey ? snapshot?.value : null;
   const verificationRequired = access?.owner === ownerKey && access.required;
-  useEffect(() => { void automationsAvailability().then(a => setEnabled(a.enabled)).catch(() => setEnabled(false)); }, []);
   useEffect(() => { try { setHighlight(new URLSearchParams(window.location.search).get('occurrence')); } catch { /* no query */ } }, []);
-  const refresh = useCallback(async () => {
-    if (!owner) return;
-    const request = generation.current, sequence = ++refreshSequence.current, key = `${owner.namespace}:${owner.address}`;
-    const result = await automationOverview(owner).catch(() => ({ ok: false as const, code: 'AUTOMATION_UNAVAILABLE' }));
-    if (request !== generation.current || sequence !== refreshSequence.current) return;
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (Automations loading): availability and the owner's overview are read in ONE parallel GET
+  // (`/api/automations/overview`), outside the page's Server Action queue; later refreshes read the overview alone. A refusal that is not
+  // "this deployment does not serve automations" is temporary: it shows a retry, never the "Coming soon" state.
+  const [availabilityIssue, setAvailabilityIssue] = useState<string | null>(null);
+  const enabledNow = useRef(enabled);
+  enabledNow.current = enabled;
+  const applyOverview = useCallback((key: string, result: NonNullable<AutomationSnapshot['overview']>) => {
     if (result.ok) { setSnapshot({ owner: key, value: result.value }); setAccess({ owner: key, required: false }); setError(null); }
     else { if (result.code === 'WALLET_SESSION_REQUIRED') setSnapshot(null); setAccess({ owner: key, required: result.code === 'WALLET_SESSION_REQUIRED' }); if (result.code !== 'WALLET_SESSION_REQUIRED') setError(result.code); }
-  }, [owner]);
+  }, []);
+  // `fresh` after a mutation: the overview read must start after it (never join an earlier read still in flight).
+  const refresh = useCallback(async (fresh = false) => {
+    if (!owner) return;
+    const request = generation.current, sequence = ++refreshSequence.current, key = `${owner.namespace}:${owner.address}`;
+    const result = await automationSnapshot(owner, 'overview', fresh).then(value => value.overview ?? { ok: false as const, code: 'AUTOMATION_UNAVAILABLE' },
+      (cause: unknown) => ({ ok: false as const, code: cause instanceof Error ? cause.message : 'AUTOMATION_UNAVAILABLE' }));
+    if (request !== generation.current || sequence !== refreshSequence.current) return;
+    applyOverview(key, result);
+  }, [owner, applyOverview]);
+  /** The first read for this owner (or none): availability (unless already known enabled) and the overview together. */
+  const load = useCallback(() => {
+    const request = generation.current, sequence = ++refreshSequence.current, key = owner ? `${owner.namespace}:${owner.address}` : null;
+    setAvailabilityIssue(null);
+    void automationSnapshot(owner, enabledNow.current === true && owner ? 'overview' : 'all').then(value => {
+      if (request !== generation.current || sequence !== refreshSequence.current) return;
+      if (value.availability) {
+        if (value.availability.enabled) setEnabled(true);
+        else if (AUTOMATIONS_OFF.has(value.availability.code ?? '')) setEnabled(false);
+        else { setAvailabilityIssue(value.availability.code ?? 'AUTOMATION_UNAVAILABLE'); return; }
+      }
+      if (key && value.overview && (value.availability?.enabled ?? enabledNow.current)) applyOverview(key, value.overview);
+    }, (cause: unknown) => {
+      if (request !== generation.current || sequence !== refreshSequence.current) return;
+      if (enabledNow.current === null) setAvailabilityIssue(cause instanceof Error ? cause.message : 'AUTOMATION_UNAVAILABLE'); else setError('AUTOMATION_UNAVAILABLE');
+    });
+  }, [owner, applyOverview]);
   useEffect(() => {
     generation.current++; setSnapshot(null); setAccess(null); setHistory(null); setCreating(null); setCreationDraft({}); setCreationStep(1); setReview(null); setMode('CONFIRM'); setError(null); setNotice('');
-    if (enabled && owner) void refresh();
+    load();
     return () => { generation.current++; };
-  }, [enabled, ownerKey, refresh]);
-  useEffect(() => { if (enabled && owner && proof?.proven) void refresh(); }, [enabled, owner, proof?.proven, refresh]);
+  }, [ownerKey, load]);
+  // The overview is read again after a proof only while the page waits for that verification (never for a session the first read already
+  // covered); a server that still refuses keeps `verificationRequired`, so this cannot loop.
+  useEffect(() => { if (enabled && owner && proof?.proven && verificationRequired) void refresh(true); }, [enabled, owner, proof?.proven, verificationRequired, refresh]);
   useEffect(() => {
     if (!enabled || !owner) return;
     const timer = setInterval(() => { void refresh(); }, 30_000);
@@ -415,7 +445,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       if (request !== generation.current) return false;
       if (!result.ok) { setError(result.code ?? 'AUTOMATION_UNAVAILABLE'); if (result.code === 'WALLET_SESSION_REQUIRED' && ownerKey) { setSnapshot(null); setAccess({ owner: ownerKey, required: true }); } return false; }
       if (done) setNotice(done);
-      await refresh();
+      await refresh(true);
       await refreshDelegation();
       return true;
     } catch { setError('AUTOMATION_UNAVAILABLE'); return false; } finally { operationLock.current = false; setBusy(false); }
@@ -437,25 +467,29 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       <p>{t('Routines that prepare proposals. You review and sign each one.')}</p></div>
       {overview && owner && <span className="automation-session">{t('Wallet session verified')} · <code>{owner.address.slice(0, 6)}…{owner.address.slice(-4)}</code></span>}</header>
     <p className="workspace-notice" role="status">{t(notice)}</p>
-    {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button></div>}
-    {enabled === null ? <p role="status">{t('Loading automations…')}</p>
+    {error && <div className="ux-panel ux-notice automation-read-error" role="alert"><p>{text.error(error)}</p><button type="button" className="ux-button ux-button-small" onClick={() => void refresh(true)}>{t('Retry')}</button></div>}
+    {enabled === null && availabilityIssue ? <div className="ux-panel ux-notice automation-availability-issue" role="status">
+        {/* A FloFi access (Flight) refusal says what it is: retrying cannot change it. Anything else is temporary. */}
+        {/^BETA_/.test(availabilityIssue) ? <p>{text.error(availabilityIssue)}</p> : <><p>{t('Automations are temporarily unavailable. This is not a change to your automations.')}</p>
+        <button type="button" className="ux-button ux-button-small" onClick={load}>{t('Retry')}</button></>}</div>
+      : enabled === null ? <div className="ux-panel ux-list-empty automation-loading" role="status" aria-busy="true"><p>{t('Loading automations…')}</p></div>
       // P0 approved UX (board 12): a deployment without automations shows one "Coming soon" state, never a form or a disabled control.
       : !enabled ? <section className="ux-panel ux-empty automation-coming-soon" aria-label={t('Automations')}><StatusTag tone="soon">{t('Coming soon')}</StatusTag>
         <h2>{t('Recurring buys, price triggers and daily watches')}</h2><p>{t('Automations are not enabled on this deployment.')}</p></section>
         : !owner ? <div className="ux-panel ux-list-empty"><p>{t('Connect a wallet from the header to use automations.')}</p></div>
           : verificationRequired ? <div className="ux-panel ux-list-empty"><p>{t('Verify wallet ownership to use automations.')}</p>{proof && <WalletProof namespace={owner.namespace} proof={{ ...proof, proven: null }}/>}</div>
-            : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="ux-button ux-button-small" onClick={() => void refresh()}>{t('Retry')}</button>}</div> : <>
+            : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="ux-button ux-button-small" onClick={() => void refresh(true)}>{t('Retry')}</button>}</div> : <>
               {/* Board 12: "Waiting for you" opens the page only while something waits; empty, the page starts with creating. */}
               {overview.pending.length > 0 && <section className="ux-panel ux-panel-attention automation-waiting" aria-labelledby="automation-pending">
                 <div className="ux-panel-head"><div><h2 id="automation-pending">{t('Waiting for you')}</h2><span className="ux-count">{overview.pending.length}</span></div>
-                  <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button></div>
+                  <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh(true)}>{t('Refresh')}</button></div>
                 <div className="automation-list">{overview.pending.map(o => <PendingCard key={o.occurrenceId} o={o} rule={byId.get(o.ruleId)} highlighted={o.occurrenceId === highlight}
                   capabilities={overview.capabilities} busy={busy} run={run} onPropose={command => onPropose?.(command)} owner={owner}/>)}</div>
               </section>}
               <section className="ux-panel automation-create-section" aria-labelledby="automation-create">
                 <div className="ux-panel-head"><div><h2 id="automation-create">{t('Create an automation')}</h2></div>{creating && !canvas && <button type="button" className="ux-button ux-button-small" onClick={() => setCreating(null)}>{t('Close')}</button>}</div>
                 {canvas ? <CanvasAutomation canvas={canvas} owner={owner} delegationReady={delegationReady} delegationBlocked={delegationBlocked ?? null}
-                  onAuthorized={() => { void refresh(); void refreshDelegation(); }} confirm={route => <CreateForm key={JSON.stringify(route)} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initial={{ name: canvas.name.slice(0, 80), source: 'ROUTE', asset: route.asset, side: route.side, network: route.network, amount: route.amount, slippageBps: String(route.slippageBps) }}/>}/>
+                  onAuthorized={() => { void refresh(true); void refreshDelegation(); }} confirm={route => <CreateForm key={JSON.stringify(route)} capabilities={overview.capabilities} owner={owner} busy={busy} run={run} onCreated={() => setCreating(null)} initial={{ name: canvas.name.slice(0, 80), source: 'ROUTE', asset: route.asset, side: route.side, network: route.network, amount: route.amount, slippageBps: String(route.slippageBps) }}/>}/>
                   : <>
                     {!creating ? <><div className="automation-choices">{(['SCHEDULED_DCA', 'PRICE_TRIGGER', 'DAILY_WATCH'] as const).map(kind => {
                       const available = kind === 'SCHEDULED_DCA' ? overview.capabilities.routes.some(r => r.executable) : overview.capabilities.observable.length > 0;
@@ -474,7 +508,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
               </section>
               <section className="ux-panel" aria-labelledby="automation-rules">
                 <div className="ux-panel-head"><div><h2 id="automation-rules">{t('Your automations')}</h2><span className="ux-count">{live.length}</span></div>
-                  {overview.pending.length === 0 && <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh()}>{t('Refresh')}</button>}</div>
+                  {overview.pending.length === 0 && <button type="button" className="ux-button ux-button-small" disabled={busy} onClick={() => void refresh(true)}>{t('Refresh')}</button>}</div>
                 {live.length ? <div className="automation-list">{live.map(rule => <RuleCard key={rule.ruleId} rule={rule} busy={busy} run={run} owner={owner}
                   onHistory={() => void loadHistory(rule.ruleId)}/>)}</div>
                   : <p className="ux-panel-text">{t('No automations yet. Choose a routine above.')}</p>}
@@ -509,11 +543,17 @@ export function AutomationInbox({ owner: ownerProp, proven, open }: { owner: Wor
   useEffect(() => {
     if (!owner || !proven) { setCount(0); return; }
     let live = true;
+    // One GET outside the Server Action queue: availability alone until the deployment is known to serve automations (a deployment without them
+    // is never asked for the owner's overview), then the overview alone on each poll.
+    let enabled = false;
     const load = async () => {
-      const availability = await automationsAvailability().catch(() => ({ enabled: false }));
-      if (!availability.enabled) return;
-      const result = await automationOverview(owner).catch(() => null);
-      if (live && result?.ok) setCount(result.value.pending.length);
+      const wasEnabled = enabled;
+      const snapshot = await automationSnapshot(owner, enabled ? 'overview' : 'availability').catch(() => null);
+      if (!live || !snapshot) return;
+      if (snapshot.availability) enabled = snapshot.availability.enabled;
+      if (enabled && snapshot.overview?.ok) setCount(snapshot.overview.value.pending.length);
+      // Just learned that automations are served: the overview is read now, not a minute later.
+      if (enabled && !wasEnabled && live) void load();
     };
     void load();
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);

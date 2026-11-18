@@ -47,7 +47,9 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, sh
   // until the shared, prefetched presence arrives), so the menu never changes rows or size while it is open.
   const privy = useFloFiPrivy(), approval = usePathname() === '/mcp/approve';
   const offered = useAccountsOffered() && !approval;
-  const { presence, prefetch } = useAccountPresence(offered);
+  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the product page states the verified presence with its first HTML (`accountPresence`), so
+  // My Account is shown at once; elsewhere (or when it was not known) it is read as before, outside the Server Action queue.
+  const { presence, prefetch } = useAccountPresence(offered, useProductBootstrap().accountPresence ?? null);
   // A different Privy user observed in this page (another tab signed in or out) never sees the previous presence: it is forgotten and read again.
   const seenUser = useRef<string | null>(null);
   useEffect(() => {

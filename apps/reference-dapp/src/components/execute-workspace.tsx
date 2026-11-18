@@ -2,7 +2,8 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import type { CanvasExecution } from '../domain/canvas-execution';
 import { useExecutionControls, type ExecutionControls } from '../state/execution-controls';
 import { CanvasLifecycleAction } from './canvas-lifecycle-action';
 import { type ExecutionWorkspaceState } from '../domain/execution-presentation';
@@ -66,6 +67,12 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    * Editor footer holds the ONE primary action; going back is the stepper).
    */
   reviewBlock?: boolean;
+  /**
+   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the execution of the workflow on the Canvas (`domain/canvas-execution.ts`). While it covers the
+   * live run, Execute keeps showing the SAME Canvas — its cards and connections colored by their records — and the step-by-step timeline (hashes,
+   * receipts, evidence, errors) moves into a collapsible "Execution details" beneath it. Absent or not covering the run: the timeline is shown.
+   */
+  canvasExecution?: CanvasExecution | null;
 };
 export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const { t: tr } = useLocale();
@@ -84,6 +91,17 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const statusLabel = live ? verifying ? verificationLabel : canContinue ? continuationLabel : result?.label ?? interactionLabel ?? recovery?.label ?? live.label : requesting && !execution.started ? 'Preparing execution…' : view.label;
   const statusMessage = live ? verifying ? verificationMessage : canContinue ? continuationMessage : result?.message ?? interactionMessage ?? recovery?.message ?? live.message : view.message;
   const detailsOnly = Boolean(props.detailsOnly);
+  // The shell computes the Canvas execution for the Canvas workflow itself and the Canvas checks that identity again against the workflow it draws
+  // (exact id and revision). Execute keeps the Canvas for a live run only when that execution includes this very run; otherwise the timeline stays.
+  const canvasRun = props.canvasExecution?.started ? props.canvasExecution : null;
+  const canvasLive = live && live.runKey && canvasRun?.runKeys.includes(live.runKey) ? canvasRun : null;
+  // Execution details: closed while the run progresses (the Canvas shows it), open once a result or something that needs attention exists; the
+  // owner's own choice is kept for this run.
+  const [detailsChoice, setDetailsChoice] = useState<{ readonly key: string; readonly open: boolean } | null>(null);
+  // The owner's open/closed choice belongs to one run: a later step of a step-by-step workflow (a new run) starts from the default again, so its
+  // result or failure is never hidden behind a choice made for an earlier step.
+  const detailsKey = canvasLive && live?.runKey ? live.runKey : '';
+  const detailsOpen = detailsChoice?.key === detailsKey ? detailsChoice.open : Boolean(result) || Boolean(live && ['attention', 'uncertain'].includes(live.state));
   const progress = props.workflowProgress ?? null, continuation = !live && props.continuation ? props.continuation : null;
   // N is the WHOLE workflow's number of steps (a sequence step's own run has one); without a workflow view the run's own count stays.
   const reviewBlock = Boolean(props.reviewBlock && !live && !continuation);
@@ -107,6 +125,10 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const notices = <>
         {(requestFailed || live && props.source.state.error) && <p className="simulation-warning-blocking execution-request-error" role="status">{tr("The last request could not complete. Check the recorded status before taking another action.")}</p>}
         {live && recovery?.contextIssue && <p className="execution-context execution-recovery-attention" role="status">{tr(recovery.contextIssue)}</p>}
+        {/* BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: with the Canvas as the view, the run's provenance stays visible here (never only inside the
+            collapsed details): a restored record sends nothing, a local run touches no public chain. */}
+        {live && canvasLive && live.restored && <p className="execution-context" role="status">{tr('Resuming display of the recorded execution. No new request has been sent.')}</p>}
+        {live && canvasLive && live.local && <p className="execution-context">{tr('Local execution · no public-chain transactions')}</p>}
         {result && live?.evidence?.attention.map(item => <p className="execution-context execution-recovery-attention" key={item}>{tr(item)}</p>)}
         {live?.local && live.steps.some(step => step.operations.some(operation => operation.intent)) && <p className="execution-context">{tr("Local signed-order execution · scripted settlement. No public settlement or funds are observed.")}</p>}
         {checkFailed && <p className="execution-context" role="status">{tr("Unable to check execution status. The recorded result is unchanged; no transaction was resent.")}</p>}
@@ -180,13 +202,22 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   </section>;
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
-      {!live && continuation ? <SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>
-        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" dock={detailsOnly ? statusPanel : undefined} dockLabel={null} foot={!reviewBlock} primaryAction={reviewBlock ? undefined : props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+      {!live && continuation && canvasRun ? <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasRun} dockLabel={null}
+          dock={<SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>}/>
+        : !live && continuation ? <SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>
+        // The live Canvas is the same grid child as the plan before the run (same element, sizing rules and card state: nothing is remounted).
+        : live && canvasLive ? <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasLive} dock={detailsOnly ? statusPanel : undefined} dockLabel={null}
+            primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>
+        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasRun} dock={detailsOnly ? statusPanel : undefined} dockLabel={null} foot={!reviewBlock} primaryAction={reviewBlock ? undefined : props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
+      {live && canvasLive && <details className="shell-details execution-details-disclosure" open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) setDetailsChoice({ key: detailsKey, open }); }}>
+        <summary>{tr('Execution details')}<span className="execution-details-hint">{tr('Transactions, receipts and recorded evidence')}</span></summary>
+        <ExecutionTimeline embedded progress={live} result={result} workflowName={workflowName} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null}/>
+      </details>}
     </div>
     {/* P0 hotfix (layout): before execution starts, the status, the whole-workflow Review and Authorize are docked inside the Canvas frame (as on
         Simulate); once an execution is live (its timeline is the frame) or a step-by-step workflow continues in place, the status follows it. */}
-    {detailsOnly && (live || continuation) && statusPanel}
+    {detailsOnly && (live && !canvasLive || continuation) && statusPanel}
     {props.technicalDetails && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
   </section>;
 }

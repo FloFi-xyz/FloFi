@@ -228,3 +228,61 @@ test('a signed-in email account sees its own wallet history without a wallet pro
   await expect(proveButton(page)).toBeVisible();
   await expect(card(page, id)).toHaveCount(0);
 });
+
+// BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the History lists the wallet's received and sent tokens beside its workflow records (MOCKED loopback
+// provider fixture: one incoming USDC on Base, outgoing ETH on Ethereum and USDC on Arbitrum One), per-network coverage, wallet isolation, and a
+// slow activity read never holds the workflow records. Nothing is signed or sent.
+test('History shows received and sent wallet activity beside the workflow records, without blocking them', async ({ page }) => {
+  const owner = createTestWallet(), other = createTestWallet(), id = await seed(owner);
+  // A deliberately slow activity provider: the workflow records must not wait for it.
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/dashboard/activity**', async route => { await held; await route.continue().catch(() => undefined); });
+  await open(page, [owner, other]);
+  await expect(card(page, id)).toBeVisible();
+  const views = page.getByRole('group', { name: 'History view', exact: true });
+  for (const label of ['All', 'Workflows', 'Received', 'Sent']) await expect(views.getByRole('button', { name: label, exact: true })).toBeVisible();
+  const activity = page.locator('.wallet-activity');
+  await expect(activity.getByRole('status')).toContainText('Loading wallet activity…');
+  release();
+  await expect(activity).toContainText('Test data (MOCKED)');
+  await expect(activity).toContainText('+1 USDC'); await expect(activity).toContainText('−0.01 ETH');
+  await expect(activity.getByRole('list', { name: 'Network coverage', exact: true })).toContainText('Robinhood Chain: wallet activity is not available on this network yet.');
+  await page.screenshot({ path: '.tmp/history-all-light.png', fullPage: true });
+  await views.getByRole('button', { name: 'Received', exact: true }).click();
+  await expect(card(page, id)).toBeHidden();
+  const received = activity.getByRole('list', { name: 'Received', exact: true });
+  await expect(received.locator('li')).toHaveCount(1);
+  await expect(received).toContainText('+1 USDC'); await expect(received).toContainText('From 0x2222…2222'); await expect(received).toContainText('Base');
+  await expect(received.getByRole('link', { name: 'View transaction', exact: true })).toHaveAttribute('href', `https://basescan.org/tx/0x${'1'.repeat(64)}`);
+  expect(await received.locator('.wallet-activity-amount').evaluate(element => getComputedStyle(element).color)).not.toBe(await page.locator('h1').evaluate(element => getComputedStyle(element).color));
+  await page.screenshot({ path: '.tmp/history-received-light.png', fullPage: true });
+  await views.getByRole('button', { name: 'Sent', exact: true }).click();
+  const sent = activity.getByRole('list', { name: 'Sent', exact: true });
+  await expect(sent.locator('li')).toHaveCount(2); await expect(sent).toContainText('−0.01 ETH'); await expect(sent).toContainText('−2.5 USDC'); await expect(sent).toContainText('To 0x2222…2222');
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await page.screenshot({ path: '.tmp/history-sent-dark.png', fullPage: true });
+  await views.getByRole('button', { name: 'Workflows', exact: true }).click();
+  await expect(card(page, id)).toBeVisible(); await expect(activity).toBeHidden();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await views.getByRole('button', { name: 'Received', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: '.tmp/history-received-mobile-dark.png', fullPage: true });
+  // Another wallet that has not proved itself here sees no activity of anyone (and FloFi asks it to verify first).
+  await switchAccount(page, other.address);
+  await expect(page.locator('.wallet-activity')).toContainText('Verify this wallet above to see its activity.');
+  expect((await walletRequests(page)).filter(method => /send|signTransaction/i.test(method))).toEqual([]);
+});
+test('History in Portuguese: Recebido and Enviado keep their amounts and network coverage', async ({ page, context }) => {
+  await chooseLanguage(context, 'PT');
+  const owner = createTestWallet(); await installJourneyWallet(page, [owner], { chain: '0xa4b1', transactionControl: async () => { throw Error('FINANCIAL_REQUEST_FORBIDDEN'); } });
+  await page.goto('/app/workflows');
+  const prove = page.getByRole('button', { name: 'Conectar carteira e verificar titularidade', exact: true });
+  await prove.click(); await expect(prove).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Atualizar fluxos', exact: true })).toBeVisible();
+  const views = page.getByRole('group', { name: 'Visualização do histórico', exact: true });
+  await views.getByRole('button', { name: 'Recebido', exact: true }).click();
+  await expect(page.locator('.wallet-activity')).toContainText('+1 USDC');
+  await expect(page.locator('.wallet-activity')).toContainText('Robinhood Chain: a atividade da carteira ainda não está disponível nesta rede.');
+  await page.screenshot({ path: '.tmp/history-received-pt.png', fullPage: true });
+});

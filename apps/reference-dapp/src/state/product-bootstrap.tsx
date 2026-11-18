@@ -19,7 +19,13 @@ export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosyst
    * HOTFIX-P1-FLIGHT-ACCESS-AND-CHAT-RECOVERY-001: an opaque digest of the tenant and the signed-in FloFi account (`server/conversation-scope.ts`)
    * under which this tab keeps the FloFi chat; null or absent: no account session, the chat stays in memory only. Not authority for anything.
    */
-  readonly conversationScope?: string | null | undefined };
+  readonly conversationScope?: string | null | undefined;
+  /**
+   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: whether this deployment offers accounts and this browser holds a valid FloFi session, from the
+   * same server-verified session read (`currentAccountBootstrap`); null or absent: not known, read by the Settings menu itself. Presentation
+   * only — it opens no page and authorizes nothing (every account page and action verifies the session again).
+   */
+  readonly accountPresence?: { readonly accounts: boolean; readonly signedIn: boolean } | null | undefined };
 const NONE: ProductBootstrap = Object.freeze({ walletHint: Object.freeze([]), copilotMode: null });
 const Context = createContext<ProductBootstrap>(NONE);
 export function ProductBootstrapProvider({ value, children }: { value: ProductBootstrap; children: ReactNode }) {

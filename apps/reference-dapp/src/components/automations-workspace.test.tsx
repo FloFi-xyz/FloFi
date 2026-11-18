@@ -2,11 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { HookHarness, deferred } from '../test-utils/hook-harness';
-import { AutomationsWorkspace, CreateForm, bpsToPercent, percentToBps } from './automations-workspace';
+import { AutomationInbox, AutomationsWorkspace, CreateForm, bpsToPercent, percentToBps } from './automations-workspace';
 import type { CapabilityView, OverviewView } from '../automations/views';
-const f = vi.hoisted(() => ({ overview: vi.fn(), create: vi.fn(), history: vi.fn(), enabled: true }));
+const f = vi.hoisted(() => ({ overview: vi.fn(), create: vi.fn(), history: vi.fn(), enabled: true, availability: null as null | { enabled: boolean; code: string | null } | Error,
+  reads: [] as string[] }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
-vi.mock('../app/automation-action', () => ({ automationOverview: f.overview, createAutomation: f.create, automationHistory: f.history, automationsAvailability: async () => ({ enabled: f.enabled }),
+// BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the reads go through ONE GET (`app/automation-reads.ts`): availability (first read only) and the
+// owner's overview together. This stand-in answers them from the same fixtures the Server Actions used to.
+vi.mock('../app/automation-reads', () => ({ AUTOMATIONS_OFF: new Set(['AUTOMATIONS_NOT_ENABLED', 'AUTOMATION_CONFIGURATION_INVALID']),
+  automationSnapshot: async (o: unknown, scope: 'all' | 'overview' | 'availability' = 'all') => {
+    f.reads.push(scope);
+    if (scope !== 'overview' && f.availability instanceof Error) throw f.availability;
+    const availability = scope !== 'overview' ? f.availability ?? { enabled: f.enabled, code: f.enabled ? null : 'AUTOMATIONS_NOT_ENABLED' } : null;
+    return { availability, overview: o && scope !== 'availability' ? await f.overview(o) : null };
+  } }));
+vi.mock('../app/automation-action', () => ({ createAutomation: f.create, automationHistory: f.history,
   changeAutomationState: vi.fn(), createTelegramLinkCode: vi.fn(), dismissAutomationOccurrence: vi.fn(), openAutomationOccurrence: vi.fn(), prepareWatchProposal: vi.fn(), rebindAutomation: vi.fn(), unlinkTelegram: vi.fn() }));
 vi.mock('../app/workflow-action', () => ({ listWorkflows: async () => ({ ok: true, value: { items: [] } }) }));
 vi.mock('./wallet-proof', () => ({ WalletProof: () => null }));
@@ -27,7 +37,7 @@ function textOf(value: ReactNode): string { return Array.isArray(value) ? value.
 function find(tree: ReactNode, match: (e: Element) => boolean) { const target = nodes(tree).find(match); expect(target).toBeDefined(); return target!.props; }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 let host: HookHarness;
-beforeEach(() => { host = new HookHarness(); vi.clearAllMocks(); f.enabled = true; vi.stubGlobal('requestAnimationFrame', (work: () => void) => work()); vi.stubGlobal('window', { location: { search: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() }); f.overview.mockResolvedValue({ ok: true, value: overview }); f.create.mockResolvedValue({ ok: true, value: { ruleId: 'persisted-rule' } }); });
+beforeEach(() => { host = new HookHarness(); vi.clearAllMocks(); f.enabled = true; f.availability = null; f.reads = []; vi.stubGlobal('requestAnimationFrame', (work: () => void) => work()); vi.stubGlobal('window', { location: { search: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() }); f.overview.mockResolvedValue({ ok: true, value: overview }); f.create.mockResolvedValue({ ok: true, value: { ruleId: 'persisted-rule' } }); });
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
 const work = (wallet = owner) => host.render(() => AutomationsWorkspace({ owner: wallet }));
 const form = (initial: Parameters<typeof CreateForm>[0]['initial'] = { name: 'Weekly ETH', amount: '10' }, caps = capabilities) => host.render(() => CreateForm({ owner, capabilities: caps, busy: false, run: async task => (await task()).ok, initial }));
@@ -132,7 +142,53 @@ describe('Automation management server authorization', () => {
   it('shows one "Coming soon" state, and no form or control, when automations are not enabled on the deployment', async () => {
     f.enabled = false; work(); await flush(); const tree = work(); const text = textOf(tree);
     expect(text).toContain('Coming soon'); expect(text).toContain('Automations are not enabled on this deployment.');
-    expect(nodes(tree).filter(e => e.type === 'button' || e.type === 'form' || e.type === 'input')).toHaveLength(0); expect(f.overview).not.toHaveBeenCalled();
+    // The overview is read in the same parallel request, but a deployment without automations never shows it.
+    expect(nodes(tree).filter(e => e.type === 'button' || e.type === 'form' || e.type === 'input')).toHaveLength(0); expect(text).not.toContain('Wallet session verified');
+  });
+  it('reads availability and the overview in ONE request on open — no second overview when the wallet was already proven', async () => {
+    const proof = { proven: owner.address } as NonNullable<Parameters<typeof AutomationsWorkspace>[0]['proof']>;
+    const page = () => host.render(() => AutomationsWorkspace({ owner, proof }));
+    page(); await flush(); page(); await flush(); page(); await flush();
+    expect(f.reads).toEqual(['all']); expect(f.overview).toHaveBeenCalledOnce(); expect(textOf(page())).toContain('Wallet session verified');
+  });
+  it('a proof that arrives after the first read (session still checking) asks nothing more; a proof that the page waited for reads once', async () => {
+    const page = (proven: string | null) => host.render(() => AutomationsWorkspace({ owner, proof: { proven } as NonNullable<Parameters<typeof AutomationsWorkspace>[0]['proof']> }));
+    page(null); await flush(); page(null); await flush(); page(owner.address); await flush(); page(owner.address); await flush();
+    expect(f.reads).toEqual(['all']);
+    host.unmount(); host = new HookHarness(); f.reads = []; f.overview.mockReset();
+    f.overview.mockResolvedValueOnce({ ok: false, code: 'WALLET_SESSION_REQUIRED' }).mockResolvedValue({ ok: true, value: overview });
+    page(null); await flush(); page(null); await flush();
+    expect(textOf(page(null))).toContain('Verify wallet ownership to use automations.');
+    page(owner.address); await flush(); page(owner.address); await flush();
+    expect(f.reads).toEqual(['all', 'overview']); expect(textOf(page(owner.address))).toContain('Wallet session verified');
+  });
+  it('a FloFi access refusal is said as such, without a Retry that cannot change it', async () => {
+    f.availability = new Error('BETA_WALLET_NOT_LINKED'); work(); await flush();
+    const tree = work(), text = textOf(tree);
+    expect(text).not.toContain('temporarily unavailable'); expect(text).not.toContain('Coming soon');
+    expect(nodes(tree).some(e => e.type === 'button' && textOf(e) === 'Retry')).toBe(false);
+  });
+  it('a temporary availability failure offers Retry — never the "Coming soon" disabled state — and Retry recovers', async () => {
+    f.availability = new Error('AUTOMATION_UNAVAILABLE'); work(); await flush();
+    let tree = work(); let text = textOf(tree);
+    expect(text).toContain('Automations are temporarily unavailable.'); expect(text).not.toContain('Coming soon');
+    f.availability = { enabled: false, code: 'AUTOMATION_UNAVAILABLE' }; (find(tree, e => e.type === 'button' && textOf(e) === 'Retry').onClick as () => void)(); await flush();
+    tree = work(); text = textOf(tree); expect(text).toContain('Automations are temporarily unavailable.'); expect(text).not.toContain('Coming soon');
+    f.availability = null; (find(tree, e => e.type === 'button' && textOf(e) === 'Retry').onClick as () => void)(); await flush(); work(); await flush();
+    expect(textOf(work())).toContain('Wallet session verified');
   });
   it('disables unsupported landing choices when policy and price source are unavailable', async () => { f.overview.mockResolvedValue({ ok: true, value: { ...overview, capabilities: { ...capabilities, routes: [], observable: [], priceSource: 'off' } } }); work(); await flush(); work(); await flush(); const tree = work(); for (const choice of nodes(tree).filter(e => e.props.className === 'automation-choice')) expect(choice.props.disabled).toBe(true); expect(textOf(tree)).toContain('A verified price source is required'); });
+});
+
+describe('Automation proposals notice', () => {
+  it('asks availability alone while automations are not served (never the owner overview); reads the overview once they are', async () => {
+    f.enabled = false;
+    host.render(() => AutomationInbox({ owner, proven: true, open: vi.fn() })); await flush();
+    expect(f.reads).toEqual(['availability']); expect(f.overview).not.toHaveBeenCalled();
+    host.unmount(); host = new HookHarness(); f.reads = []; f.enabled = true;
+    f.overview.mockResolvedValue({ ok: true, value: { ...overview, pending: [{ id: 'p1' }] } });
+    host.render(() => AutomationInbox({ owner, proven: true, open: vi.fn() })); await flush();
+    expect(f.reads).toEqual(['availability', 'overview']); expect(f.overview).toHaveBeenCalledOnce();
+    expect(textOf(host.render(() => AutomationInbox({ owner, proven: true, open: vi.fn() })))).toContain('1 automation proposal is waiting for you.');
+  });
 });

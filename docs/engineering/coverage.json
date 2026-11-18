@@ -1565,6 +1565,46 @@
     "app.state.uniswap-liquidity-store": {
       "path": "apps/reference-dapp/src/state/uniswap-liquidity-store.test.tsx",
       "stage": "unit"
+    },
+    "app.domain.canvas-execution": {
+      "path": "apps/reference-dapp/src/domain/canvas-execution.test.ts",
+      "stage": "unit"
+    },
+    "app.components.live-canvas": {
+      "path": "apps/reference-dapp/src/components/live-canvas.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.live-canvas-build": {
+      "path": "apps/reference-dapp/src/components/live-canvas-build.test.tsx",
+      "stage": "unit"
+    },
+    "app.components.execute-details-choice": {
+      "path": "apps/reference-dapp/src/components/execute-details-choice.test.tsx",
+      "stage": "unit"
+    },
+    "app.server.wallet-activity": {
+      "path": "apps/reference-dapp/src/server/wallet-activity.test.ts",
+      "stage": "unit"
+    },
+    "app.components.wallet-activity": {
+      "path": "apps/reference-dapp/src/components/wallet-activity.test.tsx",
+      "stage": "unit"
+    },
+    "app.app.api.dashboard.activity.route": {
+      "path": "apps/reference-dapp/src/app/api/dashboard/activity/route.test.ts",
+      "stage": "unit"
+    },
+    "app.app.api.automations.overview.route": {
+      "path": "apps/reference-dapp/src/app/api/automations/overview/route.test.ts",
+      "stage": "unit"
+    },
+    "app.app.api.account.presence.route": {
+      "path": "apps/reference-dapp/src/app/api/account/presence/route.test.ts",
+      "stage": "unit"
+    },
+    "app.app.automation-reads": {
+      "path": "apps/reference-dapp/src/app/automation-reads.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1694,7 +1734,17 @@
     "app.domain.copilot-pool-dialogue.repro",
     "app.server.base-liquidity",
     "app.server.supply-service",
-    "app.state.uniswap-liquidity-store"
+    "app.state.uniswap-liquidity-store",
+    "app.domain.canvas-execution",
+    "app.components.live-canvas",
+    "app.components.live-canvas-build",
+    "app.components.execute-details-choice",
+    "app.server.wallet-activity",
+    "app.components.wallet-activity",
+    "app.app.api.dashboard.activity.route",
+    "app.app.api.automations.overview.route",
+    "app.app.api.account.presence.route",
+    "app.app.automation-reads"
   ],
   "modules": [
     {
@@ -1826,7 +1876,8 @@
         "apps/reference-dapp/src/server/session-cookie.ts",
         "apps/reference-dapp/src/accounts/page-exit.ts",
         "apps/reference-dapp/src/app/(account)/account/sign-in-methods/page.tsx",
-        "apps/reference-dapp/src/components/account/sign-in-methods.tsx"
+        "apps/reference-dapp/src/components/account/sign-in-methods.tsx",
+        "apps/reference-dapp/src/app/api/account/presence/route.ts"
       ],
       "suites": [
         "app.accounts.account-csp",
@@ -1879,7 +1930,8 @@
         "cloud-runtime.flofi-accounts-migration.pg",
         "cloud-runtime.privy-accounts-migration.pg",
         "app.accounts.account-store-schema19.pg",
-        "app.components.account.account-shell"
+        "app.components.account.account-shell",
+        "app.app.api.account.presence.route"
       ],
       "gaps": [
         "Live Privy is unverified: the suites verify real ES256 access tokens with the official @privy-io/node SDK against a local key, and the browser suite uses the MOCKED loopback Privy stand-in (e2e/privy-emulator.ts). They certify FloFi's verification, linking, isolation and signing-gate rules, not Privy itself; docs/deploy/LIVE-VERIFICATION-PRIVY.md is the owner's live check.",
@@ -2312,7 +2364,9 @@
         "apps/reference-dapp/src/app/admin/automations/page.tsx",
         "apps/reference-dapp/src/app/api/automations/dispatch/route.ts",
         "apps/reference-dapp/src/app/api/automations/health/route.ts",
-        "apps/reference-dapp/src/app/automation-action.ts"
+        "apps/reference-dapp/src/app/automation-action.ts",
+        "apps/reference-dapp/src/app/api/automations/overview/route.ts",
+        "apps/reference-dapp/src/app/automation-reads.ts"
       ],
       "suites": [
         "app.automations.boundaries",
@@ -2321,7 +2375,9 @@
         "app.automations.schedule",
         "app.automations.scheduler.pg",
         "app.backend.automation-production.pg",
-        "app.automations.beta-access.pg"
+        "app.automations.beta-access.pg",
+        "app.app.api.automations.overview.route",
+        "app.app.automation-reads"
       ],
       "gaps": [
         "CONFIRM_EACH_TIME proposals are supported; production delegated signing and live DCA execution are not certified."
@@ -2818,7 +2874,9 @@
         "apps/reference-dapp/src/app/solana-composition-action.ts",
         "apps/reference-dapp/src/app/workflow-action.ts",
         "apps/reference-dapp/src/app/api/dashboard/history/route.ts",
-        "apps/reference-dapp/src/app/dashboard-reads.ts"
+        "apps/reference-dapp/src/app/dashboard-reads.ts",
+        "apps/reference-dapp/src/app/api/dashboard/activity/route.ts",
+        "apps/reference-dapp/src/app/wallet-activity-reads.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -2830,7 +2888,8 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "app.app.api.dashboard.history.route"
+        "app.app.api.dashboard.history.route",
+        "app.app.api.dashboard.activity.route"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -3588,7 +3647,9 @@
         "apps/reference-dapp/src/components/workflow-edit-review.tsx",
         "apps/reference-dapp/src/components/workflow-name.tsx",
         "apps/reference-dapp/src/components/workflow-records.module.css",
-        "apps/reference-dapp/src/components/workflow-run-panel.tsx"
+        "apps/reference-dapp/src/components/workflow-run-panel.tsx",
+        "apps/reference-dapp/src/components/canvas-execution-badge.tsx",
+        "apps/reference-dapp/src/components/wallet-activity.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -3609,7 +3670,13 @@
         "app.e2e.portfolio-ux004",
         "app.e2e.editor-workflow-run",
         "app.components.review-summary-panel",
-        "app.e2e.dashboard-productization"
+        "app.e2e.dashboard-productization",
+        "app.domain.canvas-execution",
+        "app.components.live-canvas",
+        "app.components.live-canvas-build",
+        "app.components.execute-details-choice",
+        "app.server.wallet-activity",
+        "app.components.wallet-activity"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4548,7 +4615,9 @@
         "apps/reference-dapp/src/domain/editor-persistence.ts",
         "apps/reference-dapp/src/domain/workflow-progress.ts",
         "apps/reference-dapp/src/domain/gas-payment.ts",
-        "apps/reference-dapp/src/domain/settlement-sync.ts"
+        "apps/reference-dapp/src/domain/settlement-sync.ts",
+        "apps/reference-dapp/src/domain/canvas-execution.ts",
+        "apps/reference-dapp/src/domain/wallet-activity.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -4570,7 +4639,9 @@
         "app.domain.gas-payment",
         "app.domain.new-workflow-isolation",
         "app.state.settlement-sync",
-        "app.domain.execution-ux-reliability"
+        "app.domain.execution-ux-reliability",
+        "app.domain.canvas-execution",
+        "app.server.wallet-activity"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -4864,7 +4935,8 @@
         "apps/reference-dapp/src/i18n/pt-execution-ux-reliability.ts",
         "apps/reference-dapp/src/i18n/pt-identity-recovery.ts",
         "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts",
-        "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts"
+        "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts",
+        "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -6983,7 +7055,8 @@
         "apps/reference-dapp/src/server/solana-asset-catalog.ts",
         "apps/reference-dapp/src/server/solana-rpc.ts",
         "apps/reference-dapp/src/server/wallet-portfolio.ts",
-        "apps/reference-dapp/src/server/solana-token-amount.ts"
+        "apps/reference-dapp/src/server/solana-token-amount.ts",
+        "apps/reference-dapp/src/server/wallet-activity.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
@@ -6992,7 +7065,8 @@
         "app.server.provider-boundary",
         "app.server.router-providers",
         "app.server.wallet-portfolio",
-        "app.server.solana-token-amount"
+        "app.server.solana-token-amount",
+        "app.server.wallet-activity"
       ],
       "gaps": [
         "Catalog/discovery and offline provider responses do not certify provider uptime or real execution."
