@@ -61,7 +61,7 @@ describe('History wallet activity panel', () => {
     const tree = view();
     expect(rows(tree)).toEqual([]);
     // The gate's own reason and next step; never a claim that the wallet on screen lacks access.
-    expect(textOf(tree)).toContain('Sign in again'); expect(textOf(tree)).toContain('FloFi stopped reading wallet activity for this browser.');
+    expect(textOf(tree)).toContain('Sign in again'); expect(textOf(tree)).toContain('FloFi stopped reading wallet activity for this browser.'); expect(textOf(tree)).not.toContain('not affected');
     // Signing in returns to the History.
     expect(nodes(tree).find(e => e.type === 'a' && textOf(e.props.children) === 'Sign in')?.props.href).toBe('/login?returnTo=%2Fapp%2Fworkflows');
     f.read.mockRejectedValueOnce(new Error('ACTIVITY_SIGN_IN_REQUIRED'));

@@ -90,10 +90,11 @@ not mean there is none."). No network is ever presented as an empty history when
   a partial-coverage note of any page listed stays, in its own words per code (internal transfers, token-account limit, unreadable
   transaction); Solana reports every reason that applies, not only the first. Retry repeats exactly the request that failed (a failed refresh re-reads the newest, never the next page). A refusal meaning
   FloFi no longer reads this wallet for this browser — not verified here (`ACTIVITY_SIGN_IN_REQUIRED`), session ended, another account, access
-  revoked, wallet not linked (`BETA_*` except the retryable access check) — clears what was loaded and shows the Flight gate's own title and next
-  step (Sign in — back to the History —, Open Credentials, Open Board). The gate checks every wallet proven in this browser, so the panel never
+  revoked, wallet not linked (`BETA_*` except the retryable access check) — clears what was loaded. A wallet not verified here asks for its
+  verification above; a Flight refusal shows the gate's own title and next step (it never says the workflow history is unaffected: the same gate
+  guards it) (Sign in — back to the History —, Open Credentials, Open Board). The gate checks every wallet proven in this browser, so the panel never
   claims the refusal is about the wallet on screen ("A wallet used in this browser is not linked to your FloFi account"); Retry is hidden where
-  nothing can change (access ended or closed).
+  nothing can change (access ended or closed), and focus stays in the panel when a control it used disappears.
 - Solana Token-2022 mints whose display amount differs from their base amount (Scaled UI Amount, interest-bearing) are counted as hidden instead of
   shown with a base-unit amount; a transaction the node cannot return marks Solana PARTIAL.
 

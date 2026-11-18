@@ -87,6 +87,9 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
   const [state, setState] = useState<{ readonly account: string; readonly status: 'loading' | 'more' | 'ready' | 'error'; readonly code: string | null; readonly cursor: string | null }>(
     { account, status: 'loading', code: null, cursor: null });
   const generation = useRef(0);
+  // When a control the person used disappears (Retry while it reloads, Load more after a refusal), focus stays in this panel, never the page body.
+  const panel = useRef<HTMLElement | null>(null);
+  const keepFocus = () => { try { if (typeof document !== 'undefined' && panel.current?.contains(document.activeElement)) panel.current.focus(); } catch { /* no DOM */ } };
   const load = useCallback((cursor: string | null) => {
     const request = ++generation.current;
     setState({ account, status: cursor ? 'more' : 'loading', code: null, cursor });
@@ -103,7 +106,7 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     }, (error: unknown) => {
       if (request !== generation.current) return;
       const code = error instanceof Error ? error.message : 'ACTIVITY_READ_UNAVAILABLE';
-      if (refusedReader(code)) setLoaded(null);
+      if (refusedReader(code)) { keepFocus(); setLoaded(null); }
       setState({ account, status: 'error', code, cursor });
     });
   }, [account]);
@@ -127,21 +130,21 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
   const readable = Boolean(shown?.coverage.current.some(c => c.status === 'COVERED' || c.status === 'PARTIAL'));
   const onlyWorkflows = Boolean(shown && filter === 'ALL' && !rows.length && !waiting && shown.transfers.length);
   const heading = filter === 'IN' ? 'Received' : filter === 'OUT' ? 'Sent' : 'Wallet activity';
-  return <section className="ux-panel wallet-activity" aria-labelledby="wallet-activity-heading" aria-busy={status === 'loading' || status === 'more'}>
+  return <section ref={panel} tabIndex={-1} className="ux-panel wallet-activity" aria-labelledby="wallet-activity-heading" aria-busy={status === 'loading' || status === 'more'}>
     <div className="ux-panel-head"><div><h2 id="wallet-activity-heading">{t(heading)}</h2>
       {shown?.provenance === 'MOCKED' && <StatusTag tone="soon">{t('Test data (MOCKED)')}</StatusTag>}</div>
       <button type="button" className="ux-button ux-button-small" onClick={() => load(null)} disabled={status === 'loading'} aria-label={t('Refresh wallet activity')}>{t('Refresh')}</button></div>
     <p className="ux-panel-text">{t(filter === 'ALL' ? 'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. A transaction FloFi matches to a workflow record above is shown with that record, not repeated here.' : filter === 'IN'
       ? 'Tokens your wallet received, including transfers from other wallets and outside FloFi.' : 'Tokens your wallet sent, including transfers made outside FloFi.')}</p>
     {status === 'loading' && !shown && <p className="muted" role="status">{t('Loading wallet activity…')}</p>}
-    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(REFUSAL_TITLE[refusal.code] ?? refusal.title)}</strong> {t('FloFi stopped reading wallet activity for this browser. Your FloFi workflow history is not affected.')}</>
+    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(REFUSAL_TITLE[refusal.code] ?? refusal.title)}</strong> {t('FloFi stopped reading wallet activity for this browser.')}</>
       : t(state.code === 'ACTIVITY_SIGN_IN_REQUIRED' ? 'Verify this wallet above to see its activity.'
       : state.code === 'ACTIVITY_RATE_LIMITED' ? 'Wallet activity was refreshed many times in a short period. Try again in a minute.'
       : 'Wallet activity is temporarily unavailable. Your FloFi workflow history is not affected.')}</p>
       {/* The Flight refusal's own next step (it names the access the gate checked, never claims it is this wallet's); Retry only where it can help. */}
       {refusal && FLIGHT_REFUSAL_HREF[refusal.action] && <a className="ux-button ux-button-small" href={REFUSAL_HREF[refusal.action] ?? FLIGHT_REFUSAL_HREF[refusal.action]!}>
         {t(refusal.action === 'LINK_WALLET' ? 'Open Credentials' : refusal.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}
-      {refusal?.action !== 'NONE' && <button type="button" className="ux-button ux-button-small" onClick={() => load(state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button>}</div>}
+      {refusal?.action !== 'NONE' && <button type="button" className="ux-button ux-button-small" onClick={() => { keepFocus(); load(state.cursor && shown ? state.cursor : null); }}>{t('Retry')}</button>}</div>}
     {shown && (rows.length || waiting ? rows.length > 0 && <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>
       : <p className="ux-panel-text wallet-activity-empty">{t(!readable ? 'Wallet activity could not be read on any network right now. This does not mean there is none.'
         : onlyWorkflows ? 'The recent movements of this wallet are your FloFi workflows above. Open Received or Sent to see each transfer.'
