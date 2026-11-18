@@ -100,3 +100,5 @@ Mainnet-only public product; no mock data in production paths; no alternate exec
 ## H. Delivery
 
 One consolidated PR with focused commits per FIX group. Do not merge or deploy from this task. Recommendation in the PR body / final report after CI.
+
+CircleCI `certification-browser-1` on `b10029a5` failed deterministically: `base-mainnet-authoring.spec.ts` still expected the pre-FIX-02 `Real funds on Base` proposal note. Updated to the wallet-signing boundary copy. `certification-browser-3` `swap-read-acceptance` was an intermittent flake (diagnostic rerun passed); the new push re-certifies the full suite.
