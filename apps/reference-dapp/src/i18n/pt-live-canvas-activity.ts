@@ -22,6 +22,7 @@ export const portugueseLiveCanvasActivity: Readonly<Record<string, string>> = {
   '{0}: some transactions could not be read right now, so their movements are not listed.': '{0}: algumas transações não puderam ser lidas agora, então as movimentações delas não são listadas.',
   '{0}: part of the activity is not listed.': '{0}: parte da atividade não é listada.',
   'FloFi stopped reading wallet activity for this browser. Your FloFi workflow history is not affected.': 'A FloFi parou de ler a atividade da carteira neste navegador. Seu histórico de fluxos da FloFi não é afetado.',
+  'A wallet used in this browser is not linked to your FloFi account': 'Uma carteira usada neste navegador não está vinculada à sua conta FloFi',
   'Wallet activity could not be read on any network right now. This does not mean there is none.': 'Não foi possível ler a atividade da carteira em nenhuma rede agora. Isso não significa que não haja nenhuma.',
   'The recent movements of this wallet are your FloFi workflows above. Open Received or Sent to see each transfer.': 'As movimentações recentes desta carteira são seus fluxos da FloFi acima. Abra Recebido ou Enviado para ver cada transferência.',
   '{0}: wallet activity is not available on this network yet.': '{0}: a atividade da carteira ainda não está disponível nesta rede.',

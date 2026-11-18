@@ -5,7 +5,7 @@ import { JUPITER_SOLANA_MAINNET, type AssetCatalog } from '@defi-workflow-engine
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { ACTIVITY_READS_PER_MINUTE, activityAccount, activityGate, decodeCursor, encodeCursor, readWalletActivity, type AlchemyCall, type WalletActivityCache, type WalletActivitySeams } from './wallet-activity';
 import type { cloudFlow } from './flow-runtime';
-import { activityRows, mergeCoverage, signedAmount, type ActivityCoverage } from '../domain/wallet-activity';
+import { activityRows, mergeCoverage, signedAmount, type ActivityCoverage, type WalletActivityPage, type WalletTransfer } from '../domain/wallet-activity';
 import type { SolanaAssetCatalog } from '../domain/solana-asset-catalog';
 
 const owner = '0x' + '1'.repeat(40), peer = '0x' + '2'.repeat(40), pool = '0x' + '3'.repeat(40);
@@ -461,6 +461,47 @@ describe('review hardening (round 3)', () => {
     // A became verified (shown); B keeps its key, so the union across reads still counts two movements, never three.
     expect(after.hiddenMoves).toEqual([`${JUPITER_SOLANA_MAINNET.chain}:${sig('A')}:IN:1`]);
     expect(new Set([...before.hiddenMoves, ...after.hiddenMoves]).size).toBe(2);
+  });
+});
+
+describe('review hardening (round 4)', () => {
+  it('a network unavailable on a later page still bounds it where it was left: the bound never drops past unread history, never rises, never disappears', async () => {
+    // Ethereum and Base both have more history; Ethereum fails on page 2, then reads 09:30/09:15, then an empty page with a continuation.
+    const ethPages: Record<string, { transfers: unknown[]; pageKey?: string } | 'fail'> = {
+      '': { transfers: [transfer(1, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T12:00:00Z'), transfer(2, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T10:00:00Z')], pageKey: 'e2' },
+    };
+    let ethFails = false, ethStep = 0;
+    const basePages: Record<string, { transfers: unknown[]; pageKey?: string }> = {
+      '': { transfers: [transfer(3, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T11:00:00Z'), transfer(4, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T09:00:00Z')], pageKey: 'b2' },
+      b2: { transfers: [transfer(5, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T08:30:00Z'), transfer(6, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T08:00:00Z')], pageKey: 'b3' },
+      b3: { transfers: [transfer(7, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T07:00:00Z')], pageKey: 'b4' },
+      b4: { transfers: [transfer(8, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T06:00:00Z')], pageKey: 'b5' },
+    };
+    const alchemy: AlchemyCall = async (network, params) => {
+      if (!('toAddress' in params)) return { transfers: [] };
+      const key = String(params.pageKey ?? '');
+      if (network === 'base') return basePages[key] ?? { transfers: [] };
+      if (key === '') return ethPages['']!;
+      if (ethFails) throw new Error('ACTIVITY_PROVIDER_RATE_LIMITED');
+      ethStep++;
+      return ethStep === 1 ? { transfers: [transfer(9, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T09:30:00Z'), transfer(10, peer, owner, 'erc20', 1n, USDC, 6, '2026-11-17T09:15:00Z')], pageKey: 'e3' }
+        : { transfers: [], pageKey: 'e4' };
+    };
+    const s = seams(alchemy, { mode: async n => n === 'base' || n === 'ethereum' ? 'live' : 'off' });
+    const bounds: (string | null)[] = [];
+    let cursor: string | null = null, all: WalletTransfer[] = [];
+    for (const fail of [false, true, false, false]) {
+      ethFails = fail;
+      const page: WalletActivityPage = await readWalletActivity({ account: owner, cursor }, {}, s);
+      expect(page.cursor).not.toBeNull();
+      expect(page.completeAfter).not.toBeNull();
+      bounds.push(page.completeAfter); cursor = page.cursor; all = [...all, ...page.transfers];
+      // Every row the page calls complete stays listed on every later page (the bound never rises).
+      if (bounds.length > 1) expect(Date.parse(page.completeAfter!)).toBeLessThanOrEqual(Date.parse(bounds.at(-2)!));
+    }
+    // Page 2: Ethereum failed, read only down to 10:00 — Base's 09:00 and 08:30 wait (never listed across Ethereum's unread range).
+    expect(bounds).toEqual(['2026-11-17T10:00:00.000Z', '2026-11-17T10:00:00.000Z', '2026-11-17T09:15:00.000Z', '2026-11-17T09:15:00.000Z']);
+    expect(activityRows(all, 'ALL', new Set(), bounds.at(-1)!).map(r => r.transfer.timestamp)).toEqual(['2026-11-17T12:00:00.000Z', '2026-11-17T11:00:00.000Z', '2026-11-17T10:00:00.000Z', '2026-11-17T09:30:00.000Z']);
   });
 });
 

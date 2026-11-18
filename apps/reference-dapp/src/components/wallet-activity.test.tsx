@@ -62,7 +62,8 @@ describe('History wallet activity panel', () => {
     expect(rows(tree)).toEqual([]);
     // The gate's own reason and next step; never a claim that the wallet on screen lacks access.
     expect(textOf(tree)).toContain('Sign in again'); expect(textOf(tree)).toContain('FloFi stopped reading wallet activity for this browser.');
-    expect(nodes(tree).find(e => e.type === 'a' && textOf(e.props.children) === 'Sign in')).toBeDefined();
+    // Signing in returns to the History.
+    expect(nodes(tree).find(e => e.type === 'a' && textOf(e.props.children) === 'Sign in')?.props.href).toBe('/login?returnTo=%2Fapp%2Fworkflows');
     f.read.mockRejectedValueOnce(new Error('ACTIVITY_SIGN_IN_REQUIRED'));
     await click(tree, 'Retry');
     expect(f.read).toHaveBeenLastCalledWith(account, null);
@@ -70,7 +71,9 @@ describe('History wallet activity panel', () => {
     // A wallet not linked: the Credentials step; access that ended: nothing to retry.
     f.read.mockRejectedValueOnce(new Error('BETA_WALLET_NOT_LINKED'));
     await click(view(), 'Retry');
-    expect(nodes(view()).find(e => e.type === 'a' && textOf(e.props.children) === 'Open Credentials')).toBeDefined();
+    // The gate checks every wallet proven in this browser: the title never says it is the wallet on screen.
+    expect(textOf(view())).toContain('A wallet used in this browser is not linked to your FloFi account');
+    expect(nodes(view()).find(e => e.type === 'a' && textOf(e.props.children) === 'Open Credentials')?.props.href).toBe('/app/credentials');
     f.read.mockRejectedValueOnce(new Error('BETA_ACCESS_REVOKED'));
     await click(view(), 'Retry');
     expect(textOf(view())).toContain('Flight access ended');

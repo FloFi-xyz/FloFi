@@ -33,6 +33,12 @@ const PARTIAL_FALLBACK = '{0}: part of the activity is not listed.';
  * account signed in, access was revoked or the wallet is not linked): nothing loaded earlier stays on screen. A refusal whose own action is a
  * retry (access could not be checked right now) is temporary.
  */
+/**
+ * The History's own words where a Flight title would name a wallet: the gate checks every wallet proven in this browser, so a refusal is never
+ * presented as being about the wallet on screen. Sign-in returns to the History.
+ */
+const REFUSAL_TITLE: Readonly<Record<string, string>> = { BETA_WALLET_NOT_LINKED: 'A wallet used in this browser is not linked to your FloFi account' };
+const REFUSAL_HREF: Readonly<Partial<Record<string, string>>> = { SIGN_IN: '/login?returnTo=%2Fapp%2Fworkflows' };
 const refusedReader = (code: string | null) => code === 'ACTIVITY_SIGN_IN_REQUIRED' || Boolean(code && flightRefusal(code) && flightRefusal(code)!.action !== 'RETRY');
 
 function DirectionIcon({ direction }: { direction: WalletTransfer['direction'] }) {
@@ -128,12 +134,12 @@ export function WalletActivity({ account, filter, recorded, epoch = 0, refreshRe
     <p className="ux-panel-text">{t(filter === 'ALL' ? 'Tokens your wallet received and sent on supported networks, including transfers made outside FloFi. A transaction FloFi matches to a workflow record above is shown with that record, not repeated here.' : filter === 'IN'
       ? 'Tokens your wallet received, including transfers from other wallets and outside FloFi.' : 'Tokens your wallet sent, including transfers made outside FloFi.')}</p>
     {status === 'loading' && !shown && <p className="muted" role="status">{t('Loading wallet activity…')}</p>}
-    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(refusal.title)}</strong> {t('FloFi stopped reading wallet activity for this browser. Your FloFi workflow history is not affected.')}</>
+    {status === 'error' && <div className="ux-notice" role="status"><p>{refusal ? <><strong>{t(REFUSAL_TITLE[refusal.code] ?? refusal.title)}</strong> {t('FloFi stopped reading wallet activity for this browser. Your FloFi workflow history is not affected.')}</>
       : t(state.code === 'ACTIVITY_SIGN_IN_REQUIRED' ? 'Verify this wallet above to see its activity.'
       : state.code === 'ACTIVITY_RATE_LIMITED' ? 'Wallet activity was refreshed many times in a short period. Try again in a minute.'
       : 'Wallet activity is temporarily unavailable. Your FloFi workflow history is not affected.')}</p>
       {/* The Flight refusal's own next step (it names the access the gate checked, never claims it is this wallet's); Retry only where it can help. */}
-      {refusal && FLIGHT_REFUSAL_HREF[refusal.action] && <a className="ux-button ux-button-small" href={FLIGHT_REFUSAL_HREF[refusal.action]!}>
+      {refusal && FLIGHT_REFUSAL_HREF[refusal.action] && <a className="ux-button ux-button-small" href={REFUSAL_HREF[refusal.action] ?? FLIGHT_REFUSAL_HREF[refusal.action]!}>
         {t(refusal.action === 'LINK_WALLET' ? 'Open Credentials' : refusal.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}
       {refusal?.action !== 'NONE' && <button type="button" className="ux-button ux-button-small" onClick={() => load(state.cursor && shown ? state.cursor : null)}>{t('Retry')}</button>}</div>}
     {shown && (rows.length || waiting ? rows.length > 0 && <ul className="ux-list wallet-activity-list" aria-label={t(heading)}>{rows.map(row => <Row key={row.transfer.id} transfer={row.transfer} flofi={row.flofi}/>)}</ul>

@@ -214,10 +214,10 @@ async function readEvm(network: EvmActivityNetwork, owner: string, alchemy: Alch
     if (value.pageKey !== undefined && value.pageKey !== null && !(typeof value.pageKey === 'string' && PAGE_KEY.test(value.pageKey))) throw new Error('ACTIVITY_PROVIDER_INVALID');
     streams[key] = typeof value.pageKey === 'string' ? value.pageKey : null;
     // A stream with more history bounds the page by the oldest time it read; one whose page carries no time (empty, or without timestamps)
-    // keeps the previous page's bound (it has read nothing newer), or holds the whole page back on a first page.
+    // keeps the previous page's bound if that page read it (it has read nothing older since), else holds the whole page back.
     if (streams[key]) {
       const oldest = (value.transfers as AlchemyTransfer[]).map(t => typeof t.metadata?.blockTimestamp === 'string' ? Date.parse(t.metadata.blockTimestamp) : NaN).filter(Number.isFinite);
-      frontier = later(frontier, oldest.length ? Math.min(...oldest) : previousFrontier ?? UNKNOWN_TIME);
+      frontier = later(frontier, oldest.length ? Math.min(...oldest) : before !== undefined ? previousFrontier ?? UNKNOWN_TIME : UNKNOWN_TIME);
     }
     for (const raw of value.transfers as AlchemyTransfer[]) {
       const hash = typeof raw.hash === 'string' && HASH.test(raw.hash) ? raw.hash.toLowerCase() : null;
@@ -316,13 +316,13 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
   // (a same-slot tie the page cut through) is read again next time, never skipped; repeated ones are deduplicated by id.
   const onPage = new Set(page.map(item => item.signature));
   /** Per address with more history: the index of the signature that bounds the page (see the frontier below). */
-  const edges: { own: typeof found; edge: number }[] = [];
+  const edges: { own: typeof found; edge: number; continued: boolean }[] = [];
   for (const source of sources) {
     const key = `solana:${source}`;
     if (streams[key] === null) continue;
     const own = found.filter(item => item.source === source), cut = own.findIndex(item => !onPage.has(item.signature));
     streams[key] = cut === -1 ? exhausted.has(source) ? null : own.at(-1)?.signature ?? null : cut === 0 ? previous?.[key] ?? FROM_NEWEST : own[cut - 1]!.signature;
-    if (streams[key]) edges.push({ own, edge: cut === -1 ? own.length - 1 : cut });
+    if (streams[key]) edges.push({ own, edge: cut === -1 ? own.length - 1 : cut, continued: previous?.[key] !== undefined });
   }
   const blockTimes = new Map<string, number>();
   const legs: ActivityLeg[] = [], hiddenMoves: string[] = [];
@@ -389,12 +389,12 @@ async function readSolana(owner: string, rpc: SolanaRpc, catalog: Promise<Solana
   }
   // Complete only after the newest of the oldest times read on addresses with more history (see `completeAfter`): an address read through
   // entirely is bounded by its oldest read signature; one the page cut, by its first signature not shown. A signature without a time takes the
-  // nearest newer one of its address (from the signature list or the transaction read), else the previous page's bound; only a first page with
-  // no time at all holds every row back.
+  // nearest newer one of its address (from the signature list or the transaction read), else the previous page's bound when that page read
+  // this address; otherwise every row is held back.
   let frontier: number | null = null;
-  for (const { own, edge } of edges) {
+  for (const { own, edge, continued } of edges) {
     const bound = own.slice(0, edge + 1).reverse().map(item => item.time ?? blockTimes.get(item.signature) ?? null).find(time => time !== null);
-    frontier = later(frontier, bound ?? previousFrontier ?? UNKNOWN_TIME);
+    frontier = later(frontier, bound ?? (continued ? previousFrontier : null) ?? UNKNOWN_TIME);
   }
   // Every reason the network is partial is reported (the History keeps each in its own words).
   const reasons = [...accounts.length > SOLANA_MAX_TOKEN_ACCOUNTS ? ['SOLANA_TOKEN_ACCOUNT_LIMIT'] : [], ...unreadable ? ['SOLANA_TRANSACTION_UNREADABLE'] : []];
@@ -489,9 +489,13 @@ async function readUncached(account: ActivityAccount, continuation: Continuation
       frontier = later(frontier, result.frontier); }
     else coverage.push(result);
   }
-  // A network unavailable on this page keeps its continuation, so the next page tries it again; a network already read to the end stays so.
-  if (previous) for (const [k, v] of Object.entries(previous)) if (!(k in streams) && (coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))
-    || v === null && ACTIVITY_NETWORKS.some(network => k.startsWith(`${network}:`) && finished(network)))) streams[k] = v;
+  // A network unavailable on this page keeps its continuation, so the next page tries it again — and, read no further, it still bounds this
+  // page where the previous page left it (rows older than that may sit in its unread range); a network already read to the end stays so.
+  if (previous) for (const [k, v] of Object.entries(previous)) {
+    if (k in streams) continue;
+    if (coverage.some(c => c.status === 'UNAVAILABLE' && k.startsWith(`${c.network}:`))) { streams[k] = v; if (v !== null) frontier = later(frontier, previousFrontier ?? UNKNOWN_TIME); }
+    else if (v === null && ACTIVITY_NETWORKS.some(network => k.startsWith(`${network}:`) && finished(network))) streams[k] = v;
+  }
   const more = Object.values(streams).some(v => v !== null);
   const moves = [...new Set(hiddenMoves)];
   const bound = more && frontier !== null ? frontier : null;
