@@ -66,6 +66,7 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   canvasLayout: CanvasLayout; canUndo: boolean; canRedo: boolean; undo(): void; redo(): void;
   readCanvasViewport(width: number, height: number, stacked?: boolean): CanvasViewport | undefined;
   rememberCanvasViewport(view: CanvasViewport, width: number, height: number, stacked?: boolean): void;
+  forgetCanvasViewport(stacked?: boolean): void;
   moveCanvasNodes(positions: Readonly<Record<string, { x: number; y: number }>>): void;
   addCanvasCommand(command: Command, position: { x: number; y: number }): void;
   duplicateCanvasNodes(nodeIds: readonly string[]): void;
@@ -539,6 +540,10 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const previous = viewportMemory.current;
     viewportMemory.current = { ...previous?.id === canvasId ? previous : { id: canvasId }, [stacked ? 'stacked' : 'standard']: viewportCenter(view, width, height) };
   }, [canvasId]);
+  const forgetCanvasViewport = useCallback((stacked = false) => {
+    const saved = viewportMemory.current;
+    if (saved?.id === canvasId) delete saved[stacked ? 'stacked' : 'standard'];
+  }, [canvasId]);
   return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
     canvasRestoring: pendingRestorations > 0, trackCanvasRestoration,
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
@@ -546,7 +551,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
-    canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, readCanvasViewport, rememberCanvasViewport,
+    canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, readCanvasViewport, rememberCanvasViewport, forgetCanvasViewport,
     pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>

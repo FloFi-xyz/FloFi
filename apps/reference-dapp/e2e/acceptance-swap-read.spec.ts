@@ -24,8 +24,9 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
     await expect(card.locator('.composer-destination-box')).toContainText('0.0005');
-    // BUILD-FLOFI-UX-FIX-003: the estimate is the destination amount itself; provider and quality labels stay off the card (Review shows the route).
-    await expect(card).not.toContainText(/Approximate|Uniswap V3 ·|Simulate before review/);
+    await expect(card.locator('.composer-provider')).toHaveText('Uniswap V3');
+    await expect(card.locator('.composer-provider')).toHaveAttribute('title', 'Estimate from Uniswap V3');
+    await expect(card).not.toContainText(/Approximate|Simulate before review/);
     await expect(card.locator('.composer-quote-note')).toHaveCount(0);
     await expect.poll(() => workflows.length).toBeGreaterThan(0);
     const workflow = workflows.at(-1)!, revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');

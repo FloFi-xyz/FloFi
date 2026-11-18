@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+
+export async function selectCanvasSourceToken(page: Page, card: Locator, symbol: string) {
+  await card.getByRole('button', { name: 'Select source token', exact: true }).click();
+  const picker = page.getByRole('region', { name: 'Source token picker', exact: true });
+  await picker.locator('label', { has: page.getByRole('radio', { name: symbol, exact: true }) }).click();
+  await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
+}
 
 /** Explicitly configure fixtures that exercise already-authored workflows. Toolbar creation itself stays unconfigured. */
 export async function configureCanvasAction(page: Page, amount: string) {

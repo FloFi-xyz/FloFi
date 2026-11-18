@@ -257,10 +257,11 @@ test('My DeFi Positions loads only on disclosure and distinguishes a disconnecte
   await expect(page.getByRole('heading', { name: 'My DeFi Positions' })).toBeVisible();
   expect(requests).toHaveLength(0);
   const disclosure = page.locator('summary').filter({ hasText: 'My DeFi Positions' });
-  await disclosure.focus();
-  await page.keyboard.press('Enter');
+  await disclosure.press('Enter');
+  await expect(disclosure.locator('..')).toHaveAttribute('open', '');
   await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toBeVisible();
   expect(requests).toHaveLength(1);
-  await page.keyboard.press('Enter');
+  await disclosure.press('Enter');
+  await expect(disclosure.locator('..')).not.toHaveAttribute('open', '');
   await expect(page.getByText('Connect or link a wallet to view its DeFi positions.')).toHaveCount(0);
 });

@@ -97,7 +97,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   /** The frame's caption line ("Execution plan · Configured on the Canvas"); off where the docked Review already says what runs (board 06). */ foot?: boolean;
   /** The docked panel's landmark name; null when the docked content already names itself (e.g. Execute's status panel). */ dockLabel?: string | null }) {
   const { t: tr } = useLocale();
-  const { state, context, canvasLayout, reviewError, actionSetup, rememberCanvasViewport } = useWorkflow();
+  const { state, context, canvasLayout, reviewError, actionSetup, rememberCanvasViewport, forgetCanvasViewport } = useWorkflow();
   const workflow = state.workflow;
   const actions = composerActions(workflow);
   const execution = canvasExecutionFor(executionInput, workflow);
@@ -176,7 +176,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
             Canvas navigator on its own centred line, then Back to the Canvas immediately left of the primary action, bottom-right. A step note
             takes its own line above the buttons, so no width, locale or note can make the navigator and the actions overlap. */}
         <Panel ref={controls} position="bottom-right" className="simulation-canvas-controls">
-          <CanvasNavigator embedded fitViewOptions={{ padding }} compactBelow={1024} onViewportChange={rememberView}/>
+          <CanvasNavigator embedded fitViewOptions={{ padding }} compactBelow={1024} onViewportChange={rememberView} onFit={() => forgetCanvasViewport?.(narrow)}/>
           {primaryAction && <div className={`canvas-primary-action simulation-canvas-actions${execution ? ' execution-lifecycle-actions' : ''}`}>{primaryAction}</div>}
         </Panel>
       </ReactFlow>

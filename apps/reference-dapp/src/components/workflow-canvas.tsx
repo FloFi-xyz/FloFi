@@ -408,7 +408,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
 
 function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, onAutomate, overview, runActive = false, runStatus = null, onNewWorkflow, execution: executionInput = null }: BuildCanvasProps) {
   const { t: tr } = useLocale();
-  const { state, dispatch, context, canvasLayout, rememberCanvasViewport, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
+  const { state, dispatch, context, canvasLayout, rememberCanvasViewport, forgetCanvasViewport, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
     sequence = null, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
   const workflow: Workflow = state.workflow;
   const wallet=useBuild009Wallet();
@@ -1116,7 +1116,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         onEdgeClick={(_event, edge) => { selectNodes([], null); setSelectedEdge({ from: edge.source, to: edge.target }); }}
         onPaneClick={() => { if (ignorePaneClick.current) return; selectNodes([], null); }} onConnect={({ source, target, sourceHandle, targetHandle }) => runActive ? undefined : connect(source, target, sourceHandle, targetHandle)}>
         <InsertionViewport workflowId={workflow.workflowId} ids={composerActions(workflow).map(node => node.nodeId)} padding={fitPadding}/><HandleHitArea/><CanvasFocus onFocus={id => selectNodes([id], id)}/>
-        <Background gap={22} size={1.5} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right" onViewportChange={rememberView}/><PanelRevealer/>
+        <Background gap={22} size={1.5} color="var(--grid)" /><DarkSpotlight/><CanvasNavigator fitViewOptions={{ padding: fitPadding }} position="bottom-right" onViewportChange={rememberView} onFit={forgetCanvasViewport}/><PanelRevealer/>
         {/* BUILD UX POLISH 004 (UXA-02): mouse wheel zooms at the cursor; lists in cards scroll; the page and chat keep their own scrolling. */}
         <CanvasWheelNavigation onViewportChange={rememberView}/>
         <SelectionToolbar ids={toolbarIds}>{selectionTools}</SelectionToolbar>

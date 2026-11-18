@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { positionsWalletKey, type PositionScan, type PositionWallet } from '../../domain/defi-positions';
 import { WALLET_PROOF_CHANGED } from '../../domain/wallet-proof-events';
 import { formatObservedAt, formatTokenAmount, formatUsdValue, shortAddress } from '../../domain/wallet-portfolio';
@@ -18,14 +18,17 @@ async function read<T>(signal: AbortSignal, wallet?: PositionWallet): Promise<T>
 
 export function DefiPositions({ evm, solana }: { evm: string | null; solana: string | null }) {
   const { t } = useLocale();
+  const disclosure = useRef<HTMLDetailsElement>(null);
   const [opened, setOpened] = useState(false);
   const [proofVersion, setProofVersion] = useState(0);
   useEffect(() => {
+    // The native disclosure can be opened before hydration attaches the toggle listener.
+    setOpened(disclosure.current?.open ?? false);
     const invalidate = () => setProofVersion(version => version + 1);
     window.addEventListener(WALLET_PROOF_CHANGED, invalidate);
     return () => window.removeEventListener(WALLET_PROOF_CHANGED, invalidate);
   }, []);
-  return <details className={`ux-panel ux-details ${styles.panel}`} onToggle={event => setOpened(event.currentTarget.open)}>
+  return <details ref={disclosure} className={`ux-panel ux-details ${styles.panel}`} onToggle={event => setOpened(event.currentTarget.open)}>
     <summary><h2>{t('My DeFi Positions')}</h2></summary>
     {opened && <PositionsContent key={JSON.stringify([evm, solana, proofVersion])} evm={evm} solana={solana}/>}
   </details>;

@@ -351,8 +351,10 @@ test.describe('UX-007 fast live quote feedback', () => {
     const card = cards(page).filter({ hasText: 'Robinhood' }).first();
     const input = card.getByRole('textbox', { name: /^Stocks amount/ });
     await input.pressSequentially('10', { delay: 30 });
-    await expect(card).not.toContainText(/Approximate|Uniswap V3 ·/);
     await expect(card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true })).toContainText('0.026');
+    await expect(card.locator('.composer-provider')).toHaveText('Uniswap V3');
+    await expect(card.locator('.composer-provider')).toHaveAttribute('title', 'Estimate from Uniswap V3');
+    await expect(card).not.toContainText(/Approximate|Provider estimates/);
     expect(seen).toHaveLength(1); expect(seen[0]!.body.workflow.nodes.some(node => node.chainId === 'eip155:4663')).toBe(true);
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     await assertPassiveWallet(page); networkGuard.assertClean();

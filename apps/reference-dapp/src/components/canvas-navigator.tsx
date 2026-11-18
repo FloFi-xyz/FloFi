@@ -127,7 +127,7 @@ export const CANVAS_PRO_OPTIONS: ProOptions = Object.freeze({ hideAttribution: t
  * card never sits under the controls. `steps` is kept for callers and changes nothing.
  * BUILD-FLOFI-SINGLE-AUTH-WORKFLOW-UX-001: `embedded` renders the navigator as an ordinary flow element inside a caller's own panel (the
  * Simulate/Execute plan's bottom controls), so its position comes from layout, never from an offset computed against other controls. */
-export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-right', embedded = false, onViewportChange }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean; onViewportChange?: (view: Viewport) => void }) {
+export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position = 'bottom-right', embedded = false, onViewportChange, onFit }: { fitViewOptions?: FitViewOptions; compactBelow?: number; position?: PanelPosition; steps?: boolean; embedded?: boolean; onViewportChange?: (view: Viewport) => void; onFit?: () => void }) {
   const { t: tr } = useLocale();
   const zoom = useStore((state: ReactFlowState) => state.transform[2]);
   const minZoom = useStore((state: ReactFlowState) => state.minZoom);
@@ -144,7 +144,7 @@ export function CanvasNavigator({ fitViewOptions, compactBelow = 800, position =
   const Container = embedded ? 'div' : Panel;
   return <Container {...embedded ? {} : { position }} className={`canvas-navigator nodrag nopan nowheel${embedded ? ' canvas-navigator-embedded' : ''}`} role="group" aria-label={tr("Canvas navigator")}
     data-measured={measured} data-compact={measured && compact} data-narrow={measured && narrow}>
-    <button type="button" className="canvas-navigator-fit" aria-label={tr("Fit workflow")} title={tr("Fit workflow")} onClick={() => { void fitView(fitViewOptions).then(remember); }}>
+    <button type="button" className="canvas-navigator-fit" aria-label={tr("Fit workflow")} title={tr("Fit workflow")} onClick={() => { onFit?.(); void fitView(fitViewOptions); }}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
       </svg>
