@@ -137,4 +137,30 @@ read; the page seeds the shared presence once (fresh for 30 s), so My Account is
 
 ### Measurements
 
-See the PR description (local production builds of the base and this branch, same machine and profile).
+`e2e/loading-performance.spec.ts` (manual measurement, same spec on both builds): local production builds of `407c383` and this branch, the
+`automations` browser profile environment (embedded PostgreSQL, fixture prices, loopback reads), same 4-vCPU machine, 5 samples each, reload of
+`/app/automations` with a proven wallet, then the Settings menu opened on `/app/workflows`.
+
+| Measure | Base `407c383` | This branch |
+| --- | --- | --- |
+| Automations: "Create an automation" visible (median, range) | 1,623 ms (1,556–2,117) | 1,485 ms (1,173–1,558) |
+| Automations: page structure visible (median) | 121 ms | 129 ms |
+| Automation reads per open | 2 Server Actions, queued | 2 GETs: availability before the wallet is known, then the owner's overview (≤ 1 owner read, asserted) |
+| Server Actions queued on the page before useful content (median) | 61 | 48 |
+| My Account row resolved after opening Settings (median, range) | 913 ms (887–1,400) | 114 ms (103–142) |
+| Presence reads when Settings opens | the presence Server Action | none (seeded from the layout's verified bootstrap) |
+
+On this loopback profile the automation reads themselves are fast, so most of the remaining Automations time is the page's own start-up; the
+reads no longer wait behind the page's Server Action queue. A deployment with a slower API benefits more (the reads run in parallel and outside
+the queue). Earlier runs during the build gave the same picture (base 2,027 / 2,049 ms, branch 1,520 / 1,522 ms for Automations; My Account
+896–906 ms → 108–116 ms).
+
+## Screenshots
+
+From the loopback acceptance harness (fixtures; no public chain, nothing signed), in
+[`BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001/`](BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001/):
+
+- Before: `canvas-before-timeline.png` — Execute replaced the Canvas with the timeline (the fallback still used when no Canvas execution covers a run).
+- After: `canvas-progress-0-light.png` … `canvas-progress-3-light.png` (and `canvas-progress-3-dark.png`) — the same three cards, waiting → in
+  progress → completed one by one; `canvas-failed.png`; `canvas-mobile.png`.
+- History: `history-all-light.png`, `history-received-light.png`, `history-sent-dark.png`, `history-received-pt.png`, `history-received-mobile-dark.png`.
