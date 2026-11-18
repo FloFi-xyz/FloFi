@@ -74,10 +74,15 @@ Guarded browser profiles and CircleCI remain the certification authority; local 
 | Gate | Result |
 | --- | --- |
 | `python3 scripts/agent_guard.py check` | PASS |
-| Focused Vitest (authoring, conversation, overview, reveal, execution UX, registry) | PASS (iteration) |
-| `pnpm check` on Node **v24.21.0** / pnpm 11.22.0 | Recorded at PR open (must use pinned Node; Cursor agent Node 24.22.1 fails schema export) |
-| PostgreSQL / guarded browser | Run where applicable in CI |
-| CircleCI / Vercel Preview | After PR open — not claimed here |
+| `python3 scripts/governance_lite.py` + unittest | PASS |
+| Focused Vitest (authoring, conversation, overview, reveal, execution UX, registry) | PASS (127) |
+| `pnpm check` on Node **v24.21.0** / pnpm 11.22.0 | **PASS** — 719 files / 9344 tests (2 skipped); schema export verified |
+| PostgreSQL / guarded browser | Deferred to CircleCI profiles on the PR |
+| CircleCI / Vercel Preview | After PR open — not claimed green here |
+
+Note: Cursor’s default Node on PATH can be 24.22.1 and fails the schema pin; local certification used `$HOME/.nvm/versions/node/v24.21.0/bin` first.
+
+Specialist reviews ran via Cursor Task (flofi-chat, frontend-ux, workflow, bridge, wallet-execution, security). Claude Code hook ledger (`agent_guard.py review`) does not observe Cursor Task runs; findings and resolutions are recorded in §C above.
 
 ## F. Safeguards preserved
 
