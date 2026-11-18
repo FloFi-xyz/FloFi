@@ -482,7 +482,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'X19', category: 'adversarial', language: 'EN', setup: [FIXTURE.supply], turns: [{ user: 'change it to 3',
     model: { ...intent.edit({ amount: '3' }), target: { step: null, ordinal: null, nodeId: 'node-002' } }, expect: F(['could not validate']) }] },
   { id: 'X20', category: 'adversarial', language: 'EN', turns: [{ user: 'Swap 5 USDC to WETH on Base Sepolia', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '5' })),
-    expect: Q({ contains: ['Base uses real funds'] }) }] },
+    expect: Q({ contains: ['no test networks: every network uses real funds. Did you mean Base'] }) }] },
   { id: 'X21', category: 'adversarial', language: 'EN', turns: [{ user: 'Please move 1 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('1', { recipient: X })),
     expect: Q({ contains: ['could not find that recipient address'] }) }] },
   { id: 'X22', category: 'adversarial', language: 'EN', turns: [{ user: `Transfer 5 USDC to ${X}`,
@@ -540,7 +540,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
       expect: P('ADD_CRYPTO_ACTION', { sentence: 'swap 2 USDC to WETH on Ethereum slippage 100 bps' }) },
     { user: 'Please swap 2 USDC for WETH on Ethereum Sepolia', model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: P('ADD_ETHEREUM_SEPOLIA_SWAP', { sentence: 'swap 2 USDC to WETH on Ethereum Sepolia slippage 100 bps' }) }] },
   { id: 'E07', category: 'adversarial', language: 'EN', turns: [{ user: 'Please swap 2 USDC for WETH on Ethereum',
-    model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: Q({ contains: ['real funds'] }) }] },
+    model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: Q({ contains: ['Did you mean Ethereum'] }) }] },
   { id: 'E08', category: 'clarification', language: 'EN', turns: [{ user: 'Put 0.001 WBTC into Aave on Ethereum mainnet',
     // BUILD AAVE-V3-EXPANSION-001: WBTC is a reserve of the Ethereum Aave V3 Core market.
     model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001', network: 'ETHEREUM' })),

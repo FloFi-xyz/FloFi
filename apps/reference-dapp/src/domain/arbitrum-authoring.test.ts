@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseArbitrumTokenList } from '@defi-workflow-engine/action-registry';
 import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
+import { awaitingAmount } from './copilot-conversation';
+import { mentionedNetworks } from './copilot-authoring';
+import { setActiveNetworkScope } from './network-scope';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { parseLocalCommand, type Command } from './commands';
 import { editorReducer, initialEditor } from './editor';
@@ -78,5 +81,83 @@ describe('Arbitrum canonical authoring parity, no new UX or Copilot list', () =>
     for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const) expect(capabilityNetworks(action).some(n => n.chain === 'eip155:42161')).toBe(true);
     // Phase 4 implements the formerly unavailable pool capability; swap/transfer assertions above remain unchanged.
     expect(composeStrategy({ action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '1', WETH: '1' }, range: { unit: 'full' } } as unknown as StrategySpec).ok).toBe(true);
+  });
+});
+
+/**
+ * BUILD-FLOFI-BETA-REGRESSION-FIX-001: the production journey of 2026-11-18. An explicitly named network is resolved once and never re-asked
+ * (FIX-03); a coin-position "ethereum" is native ETH — never a missing token, never WETH (FIX-04); the engine's structured amount question
+ * carries the UX-02 shortcut request (FIX-01); and no turn repeats the real-funds explanation (FIX-02).
+ */
+describe('BUILD-FLOFI-BETA-REGRESSION-FIX-001: explicit networks, Ethereum-as-asset and the amount question', () => {
+  beforeEach(() => setActiveNetworkScope('PUBLIC_MAINNET'));
+  afterEach(() => setActiveNetworkScope(null));
+
+  it('“Trocar USDC por ethereum na arbitrum” asks only the amount (with shortcuts), then “1” authors native ETH on Arbitrum One', () => {
+    const copilot = new CopilotSession();
+    const asked = copilot.say('Trocar USDC por ethereum na arbitrum',
+      intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'ETH' }), 'PT'));
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', text: 'Quanto USDC você quer trocar?' });
+    // FIX-01 (UX-02): the structured amount question names the stated asset and network, so the balance shortcuts can be offered.
+    expect(awaitingAmount(copilot.state)).toMatchObject({ field: 'amount', action: 'SWAP', asset: 'USDC', network: 'ARBITRUM' });
+    // FIX-03/FIX-04: the short answer keeps the named network — no second network confirmation, no "token ETH not found".
+    const proposed = copilot.say('1');
+    expect(proposed).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 1 USDC to ETH on Arbitrum One slippage 100 bps' });
+    // FIX-02: no turn of this routine journey repeats that the network uses real funds.
+    for (const turn of copilot.turns) {
+      const said = [turn.reply?.text ?? '', ...(turn.reply?.notes ?? [])].join(' ');
+      expect(said).not.toMatch(/fundos reais|real funds/i);
+    }
+  });
+
+  it('the model may normalize the asset as "Ethereum"; it still authors native ETH, never WETH (FIX-04)', () => {
+    const copilot = new CopilotSession();
+    const proposed = copilot.say('Trocar 1 USDC por ethereum na arbitrum',
+      intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'Ethereum', amount: '1' }), 'PT'));
+    expect(proposed).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 1 USDC to ETH on Arbitrum One slippage 100 bps' });
+  });
+
+  it.each([
+    ['Swap 1 USDC to Ethereum on Arbitrum', 'EN', 'ETH'],
+    ['Trocar 1 USDC por ETH na Arbitrum One', 'PT', 'ETH'],
+    ['Trocar 1 USDC por WETH na Arbitrum', 'PT', 'WETH'],
+  ] as const)('“%s” authors the right asset (ETH and WETH stay distinct)', (text, language, output) => {
+    const copilot = new CopilotSession();
+    const proposed = copilot.say(text, intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: output, amount: '1' }), language));
+    // The exact chat grammar may author the proposal locally (no model turn); either way the authored swap receives exactly `output`.
+    if (proposed) expect(proposed).toMatchObject({ kind: 'PROPOSAL', sentence: `swap 1 USDC to ${output} on Arbitrum One slippage 100 bps` });
+    else expect(copilot.pending?.command).toMatchObject({ input: { selection: { from: 'USDC', to: output } } });
+  });
+
+  it('grounds coin-position "ethereum" as the asset and keeps directional "ethereum" as the network (FIX-03/FIX-04)', () => {
+    // The received side of an exchange is the coin; the explicitly named network is the only network mention left.
+    expect(mentionedNetworks('Trocar USDC por ethereum na arbitrum')).toEqual(['ARBITRUM']);
+    expect(mentionedNetworks('Swap USDC to Ethereum on Arbitrum')).toEqual(['ARBITRUM']);
+    expect(mentionedNetworks('Swap 2 USDC for ethereum on Base')).toEqual(['BASE']);
+    // A bridge or transfer destination stays a network: no coin reading without a following network phrase.
+    expect(mentionedNetworks('bridge 1 USDC from Base to ethereum')).toEqual(['BASE', 'ETHEREUM']);
+    expect(mentionedNetworks('bridge 1 USDC da Base para ethereum')).toEqual(['BASE', 'ETHEREUM']);
+    // "na Ethereum" names the network even when the swap receives ETH there.
+    expect(mentionedNetworks('Trocar 1 USDC por ETH na Ethereum')).toEqual(['ETHEREUM']);
+    // Collision filter: every common preposition counts as naming Arbitrum explicitly (the ARB token shares the name).
+    expect(mentionedNetworks('troca 10 usdc por weth em arbitrum')).toContain('ARBITRUM');
+    expect(mentionedNetworks('swap 10 usdc to weth in arbitrum')).toContain('ARBITRUM');
+  });
+
+  it('“na Ethereum” keeps the network and the swap receives native ETH there', () => {
+    const copilot = new CopilotSession();
+    const proposed = copilot.say('Trocar 1 USDC por ETH na Ethereum',
+      intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }), 'PT'));
+    expect(proposed).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 1 USDC to ETH on Ethereum slippage 100 bps' });
+  });
+
+  it.each([
+    ['Trocar 1 USDC por Ether na Base', 'PT', 'BASE', 'ETH', 'Base'],
+    ['Swap 1 USDC to wrapped ETH on Base', 'EN', 'BASE', 'WETH', 'Base'],
+  ] as const)('“%s” resolves the verified alias on the named network', (text, language, network, output, label) => {
+    const copilot = new CopilotSession();
+    const proposed = copilot.say(text, intent.action(act.swap({ network, inputAsset: 'USDC', outputAsset: output, amount: '1' }), language));
+    if (proposed) expect(proposed).toMatchObject({ kind: 'PROPOSAL', sentence: `swap 1 USDC to ${output} on ${label} slippage 100 bps` });
+    else expect(copilot.pending?.command).toMatchObject({ input: { selection: { from: 'USDC', to: output } } });
   });
 });

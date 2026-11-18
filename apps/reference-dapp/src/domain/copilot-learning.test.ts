@@ -163,7 +163,7 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
     const s = session(learning('AVAILABLE', { global: [glossary('arbitrun', 'network:ARBITRUM', 2)], globalVersion: 2 }));
     const asked = s.say('Bridge 10 USDC from Base to arbitrun', BASE_TO_ARB);
     expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Arbitrum One'] });
-    expect(asked!.notes).toEqual(['“arbitrun” may mean Arbitrum One, which uses real funds — choose it below only if that is what you mean.']);
+    expect(asked!.notes).toEqual(['“arbitrun” may mean Arbitrum One — it is first below; choose it only if that is what you mean.']);
     const picked = s.say('Arbitrum One');
     expect(picked).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps' });
     expect(picked!.learning?.signals).toEqual(expect.arrayContaining(['CLARIFICATION_ANSWERED', 'SUGGESTION_CONFIRMED']));
@@ -234,7 +234,7 @@ describe('BUILD-CHAT-LEARNING-002 invisible learning in the conversation', () =>
     s.dismiss();
     const again = s.say('Bridge 5 USDC from Base to arb', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '5' })));
     expect(again).toMatchObject({ kind: 'CLARIFICATION', options: ['Arbitrum One'] });
-    expect(again!.notes).toEqual(['You used “arb” for Arbitrum One before. It uses real funds, so it is first below — choose it only if that is what you mean.']);
+    expect(again!.notes).toEqual(['You used “arb” for Arbitrum One before, so it is first below — choose it only if that is what you mean.']);
   });
 
   it('a correction of a reading FloFi made on its own withdraws it; the word is asked about again', () => {
