@@ -87,7 +87,9 @@ export type PublicAttempt = { readonly attemptId: string; readonly executionId: 
   readonly adapter: 'uniswap.v3' | 'weth9.wrap'; readonly semanticRevision: number; readonly manifestHash: string;
   readonly tx: Tx; readonly calldataDigest: string; readonly authorizedInput: string; readonly authorizedMinimumOutput: string;
   readonly preBlock: number; readonly nativeBefore: string; readonly inputBefore: string; readonly outputBefore: string;
-  readonly allowanceBefore: string; readonly nativeAfter: string | null; readonly txHash: string | null; readonly receipt: PublicReceipt | null };
+  readonly allowanceBefore: string; readonly nativeAfter: string | null; readonly txHash: string | null; readonly receipt: PublicReceipt | null;
+  /** Hashes the wallet replaced (speed-up of the same reviewed call), oldest first; the durable log only accepts a hash change in this form. */
+  readonly replacedTxHashes?: readonly string[] };
 export type PublicReceipt = { readonly transactionHash: string; readonly status: 0 | 1; readonly blockNumber: number;
   readonly blockHash: string; readonly from: string; readonly to: string; readonly gasUsed: string;
   readonly effectiveGasPrice: string; readonly executionGasCostWei: string; readonly l1FeeWei: string;
@@ -305,7 +307,7 @@ export const MAINNET_SWAP_CONFIRMATIONS: Readonly<Record<number, number>> = Obje
 /** Public or unlabelled catalog runs use the mainnet depth (fail closed); only a MOCKED runtime may inject its own for tests. */
 function swapConfirmations(P: SwapProfile, provenance: 'PUBLIC_MAINNET' | 'MOCKED' | undefined, runtime: CatalogSwapRuntime | undefined): number {
   if (P.kind !== 'CATALOG') return 0;
-  if (provenance === 'MOCKED') return runtime?.confirmations?.[P.chainId] ?? 0;
+  if (provenance === 'MOCKED') return runtime?.provenance === 'MOCKED' ? runtime.confirmations?.[P.chainId] ?? 0 : 0;
   return MAINNET_SWAP_CONFIRMATIONS[P.chainId] ?? fail('PUBLIC_STORE_CORRUPT');
 }
 const profileOf = (chainId: number): SwapProfile => swapProfile(chainId) ?? fail('PUBLIC_STORE_CORRUPT');
@@ -999,7 +1001,8 @@ function createGaslessExecution({ rpcFor, now, catalog, persistence, quote, quot
     const candidates = [...new Set([...attempt.candidates, ...hint?.transactions ?? []])].slice(0, 16);
     let current: GaslessAttempt = { ...attempt, candidates, ...hint !== undefined ? { hint: { status: hint ? hint.status : 'not_found', reason: hint?.reason ?? null,
       checkedAt: now().toISOString() } } : {} };
-    let reverted: string | null = null;
+    let reverted: string | null = null, shallow = false;
+    const depth = swapConfirmations(P, run.quote.provenance, catalog);
     for (const txHash of candidates) {
       const raw = await rpc('eth_getTransactionReceipt', [txHash]);
       if (raw === null) continue;
@@ -1013,12 +1016,12 @@ function createGaslessExecution({ rpcFor, now, catalog, persistence, quote, quot
           address(raw.to) !== binding.settler || !HASH.test(hex(raw.blockHash))) fail('RECEIPT_INVALID');
       try { await canonicalInclusion(rpc, raw, tx, txHash, blockNumber); }
       catch (cause) { if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL') continue; throw cause; }
+      // The same confirmation depth as an owner-sent swap, for a settlement and for a revert alike: until then nothing becomes final.
+      if (depth > 1 && Number(quantity(await rpc('eth_blockNumber', []))) - blockNumber + 1 < depth) { shallow = true; continue; }
       if (status === 0) { reverted = txHash; continue; }
-      // The same confirmation depth as an owner-sent swap: until then the attempt stays active and nothing is reconciled.
-      const depth = swapConfirmations(P, run.quote.provenance, catalog);
-      if (depth > 1 && Number(quantity(await rpc('eth_blockNumber', []))) - blockNumber + 1 < depth) return save(withGasless(run, current));
       return reconcile(run, current, binding, P, rpc, raw, tx, txHash, relayer, blockNumber);
     }
+    if (shallow) return save(withGasless(run, current));
     const deadlinePassed = now().getTime() > (binding.trade.deadline + 60) * 1000;
     // Past the deadline the signature can only have run if its Permit2 nonce was consumed: a consumed nonce no candidate proves is never guessed.
     if (deadlinePassed && await permit2NonceUsed(rpc, attempt.account, binding.trade.nonce, 'latest')) return save({ ...withGasless(run, current), divergence: 'ZEROX_SETTLEMENT_UNTRACED' });
@@ -1089,6 +1092,12 @@ function rpcRouter(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial
   return profile => config.rpcs?.[profile.chainRef] ?? (profile.chainRef === BASE_SEPOLIA.chainRef ? config.rpc : fail('PUBLIC_NETWORK_UNAVAILABLE'));
 }
 /** Append-only snapshot history: identity, authorized calls, hashes and terminal results never change. */
+/** A wallet speed-up adopted by nonce discovery: the pending hash moves, append-only, into `replacedTxHashes` (BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002). */
+function adoptedReplacement(before: PublicAttempt, after: PublicAttempt): boolean {
+  const prior = before.replacedTxHashes ?? [], next = after.replacedTxHashes ?? [];
+  return ['HASH', 'PENDING'].includes(before.state) && after.state === 'HASH' && typeof after.txHash === 'string' && HASH.test(after.txHash) &&
+    next.length === prior.length + 1 && next.length <= 8 && prior.every((hash, index) => next[index] === hash) && next.at(-1) === before.txHash;
+}
 export function validatePublicRunLog(bytes: Uint8Array): void {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   if (!text.endsWith('\n') || bytes.length > 16_777_216) fail('PUBLIC_STORE_CORRUPT');
@@ -1130,7 +1139,8 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
         const after = run.attempts[index]!;
         if (after.attemptId !== before.attemptId || after.step !== before.step || after.account !== before.account || !same(after.tx, before.tx) ||
             after.authorizedInput !== before.authorizedInput || after.authorizedMinimumOutput !== before.authorizedMinimumOutput ||
-            after.preBlock !== before.preBlock || before.txHash !== null && after.txHash !== before.txHash ||
+            after.preBlock !== before.preBlock || before.txHash !== null && after.txHash !== before.txHash && !adoptedReplacement(before, after) ||
+            after.txHash === before.txHash && !same(after.replacedTxHashes ?? [], before.replacedTxHashes ?? []) ||
             ['CONFIRMED', 'REVERTED', 'REJECTED'].includes(before.state) && after.state !== before.state) fail('PUBLIC_STORE_CORRUPT');
       }
     }
@@ -1843,7 +1853,7 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
               maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpc);
             if (found.consumed && found.hash && found.hash !== attempt.txHash) {
               if (found.mismatch) return save({ ...run, divergence: 'NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
-              const replaced: PublicAttempt = { ...attempt, state: 'HASH', txHash: found.hash };
+              const replaced: PublicAttempt = { ...attempt, state: 'HASH', txHash: found.hash, replacedTxHashes: [...attempt.replacedTxHashes ?? [], attempt.txHash!] };
               return save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? replaced : a) });
             }
           }
@@ -1863,17 +1873,22 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           throw cause;
         }
         const { direct, delegated, delegationDepth, txFrom, txTo, txInput, status, blockNumber, gasUsed, effectiveGasPrice, l1Fee, nonce } = verified;
+        const review = run.quote.ownerReview;
+        const relayedShape = review !== undefined && delegated && verified.submission === 'DELEGATED_EXISTING' && delegationDepth === 1 &&
+          review.delegation === DELEGATOR_IMPL && txFrom !== attempt.account;
+        // A relayed redemption is claimed for this attempt as soon as it is proven, before any confirmation wait, so an identical run's scan
+        // can never adopt it in the meantime (the claim below is the same create-once record and is idempotent for this attempt).
+        if (relayedShape && !await persistence.claims.claim(P.chainId, attempt.txHash, { id, attemptId: attempt.attemptId }))
+          return save({ ...run, divergence: 'RELAYED_TRANSACTION_ALREADY_CLAIMED' });
         // Until the receipt is deep enough nothing is recorded: the attempt keeps its state and the next observation re-verifies it.
         const depth = swapConfirmations(P, run.quote.provenance, catalog);
         if (depth > 1 && Number(quantity(await rpc('eth_blockNumber', []))) - blockNumber + 1 < depth) return run;
-        const review = run.quote.ownerReview;
         // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: a MetaMask Smart Account (an EIP-7702 delegated EOA) may hand the reviewed call to a relayer,
         // which redeems the owner's delegation through the Delegation Manager and pays the network fee. For an owner-bound swap this is accepted
         // only in the shape verified on chain (testdata/metamask-delegated-depth1-approval.base-sepolia.json): a type-2 redemption, sent by a
         // third party, of exactly the reviewed call (one call, depth 1, no native value) from the owner's reviewed DeleGator delegation, unchanged
         // from preparation to inclusion, with a single `RedeemedDelegation` naming the owner. Any other delegated shape is recorded as divergent.
-        const relayed = review !== undefined && delegated && verified.submission === 'DELEGATED_EXISTING' && delegationDepth === 1 &&
-          review.delegation === DELEGATOR_IMPL && txFrom !== attempt.account;
+        const relayed = relayedShape;
         // Whether the owner's balances can move without its nonce moving (relayed redemptions): the nonce count then cannot show that the
         // balance window is this swap's alone, so the receipt is the proof (as HOTFIX-WORKFLOW-CONCURRENCY-001 does for concurrent transactions).
         let relayCapable = false;

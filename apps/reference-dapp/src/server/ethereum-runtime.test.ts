@@ -301,6 +301,25 @@ describe('Ethereum swaps on the shared owner runtime', () => {
     expect(done.attempts).toHaveLength(1);
     expect(FLOWS['ethereum-swap'].needsObservation({ ...run, attempts: [{ ...begun.attempt, state: 'UNKNOWN' }] })).toBe(true);
   });
+  it('durably adopts a wallet speed-up: the replaced hash is kept, the log stays valid, and the swap reconciles', async () => {
+    chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10_000_000n);
+    const storage = createFileExecutionStorage(dir(), 'EXECUTION_BUSY');
+    const create = () => createDurablePublicTestnetService({ storage, rpc: chain.rpc, rpcs: { [chainId]: chain.rpc }, idPrefix: 'ets',
+      now: () => new Date(now), catalog: mockCatalogRuntime(catalog) });
+    const s = create(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
+    await s.review(id, run.quote.manifestHash); const begun = await s.begin(id, owner), dropped = '0x' + 'ab'.repeat(32);
+    await s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: dropped });
+    expect((await create().observe(id)).attempts[0]).toMatchObject({ state: 'PENDING', txHash: dropped });
+    const landed = chain.apply(begun.tx);
+    now += 31_000;
+    expect((await create().observe(id)).attempts[0]).toMatchObject({ state: 'HASH', txHash: landed, replacedTxHashes: [dropped] });
+    const done = await create().observe(id);
+    expect(done.outcome?.evidence).toMatchObject({ environment: 'MOCKED', outcome: 'RECONCILED' });
+    expect(done.attempts[0]).toMatchObject({ state: 'CONFIRMED', txHash: landed, replacedTxHashes: [dropped] });
+    expect(() => validatePublicRunLog(new TextEncoder().encode([run, { ...run, attempts: [{ ...begun.attempt, state: 'HASH', txHash: dropped }] },
+      { ...run, attempts: [{ ...begun.attempt, state: 'HASH', txHash: landed }] }].map(r => JSON.stringify(r)).join('\n') + '\n')))
+      .toThrow('PUBLIC_STORE_CORRUPT');
+  });
   it('marks a different transaction consuming the nonce divergent, with no evidence', async () => {
     const s = swapService(), run = await s.prepare(swap(), owner), id = run.quote.executionId;
     s.review(id, run.quote.manifestHash); const begun = await s.begin(id, owner); s.report(id, begun.attempt.attemptId, { kind: 'UNKNOWN' });

@@ -157,8 +157,9 @@ ledger in place. Builds before this certificate refuse schema 30.
 
 Specialist reviews (read-only): flofi-bridge, flofi-workflow, flofi-security, flofi-admin-analytics, flofi-data-privacy and
 flofi-infrastructure-ci. Their medium and high findings were fixed in this build: callTracer fallback on contradicting traces, gasless
-depth, invoice precedence across environments, provider-reported quality, plain-Node loading of the billing loop, and identifiers in the
-fixture. Results are listed in the PR description with CircleCI links. Local runs used a disposable loopback PostgreSQL 18 and MOCKED chains or
+depth, invoice precedence across environments, provider-reported quality, plain-Node loading of the billing loop, identifiers in the
+fixture, a durable-log rejection of wallet speed-ups (pre-existing), gasless reverts before depth, and the relayed-transaction claim during
+a depth wait. Batch 3 (flofi-swap, flofi-liquidity, flofi-wallet-execution) reviewed the confirmation-depth change. Results are listed in the PR description with CircleCI links. Local runs used a disposable loopback PostgreSQL 18 and MOCKED chains or
 closed replays only: they do not prove public execution, provider entitlements or invoice accuracy.
 
 ## 10. Remaining operational blockers
@@ -171,3 +172,10 @@ closed replays only: they do not prove public execution, provider entitlements o
 - A workflow step whose execution was already claimed by another run's identical step (`WORKFLOW_STEP_EXECUTION_ALREADY_CLAIMED`) stays in
   ATTENTION until an operator resolves it; there is no automatic exit yet.
 - Known fail-closed limits outside this build: the 0x Gasless native check and Aave's exact balance equality are block-level.
+- Pre-existing swap observation paths that record a permanent divergence without waiting for depth (nonce consumed by a different
+  transaction, unsupported or duplicate relayed shapes) and state reads bound by block number rather than hash: fail-closed (attention,
+  never a false settlement), left for a follow-up because each needs its own fork-shaped tests.
+- The swap worker retries a depth wait on its normal backoff, so with no browser observing, an Ethereum swap can take one backoff step
+  longer than its three blocks to reconcile.
+- Workflow owner-step observation reads at most 16 recent runs of the flow before filtering, and the claim lookup has no index
+  (a later migration); both pre-date this build.

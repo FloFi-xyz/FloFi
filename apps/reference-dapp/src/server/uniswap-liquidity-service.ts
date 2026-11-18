@@ -263,6 +263,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     readonly codePins?: Partial<Record<string, string>> } }) {
   const { provenance } = input, { log, leases } = input.storage;
   if ((input.mockedCodePins || input.catalog?.codePins) && provenance !== 'MOCKED') fail('UNISWAP_CODE_PINS_MOCKED_ONLY');
+  if (input.confirmations !== undefined && (provenance !== 'MOCKED' || !Number.isSafeInteger(input.confirmations) || input.confirmations < 0))
+    fail('UNISWAP_CONFIRMATIONS_MOCKED_ONLY');
   // A Robinhood Chain service is never labelled as a testnet, and a testnet service never as mainnet.
   if (provenance === (input.catalog ? 'PUBLIC_TESTNET' : 'PUBLIC_MAINNET')) fail('UNISWAP_PROVENANCE_INVALID');
   const servedChain = input.catalog?.chain ?? ROBINHOOD.chain, served = input.catalog ? swapProfile(servedChain) : null;

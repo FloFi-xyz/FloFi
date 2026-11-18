@@ -212,6 +212,7 @@ describe('BUILD-RH-002 Robinhood Chain liquidity service (MOCKED)', () => {
     const catalogRuntime = { catalogFor: async () => catalog };
     expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_TESTNET', catalog: catalogRuntime })).toThrow('UNISWAP_PROVENANCE_INVALID');
     expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_MAINNET' })).toThrow('UNISWAP_PROVENANCE_INVALID');
+    expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_TESTNET', confirmations: 2 })).toThrow('UNISWAP_CONFIRMATIONS_MOCKED_ONLY');
     expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_MAINNET', catalog: { ...catalogRuntime, codePins: chain.catalogPins } }))
       .toThrow('UNISWAP_CODE_PINS_MOCKED_ONLY');
     expect(chain.counters.sends).toBe(0);
