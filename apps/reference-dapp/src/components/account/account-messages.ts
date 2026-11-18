@@ -50,7 +50,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   PRIVY_RESPONSE_INVALID: 'The wallet provider sent an answer FloFi could not read. Nothing changed.',
   PRIVY_SIGN_IN_FAILED: 'Sign-in did not complete. Try again.',
   // Authentication UX & Login Regression Fix (P0): another sign-in was still open in this browser; it has been ended (nothing was signed in).
-  PRIVY_SIGN_IN_INTERRUPTED: 'This browser still had another sign-in open, so this one didn’t finish. It’s closed now. Choose your method again.',
+  PRIVY_SIGN_IN_INTERRUPTED: 'Sign-in didn’t finish because another sign-in was still open in this browser. We closed it. Choose your method again.',
   SIGN_IN_PAGE_OUTDATED: 'FloFi was updated while you were signing in. Nothing was signed in. Sign in again.',
   PRIVY_LOGIN_METHOD_UNSUPPORTED: 'Sign in with Google, your email or a Web3 wallet.',
   PRIVY_SESSION_REQUIRED: 'Your wallet provider session has ended in this browser. Sign in again.',

@@ -22,9 +22,9 @@ Evidence levels: **CODE** unit tests · **PG/BROWSER** production build, headles
 
 ## 2. The production evidence and what it means
 
-Owner's read-only query (Neon production), as reported:
-- account A `acct_3f49…c305` — PRIVY + EIP155, Boarding Pass #001, Founding Seat #001, beta access active, last access 17/11 17:23 UTC;
-- account B `acct_7830…1e06` — GOOGLE (`alrimar6@gmail.com`), authenticated 23:33:03 UTC, **session revoked 23:33:21 UTC**.
+The owner's read-only production query (details kept out of the repository) showed: the boarded account A (signs in with a Web3 wallet; boarding
+pass, Founding seat and beta access intact; no sign-in since earlier that day) and a second account B (signs in with Google on the same Gmail
+address) whose session was created and then **revoked 18 seconds later**.
 
 So Google **did** sign in (to B). FloFi revokes a session only in these code paths (all in `src/app/account-action.ts`): sign-out
 (`accountSignOut`), the start of a move (`startAccountMove`), a superseding sign-in in the same browser, a refused step-up
@@ -56,7 +56,7 @@ at Privy (an embedded wallet or MFA would make B impossible to close; FloFi refu
 ### 3.1 The login page never starts a sign-in over a live Privy session (`src/components/account/sign-in.tsx`)
 - The methods are disabled ("Getting sign-in ready…") until Privy has loaded **and** any session left in the browser has **finished** ending;
   `begin()` also ends one that appeared since. If Privy does not load in 15 s, the page says the provider could not be reached.
-- A Google return that Privy reports as "already authenticated", or that Privy has not finished within 20 s, is ended **with a reason**: the
+- A Google return that Privy reports as "already authenticated", or for which Privy reports nothing at all within 20 s, is ended **with a reason**: the
   return is removed from the address (a reload never retries it), the Privy session is ended, and the person reads "This browser still had another
   sign-in open, so this one didn't finish. It's closed now. Choose your method again." (`PRIVY_SIGN_IN_INTERRUPTED`, EN/PT).
 - Privy's real refusals (`already logged in`, `already authenticated`, `no OAuth flow is in progress`) map to that code
@@ -66,8 +66,11 @@ at Privy (an embedded wallet or MFA would make B impossible to close; FloFi refu
 In closed beta (`FLOFI_BETA_ACCESS=beta`), an account with **no beta grant of its own (even revoked)** whose strongly verified address (email code,
 or Google on gmail.com/googlemail.com) is held by **another** account (`entryHolder`, the same rule as `/board`'s hint, now shared in
 `src/flight/held-elsewhere.ts`) is sent to `/board` after sign-in instead of wallet onboarding or `/app` (one hop fewer), and the wallet
-onboarding and import pages redirect it to `/board`. It decides a destination only: nothing is granted, linked, closed or deleted; any failure keeps
-the previous destination. Open and closed deployments are unchanged.
+onboarding and import pages redirect it to `/board`. It is `/board`'s own rule (the account is `not_listed` — no claim, invite or list
+address of its own), so an account with its own way to board keeps wallet onboarding. It decides a destination only (routing, not enforcement:
+the closure of a duplicate still re-checks FloFi and Privy for any wallet under a row lock): nothing is granted, linked, closed or deleted, and any
+failure keeps the previous destination. Open and closed deployments are unchanged. An account the person explicitly chose to keep separate is
+routed the same way while it has no beta access of its own (in closed beta it cannot use the product anyway).
 
 ### 3.3 Diagnostics (`src/app/account-action.ts`)
 Each sign-in, move start and ended session writes one log line with enums and FloFi codes only (no account id, address, token or provider text):
@@ -87,10 +90,12 @@ unchanged). The duplicate-account option sits behind "Is this a second FloFi acc
 ## 6. Protections validated (unchanged)
 - Closing a duplicate still needs a recent sign-in to it, a sign-in to the keeper, the explicit confirmation, the server-side emptiness check at
   FloFi **and** at Privy (no wallet of any kind, no MFA, only Google/Apple/email) re-checked under a row lock, and the audit records.
-- Dependencies of an account, re-inventoried over every migration: every table with a foreign key to `flofi_accounts` is in
-  `RETIREMENT_CHECKS` (an existing PostgreSQL test fails otherwise); the account references without a foreign key are the Editor requester
-  (`workflow_runs`, `mcp_handoffs`: HISTORY) and the MCP account link (`flight_beta_mcp_accounts`: MCP); everything else (automations,
-  delegations, saved workflows, learning, admin principals) is keyed by a wallet address, which an account FloFi may close cannot hold.
+- Dependencies of an account, re-inventoried over every migration (and checked by the flofi-data-privacy review): every table with a foreign
+  key to `flofi_accounts` is in `RETIREMENT_CHECKS` — identities, wallets, recipients, passes, invites, simulations, list claims, beta grants
+  (with their beta wallets) and the MCP link (`flight_beta_mcp_accounts`) — except its own sessions, which end with it by design. The account
+  references without a foreign key are the Editor requester (`workflow_runs`, `mcp_handoffs`: HISTORY). Everything else (automations,
+  delegations, saved workflows, learning, admin principals, channel conversations) is keyed by a wallet address or a digest, which an account
+  FloFi may close cannot hold. The append-only `admin_audit_events` keeps opaque ids of a closed duplicate (pre-existing, unchanged).
 - Nothing here merges, moves or deletes an account by itself, and nothing writes to the database outside the existing reviewed paths.
 
 ## 7. Proven here vs. depends on the owner's real test

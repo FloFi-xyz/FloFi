@@ -113,8 +113,8 @@ export async function privySignIn(accessToken: string, returnTo = '/app', option
       logAccount({ event: 'account.sign_in', mode: 'reauth', result: 'ACCOUNT_REAUTH_OTHER_ACCOUNT' });
       return { ok: false, code: 'ACCOUNT_REAUTH_OTHER_ACCOUNT' };
     }
-    if (previous && previous.sessionId !== outcome.session.sessionId) logAccount({ event: 'account.session_ended', reason: 'superseded' });
     await supersede(h, previous, outcome.session);
+    if (previous && previous.sessionId !== outcome.session.sessionId) logAccount({ event: 'account.session_ended', reason: 'superseded' });
     await setAccountCookie(outcome.session);
     // A move intent belongs to the move sign-in (and the keeper's step-up while confirming it): any other sign-in in this browser ends it.
     if (!move && options.mode !== 'reauth') await clearMoveCookie();
@@ -213,7 +213,9 @@ export async function privyMoveToExisting(accessToken: string): Promise<Result<{
     try {
       const intent = await h.service.startAccountMove(outcome.session);
       await setMoveCookie(intent);
+      logAccount({ event: 'account.move_start', result: 'ok' });
     } catch (cause) {
+      logAccount({ event: 'account.move_start', result: failure(cause, 'ACCOUNT_MOVE_FAILED').code });
       // The person asked to bring this sign-in to another account, not for a new one: an account created just now that cannot move is discarded.
       if (outcome.created) await h.store.discardEmptyAccount(outcome.session.accountId).catch(() => false);
       throw cause;

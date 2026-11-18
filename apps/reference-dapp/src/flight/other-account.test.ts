@@ -6,7 +6,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const rows = { grant: false, holder: null as string | null };
+const rows = { grant: false, holder: null as string | null, access: 'not_listed' };
+vi.mock('./host', () => ({ flightNow: async () => 0, flightStore: async () => ({ account: async () => ({ access: { kind: rows.access } }) }) }));
 vi.mock('../server/platform-state-host', () => ({ platformStateHost: async () => ({ tenantId: 'default', db: { query: async (sql: string) => ({
   rows: sql.includes('flight_beta_grants') ? (rows.grant ? [{ '?column?': 1 }] : [])
     : sql.includes('flight_list_entries') ? (rows.holder ? [{ entry_id: 'fle_1', language: 'EN', opens_at: null, boarded_at: new Date(), account_id: rows.holder }] : [])
@@ -16,7 +17,7 @@ import { strongEmailsOf } from './held-elsewhere';
 
 const beta = { FLOFI_BETA_ACCESS: 'beta' };
 const google = [{ kind: 'google', label: 'Person@Gmail.com' }];
-beforeEach(() => { rows.grant = false; rows.holder = 'acct_boarded'; });
+beforeEach(() => { rows.grant = false; rows.holder = 'acct_boarded'; rows.access = 'not_listed'; });
 
 describe('the person’s other account', () => {
   it('counts only email-code addresses and Google sign-ins on Google’s own mail domain as strongly verified', () => {
@@ -29,7 +30,10 @@ describe('the person’s other account', () => {
     expect(await isOtherAccountOfBoardedPerson('acct_boarded', google, beta)).toBe(false);
     rows.grant = true;
     expect(await isOtherAccountOfBoardedPerson('acct_other', google, beta)).toBe(false);
-    rows.grant = false; rows.holder = null;
+    rows.grant = false;
+    // /board's own rule: an account with its own way to board (its own claim, an invite, its own list address) keeps wallet onboarding.
+    for (const access of ['eligible', 'batch_closed']) { rows.access = access; expect(await isOtherAccountOfBoardedPerson('acct_other', google, beta), access).toBe(false); }
+    rows.access = 'not_listed'; rows.holder = null;
     expect(await isOtherAccountOfBoardedPerson('acct_other', google, beta)).toBe(false);
     rows.holder = 'acct_boarded';
     // A weak address (Google on another domain), and deployments that are not in closed beta, keep the usual destinations.

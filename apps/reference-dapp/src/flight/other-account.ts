@@ -9,7 +9,9 @@
  * decides a destination only: it grants, links, closes and deletes nothing, and any failure answers "no" (the previous destination is kept).
  */
 import { betaAccessMode } from './beta-access';
+import { normalizeEmail } from './campaign';
 import { heldElsewhere, strongEmailsOf } from './held-elsewhere';
+import { flightNow, flightStore } from './host';
 import { platformStateHost } from '../server/platform-state-host';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -23,7 +25,15 @@ export async function isOtherAccountOfBoardedPerson(accountId: string, identitie
     const { db, tenantId } = await platformStateHost(env);
     // Any beta grant of its own (even a revoked one) means this is not an empty other account: the usual destinations apply.
     const granted = (await db.query('SELECT 1 FROM flight_beta_grants WHERE tenant_id = $1 AND account_id = $2 LIMIT 1', [tenantId, accountId])).rows.length > 0;
-    return !granted && await heldElsewhere(db, tenantId, accountId, emails);
+    if (granted) return false;
+    // /board's own rule (src/flight/http.ts): only an account that is not on the list in any way of its own (no claim of its own, no invite,
+    // no list address of its own) — an account with its own way to board keeps wallet onboarding, which boarding needs.
+    const store = await flightStore(env);
+    if (!store) return false;
+    const all = [...new Set(identities.filter(identity => identity.kind === 'email' || identity.kind === 'google' || identity.kind === 'apple')
+      .map(identity => normalizeEmail(identity.label)).filter((email): email is string => email !== null))];
+    const flight = await store.account({ accountId, emails: all, now: await flightNow(env) });
+    return flight.access.kind === 'not_listed' && await heldElsewhere(db, tenantId, accountId, emails);
   } catch { return false; }
 }
 

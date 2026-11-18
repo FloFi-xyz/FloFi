@@ -14,9 +14,13 @@ export const portugueseIdentityRecovery: Readonly<Record<string, string>> = {
   // Authentication UX & Login Regression Fix (item 6): the step after a link, and after closing a duplicate.
   'Continue to my account': 'Continuar para minha conta',
   // Authentication UX & Login Regression Fix: shorter sign-in and Sign-in methods copy.
-  'Sign in again with the same method.': 'Entre de novo com o mesmo método.',
+  'Sign in again with any method of this account.': 'Entre de novo com qualquer método desta conta.',
+  'Use the method you boarded with.': 'Use o método com que você embarcou.',
+  'Not available yet': 'Ainda não disponível',
+  'If that account is empty, sign in with it and choose “Bring this sign-in to my other account”.':
+    'Se essa conta estiver vazia, entre nela e escolha “Levar este login para minha outra conta”.',
   'Use the method you boarded with, not {0}.': 'Use o método com que você embarcou, não {0}.',
-  'That account signs in with {0}.': 'Essa conta entra com {0}.',
+  'That account signs in with {0}.': 'Essa conta usa {0} para entrar.',
   'Getting sign-in ready…': 'Preparando o login…',
   'Every method here opens this same account.': 'Cada método aqui abre esta mesma conta.',
   'For your security, confirm it’s you first.': 'Por segurança, confirme primeiro que é você.',

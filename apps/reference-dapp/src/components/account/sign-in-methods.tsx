@@ -50,7 +50,9 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
       const result = token ? await syncSignInMethods(token) : { ok: false as const, code: 'PRIVY_SESSION_REQUIRED' };
       if (!result.ok) { setError(result.code); return; }
       if (result.value.added) setLinked(true);
-      setNotice(result.value.heldElsewhere ? t('That sign-in method already opens another FloFi account, so it was not added. Nothing was merged or moved.')
+      // The boarded account's own next step when its Google belongs to the other account (the case this build fixes).
+      setNotice(result.value.heldElsewhere ? `${t('That sign-in method already opens another FloFi account, so it was not added. Nothing was merged or moved.')} ${
+        t('If that account is empty, sign in with it and choose “Bring this sign-in to my other account”.')}`
         : result.value.added ? t('Linked. You can now sign in with it.')
           : result.value.unconfirmed ? t('A sign-in method was linked at Privy before FloFi asked, so it was not added and does not open this account.')
             : t('Nothing new was linked.'));
@@ -131,14 +133,21 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
   const linkGoogleNow = moved?.includes('google') && canLink, linkEmailNow = moved?.includes('email') && canLink && state.emailLink && Boolean(privy?.sendLinkEmailCode);
   const emailForms = !codeSent ? <form className={styles.form} onSubmit={event => void sendEmailCode(event)} aria-label={t('Link an email')}>
     <label htmlFor={emailId}>{t('Email address')}</label>
-    <input id={emailId} className={styles.input} type="email" inputMode="email" autoComplete="email" required maxLength={254} value={email}
+    <input id={emailId} className={styles.input} type="email" inputMode="email" autoComplete="email" required maxLength={254} value={email} autoFocus
       onChange={event => setEmail(event.currentTarget.value)}/>
     <button type="submit" className={styles.primary} disabled={busy !== null || !email.includes('@')}>{t(busy === 'email' ? 'Sending code…' : 'Email me a code')}</button>
+    {showEmail && <button type="button" className={styles.textLink} onClick={() => { setShowEmail(false); setEmail(''); }}>{t('Cancel')}</button>}
   </form> : <form className={styles.form} onSubmit={event => void verifyEmailCode(event)} aria-label={t('Enter your code')}>
     <label htmlFor={codeId}>{t('Enter the 6-digit code we sent to {0}', email.trim())}</label>
     <input id={codeId} className={`${styles.input} ${styles.code}`} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required
-      value={code} onChange={event => setCode(event.currentTarget.value.replace(/\D/g, '').slice(0, 6))}/>
+      value={code} autoFocus onChange={event => setCode(event.currentTarget.value.replace(/\D/g, '').slice(0, 6))}/>
     <button type="submit" className={styles.primary} disabled={busy !== null || code.length !== 6}>{t(busy === 'email' ? 'Verifying…' : 'Link this email')}</button>
+    {/* Never a dead end: a new code, another address, or stop. */}
+    <div className={styles.row}>
+      <button type="button" className={styles.textLink} disabled={busy !== null} onClick={event => void sendEmailCode(event)}>{t('Send a new code')}</button>
+      <button type="button" className={styles.textLink} onClick={() => { setCodeSent(false); setCode(''); }}>{t('Use another email')}</button>
+      <button type="button" className={styles.textLink} onClick={() => { setCodeSent(false); setCode(''); setEmail(''); setShowEmail(false); setError(null); }}>{t('Cancel')}</button>
+    </div>
   </form>;
   return <AccountShell showcase="account" start>
     <h1 className={styles.title}>{t('Sign-in methods')}</h1>
@@ -206,7 +215,7 @@ export function SignInMethodsScreen({ initial }: { initial: SignInMethodsState }
           : <>
             {addGoogle && <button type="button" className={styles.method} disabled={busy !== null} onClick={() => void linkGoogle()}>{t(busy === 'google' ? 'Opening…' : 'Add Google')}</button>}
             {addEmail && (showEmail || codeSent ? emailForms
-              : <button type="button" className={styles.method} disabled={busy !== null} onClick={() => setShowEmail(true)} aria-expanded={false}>{t('Add email')}</button>)}
+              : <button type="button" className={styles.method} disabled={busy !== null} onClick={() => setShowEmail(true)}>{t('Add email')}</button>)}
           </>}
       </>}
       {!move && <details className={styles.small} data-duplicate-help="true">
