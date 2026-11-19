@@ -92,7 +92,7 @@ describe('public swap durable recovery and explicit fresh Review', () => {
     vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
     vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
     f.session.mockResolvedValue({ account, chainId: '0x1237' });
-    vi.mocked(publicPrepare).mockResolvedValueOnce({ ok: true, value: { ...run, attempts: [], workflow: buy.workflow, quote: { ...run.quote, chainId: 4663 } } });
+    vi.mocked(publicPrepare).mockResolvedValueOnce({ ok: true, value: { ...run, attempts: [], workflow: buy.workflow as PublicRun['workflow'], quote: { ...run.quote, chainId: 4663 } } });
     read(); await settle(); store.simulate(); await settle();
     expect(store).toMatchObject({ retired: false, run: { workflow: forward } });
 

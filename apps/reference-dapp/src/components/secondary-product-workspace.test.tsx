@@ -32,13 +32,15 @@ const markup = (workspace: 'credentials' | 'agents' | 'passkeys') => renderToSta
 const wallets = (html: string) => html.match(/class="ux-wallet-row"/g)?.length ?? 0;
 
 describe('secondary product workspaces', () => {
-  it('renders functional Add wallet and Add card with truthful empty states and no secret affordances', () => {
+  it('renders Add wallet and Add card with a pending wallet list in the server document and no secret affordances', () => {
     const html = markup('credentials');
     expect(html).toContain('<h1>Credentials</h1>');
     expect(html).toContain('>Wallets</h2>');
     expect(html).toContain('>Cards</h2>');
-    expect(html.match(/class="ux-count">0<\/span>/g)).toHaveLength(2);
-    for (const text of ['Add a wallet to save its public address here.', "Cards are added through a certified card provider&#x27;s secure entry."]) expect(html).toContain(text);
+    expect(html).not.toContain('>Wallets</h2><span class="ux-count">0</span>');
+    expect(html).toContain('>Cards</h2><span class="ux-count">0</span>');
+    for (const text of ['Loading wallets…', "Cards are added through a certified card provider&#x27;s secure entry."]) expect(html).toContain(text);
+    expect(html).not.toContain('Add a wallet to save its public address here.');
     for (const label of ['Add wallet', 'Add card']) expect(html).toMatch(new RegExp(`<button type="button" class="ux-button">[\\s\\S]*?${label}</button>`));
     // Board 13: Pix and boleto do not exist yet — one row with a "Coming soon" status and no control; "Add secret" is gone (no disabled fake button).
     const pix = html.slice(html.indexOf('aria-labelledby="credentials-payments"'), html.indexOf('</section>', html.indexOf('aria-labelledby="credentials-payments"')));
