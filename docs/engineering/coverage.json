@@ -1689,6 +1689,10 @@
     "app.components.admin.finops-views": {
       "path": "apps/reference-dapp/src/components/admin/finops-views.test.tsx",
       "stage": "unit"
+    },
+    "app.domain.product-areas": {
+      "path": "apps/reference-dapp/src/domain/product-areas.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1837,6 +1841,9 @@
     "app.admin.finops-sync-infra",
     "app.admin.finops-sync-ai",
     "app.admin.finops-sync-circleci",
+    "app.components.admin.finops-views",
+    "app.domain.editor-stages",
+    "app.domain.product-areas",
     "app.server.universal-router.incident-replay",
     "app.platform.settlement-regression-matrix"
   ],
@@ -4791,7 +4798,8 @@
         "app.domain.execution-ux-reliability",
         "app.domain.canvas-execution",
         "app.server.wallet-activity",
-        "app.domain.editor-stages"
+        "app.domain.editor-stages",
+        "app.domain.product-areas"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
