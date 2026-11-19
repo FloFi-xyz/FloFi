@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 within BUILD-FLOFI-UX-EDITOR-FINOPS-001's Editor: the Simulate panel (B2) and the Execute Review (C1 valid, C2
+ * expired) of every Uniswap v3 and Orca position operation, from real runs of the real services on closed MOCKED chains (`liquidity-position-editor
+ * .test-harness.ts`). Simulate states the outcome with no authorization or permission row; Execute's "You are authorizing" lists the position
+ * Review lines, no token permission and one wallet request; an expired Review shows the configured operation — never deposit amounts or stale
+ * figures — and neither surface has an authorize control (the ONE action is the Editor footer's). EN and PT-BR.
+ */
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { createElement, type ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA } from '@defi-workflow-engine/action-registry';
+import { LocaleProvider } from '../i18n/locale';
+import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
+import type { SimulationSource } from '../domain/simulation-presentation';
+import type { Workflow } from '../domain/initial-workflow';
+import { asMainnet, ORCA_CLOCK, ORCA_OWNER_WALLET, orcaPositionRun, orcaSource, positionAuthorization, positionCatalog, positionContext as context, positionWallet,
+  UNI_OWNER, uniswapPositionRun, uniswapSource } from '../domain/liquidity-position-editor.test-harness';
+import { ReviewSummaryPanel } from './review-summary-panel';
+
+beforeAll(() => registerNetworkCatalog(positionCatalog));
+afterAll(() => resetNetworkCatalogs());
+afterEach(() => { vi.useRealTimers(); });
+
+type Bound = { workflow: Workflow; source: SimulationSource; key: string; owner: string; chain: string };
+function render(bound: Bound, stage: 'simulate' | 'execute', language: 'EN' | 'PT' = 'EN', at?: number) {
+  if (at !== undefined) { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(at); }
+  const panel: ReactElement = createElement(ReviewSummaryPanel, { stage, workflow: bound.workflow, canvasWorkflow: bound.workflow, context, source: bound.source,
+    authorization: positionAuthorization(bound.key, bound.owner, bound.chain), wallet: positionWallet(bound.owner, bound.chain), technical: createElement('p', null, 'TECHNICAL') });
+  return renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: language, children: panel }));
+}
+/** The visible text of a rendered panel (tags removed), and its definition rows as label → value. */
+const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#x27;/g, '\'').replace(/\s+/g, ' ');
+const rows = (html: string) => Object.fromEntries([...html.matchAll(/<dt>(.*?)<\/dt><dd[^>]*>(.*?)<\/dd>/g)].map(match => [text(match[1]!).trim(), text(match[2]!).trim()]));
+const NO_AUTHORIZE = /data-lifecycle-action|Authorize workflow|Authorize in wallet|Autorizar fluxo|<button[^>]*class="primary"/;
+const NO_YIELD = /\byield\b|rendimento/i;
+
+async function uniswap(operation: 'COLLECT' | 'DECREASE' | 'EXIT', partBps: number | null = null, close = false) {
+  const { record, workflow } = await uniswapPositionRun({ operation, partBps, close });
+  const live = asMainnet(record);
+  return { bound: { workflow, source: uniswapSource(live), key: `${live.id}:${live.review.commitment}`, owner: UNI_OWNER, chain: 'eip155:8453' },
+    observedAt: Date.parse(record.review.observedAt), expiresAt: Date.parse(record.review.expiresAt), record: live };
+}
+
+describe('Uniswap v3 position operations in the Editor', () => {
+  it('Simulate before a simulation: the operation as configured, what the simulation does, no deposit amounts and no authorization', async () => {
+    const { bound } = await uniswap('DECREASE', 5_000);
+    const html = render({ ...bound, source: uniswapSource(null) }, 'simulate');
+    expect(html).toContain('data-position-operation="DECREASE"');
+    expect(text(html)).toContain('Simulate workflow');
+    expect(text(html)).toContain('Remove 50% of liquidity');
+    expect(text(html)).toMatch(/Uniswap v3 position #\d+/);
+    expect(text(html)).toContain('What does the simulation do?');
+    expect(html).not.toMatch(/Pool \/ Liquidity|You are authorizing|Token permission/);
+    expect(html).not.toMatch(NO_AUTHORIZE);
+  });
+
+  it('Simulate result of a partial withdrawal: liquidity removed and remaining, principal and its enforced minimum, owed tokens and fees as lower bounds, the NFT, the fee', async () => {
+    const { bound, observedAt, record } = await uniswap('DECREASE', 5_000);
+    const html = render(bound, 'simulate', 'EN', observedAt);
+    expect(html).toContain('data-review-state="ready"');
+    expect(text(html)).toContain('Simulation result');
+    const shown = rows(html);
+    expect(shown['Remove liquidity']).toBe(`50% · #${record.review.position.tokenId}`);
+    expect(shown['Liquidity removed']).toBe(`${record.review.liquidityToRemove} of ${record.review.position.liquidity} (50%)`);
+    expect(shown['Liquidity remaining']).toBe(record.review.liquidityAfter);
+    for (const label of ['Expected principal returned', 'Minimum principal (enforced)', 'Owed tokens and fees', 'Collected, at least', 'Network fee, at most'])
+      expect(shown[label], label).toBeTruthy();
+    expect(shown['Owed tokens and fees']).toMatch(/^≥ /);
+    expect(shown['Position NFT']).toBe('Stays in your wallet');
+    // Simulate is not the authorization: no permission rows, no Review heading, no authorize control, no wallet-request row.
+    expect(html).not.toMatch(/You are authorizing|Token permission|Wallet requests|Pool \/ Liquidity/);
+    expect(html).not.toMatch(NO_AUTHORIZE);
+    expect(text(html)).not.toMatch(NO_YIELD);
+  });
+
+  it('Execute C1: "You are authorizing" the position Review lines — no token permission, one wallet request — and no authorize control in the panel', async () => {
+    const { bound, observedAt, record } = await uniswap('EXIT', null, true);
+    const html = render(bound, 'execute', 'EN', observedAt);
+    expect(html).toContain('data-review-state="ready"');
+    expect(text(html)).toContain('You are authorizing');
+    expect(text(html)).toMatch(/Review valid until/);
+    const shown = rows(html);
+    expect(shown.Operation).toBe('Remove all liquidity, collect and close the position (burns the NFT)');
+    expect(shown.Network).toBe('Base');
+    expect(shown.Position).toBe(`#${record.review.position.tokenId}`);
+    expect(shown['Position NFT']).toBe('Burned (closed)');
+    expect(shown['Position Manager']).toBe(record.review.contracts.positionManager);
+    expect(shown['Wallet requests']).toBe('1');
+    expect(shown['Token permission']).toBe('None — this operation needs no token permission');
+    expect(shown['Liquidity remaining']).toBe('0');
+    expect(text(html)).toContain('Closing burns the position NFT. This cannot be undone.');
+    expect(html).not.toMatch(NO_AUTHORIZE);
+    expect(text(html)).not.toMatch(NO_YIELD);
+  });
+
+  it('a collection: owed tokens and fees as a lower bound, liquidity unchanged, no principal minimum', async () => {
+    const { bound, observedAt, record } = await uniswap('COLLECT');
+    const shown = rows(render(bound, 'simulate', 'EN', observedAt));
+    expect(shown['Collect fees']).toBe(`#${record.review.position.tokenId}`);
+    expect(shown.Liquidity).toBe(`${record.review.position.liquidity} (unchanged)`);
+    expect(shown['Collected, at least']).toMatch(/^≥ /);
+    expect(shown['Minimum principal (enforced)']).toBeUndefined();
+    expect(shown['Liquidity removed']).toBeUndefined();
+  });
+
+  it('Execute C2 (expired): "Your review expired" first, the configured operation — never the expired figures — fee to refresh, no permission, one wallet request', async () => {
+    const { bound, expiresAt, record } = await uniswap('DECREASE', 2_500);
+    const html = render(bound, 'execute', 'EN', expiresAt + 1_000);
+    expect(html).toContain('data-review-state="expired"');
+    expect(text(html).indexOf('Your review expired')).toBeLessThan(text(html).indexOf('Operation summary'));
+    expect(text(html)).toContain('Remove 25% of liquidity');
+    expect(text(html)).toContain(`Uniswap v3 position #${record.review.position.tokenId}`);
+    const shown = rows(html);
+    expect(shown['Network fee']).toBe('Needs to be refreshed');
+    expect(shown['Token permission']).toBe('None — this operation needs no token permission');
+    expect(shown['Wallet requests']).toBe('1');
+    // Nothing of the expired Review is presented as current.
+    expect(html).not.toMatch(/You are authorizing|Expected principal returned|Minimum principal|Network fee, at most|Pool \/ Liquidity/);
+    expect(html).not.toMatch(NO_AUTHORIZE);
+  });
+
+  it('PT-BR: the same Simulate result, Review and expired Review', async () => {
+    const { bound, observedAt, expiresAt } = await uniswap('DECREASE', 5_000);
+    const simulate = text(render(bound, 'simulate', 'PT', observedAt));
+    expect(simulate).toContain('Resultado da simulação');
+    for (const label of ['Liquidez removida', 'Liquidez restante', 'Capital devolvido esperado', 'Capital mínimo (garantido na rede)', 'Tokens devidos e taxas', 'NFT da posição'])
+      expect(simulate, label).toContain(label);
+    const valid = text(render(bound, 'execute', 'PT', observedAt));
+    expect(valid).toContain('Você está autorizando');
+    expect(valid).toContain('Nenhuma — esta operação não precisa de permissão de token');
+    expect(valid).toContain('Pedidos à carteira');
+    const expired = text(render(bound, 'execute', 'PT', expiresAt + 1_000));
+    expect(expired).toContain('Sua revisão expirou');
+    expect(expired).toContain('Resumo da operação');
+    expect(expired).toContain('Remover 50% da liquidez');
+    expect(expired).toMatch(/Posição Uniswap v3 #\d+/);
+    expect(`${simulate} ${valid} ${expired}`).not.toMatch(NO_YIELD);
+  });
+});
+
+describe('one authorization surface (#219: authorization lives only on Execute, in the footer)', () => {
+  it('the engineering Uniswap position panel is read-only: it simulates, authorizes, executes and observes nothing', () => {
+    const source = readFileSync(new URL('./uniswap-liquidity-panel.tsx', import.meta.url), 'utf8');
+    const panel = source.slice(source.indexOf('function UniswapPositionPanel'));
+    expect(panel.length).toBeGreaterThan(500);
+    expect(panel).not.toMatch(/position\.(?:simulate|refresh|review|execute|observe|switchNetwork)\(|wallet\.connect\(|<button/);
+    expect(panel).toContain('data-position-panel="read-only"');
+  });
+});
+
+describe('Orca position operations in the Editor', () => {
+  async function orca(operation: 'COLLECT' | 'DECREASE' | 'EXIT', partBps: number | null = null) {
+    const { record, workflow, mint } = await orcaPositionRun(operation, partBps);
+    return { bound: { workflow, source: orcaSource(record), key: `${record.id}:${record.review.commitment}`, owner: ORCA_OWNER_WALLET.owner, chain: ORCA.chain }, mint,
+      expiresAt: Date.parse(record.review.expiresAt) };
+  }
+  it('Simulate result of a partial withdrawal: principal and minimum, liquidity removed and remaining, fees as a lower bound, the NFT kept', async () => {
+    const { bound, mint } = await orca('DECREASE', 5_000);
+    const html = render(bound, 'simulate', 'EN', ORCA_CLOCK);
+    expect(html).toContain('data-review-state="ready"');
+    const shown = rows(html);
+    expect(shown['Remove liquidity']).toBe(`50% · ${mint}`);
+    expect(shown['Liquidity removed']).toBe('20000000');
+    expect(shown['Liquidity remaining']).toBe('20000000');
+    expect(shown['Expected principal returned']).toMatch(/SOL \+ .* USDC$/);
+    expect(shown['Minimum principal (enforced)']).toMatch(/SOL \+ .* USDC$/);
+    expect(shown['Fees collected, at least']).toBeTruthy();
+    expect(shown['Position NFT']).toBe('Stays in your wallet');
+    expect(shown['Estimated network fee']).toBe('0.000005 SOL');
+    expect(html).not.toMatch(/You are authorizing|Token permission|Pool \/ Liquidity/);
+    expect(html).not.toMatch(NO_AUTHORIZE);
+  });
+  it('Execute C1 of an exit: the position closes and its rent is refunded, no token permission, one wallet request', async () => {
+    const { bound, mint } = await orca('EXIT');
+    const html = render(bound, 'execute', 'EN', ORCA_CLOCK);
+    expect(text(html)).toContain('You are authorizing');
+    const shown = rows(html);
+    expect(shown.Operation).toBe('Remove all liquidity, collect fees and close the position; the position NFT is closed and its account rent is refunded');
+    expect(shown.Network).toBe('Solana');
+    expect(shown.Position).toBe(mint);
+    expect(shown['Liquidity remaining']).toBe('0');
+    expect(shown['Position NFT']).toBe('Closed (account rent refunded)');
+    expect(shown['Account rent refunded']).toMatch(/SOL$/);
+    expect(shown['Wallet requests']).toBe('1');
+    expect(shown['Token permission']).toBe('None — this operation needs no token permission');
+    expect(html).not.toMatch(NO_AUTHORIZE);
+  });
+  it('a collection and the expired Review (C2), in EN and PT-BR', async () => {
+    const collect = await orca('COLLECT');
+    const shown = rows(render(collect.bound, 'simulate', 'EN', ORCA_CLOCK));
+    expect(shown['Collect fees']).toBe(collect.mint);
+    expect(shown['Fees collected, at least']).toMatch(/^≥ /);
+    expect(shown['Minimum principal (enforced)']).toBeUndefined();
+    const exit = await orca('EXIT');
+    const expired = render(exit.bound, 'execute', 'EN', exit.expiresAt + 1_000);
+    expect(expired).toContain('data-review-state="expired"');
+    expect(text(expired)).toContain('Close position');
+    expect(text(expired)).toMatch(/Orca position \S+…\S+/);
+    expect(rows(expired)['Token permission']).toBe('None — this operation needs no token permission');
+    expect(expired).not.toMatch(/Account rent refunded|Expected principal returned|Pool \/ Liquidity/);
+    const pt = text(render(exit.bound, 'execute', 'PT', exit.expiresAt + 1_000));
+    expect(pt).toContain('Sua revisão expirou');
+    expect(pt).toContain('Fechar posição');
+    expect(pt).toMatch(/Posição Orca \S+…\S+/);
+    expect(text(render(exit.bound, 'execute', 'PT', ORCA_CLOCK))).toContain('Fechada (reserva de saldo devolvida)');
+  });
+});

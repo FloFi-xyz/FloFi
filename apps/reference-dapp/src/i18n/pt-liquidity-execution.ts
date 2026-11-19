@@ -18,8 +18,9 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
     'Um pedido anterior à carteira não foi enviado e a revisão foi atualizada. Confira a revisão atualizada e autorize-a de novo.',
   'The Review expired before the wallet request': 'A revisão expirou antes do pedido à carteira',
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing an existing position (collect, remove, close) — Review, panels, Dashboard and refusals.
-  ' · prepared from your position. Change it from the Dashboard or in chat; Simulate shows the exact Review.':
-    ' · preparado a partir da sua posição. Altere pelo Painel ou no chat; a simulação mostra a revisão exata.',
+  // The catalog looks a message up trimmed: a key with a leading space is never found (the Canvas inspector's note of a managed position).
+  '· prepared from your position. Change it from the Dashboard or in chat; Simulate shows the exact Review.':
+    '· preparado a partir da sua posição. Altere pelo Painel ou no chat; a simulação mostra a revisão exata.',
   'Liquidity remaining': 'Liquidez restante',
   'Minimum principal (enforced)': 'Capital mínimo (garantido na rede)',
   'Minimum principal': 'Capital mínimo',
@@ -116,4 +117,14 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
   'This position no longer exists on this network, so nothing was simulated or sent. Refresh your positions.':
     'Esta posição não existe mais nesta rede, então nada foi simulado nem enviado. Atualize suas posições.',
   'Choose the position operation again from your positions. Nothing was simulated or sent.': 'Escolha de novo a operação nas suas posições. Nada foi simulado nem enviado.',
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 within the Editor (Create → Simulate → Execute): the configured operation and position, the Review rows.
+  'Remove {0} of liquidity': 'Remover {0} da liquidez',
+  'Uniswap v3 position #{0}': 'Posição Uniswap v3 #{0}',
+  'Orca position {0}': 'Posição Orca {0}',
+  'None — this operation needs no token permission': 'Nenhuma — esta operação não precisa de permissão de token',
+  'Closed (account rent refunded)': 'Fechada (reserva de saldo devolvida)',
+  'Your current workflow is still being executed or checked. Follow it in Operate; prepare this position once it has finished. Nothing was changed.':
+    'Seu fluxo atual ainda está sendo executado ou verificado. Acompanhe-o em Operar; prepare esta posição quando ele terminar. Nada foi alterado.',
+  'Simulate, authorize and follow this operation from the Editor: Simulate shows its result, Execute its Review and your one wallet request.':
+    'Simule, autorize e acompanhe esta operação no Editor: Simular mostra o resultado, Executar a revisão e o seu único pedido à carteira.',
 };

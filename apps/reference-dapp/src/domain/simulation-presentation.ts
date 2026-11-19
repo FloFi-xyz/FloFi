@@ -22,6 +22,7 @@ import type { useLiquidity } from '../state/liquidity-store';
 import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
+import { liquidityPositionActionLabel, liquidityPositionOperationPhrase, percentOfBps } from './liquidity-position-summary';
 import { REVIEW_EXPIRED_REFRESH } from './execution-result';
 import { boundRecipientOwned } from './destination-wallet';
 import { quoteDecimals } from './public-testnet-swap';
@@ -272,22 +273,8 @@ export function simulationError(error: string): string {
 /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap position-management run (collect, withdrawal, exit, close), never a mint. */
 export const isUniswapPositionRecord = (record: unknown): record is UniswapPositionRecord =>
   Boolean(record && typeof record === 'object' && (record as { format?: unknown }).format === 'flofi.uniswap-position-run.v1');
-/**
- * The position operation in plain words (Review, Canvas, chat and panels). Owed tokens are never called yield alone: a Uniswap position's owed
- * tokens can include principal withdrawn earlier and not collected.
- */
-export function liquidityPositionOperationPhrase(protocol: 'UNISWAP_V3' | 'ORCA', operation: string, close: boolean): string {
-  if (operation === 'COLLECT') return protocol === 'ORCA' ? 'Collect fees (liquidity unchanged)' : 'Collect owed tokens and fees (liquidity unchanged)';
-  if (operation === 'DECREASE' || operation === 'DECREASE_PARTIAL') return protocol === 'ORCA' ? 'Remove part of the position\'s liquidity and collect fees'
-    : 'Remove part of the position\'s liquidity and collect';
-  if (protocol === 'ORCA') return 'Remove all liquidity, collect fees and close the position; the position NFT is closed and its account rent is refunded';
-  return close ? 'Remove all liquidity, collect and close the position (burns the NFT)' : 'Remove all liquidity and collect (the position NFT stays in your wallet)';
-}
-/** The short action name of a position operation (the Review's step name). */
-export function liquidityPositionActionLabel(operation: string, close: boolean): string {
-  return operation === 'COLLECT' ? 'Collect fees' : operation === 'EXIT' && close ? 'Close position' : operation === 'EXIT' ? 'Remove all liquidity' : 'Remove liquidity';
-}
-const percentOfBps = (value: number) => `${(value / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the position operation's words live with the Editor's position summary (one source for every stage). */
+export { liquidityPositionActionLabel, liquidityPositionOperationPhrase } from './liquidity-position-summary';
 const rangeStateLabel: Readonly<Record<string, string>> = { IN_RANGE: 'In range', BELOW_RANGE: 'Out of range (below)', ABOVE_RANGE: 'Out of range (above)' };
 /**
  * The Review of one Uniswap position operation: protocol, network, position, pool and fee tier, range and state, the operation in plain words,
@@ -655,10 +642,12 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         s.input = share ? `${share} · ${mint}` : mint; s.networks = [q.cluster === 'devnet' ? 'Solana Devnet' : 'Solana'];
         const min = [simulationAmount(q.operationPlan.tokenA, q.token0.decimals, sym0), simulationAmount(q.operationPlan.tokenB, q.token1.decimals, sym1)];
         if (!collecting && min.every(Boolean)) s.minimum = min.join(' + ');
+        // The Editor's Simulate result and Execute Review state the network and what happens to the position NFT (an Orca exit always closes it).
         s.details.push({ label: 'Operation', value: liquidityPositionOperationPhrase('ORCA', operation, operation === 'EXIT') }, { label: 'Protocol', value: 'Orca Whirlpools' },
-          { label: 'Position', value: mint }, { label: 'Pool', value: `${sym0}/${sym1} · ${q.pool.feeRate / 10_000}%` },
+          { label: 'Network', value: s.networks[0]! }, { label: 'Position', value: mint }, { label: 'Pool', value: `${sym0}/${sym1} · ${q.pool.feeRate / 10_000}%` },
           ...collecting ? [] : [{ label: 'Liquidity removed', value: `${q.expected.liquidity}` }, { label: 'Liquidity remaining', value: q.expected.positionLiquidityAfter }],
           { label: 'Fees collected, at least', value: `${simulationAmount(sim.collectedFeesA, q.token0.decimals, sym0) ?? '—'} + ${simulationAmount(sim.collectedFeesB, q.token1.decimals, sym1) ?? '—'}` },
+          { label: 'Position NFT', value: operation === 'EXIT' ? 'Closed (account rent refunded)' : 'Stays in your wallet' },
           { label: 'Wallet requests', value: '1' });
         warn('attention', liquidityPositionOperationPhrase('ORCA', operation, operation === 'EXIT'));
         warn('info', 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.');

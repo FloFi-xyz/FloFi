@@ -659,11 +659,11 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const chainLabel = card.summary.chain.split(' → ').map(side => side.replace(/ \(\d+\)$/, '').trim()).join(' → ');
   const execution = card.execution && card.execution.visual !== 'waiting' ? card.execution : undefined;
   const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone} data-card-status={status?.kind} data-network-pending={networkPending || undefined}
-    data-execution={card.execution?.visual}>
+    data-execution={card.execution?.visual} data-position-operation={card.summary.position?.management.operation}>
       <Handle id="input" type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={!card.inspection && Boolean(card.connectable)}/>
       {execution && <CanvasExecutionBadge execution={execution} vertical={card.vertical}/>}
       <div className="composer-card-head">
-      <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
+      <strong className="composer-action-title"><span className="composer-step-number">{tr(card.step)}</span><span className="composer-step-dot">. </span><span className="composer-action-name">{tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? (card.summary.position ? 'pool' : 'action')}/></strong>
       {poolCard ? null : <span className="composer-metadata">
         <span className="composer-provider" title={estimate?.provider ? tr('Estimate from {0}', estimate.provider) : undefined}>
           {tr(estimate?.provider || card.summary.provider.replace(/Cross-chain Router/g, 'Router') || 'Provider not specified')}</span>
