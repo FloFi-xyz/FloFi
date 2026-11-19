@@ -7,7 +7,8 @@ import { LIGHTHOUSE_PROGRAM } from './solana-wallet-change.js';
 import { evaluateMockedLighthouse } from './lighthouse-mock.js';
 import { decodeOrcaSwapV2, orcaOracleAddress, orcaTickArrayAddress, orcaTickArrayStarts } from './orca-whirlpool.js';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as devnetLiquidity, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
-import { decodeOrcaModifyLiquidity, decodeOrcaOpenPosition, orcaLiquidityAmounts, orcaSqrtPriceAtTick, orcaTickArrayStart, orcaLiquidityTickArray } from './orca-liquidity.js';
+import { decodeOrcaModifyLiquidity, decodeOrcaOpenPosition, orcaLiquidityAmounts, orcaPositionAddress, orcaPositionTokenAccount, orcaSqrtPriceAtTick, orcaTickArrayStart,
+  orcaLiquidityTickArray } from './orca-liquidity.js';
 
 /**
  * MOCKED deterministic Solana Devnet + Orca Whirlpool loopback for tests and the offline browser harness.
@@ -45,6 +46,14 @@ export type MockedOrcaOptions = { actualOutput?: (quoted: bigint) => bigint; fai
 type Position = { mint: string; liquidity: bigint; lower: number; upper: number; feeOwedA: bigint; feeOwedB: bigint; rewardOwed?: readonly bigint[]; whirlpool?: string };
 /** `delegate`: an approved delegate on a Token-2022 position token account (encoded as the account's COption delegate). */
 type Token = { mint: string; owner: string; amount: bigint; delegate?: string };
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position opened outside FloFi, written into the MOCKED state as the program leaves it: the position account
+ * on the served pool, its Token-2022 mint, and the owner's Token-2022 associated account holding exactly 1 (with `delegate`, an approved delegate).
+ * Fees and rewards already credited to the position (fee_owed, reward_infos[i].amount_owed) are recorded as given; fees still to be credited at the
+ * next checkpoint follow `accrueFees`.
+ */
+export type MockedOrcaSeededPosition = { owner: string; liquidity: bigint; tickLower: number; tickUpper: number; feeOwedA?: bigint; feeOwedB?: bigint;
+  rewardOwed?: readonly bigint[]; delegate?: string; mint?: string };
 type Snapshot = { lamports: Map<string, bigint>; tokens: Map<string, Token>; lamportsOf: Map<string, bigint>; positions: Map<string, Position>; tokens2022: Map<string, Token>;
   mints: Set<string>; accrued: Set<string> };
 const POSITION_RENT = 2_885_440n, MINT_RENT = 1_676_400n, POSITION_TOKEN_RENT = 1_513_840n;
@@ -92,6 +101,23 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
   function fund(owner: string, lamports: bigint, devUsdc = 0n) {
     state.lamports.set(owner, lamports);
     if (devUsdc > 0n) { state.tokens.set(ata(owner, POOL.tokenMintB), { mint: POOL.tokenMintB, owner, amount: devUsdc }); state.lamportsOf.set(ata(owner, POOL.tokenMintB), RENT); }
+  }
+  let seeded = 0;
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position opened outside FloFi (`MockedOrcaSeededPosition`); returns its position mint. */
+  function seedPosition(input: MockedOrcaSeededPosition): string {
+    const { owner, liquidity, tickLower, tickUpper } = input, feeOwedA = input.feeOwedA ?? 0n, feeOwedB = input.feeOwedB ?? 0n;
+    const u64 = (n: bigint) => n >= 0n && n < 1n << 64n;
+    publicKeyBytes(owner); if (input.delegate) publicKeyBytes(input.delegate);
+    if (!Number.isSafeInteger(tickLower) || !Number.isSafeInteger(tickUpper) || tickLower % POOL.tickSpacing || tickUpper % POOL.tickSpacing || tickLower >= tickUpper ||
+        liquidity < 0n || liquidity >= 1n << 128n || !u64(feeOwedA) || !u64(feeOwedB) || (input.rewardOwed ?? []).length > 3 || !(input.rewardOwed ?? []).every(u64))
+      throw new Error('MOCK_POSITION_INVALID');
+    const mint = input.mint ?? base58Encode(sha256(new TextEncoder().encode(`mocked-orca-position:${lp.genesisHash}:${owner}:${++seeded}`)));
+    const position = orcaPositionAddress(mint), tokenAccount = orcaPositionTokenAccount(owner, mint);
+    if (state.positions.has(position) || state.mints.has(mint)) throw new Error('MOCK_POSITION_EXISTS');
+    state.positions.set(position, { mint, liquidity, lower: tickLower, upper: tickUpper, feeOwedA, feeOwedB, ...input.rewardOwed ? { rewardOwed: [...input.rewardOwed] } : {} });
+    state.lamportsOf.set(position, POSITION_RENT); state.mints.add(mint); state.lamportsOf.set(mint, MINT_RENT);
+    state.tokens2022.set(tokenAccount, { mint, owner, amount: 1n, ...input.delegate ? { delegate: input.delegate } : {} }); state.lamportsOf.set(tokenAccount, POSITION_TOKEN_RENT);
+    return mint;
   }
   const snapshot = (): Snapshot => ({ lamports: new Map(state.lamports), tokens: new Map([...state.tokens].map(([k, v]) => [k, { ...v }])), lamportsOf: new Map(state.lamportsOf),
     positions: new Map([...state.positions].map(([k, v]) => [k, { ...v }])), tokens2022: new Map([...state.tokens2022].map(([k, v]) => [k, { ...v }])), mints: new Set(state.mints),
@@ -293,6 +319,16 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
     switch (method) {
       case 'getGenesisHash': return options.cluster ?? lp.genesisHash;
       case 'getMultipleAccounts': return value((params[0] as string[]).map(k => accountValue(snapshot(), k)));
+      case 'getTokenAccountsByOwner': {
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owner's token accounts of one token program (SPL Token or Token-2022), encoded exactly as
+        // getMultipleAccounts encodes them, at the current slot. Only the `programId` filter and base64 encoding are served.
+        const [owner, filter, config] = params as [unknown, { programId?: unknown; mint?: unknown } | null | undefined, { encoding?: unknown } | null | undefined];
+        const program = filter && typeof filter === 'object' ? filter.programId : undefined;
+        if (typeof owner !== 'string' || (program !== P.token && program !== lp.programs.token2022) || filter?.mint !== undefined || (config?.encoding ?? 'base64') !== 'base64')
+          throw Object.assign(new Error('Invalid params'), { rpc: -32602 });
+        const s = snapshot(), held = program === P.token ? s.tokens : s.tokens2022;
+        return value([...held].filter(([, token]) => token.owner === owner).map(([pubkey]) => ({ pubkey, account: accountValue(s, pubkey) })));
+      }
       case 'getLatestBlockhash': { const hash = blockhash(state.blockHeight); issued.set(hash, state.blockHeight + 150); return value({ blockhash: hash, lastValidBlockHeight: state.blockHeight + 150 }); }
       case 'getBlockHeight': return state.blockHeight;
       case 'simulateTransaction': {
@@ -322,7 +358,7 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
       default: throw new Error('SOLANA_RPC_METHOD_DENIED');
     }
   }
-  return { state, rpc, fund, ata, quoteFor, advance: (blocks: number) => { state.blockHeight += blocks; state.slot += blocks; },
+  return { state, rpc, fund, ata, quoteFor, seedPosition, advance: (blocks: number) => { state.blockHeight += blocks; state.slot += blocks; },
     /** MOCKED pool trading since every position's last fee checkpoint: each position with liquidity accrues `accrueFees` once more at its next checkpoint. */
     trade: () => { state.accrued.clear(); } };
 }
