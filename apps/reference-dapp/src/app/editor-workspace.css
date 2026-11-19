@@ -10,11 +10,10 @@
 .product-area:hover{color:var(--ink);background:var(--surface-raised)}
 .product-area[aria-current="page"]{background:var(--blue-soft);color:var(--accent);font-weight:600}
 .product-area:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
-@media(pointer:coarse){.product-area{min-height:44px}}
 /* The top bar keeps its three columns; the areas sit with the logo on the left, the wallet and Settings on the right. */
 .top-bar{grid-template-columns:minmax(0,1fr) auto}
 @media(max-width:800px){
-  /* Phones: ☰, logo and wallet on the first row; the three areas on their own row, full width, never a horizontal page scroll. */
+  /* Phones: ☰ and logo on the first row, the three areas on their own row (full width), then the wallet and Settings; never a horizontal page scroll. */
   .top-bar{grid-template-columns:auto minmax(0,1fr) auto}
   .top-bar>.brand{display:contents}
   .top-bar>.brand>.navigation-control{grid-column:1;grid-row:1}
@@ -24,6 +23,9 @@
   .top-bar>.top-meta{grid-column:1/-1;grid-row:3;justify-self:start}
   .top-bar>.shell-network-row{grid-row:4}
 }
+@media(pointer:coarse){.product-area{min-height:44px}}
+/* Between the phone layout and a wide desktop the areas keep their size; the brand column never paints over the wallet. */
+@media(min-width:801px) and (max-width:1100px){.product-areas{margin-left:4px;padding-left:10px}.product-area{padding:0 10px}}
 
 /* ── The Editor header (A2/B2/C2): name, step count and status, then the discreet stage indicator, then the Canvas actions. ── */
 .canvas-head-stages{display:flex;align-items:center;flex:0 1 auto;min-width:0;margin:0 4px 0 8px;padding-left:16px;border-left:1px solid var(--line)}
@@ -46,6 +48,8 @@
 .canvas-head-stages .editor-stepper li[data-step-look="closed"] button{color:var(--muted);opacity:.75;cursor:not-allowed}
 .canvas-head-stages .editor-stepper li[data-step-look="closed"] .editor-stepper-number{border-style:dashed}
 .canvas-head-stages .editor-stepper button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.canvas-head-stages .editor-stepper{position:relative}
+.editor-stepper-notice{position:absolute;z-index:30;top:calc(100% + 6px);right:0;max-width:280px;margin:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:13px;line-height:1.4;box-shadow:0 8px 20px rgba(20,35,58,.12)}
 @media(pointer:coarse){.canvas-head-stages .editor-stepper button{min-height:44px}}
 @media(max-width:1100px){.canvas-head-stages{order:3;flex-basis:100%;margin:2px 0 0;padding:6px 0 0;border-left:0;border-top:1px solid var(--line)}}
 @media(max-width:800px){
@@ -87,7 +91,8 @@
 .simulation-explainer strong{display:block;margin-bottom:2px;font-size:13.5px}
 .simulation-explainer p{margin:0;color:var(--muted)}
 .simulation-panel-action .canvas-lifecycle-control{display:flex;flex-direction:column;align-items:stretch;gap:8px}
-.simulation-panel-action button.primary{width:100%;min-height:46px;border-radius:12px;font-size:15px}
+.simulation-panel-action button.primary{width:100%;min-height:46px;border:1px solid var(--primary);border-radius:12px;background:var(--primary);color:var(--on-accent,#fff);font-size:15px;font-weight:600}
+.simulation-panel-action button.primary:hover:not(:disabled){filter:brightness(1.06)}
 .simulation-panel-action [role="status"]{margin:0;color:var(--muted);font-size:13px}
 .simulation-panel-action button.primary:disabled{background:var(--line);border-color:transparent;color:var(--muted);opacity:1;box-shadow:none;cursor:not-allowed}
 .simulation-context-panel .review-panel-sequence{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
@@ -106,6 +111,8 @@
 .review-refresh-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;background:var(--warning-surface);color:var(--warning-text);font-size:12.5px;font-weight:500;white-space:nowrap}
 
 /* ── The contextual footer (all stages): count, the stage's status, one quiet note, ONE primary action. ── */
+/* C2: an expired Review is the footer's one red status (other blockers keep the amber dot). */
+.summary-status-dot[data-tone="expired"]{background:var(--red)}
 .summary-stage-note{margin:0 0 0 auto;color:var(--muted);font-size:13px;line-height:1.4;text-align:right;max-width:420px}
 .summary-bar .editor-review-operation span[aria-hidden="true"]{margin-left:2px}
 @media(max-width:800px){.summary-stage-note{order:3;flex:1 1 100%;margin:0;text-align:left}}

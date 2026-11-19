@@ -845,9 +845,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     sequence: sequenceContinuing || sequenceFinishedIdle || Boolean(sequenceRestore), recovery: recoveryPath, cow: localCowIntent,
     // A recovery projection always exists (a local runtime even names its network as a context issue); only a recovery action — set for a started
     // execution — is evidence of a record to recover.
-    live: Boolean(liveExecution), recoveryRecord: Boolean(executionProgress.recovery?.action) };
+    live: Boolean(liveExecution), recoveryRecord: Boolean(executionProgress.recovery?.action),
+    // A record that keeps its own words (recovery only, or a status that needs attention) is evidence too, whatever its runtime.
+    attention: Boolean(sourceState.recoveryOnly) || recordNeedsAttention(sourceState.record) };
   const stageReasons = chatFirst ? editorStageReasons({ actionable, reviewed: stageSignals.reviewed || stageSignals.run, lifecycleBeyondSimulation: stageSignals.beyond,
-    executionEvidence: stageSignals.started || stageSignals.sequence || stageSignals.recovery || stageSignals.cow || stageSignals.live || stageSignals.recoveryRecord }) : undefined;
+    executionEvidence: stageSignals.started || stageSignals.sequence || stageSignals.recovery || stageSignals.cow || stageSignals.live || stageSignals.recoveryRecord
+      || stageSignals.attention }) : undefined;
   const editorStepper = <EditorStepper tab={tab} setTab={setTab} disabled={Boolean(authoringIncomplete || approvalGate || networkQuestion && !actionable)} incomplete={Boolean(authoringIncomplete)}
     closedReason={networkQuestion && !actionable ? 'Choose the network in the chat first' : null} stageReasons={stageReasons}/>;
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the stage indicator lives in the Editor's own header (`editor-chrome.tsx`), never in the global top bar.
@@ -884,10 +887,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     expiresAt: runReviewed?.validUntil && Number.isFinite(Date.parse(runReviewed.validUntil)) ? Date.parse(runReviewed.validUntil) : null, executionStarted: workflowStarted,
     subject: 'review' as const };
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): on Simulate the whole-workflow path's footer states its simulation (the same Review), never authorization.
-  const groupedSimulationFooter = { ...reviewFooter, label: runReviewed?.refusal?.evidence ? 'Not enough ETH for the network fee' : 'Simulation blocked', subject: 'simulation' as const };
-  // C1/C2: on Execute the same lifecycle actions read as the Review the owner authorizes ("Authorize workflow") or refreshes ("Refresh review").
-  const executeLabel = (action: CanvasAction) => action.kind === 'approve' || action.kind === 'execute' ? 'Authorize workflow'
-    : action.kind === 'simulate' && action.label === 'Simulate again' ? 'Refresh review' : action.label;
+  const groupedSimulationFooter = { ...reviewFooter, status: runReviewed?.refusal || !runReviewed && workflowRunHere.error ? 'blocked' as const : 'ready' as const,
+    label: runReviewed?.refusal?.evidence ? 'Not enough ETH for the network fee' : 'Simulation blocked', subject: 'simulation' as const };
+  // C1/C2: on Execute the same lifecycle actions read as the Review the owner authorizes or refreshes. "Authorize workflow" only where that
+  // Review covers the whole workflow (one action, nothing running); a step of a confirm-each-step sequence or a request of a run in progress keeps
+  // "Authorize in wallet" (the whole workflow is never claimed in those modes). "Simulate again" before anything runs reads "Refresh review".
+  const wholeWorkflowReview = !sequence && !liveExecution;
+  const executeLabel = (action: CanvasAction) => (action.kind === 'approve' || action.kind === 'execute') ? wholeWorkflowReview ? 'Authorize workflow' : action.label
+    : action.kind === 'simulate' && action.label === 'Simulate again' && !liveExecution ? 'Refresh review' : action.label;
   const reviewFooterAction = groupedPrimary ? <EditorWorkflowRunPrimaryAction state={workflowRunHere}/> : simulateActionFor(null, { stay: true, labelFor: executeLabel });
   // B2: Simulate's ONE primary action is inside its panel until the simulation is valid; then the footer's "Review operation" opens Execute (no
   // authorization from Simulate). A wallet, network or restore control the lifecycle needs first stays in the panel too.
@@ -912,17 +919,28 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       simulationDisabled={simulationDisabled || !actionable || sequenceDone} simulationReason={sequenceDoneReason ?? simulationReason} simulate={() => simulateAgain()} onExecute={() => setTab('Execute')} labelFor={executeLabel}/>
     : simulateActionFor(null, { stay: Boolean(authorization.key) || canvasAction.label === 'Simulate again', labelFor: executeLabel });
   // C1/C2 (step-by-step and single-action path): the Review the owner authorizes, before any execution exists, at the top of the status panel.
-  const executeReview = chatFirst && !groupedPrimary && !reviewBlock && authorization.key && !liveExecution && !executeContinuationShown
+  // It is shown whenever a Review of this step can be accepted (also while a run continues, e.g. a Review refreshed in place, and beside the
+  // whole-workflow block of a step-by-step workflow), so the Review accepted is always the one on screen.
+  const executeReview = chatFirst && !groupedPrimary && authorization.key && !executeContinuationShown
+    && (!liveExecution || canvasAction.kind === 'approve' || canvasAction.kind === 'execute')
     ? <ReviewSummaryPanel stage="execute" canvasWorkflow={state.workflow} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet}
       invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason} sequenceNote={sequenceNote}
-      technical={<SimulationSummary workflow={runtimeWorkflow} context={context} source={simulationSource} invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason}/>}/> : null;
+      technical={lifecycleControls.view.authorizationLabel === 'Expired' ? undefined
+        : <SimulationSummary workflow={runtimeWorkflow} context={context} source={simulationSource} invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason}/>}/> : null;
   // The Execute footer's status: the live execution's own state (never a timer), else the Review's validity, else the simulation's status.
   const liveTone = (state: string): FooterStatus['tone'] => state === 'complete' ? 'ready' : state === 'active' ? 'neutral' : state === 'uncertain' || state === 'attention' ? 'attention' : 'blocked';
   const executeStatus: FooterStatus | null = liveExecution ? { tone: liveTone(liveExecution.state), text: liveExecution.label }
     : groupedPrimary && !reviewBlock && canvasRunStatus ? { tone: /attention/i.test(canvasRunStatus) ? 'attention' : 'neutral', text: canvasRunStatus } : null;
   const executeSimulation = groupedPrimary ? reviewBlock ? reviewFooter : undefined : liveExecution ? undefined : authorization.key ? { ...footerSimulation, subject: 'review' as const } : footerSimulation;
+  // Create never hosts an authorization (no authorization language there): once this step's simulation is valid, or a run is in progress, its one
+  // action opens Execute instead; Simulate, its processing state and every prerequisite control stay as before.
+  const createNavigation = chatFirst && !groupedPrimary && !simulationSource.state.busy && !sequenceRestore && !walletIssue && !networkAction
+    && ['approve', 'execute', 'continue', 'recover'].includes(canvasAction.kind);
+  const createAction = createNavigation ? <button type="button" className="primary editor-review-operation" data-lifecycle-action="review-operation" onClick={() => setTab('Execute')}>
+    {tr(canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Review operation' : 'Open workflow progress')}<span aria-hidden="true">{' →'}</span></button>
+    : simulateActionFor(null);
   const footerAction = tab === 'Execute' ? chatFirst ? executeFooterAction : reviewBlock ? reviewFooterAction : undefined
-    : tab === 'Build' ? simulateActionFor(null) : tab === 'Simulate' && chatFirst ? reviewOperation : undefined;
+    : tab === 'Build' ? createAction : tab === 'Simulate' && chatFirst ? reviewOperation : undefined;
   const footerStatusSource = !chatFirst ? undefined : tab === 'Execute' ? executeSimulation : tab === 'Simulate' && groupedPrimary ? groupedSimulationFooter : footerSimulation;
   return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
@@ -957,6 +975,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {(chatFirst || tab !== 'Execute' || reviewBlock) && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction primaryAction={footerAction ?? undefined} overview={overview} showStep={showStep}
       simulationBlocked={Boolean(walletIssue || simulationDisabled || !actionable || lifecycleState.invalidWorkflow)} simulation={footerStatusSource} networkQuestion={networkQuestion}
       statusOverride={tab === 'Execute' && chatFirst ? executeStatus : null}
-      stageNote={tab === 'Simulate' && chatFirst && !simulationReady && !executionUnderway ? 'After simulating, you can review the details and then execute.' : null}/>}
+      stageNote={tab === 'Simulate' && chatFirst && !simulationReady && !executionUnderway && (groupedPrimary ? !runReviewed && !workflowRunHere.error
+        : footerSimulation.status !== 'blocked' && footerSimulation.expiresAt === null) ? 'After simulating, you can review the details and then execute.' : null}/>}
   </div></EditorChromeProvider></EstimateOwnersContext.Provider>;
 }

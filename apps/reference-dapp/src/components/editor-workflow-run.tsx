@@ -879,6 +879,8 @@ export const EXECUTION_REFUSAL: Readonly<Record<string, string>> = {
   // Final review (P3): found at Authorize, before the first group was stored: the run was ended at once (nothing to end); review again.
   EDITOR_MECHANISM_CHANGED_NOT_STARTED,
 };
+/** The words the Review panel uses for a refusal or an action's error (BUILD-FLOFI-UX-EDITOR-FINOPS-001: also said by the Simulate panel). */
+export const workflowRunErrorText = (error: string) => EXECUTION_REFUSAL[error] ?? 'FloFi could not complete this request ({0}). Nothing was sent.';
 /** A Review refusal that names the step it is about (`refusal.step`, shown as {0}): only then is a step number written. */
 export const STEP_REFUSAL: Readonly<Record<string, string>> = {
   SIMULATION_REVERTED: 'FloFi simulated the whole batch and step {0} would fail on chain now. Check its amount, balance and allowance; nothing was sent.',
@@ -1226,7 +1228,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     onClick={() => void state.startReview()}>{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : 'Review again')}</button>;
   return <section className={`editor-workflow-run panel${fresh ? ' editor-review-block' : ''}`} aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}
     data-review-state={fresh ? feeBlocked ? 'blocked' : busy ? 'busy' : review ? alert ? 'attention' : 'ready' : 'pending' : undefined}>
-    {fresh && !feeBlocked && stage === 'execute' && expired && review && <>
+    {fresh && !feeBlocked && stage === 'execute' && expired && review && state.grouped && <>
       {/* C2: the Review expired. Its own surface first, then the operations as configured (never the expired figures), the fee and permissions
           marked as needing a refreshed Review; the footer's one action refreshes it ("Refresh review"), and nothing can be authorized meanwhile. */}
       <ExpiredReviewAlert/>
@@ -1237,7 +1239,6 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         <div><dt>{tr('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review"/></dd></div>
         {block && <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>}
       </dl>
-      <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
     </>}
     {fresh && !feeBlocked && stage === 'simulate' && review && block && !expired && <>
       {/* B2: the simulated result of the whole workflow — what each step spends and is expected to deliver, the minimum and the network fee. */}
@@ -1250,7 +1251,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       {nativeLater}
       <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
     </>}
-    {fresh && !feeBlocked && stage === 'execute' && !expired && <>
+    {fresh && !feeBlocked && stage === 'execute' && !(expired && review && state.grouped) && <>
       {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
       {block && review?.validUntil && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>}
       <p className="eyebrow">{tr('REVIEW')}</p>

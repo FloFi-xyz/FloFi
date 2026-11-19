@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { useState } from 'react';
 import { useLocale } from '../i18n/locale';
 import type { Tab } from './top-bar';
 
@@ -35,6 +36,8 @@ export function EditorStepper({ tab, setTab, disabled, incomplete, closedReason,
   const { t: tr } = useLocale();
   const current = STEPS.findIndex(step => step.tab === tab);
   const reason = closedReason ?? (incomplete ? 'Configure the action amount on the Canvas first' : null);
+  // A closed step's reason is also shown when it is pressed (touch and keyboard users never see a hover tooltip); it is a polite status.
+  const [notice, setNotice] = useState<string | null>(null);
   return <nav className="editor-stepper" aria-label={tr('Editor steps')}>
     <ol>{STEPS.map((step, index) => {
       const own = step.tab === 'Build' ? null : stageReasons?.[step.tab] ?? null;
@@ -47,12 +50,13 @@ export function EditorStepper({ tab, setTab, disabled, incomplete, closedReason,
         {index > 0 && <span className="editor-stepper-line" aria-hidden="true"/>}
         <button type="button" aria-current={index === current ? 'step' : undefined} aria-disabled={closed || undefined}
           title={closed && stepReason ? tr(stepReason) : look === 'reachable' ? tr(index < current ? 'Back to {0}' : 'Open {0}', tr(step.label)) : undefined}
-          onClick={() => { if (!closed && index !== current) setTab(step.tab); }}>
+          onClick={() => { if (closed) { setNotice(stepReason); return; } setNotice(null); if (index !== current) setTab(step.tab); }}>
           <span className="editor-stepper-number" aria-hidden="true">{index + 1}</span>
           <span className="editor-stepper-label">{tr(step.label)}</span>
           {closed && stepReason && <span className="sr-only">{`: ${tr(stepReason)}`}</span>}
         </button>
       </li>;
     })}</ol>
+    {notice && <p className="editor-stepper-notice" role="status">{tr(notice)}</p>}
   </nav>;
 }

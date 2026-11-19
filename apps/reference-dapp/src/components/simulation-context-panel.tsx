@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { useLocale } from '../i18n/locale';
 import type { Workflow } from '../domain/initial-workflow';
-import { EditorWorkflowRunPanel, type EditorWorkflowRunState } from './editor-workflow-run';
+import { EditorWorkflowRunPanel, workflowRunErrorText, type EditorWorkflowRunState } from './editor-workflow-run';
 import { OperationSummary } from './operation-summary';
 import { SimulationExplainer, SimulationPanelHead } from './review-summary-panel';
 
@@ -35,6 +35,8 @@ export function GroupedSimulationPanel({ state, canvasWorkflow, context, action 
     {view === 'ready' || view === 'blocked' ? <EditorWorkflowRunPanel state={state} stage="simulate" actionsOutside/>
       : <OperationSummary workflow={canvasWorkflow} context={context} heading={null} variant="icons"/>}
     {view === 'busy' && <p className="review-panel-status" role="status">{t('Simulating workflow…')}</p>}
+    {/* A request that failed before any result (wallet not connected, rate limit, RPC) is said here, never a silent return to "Simulate workflow". */}
+    {(view === 'pending' || view === 'expired') && state.error && <p className="review-block-alert" role="alert">{t(workflowRunErrorText(state.error), state.error)}</p>}
     {view === 'pending' && <SimulationExplainer/>}
     {view !== 'ready' && view !== 'started' && <div className="simulation-panel-action">{action}</div>}
   </section>;
