@@ -5,7 +5,7 @@ import { useLocale } from '../i18n/locale';
 
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { simulateFooterStatus } from '../domain/approved-ux';
+import { simulateFooterStatus, type FooterStatus } from '../domain/approved-ux';
 import type { EditorOverview } from '../domain/editor-overview';
 import { useModeA } from '../state/mode-a-store';
 import { useModeB } from '../state/mode-b-store';
@@ -34,7 +34,11 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 /** P0 approved UX (board 06/07): what the Simulate footer states, from the shell's existing projections (see `simulateFooterStatus`). */
 export type FooterSimulation = { readonly busy: boolean; readonly status: 'ready' | 'attention' | 'blocked'; readonly label: string; readonly expiresAt: number | null;
   readonly executionStarted: boolean; readonly networkQuestion?: boolean; readonly subject?: 'simulation' | 'review' };
-export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable, focusReview, canvasOwnsAction, primaryAction, overview, showStep, simulationBlocked = false, simulation, networkQuestion = false, statusOverride = null, stageNote = null }: { canvasOwnsAction?: boolean; tab: Tab; setTab: (value: Tab) => void; simulationActionHost?: HTMLDivElement | null; reviewAvailable?: boolean; focusReview?: () => void;
+  /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Execute): the live execution's own status from its records (never a timer), in place of the Review's. */
+  statusOverride?: FooterStatus | null;
+  /** B2: one quiet line on Simulate before the simulation is valid ("After simulating, you can review the details and then execute."). */
+  stageNote?: string | null;
   primaryAction?: ReactNode; overview?: EditorOverview; showStep?: (nodeId: string) => void;
   /** Simulate is closed for a reason its control states; the footer then claims nothing about warnings. */
   simulationBlocked?: boolean;
@@ -49,7 +53,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [counting]);
-  const status = tab !== 'Build' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null;
+  const status = statusOverride ?? (tab !== 'Build' && simulation ? simulateFooterStatus({ ...simulation, now: Math.max(now, Date.now()) }) : null);
   const ticking = status?.text === 'Simulation valid for {0}' || status?.text === 'Review valid for {0}';
   const spokenNow = !status ? '' : `${tr(status.text, ...(status.parameters ?? []))}${status.detail ? ` · ${tr(status.detail)}` : ''}`;
   // What the live region says changes only with the meaning (valid, under 15 s, expired, a blocker); it then includes the time left at that moment.
@@ -128,7 +132,8 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
     {/* The m:ss countdown ticks visibly only; the live region speaks when the meaning changes (valid, under 15 s, expired, a blocker). */}
     {status && <p className="summary-status-line" data-tone={status.tone}><span className="summary-status-dot" data-tone={status.tone} aria-hidden="true"/>
       <span className="summary-status-text" aria-hidden={ticking || undefined}>{tr(status.text, ...(status.parameters ?? []))}</span>{status.detail && <span className="summary-status-detail">{tr(status.detail)}</span>}</p>}
-    {tab !== 'Build' && simulation && <span className="sr-only" role="status">{announcement}</span>}
+    {tab !== 'Build' && (simulation || statusOverride) && <span className="sr-only" role="status">{announcement}</span>}
+    {stageNote && <p className="summary-stage-note">{tr(stageNote)}</p>}
     {/* Relocate the existing action without duplicating its review gates or handler. */}
     {tr(tab === 'Simulate' && simulationActionHost ? createPortal(action, simulationActionHost) : action)}
     {lifecycle && <div className="canvas-primary-action summary-primary-action">{primaryAction}</div>}

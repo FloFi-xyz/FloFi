@@ -29,7 +29,7 @@ export function countdown(ms: number): string {
 /** Board 16 §6: the validity countdown turns to attention under 15 seconds. */
 export const COUNTDOWN_ATTENTION_MS = 15_000;
 
-export type FooterStatus = { readonly tone: 'ready' | 'attention' | 'blocked' | 'neutral'; readonly text: string; readonly parameters?: readonly string[];
+export type FooterStatus = { readonly tone: 'ready' | 'attention' | 'blocked' | 'expired' | 'neutral'; readonly text: string; readonly parameters?: readonly string[];
   readonly detail?: string | null };
 /**
  * The footer's left status on Simulate (board 06/07): a valid simulation counts down its own validity; a blocker names itself and, only when no
@@ -46,7 +46,9 @@ export function simulateFooterStatus(input: { readonly busy: boolean; readonly s
   if (input.expiresAt !== null) {
     const left = input.expiresAt - input.now;
     return left > 0 ? { tone: left < COUNTDOWN_ATTENTION_MS ? 'attention' : 'ready', text: review ? 'Review valid for {0}' : 'Simulation valid for {0}', parameters: [countdown(left)] }
-      : { tone: 'attention', text: review ? 'Review expired, review again' : 'Expired, simulate again' };
+      // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review blocks authorization ("Review expired", its own red tone, as C2 shows); the
+      // footer's one action refreshes it. An expired simulation keeps its amber line.
+      : review ? { tone: 'expired', text: 'Review expired' } : { tone: 'attention', text: 'Expired, simulate again' };
   }
   return null;
 }

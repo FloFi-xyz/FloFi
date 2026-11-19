@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
-import { editorSteps, navigationTrigger, openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSectionAction, editorSteps, navigationTrigger, openBuilder, openEditorSection } from './build-entry-navigation';
 
 test('shows honest authorization and unavailable stage states', async ({ page }) => {
   await openBuilder(page);
   await expect(page.getByText('Demo mode', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeDisabled();
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03): with nothing on the Canvas the public Editor keeps Simulate and Execute closed, each
+  // saying why — nothing can be simulated, reviewed or executed yet.
+  await expect(editorSectionAction(page, 'Simulate')).toHaveAccessibleName(/^Simulate ?: Add an action to your workflow first$/);
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  // The opted-in engineering diagnostics (no stage gating) still state why nothing can be generated or authorized.
+  await page.evaluate(() => {
+    if (!(window as unknown as { __flofiEngineeringWorkflow?: string }).__flofiEngineeringWorkflow) throw Error('ENGINEERING_HARNESS_REQUIRED');
+    window.history.pushState(null, '', '/__engineering');
+  });
   await openEditorSection(page, 'Simulate');
   await openSimulationDetails(page);
   await expect(page.locator('.simulation-technical .engineering-artifacts > .simulate-head')).toContainText('Mocked artifacts cannot authorize execution.');

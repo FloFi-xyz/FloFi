@@ -17,8 +17,8 @@ import { createTestWallet } from '../../../packages/reference-reconciler/test/te
 import { createAccountStore } from '../src/accounts/account-store';
 import { ACCOUNT_SESSION_COOKIE, sealAccountSession, type AccountSessionToken } from '../src/accounts/account-session';
 import { APP_ORIGIN } from './app-origin';
-import { openBuilder, openEditorSection } from './build-entry-navigation';
-import { expect, test } from './fixtures';
+import { editorSectionAction, openBuilder, openEditorSection } from './build-entry-navigation';
+import { expect, expectSimulationValid, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
 
 test.skip(process.env.FLOFI_WORKFLOW_RUNS !== 'enabled' || process.env.GRYLOO_CLOUD_RUNTIME_E2E !== 'EMBEDDED_LOOPBACK_ONLY'
@@ -64,7 +64,8 @@ async function simulate(page: Page) {
   const action = page.locator('.canvas-primary-action [data-lifecycle-action="simulate"]');
   await expect(action).toBeEnabled({ timeout: 30_000 });
   await action.click();
-  await expect(page.locator('[data-lifecycle-action="approve"]').first()).toBeVisible({ timeout: 45_000 });
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): a valid simulation offers "Review operation" (to Execute); nothing is accepted from Simulate.
+  await expectSimulationValid(page, { timeout: 45_000 });
 }
 
 test('a simulated multi-step Canvas workflow starts the shared workflow run on /approve; stale or unsimulated, it cannot; the wallet is never asked', async ({ page, networkGuard }) => {
@@ -88,15 +89,15 @@ test('a simulated multi-step Canvas workflow starts the shared workflow run on /
   await say(page, 'swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 0.001 WETH');
   await expect(cards(page)).toHaveCount(2);
 
-  // Offered for the two-step workflow, but not before it is simulated.
-  await openEditorSection(page, 'Execute');
-  await expect(runRegion(page)).toContainText('Runs all 2 steps in order on FloFi\'s approval page');
-  await expect(runButton(page)).toBeDisabled();
-  await expect(runRegion(page)).toContainText('Simulate the workflow before running it.');
+  // Not before it is simulated. BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): Execute, where the run is offered, is
+  // closed until the workflow is simulated, and says why (the offer's own "Simulate the workflow before running it." is no longer reachable).
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await expect(runButton(page)).toHaveCount(0);
 
-  // Simulated at the current revision: ready.
+  // Simulated at the current revision: offered for the two-step workflow, and ready.
   await simulate(page);
   await openEditorSection(page, 'Execute');
+  await expect(runRegion(page)).toContainText('Runs all 2 steps in order on FloFi\'s approval page');
   await expect(runButton(page)).toBeEnabled();
 
   // An edit after the simulation is a new revision: the earlier simulation never stands for it.
@@ -105,9 +106,9 @@ test('a simulated multi-step Canvas workflow starts the shared workflow run on /
   await amount.fill('0.002');
   await amount.blur();
   await expect(amount).toHaveValue('0.002');
-  await openEditorSection(page, 'Execute');
-  await expect(runButton(page)).toBeDisabled();
-  await expect(runRegion(page)).toContainText('The workflow changed after it was simulated. Simulate it again to run it.');
+  // The earlier simulation no longer stands for this revision: Execute closes again until it is simulated, and no run can be started.
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await expect(runButton(page)).toHaveCount(0);
 
   await simulate(page);
   await openEditorSection(page, 'Execute');

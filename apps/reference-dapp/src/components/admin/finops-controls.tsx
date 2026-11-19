@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ENTRY_SOURCES, FINOPS_ENVIRONMENTS, FINOPS_SCOPES, scopeIds, type ScopeId } from '../../admin/finops/economics';
 import { modelScenario, parseScenario, SCENARIO_FIELDS, SCENARIO_PRESETS, scenarioKeys, type Scenario } from '../../admin/finops/scenario';
 import { adminPost } from './admin-client';
-import { Kpi } from './admin-ui';
+import { Kpi, Status } from './admin-ui';
 import { useLocale } from '../../i18n/locale';
 import { finopsCopy } from './finops-copy';
 import type { FinopsReport } from '../../admin/finops/report';
@@ -26,8 +26,35 @@ const ERRORS: Readonly<Record<string, string>> = {
 };
 const message = (code: string) => ERRORS[code] ?? 'The request could not be completed. Your saved records are preserved.';
 
+/**
+ * BUILD-FLOFI-UX-EDITOR-FINOPS-001: the existing reporting period form (GET range/from/to, UTC, same boundaries), compact: the custom start and
+ * last day appear only when "Custom dates" is chosen. Nothing is queried until Apply period submits the same parameters as before.
+ */
+export function FinopsPeriodForm({ action, preset, from, to, options }: { action: string; preset: string; from?: string | undefined; to?: string | undefined;
+  options: readonly { readonly value: string; readonly label: string }[] }) {
+  const { copy } = finopsCopy(useLocale().language);
+  const [range, setRange] = useState(preset);
+  const select = useRef<HTMLSelectElement>(null);
+  // A browser may restore the select's value on Back: the dates follow what the select really shows.
+  useEffect(() => { if (select.current && select.current.value !== preset) setRange(select.current.value); }, [preset]);
+  const custom = range === 'custom';
+  return <form className="admin-filters admin-finops-period-form" action={action} method="get" aria-label={copy("Financial reporting period")}>
+    <label>{copy("Period")}<select ref={select} name="range" aria-label={copy("Period")} defaultValue={preset} onChange={event => setRange(event.target.value)}>
+      {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+    <fieldset className="admin-finops-custom-dates" hidden={!custom} disabled={!custom}>
+      <legend className="admin-sr">{copy('Custom dates')}</legend>
+      <label>{copy("Custom start (UTC)")}<input type="date" name="from" defaultValue={from} required={custom}/></label>
+      <label>{copy("Custom last day (UTC)")}<input type="date" name="to" defaultValue={to} required={custom}/></label>
+    </fieldset>
+    <button className="admin-button" type="submit">{copy("Apply period")}</button>
+  </form>;
+}
+
+const STATUS_TONE: Readonly<Record<string, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>> = { Synchronizing: 'info', 'Manual records only': 'neutral', 'Not configured': 'neutral',
+  'Needs attention': 'bad', Stale: 'warn', Connected: 'ok', 'Ready to synchronize': 'info' };
+
 export function FinopsIntegrations({ integrations, csrf }: { integrations: FinopsReport['integrations']; csrf?: string }) {
-  const { copy, money, time, count } = finopsCopy(useLocale().language), router = useRouter();
+  const { copy, time, count, display } = finopsCopy(useLocale().language), router = useRouter();
   const [requested, setRequested] = useState(false);
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false), requestInFlight = useRef(false);
@@ -60,10 +87,10 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
     {csrf && <div className="admin-actions"><button type="button" className="admin-button" disabled={busy || !integrations.providers.some(provider => provider.configured)}
       onClick={() => void queue('all')}>{copy('Sync all')}</button></div>}
     {feedback && <p className="admin-alert" role={feedback.error ? 'alert' : 'status'} data-tone={feedback.error ? 'bad' : 'ok'}>{feedback.text}</p>}
-    <p>{copy('Metered usage and estimates are shown separately from recorded costs.')}</p>
-    <div className="admin-table-wrap"><table className="admin-table" aria-label={copy('Financial integrations')}>
-      <thead><tr>{['Provider', 'Connection', 'Current-period cost', 'Last successful sync', 'Next scheduled sync', 'Data quality', 'Historical coverage', ...(csrf ? ['Actions'] : [])]
-        .map(label => <th key={label} scope="col">{copy(label)}</th>)}</tr></thead>
+    <p className="admin-diff">{copy('Metered usage and estimates are shown separately from recorded costs.')}</p>
+    <div className="admin-table-wrap"><table className="admin-table admin-finops-integrations" aria-label={copy('Financial integrations')}>
+      <thead><tr>{['Provider', 'Connection', 'Financial data', 'Current-period cost', ...(csrf ? ['Actions'] : [])]
+        .map(label => <th key={label} scope="col" className={label === 'Current-period cost' ? 'admin-num' : undefined}>{copy(label)}</th>)}</tr></thead>
       <tbody>{integrations.providers.map(provider => {
         const recent = provider.coverage[0];
         const stale = Boolean(provider.lastSuccess && provider.nextSync && Date.parse(provider.nextSync) < Date.now() && !provider.active);
@@ -71,19 +98,29 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
         const limitation = (code: string) => copy(FINANCIAL_LIMITATION_LABELS[code] ?? code);
         const status = provider.active ? 'Synchronizing' : manual ? 'Manual records only' : !provider.configured ? 'Not configured' : provider.errorCode ? 'Needs attention'
           : stale ? 'Stale' : provider.lastSuccess ? 'Connected' : 'Ready to synchronize';
-        return <tr key={provider.id}><th scope="row">{copy(provider.name)}</th>
-          <td>{copy(status)}{provider.errorCode && <p>{copy(message(provider.errorCode))}</p>}</td>
-          <td>{money(provider.cost.amount)}{provider.cost.amount !== null && <p>{copy(provider.cost.quality)}</p>}</td>
-          <td>{time(provider.lastSuccess)}</td><td>{time(provider.nextSync)}</td>
-          <td>{recent ? copy(recent.quality) : copy('Unavailable')}{recent?.limitations.length ? <details><summary>{copy('Coverage limitations')}</summary>
-            <ul>{recent.limitations.map(code => <li key={code}>{limitation(code)}</li>)}</ul></details> : null}</td>
-          <td>{provider.coverage.length > 0 ? <details><summary>{copy('{0} synchronized periods', count(provider.coverage.length))}</summary>
-            <ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>{coverage.period.from} – {coverage.period.to} · {copy(coverage.quality)}
-              {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>
-            {provider.meters.length > 0 && <ul>{provider.meters.slice(0, 100).map((meter, index) =>
-              <li key={index}>{meter.service} · {meter.metric} · {meter.amount} {meter.unit}{meter.basis ? ' · ' + meter.basis : ''}</li>)}</ul>}
-          </details> : copy('No synchronized period')}</td>
-          {csrf && <td><button type="button" className="admin-button" disabled={busy || provider.active || !provider.configured}
+        // BUILD-FLOFI-UX-EDITOR-FINOPS-001: provider, connection, data available, recorded cost and the action first; the sync times, data quality,
+        // historical coverage and the provider's own message one click away (a problem is still said by the connection state itself).
+        return <tr key={provider.id} data-status={status}><th scope="row">{copy(provider.name)}
+</th>
+
+          <td><Status tone={STATUS_TONE[status] ?? 'neutral'}>{copy(status)}</Status>{provider.errorCode && <p className="admin-diff">{copy(message(provider.errorCode))}</p>}</td>
+          <td>{provider.coverage.length > 0 ? copy('{0} synchronized periods', count(provider.coverage.length)) : copy('No synchronized period')}
+            {recent?.limitations.length ? <p className="admin-diff">{copy('Coverage limitations')}: {recent.limitations.map(limitation).join(' · ')}</p> : null}
+          <details className="admin-finops-row-details"><summary>{copy('Sync details')}</summary><dl>
+            <div><dt>{copy('Last successful sync')}</dt><dd>{time(provider.lastSuccess)}</dd></div>
+            <div><dt>{copy('Next scheduled sync')}</dt><dd>{time(provider.nextSync)}</dd></div>
+            {/* Its limitations are already stated under the financial data, never twice. */}
+            <div><dt>{copy('Data quality')}</dt><dd>{recent ? copy(recent.quality) : copy('Unavailable')}</dd></div>
+            <div><dt>{copy('Historical coverage')}</dt><dd>{provider.coverage.length > 0 ? <><ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>{coverage.period.from} – {coverage.period.to} · {copy(coverage.quality)}
+                {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>
+              {provider.meters.length > 0 && <ul>{provider.meters.slice(0, 100).map((meter, index) =>
+                <li key={index}>{meter.service} · {meter.metric} · {meter.amount} {meter.unit}{meter.basis ? ' · ' + meter.basis : ''}</li>)}</ul>}</> : copy('No synchronized period')}</dd></div>
+          </dl></details></td>
+          <td className="admin-num">{(() => { const shown = display(provider.cost.amount);
+            return <span className="admin-amount" title={shown.text === shown.exact ? undefined : copy('Recorded value: {0}', shown.exact)}>{shown.text}
+              {shown.text === shown.exact ? null : <span className="admin-sr"> ({copy('Recorded value: {0}', shown.exact)})</span>}</span>; })()}
+            {provider.cost.amount !== null && <p className="admin-diff">{copy(provider.cost.quality)}</p>}</td>
+          {csrf && <td><button type="button" className="admin-button" data-size="sm" disabled={busy || provider.active || !provider.configured}
             onClick={() => void queue(provider.id)}>{copy('Sync now')}</button></td>}
         </tr>;
       })}</tbody>
@@ -177,6 +214,11 @@ export function FinopsImports({ csrf, adapters, filter }: { csrf: string; adapte
   </div>;
 }
 
+const SCENARIO_GROUPS: readonly (readonly [string, readonly (keyof Scenario)[]])[] = [
+  ['User and activity assumptions', ['users', 'chats']], ['Workflow and completion assumptions', ['workflows', 'completion']],
+  ['Revenue assumptions', ['eligibleVolume', 'fee']], ['Variable costs', ['ai', 'workflowCost']], ['Gas sponsorship assumptions', ['gas']],
+  ['Fixed infrastructure costs', ['infrastructure']]];
+
 function Assumptions({ values }: { values: Scenario }) {
   const { copy, count } = finopsCopy(useLocale().language);
   return <dl className="admin-finops-assumptions">{scenarioKeys.map(key => <div key={key}><dt>{copy(SCENARIO_FIELDS[key].label)}</dt><dd>{count(values[key])}</dd></div>)}</dl>;
@@ -207,16 +249,21 @@ export function FinopsScenario({ investor }: { investor?: { csrf: string; filter
       <p className="admin-diff">{copy("ESTIMATED · Enter monthly assumptions to compare with the records above. Workflow unit costs exclude AI and sponsored gas.")}</p>
       <div className="admin-actions" aria-label={copy("Active user scenarios")}>{SCENARIO_PRESETS.map(users => <button type="button" className="admin-button" key={users}
         onClick={() => setInput(previous => ({ ...previous, users: String(users) }))} aria-pressed={input.users === String(users)}>{copy('{0} users', count(users))}</button>)}</div>
-      <div className="admin-form-row">{scenarioKeys.map(key => {
-        const { label, max, step } = SCENARIO_FIELDS[key];
-        return <label className="admin-field" key={key}>{copy(label)}
-          <input type="number" min="0" max={max} step={step} value={input[key] ?? ''}
-            onChange={event => setInput(previous => ({ ...previous, [key]: event.target.value }))}/>
-        </label>;
-      })}</div>
+      {/* BUILD-FLOFI-UX-EDITOR-FINOPS-001: the same assumptions, grouped by what they describe (inputs only; results are below and marked ESTIMATED). */}
+      <div className="admin-finops-scenario-groups">{SCENARIO_GROUPS.map(([title, keys]) => <fieldset key={title} className="admin-finops-scenario-group">
+        <legend>{copy(title)}</legend>
+        {keys.map(key => {
+          const { label, max, step } = SCENARIO_FIELDS[key];
+          return <label className="admin-field" key={key}>{copy(label)}
+            <input type="number" min="0" max={max} step={step} value={input[key] ?? ''}
+              onChange={event => setInput(previous => ({ ...previous, [key]: event.target.value }))}/>
+          </label>;
+        })}</fieldset>)}</div>
     </form>
     {assumptions && result ? <>
-      <div className="admin-kpis" aria-label={copy("Estimated monthly results")}>
+      <h3 className="admin-finops-subhead">{copy('Estimated monthly results')} <Status tone="info">ESTIMATED</Status></h3>
+      <p className="admin-diff">{copy('Scenario outputs from the assumptions above — not recorded financial performance.')}</p>
+      <div className="admin-kpis admin-finops-estimates" aria-label={copy("Estimated monthly results")}>
         {([['Monthly chats', count(result.chats)], ['Initiated workflows', count(result.workflows)], ['Completed workflows', count(result.completed)],
           ['Fee-eligible volume', money(result.eligibleVolume)], ['AI expenditure', money(result.ai)], ['Workflow expenditure', money(result.workflow)],
           ['Sponsored gas', money(result.gas)], ['Operating costs', money(result.total)], ['Collected fee revenue', money(result.revenue)],

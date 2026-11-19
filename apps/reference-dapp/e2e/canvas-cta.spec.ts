@@ -86,18 +86,26 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   await configureCanvasAction(page, '1');
   await page.locator('footer.summary-bar').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expectEditorSection(page, 'Simulate');
-  // P0 approved UX (board 06): the one lifecycle control stays in the Editor footer on Simulate too (the simulated canvas carries no action); no
-  // section button of its own (the stepper opens Execute).
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate states the result with no authorization (the simulated canvas carries no action); the
+  // footer's one lifecycle control, "Review operation", opens Execute.
   await expect(page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action')).toHaveCount(0);
   const primary = page.locator('footer.summary-bar .canvas-primary-action');
-  await expect(primary.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
+  const reviewOperation = primary.getByRole('button', { name: 'Review operation', exact: true });
+  await expect(reviewOperation).toBeEnabled();
+  await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Simulate Supply', exact: true })).toHaveCount(0);
   await expect(page.locator('.summary-bar button[data-lifecycle-action]')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(0);
+  // C1: the Review is authorized only from Execute, through the one guarded footer action (closed here: nothing is authorized).
+  await reviewOperation.click();
+  await expectEditorSection(page, 'Execute');
+  await expect(primary.getByRole('button', { name: 'Authorize workflow', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
   await openEditorSection(page, 'Build');
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
+  // Create never hosts an authorization: its one action opens the Review in Execute.
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Review operation', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
   await expect(page.locator('.flow-card.active')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
 });

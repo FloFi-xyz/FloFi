@@ -135,7 +135,7 @@ const definitions = [
   // workflow of a signed-in account starts that same run on /approve; a passive wallet is never asked for anything).
   // P0 universal execution (case D): the Editor's whole-workflow Authorize asks the browser wallet for ONE EIP-5792 wallet_sendCalls batch (Swap →
   // Supply → Borrow on Base), executed on the MOCKED user-funded chain double (https://127.0.0.1:8567) and reconciled; never sent twice.
-  ['editor-wallet-batch', ['editor-wallet-batch.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY',
+  ['editor-wallet-batch', ['editor-wallet-batch.spec.ts', 'editor-stages-review.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY',
     GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_USER_FUNDED_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['approve-workflow-run', ['approve-workflow-run.spec.ts', 'editor-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',

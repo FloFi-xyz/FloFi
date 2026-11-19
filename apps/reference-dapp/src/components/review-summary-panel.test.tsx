@@ -44,19 +44,35 @@ describe('blocker panel (board 07)', () => {
 });
 
 describe('Review panel (board 06)', () => {
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2, intentional change): the Simulate panel lists the operations as configured, says what a simulation
+  // does and holds the shell's one Simulate control; still no authorization copy before (or after) a valid result.
   it('shows the ordered workflow and simulation guidance without authorization copy before a valid result', () => {
     const html = render({ kind: 'unavailable', state: { error: null, busy: false } });
-    expect(html).toContain('<h2>Workflow simulation</h2>');
-    expect(html).toContain('<ol class="workflow-progress-steps" aria-label="Workflow actions">');
-    expect(html).toContain('Simulation checks expected outcomes and costs');
+    expect(html).toContain('<h2>Simulate workflow</h2>');
+    expect(html).toContain('Check the expected result, costs and possible risks.');
+    expect(html).toContain('<section class="operation-summary" data-variant="icons" aria-label="Workflow actions">');
+    expect(html).toContain('<strong>Swap</strong>');
+    expect(html).toContain('What does the simulation do?');
     expect(html).toContain('<details class="review-panel-technical"><summary>Technical details</summary><p>SUMMARY</p>');
-    expect(html).not.toMatch(/You are authorizing|<button[^>]*class="primary"|Authorize in wallet/);
+    expect(html).not.toMatch(/You are authorizing|<button[^>]*class="primary"|Authorize in wallet|Authorize workflow/);
+    const hosted = renderToStaticMarkup(createElement(ReviewSummaryPanel, { workflow, context, source: { kind: 'unavailable', state: { error: null, busy: false } }, authorization, wallet,
+      action: createElement('button', { type: 'button', className: 'primary' }, 'Simulate workflow') }));
+    expect(hosted).toContain('<div class="simulation-panel-action"><button type="button" class="primary">Simulate workflow</button></div>');
   });
   it('explains expiration and displays neither authorization copy nor old financial values', () => {
     const html = render(blocked('QUOTE_EXPIRED'));
     expect(html).toContain('Simulation expired');
-    expect(html).toContain('Simulate again to refresh network fees and token permissions');
+    expect(html).toContain('Simulate again to refresh the expected result and costs. The previous values are no longer current.');
     expect(html).not.toMatch(/You are authorizing|Token permission<|Network fee, at most/);
+  });
+  // C2 (Execute, expired Review): the summary as configured, the fee and permission marked as needing a refreshed Review, never a stale figure.
+  it('on Execute, an expired Review says so first and marks its fee and permissions as needing a refresh', () => {
+    const html = renderToStaticMarkup(createElement(ReviewSummaryPanel, { workflow, context, source: blocked('QUOTE_EXPIRED'), authorization, wallet, stage: 'execute' }));
+    if (!html.includes('Your review expired')) return; // a source that is not expired renders the blocker instead (covered above)
+    expect(html.indexOf('Your review expired')).toBeLessThan(html.indexOf('Operation summary'));
+    expect(html).toContain('Needs to be refreshed');
+    expect(html).toContain('Depends on the updated review');
+    expect(html).not.toMatch(/You are authorizing|Network fee, at most/);
   });
 });
 

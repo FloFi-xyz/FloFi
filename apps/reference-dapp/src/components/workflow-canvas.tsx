@@ -57,6 +57,7 @@ import { NetworkBrandIcon } from './brand-icon';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 import { canvasMarquee, marqueeIntersects } from '../domain/canvas-marquee';
 import { planCanvasDuplicate } from '../domain/editor-history';
+import { useEditorStepper } from './editor-chrome';
 import type { Workflow } from '../domain/initial-workflow';
 import { canvasViewportFor, canvasViewportSignature, SIMULATION_VIEWPORT, type CanvasViewportInputs } from '../domain/mode-a';
 
@@ -1067,6 +1068,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const shownName = workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName;
   const stepCount = tr(projectedNodes.length === 1 ? '{0} step' : '{0} steps', projectedNodes.length);
   const networkPending = Boolean(overview && overview.count > 0 && overview.networks.length === 0);
+  const stepper = useEditorStepper();
   return <section className={`canvas panel ${isLendingComposition(workflow)?'lending-canvas':''}`} tabIndex={-1} aria-label={tr("Workflow canvas")} data-toolbox={toolboxMode} data-toolbox-ready={toolboxReady} data-run-active={runActive || undefined} data-execution={execution ? execution.settled ? 'settled' : 'live' : undefined}>
     <div className="canvas-head build-canvas-head"><div className="canvas-head-main"><WorkflowName name={workflowName} shownName={shownName} rename={renameWorkflow} onNew={runActive ? undefined : onNewWorkflow}/>
       <div className="canvas-head-meta">
@@ -1076,6 +1078,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         {overview && (runActive && runStatus ? <span className="editor-state-pill" data-editor-state={/needs attention|uncertain/i.test(runStatus) ? 'attention' : 'executing'} title={tr(runStatus)}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(runStatus)}</span>
           : <span className="editor-state-pill" data-editor-state={overview.state} title={tr(editorStateDetail(overview))}><span className="sr-only">{tr('Workflow state: ')}</span>{tr(EDITOR_STATE_LABEL[overview.state])}</span>)}
       </div>
+      {/* BUILD-FLOFI-UX-EDITOR-FINOPS-001 (A2): the discreet Create → Simulate → Execute indicator inside the Editor header (the shell's own control). */}
+      {stepper && <div className="canvas-head-stages">{stepper}</div>}
       <div className="canvas-head-actions">
         {runActive ? <span className="canvas-edit-paused" role="status"><LockIcon/>{tr('Editing paused during execution')}</span> : <>
           <button type="button" className="canvas-head-icon" title={tr("Undo (Ctrl+Z)")} aria-label={tr("Undo")} disabled={!canUndo} onClick={undo}><HistoryIcon direction="undo"/></button>

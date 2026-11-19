@@ -57,6 +57,21 @@ describe('Editor stepper', () => {
     closed[1]!.props.onClick(); closed[2]!.props.onClick(); expect(refused).not.toHaveBeenCalled();
   });
 
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03): a future stage closes on its own eligibility, with its reason; never the current stage.
+  it('closes a future stage on its own reason, keeps earlier and current stages reachable', () => {
+    const reasons = { Simulate: null, Execute: 'Simulate the workflow first' };
+    const html = renderToStaticMarkup(createElement(EditorStepper, { tab: 'Build', setTab: vi.fn(), disabled: false, stageReasons: reasons }));
+    expect([...html.matchAll(/data-step-look="([a-z]+)"/g)].map(match => match[1])).toEqual(['current', 'reachable', 'closed']);
+    expect(html).toContain('title="Simulate the workflow first"');
+    expect(html).toContain('<span class="sr-only">: Simulate the workflow first</span>');
+    const refused = vi.fn(), [, simulate, execute] = buttons({ tab: 'Build', setTab: refused, disabled: false, stageReasons: reasons });
+    execute!.props.onClick(); expect(refused).not.toHaveBeenCalled();
+    simulate!.props.onClick(); expect(refused).toHaveBeenLastCalledWith('Simulate');
+    // Already on Execute (e.g. an expired Review): the current stage is never closed by its own eligibility.
+    const onExecute = renderToStaticMarkup(createElement(EditorStepper, { tab: 'Execute', setTab: vi.fn(), disabled: false, stageReasons: { Simulate: 'Add an action to your workflow first', Execute: 'Simulate the workflow first' } }));
+    expect([...onExecute.matchAll(/data-step-look="([a-z]+)"/g)].map(match => match[1])).toEqual(['reachable', 'reachable', 'current']);
+  });
+
   it('speaks Portuguese', () => {
     const html = renderToStaticMarkup(createElement(LocaleProvider, { initialLanguage: 'PT', children: createElement(EditorStepper, { tab: 'Simulate', setTab: vi.fn(), disabled: false }) }));
     expect([...html.matchAll(/editor-stepper-label">([^<]+)</g)].map(match => match[1])).toEqual(['Criar', 'Simular', 'Executar']);

@@ -12,7 +12,7 @@
  */
 import type { Page, TestInfo } from '@playwright/test';
 import { test, expect, installPassiveWallet, sendChatCommand } from './fixtures';
-import { openBuilder, openEditorSection, type EditorSection } from './build-entry-navigation';
+import { editorSectionAction, openBuilder, openEditorSection, type EditorSection } from './build-entry-navigation';
 
 const VIEWPORTS = [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 768, height: 1024 }, { width: 375, height: 812 }] as const;
 /** The smallest rendered card width the read-only graph may show (a Simulate card is 224 px at 1×). */
@@ -83,7 +83,7 @@ async function assertSection(page: Page, section: EditorSection, width: number, 
     const frame = page.locator('.simulate-workspace .simulation-workflow-canvas');
     const dock = frame.locator('> .simulate-canvas-body > aside.canvas-review-dock');
     await expect(dock).toBeVisible();
-    await expect(page.getByRole('complementary', { name: /^(Review|Revisão|Workflow simulation|Simulação do fluxo)$/ })).toHaveCount(1);
+    await expect(page.getByRole('complementary', { name: /^(Review|Revisão|Workflow simulation|Simulação do fluxo|Simulation result|Resultado da simulação)$/ })).toHaveCount(1);
     await expect(page.locator('details.simulation-details')).toHaveCount(0);
     const dockBox = (await dock.boundingBox())!, frameBox = (await frame.boundingBox())!;
     expect(inside(dockBox, frameBox), `${label}: the Review is outside the Canvas frame`).toBe(true);
@@ -111,8 +111,11 @@ for (const language of ['EN', 'PT'] as const) for (const viewport of VIEWPORTS) 
       for (const theme of ['light', 'dark'] as const) {
         await openEditorSection(page, 'Build');
         await useTheme(page, theme);
-        for (const section of ['Build', 'Simulate', 'Execute'] as const)
+        for (const section of ['Build', 'Simulate'] as const)
           await assertSection(page, section, viewport.width, testInfo, `${section.toLowerCase()}-${language.toLowerCase()}-${viewport.width}-${theme}`);
+        // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): with nothing simulated (a passive wallet), Execute stays closed
+        // and says why; its layout is covered where a simulation exists (editor-stages-review, execute-product-workspace).
+        await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/(Simulate the workflow first|Simule o fluxo primeiro)$/);
       }
     });
 }

@@ -3,8 +3,9 @@
 /**
  * P0 approved UX (board 06 "Simulate and review", board 07 "Blocked"): the Review panel beside the simulated canvas, or the blocker panel that
  * replaces it. Presentation only: every value is the existing simulation and Review projections' own (`projectSimulation`, `projectReview`), and
- * the fee-shortfall numbers are the server's own evidence (`NativeFeeShortfall`). It has NO authorize control: the one primary action is the
- * footer's lifecycle button. Nothing here quotes, signs, submits or retries; a balance that arrives never re-simulates by itself.
+ * the fee-shortfall numbers are the server's own evidence (`NativeFeeShortfall`). It has NO authorize control: on Execute the one primary action
+ * is the footer's lifecycle button; on Simulate (BUILD-FLOFI-UX-EDITOR-FINOPS-001, B2) the panel hosts the shell's own Simulate control (`action`),
+ * never an authorization. Nothing here quotes, signs, submits or retries; a balance that arrives never re-simulates by itself.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -17,7 +18,7 @@ import { feeShortfallView } from '../domain/approved-ux';
 import { circleUnavailableReason } from '../domain/token-fee';
 import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
-import { composerActions, composerSummary } from '../domain/composer-presentation';
+import { OperationSummary } from './operation-summary';
 
 export type ReviewSummaryPanelProps = {
   workflow: Workflow; context: ReviewContext; source: SimulationSource; authorization: ReviewAuthorization; wallet: ReviewWallet;
@@ -31,6 +32,12 @@ export type ReviewSummaryPanelProps = {
   sequenceNote?: string | null;
   /** The Canvas stays whole when the runtime simulates only its current step. */
   canvasWorkflow?: Workflow;
+  /**
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001: `simulate` (default) is the B2 Simulate panel — no authorization language, its one primary action inside
+   * (`action`); `execute` is the Review the owner authorizes from the Execute stage (C1 valid, C2 expired), whose one action is the footer's.
+   */
+  stage?: 'simulate' | 'execute';
+  action?: ReactNode;
 };
 
 function useRefreshAtExpiry(until: number | null) {
@@ -43,8 +50,9 @@ function useRefreshAtExpiry(until: number | null) {
 }
 
 export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const { workflow, context, source, authorization, wallet, invalidWorkflow = false } = props;
+  const stage = props.stage ?? 'simulate';
   const now = Date.now();
   const sim = projectSimulation(workflow, context, source, now);
   const status = simulationStatusPresentation(sim, invalidWorkflow, source.state.busy);
@@ -55,34 +63,57 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const blocked = !busy && sim.status === 'blocked';
   const technical = props.technical ? <details className="review-panel-technical"><summary>{t(blocked ? 'Technical details, for support' : 'Technical details')}</summary>
     {blocked && source.state.error && <p className="review-panel-code"><code>{source.state.error}</code></p>}{props.technical}</details> : null;
+  const action = props.action ? <div className="simulation-panel-action">{props.action}</div> : null;
   if (blocked && !expired) return <BlockerPanel message={props.unavailableReason ?? status.message} title={status.label} error={source.state.error ?? null}
-    owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation/>;
+    owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={action}/>;
   const ready = !busy && sim.status !== 'blocked' && (review.status === 'ready' || review.status === 'approved');
   const step = sim.steps[sim.steps.length - 1];
   const canvas = props.canvasWorkflow ?? workflow;
-  const actions = ready ? [] : composerActions(canvas).map(node => ({ id: node.nodeId, ...composerSummary(canvas, node, context) }));
-  return <section className="review-panel-approved" aria-label={t(ready ? 'Review' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'}>
-    {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
-    {ready && <p className="eyebrow">{t('REVIEW')}</p>}
-    <h2>{t(ready ? 'You are authorizing' : expired ? 'Simulation expired' : 'Workflow simulation')}</h2>
-    {!ready ? <>
-      <p className="review-panel-status" role="status">{t(expired ? 'Simulate again to refresh network fees and token permissions before review.'
-        : busy ? 'Simulating workflow…' : props.unavailableReason ?? 'Simulation checks expected outcomes and costs before anything is signed or sent.')}</p>
-      <ol className="workflow-progress-steps" aria-label={t('Workflow actions')}>{actions.map(s => <li className="workflow-progress-step" key={s.id}><strong>{t(s.action)}</strong>
-        <span>{t(s.chain)}{s.bridgePair ?? s.detail ? ` · ${t((s.bridgePair ?? s.detail)!)}` : ''}</span></li>)}</ol>
-    </> : <>
+  const until = review.expiresAt !== null && review.expiresAt > now ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
+  // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.
+  const resultRows = <>
+    {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
+    {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
+    {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
+      // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
+      const paidTo = paidToPimlicoNote(line);
+      return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
+        ? <dd><span className="numeric">{t(line.value)}</span><small className="review-block-qualifier">{t(paidTo)}</small></dd>
+        : <dd className="numeric">{t(line.value)}</dd>}</div>;
+    })}
+    {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
+    {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+  </>;
+  const warnings = sim.warnings.filter(warning => !warning.technical).map((warning, index) => <p className="review-panel-note review-panel-warning" key={index}>{t(warning.message)}</p>);
+  if (stage === 'execute') {
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review keeps the workflow's summary (only what the owner configured) and marks the fee and
+    // the permissions as needing a refreshed Review; no stale figure is shown as current and nothing can be authorized from it.
+    if (expired) return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="expired">
+      {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
+      <ExpiredReviewAlert/>
+      <OperationSummary workflow={canvas} context={context}/>
       <dl className="review-panel-rows">
-        {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
-        {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
-        {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
-          // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
-          const paidTo = paidToPimlicoNote(line);
-          return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
-            ? <dd><span className="numeric">{t(line.value)}</span><small className="review-block-qualifier">{t(paidTo)}</small></dd>
-            : <dd className="numeric">{t(line.value)}</dd>}</div>;
-        })}
-        {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
-        {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+        <div><dt>{t('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed"/></dd></div>
+        <div><dt>{t('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review"/></dd></div>
+        {typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
+      </dl>
+      {technical}
+    </section>;
+    if (!ready) return <section className="review-panel-approved review-panel-execute" aria-label={t('Simulation')} data-review-state={busy ? 'busy' : 'pending'}>
+      {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
+      <h2>{t('Workflow simulation')}</h2>
+      <p className="review-panel-status" role="status">{t(busy ? 'Simulating workflow…' : props.unavailableReason ?? 'Simulation checks expected outcomes and costs before anything is signed or sent.')}</p>
+      <OperationSummary workflow={canvas} context={context}/>
+      {technical}
+    </section>;
+    // C1: the valid Review — what the owner authorizes, its costs and permissions, before any wallet request. The ONE action is the footer's.
+    return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="ready">
+      {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
+      {until && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{t('Review valid until {0}', until)}</p>}
+      <p className="eyebrow">{t('REVIEW')}</p>
+      <h2>{t('You are authorizing')}</h2>
+      <dl className="review-panel-rows">
+        {resultRows}
         {step?.details.filter(line => line.label === SIGNATURES_LABEL).map(line => <div key={line.label}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}
         {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.address}`}><dt>{t('Token permission')}</dt>
           <dd>{approval.unlimited ? t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')
@@ -91,15 +122,59 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       </dl>
       <p className="review-panel-note">{t(sim.fees.some(isIncludedNetworkFee) ? 'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.'
         : 'Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
-      {sim.warnings.filter(warning => !warning.technical).map((warning, index) => <p className="review-panel-note" key={index}>{t(warning.message)}</p>)}
-    </>}
-    {!expired && technical}
+      {warnings}
+      {technical}
+    </section>;
+  }
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): the Simulate contextual panel. Before the simulation it lists the operations, says what a simulation does
+  // and holds the ONE primary action (Simulate workflow); a valid result states the expected outcome and costs with no authorization language
+  // (the footer's "Review operation" leads to Execute, where the Review is authorized); an expired result shows no stale figure.
+  const awaiting = !busy && !ready && !expired;
+  return <section className="review-panel-approved simulation-context-panel" aria-label={t(ready ? 'Simulation result' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'}>
+    <SimulationPanelHead title={ready ? 'Simulation result' : expired ? 'Simulation expired' : 'Simulate workflow'}
+      subtitle={ready ? until ? t('Valid until {0}. Nothing has been signed or sent.', until) : t('Nothing has been signed or sent.')
+        : expired ? t('Simulate again to refresh the expected result and costs. The previous values are no longer current.')
+        : t('Check the expected result, costs and possible risks.')}/>
+    {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
+    {ready ? <dl className="review-panel-rows simulation-result-rows">{resultRows}</dl> : <OperationSummary workflow={canvas} context={context} heading={null} variant="icons"/>}
+    {ready && warnings}
+    {/* The panel's action states its own reason when it is closed; the status line covers a run in progress and a reason with no action here. */}
+    {!ready && (busy || props.unavailableReason && !props.action) && <p className="review-panel-status" role="status">{t(busy ? 'Simulating workflow…' : props.unavailableReason!)}</p>}
+    {awaiting && <SimulationExplainer/>}
+    {!ready && action}
+    {technical}
   </section>;
 }
 
+/** B2: the Simulate panel's title row (a flask mark, the title and one line under it). */
+export function SimulationPanelHead({ title, subtitle }: { title: string; subtitle: string }) {
+  const { t } = useLocale();
+  return <div className="simulation-panel-head"><span className="simulation-panel-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg></span>
+    <div><h2>{t(title)}</h2><p>{subtitle}</p></div></div>;
+}
+/** B2: what a simulation does, before the owner runs it. */
+export function SimulationExplainer() {
+  const { t } = useLocale();
+  return <div className="simulation-explainer" role="note"><span aria-hidden="true">i</span><div><strong>{t('What does the simulation do?')}</strong>
+    <p>{t('It estimates the result of your operation and shows the expected costs, without moving your funds.')}</p></div></div>;
+}
+/** C2: the Review expired — said first, in its own surface, with what to do. */
+export function ExpiredReviewAlert() {
+  const { t } = useLocale();
+  return <div className="review-expired-alert" role="alert"><span className="review-expired-mark" aria-hidden="true">!</span>
+    <div><strong>{t('Your review expired')}</strong><p>{t('Refresh the simulation and check the new values before authorizing.')}</p></div></div>;
+}
+/** C2: a value that only a refreshed Review can state (never a stale figure). */
+export function RefreshBadge({ text }: { text: string }) {
+  const { t } = useLocale();
+  return <span className="review-refresh-badge">{t(text)}</span>;
+}
+
 /** Board 07: what blocks the simulation, the server's own numbers when it has them, and the one next action (the footer keeps "Simulate again"). */
-export function BlockerPanel({ title, message, error, owner, feeShortfall, technical, simulation = false }: { title: string; message: string; error: string | null; owner: string | null;
-  feeShortfall: NativeFeeShortfall | null; technical: ReactNode; simulation?: boolean }) {
+export function BlockerPanel({ title, message, error, owner, feeShortfall, technical, simulation = false, action = null }: { title: string; message: string; error: string | null; owner: string | null;
+  feeShortfall: NativeFeeShortfall | null; technical: ReactNode; simulation?: boolean;
+  /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): on Simulate, the panel holds the one primary action (Simulate again) after the blocker's own actions. */
+  action?: ReactNode }) {
   const { t } = useLocale();
   const [copied, setCopied] = useState<'copied' | 'failed' | null>(null);
   const fee = feeShortfallView(feeShortfall);
@@ -128,6 +203,7 @@ export function BlockerPanel({ title, message, error, owner, feeShortfall, techn
       {href && <a className="secondary" href={href}>{t(flight!.action === 'LINK_WALLET' ? 'Open Credentials' : flight!.action === 'SIGN_IN' ? 'Sign in' : 'Open Board')}</a>}
       <span role="status" className={copied ? undefined : 'sr-only'}>{copied ? t(copied === 'copied' ? 'Address copied.' : 'Address could not be copied.') : ''}</span>
     </div>
+    {action}
     {technical}
   </section>;
 }

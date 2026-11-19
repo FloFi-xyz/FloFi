@@ -4,7 +4,7 @@ import { test, expect } from './fixtures';
 import { installJourneyWallet, walletRequests, setWalletChain } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { openBuilder, openEditorSection, openReviewTechnicalDetails } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails } from './build-entry-navigation';
 
 for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia', '0xaa36a7']] as const) {
   test(`${network}: Canvas → real read client estimate → Simulate → Review; locale preserves authority and wallet changes invalidate it`, async ({ page, request, networkGuard }) => {
@@ -41,10 +41,12 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
     await expect(summary.getByRole('region', { name: 'Expected result' })).toContainText('0.0005 WETH');
     await expect(summary).not.toContainText('The workflow has changed.');
-    // BUILD-SOLANA-TRANSFER-UX-001: one owner action, "Authorize in wallet" (Review acceptance, then the wallet request). This read-only
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate states the result with no authorization; its footer's "Review operation" opens
+    // Execute (C1), where the one owner action, "Authorize workflow" (Review acceptance, then the wallet request), is offered. This read-only
     // acceptance never clicks it: nothing is accepted or requested, and locale and wallet changes act on the fresh Review's authority.
-    await expect(primary.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
+    const reviewOperation = primary.getByRole('button', { name: 'Review operation', exact: true });
+    await expect(reviewOperation).toBeEnabled();
     await review.locator('> summary').click();
     for (const limit of ['Wallet', 'Network', 'Permissions', 'Max spend', 'Max slippage', 'Minimum received', 'Valid until']) await expect(review).toContainText(limit);
     await expect(review.getByRole('button')).toHaveCount(0);
@@ -52,20 +54,25 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     // Quote arrival does not edit the IR or semantic revision.
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
     expect(hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflows.at(-1))))).toBe(hash);
+    await reviewOperation.click();
+    await expectEditorSection(page, 'Execute');
+    await expect(primary.getByRole('button', { name: 'Authorize workflow', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Authorize workflow', exact: true })).toHaveCount(1);
     const before = await walletRequests(page);
     expect(before).not.toContain('eth_sendTransaction');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('switch', { name: 'Language', exact: true }).click(); await page.keyboard.press('Escape');
     await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
-    await expect(primary.getByRole('button', { name: 'Autorizar na carteira', exact: true })).toBeEnabled();
+    await expect(primary.getByRole('button', { name: 'Autorizar fluxo', exact: true })).toBeEnabled();
     expect(await walletRequests(page)).toEqual(before);
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
     // Returning to the reviewed network cannot revive authorization.
     await setWalletChain(page, '0x1');
-    await expect(primary.getByRole('button', { name: 'Autorizar na carteira', exact: true })).toHaveCount(0);
+    await expect(primary.getByRole('button', { name: 'Autorizar fluxo', exact: true })).toHaveCount(0);
     await setWalletChain(page, chain);
-    await expect(primary.getByRole('button', { name: 'Autorizar na carteira', exact: true })).toHaveCount(0);
-    await expect(primary.getByRole('button', { name: 'Simular novamente', exact: true })).toBeVisible();
+    await expect(primary.getByRole('button', { name: 'Autorizar fluxo', exact: true })).toHaveCount(0);
+    // C2 wording on Execute: the Review must be refreshed (the step's "Simulate again", nothing sent).
+    await expect(primary.getByRole('button', { name: 'Atualizar revisão', exact: true })).toBeVisible();
     expect(await walletRequests(page)).not.toContain('eth_sendTransaction');
     const reads = await request.get('https://127.0.0.1:8558/', { ignoreHTTPSErrors: true });
     expect((await reads.json()).methods.every((method: string) => ['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call'].includes(method))).toBe(true);

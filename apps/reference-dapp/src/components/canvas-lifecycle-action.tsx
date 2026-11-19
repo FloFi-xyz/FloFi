@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useEffect, useState } from 'react';
-import { projectCanvasAction } from '../domain/canvas-lifecycle';
+import { projectCanvasAction, type CanvasAction } from '../domain/canvas-lifecycle';
 import type { ExecutionControls, ExecutionControlsState } from '../state/execution-controls';
 import { useLocale } from '../i18n/locale';
 import { WalletPendingNotice } from './wallet-pending-notice';
@@ -15,9 +15,15 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: which step of a sequence this control serves (a result never stands for the whole workflow). */
   sequenceNote?: string | null;
   onExecute?: () => void; workflowName?: string;
+  /**
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, C1/C2): the Editor's Execute stage words the same actions as "Authorize workflow" (a Review to accept)
+   * and "Refresh review" (an expired or invalidated one). Wording only: the projected action, its gates, `disabled` and its handler are unchanged.
+   */
+  labelFor?: ((action: CanvasAction) => string) | undefined;
 }) {
   const { t, language } = useLocale();
   const c = props.controls, action = projectCanvasAction(c.current, c);
+  const label = props.labelFor ? props.labelFor(action) : action.label;
   const disabled = action.disabled || action.kind === 'simulate' && (!props.simulate || props.simulationDisabled) || action.kind === 'execute' && !c.view.canExecute;
   // Why the last Authorize stopped before any wallet request because the person's FloFi wallet (Privy) was not ready in this page.
   const [floFiIssue, setFloFiIssue] = useState<string | null>(null), privy = useFloFiPrivy();
@@ -43,10 +49,10 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   return <div className="canvas-lifecycle-control">
     {props.sequenceNote && <p className="canvas-sequence-note" role="note">{props.sequenceNote}</p>}
     {/* UX-003: simulating / waiting for the wallet keep the CTA position as a locked, active button; a duplicate request cannot start. */}
-    {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(action.label)}</button>
-      : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled}
+    {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(label)}</button>
+      : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled}
         title={action.kind === 'simulate' && disabled && props.simulationReason ? t(props.simulationReason) : undefined}
-        aria-description={action.kind === 'simulate' ? t(disabled && props.simulationReason ? props.simulationReason : 'Check amounts, fees and conditions before continuing.') : undefined} onClick={act}>{t(action.label)}</button>}
+        aria-description={action.kind === 'simulate' ? t(disabled && props.simulationReason ? props.simulationReason : 'Check amounts, fees and conditions before continuing.') : undefined} onClick={act}>{t(label)}</button>}
     {c.live?.steps.some(step => step.operations.some(operation => operation.state === 'wallet')) && <WalletPendingNotice/>}
     {(action.kind === 'approve' || action.kind === 'execute' || action.kind === 'continue') && <FloFiWalletLockHint account={props.wallet.account} issue={floFiIssue}/>}
     {action.kind === 'recover' && c.lastCheckedAt && <p className="muted"><time dateTime={c.lastCheckedAt}>{t('Last checked at {0}',new Date(c.lastCheckedAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US'))}</time></p>}
