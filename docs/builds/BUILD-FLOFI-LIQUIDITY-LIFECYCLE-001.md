@@ -125,7 +125,7 @@ revenue. The Admin FinOps presentation of PR #219 is unchanged.
 
 - **Implemented:** everything in §5–§9.
 - **Certified by local / MOCKED evidence:** unit suites (compiler, linter, contracts, services, stores, presentation, chat dialogue), disposable
-  PostgreSQL (0031 certificate, end-to-end purge, cloud flows), MOCKED browser profiles (see §12). Authorization in browser specs is performed
+  PostgreSQL (0031 certificate, end-to-end purge, cloud flows), MOCKED browser profiles (see §12.4). Authorization in browser specs is performed
   through the same runtime as the server actions, because the product never authorizes a MOCKED result (precedent:
   `e2e/uniswap-liquidity-continuation.spec.ts`).
 - **Validated with live mainnet reads:** none in this build (no public RPC was used).
@@ -160,4 +160,103 @@ revenue. The Admin FinOps presentation of PR #219 is unchanged.
   0016 tombstone and owner-history events keep wallet and run id permanently (now also for position runs); `admin_run_facts` keeps derived run
   facts for every format (unchanged by 0016 and 0031).
 
-<!-- §12 (reviews, gates, tested SHA, CI, rollout order and the no-transaction confirmation) is completed at certification. -->
+## 12. Reviews, gates, certification and rollout
+
+### 12.1 Specialist reviews (read-only specialists; at most three at once; main ran every requested search and test)
+
+| Domain | Head reviewed | Result | Disposition |
+| --- | --- | --- | --- |
+| flofi-workflow | 0057babe | F1–F6 | F1–F6 fixed or accepted (§5, §8) |
+| flofi-liquidity | 0057babe | #1–#7 | all fixed (§8) |
+| flofi-security | 0057babe | stopped to respect the three-agent cap | superseded by the final review at 7242e124 |
+| flofi-data-privacy | 4e8ceb4b | 8 findings | #1, #2, #4–#8 fixed; #3 documented (§11, data privacy) |
+| flofi-security (final) | 7242e124 | P2, P3, P3 | P2 owner-execution gate → owner decision (§11, §12.5); P3 lapsed PREPARED fixed; P3 Orca binding wording fixed |
+| flofi-workflow (final) | 7242e124 | P2, P3 ×3 | P2 retired previous fixed; P3 EXIT:keep fixed; P3 lapsed PREPARED fixed; P3 restored mixed workflow → follow-up (§11) |
+| flofi-liquidity (final) | 7242e124 | P2 ×2, P3 ×6 | P2-1, P2-2, P3-1, P3-3, P3-4, P3-5 fixed; P3-2, P3-6 follow-ups (§11) |
+| flofi-frontend-ux (final) | bddd4546 | 6 × P3 | #1 floor wording and #5 generic PT template fixed; #2, #3, #4, #6 follow-ups (§12.3) |
+| flofi-chat (final) | bddd4546 | P1, P2 ×2, P3 ×2 | all fixed with tests (button label read as the portion; ordinal; token ids to the model; help topic; Aave withdraw) |
+| flofi-wallet-execution (final) | bddd4546 | P2, P3 ×4 | P2-1 same-block expiry fixed (race test fails without the fix); P3-1 envelope nonce and P3-4 server never-sent guard fixed; P3-2 documented; P3-3 follow-up |
+| flofi-liquidity (delta) | eeec8aac | no blocker; 4 follow-ups | F1 (mint path, pre-existing) fixed by parity with a race test; F3 wording fixed; F2, F4 follow-ups |
+| flofi-infrastructure-ci | eeec8aac | no blocker; 2 low | unmeasured timings dropped (median rule); inherited Orca journal cleared by the runner |
+| flofi-protocol-integrations | eeec8aac | no blocker; 4 low | doc comment corrected; availability items follow-ups (all fail closed) |
+| flofi-wallet-execution (delta) | f275a904 | PASS | relayed-submission and block-hash hardening, mint envelope nonce → follow-ups |
+| flofi-chat (delta) | f275a904 | PASS | Orca short ids redacted (0d820527); count wording, range-filtered ordinal, "liquidez" + token amount, regex export → follow-ups (export fixed) |
+
+AI review is advisory; CircleCI is the certification authority.
+
+### 12.2 Domains not reviewed, and why
+
+- flofi-bridge, flofi-automations, flofi-payments-billing, flofi-transfer-payments: no change in their paths. The new composition restriction
+  applies only to a node carrying the `position-management` marker; `liquidity-positions.test.ts` proves swap, bridge, deposit and lending
+  workflows compose exactly as before.
+- flofi-mcp, flofi-channels, flofi-developers: no capability was added. Non-web surfaces answer that position management is web-only; the
+  certification matrix keeps `mcp`, `telegram` and `developerApi` false. flofi-security and flofi-chat verified this, and `channels/boundaries.test.ts`
+  is green.
+- flofi-admin-analytics: the only change is the default-off, trace-free `liquidity.lifecycle` line, covered by the flofi-data-privacy review.
+- flofi-swap, flofi-lending: no material change. The Aave-withdraw routing correction is covered by the flofi-chat review and its tests.
+
+### 12.3 Follow-ups from the final reviews (non-blocking; none moves funds without the owner's wallet)
+
+- Editor: "Adjust" on a managed withdrawal card opens a dialog with no slippage field; "Start a new workflow" after `HAS_OTHER_STEPS` can fail
+  silently if staging then fails; the Dashboard offers prepare actions for a linked wallet that is not connected (the runtime refuses, but the
+  sentence names the wrong cause); PT-BR wording nits (gender of "Fechada", two terms for rent, raw ISO deadline, "Collect fees" for a Uniswap
+  collect that may include principal).
+- Chat: "Only N positions match" counts eligible positions after an unresolved ordinal; an ordinal after a range-filtered list counts the
+  unfiltered list; "retira 10 USDC da minha liquidez" is read as an Aave Withdraw (the behaviour before this build; the owner reviews it).
+- Execution: relayed (EIP-7702) submissions are not covered by the same-block nonce rule, so a request whose receipt arrives between the receipt
+  read and the head read can still read as expired (the behaviour before this build); query the count by block hash (EIP-1898); NOT_FOUND is
+  judged at the unconfirmed head; the mint envelope check does not bind the nonce; a lapsed position PREPARED attempt blocks a mint's nonce
+  until observed (fails closed); a FloFi Wallet (embedded) session sees "rejected" rather than "not supported"; Orca has no per-position claim
+  (two separately authorized withdrawals of one position can both land).
+- Discovery: Orca reads only the verified SOL/USDC Whirlpool, so a wallet holding positions on other Whirlpools reads as having none there; the
+  catalog read and the per-position static collect share the 12 s budget (a large wallet may show UNAVAILABLE); queued reads continue after the
+  deadline; degraded manageability is cached for 30 s with the reason `POOL_NOT_VERIFIED`.
+- CI: refresh the two new profile timings with `scripts/ci_timings.py` after the first certification.
+
+### 12.4 Gates at the tested commit
+
+Local gates (Node 24.21.0, pnpm 11.22.0, Anvil 1.8.3; CircleCI is the certification authority):
+
+- `pnpm check` at 0d820527: typecheck (16/16), lint and build (9/9), schema drift (11 exports), unit and contract suites with 749 files
+  passed and 2 skipped (both skips predate this build; none was added and no test was deleted), 9685 tests.
+- `pnpm test:postgres` on disposable PostgreSQL 16.15: 136 of 137 files passed, 932 of 933 tests. These include the 0031 certificate and its
+  reversal, the end-to-end position purge, and the cloud flows. The one failure is `forward-compatibility.pg.test.ts`, the 0015 check on a v14
+  database: it expects the three NOT NULL constraint rows that PostgreSQL 18 models, while local PostgreSQL 16 records none. This build changes
+  neither that test nor 0015. CircleCI runs PostgreSQL 18.
+- MOCKED browser profiles on the 0d820527 production build:
+  - `liquidity-position-management` 8/8 (Editor, Dashboard and the chat spec on closed replay);
+  - `orca-position-management` 2/2, after ba89dafb aligned the spec with the Dashboard's current "Open (has liquidity)" label (it had failed
+    deterministically on that text);
+  - `copilot` 13/13 and `copilot-pool-dialogue` 3/3 (existing replay chat paths, after the chat fixes).
+- `python3 scripts/governance_lite.py` passed. `python3 -m unittest discover -s scripts`: 353 tests OK.
+- `python3 scripts/agent_guard.py check` PASS (19 domains, 185 modules). `impact`: no unmapped path. `agent_evolution.py`: advisory signals
+  only, with no missing suite or owner.
+- `agent_guard.py review` (hook-observed): it records a peak of four concurrent `flofi-*` reviewers against a limit of three. This happened once,
+  early, when the first flofi-security review overlapped the next batch and was then stopped. Every later batch ran at three or fewer. It also
+  records the implementation agents (general-purpose and workflow) as invoked outside the review plan.
+- The CircleCI certification of the pull request's exact head is recorded on the pull request.
+
+### 12.5 Rollout order
+
+1. The owner reviews the pull request. It is merged only on the owner's authorization, after CircleCI certifies its exact head.
+2. Deploying it changes no schema. `SHIPPED_MIGRATIONS` stays at 28, and the pre-deploy `migrate` applies nothing. 0031 is certified, not applied.
+3. Owner-execution gate (owner decision, §11): position operations use the existing per-network owner-execution switch for minting. Where a
+   switch is already on, collect, withdrawal, exit and close are offered with real funds as soon as this release is deployed, and no public-network
+   evidence exists yet. Owner wallet authorization, owner-only recipients and explicit close still apply. To hold them back, keep the switch off
+   until a first supervised operation. This build changes no switch.
+4. First supervised operation per network, with the owner's own funds and signature: it is the first public-network evidence. Until it
+   exists, the evidence class stays local or MOCKED (§10).
+5. 0031 follows its own staged procedure ([RELEASE-POSITION-PURGE-0031.md](../deploy/RELEASE-POSITION-PURGE-0031.md)): FinOps 0029/0030 first, a
+   rehearsal on a disposable Neon branch, then the owner's approval.
+
+Rollback: before 0031, any earlier build can still serve the database, because the schema is unchanged. Position runs written by this release
+are readable only by a build that knows the position format (`flofi.uniswap-position-run.v1`). An older worker still schedules a submitted,
+pending or uncertain position run for observation, but it cannot load the run. That run therefore stays unreconciled, and nothing is sent: the
+older build has no send path for it. Roll back only when no position run is in flight; otherwise redeploy forward, and the position run is then
+reconciled from where it stopped. Never edit or delete a run to make an older build accept it.
+
+### 12.6 Confirmation
+
+No real-money transaction was signed, sent or broadcast. No production database was read or written. No migration was applied outside disposable
+PostgreSQL. No environment variable, execution gate, fee policy, or Railway or Vercel configuration was changed. Browser and fork acceptance used
+closed replay and loopback harnesses only.
