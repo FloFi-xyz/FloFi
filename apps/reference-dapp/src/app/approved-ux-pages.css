@@ -99,8 +99,9 @@
 .ux-page .ux-workflow-rows .ux-row{padding:10px 0}
 .ux-page .ux-workflow-rows :is(.ux-row-name,.ux-row-toggle){min-height:24px;display:flex;align-items:center}
 .ux-page .ux-workflow-rows :is(.ux-row-name>span,.ux-row-toggle>span:first-child){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ux-page .ux-workflow-rows .ux-row-actions{flex-wrap:nowrap}
-.ux-page .ux-workflow-rows .ux-row-actions>.ux-tag{flex:0 1 auto;overflow-wrap:anywhere}
+/* Compact rows keep status + Open + ··· together when they fit; wrapping stays allowed so UX-01
+   (320 px at 125%) never clips a status tag or button past the row. */
+.ux-page .ux-workflow-rows .ux-row-actions>.ux-tag{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
 .ux-page .ux-workflow-rows .ux-row-actions>:is(.ux-button,.history-actions){flex:none}
 .ux-page .ux-list-empty{display:grid;gap:6px;padding:28px 22px;text-align:left}
 .ux-page .ux-list-empty h3{margin:0;font-size:16px;font-weight:600;color:var(--ink)}
