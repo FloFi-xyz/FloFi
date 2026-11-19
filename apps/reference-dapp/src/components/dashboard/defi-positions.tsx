@@ -255,9 +255,22 @@ function LiquidityPositionFacts({ view, prepare }: { view: LiquidityPositionView
       <p className={styles.note}>{t(orca && actions.includes('CLOSE') ? 'These actions prepare the workflow only. You review it and confirm in your wallet; nothing is executed here. Closing an Orca position refunds its account rent.'
         : 'These actions prepare the workflow only. You review it and confirm in your wallet; nothing is executed here.')}</p>
     </>}
-    {refusal && (refusal.code === 'POSITION_WORKFLOW_HAS_OTHER_STEPS' ? <div role="alert" className={styles.actions}>
-      <p>{t('Your current workflow has other steps. Start a new workflow for this position; the current one stays in your history if you saved it.')}</p>
-      <button type="button" className="ux-button ux-button-small" onClick={() => run(refusal.choice, true)}>{t('Start a new workflow')}</button>
-    </div> : <p role="alert">{t('This position could not be prepared. Nothing was simulated or sent. Refresh the positions and try again.')}</p>)}
+    {refusal && <PreparationRefusal code={refusal.code} startNew={() => run(refusal.choice, true)}/>}
   </div>;
+}
+
+/**
+ * Why the Editor did not take a position action (nothing was prepared, simulated or sent): the open workflow has other steps (the owner may start a
+ * new workflow for the position — an explicit click), it is still being executed or checked (it is never changed under its run), or the
+ * preparation failed.
+ */
+export function PreparationRefusal({ code, startNew }: { code: string; startNew: () => void }) {
+  const { t } = useLocale();
+  if (code === 'POSITION_WORKFLOW_HAS_OTHER_STEPS') return <div role="alert" className={styles.actions} data-position-refusal={code}>
+    <p>{t('Your current workflow has other steps. Start a new workflow for this position; the current one stays in your history if you saved it.')}</p>
+    <button type="button" className="ux-button ux-button-small" onClick={startNew}>{t('Start a new workflow')}</button>
+  </div>;
+  return <p role="alert" data-position-refusal={code}>{t(code === 'POSITION_WORKFLOW_EXECUTING'
+    ? 'Your current workflow is still being executed or checked. Follow it in Operate; prepare this position once it has finished. Nothing was changed.'
+    : 'This position could not be prepared. Nothing was simulated or sent. Refresh the positions and try again.')}</p>;
 }

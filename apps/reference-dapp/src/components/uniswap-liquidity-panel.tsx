@@ -246,29 +246,27 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
 }
 
 /**
- * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the engineering panel of a Uniswap position operation (collect, withdrawal, exit, explicit close): the
- * same Review rows as the product Review (`uniswapPositionReviewLines`), one Review acceptance and one Execute click for the run's one wallet
- * request. FloFi never signs or sends; an unknown wallet outcome is only observed.
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the engineering (technical details) panel of a Uniswap position operation (collect, withdrawal, exit,
+ * explicit close): READ-ONLY. BUILD-FLOFI-UX-EDITOR-FINOPS-001: the Editor's stages own every action — Simulate runs the simulation, Execute holds
+ * the Review's ONE "Authorize workflow" (or "Refresh review") and the status checks — so this panel repeats none of them; it shows the same Review
+ * rows (`uniswapPositionReviewLines`), the run's attempts and its reconciled result. FloFi never signs or sends; an unknown outcome is only observed.
  */
 function UniswapPositionPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
-  const position = useUniswapPosition(), wallet = useBuild009Wallet();
-  const record = position.record, r = record?.review, last = record?.attempts.at(-1);
+  const position = useUniswapPosition();
+  const record = position.record, r = record?.review;
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const fresh = r ? Math.max(0, Math.round((Date.parse(r.expiresAt) - clock) / 1000)) : 0;
-  const pending = Boolean(last && record?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
   const authorized = Boolean(record?.authorization && record.authorization === r?.commitment);
-  const canExecute = Boolean(authorized && !position.retired && !pending && record?.verdict === 'PENDING' && fresh > 0 && position.executionEnabled && !record?.attempts.some(a => a.state === 'CONFIRMED'));
   const lines = r && !position.retired ? uniswapPositionReviewLines(r) : null;
   const info = position.error ?? record?.error;
   const request = position.request;
-  return <section className="panel" aria-label={tr('Uniswap position')}><h2>{tr(view === 'simulate' ? 'Simulate position operation' : 'Review position operation')}</h2>
+  return <section className="panel" aria-label={tr('Uniswap position')} data-position-panel="read-only"><h2>{tr(view === 'simulate' ? 'Simulate position operation' : 'Review position operation')}</h2>
     {request && <p>{tr(liquidityPositionActionLabel(request.operation, request.close))} · #{request.tokenId}</p>}
     <p role="note">{tr('This uses real funds. One wallet request to the Uniswap Position Manager; FloFi never signs or sends.')}</p>
+    <p className="muted">{tr('Simulate, authorize and follow this operation from the Editor: Simulate shows its result, Execute its Review and your one wallet request.')}</p>
     {position.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
-    {!wallet.account && <button type="button" disabled={wallet.busy} onClick={() => void wallet.connect()}>{tr("Connect wallet")}</button>}
-    {view === 'simulate' && <button type="button" disabled={position.busy || !position.available || !request} onClick={() => void position.simulate()}>{tr('Simulate position operation')}</button>}
     {lines && <dl className="swap-summary" aria-label={tr('Position operation review')}>
       {lines.details.map(line => <div key={line.label}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}</dd></div>)}
       <dt>{tr('Maximum network fee')}</dt><dd>{tr(r!.fees.totalUpperBoundWei ?? r!.fees.executionFeeUpperBoundWei)} wei</dd>
@@ -276,11 +274,8 @@ function UniswapPositionPanel({ view }: { view: 'simulate' | 'execute' }) {
     </dl>}
     {lines && <ul aria-label={tr('Position operation notices')}>{lines.warnings.map(w => <li key={w.message}>{tr(w.message)}</li>)}</ul>}
     {view === 'execute' && record && <>
-      {!authorized && !pending && record.verdict === 'PENDING' && !position.retired && fresh > 0 && <button type="button" disabled={position.busy} onClick={() => void position.review()}>{tr('Accept position review')}</button>}
       {authorized && !position.executionEnabled && <p role="status">{tr("Execution is not enabled on this server. Simulation and Review remain read-only.")}</p>}
-      {canExecute && <button type="button" className="primary" disabled={position.busy} onClick={() => void position.execute()}>{tr('Execute in wallet')}</button>}
       {position.requoted && <p className="bridge-requote-reason" role="status">{tr(requotedMessage(position.requoted.code))}</p>}
-      {pending && <button type="button" disabled={position.busy} onClick={() => void position.observe()}>{tr("Observe existing transaction")}</button>}
       {record.attempts.length > 0 && <ol aria-label={tr('Position transactions')}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.state.toLowerCase().replaceAll('_', ' '))}
         {a.transactionHash && <> · <code>{a.replacementHash ?? a.transactionHash}</code></>}</li>)}</ol>}
       {record.result && record.evidence && <section aria-label={tr('Position result')} className="swap-result"><h3>{tr('Reconciled')}</h3>

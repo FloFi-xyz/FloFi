@@ -2,7 +2,8 @@
 'use client';
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
-import { uniswapPositionRunResumable, uniswapRefreshInPlace } from '../domain/uniswap-liquidity-continuation';
+import { uniswapPositionRefreshInPlace, uniswapRefreshInPlace } from '../domain/uniswap-liquidity-continuation';
+import { positionPreparationRefusal } from '../domain/liquidity-position-summary';
 import { orcaPositionRequestOf, orcaPositionRequestOfMarker, workflowPositionManagement, type LiquidityPositionChoice } from '../domain/liquidity-positions';
 import type { LiquidityPositionPoolInput } from '../domain/commands';
 import { flightWalletAccess } from '../app/flight-wallet-action';
@@ -472,9 +473,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : simulationSource.kind === 'supply' ? supply.simulate
     // EXEC-01: "Simulate again" of a started liquidity run (an approval landed, nothing pending) refreshes that same run in place: the
     // confirmed approval is kept and only the remaining requests are reviewed again. A run with nothing landed starts a new simulation.
-    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged Uniswap position operation simulates exactly that operation (`uniswapPositionRequestOf`); a run
-    // whose request was refused before the wallet (nothing sent) is refreshed in place.
-    : positionServed ? () => uniswapPosition.record && !uniswapPosition.retired && uniswapPosition.record.attempts.length > 0 && uniswapPositionRunResumable(uniswapPosition.record)
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged Uniswap position operation simulates exactly that operation (`uniswapPositionRequestOf`); the
+    // Editor's "Refresh review" (C2) and "Simulate again" refresh the SAME run in place while nothing of it was sent and the owner is connected.
+    : positionServed ? () => uniswapPositionRefreshInPlace(uniswapPosition.record, uniswapPosition.retired, connectedWallet.account)
       ? uniswapPosition.refresh() : uniswapPosition.simulate()
     : simulationSource.kind === 'uniswap-pool' ? () => uniswapRefreshInPlace(uniswapLiquidity.record, uniswapLiquidity.retired) ? uniswapLiquidity.refresh() : uniswapLiquidity.simulate()
     : simulationSource.kind === 'solana-composition' ? solanaComposition.simulate
@@ -659,6 +660,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   function prepareLiquidityPosition(choice: LiquidityPositionChoice, pool: LiquidityPositionPoolInput, fresh = false): string | null {
     if (!stageLiquidityPosition) return 'LIQUIDITY_POSITION_UNAVAILABLE';
     if (fresh) { setQueuedPosition({ choice, pool, from: state.workflow.workflowId }); resetForNewWorkflow(); return null; }
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (Editor integration): a workflow being executed or checked is never changed under its run, and one with
+    // other steps (a deposit, another position, a swap…) is replaced only after the owner explicitly starts a new workflow for this position.
+    const refusal = positionPreparationRefusal(state.workflow, choice, editingPaused);
+    if (refusal) return refusal;
     const result = stageLiquidityPosition(choice, pool);
     if (!result.ok) return result.error;
     setTab('Build');

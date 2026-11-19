@@ -22,6 +22,7 @@ import { createAuthoredTransfer } from './robinhood-transfer-authoring';
 import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION, markConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
+import { workflowMixesPositionManagement } from './liquidity-positions';
 import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, uniswapCatalogDeployment } from '@defi-workflow-engine/action-registry';
 import { uniswapPositionAsset } from '@defi-workflow-engine/reference-linter';
 import { formatTokenAmount } from './jupiter-authoring';
@@ -45,7 +46,13 @@ export const templateEditor = (): EditorState => ({ workflow: templateWorkflow()
  * link, and is skipped for fixed compositions and whenever the linked draft would not validate (the step is then added unlinked, as before).
  */
 export function editorReducer(state: EditorState, command: Command, context?: ReviewContext): EditorState {
-  return autoConnect(state.workflow, reduceEditor(state, command, context), context);
+  const next = autoConnect(state.workflow, reduceEditor(state, command, context), context);
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation is its workflow's only financial step (Create's toolbar, the chat and every proposal
+  // reach this reducer). A change that would put another step beside it is refused with the existing "use a separate workflow" reason; a
+  // workflow that already mixes them (restored from elsewhere) can still be edited, e.g. to remove a step.
+  if (!next.error && next.workflow !== state.workflow && workflowMixesPositionManagement(next.workflow) && !workflowMixesPositionManagement(state.workflow))
+    return { workflow: state.workflow, error: 'POSITION_WORKFLOW_HAS_OTHER_STEPS' };
+  return next;
 }
 function autoConnect(before: Workflow, after: EditorState, context?: ReviewContext): EditorState {
   if (after.error || after.workflow === before) return after;

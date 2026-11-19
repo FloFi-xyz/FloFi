@@ -4,6 +4,7 @@ import { solanaSwapDetails } from './jupiter-authoring';
 import { routerDetails } from './router-authoring';
 import { universalBridgeDetails } from './universal-bridge-authoring';
 import { formatSlippage } from './slippage-policy';
+import { workflowPositionManagement } from './liquidity-positions';
 
 /**
  * BUILD-FLOFI-BUILDER-UX-002: the compact summary a Canvas step card states. Presentation only: every value is read from the step itself (or from
@@ -13,6 +14,8 @@ import { formatSlippage } from './slippage-policy';
 export type CanvasCardSummaryInput = {
   readonly action: string; readonly provider: string; readonly chain: string; readonly amount: string;
   readonly detail?: string | undefined; readonly bridgePair?: string | undefined;
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a step managing an existing position names that position. */
+  readonly position?: { readonly subject: string } | undefined;
 };
 
 /** Network labels carry their chain number elsewhere on the card; the flow line names the network only. */
@@ -25,6 +28,8 @@ const tokenOf = (amount: string) => /^\S+ (\S+)$/.exec(amount.trim())?.[1];
  * value boxes already name both assets).
  */
 export function canvasCardFlow(summary: CanvasCardSummaryInput, recipient?: string | null): string | null {
+  // A position-management step's flow is the position it acts on ("Uniswap v3 position #123"); it never names an amount it would deposit.
+  if (summary.position) return summary.position.subject;
   const token = tokenOf(summary.amount);
   switch (summary.action) {
     case 'Swap': case 'Stocks': return summary.detail?.includes(' → ') ? summary.detail : null;
@@ -63,7 +68,9 @@ export function canvasCardParams(node: Workflow['nodes'][number]): readonly Canv
   const constraint = node.userConstraints.find(item => item.kind === 'MAXIMUM_SLIPPAGE_BPS');
   const slippage = basisPoints(constraint?.kind === 'MAXIMUM_SLIPPAGE_BPS' ? constraint.maximumBps : undefined)
     ?? basisPoints(routerDetails(node)?.slippage) ?? basisPoints(universalBridgeDetails(node)?.slippage) ?? basisPoints(solanaSwapDetails(node)?.slippage);
-  if (slippage !== null) params.push({ key: 'slippage', value: formatSlippage(slippage) });
+  // A collection removes no liquidity, so no slippage bound applies to it (a withdrawal's minimum principal uses the configured slippage).
+  const collecting = workflowPositionManagement({ nodes: [node] })?.management.operation === 'COLLECT';
+  if (slippage !== null && !collecting) params.push({ key: 'slippage', value: formatSlippage(slippage) });
   const fee = node.inputs.find(input => input.name === 'fee-tier');
   if (fee?.kind === 'INTEGER' && Number.isSafeInteger(fee.value) && fee.value > 0 && fee.value < 1_000_000) params.push({ key: 'fee-tier', value: percent(fee.value, 10_000) });
   return params;

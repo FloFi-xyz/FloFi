@@ -110,8 +110,20 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: staged position choice', () => {
     // Another command clears it too.
     expect(store.commitChatCommand(manage(choice('COLLECT')))).toMatchObject({ ok: true }); render(true);
     expect(store.stagedPosition?.operation).toBe('COLLECT');
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (Editor integration, intentional change of this test): another step is never added beside a position
+    // operation (it would make the workflow a sequence or a grouped workflow run around a step only the position runtime may serve). The swap is
+    // refused, so the workflow — and the staged choice that describes it — stay exactly as they were.
+    const positionWorkflow = store.state.workflow;
     store.dispatch(parseLocalCommand('swap 0.001 ETH to USDC on Base slippage 100 bps', store.state.workflow, context, OWNER)); render(true);
+    expect(store.state.workflow).toBe(positionWorkflow);
+    expect(store.state.error).toBe('POSITION_WORKFLOW_HAS_OTHER_STEPS');
+    expect(store.stagedPosition?.operation).toBe('COLLECT');
+    // Another command (removing the position's step) clears the staged choice; on a workflow with other steps a position is never staged.
+    store.dispatch({ type: 'REMOVE', nodeId: positionWorkflow.nodes.find(node => node.actionType === 'asset.liquidity.concentrated')!.nodeId, source: 'CANVAS',
+      baseRevision: store.state.workflow.revision }); render(true);
     expect(store.stagedPosition).toBeNull();
+    store.dispatch(parseLocalCommand('swap 0.001 ETH to USDC on Base slippage 100 bps', store.state.workflow, context, OWNER)); render(true);
+    expect(store.state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input')).toBe(true);
     expect(store.commitChatCommand(manage(choice('COLLECT')))).toMatchObject({ ok: false, error: 'POSITION_WORKFLOW_HAS_OTHER_STEPS' }); render(true);
     expect(store.stagedPosition).toBeNull();
     vi.stubGlobal('crypto', { randomUUID: () => '00000000-0000-4000-8000-000000000002' });

@@ -74,3 +74,12 @@ export function uniswapPositionReviewAuthorizable(record: (PositionRun & { reado
   if (!record || record.format !== 'flofi.uniswap-position-run.v1' || record.verdict !== 'PENDING') return false;
   return record.attempts.every(a => supersededUnsent(a, record.review.commitment));
 }
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (Editor C2, "Refresh review"): Simulate again / Refresh review of a position workflow refreshes the SAME run
+ * in place — a fresh read-only simulation and Review of the same request, nothing sent — when that run still stands for this workflow and choice
+ * (`retired` false), nothing of it can have reached the network (`uniswapPositionRunResumable`) and the connected wallet is the run's owner.
+ * Otherwise a new simulation starts (another wallet or choice); a run that is final or holds a sent request is never refreshed, only observed.
+ */
+export function uniswapPositionRefreshInPlace(record: (PositionRun & { readonly owner: string }) | null | undefined, retired: boolean, account: string | null | undefined): boolean {
+  return Boolean(record && !retired && account && account.toLowerCase() === record.owner.toLowerCase() && uniswapPositionRunResumable(record));
+}

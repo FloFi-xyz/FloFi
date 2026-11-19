@@ -16,6 +16,7 @@ import { actionReviewValue } from './canvas-action-setup';
 import { defaultCanvasPosition, shownCanvasPositions, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
 import { freeze, type Workflow } from './initial-workflow';
+import { workflowMixesPositionManagement } from './liquidity-positions';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
 import { transferDetails } from './robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from './recipient-address';
@@ -92,6 +93,8 @@ export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, no
   const candidate = { ...workflow, revision: workflow.revision + 1,
     nodes: [...workflow.nodes, ...nodes], resourceEdges: [...workflow.resourceEdges, ...resourceEdges] };
   try { validateWorkflowDraft(candidate, context); } catch { return null; }
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation stays its workflow's only financial step (never duplicated beside itself or others).
+  if (workflowMixesPositionManagement(candidate)) return null;
   const duplicateLayout = { ...layout };
   for (const [index, node] of sources.entries()) {
     const sourcePosition = layout[node.nodeId]?.actionType === node.actionType
