@@ -9,6 +9,14 @@ const quantity = (v: unknown): bigint => {
   return BigInt(v);
 };
 const tag = (n: number) => '0x' + n.toString(16);
+/**
+ * True only when the owner's nonce of `attempt` is provably unused AT block `at` (an unreadable count is never proof). "Expired, never executed" is
+ * judged at ONE block: its timestamp past the deadline AND this at that same block. A discovery that read an earlier (or another node's) head can
+ * otherwise miss a request mined in between (flofi-wallet-execution P2-1; shared by the Uniswap mint and position runtimes).
+ */
+export async function evmNonceUnusedAt(rpc: Rpc, attempt: Pick<Attempt, 'nonce' | 'tx'>, at: number): Promise<boolean> {
+  try { return quantity(await rpc('eth_getTransactionCount', [attempt.tx.from.toLowerCase(), tag(at)])) <= BigInt(attempt.nonce); } catch { return false; }
+}
 export const legacyUnprovenApproval = (a: { state: string; step: string; note: string | null; transactionHash: string | null }) =>
   a.state === 'NOT_FOUND' && a.step.includes('APPROV') && /^(UNIVERSAL|ROUTER|UNISWAP)_SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(a.note ?? '');
 

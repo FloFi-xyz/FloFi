@@ -24,7 +24,7 @@ import { decodeUniswapAmounts, decodeUniswapCollect, decodeUniswapDecreaseLiquid
 import { hashArtifactBytes, type ConcentratedLiquidityManagement, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { sameEvmIntent } from './evm-submission-discovery.ts';
+import { evmNonceUnusedAt, sameEvmIntent } from './evm-submission-discovery.ts';
 import { verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
 import { readNotAnswered } from './public-testnet-rpc.ts';
 import { recordLiquidityOutcome, type LiquidityOutcome } from './liquidity-lifecycle-telemetry.ts';
@@ -195,10 +195,6 @@ export function validateUniswapPositionLog(bytes: Uint8Array, idPattern: RegExp,
  */
 const neverSent = (record: { readonly attempts: readonly UniswapPositionAttempt[] }) =>
   record.attempts.every(a => a.state === 'CANCELLED' && !a.transactionHash && !a.replacementHash);
-/** True only when the owner's nonce of `attempt` is provably unused at block `at` (an unreadable count is never proof). */
-async function nonceUnusedAt(R: { readonly rpc: Rpc }, attempt: UniswapPositionAttempt, at: number): Promise<boolean> {
-  try { return quantity(await R.rpc('eth_getTransactionCount', [attempt.tx.from.toLowerCase(), tag(at)])) <= BigInt(attempt.nonce); } catch { return false; }
-}
 const collectsToOwner = (data: string, owner: string) => decodeUniswapPositionRequest(data).every(c => c.kind !== 'COLLECT' || decodeUniswapCollect(c.data).recipient === owner);
 function validatePositionLines(bytes: Uint8Array, idPattern: RegExp, chainId: number | null): void {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -814,7 +810,7 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
           // judged at ONE block: its timestamp is past the deadline AND the owner's nonce is still unused at that same block. The discovery above
           // read an earlier (or another node's) head, so a withdrawal mined in between is never recorded as not executed (flofi-wallet-execution P2-1).
           const latest = await R.head();
-          if (record.review.deadline !== null && latest.timestamp > Number(record.review.deadline) && await nonceUnusedAt(R, attempt, latest.number))
+          if (record.review.deadline !== null && latest.timestamp > Number(record.review.deadline) && await evmNonceUnusedAt(R.rpc, attempt, latest.number))
             return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' },
               { ...attempt, state: 'NOT_FOUND', note: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' }));
           // An observation that learns nothing new appends nothing: polling a long-uncertain request never grows the log (flofi-liquidity P3-4).

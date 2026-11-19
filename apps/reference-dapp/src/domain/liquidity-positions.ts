@@ -27,7 +27,8 @@ export type LiquidityPositionRef = {
 export type LiquidityPositionToken = { readonly symbol: string; readonly address: string; readonly decimals: number };
 export type LiquidityPositionManageability =
   | { readonly ok: true }
-  /** POOL_NOT_VERIFIED: a pair or pool FloFi cannot verify (non-catalog token, other Whirlpool). LEGACY_POSITION_TOKEN / DELEGATED_POSITION_TOKEN: an Orca
+  /** POOL_NOT_VERIFIED: a Uniswap v3 pair or pool FloFi cannot verify (non-catalog token or pool). Orca discovery reads only the verified SOL/USDC
+   * Whirlpool; positions on other Whirlpools are not listed (a documented follow-up). LEGACY_POSITION_TOKEN / DELEGATED_POSITION_TOKEN: an Orca
    * position token the verified engine does not manage. REWARDS_UNSUPPORTED: emitting reward state the engine refuses. */
   | { readonly ok: false; readonly reason: 'POOL_NOT_VERIFIED' | 'LEGACY_POSITION_TOKEN' | 'DELEGATED_POSITION_TOKEN' | 'REWARDS_UNSUPPORTED' };
 export type LiquidityPositionView = {

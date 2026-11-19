@@ -22,7 +22,7 @@
  * Position Manager when the on-chain allowance is short, then one mint whose NFT recipient is the owner. Each step is
  * its own wallet request; a confirmed approval requires a fresh simulation and Review before the mint.
  */
-import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
+import { discoverEvmNonce, evmNonceUnusedAt, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { ARBITRUM_ONE, ARBITRUM_ONE_TRANSFER, BASE_MAINNET_TRANSFER, catalogAsset, ETHEREUM_MAINNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
   uniswapCatalogDeployment, uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
@@ -966,7 +966,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         const found = await discoverByNonce(attempt);
         if (!found.consumed) {
           const latest = await head();
-          const expired = attempt.step === 'MINT' ? latest.timestamp > Number(decodeUniswapMint(attempt.tx.data).deadline)
+          // Judged at one block: past the deadline AND the owner's nonce still unused at that block (flofi-wallet-execution P2-1, mint parity).
+          const expired = attempt.step === 'MINT' ? latest.timestamp > Number(decodeUniswapMint(attempt.tx.data).deadline) && await evmNonceUnusedAt(rpc, attempt, latest.number)
             : false;
           if (expired) return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' },
             { ...attempt, state: 'NOT_FOUND', note: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' }));

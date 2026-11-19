@@ -316,7 +316,7 @@ export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: 
   const warnings: { severity: SimulationWarning['severity']; message: string }[] = [
     { severity: 'attention', message: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close) },
     // A withdrawal shows an expected total and its floor apart: only "Collected, at least" is a lower bound (flofi-frontend-ux review P3-1).
-    removing ? { severity: 'info', message: '"Collected, at least" is the floor the chain enforces; "Collected (expected)" can come in lower within your slippage limit. Fees accrued until execution are also collected.' }
+    removing ? { severity: 'info', message: '"Collected, at least" adds the principal minimum the chain enforces to the owed tokens and fees read now; "Collected (expected)" can come in lower within your slippage limit. Fees accrued until execution are also collected.' }
       : { severity: 'info', message: 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.' },
     { severity: 'info', message: 'Owed tokens and fees can include principal withdrawn earlier and not collected; they are not only trading fees.' },
     { severity: 'info', message: 'Tokens are returned to your wallet as the pool\'s own tokens; nothing is swapped or unwrapped.' },
