@@ -22,7 +22,12 @@ export type LiquidityOutcomeEvent = { readonly outcome: LiquidityOutcome; readon
   readonly operation?: (typeof OPERATIONS)[number] | null; readonly code?: string | null; readonly count?: number | null;
   /** UNKNOWN: a read that failed before any data (and so its provenance) existed. */ readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED' | 'UNKNOWN' };
 type Fields = Readonly<Record<string, string | number | null>>;
-const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
+/**
+ * FloFi's own refusal codes only: upper-case words of at most 24 characters, each starting with a letter, and at most two digits in all
+ * (`UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED`). A token id, mint, address or amount can never fit (flofi-data-privacy #2).
+ */
+const CODE = /^(?=.{3,80}$)[A-Z][A-Z0-9]{0,23}(?:_[A-Z][A-Z0-9]{0,23})*$/;
+const codeAllowed = (code: string) => CODE.test(code) && (code.match(/[0-9]/g) ?? []).length <= 2;
 /** Discovery counts are bucketed so a line never reveals a wallet's exact holdings. */
 const bucket = (count: number) => count <= 0 ? '0' : count === 1 ? '1' : count <= 5 ? '2-5' : count <= 20 ? '6-20' : '21+';
 
@@ -33,12 +38,23 @@ export function setLiquidityOutcomeSink(next: ((fields: Fields) => void) | null)
 /** The closed line for an event, or null when any field falls outside the schema (nothing partial is ever logged). */
 export function liquidityOutcomeFields(event: LiquidityOutcomeEvent, env: Readonly<Record<string, string | undefined>>): Fields | null {
   if (!LIQUIDITY_OUTCOMES.includes(event.outcome) || !PROTOCOLS.includes(event.protocol) || !(NETWORKS as readonly string[]).includes(event.network) ||
-      (event.operation != null && !OPERATIONS.includes(event.operation)) || (event.code != null && !CODE.test(event.code)) ||
+      (event.operation != null && !OPERATIONS.includes(event.operation)) || (event.code != null && !codeAllowed(event.code)) ||
       (event.count != null && (!Number.isSafeInteger(event.count) || event.count < 0)) || !['PUBLIC_MAINNET', 'MOCKED', 'UNKNOWN'].includes(event.provenance)) return null;
   return { schema: 'flofi.liquidity-lifecycle.v1', evidence: 'OPERATIONAL_SIGNAL', deployment: deploymentEnvironment(env), outcome: event.outcome,
     protocol: event.protocol, network: event.network, operation: event.operation ?? null, code: event.code ?? null,
     positions: event.count == null ? null : bucket(event.count), provenance: event.provenance };
 }
+/**
+ * The structured logger adds the current trace and span ids to every line; this line must not carry them, or it could be joined to a run's other
+ * span lines (flofi-data-privacy #1; the journey route likewise runs outside any span). Same pipeline, same redaction, no trace fields.
+ */
+export const TRACE_FIELDS = ['trace_id', 'span_id', 'parent_span_id'] as const;
+export function withoutTraceFields(line: string): string {
+  const record = JSON.parse(line) as Record<string, unknown>;
+  for (const key of TRACE_FIELDS) delete record[key];
+  return JSON.stringify(record);
+}
+const traceFreeLogger = () => createLogger({ service: 'flofi-liquidity', sink: line => { process.stdout.write(withoutTraceFields(line) + '\n'); } });
 /** Never throws and never blocks the financial path: a logging failure is dropped. */
 export function recordLiquidityOutcome(event: LiquidityOutcomeEvent, env: Readonly<Record<string, string | undefined>> = process.env): void {
   try {
@@ -46,6 +62,6 @@ export function recordLiquidityOutcome(event: LiquidityOutcomeEvent, env: Readon
     const fields = liquidityOutcomeFields(event, env);
     if (!fields) return;
     if (sink) sink(fields);
-    else createLogger({ service: 'flofi-liquidity' }).info('liquidity.lifecycle', fields);
+    else traceFreeLogger().info('liquidity.lifecycle', fields);
   } catch { /* operational signal only */ }
 }

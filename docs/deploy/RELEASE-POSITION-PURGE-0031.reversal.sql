@@ -5,9 +5,11 @@
 -- are immutable); no row, table, trigger or privilege is touched.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
+-- The migration runner's own advisory lock: no concurrent runner can add a migration between the check below and the ledger change.
+SELECT pg_advisory_xact_lock(7340032001);
 DO $$ BEGIN
   IF (SELECT max(version) FROM schema_migrations) <> 31 OR NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 31 AND name = 'position_history_purge'
-    AND sha256 = 'c6d51adbb71828bfd83b2956f291e901f4205e50ebb80e71a0837a685b686065') THEN RAISE EXCEPTION 'NOT_CERTIFIED_0031_HEAD'; END IF;
+    AND sha256 = 'c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d') THEN RAISE EXCEPTION 'NOT_CERTIFIED_0031_HEAD'; END IF;
 END $$;
 CREATE OR REPLACE FUNCTION disposable_execution_snapshot(s jsonb, p_id text, p_owner text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE item record; nested jsonb; allowed text[];
@@ -47,5 +49,5 @@ BEGIN
 END; $$;
 REVOKE ALL ON FUNCTION disposable_execution_snapshot(jsonb,text,text) FROM PUBLIC;
 DELETE FROM schema_migrations WHERE version = 31 AND name = 'position_history_purge'
-  AND sha256 = 'c6d51adbb71828bfd83b2956f291e901f4205e50ebb80e71a0837a685b686065';
+  AND sha256 = 'c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d';
 COMMIT;

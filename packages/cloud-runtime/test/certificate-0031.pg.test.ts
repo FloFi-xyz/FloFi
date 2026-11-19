@@ -83,7 +83,7 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: certificate for 0031 position_his
   it('certifies the exact fixture bytes after the FinOps 0029/0030 for the v28 build; 0016 stays immutable and unshipped migrations stay in fixtures', async () => {
     expect(CERTIFICATE.base).toEqual(V28[27]);
     expect(CERTIFICATE.migrations.map(m => [m.version, m.name])).toEqual([[29, 'finops_ledger'], [30, 'finops_sync'], [31, 'position_history_purge']]);
-    expect((await fixture(31)).sha256).toBe('c6d51adbb71828bfd83b2956f291e901f4205e50ebb80e71a0837a685b686065');
+    expect((await fixture(31)).sha256).toBe('c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d');
     expect(SHIPPED_MIGRATIONS.find(m => m.version === 16)!.sha256).toBe('a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f');
     expect(sha(await readFile(new URL('../migrations/0016_owner_history_purge.sql', import.meta.url), 'utf8'))).toBe(SHIPPED_MIGRATIONS[15]!.sha256);
     // This build ships through 0028; a later build that ships 0029–0031 must ship exactly these identities.
@@ -97,6 +97,12 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: certificate for 0031 position_his
       "SET LOCAL lock_timeout = '5s';",
       'CREATE OR REPLACE FUNCTION disposable_execution_snapshot(s jsonb, p_id text, p_owner text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$',
       'REVOKE ALL ON FUNCTION disposable_execution_snapshot(jsonb,text,text) FROM PUBLIC;']);
+    // The predicate is 0016's, byte for byte, plus exactly the position branch and `result` in the must-be-null list (data-privacy review).
+    const original = await readFile(new URL('../migrations/0016_owner_history_purge.sql', import.meta.url), 'utf8');
+    const body = (text: string) => { const from = text.indexOf('FUNCTION disposable_execution_snapshot'); return text.slice(from, text.indexOf('END; $$;', from)); };
+    const branch = sql.slice(sql.indexOf("  ELSIF s->>'format'='flofi.uniswap-position-run.v1' THEN"), sql.indexOf('  ELSE RETURN false; END IF;'));
+    expect(branch.split('\n').filter(Boolean)).toHaveLength(6);
+    expect(body(sql).replace(branch, '').replace(",s->'result']", ']')).toBe(body(original));
   });
 
   it('serves schema 31 for the v28 build only through this certificate; the catalog diff is the one predicate; rows and logs survive; reruns change nothing', async () => {
@@ -151,6 +157,8 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: certificate for 0031 position_his
       ['signed', jsonl(position('signed', { review: { ...position('signed').review as Line, signature: '0x' + '02'.repeat(65) } }))],
       ['receipt', jsonl(position('receipt', { review: { ...position('receipt').review as Line, receipt: { status: 1 } } }))],
       ['extra-key', jsonl(position('extra-key', { claim: 'x' }))],
+      // A snapshot lacking one of the record's own keys (e.g. a future shape without `result`) is retained, never assumed unstarted.
+      ['missing-key', jsonl(Object.fromEntries(Object.entries(position('missing-key')).filter(([key]) => key !== 'result')))],
       ['wrong-id', jsonl(position('wrong-id', { id: 'another-run' }))],
       ['wrong-owner', jsonl(position('wrong-owner', { owner: OTHER }))],
       ['observed-status', jsonl(position('observed-status')), { needsObservation: true }],
@@ -196,27 +204,33 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: certificate for 0031 position_his
     for (const id of ['leased', 'intent', 'queued']) expect(await purge(t, id), id).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
   });
 
-  it('a deletion racing an authorization never loses the authorization: either the writer wins and the run is kept, or the writer is refused', async () => {
+  it('a deletion racing an authorization never loses it: both orders are forced, and the predicate (not the run status) refuses a later deletion', async () => {
     const { t, v30, m31 } = await schema30();
     expect(await migrate(t.db, [...v30, m31])).toEqual([31]);
-    for (let i = 0; i < 6; i += 1) {
-      const id = `race-${i}`, s = store(t, 'default', new Map()), writer = createPostgresLogStore({ db: t.open(2), tenantId: 'default', namespace: 'base-liquidity',
-        projector: (name, content) => name.endsWith('.jsonl') ? { run: { runId: id, workflowId: 'wf-' + id, flow: 'base-liquidity', status: 'AUTHORIZED', provenance: 'MOCKED',
-          ownerAccount: OWNER, recoveryOf: null, errorCode: null, needsObservation: false, hasEvidence: false, attempts: [], journal: [] }, work: [] } : (void content, null) });
-      const first = jsonl(position(id));
-      await s.create(id + '.jsonl', first);
-      const authorized = jsonl(position(id), position(id, { authorization: '0x' + 'ab'.repeat(32) }));
-      const [purged, written] = await Promise.allSettled([purge(t, id), writer.extend(id + '.jsonl', authorized, () => undefined)]);
-      expect(purged.status).toBe('fulfilled');
-      const result = (purged as PromiseFulfilledResult<{ ok: boolean; code?: string }>).value;
-      if (written.status === 'fulfilled') {
-        expect(result, id).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
-        expect(await s.read(id + '.jsonl')).toEqual(authorized);
-      } else {
-        expect(result, id).toMatchObject({ ok: true, disposition: 'DELETED' });
-        expect(String((written as PromiseRejectedResult).reason)).toMatch(/EXECUTION_DELETED|NOT_FOUND|JOURNAL_CORRUPT/);
-      }
-    }
+    // The writer's projection stays SIMULATED, so only the snapshot predicate can refuse the deletion.
+    const writerOf = (id: string) => createPostgresLogStore({ db: t.open(2), tenantId: 'default', namespace: 'base-liquidity',
+      projector: name => name.endsWith('.jsonl') ? { run: { runId: id, workflowId: 'wf-' + id, flow: 'base-liquidity', status: 'SIMULATED', provenance: 'MOCKED',
+        ownerAccount: OWNER, recoveryOf: null, errorCode: null, needsObservation: false, hasEvidence: false, attempts: [], journal: [] }, work: [] } : null });
+    const s = store(t, 'default', new Map()), authorize = (id: string) => jsonl(position(id), position(id, { authorization: '0x' + 'ab'.repeat(32) }));
+    // A. The deletion holds the log's advisory lock first: the authorization write waits for it, then is refused (the identity is tombstoned).
+    await s.create('first.jsonl', jsonl(position('first')));
+    const holder = t.open(1);
+    await holder.query('BEGIN');
+    const held = (await holder.query<{ result: { ok: boolean; disposition?: string } }>('SELECT purge_unstarted_execution($1,$2,$3) AS result', ['default', OWNER, 'first'])).rows[0]!.result;
+    expect(held).toMatchObject({ ok: true, disposition: 'DELETED' });
+    let settled = false;
+    const write = writerOf('first').extend('first.jsonl', authorize('first'), () => undefined).finally(() => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(settled).toBe(false); // blocked on the same advisory lock
+    await holder.query('COMMIT');
+    await expect(write).rejects.toThrow(/EXECUTION_DELETED|NOT_FOUND|JOURNAL_CORRUPT/);
+    expect((await t.db.query(`SELECT run_id FROM execution_runs WHERE run_id = 'first'`)).rows).toEqual([]);
+    // B. The authorization lands first: the run is kept, refused by the predicate alone (its projection is still SIMULATED).
+    await s.create('second.jsonl', jsonl(position('second')));
+    await writerOf('second').extend('second.jsonl', authorize('second'), () => undefined);
+    expect((await t.db.query<{ status: string }>(`SELECT status FROM execution_runs WHERE run_id = 'second'`)).rows).toEqual([{ status: 'SIMULATED' }]);
+    expect(await purge(t, 'second')).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(await s.read('second.jsonl')).toEqual(authorize('second'));
   });
 
   it('a failing 0031 rolls back completely; the documented emergency reversal restores the exact schema-30 catalog and the previous certificate', async () => {

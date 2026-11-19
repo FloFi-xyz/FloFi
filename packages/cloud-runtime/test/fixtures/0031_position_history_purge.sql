@@ -20,6 +20,8 @@ BEGIN
     -- BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap v3 position-management run (collect, partial withdrawal, exit, close). Exactly the record's
     -- own keys; `request` is the owner's choice (operation, token id, portion, close) and `result` must be null below (no observed outcome).
     allowed := ARRAY['format','id','provenance','workflow','owner','request','review','authorization','attempts','result','evidence','verdict','error'];
+    -- Every one of those keys must be present: a snapshot that lacks one (e.g. a future shape) is retained, never assumed unstarted.
+    IF NOT s ?& allowed THEN RETURN false; END IF;
   ELSE RETURN false; END IF;
   IF EXISTS (SELECT 1 FROM jsonb_object_keys(s) k WHERE NOT k=ANY(allowed)) THEN RETURN false; END IF;
   IF s ? 'attempts' THEN

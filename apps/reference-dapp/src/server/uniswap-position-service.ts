@@ -760,7 +760,8 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
           !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state)) fail('UNISWAP_DIAGNOSTIC_NOT_PRE_SUBMISSION');
       if (!diagnostic.invoked && attempt.state === 'SUBMISSION_RESULT_UNKNOWN') fail('UNISWAP_DIAGNOSTIC_NOT_PRE_SUBMISSION');
       const note = refused ? 'UNISWAP_REJECTED' : diagnostic.code;
-      outcome('WALLET_HANDOFF_FAILED', record.review.network, record.request, note);
+      // Telemetry carries a closed FloFi code, never the browser-reported diagnostic text (flofi-data-privacy #2).
+      outcome('WALLET_HANDOFF_FAILED', record.review.network, record.request, refused ? 'UNISWAP_REJECTED' : 'UNISWAP_WALLET_NOT_SUBMITTED');
       return save(replaceAttempt({ ...record, authorization: null, error: note }, { ...attempt, state: 'CANCELLED', note }));
     }); },
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */

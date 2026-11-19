@@ -254,7 +254,8 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       if (JSON.stringify(diagnostic).length > 16_384 || !new RegExp(`^${X}_[A-Z0-9_]{2,70}$`).test(diagnostic.code)) throw new Error(`${X}_DIAGNOSTIC_INVALID`);
       if (record.attempt && record.attempt.state !== 'PREPARED') throw new Error(`${X}_DIAGNOSTIC_NOT_PRE_SUBMISSION`);
       const cancelled = record.attempt ? orcaLiquidityTransition(record, 'CANCELLED') : record;
-      managed('WALLET_HANDOFF_FAILED', record.operation, diagnostic.code);
+      // Telemetry carries a closed FloFi code, never the browser-reported diagnostic text (flofi-data-privacy #2).
+      managed('WALLET_HANDOFF_FAILED', record.operation, `${X}_WALLET_NOT_SUBMITTED`);
       return save({ ...record, ...cancelled, authorization: null, notSubmitted: Boolean(record.attempt), walletDiagnostic: diagnostic, error: diagnostic.code, submissionError: diagnostic.code });
     }); },
     /** Verify the reviewed bytes (or a verified wallet guard) and every reviewed signature, persist both, then broadcast once. */
