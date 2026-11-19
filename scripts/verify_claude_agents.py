@@ -72,6 +72,37 @@ def text_of(content):
                      for item in content if isinstance(item, dict))
 
 
+def stream_events(stdout):
+    events, malformed = [], False
+    for line in stdout.splitlines():
+        if line.lstrip().startswith("{"):
+            try:
+                events.append(json.loads(line))
+            except (ValueError, RecursionError):
+                malformed = True
+    return events, malformed
+
+
+def stdout_failure(events):
+    """Describe a failed result without printing messages, tool inputs or transcripts."""
+    for event in reversed(events):
+        if event.get("type") != "result" or event.get("is_error") is not True:
+            continue
+        subtype = event.get("subtype")
+        if subtype not in ("error_during_execution", "error_max_turns", "error_max_budget_usd",
+                           "error_max_structured_output_retries"):
+            subtype = "unknown error subtype"
+        errors = event.get("errors")
+        messages = [error.lower() for error in errors if isinstance(error, str)] if isinstance(errors, list) else []
+        details = [f"structured result {subtype}", f"error count {len(messages)}"]
+        if any("auto mode" in message and "permission" in message for message in messages):
+            details.append("Auto Mode permission check failed")
+        if event.get("stop_reason") == "aborted_tools" or "aborted_tools" in messages:
+            details.append("aborted_tools")
+        return ", ".join(details)
+    return "no structured error in stdout"
+
+
 def run_claude(answer, session_id, *arguments, environment=None):
     """Run `claude -p` against a loopback Messages API whose replies come from `answer(body)`; return its events and ledger."""
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -101,22 +132,27 @@ def run_claude(answer, session_id, *arguments, environment=None):
             with tempfile.TemporaryDirectory(prefix="flofi-claude-probe-") as scratch:
                 env = {"PATH": os.environ["PATH"], "HOME": scratch, "CLAUDE_CONFIG_DIR": scratch,
                        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}", "ANTHROPIC_API_KEY": "offline-probe",
-                       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1",
-                       **(environment or {})}
+                       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1"}
                 version = subprocess.check_output(["claude", "--version"], env=env, text=True, stderr=subprocess.DEVNULL).strip()
                 run = subprocess.run(["claude", "-p", "--output-format", "stream-json", "--verbose", "--session-id", session_id,
                                       *arguments, "Offline FloFi agent probe."],
-                                     cwd=ROOT, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
+                                     cwd=ROOT, env={**env, **(environment or {})}, stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, timeout=600)
         finally:
             server.shutdown()
             worker.join()
             # Scripted probe evidence is not a review session, even after a timeout.
             rows = [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.is_file() else []
             ledger.unlink(missing_ok=True)
-    events = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
+    events, malformed = stream_events(run.stdout)
     init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None)
-    if run.returncode or not init or init.get("session_id") != session_id:
-        raise RuntimeError(f"Claude Code probe run failed (exit {run.returncode}): {run.stderr.strip()[-500:]}")
+    if run.returncode or malformed or not init or init.get("session_id") != session_id:
+        detail = run.stderr.strip()[-500:]
+        if not detail:
+            detail = stdout_failure(events)
+            if malformed:
+                detail += ", malformed stream JSON"
+        raise RuntimeError(f"Claude Code probe run failed (exit {run.returncode}): {detail}")
     return version, init, rows
 
 
@@ -230,8 +266,10 @@ def handback_phase():
             return [{"type": "text", "text": "<severity>5</severity>"}], "end_turn"
         return [{"type": "text", "text": "ok"}], "end_turn"
 
+    # Claude Code 2.1.327's server-side classifier cannot evaluate the scripted loopback actions.
     _version, _init, rows = run_claude(answer, str(uuid.uuid4()), "--permission-mode", "auto",
-                                       environment={"CLAUDE_CODE_SENDMESSAGE_HANDBACK": "1"})
+                                       environment={"CLAUDE_CODE_SENDMESSAGE_HANDBACK": "1",
+                                                    "CLAUDE_CODE_AUTO_MODE_SERVER": "0"})
     errors = []
     handbacks = {row["agent"] for row in rows if row["event"] == "handback" and row.get("review") == NO_FINDINGS}
     for index, domain in enumerate(DOMAINS):
