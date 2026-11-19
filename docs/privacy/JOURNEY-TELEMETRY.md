@@ -133,3 +133,29 @@ schema), `apps/reference-dapp/src/app/api/flofi/journey/route.test.ts` (route of
 tests; there is no production sample and no legal review yet.
 
 Change history: issue #149 turned the default from ON (unset logged) to OFF and added the browser switch.
+
+## 10. Liquidity lifecycle outcomes (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001)
+
+**Status: same as the journey timings — off by default, pending owner and legal review.** The server switch
+`FLOFI_JOURNEY_TELEMETRY=on` also enables one more content-free log line, `liquidity.lifecycle`
+(`apps/reference-dapp/src/server/liquidity-lifecycle-telemetry.ts`), written by FloFi's own servers (no browser beacon) when a
+liquidity position is discovered or a position-management run (collect, partial withdrawal, exit, close) is prepared, refused,
+handed off unsuccessfully or settled. With the switch unset, `off` or anything but `on`, nothing is written.
+
+| Field | Values |
+| --- | --- |
+| `schema` / `evidence` | `flofi.liquidity-lifecycle.v1` / `OPERATIONAL_SIGNAL` |
+| `deployment` | `production`, `preview`, `development` or `local` |
+| `outcome` | `POSITIONS_DISCOVERED`, `INSPECTION_UNAVAILABLE`, `COLLECTION_PREPARED`, `WITHDRAWAL_PREPARED`, `EXIT_PREPARED`, `SIMULATION_REJECTED`, `WALLET_HANDOFF_FAILED`, `PARTIAL_COMPLETION`, `RECONCILED`, `RECONCILIATION_REQUIRED` |
+| `protocol` / `network` | `UNISWAP_V3` or `ORCA` / one of `Base`, `Arbitrum One`, `Ethereum`, `Robinhood Chain`, `Solana` (testnets are never logged) |
+| `operation` | `COLLECT`, `DECREASE`, `EXIT`, `CLOSE` or null |
+| `code` | FloFi's own closed error code (`^[A-Z][A-Z0-9_]{2,80}$`) or null |
+| `positions` | discovered positions as a bucket (`0`, `1`, `2-5`, `6-20`, `21+`), never an exact count |
+| `provenance` | `PUBLIC_MAINNET`, `MOCKED` or `UNKNOWN` (a read that failed before any data existed) |
+
+No address, position id, NFT token id, mint, pool, amount, price, hash, signature, account, session, IP or chat text exists in
+the schema; an event with any other value is dropped whole (`liquidityOutcomeFields`), and a logging failure never affects the
+financial path. The lines are operational signals: never financial or certification evidence, never billing input, never a
+decision about a person. `PARTIAL_COMPLETION` is reserved: a FloFi position operation is one atomic transaction (Uniswap's
+own `multicall`; one Orca transaction), so no position operation can complete partially today. Retention, access and rights are
+those of §6–§8 (the platform's log retention; no table or copy of its own).
