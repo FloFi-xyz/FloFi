@@ -20,7 +20,11 @@ const orcaSqrtAt = (tick: number) => orcaSqrtPriceAtTick(tick);
 const MICRO_USDC_PER_SOL = 22_300_000n;
 export type MockedOrcaOptions = { actualOutput?: (quoted: bigint) => bigint; failSwap?: boolean; extraInputDebit?: bigint; extraOwnerDebit?: bigint;
   send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number; cluster?: string; poolConfig?: string; noTradeEvent?: boolean;
-  /** BUILD-015 liquidity: synthetic trading fees credited to a position when it is next modified or collected. */
+  /**
+   * BUILD-015 liquidity: synthetic trading fees credited to a position (with liquidity) at its next fee checkpoint: increase/decrease liquidity or
+   * update_fees_and_rewards, once until `trade()` models more trading. Like the program, collect_fees_v2 pays only the stored fee owed
+   * (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001); it never credits fees itself.
+   */
   accrueFees?: { a: string; b: string }; failLiquidity?: boolean; poolRewardMint?: string; poolRewardEmissionsX64?: bigint; poolFeeRate?: number; extraVaultOutflowB?: bigint;
   /** Shift the pool price between simulation and execution (price movement), in ticks. */
   priceShiftTicks?: number;
@@ -29,8 +33,13 @@ export type MockedOrcaOptions = { actualOutput?: (quoted: bigint) => bigint; fai
    * loopback of the mainnet-beta pool. The synthetic price is unchanged. Nothing here is public, Devnet or mainnet evidence.
    */
   liquidityProfile?: OrcaLiquidityProfile };
-type Position = { mint: string; liquidity: bigint; lower: number; upper: number; feeOwedA: bigint; feeOwedB: bigint };
-type Token = { mint: string; owner: string; amount: bigint };
+/**
+ * For positions written directly into the MOCKED state (e.g. one opened by another app): `rewardOwed` is reward_infos[i].amount_owed and `whirlpool`
+ * the position's recorded pool when it is not the served one (only its account encoding changes; the MOCKED instructions model no other pool).
+ */
+type Position = { mint: string; liquidity: bigint; lower: number; upper: number; feeOwedA: bigint; feeOwedB: bigint; rewardOwed?: readonly bigint[]; whirlpool?: string };
+/** `delegate`: an approved delegate on a Token-2022 position token account (encoded as the account's COption delegate). */
+type Token = { mint: string; owner: string; amount: bigint; delegate?: string };
 type Snapshot = { lamports: Map<string, bigint>; tokens: Map<string, Token>; lamportsOf: Map<string, bigint>; positions: Map<string, Position>; tokens2022: Map<string, Token>;
   mints: Set<string>; accrued: Set<string> };
 const POSITION_RENT = 2_885_440n, MINT_RENT = 1_676_400n, POSITION_TOKEN_RENT = 1_513_840n;
@@ -131,10 +140,22 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
         eventLog(increase ? lp.events.liquidityIncreased : lp.events.liquidityDecreased, a(5), p!, { liquidity: delta, a: amounts.amount0, b: amounts.amount1 }));
       return;
     }
+    if (d === I.updateFeesAndRewards) {
+      // Permissionless checkpoint (no signer): credits fees accrued since the last checkpoint to fee_owed. The program refuses a position without
+      // liquidity (update_fees_and_rewards.rs: "Disallow only updating position fee and reward growth when position has zero liquidity").
+      const p = s.positions.get(a(1));
+      if (a(0) !== POOL.address || !p || a(2) !== orcaLiquidityTickArray(POOL.address, p.lower, POOL.tickSpacing) ||
+          a(3) !== orcaLiquidityTickArray(POOL.address, p.upper, POOL.tickSpacing) || ![a(2), a(3)].every(t => tickArrays.has(t))) fault({ Custom: 6023 });
+      if (p!.liquidity === 0n) fault({ Custom: 6012 }); // LiquidityZero
+      accrue(a(1), p!);
+      logs.push('Program log: Instruction: UpdateFeesAndRewards');
+      return;
+    }
     if (d === I.collectFeesV2) {
       const p = s.positions.get(a(2));
       if (a(0) !== POOL.address || !p) fault({ Custom: 6023 });
-      authority(a(1), a(3), p!.mint); accrue(a(2), p!);
+      // Pays only the stored fee owed: fees accrued since the last checkpoint stay in the vault until a checkpoint credits them (as on the program).
+      authority(a(1), a(3), p!.mint);
       move(POOL.tokenVaultA, a(6), p!.feeOwedA); move(POOL.tokenVaultB, a(8), p!.feeOwedB + (options.extraVaultOutflowB ?? 0n));
       p!.feeOwedA = 0n; p!.feeOwedB = 0n;
       logs.push('Program log: Instruction: CollectFeesV2');
@@ -211,15 +232,17 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
     const position = s.positions.get(k);
     if (position) {
       const data = new Uint8Array(216), view = new DataView(data.buffer);
-      data.set(Buffer.from(lp.positionDiscriminator, 'hex'), 0); data.set(publicKeyBytes(POOL.address), 8); data.set(publicKeyBytes(position.mint), 40);
+      data.set(Buffer.from(lp.positionDiscriminator, 'hex'), 0); data.set(publicKeyBytes(position.whirlpool ?? POOL.address), 8); data.set(publicKeyBytes(position.mint), 40);
       view.setBigUint64(72, position.liquidity & ((1n << 64n) - 1n), true); view.setBigUint64(80, position.liquidity >> 64n, true);
       view.setInt32(88, position.lower, true); view.setInt32(92, position.upper, true); view.setBigUint64(112, position.feeOwedA, true); view.setBigUint64(136, position.feeOwedB, true);
+      (position.rewardOwed ?? []).slice(0, 3).forEach((owed, i) => view.setBigUint64(160 + i * 24, owed, true));
       return { lamports: Number(s.lamportsOf.get(k) ?? 0n), owner: P.whirlpool, data: [toBase64(data), 'base64'], executable: false, rentEpoch: 0, space: 216 };
     }
     if (s.mints.has(k)) return { lamports: Number(s.lamportsOf.get(k) ?? 0n), owner: lp.programs.token2022, data: [toBase64(new Uint8Array(234)), 'base64'], executable: false, rentEpoch: 0, space: 234 };
     const t22 = s.tokens2022.get(k);
     if (t22) {
       const data = new Uint8Array(170); data.set(publicKeyBytes(t22.mint), 0); data.set(publicKeyBytes(t22.owner), 32); new DataView(data.buffer).setBigUint64(64, t22.amount, true); data[108] = 1; data[165] = 2;
+      if (t22.delegate) { new DataView(data.buffer).setUint32(72, 1, true); data.set(publicKeyBytes(t22.delegate), 76); }
       return { lamports: Number(s.lamportsOf.get(k) ?? 0n), owner: lp.programs.token2022, data: [toBase64(data), 'base64'], executable: false, rentEpoch: 0, space: 170 };
     }
     if (tickArrays.has(k)) { const data = new Uint8Array(16); data.set(Buffer.from(lp.tickArrayDiscriminator, 'hex'), 0);
@@ -291,5 +314,7 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
       default: throw new Error('SOLANA_RPC_METHOD_DENIED');
     }
   }
-  return { state, rpc, fund, ata, quoteFor, advance: (blocks: number) => { state.blockHeight += blocks; state.slot += blocks; } };
+  return { state, rpc, fund, ata, quoteFor, advance: (blocks: number) => { state.blockHeight += blocks; state.slot += blocks; },
+    /** MOCKED pool trading since every position's last fee checkpoint: each position with liquidity accrues `accrueFees` once more at its next checkpoint. */
+    trade: () => { state.accrued.clear(); } };
 }

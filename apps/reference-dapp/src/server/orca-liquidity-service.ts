@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { assertExecutionEnabled } from './execution-guard.ts';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, assertOrcaLiquidityReview, inspectOrcaPosition, orcaLiquidityIntentProfile, readOrcaLiquidityPrice, simulateOrcaLiquidity,
+import { ORCA_LIQUIDITY_OPERATIONS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, assertOrcaLiquidityReview, inspectOrcaPosition, orcaLiquidityIntentProfile, readOrcaLiquidityPrice, simulateOrcaLiquidity,
   describeSolanaWalletChange, solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type OrcaLiquidityProfile, type SignedSolanaTransaction, type SolanaRpc,
   type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { createOrcaLiquidityRun, orcaLiquidityAttemptResolved, orcaLiquidityTransition, prepareOrcaLiquidityAttempt, recordOrcaLiquiditySignature,
@@ -17,8 +17,12 @@ import { solanaTransactionClaim } from './solana-transaction-claim.ts';
 /**
  * BUILD-015 Orca Whirlpools liquidity on Solana Devnet; BUILD-SOLANA-MAINNET-001: one service instance per cluster (`profile`), each on its own
  * storage. A service refuses any workflow, record or Review of another cluster. Simulation and Review are read-only. Each lifecycle operation
- * (OPEN, DECREASE_PARTIAL, EXIT) is one reviewed transaction that needs the owner's Execute click and wallet signature;
+ * (OPEN, DECREASE_PARTIAL, EXIT, COLLECT) is one reviewed transaction that needs the owner's Execute click and wallet signature;
  * OPEN also carries the client-side position-mint signature, whose secret never reaches this server.
+ *
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owner may manage (DECREASE_PARTIAL, EXIT, COLLECT) a position FloFi did not open, once the chain proves it
+ * is manageable: a Whirlpools position on this cluster's verified pool whose single Token-2022 position token the owner's wallet holds without a
+ * delegate. The first operation FloFi prepares for it enters it in the owner's registry, exactly like a FloFi-opened position.
  *
  * Durability: the run is persisted before the wallet is asked; the owner's position registry records the position mint
  * when an OPEN attempt is prepared (before any signature), so a restart always recovers the real position and never
@@ -35,6 +39,24 @@ export type OrcaPositionEntry = { positionMint: string; runs: { id: string; oper
 type RegistryLine = { positionMint: string; id: string; operation: OrcaLiquidityOperation };
 const code = (cause: unknown, fallback: string) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : fallback;
 const X = 'ORCA_LIQUIDITY';
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: why a position the owner names cannot be managed here. `simulate` refuses an unmanageable position with exactly
+ * one of these codes (the engine's own verification codes, unchanged), so a caller can explain the refusal without re-reading the chain.
+ */
+export const ORCA_POSITION_NOT_MANAGEABLE = Object.freeze({
+  ORCA_POSITION_UNKNOWN: 'No Orca Whirlpools position exists at this position mint on this cluster.',
+  ORCA_POSITION_INVALID: 'The account at the position address is not an Orca Whirlpools position.',
+  ORCA_POSITION_POOL_MISMATCH: "The position belongs to another pool than this cluster's verified pool.",
+  ORCA_POSITION_AUTHORITY_MISMATCH: 'This wallet does not hold the position token as exactly one Token-2022 token without a delegate (for example a legacy SPL-Token position, or a delegated or transferred position token).',
+  ORCA_POSITION_RANGE_MISMATCH: "The authored price range is not the position's own range.",
+  ORCA_POSITION_REWARDS_UNSUPPORTED: 'The position has reward tokens owed, which Flofi does not collect.',
+} as const);
+export type OrcaPositionNotManageable = keyof typeof ORCA_POSITION_NOT_MANAGEABLE;
+/** The not-manageable reason a `simulate` refusal carries, or null when the refusal is something else (a transport error, a stale pool, …). */
+export function orcaPositionNotManageable(cause: unknown): OrcaPositionNotManageable | null {
+  const value = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+  return Object.hasOwn(ORCA_POSITION_NOT_MANAGEABLE, value) ? value as OrcaPositionNotManageable : null;
+}
 
 export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?: string; storage?: ExecutionStorage; provenance: OrcaLiquidityProvenance; executionEnabled: boolean; now?: () => number;
   /** The cluster this service serves; Devnet unless stated. */ profile?: OrcaLiquidityProfile }) {
@@ -89,7 +111,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
     const text = utf8(await log.read(registryPath(owner)));
     return text.trimEnd().split('\n').filter(Boolean).map(line => {
       const value = JSON.parse(line) as RegistryLine;
-      if (!ORCA_LIQUIDITY_ID.test(value.id) || !['OPEN', 'DECREASE_PARTIAL', 'EXIT'].includes(value.operation)) throw new Error(`${X}_STORE_CORRUPT`);
+      if (!ORCA_LIQUIDITY_ID.test(value.id) || !ORCA_LIQUIDITY_OPERATIONS.includes(value.operation)) throw new Error(`${X}_STORE_CORRUPT`);
       solanaAddress(value.positionMint);
       return value;
     });
@@ -111,7 +133,10 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
   const neverSigned = async (holder: string) => { const prior = await load(holder); return prior.attempt?.state === 'CANCELLED' && !prior.attempt.signature; };
   const claimTransaction = (kind: 'message' | 'signature', value: string, id: string) => solanaTransactionClaim(storage, `${value.replace(/^0x/, '')}.orcalp-${kind}`, id,
     kind === 'message' ? `${X}_DUPLICATE_TRANSACTION_SIMULATE_AGAIN` : `${X}_DUPLICATE_SIGNATURE_NOT_SUBMITTED`, kind === 'message' ? neverSigned : undefined);
-  /** Every Gryloo-created position of this owner, with each operation's journal state and the position's current chain state. */
+  /**
+   * Every position of this owner in the registry (Gryloo-created, or discovered on chain and then managed here), with each operation's journal state
+   * and the position's current chain state.
+   */
   async function positions(ownerInput: string): Promise<OrcaPositionEntry[]> {
     const owner = solanaAddress(ownerInput), lines = await readRegistry(owner);
     const mints = [...new Set(lines.map(l => l.positionMint))];
@@ -151,9 +176,19 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
         if (known.some(p => p.positionMint === positionMint)) throw new Error('ORCA_POSITION_MINT_IN_USE');
       } else {
         const entry = known.find(p => p.positionMint === positionMint);
-        if (!entry) throw new Error('ORCA_POSITION_UNKNOWN');
-        if (entry.status === 'OPEN_PENDING') throw new Error(`${X}_OPEN_UNRESOLVED`);
-        if (entry.status === 'CLOSED' || entry.status === 'NOT_CREATED') throw new Error('ORCA_POSITION_NOT_FOUND');
+        if (entry) {
+          if (entry.status === 'OPEN_PENDING') throw new Error(`${X}_OPEN_UNRESOLVED`);
+          if (entry.status === 'CLOSED' || entry.status === 'NOT_CREATED') throw new Error('ORCA_POSITION_NOT_FOUND');
+        } else {
+          // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position FloFi did not open is manageable only when the chain proves it (Whirlpools-owned position on
+          // this cluster's verified pool; the owner's Token-2022 position token account holds exactly 1 with no delegate). Its verification refusals
+          // (ORCA_POSITION_AUTHORITY_MISMATCH, ORCA_POSITION_POOL_MISMATCH, ORCA_POSITION_INVALID) pass through unchanged; a mint with no position
+          // account behind it is no position at all and stays ORCA_POSITION_UNKNOWN. The engine verifies the same position again in simulation.
+          let chain: Awaited<ReturnType<typeof inspectOrcaPosition>>;
+          try { chain = await inspectOrcaPosition(input.rpc, owner, positionMint, profile); }
+          catch (cause) { throw code(cause, '') === 'ORCA_POSITION_NOT_FOUND' ? new Error('ORCA_POSITION_UNKNOWN') : cause; }
+          if (!chain.exists) throw new Error('ORCA_POSITION_UNKNOWN');
+        }
       }
       const review = await simulateOrcaLiquidity(workflow, owner, { operation: request.operation, positionMint, ...request.partBps === undefined ? {} : { partBps: request.partBps } },
         input.rpc, now());

@@ -114,12 +114,14 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
     }
     const lamportExplained = new Set([review.owner, a.ownerTokenA, a.ownerTokenB, a.position, a.positionMint, a.positionTokenAccount, a.vaultA]);
     keys.forEach((key, i) => { if (!lamportExplained.has(key) && pre[i] !== post[i]) fail('ORCA_LIQUIDITY_UNEXPECTED_LAMPORT_MOVEMENT'); });
-    // Position authority at transaction time: the owner holds exactly one position token (OPEN) or held it until the burn (EXIT).
+    // Position authority at transaction time: the owner still holds exactly one position token after OPEN, DECREASE_PARTIAL and COLLECT (the position
+    // stays open; BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001), or held it until the burn (EXIT).
     const positionToken = (list: TokenBalance[]) => list.find(b => b.index === at(a.positionTokenAccount)) ?? null;
-    const authority = review.operation === 'EXIT' ? positionToken(preTokens) : positionToken(postTokens);
+    const closes = review.operation === 'EXIT';
+    const authority = closes ? positionToken(preTokens) : positionToken(postTokens);
     if (!authority || authority.programId !== program.programs.token2022 || authority.owner !== review.owner || authority.mint !== a.positionMint || authority.amount !== 1n)
       return fail('ORCA_POSITION_AUTHORITY_MISMATCH');
-    if (review.operation === 'EXIT' && positionToken(postTokens)) fail('ORCA_POSITION_NOT_CLOSED');
+    if (closes && positionToken(postTokens)) fail('ORCA_POSITION_NOT_CLOSED');
     base.positionAuthority = { tokenAccount: a.positionTokenAccount, owner: authority.owner, amount: authority.amount.toString() };
     base.owner = { lamportsBefore: before.ownerLamports, lamportsAfter: after.ownerLamports, tokenBBefore: before.tokenB, tokenBAfter: after.tokenB };
     base.vaults = { aBefore: before.vaultA, aAfter: after.vaultA, bBefore: before.vaultB, bAfter: after.vaultB };
@@ -175,13 +177,16 @@ export function buildOrcaLiquidityEvidence(input: { id: string; review: OrcaLiqu
     'Withdrawn principal is taken from Orca LiquidityDecreased events; collected fees are the remaining vault outflow. Principal is never counted as fees.',
     'Native SOL deltas exclude the network fee and refundable account deposits, which are reported separately.',
     profile.realFunds ? 'Solana mainnet-beta with real funds (Gryloo evidence class PUBLIC_EXECUTED).'
-      : 'Solana Devnet with valueless test tokens (Gryloo evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.'];
+      : 'Solana Devnet with valueless test tokens (Gryloo evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.',
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: stated only on a COLLECT bundle, so every other operation's bundle is unchanged.
+    ...review.operation === 'COLLECT' ? ['COLLECT moves no liquidity: the transaction has no Orca liquidity event, so the whole vault outflow is collected fees and the position stays open.'] : []];
   const bundle: EvidenceBundle = { schemaVersion: '1.0.0', evidenceBundleId: input.id, version: 1, supersedes: null,
     semanticWorkflowHash: review.manifest.semanticWorkflowHash, artifactSetHash: review.manifest.artifactSetHash, simulationHash: review.manifest.simulationHash,
     policyHash: review.manifest.policyHash, manifestHash: solanaSwapArtifactHash('strategy-manifest', review.manifest), executionPlanHash: solanaSwapArtifactHash('execution-plan', review.plan),
     journalHeadHash: head, observedAt: new Date().toISOString(), environment, outcome: 'RECONCILED',
     receipts: [{ receiptId: `orca-liquidity-${review.operation.toLowerCase()}-transaction`, contentHash: solanaSwapHash(o) }], differences: [],
     reconciliation: { balances: [{ asset: asset(review.token1), amount: o.owner.tokenBAfter ?? '0' }], allowances: [], debt: [],
+      // The position NFT stays with the owner after every operation but EXIT (COLLECT included).
       positions: review.operation === 'EXIT' ? [] : [{ asset: { chainId: review.chain, address: program.programs.whirlpool, decimals: 0 }, amount: '1' }],
       fees: [{ asset: { chainId: review.chain, nativeId: 'SOL', decimals: 9 }, amount: o.feeLamports ?? '0' }], residualAssets: [],
       ownership: [{ chainId: review.chain, address: review.owner }], limitations },

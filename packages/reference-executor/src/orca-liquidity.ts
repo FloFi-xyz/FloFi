@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
-import { orcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, type OrcaLiquidityReview, type SignedSolanaTransaction } from '@defi-workflow-engine/reference-compiler';
+import { ORCA_LIQUIDITY_OPERATIONS, orcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, type OrcaLiquidityReview, type SignedSolanaTransaction } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 import type { SolanaSwapAttempt, SolanaSwapAttemptState } from './jupiter.js';
 import { SOLANA_SWAP_TERMINAL_STATES, assertSignedSolanaAttempt } from './jupiter.js';
 
 /**
- * BUILD-015: one owner-signed Solana transaction per liquidity operation (OPEN, DECREASE_PARTIAL, EXIT). The attempt is
+ * BUILD-015: one owner-signed Solana transaction per liquidity operation (OPEN, DECREASE_PARTIAL, EXIT, and COLLECT since
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: step `orca-liquidity-collect`, attempt `<id>.collect`). The attempt is
  * durable before the wallet is asked; the owner signature (the transaction identity) and the exact signed bytes are durable
  * before the single broadcast. The same attempt states and no-resubmission rules as the canonical Solana swap apply.
  * Each operation is its own idempotent recovery boundary; position identity (the position mint) is part of the reviewed
@@ -21,6 +22,8 @@ export type OrcaLiquidityRun = { format: 'gryloo.orca-liquidity-run.v1'; id: str
   verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE' | 'NOT_EXECUTED'; ownerInitiated: boolean };
 export const ORCA_LIQUIDITY_ID = /^orcalp-[a-f0-9]{32}$/;
 const fail = (code: string): never => { throw new Error(code); };
+/** Only the registry's liquidity operations have a step, an attempt and a journal; anything else is not a run of this engine. */
+const knownOperation = (operation: unknown): boolean => typeof operation === 'string' && (ORCA_LIQUIDITY_OPERATIONS as readonly string[]).includes(operation);
 const names = (run: Pick<OrcaLiquidityRun, 'id' | 'operation'>) => {
   const step = `orca-liquidity-${run.operation.toLowerCase().replaceAll('_', '-')}`;
   return { segment: 'orca-liquidity-segment', step, attempt: `${run.id}.${run.operation.toLowerCase()}` };
@@ -29,6 +32,7 @@ const names = (run: Pick<OrcaLiquidityRun, 'id' | 'operation'>) => {
 export function createOrcaLiquidityRun(id: string, review: OrcaLiquidityReview, provenance: OrcaLiquidityProvenance): OrcaLiquidityRun {
   if (!ORCA_LIQUIDITY_ID.test(id)) fail('ORCA_LIQUIDITY_ID_INVALID');
   if (provenance !== 'MOCKED' && orcaLiquidityProfile(review.chain)?.provenance !== provenance) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
+  if (!knownOperation(review.operation) || review.operationPlan?.operation !== review.operation) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
   const base = { id, operation: review.operation };
   const { segment, step } = names(base);
   if (review.plan.segments[0]?.steps[0]?.stepId !== step) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
@@ -81,7 +85,8 @@ export function validateOrcaLiquidityRun(run: OrcaLiquidityRun): void {
   const corrupt = 'ORCA_LIQUIDITY_STORE_CORRUPT';
   if (!run || run.format !== 'gryloo.orca-liquidity-run.v1' || !ORCA_LIQUIDITY_ID.test(run.id) || !['MOCKED', 'PUBLIC_DEVNET', 'PUBLIC_MAINNET'].includes(run.provenance) ||
       run.provenance !== 'MOCKED' && orcaLiquidityProfile(run.review?.chain)?.provenance !== run.provenance ||
-      run.review?.format !== 'gryloo.orca-liquidity-review.v1' || run.operation !== run.review.operation || run.positionMint !== run.review.accounts.positionMint) fail(corrupt);
+      run.review?.format !== 'gryloo.orca-liquidity-review.v1' || !knownOperation(run.operation) || run.operation !== run.review.operation ||
+      run.review.operationPlan?.operation !== run.operation || run.positionMint !== run.review.accounts.positionMint) fail(corrupt);
   const { commitment, ...review } = run.review;
   if (solanaSwapHash(review) !== commitment || solanaSwapArtifactHash('execution-plan', run.review.plan) !== run.journal.executionPlanHash ||
       solanaSwapArtifactHash('strategy-manifest', run.review.manifest) !== run.journal.manifestHash || run.journal.journalId !== run.id ||

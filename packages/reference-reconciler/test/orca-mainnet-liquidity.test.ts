@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { createConcentratedLiquidityNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as devnet, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as mainnet, base58Encode, createMockedSolanaDevnetOrca, createMockedSolanaWallet,
-  fromBase64, parseTransaction, serializeSignedTransaction, simulateOrcaLiquidity, toBase64, type OrcaLiquidityProfile } from '@defi-workflow-engine/reference-compiler';
+  fromBase64, parseTransaction, serializeSignedTransaction, simulateOrcaLiquidity, toBase64, type MockedOrcaOptions, type OrcaLiquidityProfile, type OrcaLiquidityReview,
+  type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { createOrcaLiquidityRun, prepareOrcaLiquidityAttempt, validateOrcaLiquidityRun } from '../../reference-executor/src/orca-liquidity.js';
 import { buildOrcaLiquidityEvidence, classifyOrcaLiquidityEvidence, reconcileOrcaLiquidityAttempt } from '../src/index.js';
 
@@ -14,8 +15,8 @@ const workflow = (profile: OrcaLiquidityProfile): SemanticWorkflow => ({ schemaV
     amount0Max: '10000000', amount1Max: '300000', amount0Min: '0', amount1Min: '0', tickLower: -39104, tickUpper: -36992, feeTier: profile.feeTier, slippageBps: 100,
     protocols: ['orca-whirlpools'], recipient: null, positionAsset: { chainId: profile.chain, address: profile.programs.whirlpool, decimals: 0 } })] });
 const NOW = Date.parse('2026-10-13T12:00:00.000Z');
-async function landedOpen(profile: OrcaLiquidityProfile) {
-  const env = createMockedSolanaDevnetOrca({ liquidityProfile: profile }), wallet = createMockedSolanaWallet();
+async function landedOpen(profile: OrcaLiquidityProfile, options: MockedOrcaOptions = {}) {
+  const env = createMockedSolanaDevnetOrca({ liquidityProfile: profile, ...options }), wallet = createMockedSolanaWallet();
   env.fund(wallet.owner, 3_000_000_000n, 50_000_000n);
   const secret = ed25519.utils.randomSecretKey(), mint = base58Encode(ed25519.getPublicKey(secret));
   const open = await simulateOrcaLiquidity(workflow(profile), wallet.owner, { operation: 'OPEN', positionMint: mint }, env.rpc, NOW);
@@ -60,4 +61,51 @@ describe('Orca liquidity on Solana mainnet-beta: reconciliation and evidence (MO
     expect(observation.verdict).not.toBe('RECONCILED');
     expect(observation.reason).toBe('SOLANA_WRONG_CLUSTER');
   });
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: every lifecycle operation after OPEN, reconciled from finalized transaction facts only.
+  it('reconciles a mainnet DECREASE_PARTIAL, COLLECT and EXIT from finalized facts; MOCKED provenance stays MOCKED evidence', async () => {
+    const s = await landedOpen(mainnet, { accrueFees: { a: '777', b: '33' } }), mint = s.open.accounts.positionMint, owner = s.wallet.owner;
+    const decrease = await simulateOrcaLiquidity(workflow(mainnet), owner, { operation: 'DECREASE_PARTIAL', positionMint: mint, partBps: 5000 }, s.env.rpc, NOW);
+    const d = await reconcileOrcaLiquidityAttempt(decrease, await send(s, decrease), s.env.rpc);
+    expect(d).toMatchObject({ verdict: 'RECONCILED', confirmation: 'finalized', instructions: decrease.instructionSummary.map(i => i.name), positionAuthority: { owner, amount: '1' } });
+    // Principal from the LiquidityDecreased event; fees are only the extra vault outflow.
+    expect(d.effects).toMatchObject({ withdrawnPrincipalA: d.events[0]!.tokenA, withdrawnPrincipalB: d.events[0]!.tokenB, collectedFeesA: '777', collectedFeesB: '33', closedAccounts: [] });
+    s.env.trade();
+    const collect = await simulateOrcaLiquidity(workflow(mainnet), owner, { operation: 'COLLECT', positionMint: mint }, s.env.rpc, NOW);
+    const collectAttempt = await send(s, collect), c = await reconcileOrcaLiquidityAttempt(collect, collectAttempt, s.env.rpc);
+    expect(c).toMatchObject({ verdict: 'RECONCILED', reason: 'ORCA_LIQUIDITY_TRANSACTION_AND_BALANCES_VERIFIED', events: [],
+      instructions: ['set_compute_unit_limit', 'create_idempotent', 'create_idempotent', 'update_fees_and_rewards', 'collect_fees_v2', 'close_account'],
+      // The position stays open: the owner still holds its single Token-2022 position token after the collect.
+      positionAuthority: { tokenAccount: collect.accounts.positionTokenAccount, owner, amount: '1' },
+      effects: { withdrawnPrincipalA: '0', withdrawnPrincipalB: '0', collectedFeesA: '777', collectedFeesB: '33', depositedA: '0', depositedB: '0', closedAccounts: [], rentRefundedLamports: '0' } });
+    expect(c.owner).toMatchObject({ tokenBAfter: (BigInt(c.owner!.tokenBBefore!) + 33n).toString() });
+    expect(classifyOrcaLiquidityEvidence({ provenance: 'MOCKED', ownerInitiated: true, observation: c })).toBe('MOCKED');
+    const run = prepareOrcaLiquidityAttempt({ ...createOrcaLiquidityRun('orcalp-' + 'e'.repeat(32), collect, 'MOCKED'), authorization: collect.commitment }, 1);
+    expect(run.journal.entries.find(e => e.level === 'step')?.entityId).toBe('orca-liquidity-collect');
+    expect(() => validateOrcaLiquidityRun(run)).not.toThrow();
+    const evidence = buildOrcaLiquidityEvidence({ id: run.id, review: collect, journal: run.journal, provenance: 'MOCKED', ownerInitiated: true, observation: c, lifecycle: null });
+    expect([evidence.evidenceClass, evidence.bundle.environment, evidence.publicExecution.realFunds]).toEqual(['MOCKED', 'MOCKED', false]);
+    expect(evidence.publicExecution).toMatchObject({ operation: 'COLLECT', liquidityDelta: '0', withdrawnPrincipal: { a: '0', b: '0' }, collectedFees: { a: '777', b: '33' } });
+    expect(evidence.bundle.reconciliation.positions).toEqual([{ asset: { chainId: mainnet.chain, address: mainnet.programs.whirlpool, decimals: 0 }, amount: '1' }]);
+    expect(evidence.bundle.receipts[0]!.receiptId).toBe('orca-liquidity-collect-transaction');
+    expect(evidence.bundleHash).toMatch(/^0x[0-9a-f]{64}$/);
+    // A liquidity event inside a collect is never read as principal: the observation fails closed instead.
+    const decreasedLog = (await s.env.rpc('getTransaction', [d.signature, {}]) as { meta: { logMessages: string[] } }).meta.logMessages.find(l => l.startsWith('Program data:'))!;
+    const withEvent: SolanaRpc = async (method, params) => {
+      const value = await s.env.rpc(method, params);
+      if (method !== 'getTransaction' || !value) return value;
+      const copy = structuredClone(value) as { meta: { logMessages: string[] } }; copy.meta.logMessages.push(decreasedLog); return copy;
+    };
+    expect(await reconcileOrcaLiquidityAttempt(collect, collectAttempt, withEvent)).toMatchObject({ verdict: 'DIVERGENT', reason: 'ORCA_LIQUIDITY_EVENT_MISMATCH', effects: null });
+    const exit = await simulateOrcaLiquidity(workflow(mainnet), owner, { operation: 'EXIT', positionMint: mint }, s.env.rpc, NOW);
+    const e = await reconcileOrcaLiquidityAttempt(exit, await send(s, exit), s.env.rpc);
+    expect(e).toMatchObject({ verdict: 'RECONCILED', effects: { collectedFeesA: '0', collectedFeesB: '0', closedAccounts: [exit.accounts.position, mint, exit.accounts.positionTokenAccount] } });
+    expect(e.effects!.rentRefundedLamports).toBe(s.open.simulationResult.rentPaidLamports);
+    const exitRun = prepareOrcaLiquidityAttempt({ ...createOrcaLiquidityRun('orcalp-' + 'f'.repeat(32), exit, 'MOCKED'), authorization: exit.commitment }, 1);
+    const exitEvidence = buildOrcaLiquidityEvidence({ id: exitRun.id, review: exit, journal: exitRun.journal, provenance: 'MOCKED', ownerInitiated: true, observation: e, lifecycle: null });
+    expect([exitEvidence.evidenceClass, exitEvidence.bundle.reconciliation.positions]).toEqual(['MOCKED', []]);
+  });
 });
+async function send(s: Awaited<ReturnType<typeof landedOpen>>, review: OrcaLiquidityReview) {
+  const transaction = s.wallet.sign(review.unsignedTransaction);
+  return { signature: await s.env.rpc('sendTransaction', [transaction, {}]) as string, transaction };
+}

@@ -448,8 +448,9 @@ const solanaOwner = (value: unknown) => typeof value === 'string' && SOLANA_ADDR
 const signedTransaction = (value: unknown) => typeof value === 'string' && value.length <= 8_192 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
 const solanaDiagnostic = (value: unknown) => isObject(value) && ['CONNECT', 'SIGN', 'PREFLIGHT'].includes(String(value.stage)) && typeof value.code === 'string' &&
   JSON.stringify(value).length <= 16_384;
-const liquidityRequest = (value: unknown) => isObject(value) && ['OPEN', 'DECREASE_PARTIAL', 'EXIT'].includes(String(value.operation)) &&
-  solanaOwner(value.positionMint) && (value.partBps === undefined || Number.isSafeInteger(value.partBps)) &&
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT (fees only) removes no liquidity, so it never carries a portion.
+const liquidityRequest = (value: unknown) => isObject(value) && ['OPEN', 'DECREASE_PARTIAL', 'EXIT', 'COLLECT'].includes(String(value.operation)) &&
+  solanaOwner(value.positionMint) && (value.partBps === undefined || Number.isSafeInteger(value.partBps) && value.operation !== 'COLLECT') &&
   Object.keys(value).every(k => ['operation', 'positionMint', 'partBps'].includes(k));
 type SolanaRecord = { id: string; review: { owner: string; workflow: SemanticWorkflow }; provenance: 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
   authorization: string | null; verdict: string; notSubmitted?: boolean; error: string | null; journal: TransferRecord['journal']; evidence: unknown;
