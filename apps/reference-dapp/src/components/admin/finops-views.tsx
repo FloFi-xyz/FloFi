@@ -107,7 +107,7 @@ function CoverageSummary({ report, language }: { report: FinopsReport; language:
     <div><strong>{copy(heading)}</strong> <span className="admin-finops-nowrap">({range})</span>
       <p>{copy(detail)}</p></div>
     <ul className="admin-finops-quality-counts" aria-label={copy('Cost sources by data quality')}>
-      {QUALITY_ORDER.filter(quality => counts.get(quality)).map(quality => <li key={quality}><QualityBadge quality={quality}/> {copy('{0} cost sources', count(counts.get(quality)!))}</li>)}
+      {QUALITY_ORDER.filter(quality => counts.get(quality)).map(quality => <li key={quality}><QualityBadge quality={quality}/> {counts.get(quality) === 1 ? copy('1 cost source') : copy('{0} cost sources', count(counts.get(quality)!))}</li>)}
     </ul>
     <a className="admin-finops-link" href="#finops-coverage">{copy('How data quality is classified')}</a>
   </div>;

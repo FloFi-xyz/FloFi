@@ -329,7 +329,7 @@ const portuguese: Readonly<Record<string, string>> = {
   'Some cost sources have no complete record for the selected period. Totals add only the recorded amounts and are not the complete cost of operating FloFi.': 'Algumas fontes de custo não têm registro completo no período selecionado. Os totais somam apenas os valores registrados e não representam o custo completo de operação da FloFi.',
   'Every required cost source has a complete record for the selected period.': 'Todas as fontes de custo obrigatórias têm registro completo no período selecionado.',
   'Cost sources by data quality': 'Fontes de custo por qualidade dos dados',
-  '{0} cost sources': '{0} fontes de custo',
+  '{0} cost sources': '{0} fontes de custo', '1 cost source': '1 fonte de custo',
   'How data quality is classified': 'Como a qualidade dos dados é classificada',
   'Headline indicators': 'Indicadores principais',
   'Other cost indicators': 'Outros indicadores de custo',

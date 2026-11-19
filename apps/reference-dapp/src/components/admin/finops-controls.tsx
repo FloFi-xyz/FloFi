@@ -109,7 +109,8 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
           <details className="admin-finops-row-details"><summary>{copy('Sync details')}</summary><dl>
             <div><dt>{copy('Last successful sync')}</dt><dd>{time(provider.lastSuccess)}</dd></div>
             <div><dt>{copy('Next scheduled sync')}</dt><dd>{time(provider.nextSync)}</dd></div>
-            <div><dt>{copy('Data quality')}</dt><dd>{recent ? copy(recent.quality) : copy('Unavailable')}{recent?.limitations.length ? <ul>{recent.limitations.map(code => <li key={code}>{limitation(code)}</li>)}</ul> : null}</dd></div>
+            {/* Its limitations are already stated under the financial data, never twice. */}
+            <div><dt>{copy('Data quality')}</dt><dd>{recent ? copy(recent.quality) : copy('Unavailable')}</dd></div>
             <div><dt>{copy('Historical coverage')}</dt><dd>{provider.coverage.length > 0 ? <><ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>{coverage.period.from} – {coverage.period.to} · {copy(coverage.quality)}
                 {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>
               {provider.meters.length > 0 && <ul>{provider.meters.slice(0, 100).map((meter, index) =>
