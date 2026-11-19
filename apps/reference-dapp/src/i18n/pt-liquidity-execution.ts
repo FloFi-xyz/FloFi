@@ -82,6 +82,10 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
   'Position transactions': 'Transações da posição',
   'Position result': 'Resultado da posição',
   'Empty (no liquidity)': 'Vazia (sem liquidez)',
+  // The Dashboard's position status (an adjective): its own key, never the verb "Open" → "Abrir" of the buttons.
+  'Open (has liquidity)': 'Aberta (com liquidez)',
+  // A withdrawal's enforced minimum ("0.3 WETH + 1,008 USDC · 1% slippage"): read before the generic "{0}% slippage", which would garble the line.
+  '{0} · {1}% slippage': '{0} · desvio de {1}%',
   'Principal': 'Capital',
   'Collectable now': 'Coletável agora',
   'Last verified': 'Última verificação',
@@ -126,4 +130,14 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
     'Seu fluxo atual ainda está sendo executado ou verificado. Acompanhe-o em Operar; prepare esta posição quando ele terminar. Nada foi alterado.',
   'Simulate, authorize and follow this operation from the Editor: Simulate shows its result, Execute its Review and your one wallet request.':
     'Simule, autorize e acompanhe esta operação no Editor: Simular mostra o resultado, Executar a revisão e o seu único pedido à carteira.',
+};
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the values of a Uniswap position Review row ("500 of 1000 (50%)", "1000 (unchanged)", "WETH and USDC to 0x…").
+ * Spread LAST in the catalog: as templates they apply only to a line no other message or template already reads, so they never shadow another screen.
+ */
+export const portugueseLiquidityPositionValues: Readonly<Record<string, string>> = {
+  '{0} of {1} ({2})': '{0} de {1} ({2})',
+  '{0} (unchanged)': '{0} (sem alteração)',
+  '{0} and {1} to {2}': '{0} e {1} para {2}',
 };

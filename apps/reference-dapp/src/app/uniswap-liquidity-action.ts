@@ -6,7 +6,8 @@ import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createUniswapLiquidityService, type UniswapLiquidityService, type UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
-import type { UniswapPositionRequest } from '../server/uniswap-position-service';
+import type { UniswapPositionRecord, UniswapPositionRequest } from '../server/uniswap-position-service';
+import { forgetWalletPositions } from '../server/defi-positions';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, ethereumSepoliaSwapRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../server/public-testnet-rpc';
 import { UNI_MOCK_CATALOG_PINS, UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';
@@ -217,8 +218,21 @@ export async function uniswapPositionWalletFailure(id: string, diagnostic: Unisw
   return withFlightOwner(async () => run('walletFailure', [id, diagnostic], s => s.positionWalletFailure(id, diagnostic)));
 }
 export async function uniswapPositionObserve(id: string) {
-  return withFlightOwner(async () => run('observe', [id], s => s.positionObserve(id)));
+  return withFlightOwner(async () => landed(await run('observe', [id], s => s.positionObserve(id))));
 }
 export async function uniswapPositionStatus(id: string) {
-  return withFlightOwner(async () => run('status', [id], s => s.positionStatus(id)));
+  return withFlightOwner(async () => landed(await run('status', [id], s => s.positionStatus(id))));
+}
+/**
+ * A position operation that reached a final verdict changed the owner's positions on chain: the Dashboard's cached scan of that wallet from before
+ * it is dropped (`forgetWalletPositions`), so the owner never keeps reading the pre-operation facts. Read-only; the result is returned unchanged.
+ */
+function landed<T>(result: { ok: true; value: T } | { ok: false; code: string }) {
+  if (result.ok) {
+    const record = result.value as Partial<UniswapPositionRecord> | null;
+    if (record?.format === 'flofi.uniswap-position-run.v1' && record.owner && (record.verdict === 'RECONCILED' || record.verdict === 'DIVERGENT'))
+      forgetWalletPositions({ namespace: 'eip155', address: record.owner.toLowerCase() },
+        Date.parse(record.evidence?.observedAt ?? record.attempts?.findLast(a => a.transactionHash)?.createdAt ?? ''));
+  }
+  return result;
 }

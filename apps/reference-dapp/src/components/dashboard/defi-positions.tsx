@@ -217,7 +217,8 @@ function LiquidityPositionFacts({ view, prepare }: { view: LiquidityPositionView
   const [refusal, setRefusal] = useState<{ readonly code: string; readonly choice: LiquidityPositionChoice } | null>(null);
   const pair = (units: readonly (string | null)[]) => units.every(unit => unit !== null)
     ? `${formatTokenAmount(units[0]!, view.token0.decimals, language)} ${view.token0.symbol} + ${formatTokenAmount(units[1]!, view.token1.decimals, language)} ${view.token1.symbol}` : null;
-  const unit = `${view.price.quote} per ${view.price.base}`;
+  // The price unit is the catalog's own phrase ("WETH per USDC" / "WETH por USDC"), never an English word inside a Portuguese line.
+  const priced = (value: string) => t('{0} {1} per {2}', value, view.price.quote, view.price.base);
   const verified = formatObservedAt(view.observedAt, language);
   const actions = prepare ? liquidityPositionActions(view) : [];
   const orca = view.ref.protocol === 'ORCA';
@@ -228,9 +229,10 @@ function LiquidityPositionFacts({ view, prepare }: { view: LiquidityPositionView
   };
   return <div className={styles.liquidity} data-liquidity-position={view.ref.positionId}>
     <dl className={styles.facts}>
-      <div><dt>{t('Range')}</dt><dd>{view.lowerPrice}–{view.upperPrice} {unit} · {t(view.rangeState ? rangeLabel[view.rangeState] : 'Range state unavailable')}</dd></div>
-      <div><dt>{t('Current price')}</dt><dd>{view.currentPrice === null ? t('Unavailable') : `${view.currentPrice} ${unit}`}</dd></div>
-      <div><dt>{t('Liquidity')}</dt><dd>{t(view.status === 'OPEN' ? 'Open' : 'Empty (no liquidity)')}</dd></div>
+      <div><dt>{t('Range')}</dt><dd>{priced(`${view.lowerPrice}–${view.upperPrice}`)} · {t(view.rangeState ? rangeLabel[view.rangeState] : 'Range state unavailable')}</dd></div>
+      <div><dt>{t('Current price')}</dt><dd>{view.currentPrice === null ? t('Unavailable') : priced(view.currentPrice)}</dd></div>
+      {/* The position's status (an adjective, "Aberta"), never the catalog's verb "Open" → "Abrir" of the buttons. */}
+      <div><dt>{t('Liquidity')}</dt><dd>{t(view.status === 'OPEN' ? 'Open (has liquidity)' : 'Empty (no liquidity)')}</dd></div>
       <div><dt>{t('Principal')}</dt><dd>{pair(view.principal) ?? t('Unavailable')}</dd></div>
       <div><dt>{t('Owed tokens and fees (recorded)')}</dt><dd>{pair(view.recordedOwed) ?? t('Unavailable')}</dd></div>
       <div><dt>{t('Collectable now')}</dt><dd>{view.collectable ? pair(view.collectable) : t('Unavailable')}</dd></div>

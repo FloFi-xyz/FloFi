@@ -104,7 +104,10 @@ const definitions = [
   // (facts, capability-driven actions that only prepare), the Editor stages (Simulate on the real server actions, Execute's MOCKED boundary: no
   // Authorize), the owner's one Position Manager request through the same runtime, reconciliation and recovery; a 50% withdrawal, a fees-only
   // collect, an exit that closes, a declined request and an expired Review, one path in Portuguese. MOCKED evidence only; nothing is broadcast.
-  ['liquidity-position-management', ['liquidity-position-management.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_LIQUIDITY_POSITIONS_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // The same harness serves the chat journey (chat-liquidity-positions.spec.ts, EN and PT): verified facts, a clarified choice committed to the
+  // Canvas, the Simulate hand-off and a re-staged change, on the closed Copilot replay (committed answers; no model is called).
+  ['liquidity-position-management', ['liquidity-position-management.spec.ts', 'chat-liquidity-positions.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY',
+    FLOFI_LIQUIDITY_POSITIONS_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['journey-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'journey', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-ADMIN-001: the private Admin console (sign-in refusal and grant, dashboards, AI settings) on a disposable loopback database.

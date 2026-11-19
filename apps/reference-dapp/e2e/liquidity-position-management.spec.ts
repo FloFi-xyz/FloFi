@@ -12,8 +12,9 @@
  *   release-financial-provenance.spec.ts). The owner's explicit authorization and the run's ONE wallet request to the NonfungiblePositionManager are
  *   therefore made by the test through the very runtime the server actions run (e2e/liquidity-position-fixtures.ts, the uniswap-continuation
  *   pattern); the browser then recovers the run after a reload and shows it reconciled, with its step evidence. A 50% withdrawal, a fees-only
- *   collect, an exit that closes the position, a declined wallet request (recorded as not sent) and an expired Review (refused before anything is
- *   prepared) are covered, one path in Portuguese.
+ *   collect, an exit that closes the position, a declined wallet request (recorded as not sent; "Refresh & review" refreshes the same run in place)
+ *   and an expired Review (refused before anything is prepared) are covered, one path in Portuguese. Create, Simulate and Execute name the
+ *   operation from the canonical marker (never a deposit); after a reconciled operation the Dashboard reads the position again at once.
  *
  * MOCKED loopback only: the browser reaches only the app origin (the shared network guard) and its wallet double answers accounts, chain and the
  * sign-in message, and refuses any transaction; the server reads only the loopback harness; nothing is signed with a real key or broadcast, and none
@@ -55,14 +56,14 @@ const WORDS = {
   EN: { verify: 'Verify wallet for history', history: 'Saved history is unavailable in this environment', positions: 'My DeFi Positions', actions: 'Position actions', collect: 'Collect fees', remove: 'Remove liquidity',
     close: 'Close position', share: 'Share of liquidity to remove', shareLabel: 'Share to remove', prepare: 'Prepare removal', mocked: 'Test data (MOCKED)',
     range: 'Range', price: 'Current price', liquidity: 'Liquidity', principal: 'Principal', owed: 'Owed tokens and fees (recorded)', collectable: 'Collectable now',
-    verified: 'Last verified', open: 'Open', inRange: 'In range', aboveRange: 'Out of range (above)', unit: 'WETH per USDC', simulate: 'Simulate workflow',
+    verified: 'Last verified', open: 'Open (has liquidity)', inRange: 'In range', aboveRange: 'Out of range (above)', unit: 'WETH per USDC', simulate: 'Simulate workflow',
     review: 'Review operation', authorize: 'Authorize workflow', completed: 'Execution completed', reconciled: 'Reconciled', notSent: 'Transaction not submitted',
     declined: 'You declined this request in your wallet.', local: 'Local execution · no public-chain transactions', stays: 'Stays in your wallet',
     note: 'These actions prepare the workflow only. You review it and confirm in your wallet; nothing is executed here.' },
   PT: { verify: 'Verificar carteira para consultar o histórico', history: 'O histórico salvo está indisponível neste ambiente', positions: 'Minhas posições DeFi', actions: 'Ações da posição', collect: 'Coletar taxas',
     remove: 'Remover liquidez', close: 'Fechar posição', share: 'Parte da liquidez a remover', shareLabel: 'Parte a remover', prepare: 'Preparar remoção',
     mocked: 'Dados de teste (MOCKED)', range: 'Intervalo', price: 'Preço atual', liquidity: 'Liquidez', principal: 'Capital', owed: 'Tokens devidos e taxas (registrados)',
-    collectable: 'Coletável agora', verified: 'Última verificação', inRange: 'Dentro da faixa', aboveRange: 'Fora da faixa (acima)',
+    collectable: 'Coletável agora', verified: 'Última verificação', open: 'Aberta (com liquidez)', inRange: 'Dentro da faixa', aboveRange: 'Fora da faixa (acima)',
     simulate: 'Simular fluxo', review: 'Revisar operação', authorize: 'Autorizar fluxo', completed: 'Execução concluída', reconciled: /Reconciliad[ao]/,
     notSent: 'Transação não enviada', declined: 'Você recusou esta solicitação na carteira.', local: 'Execução local · sem transações numa rede pública',
     stays: 'Continua na sua carteira',
@@ -104,18 +105,6 @@ async function openPositions(page: Page, language: Language = 'EN') {
   const scan = page.getByRole('region', { name: 'Uniswap V3 · Base', exact: true });
   await expect(scan.locator('[data-liquidity-position]').first()).toBeVisible({ timeout: 30_000 });
   return scan;
-}
-/**
- * The Dashboard's "Refresh" until `check` holds. The server keeps a wallet's complete scan for 30 s (`src/server/defi-positions.ts`), so a read
- * right after the owner's own operation can still be the earlier scan; it is never presented as newer than its "Last verified" time.
- */
-async function rescanUntil(page: Page, check: () => Promise<unknown>, language: Language = 'EN') {
-  const panel = page.getByRole('region', { name: WORDS[language].positions, exact: true });
-  await expect(async () => {
-    await panel.getByRole('button', { name: language === 'PT' ? 'Atualizar' : 'Refresh', exact: true }).click();
-    await expect(panel.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 15_000 });
-    await check();
-  }).toPass({ timeout: 75_000, intervals: [5_000] });
 }
 const position = (page: Page, id: string) => page.locator(`[data-liquidity-position="${id}"]`);
 const fact = (page: Page, id: string, term: string) => position(page, id).locator('dl > div').filter({ has: page.locator('dt', { hasText: new RegExp(`^${term.replace(/[()]/g, '\\$&')}$`) }) }).locator('dd');
@@ -263,12 +252,11 @@ test('Collect fees only: Simulate states the fees-only collection; the owner\'s 
     await expect(workspace).toContainText(W.completed, { timeout: 30_000 });
     await expect(workspace).toContainText('1. Collect fees');
     await expect(workspace).toContainText(W.reconciled);
-    // The Dashboard reads the position again: still open, nothing owed or collectable now (a read value of zero, not an unavailable one).
+    // The Dashboard reads the position again at once: still open, nothing owed or collectable now (a read value of zero, not an unavailable one).
+    // Its earlier scan predates the reconciled operation, so the server dropped it from its 30 s cache when it read the reconciled run (no Refresh).
     await openPositions(page);
-    await rescanUntil(page, async () => {
-      await expect(fact(page, '9001', W.owed)).toHaveText('0 WETH + 0 USDC', { timeout: 2_000 });
-      await expect(fact(page, '9001', W.collectable)).toHaveText('0 WETH + 0 USDC', { timeout: 2_000 });
-    });
+    await expect(fact(page, '9001', W.owed)).toHaveText('0 WETH + 0 USDC');
+    await expect(fact(page, '9001', W.collectable)).toHaveText('0 WETH + 0 USDC');
     await expect(fact(page, '9001', W.liquidity)).toHaveText(W.open);
     await expectNothingAsked(page);
     networkGuard.assertClean();
@@ -293,8 +281,9 @@ test('Close position: the exit withdraws everything, collects and burns the NFT 
   await expect(workspace).toContainText(W.completed, { timeout: 30_000 });
   await expect(workspace).toContainText('1. Close position');
   await expect(workspace).toContainText(W.reconciled);
+  // The pre-operation scan is never served again (no Refresh needed): the closed position is gone at once.
   await openPositions(page);
-  await rescanUntil(page, () => expect(position(page, '9001')).toHaveCount(0, { timeout: 2_000 }));
+  await expect(position(page, '9001')).toHaveCount(0);
   await expect(position(page, '9002')).toBeVisible();
   await expectNothingAsked(page);
   networkGuard.assertClean();
@@ -305,8 +294,10 @@ test('PT-BR: a declined wallet request is recorded as not sent; an expired Revie
     const W = WORDS.PT;
     const { owner } = await setup(page, 'PT');
     await openPositions(page, 'PT');
-    // The price unit's "per" and the Liquidity status word are not translated correctly yet (reported): only the range state is read here.
-    await expect(fact(page, '9001', W.range)).toContainText(W.inRange);
+    // Read in Portuguese: the price unit says "por" (never "per") and the status is the adjective "Aberta" (never the verb "Abrir").
+    await expect(fact(page, '9001', W.range)).toHaveText(`0.00030905276–0.00035906538 WETH por USDC · ${W.inRange}`);
+    await expect(fact(page, '9001', W.price)).toHaveText('0.00033312182 WETH por USDC');
+    await expect(fact(page, '9001', W.liquidity)).toHaveText(W.open);
     await expect(fact(page, '9001', W.principal)).toHaveText('0,671728 WETH + 2.016,46 USDC');
     await expect(fact(page, '9001', W.owed)).toHaveText('0,001 WETH + 3 USDC');
     await expect(fact(page, '9001', W.collectable)).toHaveText('0,0031 WETH + 9,5 USDC');
@@ -332,6 +323,10 @@ test('PT-BR: a declined wallet request is recorded as not sent; an expired Revie
     await expect(workspace).toContainText(W.notSent, { timeout: 30_000 });
     await expect(workspace).toContainText(W.declined);
     await expect(workspace).toContainText(W.local);
+    // Nothing was sent, so the one lifecycle action refreshes this run's Review in place ("Atualizar e revisar"), never a dead end.
+    // The footer still states the run's status (it needs attention); its ONE action is now that refresh, never a status with no action.
+    await expect(footer(page).locator('.canvas-primary-action button')).toHaveText(['Atualizar e revisar']);
+    await expect(footer(page).getByRole('button', { name: 'Atualizar e revisar', exact: true })).toBeEnabled();
     expect(await harnessPosition('9001')).toMatchObject({ liquidity: '1000000000000000' });
 
     // A fresh preparation of the same position (50%; the declined run stays recorded), then a Review the owner lets expire: its authorization is
@@ -363,27 +358,99 @@ test('PT-BR: a declined wallet request is recorded as not sent; an expired Revie
   });
 
 /**
- * EDITOR-DEPENDENT (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001, the Editor agent's components, in flight this round): Create's Canvas card and Simulate's
- * step list must name the position OPERATION — today a managed node is drawn as a deposit (the principal as editable amounts, Tick/Price, Review/
- * Apply on the card; "Pool / Liquidity 2016.465711 USDC + 0.671728733356296007 WETH" in Simulate and Execute's operation summary). Kept as `fixme`
- * (reported as skipped, never as a pass) until those components land; remove the `fixme` then.
+ * The Editor names the position OPERATION on every stage, from the canonical marker (never the pool node's descriptive maxima as a deposit): the Canvas
+ * card ("Remove 50% of liquidity", "Uniswap v3 position #9001", no amount textboxes), Simulate's operations as configured and Execute's "Operation
+ * summary". A MOCKED result is never presented as a Review (the provenance boundary), so Execute shows the configured operation and no "You are
+ * authorizing" rows: the C1 position rows (Token permission: None, Wallet requests: 1) and the C2 expired Review are presented only for a live result
+ * (review-summary-panel-position.test.tsx renders them from real runs read as public); here they are asserted absent.
  */
-test('Create and Simulate name the position operation, never a deposit (Editor components)', async ({ page }) => {
-  test.fixme(true, 'Needs the Editor agent\'s position-operation card and Simulate step label (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001)');
+test('Create, Simulate and Execute name the position operation from its marker, never a deposit', async ({ page, networkGuard }) => {
   const W = WORDS.EN;
   await setup(page);
   await openPositions(page);
   await position(page, '9001').getByRole('group', { name: W.actions, exact: true }).getByRole('button', { name: W.remove, exact: true }).click();
   await position(page, '9001').getByRole('group', { name: W.share, exact: true }).getByRole('button', { name: W.prepare, exact: true }).click();
   await prepared(page);
+  const DEPOSIT = /Pool \/ Liquidity|2,?016\.46|0\.6717/;
   const card = page.locator('.build-flow-surface .composer-card');
-  await expect(card).toContainText('Remove liquidity');
-  await expect(card).toContainText('50%');
-  await expect(card).toContainText('#9001');
+  await expect(card).toHaveAttribute('data-position-operation', 'DECREASE');
+  await expect(card.locator('.composer-action-name')).toHaveText('Remove 50% of liquidity');
+  await expect(card).toContainText('Uniswap v3 position #9001');
+  await expect(card).toContainText('Uniswap v3 · Base');
   await expect(card.getByRole('textbox')).toHaveCount(0);
+  await expect(card).not.toContainText(DEPOSIT);
   await simulate(page);
   const panel = page.locator('.simulation-context-panel');
-  await expect(panel).toContainText('Remove liquidity');
-  await expect(panel).toContainText('#9001');
-  await expect(panel).not.toContainText('2016.465711 USDC + 0.671728733356296007 WETH');
+  await expect(panel).toHaveAttribute('data-position-operation', 'DECREASE');
+  await expect(panel.locator('.operation-summary li[data-position-operation="DECREASE"]')).toHaveCount(1);
+  await expect(panel).toContainText('Remove 50% of liquidity');
+  await expect(panel).toContainText('Uniswap v3 position #9001');
+  await expect(panel).not.toContainText(DEPOSIT);
+  await mockedBoundary(page);
+  const review = page.locator('.review-panel-execute');
+  await expect(review).toHaveAttribute('data-position-operation', 'DECREASE');
+  const summary = review.getByRole('region', { name: 'Operation summary', exact: true });
+  await expect(summary.locator('li[data-position-operation="DECREASE"]')).toHaveCount(1);
+  await expect(summary).toContainText('Remove 50% of liquidity');
+  await expect(summary).toContainText('Uniswap v3 position #9001');
+  await expect(summary).toContainText('Base');
+  await expect(review).not.toContainText(DEPOSIT);
+  // MOCKED: no Review is presented, so neither its C1 rows nor an expired C2 Review (both are live-only); the footer's Authorize stays disabled.
+  await expect(review).toHaveAttribute('data-review-state', 'pending');
+  await expect(page.locator('[data-position-row]')).toHaveCount(0);
+  await expect(page.locator('#workspace')).not.toContainText(/You are authorizing|Your review expired/);
+  await expectNothingAsked(page);
+  networkGuard.assertClean();
 });
+
+/**
+ * A declined wallet request sent nothing (CANCELLED before any broadcast), so the run is not a dead end: Create's and Execute's one lifecycle action is
+ * "Refresh & review", which refreshes the SAME run's Review in place (read-only; never a resend, never a new run). The owner then authorizes the
+ * refreshed Review (through the runtime, the MOCKED precedent) and its one request is reconciled; the declined attempt stays recorded unsent.
+ */
+test('a declined request: Create and Execute offer Refresh & review, which refreshes the same run in place; the refreshed Review is authorized and reconciled',
+  async ({ page, networkGuard }) => {
+    const W = WORDS.EN;
+    const { owner } = await setup(page);
+    await openPositions(page);
+    await position(page, '9001').getByRole('group', { name: W.actions, exact: true }).getByRole('button', { name: W.collect, exact: true }).click();
+    await prepared(page);
+    const id = await simulate(page);
+    await mockedBoundary(page);
+    const runtime = ownerRuntime(), run = await runtime.positionStatus(id);
+    const declined = await ownerManages(runtime, id, run.workflow, owner, { decline: true });
+    expect(declined.record.attempts.map(a => [a.state, a.note, a.transactionHash ?? null])).toEqual([['CANCELLED', 'UNISWAP_REJECTED', null]]);
+    const workspace = await recoveredExecute(page);
+    await expect(workspace).toContainText(W.notSent, { timeout: 30_000 });
+    await expect(workspace).toContainText('Wallet request declined');
+    const refresh = footer(page).getByRole('button', { name: 'Refresh & review', exact: true });
+    await expect(refresh).toBeEnabled();
+    // The status line still says the run needs attention; the ONE lifecycle action is the refresh (before the fix: a status with no action).
+    await expect(footer(page).locator('.canvas-primary-action button')).toHaveText(['Refresh & review']);
+    await openEditorSection(page, 'Build');
+    await expect(footer(page).getByRole('button', { name: 'Refresh & review', exact: true })).toBeEnabled();
+    await expect(footer(page).locator('.canvas-primary-action button')).toHaveText(['Refresh & review']);
+    await openEditorSection(page, 'Execute');
+    await refresh.click();
+    // The SAME run gets a fresh read-only Review; the declined attempt stays recorded unsent; nothing is sent or asked of the browser wallet.
+    await expect.poll(async () => (await runtime.positionStatus(id)).review.commitment, { timeout: 30_000 }).not.toBe(declined.record.review.commitment);
+    const refreshed = await runtime.positionStatus(id);
+    expect(refreshed).toMatchObject({ verdict: 'PENDING', authorization: null, error: null });
+    expect(refreshed.attempts.map(a => [a.state, a.transactionHash ?? null])).toEqual([['CANCELLED', null]]);
+    expect(await positionRun(page)).toBe(id);
+    await expect(footer(page).getByRole('button', { name: 'Refresh & review', exact: true })).toHaveCount(0);
+    await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeDisabled();
+    expect(await harnessSends()).toBe(0);
+    await expectNothingAsked(page);
+    // The owner authorizes the refreshed Review: its one request is reconciled on the same run.
+    const { record } = await ownerManages(runtime, id, refreshed.workflow, owner);
+    expect(record).toMatchObject({ id, verdict: 'RECONCILED', result: { operation: 'COLLECT', burned: false } });
+    expect(record.attempts.map(a => [a.state, Boolean(a.transactionHash)])).toEqual([['CANCELLED', false], ['CONFIRMED', true]]);
+    expect(await harnessSends()).toBe(1);
+    const done = await recoveredExecute(page);
+    await expect(done).toContainText(W.completed, { timeout: 30_000 });
+    await expect(done).toContainText('1. Collect fees');
+    await expect(done).toContainText(W.reconciled);
+    await expectNothingAsked(page);
+    networkGuard.assertClean();
+  });

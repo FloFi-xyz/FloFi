@@ -2,6 +2,8 @@
 import { projectReview } from './review-presentation';
 import { currentExecution, isFinalExecutionResult, nothingSubmitted, refreshableAfterNothingSent } from './execution-result';
 import type { ExecutionControlsState } from '../state/execution-controls';
+import type { ExecutionLifecycle } from './execution-lifecycle';
+import { isUniswapPositionRecord } from './simulation-presentation';
 
 const FRESH_SIMULATION_AFTER_NOTHING_SENT: readonly string[] = ['public', 'solana-swap', 'solana-pool', 'solana-composition', 'solana-transfer'];
 /**
@@ -10,6 +12,17 @@ const FRESH_SIMULATION_AFTER_NOTHING_SENT: readonly string[] = ['public', 'solan
  */
 export const REFRESH_AFTER_PRESEND_REFUSAL: readonly string[] = ['universal', 'router', 'uniswap-pool'];
 export const REFRESH_AND_REVIEW_LABEL = 'Refresh & review';
+/**
+ * Whether the run's final result can be prepared and reviewed again in place because nothing of it was sent (`refreshableAfterNothingSent`).
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap position run has ONE wallet request; when the owner declined it in the wallet (CANCELLED, no hash,
+ * nothing confirmed — `nothingSubmitted`) nothing was sent either, so the same run's Review is refreshed in place exactly like a request refused
+ * before the wallet (`uniswapPositionRefreshInPlace`): a fresh read-only simulation and Review the owner authorizes again. Never a resend.
+ */
+export function refreshableRun(source: ExecutionControlsState['source'], progress: ExecutionLifecycle | null | undefined): boolean {
+  if (!REFRESH_AFTER_PRESEND_REFUSAL.includes(source.kind)) return false;
+  if (refreshableAfterNothingSent(progress)) return true;
+  return source.kind === 'uniswap-pool' && isUniswapPositionRecord((source.state as { readonly record?: unknown }).record) && nothingSubmitted(progress);
+}
 /** A Solana composition whose swap is reconciled and bound, and whose position has no transaction yet. */
 function awaitsPosition(source: ExecutionControlsState['source']): boolean {
   if (source.kind !== 'solana-composition') return false;
@@ -42,7 +55,8 @@ export function projectCanvasAction(props: ExecutionControlsState, controls: {
     // pre-submission outcome (declined, wallet error, changed or stale bytes refused before any broadcast) and recover the same way.
     // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a bridge request refused before the wallet (e.g. its transaction number disagreed) continues the same
     // workflow: a fresh preparation and Review, never a resend and never a rebuilt Canvas.
-    if (REFRESH_AFTER_PRESEND_REFUSAL.includes(props.source.kind) && refreshableAfterNothingSent(progress))
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap position request declined in the wallet sent nothing either (`refreshableRun`).
+    if (refreshableRun(props.source, progress))
       return { kind: 'simulate', label: REFRESH_AND_REVIEW_LABEL, disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
     if (FRESH_SIMULATION_AFTER_NOTHING_SENT.includes(props.source.kind) && nothingSubmitted(progress)) return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
     // A confirmed prefix can need a fresh quote/Review before its still-unattempted suffix.

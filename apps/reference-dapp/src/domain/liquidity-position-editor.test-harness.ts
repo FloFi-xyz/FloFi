@@ -50,8 +50,13 @@ export function managedWorkflow(choice: LiquidityPositionChoice, pool: Liquidity
   return result.workflow;
 }
 
-/** A real Uniswap position run of the service: the managed workflow, the staged request, optionally executed by the scripted wallet. */
-export async function uniswapPositionRun(request: Omit<UniswapPositionRequest, 'tokenId'>, execute = false): Promise<{ record: UniswapPositionRecord; workflow: Workflow }> {
+/**
+ * A real Uniswap position run of the service: the managed workflow, the staged request, optionally executed by the scripted wallet, or (`'decline'`)
+ * authorized and handed off, then declined by the owner in the wallet (refused before any broadcast: nothing sent). `service` and `advance` (the
+ * MOCKED chain moving on, in seconds) let a test refresh the run's Review in place later.
+ */
+export async function uniswapPositionRun(request: Omit<UniswapPositionRequest, 'tokenId'>, execute: boolean | 'decline' = false):
+  Promise<{ record: UniswapPositionRecord; workflow: Workflow; service: ReturnType<typeof createUniswapLiquidityService>; advance: (seconds: number) => void }> {
   const chain = createUniswapLiquidityChain({ profile: UNI_PROFILE, tick: TICK, usdc: USDC_IS_0 ? 1_000_000_000n : 10_000_000n, weth: USDC_IS_0 ? 10_000_000n : 1_000_000_000n });
   const sepolia: Rpc = async () => { throw new Error('BASE_SEPOLIA_CLIENT_MUST_NOT_BE_USED'); };
   const service = createUniswapLiquidityService({ storage: createFileExecutionStorage(await mkdtemp(join(tmpdir(), 'flofi-unipm-editor-')), 'UNISWAP_LIQUIDITY_BUSY'), rpc: sepolia,
@@ -66,10 +71,14 @@ export async function uniswapPositionRun(request: Omit<UniswapPositionRequest, '
     await service.positionReview(record.id, record.review.commitment, semantic);
     const begun = await service.positionBegin(record.id, UNI_OWNER, semantic);
     await service.positionHandoff(record.id);
-    await service.positionReport(record.id, { kind: 'HASH', hash: chain.wallet.send(begun.transaction) });
-    record = await service.positionObserve(record.id);
+    if (execute === 'decline') record = await service.positionWalletFailure(record.id, { invoked: true, code: 'UNISWAP_REJECTED', rejectionCode: 4001,
+      calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001, message: 'Owner rejected test request' } }] });
+    else {
+      await service.positionReport(record.id, { kind: 'HASH', hash: chain.wallet.send(begun.transaction) });
+      record = await service.positionObserve(record.id);
+    }
   }
-  return { record, workflow };
+  return { record, workflow, service, advance: seconds => chain.advance(seconds) };
 }
 /** Presented as a Review read from the public network (the run itself stays MOCKED evidence). */
 export const asMainnet = (record: UniswapPositionRecord): UniswapPositionRecord => ({ ...record, provenance: 'PUBLIC_MAINNET' });
