@@ -1681,6 +1681,18 @@
     "app.platform.settlement-regression-matrix": {
       "path": "apps/reference-dapp/src/platform/settlement-regression-matrix.test.ts",
       "stage": "unit"
+    },
+    "reference-compiler.uniswap-position-management": {
+      "path": "packages/reference-compiler/test/uniswap-position-management.test.ts",
+      "stage": "unit"
+    },
+    "app.server.uniswap-position-service": {
+      "path": "apps/reference-dapp/src/server/uniswap-position-service.test.ts",
+      "stage": "unit"
+    },
+    "app.server.liquidity-lifecycle-telemetry": {
+      "path": "apps/reference-dapp/src/server/liquidity-lifecycle-telemetry.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1830,7 +1842,10 @@
     "app.admin.finops-sync-ai",
     "app.admin.finops-sync-circleci",
     "app.server.universal-router.incident-replay",
-    "app.platform.settlement-regression-matrix"
+    "app.platform.settlement-regression-matrix",
+    "reference-compiler.uniswap-position-management",
+    "app.server.uniswap-position-service",
+    "app.server.liquidity-lifecycle-telemetry"
   ],
   "modules": [
     {
@@ -4500,7 +4515,8 @@
         "apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/solana-liquidity-authoring.ts",
         "apps/reference-dapp/src/domain/uniswap-liquidity-authoring.ts",
-        "apps/reference-dapp/src/domain/uniswap-liquidity-continuation.ts"
+        "apps/reference-dapp/src/domain/uniswap-liquidity-continuation.ts",
+        "apps/reference-dapp/src/domain/liquidity-positions.ts"
       ],
       "suites": [
         "reference-compiler.liquidity",
@@ -4517,7 +4533,9 @@
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
         "app.e2e.uniswap-liquidity-continuation",
-        "app.state.uniswap-liquidity-store"
+        "app.state.uniswap-liquidity-store",
+        "app.server.uniswap-position-service",
+        "app.server.defi-positions"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -5099,12 +5117,14 @@
         "apps/reference-dapp/src/domain/journey-metrics.ts",
         "apps/reference-dapp/src/server/journey-telemetry.ts",
         "apps/reference-dapp/src/app/api/flofi/journey/route.ts",
-        "scripts/journey-latency-report.mjs"
+        "scripts/journey-latency-report.mjs",
+        "apps/reference-dapp/src/server/liquidity-lifecycle-telemetry.ts"
       ],
       "suites": [
         "app.app.api.flofi.journey.route",
         "app.domain.journey-metrics",
-        "app.server.journey-telemetry"
+        "app.server.journey-telemetry",
+        "app.server.liquidity-lifecycle-telemetry"
       ],
       "gaps": [
         "Current hosted sampling is unverified: p50/p95 need real journeys in the deployment logs; the report refuses to label MOCKED or LOCAL evidence otherwise.",
@@ -5968,7 +5988,8 @@
         "packages/reference-compiler/src/liquidity.ts",
         "packages/reference-compiler/src/orca-liquidity.ts",
         "packages/reference-compiler/src/orca-whirlpool.ts",
-        "packages/reference-compiler/src/uniswap-public-liquidity.ts"
+        "packages/reference-compiler/src/uniswap-public-liquidity.ts",
+        "packages/reference-compiler/src/uniswap-position-management.ts"
       ],
       "suites": [
         "reference-compiler.liquidity",
@@ -5977,7 +5998,8 @@
         "reference-compiler.uniswap-price-orientation",
         "reference-executor.bound-composition",
         "reference-executor.cross-chain-liquidity-recovery",
-        "reference-reconciler.orca-mainnet-liquidity"
+        "reference-reconciler.orca-mainnet-liquidity",
+        "reference-compiler.uniswap-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7117,7 +7139,8 @@
         "apps/reference-dapp/src/server/orca-liquidity-service.ts",
         "apps/reference-dapp/src/server/uniswap-liquidity-mock.ts",
         "apps/reference-dapp/src/server/uniswap-liquidity-service.ts",
-        "apps/reference-dapp/src/server/defi-positions-solana.ts"
+        "apps/reference-dapp/src/server/defi-positions-solana.ts",
+        "apps/reference-dapp/src/server/uniswap-position-service.ts"
       ],
       "suites": [
         "app.server.copilot-pool-integration",
@@ -7130,7 +7153,10 @@
         "app.server.base-liquidity",
         "app.e2e.uniswap-liquidity-continuation",
         "app.state.uniswap-liquidity-store",
-        "app.server.defi-positions"
+        "app.server.defi-positions",
+        "reference-compiler.uniswap-position-management",
+        "app.server.uniswap-position-service",
+        "app.server.liquidity-lifecycle-telemetry"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",

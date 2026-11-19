@@ -14,6 +14,7 @@ import { aavePositions, POSITION_EVM_METHODS, uniswapPositions, UNISWAP_POSITION
 import { orcaPositions } from './defi-positions-solana';
 import { cloudFlowMode } from './flow-runtime';
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc';
+import { recordLiquidityOutcome } from './liquidity-lifecycle-telemetry';
 import { CANONICAL_STABLECOINS, defaultMode, EVM_NETWORKS } from './wallet-portfolio';
 
 const registeredAssets: Readonly<Record<CatalogNetworkId, readonly CanonicalAsset[]>> = {
@@ -126,11 +127,22 @@ async function solanaScan(owner: string, now: Date, signal: AbortSignal): Promis
   return { ...SOLANA_SETUP, ...await orcaPositions(rpc, owner, now, unvalued), provenance: 'PUBLIC_MAINNET' };
 }
 
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: content-free discovery outcomes per liquidity network (bucketed counts; no address or position id). */
+function discoveryOutcomes(scans: readonly PositionScan[]): void {
+  for (const scan of scans) {
+    if (scan.protocol === 'Aave V3' || scan.status === 'UNSUPPORTED' || scan.status === 'NETWORK_UNAVAILABLE') continue;
+    const protocol = scan.protocol === 'Orca Whirlpools' ? 'ORCA' as const : 'UNISWAP_V3' as const, provenance = scan.provenance ?? 'UNKNOWN';
+    if (scan.status !== 'UNAVAILABLE')
+      recordLiquidityOutcome({ outcome: 'POSITIONS_DISCOVERED', protocol, network: scan.network, count: scan.positions.filter(position => position.liquidity).length, provenance });
+    if (scan.status !== 'COMPLETE') recordLiquidityOutcome({ outcome: 'INSPECTION_UNAVAILABLE', protocol, network: scan.network, code: `POSITION_SCAN_${scan.status}`, provenance });
+  }
+}
 async function readPositions(owner: PositionWallet): Promise<readonly PositionScan[]> {
   const started = new Date();
   const signal = AbortSignal.timeout(BUDGET_MS);
   const scans = await Promise.all(owner.namespace === 'eip155' ? evmScans(owner.address, started, signal)
     : [scanOne(SOLANA_SETUP, signal, () => solanaScan(owner.address, started, signal))]);
+  discoveryOutcomes(scans);
   const requested = new Set<PriceFeedAsset>();
   for (const scan of scans) {
     if (scan.provenance !== 'PUBLIC_MAINNET') continue;

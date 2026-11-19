@@ -13,6 +13,7 @@ import { buildOrcaLiquidityEvidence, classifyOrcaLiquidityEvidence, reconcileOrc
   type OrcaLiquidityObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { solanaTransactionClaim } from './solana-transaction-claim.ts';
+import { recordLiquidityOutcome, type LiquidityOutcome } from './liquidity-lifecycle-telemetry.ts';
 
 /**
  * BUILD-015 Orca Whirlpools liquidity on Solana Devnet; BUILD-SOLANA-MAINNET-001: one service instance per cluster (`profile`), each on its own
@@ -157,6 +158,12 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
     }
     return result;
   }
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: content-free outcomes of position management (an OPEN is not management; Devnet is outside the closed network set). */
+  const managed = (outcome: LiquidityOutcome, operation: OrcaLiquidityOperation, reason: string | null = null) => {
+    if (operation === 'OPEN') return;
+    recordLiquidityOutcome({ outcome, protocol: 'ORCA', network: profile.network, operation: operation === 'DECREASE_PARTIAL' ? 'DECREASE' : operation, code: reason,
+      provenance: input.provenance === 'MOCKED' ? 'MOCKED' : 'PUBLIC_MAINNET' });
+  };
   const lifecycleOf = async (owner: string, positionMint: string) => ({ positionMint, operations: await Promise.all((await readRegistry(owner))
     .filter(l => l.positionMint === positionMint).map(async l => { const r = await load(l.id);
       return { id: r.id, operation: r.operation, verdict: r.verdict, state: r.attempt?.state ?? null, signature: r.attempt?.signature ?? null }; })) });
@@ -190,8 +197,12 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
           if (!chain.exists) throw new Error('ORCA_POSITION_UNKNOWN');
         }
       }
-      const review = await simulateOrcaLiquidity(workflow, owner, { operation: request.operation, positionMint, ...request.partBps === undefined ? {} : { partBps: request.partBps } },
-        input.rpc, now());
+      let review: Awaited<ReturnType<typeof simulateOrcaLiquidity>>;
+      try {
+        review = await simulateOrcaLiquidity(workflow, owner, { operation: request.operation, positionMint, ...request.partBps === undefined ? {} : { partBps: request.partBps } },
+          input.rpc, now());
+      } catch (cause) { managed('SIMULATION_REJECTED', request.operation, code(cause, `${X}_SIMULATION_FAILED`)); throw cause; }
+      managed(request.operation === 'COLLECT' ? 'COLLECTION_PREPARED' : request.operation === 'DECREASE_PARTIAL' ? 'WITHDRAWAL_PREPARED' : 'EXIT_PREPARED', request.operation);
       const id = 'orcalp-' + randomBytes(16).toString('hex');
       return save({ ...createOrcaLiquidityRun(id, review, input.provenance), observations: [], evidence: null, error: null, evidenceClass: 'PUBLIC_READ_ONLY' });
     },
@@ -227,6 +238,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       if (JSON.stringify(diagnostic).length > 16_384 || !new RegExp(`^${X}_[A-Z0-9_]{2,70}$`).test(diagnostic.code)) throw new Error(`${X}_DIAGNOSTIC_INVALID`);
       if (record.attempt && record.attempt.state !== 'PREPARED') throw new Error(`${X}_DIAGNOSTIC_NOT_PRE_SUBMISSION`);
       const cancelled = record.attempt ? orcaLiquidityTransition(record, 'CANCELLED') : record;
+      managed('WALLET_HANDOFF_FAILED', record.operation, diagnostic.code);
       return save({ ...record, ...cancelled, authorization: null, notSubmitted: Boolean(record.attempt), walletDiagnostic: diagnostic, error: diagnostic.code, submissionError: diagnostic.code });
     }); },
     /** Verify the reviewed bytes (or a verified wallet guard) and every reviewed signature, persist both, then broadcast once. */
@@ -287,6 +299,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       const state = reconciled ? 'CONFIRMED' : observation.transactionFailed ? 'REVERTED' : 'RECONCILIATION_REQUIRED';
       const next = { ...record, ...orcaLiquidityTransition(record, state, { reconciled }), observations: [...record.observations, observation],
         verdict: reconciled ? 'RECONCILED' as const : 'DIVERGENT' as const, error: reconciled ? null : observation.reason };
+      managed(reconciled ? 'RECONCILED' : 'RECONCILIATION_REQUIRED', record.operation, reconciled ? null : observation.reason);
       if (!reconciled) return save(next);
       const lifecycle = await lifecycleOf(record.review.owner, record.positionMint);
       return save({ ...next, evidence: buildOrcaLiquidityEvidence({ id: next.id, review: next.review, journal: next.journal, provenance: next.provenance,

@@ -26,6 +26,7 @@ import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schem
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { sameEvmIntent } from './evm-submission-discovery.ts';
 import { verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
+import { recordLiquidityOutcome, type LiquidityOutcome } from './liquidity-lifecycle-telemetry.ts';
 import type { UniswapAttemptState, UniswapReceipt, UniswapTokenView, UniswapTx, UniswapWalletDiagnostic } from './uniswap-liquidity-service.ts';
 
 export type { UniswapPositionOperation };
@@ -261,6 +262,14 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
   const replaceAttempt = (record: UniswapPositionRecord, attempt: UniswapPositionAttempt): UniswapPositionRecord =>
     ({ ...record, attempts: record.attempts.map(a => a.attemptId === attempt.attemptId ? attempt : a) });
   const evidenceClass = provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' as const : 'MOCKED' as const;
+  /** Content-free operational outcome (no address, token id, amount or hash; off unless the deployment opted in). */
+  const outcome = (kind: LiquidityOutcome, network: string, request: Pick<UniswapPositionRequest, 'operation' | 'close'> | null, code: string | null = null) =>
+    recordLiquidityOutcome({ outcome: kind, protocol: 'UNISWAP_V3', network, operation: request ? request.close ? 'CLOSE' : request.operation : null, code, provenance });
+  const settled = (record: UniswapPositionRecord) => {
+    if (record.verdict === 'RECONCILED') outcome('RECONCILED', record.review.network, record.request);
+    else if (record.verdict === 'DIVERGENT') outcome('RECONCILIATION_REQUIRED', record.review.network, record.request, record.error);
+    return record;
+  };
 
   async function ethCall(R: UniswapPositionPoolRuntime, to: string, data: string, at: string, from?: string): Promise<string> {
     return hex(await R.rpc('eth_call', [from ? { from, to, data } : { to, data }, at]));
@@ -571,7 +580,15 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       const workflow = workflowInput as SemanticWorkflow, request = parseUniswapPositionRequest(requestInput);
       if (typeof ownerInput !== 'string' || !ADDRESS.test(ownerInput.toLowerCase())) fail('UNISWAP_ADDRESS_INVALID');
       const owner = ownerInput.toLowerCase();
-      const review = await buildReview(workflow, owner, request);
+      let review: UniswapPositionReview;
+      try { review = await buildReview(workflow, owner, request); }
+      catch (cause) {
+        const node = isObject(workflow) && Array.isArray(workflow.nodes) ? workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated') : undefined;
+        const network = ({ 'eip155:8453': 'Base', 'eip155:42161': 'Arbitrum One', 'eip155:1': 'Ethereum', 'eip155:4663': 'Robinhood Chain' } as Record<string, string>)[node?.chainId ?? ''];
+        if (network) outcome('SIMULATION_REJECTED', network, request, cause instanceof Error ? cause.message : null);
+        throw cause;
+      }
+      outcome(request.operation === 'COLLECT' ? 'COLLECTION_PREPARED' : request.operation === 'DECREASE' ? 'WITHDRAWAL_PREPARED' : 'EXIT_PREPARED', review.network, request);
       return save({ format: UNISWAP_POSITION_RUN_FORMAT, id: deps.newRunId(), provenance, workflow, owner, request, review, authorization: null, attempts: [],
         result: null, evidence: null, verdict: 'PENDING', error: null });
     },
@@ -686,6 +703,7 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
           !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt.state)) fail('UNISWAP_DIAGNOSTIC_NOT_PRE_SUBMISSION');
       if (!diagnostic.invoked && attempt.state === 'SUBMISSION_RESULT_UNKNOWN') fail('UNISWAP_DIAGNOSTIC_NOT_PRE_SUBMISSION');
       const note = refused ? 'UNISWAP_REJECTED' : diagnostic.code;
+      outcome('WALLET_HANDOFF_FAILED', record.review.network, record.request, note);
       return save(replaceAttempt({ ...record, authorization: null, error: note }, { ...attempt, state: 'CANCELLED', note }));
     }); },
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */
@@ -723,10 +741,10 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
         const saved = await save(replaceAttempt(record, current));
         if (raw === null) return save({ ...saved, error: 'UNISWAP_TRANSACTION_PENDING' });
         if (!isObject(raw)) fail('UNISWAP_RECEIPT_INVALID');
-        return settle(saved, R, current, hash, raw);
+        return settled(await settle(saved, R, current, hash, raw));
       }
       if (!isObject(raw)) fail('UNISWAP_RECEIPT_INVALID');
-      return settle(record, R, attempt, hash!, raw);
+      return settled(await settle(record, R, attempt, hash!, raw));
     }); },
   };
 }

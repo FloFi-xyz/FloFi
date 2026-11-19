@@ -19,6 +19,7 @@ import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type Uniswa
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import { createUniswapLiquidityService, uniswapRunNeedsObservation, type UniswapLiquidityService } from './uniswap-liquidity-service';
 import { parseUniswapPositionRequest, type UniswapPositionRequest } from './uniswap-position-service';
+import { setLiquidityOutcomeSink } from './liquidity-lifecycle-telemetry';
 import type { Rpc } from './public-testnet-service';
 
 const context = createBaseSepoliaReviewContext();
@@ -103,6 +104,24 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 Uniswap v3 position management (MO
       result: { burned: false } });
     expect(done.evidence!.bundle.reconciliation.positions).toHaveLength(1);
     expect(uniswapRunNeedsObservation(done)).toBe(false);
+  });
+
+  it('emits content-free lifecycle outcomes (prepared, rejected, reconciled) without any address, token id or amount', async () => {
+    const lines: Record<string, unknown>[] = [];
+    setLiquidityOutcomeSink(fields => lines.push(fields as Record<string, unknown>));
+    try {
+      const s = await setup(), w = positionWorkflow();
+      const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 5_000_000_000n });
+      await expect(s.service.positionSimulate(w, UNI_OWNER, request({ tokenId }))).rejects.toThrow('UNISWAP_POSITION_NOTHING_TO_COLLECT');
+      s.chain.accrueFees(tokenId, 10n, 10n);
+      const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId }));
+      await execute(s, run.id, w);
+      expect(lines.map(line => [line.outcome, line.operation, line.code])).toEqual([['SIMULATION_REJECTED', 'COLLECT', 'UNISWAP_POSITION_NOTHING_TO_COLLECT'],
+        ['COLLECTION_PREPARED', 'COLLECT', null], ['RECONCILED', 'COLLECT', null]]);
+      const text = JSON.stringify(lines);
+      for (const secret of [UNI_OWNER, run.id, PROFILE.positionManager, PROFILE.pool]) expect(text).not.toContain(secret.slice(2));
+      expect(text).not.toMatch(new RegExp(`"${tokenId}"`));
+    } finally { setLiquidityOutcomeSink(null); }
   });
 
   it('refuses to ask the owner to pay for a collection of nothing', async () => {
