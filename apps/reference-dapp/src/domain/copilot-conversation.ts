@@ -2033,8 +2033,9 @@ function positionFollowUp(state: CopilotConversation, text: string, env: Copilot
       extras = { ...earlierPortion ? { portion: earlierPortion } : {}, ...uniswap && choice.close ? { close: true as const } : {} };
     }
   }
-  const result = resolveIntent(intent, next, env, null, extras);
-  const said = result.reply.command ? { ...result, reply: { ...result.reply, notes: [p.replacedNote, ...result.reply.notes] } } : result;
+  const result = resolveIntent(intent, next, env, null, extras), proposed = result.reply.command;
+  const replaced = proposed?.type === 'MANAGE_LIQUIDITY_POSITION' && JSON.stringify(proposed.choice) !== JSON.stringify(choice);
+  const said = replaced ? { ...result, reply: { ...result.reply, notes: [p.replacedNote, ...result.reply.notes] } } : result;
   return { kind: 'LOCAL', ...tallied(said, env) };
 }
 /** Engineering certification only: "Remove 50% of my liquidity", "exit my position" on a FloFi-registered Orca position of the connected Solana Devnet wallet. */
