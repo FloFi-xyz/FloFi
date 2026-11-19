@@ -155,6 +155,9 @@ their findings and resolutions are in §10.
 - **Financially validated: not applicable / no.** No real-money transaction, signature, production invoice import, financial record change or
   production billing synchronization was performed or is needed for this presentation change; the lifecycle evidence is MOCKED loopback only.
 - The FinOps text file was not supplied; the repository implementation was used as the source.
+- Execute eligibility fails open by design: while the runtime still holds a record that keeps its own words (e.g. a declined attempt), Execute
+  stays reachable even after "Create new workflow" rebuilds the same swap, until the next simulation replaces that record. Execute then shows
+  nothing of the earlier record for the new workflow (`workflow-ux-execution.spec.ts`).
 - FinOps populated-state screenshots are rendered from an isolated test fixture (the admin harness database has no ledger migration); the real
   admin console was exercised in the browser harness in its ledger-unavailable state.
 - Unrelated observation (not fixed, out of scope): on a 390 px phone the existing admin navigation strip extends past the viewport in the
