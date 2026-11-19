@@ -672,6 +672,32 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   // A model that named a position id is discarded (FloFi selects positions from its own verified facts only).
   { id: 'S19', category: 'adversarial', language: 'EN', verified: lpVerified([LP_BASE, LP_ARB]), turns: [{ user: 'Exit position 123456',
     model: lp('EXIT', { select: { ordinal: null, assets: ['123456'] } }), expect: F(['could not validate']) }] },
+  // Every change of a prepared choice is a NEW proposal read locally ("75%", "only the fees", "Arbitrum"), never conversation state alone.
+  { id: 'S20', category: 'multi-turn', language: 'EN', verified: lpVerified([LP_BASE, LP_ARB, LP_ORCA]), turns: [
+    { user: 'Remove 50% of my liquidity on Base', model: lp('DECREASE', { percent: '50', network: 'BASE' }),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'DECREASE', partBps: 5000, position: { chain: 'eip155:8453' } } },
+        contains: ['your wallet is asked for one request', 'Next, Simulate reads the position again'] }) },
+    { user: '75%', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'DECREASE', partBps: 7500, position: { chain: 'eip155:8453' } } },
+      contains: ['This replaces the position choice FloFi prepared before'] }) },
+    { user: 'only the fees', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'COLLECT', partBps: null, close: false } } }) },
+    { user: 'Arbitrum', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'COLLECT', position: { chain: 'eip155:42161' } } } }) }] },
+  { id: 'S21', category: 'multi-turn', language: 'PT', verified: lpVerified([LP_BASE, LP_ORCA]), turns: [
+    { user: 'Coleta minhas taxas da Uniswap na Base', model: lp('COLLECT', { protocol: 'UNISWAP_V3', network: 'BASE' }, 'PT'),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'COLLECT' } }, contains: ['depois de 2 confirmações'] }) },
+    { user: 'tudo', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'EXIT', close: false } } }) },
+    { user: 'sim, fecha', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'EXIT', close: true } }, contains: ['o NFT dela é queimado'] }) }] },
+  // Surfaces that cannot manage positions are named plainly (answered by FloFi's own guide, no model call).
+  { id: 'S22', category: 'read-only', language: 'EN', verified: lpVerified([LP_BASE]), turns: [{ user: 'Can I collect my fees from Telegram?',
+    expect: A('PLATFORM', ['Telegram, WhatsApp, MCP and the Developer API cannot manage liquidity positions in this build.'], { local: true }) }] },
+  { id: 'S23', category: 'read-only', language: 'PT', turns: [{ user: 'Posso gerenciar minhas posições de liquidez pelo WhatsApp?',
+    expect: A('PLATFORM', ['Telegram, WhatsApp, MCP e a API para desenvolvedores não gerenciam posições de liquidez nesta versão.'], { local: true }) }] },
+  // The staged workflow is described from its marker: an exit that keeps the NFT, never "adds liquidity".
+  { id: 'S24', category: 'read-only', language: 'EN', verified: lpVerified([LP_BASE]), turns: [
+    { user: 'Withdraw everything from my Base position', model: lp('EXIT', { network: 'BASE' }),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'EXIT', close: false } } }) },
+    { user: 'What does my workflow do?', before: session => { session.apply(); }, model: intent.question('WORKFLOW_OVERVIEW'),
+      expect: A('WORKFLOW_OVERVIEW', ['Removes all liquidity from your Uniswap v3 position #123456 (WETH/USDC 0.05%) on Base and collects everything owed; the position NFT stays in your wallet.'],
+        { absent: ['Adds concentrated liquidity', 'yield'] }) }] },
   { id: 'S08', category: 'adversarial', language: 'EN', turns: [{ user: FIXTURE.devnetSwap, expect: EXACT },
     { user: 'yes', expect: { kind: 'ANSWER', local: true, contains: ['choose Apply'] } }, { user: 'yes, sign and execute it now', model: intent.unsupported('Flofi cannot sign or execute.'),
       expect: U(['cannot sign or execute']) }] },

@@ -345,6 +345,13 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     try {
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a short answer about a position (FloFi's open position question, or a change right after it prepared one) is
+      // resolved locally from the verified facts: facts older than POSITION_FACT_LIMITS.freshMs are read again first, never for longer than a moment
+      // (a slow read leaves the facts already known; Simulate and Review read the position again in any case).
+      const positioned = conversation.current.draft?.intent.kind === 'POSITION' || conversation.current.referents[0]?.command.type === 'MANAGE_LIQUIDITY_POSITION';
+      if (positioned && !devnetPositions(latest.current))
+        await Promise.race([loadPositions().catch(() => undefined), new Promise(resolve => setTimeout(resolve, POSITION_REFRESH_WAIT_MS))]);
+      if (ended()) return dropped;
       // The workflow, proposal and wallet this message is written against, taken before FloFi reads the saved names: a change while it reads them
       // (or while the model interprets) discards the late answer, exactly as without the read.
       const sent = contextNow();
@@ -404,7 +411,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       measure(finished.reply, finished.next, result.ok ? String((result.intent as { kind?: unknown } | null)?.kind ?? '') || null : null);
       return show(await settle(finished.reply));
     } finally { setBusy(false); }
-  }, [contextNow, recipientsNow, environmentNow, show, settle, loadVerified]);
+  }, [contextNow, recipientsNow, environmentNow, show, settle, loadVerified, loadPositions]);
   /** The Copilot's reply, or null when it is not enabled on this server (the caller shows its exact-grammar guidance). */
   const respond = useCallback(async (text: string): Promise<CopilotReply | null> => {
     const resolved = await (status.current ?? Promise.resolve<CopilotMode>('off'));
@@ -423,6 +430,8 @@ type Now = { readonly wallet: { readonly account: string | null }; readonly jupi
 /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owners whose positions the chat may read now: the connected EVM account and the Solana mainnet session. */
 const positionOwners = (now: Now) => ({ evm: now.wallet.account?.toLowerCase() ?? null,
   solana: now.jupiter.session?.chain === 'solana:mainnet' ? now.jupiter.session.account.address : null });
+/** How long a local position answer waits for stale facts to be read again before it uses the facts already known. */
+const POSITION_REFRESH_WAIT_MS = 4_000;
 /** Engineering certification only: a Solana Devnet session keeps the Devnet position path (FloFi-registered Devnet positions). */
 const devnetPositions = (now: Now) => activeNetworkScope() === 'ENGINEERING' && now.jupiter.session?.chain === 'solana:devnet';
 /**

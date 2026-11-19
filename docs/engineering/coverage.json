@@ -398,6 +398,10 @@
       "path": "apps/reference-dapp/src/domain/copilot-pool-dialogue.repro.test.ts",
       "stage": "unit"
     },
+    "app.domain.copilot-position-dialogue": {
+      "path": "apps/reference-dapp/src/domain/copilot-position-dialogue.test.ts",
+      "stage": "unit"
+    },
     "app.domain.copilot-range-dialogue": {
       "path": "apps/reference-dapp/src/domain/copilot-range-dialogue.test.ts",
       "stage": "unit"
@@ -1868,6 +1872,7 @@
     "app.flight.board-access-http",
     "app.domain.copilot-pool-dialogue",
     "app.domain.copilot-pool-dialogue.repro",
+    "app.domain.copilot-position-dialogue",
     "app.server.base-liquidity",
     "app.server.supply-service",
     "app.state.uniswap-liquidity-store",
@@ -4475,6 +4480,7 @@
         "apps/reference-dapp/src/domain/copilot-learning-copy.ts",
         "apps/reference-dapp/src/domain/copilot-lexicon.ts",
         "apps/reference-dapp/src/domain/copilot-messages.ts",
+        "apps/reference-dapp/src/domain/copilot-positions.ts",
         "apps/reference-dapp/src/domain/copilot-mode.ts",
         "apps/reference-dapp/src/domain/copilot-reconciled-context.ts",
         "apps/reference-dapp/src/domain/copilot-test-fixtures.ts",
@@ -4504,6 +4510,7 @@
         "app.domain.copilot-conversation",
         "app.domain.copilot-pool-dialogue",
         "app.domain.copilot-pool-dialogue.repro",
+        "app.domain.copilot-position-dialogue",
         "app.domain.copilot-range-dialogue",
         "app.e2e.copilot-pool-dialogue",
         "app.server.copilot-pool-integration",
@@ -4594,6 +4601,7 @@
         "reference-compiler.uniswap-public-liquidity",
         "app.domain.copilot-pool-dialogue",
         "app.domain.copilot-pool-dialogue.repro",
+        "app.domain.copilot-position-dialogue",
         "app.e2e.copilot-pool-dialogue",
         "app.server.copilot-pool-integration",
         "app.state.copilot-pool-reads",
