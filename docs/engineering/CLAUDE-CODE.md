@@ -37,7 +37,7 @@ execution moved entirely to the main session. Grep and Glob (absent from 2.1.314
 
 ## Setup
 
-- Claude Code 2.1.295 or later (`onFailure` hook field). Verified with 2.1.314 and 2.1.316.
+- Claude Code 2.1.295 or later (`onFailure` hook field). Verified with 2.1.314, 2.1.316 and 2.1.327.
 - Accept the workspace trust dialog; interactive sessions hold back project hooks
   until then. `-p`/SDK sessions treat the folder as trusted and run them.
 - Claude Code watches `.claude/agents/` only when the directory existed at session
@@ -201,12 +201,18 @@ loopback Messages API: the main session spawns each of the 19 specialists; each 
 a repository file and attempts Bash and Reads outside the repository, escaping
 through `..` and of a secret-named file. The probe checks discovery, exact
 descriptions, that the resolved tool set is exactly Read, system prompts, that Bash
-never runs, guard denials and the ledger. A second run in auto mode (the scripted
-model also answers auto mode's action classifier) has each specialist Read and then
-hand its report back: each must resolve to exactly Read and `SubagentHandback`, main
-must receive each report and the ledger each result. No real model, credentials or
-external AI service is used, so it proves harness wiring, not model judgment or
-automatic delegation.
+never runs, guard denials and the ledger. The Auto Mode handback phase requires
+each specialist to resolve to exactly Read and `SubagentHandback`, main to receive
+each report and the ledger to record each result.
+
+In Claude Code 2.1.327, the server-side Auto Mode classifier cannot evaluate
+actions in the isolated loopback session and can abort before any specialist
+starts. The handback subprocess keeps `CLAUDE_CODE_SENDMESSAGE_HANDBACK=1` and
+sets `CLAUDE_CODE_AUTO_MODE_SERVER=0` in its disposable environment. Run the
+verification command as shown above. Both phases exercise the project hooks against
+the scripted loopback endpoint. On failure with empty stderr, the probe
+summarizes recognized structured errors without printing the stdout transcript.
+These results verify installed harness wiring with zero live model responses.
 
 ## Evidence levels
 
