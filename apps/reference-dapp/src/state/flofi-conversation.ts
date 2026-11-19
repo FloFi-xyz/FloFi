@@ -1074,7 +1074,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
           const spoken: ConversationLanguage = copilot.language() === 'PT' ? 'PT' : 'EN';
           const read = APPLY_INSTRUCTION.test(reply.text) ? reply.text.replace(APPLY_INSTRUCTION, '')
             : reply.sentence ? spoken === 'PT' ? `Interpretado como “${reply.sentence}”.` : `Interpreted as “${reply.sentence}”.` : null;
-          commit(scope, reply.command, { exact: false, role: 'ai', language: spoken, ...reply.command.type === 'MANAGE_SOLANA_POSITION' && read
+          // A position operation (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a verified mainnet position too) is said as what it prepares, not as a step diff.
+          const position = reply.command.type === 'MANAGE_SOLANA_POSITION' || reply.command.type === 'MANAGE_LIQUIDITY_POSITION';
+          commit(scope, reply.command, { exact: false, role: 'ai', language: spoken, ...position && read
             ? { summary: read.replace(/\.$/, ''), notes: reply.notes } : { notes: [...read ? [read] : [], ...reply.notes] } });
           // BUILD-FLOFI-UNIFIED-COPILOT-001: the optional offer to save the typed address, after the proposal and independent of it.
           if (reply.offer) append(scope, { role: 'ai', text: reply.offer.text, options: reply.offer.options });

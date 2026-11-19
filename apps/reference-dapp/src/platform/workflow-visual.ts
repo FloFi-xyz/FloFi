@@ -100,9 +100,13 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
     case 'CATALOG_LIQUIDITY': return step({ action: 'ADD_LIQUIDITY', provider: 'Uniswap v3', network: d.input.network, amountKind: 'MAXIMUM',
       amounts: [{ amount: d.input.amountA, asset: d.input.tokenA }, { amount: d.input.amountB, asset: d.input.tokenB }],
       range: d.fullRange ? null : { lower: d.lowerPrice, upper: d.upperPrice, unit: d.priceUnit.replace(' per ', '/') }, slippageBps: bps(d.input.slippage), testFunds });
-    case 'ORCA_LIQUIDITY': return step({ action: 'ADD_LIQUIDITY', provider: s.protocol, network: d.input.network, chain: 'SOLANA', amountKind: 'MAXIMUM',
-      amounts: [{ amount: d.input.maxSol, asset: 'SOL' }, { amount: d.input.maxDevUsdc, asset: 'devUSDC' }], range: { lower: d.lowerPrice, upper: d.upperPrice, unit: 'devUSDC/SOL' },
-      slippageBps: bps(d.input.slippage), testFunds });
+    case 'ORCA_LIQUIDITY': { const quote = d.input.network === 'Solana Devnet' ? 'devUSDC' : 'USDC';
+      return step({ action: 'ADD_LIQUIDITY', provider: s.protocol, network: d.input.network, chain: 'SOLANA', amountKind: 'MAXIMUM',
+        amounts: [{ amount: d.input.maxSol, asset: 'SOL' }, { amount: d.input.maxDevUsdc, asset: quote }], range: { lower: d.lowerPrice, upper: d.upperPrice, unit: `${quote}/SOL` },
+        slippageBps: bps(d.input.slippage), testFunds }); }
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: an existing position's management step (no channel or MCP tool authors one): never shown as a deposit, and
+    // its pool maxima are not amounts it moves.
+    case 'LIQUIDITY_POSITION': return step({ action: 'OTHER', provider: s.protocol, network: d.network, chain: d.protocol === 'ORCA' ? 'SOLANA' : 'EVM', testFunds });
     case 'LENDING_COMPOSITION': {
       const owner: VisualAccount = { role: 'OWNER', address: short(d.input.owner) };
       if (d.role === 'SWAP') return step({ action: 'SWAP', provider: 'Uniswap v3', network: s.network, amounts: [{ amount: d.input.borrow, asset: 'USDC' }], toAsset: 'WETH',

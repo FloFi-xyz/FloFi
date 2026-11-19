@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reviewContextForChain, type ReviewContext } from '@defi-workflow-engine/reference-linter';
-import { isLendingComposition, LENDING_NODE_IDS, workflowDependencyOrder } from '@defi-workflow-engine/workflow-contracts';
+import { isLendingComposition, LENDING_NODE_IDS, workflowDependencyOrder, type ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import type { Workflow } from './initial-workflow';
 import { canDeleteCanvasNode } from './canvas-keyboard';
 import { SWAP_ACTION, swapDetails } from './swap-authoring';
@@ -8,7 +8,7 @@ import { solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jup
 import { routerDetails, routerInputOf, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL, type RouterBridgeInput, type RouterNetwork } from './router-authoring';
 import { universalBridgeDetails, universalInputOf, UNIVERSAL_BRIDGE_ROUTING_LABEL, type UniversalBridgeInput } from './universal-bridge-authoring';
 import { borrowDetails, lendingProfileFor, repayDetails, supplyDetails, withdrawDetails, type SupplyInput, type WithdrawInput } from './supply-authoring';
-import { aaveEnvironment } from '@defi-workflow-engine/action-registry';
+import { aaveEnvironment, orcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { uniswapLiquidityDetails, uniswapLiquidityInputOf, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { solanaLiquidityDetails, solanaLiquidityInputOf, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { lendingDetails, type LendingInput } from './lending-authoring';
@@ -38,6 +38,12 @@ export type StepDetail =
   /** BUILD-RH-002: a catalog-network Uniswap v3 position on a catalog pair; prices are `priceUnit` (token0 per token1) at the range edges. */
   | { readonly type: 'CATALOG_LIQUIDITY'; readonly input: RobinhoodLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string; readonly priceUnit: string;
       readonly fullRange: boolean }
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: an existing position's management operation, read from the node's canonical marker (collect, remove a
+   * share, exit, exit and close). Never a deposit: it is described, explained and simulated as that operation, and no authoring command re-creates it.
+   */
+  | { readonly type: 'LIQUIDITY_POSITION'; readonly protocol: 'UNISWAP_V3' | 'ORCA'; readonly chain: string; readonly network: string; readonly tokenA: string;
+      readonly tokenB: string; readonly fee: number; readonly management: ConcentratedLiquidityManagement }
   /** BUILD-BASE-001: a transfer (native ETH, or a catalog token on a catalog network) to the connected owner or an explicit recipient. */
   | { readonly type: 'TRANSFER'; readonly input: RobinhoodTransferInput }
   | { readonly type: 'LENDING_COMPOSITION'; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP'; readonly input: LendingInput }
@@ -99,9 +105,18 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
   if (catalogSwap) return { kind: 'SWAP', detail: { type: 'CATALOG_SWAP', network: catalogSwap.network, from: catalogSwap.from, to: catalogSwap.to,
     amount: catalogSwap.amount, slippage: String(catalogSwap.slippage) }, protocol: 'Uniswap v3', network: catalogSwap.network, testFunds: false };
   const rhPool = read(() => robinhoodLiquidityDetails(node));
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a marked node manages an existing position (its pool fields only identify the position; nothing is deposited).
+  // The pair is named in the pool's own token order (token0/token1), as the position list and the position Review name it (`priceUnit` is "token0 per token1").
+  const managedPair = rhPool?.management ? rhPool.priceUnit.split(' per ') : null;
+  if (rhPool?.management && managedPair?.length === 2) return { kind: 'LIQUIDITY', detail: { type: 'LIQUIDITY_POSITION', protocol: 'UNISWAP_V3', chain: node.chainId,
+    network: rhPool.network, tokenA: managedPair[0]!, tokenB: managedPair[1]!, fee: rhPool.fee, management: rhPool.management }, protocol: rhPool.provider, network: rhPool.network,
+    testFunds: false };
   if (rhPool) return { kind: 'LIQUIDITY', detail: { type: 'CATALOG_LIQUIDITY', input: robinhoodLiquidityInputOf(rhPool), lowerPrice: rhPool.lowerPrice,
     upperPrice: rhPool.upperPrice, priceUnit: rhPool.priceUnit, fullRange: rhPool.fullRange }, protocol: rhPool.provider, network: rhPool.network, testFunds: false };
   const orca = read(() => solanaLiquidityDetails(node));
+  if (orca?.management) return { kind: 'LIQUIDITY', detail: { type: 'LIQUIDITY_POSITION', protocol: 'ORCA', chain: node.chainId, network: orca.network,
+    tokenA: orcaLiquidityProfile(node.chainId)?.token0.symbol ?? 'SOL', tokenB: orca.tokenB, fee: orcaLiquidityProfile(node.chainId)?.feeTier ?? 0, management: orca.management },
+    protocol: orca.provider, network: orca.network, testFunds: orca.network === 'Solana Devnet' };
   if (orca) return { kind: 'LIQUIDITY', detail: { type: 'ORCA_LIQUIDITY', input: solanaLiquidityInputOf(orca), lowerPrice: orca.lowerPrice, upperPrice: orca.upperPrice },
     protocol: orca.provider, network: orca.network, testFunds: orca.network === 'Solana Devnet' };
   const network = CHAIN_LABEL[node.chainId] ?? node.chainId;

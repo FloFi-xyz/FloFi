@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { COPILOT_INSTRUCTIONS_V2, COPILOT_REPLAY_FORMAT_V2, COPILOT_SERVER_LIMITS, buildCopilotRequestV2, copilotTelemetrySink, copilotTuning, createCopilotLimiter,
   createReplayTransport, interpretCopilotV2, parseCopilotReplay, readCopilotResponseV2, replaySegment, retryAfterSeconds, validateCopilotRequestV2, replyLanguageOf,
   type CopilotHttpResponse, type CopilotTelemetry, type CopilotTransport } from './copilot-service';
-import { COPILOT_OUTPUT_SCHEMA_V2, parseCopilotOutputV2 } from '../domain/copilot-intent-v2';
+import { COPILOT_OUTPUT_SCHEMA_V2, COPILOT_POSITION_OPERATIONS, parseCopilotOutputV2 } from '../domain/copilot-intent-v2';
+import { copilotSupportsSection } from './copilot-capabilities';
 
 const KEY = 'test-key-88';
 const ADDRESS = '0x9999999999999999999999999999999999999999';
@@ -170,6 +171,33 @@ describe('V2 replay', () => {
     const replay = parseCopilotReplay({ format: COPILOT_REPLAY_FORMAT_V2, entries: [{ user: ['Na verdade muda para 2.'], answer: { output: { intent: edit } } }] }, COPILOT_REPLAY_FORMAT_V2);
     expect(await interpretCopilotV2(request(), { transport: createReplayTransport(replay, 'segment'), settings, mode: 'replay' })).toEqual({ ok: true, intent: edit });
     expect(() => parseCopilotReplay({ format: COPILOT_REPLAY_FORMAT_V2, entries: [] })).toThrow('COPILOT_REPLAY_INVALID');
+  });
+  it('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: records the position lifecycle requests in EN and PT as POSITION intents that name no position', () => {
+    const committed = parseCopilotReplay(JSON.parse(readFileSync(join(__dirname, '..', '..', 'e2e', 'copilot', 'replay-v2.json'), 'utf8')), COPILOT_REPLAY_FORMAT_V2);
+    const positions = committed.entries.flatMap(entry => {
+      const { output, invalid } = entry.answer as { output?: unknown; invalid?: boolean };
+      if (output === undefined || invalid) return [];
+      const intent = parseCopilotOutputV2(output);
+      return intent.kind === 'POSITION' ? [[entry.user.join('\n'), intent] as const] : [];
+    });
+    const operation = (user: string) => positions.find(([text]) => text === user)?.[1].operation;
+    for (const [user, expected] of [['Show my liquidity positions', 'LIST'], ['Quais são as minhas pools?', 'LIST'], ['Which of my pools are in range?', 'LIST'],
+      ['How much can I collect from my Uniswap position?', 'INSPECT'], ['Collect my fees on Base', 'COLLECT'], ['Coleta minhas taxas da Uniswap', 'COLLECT'],
+      ['Só os rendimentos', 'COLLECT'], ['Remove 50% of my liquidity', 'DECREASE'], ['Retira metade da minha liquidez', 'DECREASE'],
+      ['Withdraw everything from my WETH/USDC position', 'EXIT'], ['Quero sair completamente dessa pool', 'EXIT'], ['Close my Orca position', 'CLOSE']] as const)
+      expect(operation(user), user).toBe(expected);
+    for (const [, intent] of positions) expect(JSON.stringify(intent)).not.toMatch(/positionId|tokenId|mint|0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}/);
+  });
+  it('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: tells the interpreter what position management is, with EN/PT examples, from the capability registries', () => {
+    expect(JSON.stringify(COPILOT_OUTPUT_SCHEMA_V2)).toContain(JSON.stringify([...COPILOT_POSITION_OPERATIONS]));
+    for (const example of ['"Show my liquidity positions"', '"Quais são as minhas pools?"', '"Which of my pools are in range?"', '"How much can I collect from my Uniswap position?"',
+      '"Collect my fees on Base"', '"Coleta minhas taxas da Uniswap"', '"Só os rendimentos"', '"Remove 50% of my liquidity"', '"Retira metade da minha liquidez"',
+      '"Withdraw everything from my WETH/USDC position"', '"Quero sair completamente dessa pool"', '"Close my Orca position"', 'percent only for DECREASE',
+      'never an id, token id, mint or address', '"sacar meu USDC da Aave" is the Aave WITHDRAW action']) expect(COPILOT_INSTRUCTIONS_V2).toContain(example);
+    const line = copilotSupportsSection('PUBLIC_MAINNET').split('\n').find(item => item.startsWith('- POSITION'));
+    expect(line).toBe('- POSITION (the user\'s existing liquidity positions, read and selected by FloFi from the connected wallets): list or inspect them, collect fees and owed tokens, ' +
+      'remove part of the liquidity, exit (remove all) or close: Base, Arbitrum One, Ethereum and Robinhood Chain (Uniswap v3) and Solana (Orca SOL/USDC). ' +
+      'Each operation is only prepared for the owner\'s Review and wallet signature.');
   });
   it('keeps the committed V2 browser replay well formed', () => {
     const committed = parseCopilotReplay(JSON.parse(readFileSync(join(__dirname, '..', '..', 'e2e', 'copilot', 'replay-v2.json'), 'utf8')), COPILOT_REPLAY_FORMAT_V2);

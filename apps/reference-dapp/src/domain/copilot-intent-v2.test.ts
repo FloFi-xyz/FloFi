@@ -93,4 +93,31 @@ describe('CopilotIntentV2 strict parsing', () => {
     rejects(intent.position('OPEN' as 'EXIT'));
     rejects({ ...intent.position('EXIT'), positionMint: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU' });
   });
+  it('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the position lifecycle operations, a percentage only for DECREASE, and a selection that never names an id', () => {
+    const position = (operation: string, percent: string | null = null, extra: Record<string, unknown> = {}) =>
+      ({ version: '2', language: 'EN', kind: 'POSITION', operation, protocol: null, network: null, percent, ...extra });
+    for (const operation of ['LIST', 'INSPECT', 'COLLECT', 'EXIT', 'CLOSE']) accepts(position(operation));
+    accepts(position('DECREASE', '50'));
+    accepts(position('DECREASE', '12.5', { protocol: 'UNISWAP_V3', network: 'ARBITRUM' }));
+    // Recorded (older) answers without `select` stay valid; a current answer carries it (null or an ordinal and the pair's symbols).
+    accepts(position('COLLECT', null, { select: null }));
+    accepts(position('DECREASE', '50', { select: { ordinal: 'SECOND', assets: [] } }));
+    accepts(position('EXIT', null, { select: { ordinal: null, assets: ['WETH', 'USDC'] } }));
+    accepts({ ...position('LIST'), language: 'PT' });
+    // A percentage belongs to a partial removal only: never to a collection, an exit, a close or a read.
+    for (const operation of ['LIST', 'INSPECT', 'COLLECT', 'EXIT', 'CLOSE']) rejects(position(operation, '50'));
+    rejects(position('DECREASE', '-5'));
+    rejects(position('REBALANCE'));
+    rejects(position('OPEN'));
+    // Never an id, a token id, a mint or an address from the model; at most the pair's two symbols, each once.
+    for (const id of ['123456', '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', '0x4200000000000000000000000000000000000006', '#123456', 'OTHER', 'WETH/USDC', ''])
+      rejects(position('COLLECT', null, { select: { ordinal: null, assets: [id] } }));
+    rejects(position('COLLECT', null, { select: { ordinal: null, assets: ['WETH', 'USDC', 'DAI'] } }));
+    rejects(position('COLLECT', null, { select: { ordinal: null, assets: ['USDC', 'usdc'] } }));
+    rejects(position('COLLECT', null, { select: { ordinal: 'TENTH', assets: [] } }));
+    rejects(position('COLLECT', null, { select: { ordinal: null, assets: [], positionId: '123456' } }));
+    rejects(position('COLLECT', null, { select: { ordinal: null } }));
+    rejects(position('COLLECT', null, { positionId: '123456' }));
+    rejects(position('COLLECT', null, { tokenId: '123456', select: null }));
+  });
 });

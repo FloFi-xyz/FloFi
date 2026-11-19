@@ -93,6 +93,13 @@ export function mergeDraftIntent(before: CopilotIntentV2 | null, interpreted: Co
       mergeFields(before.actions[i]!, action, latest) as CopilotAction) };
   if (before?.kind === 'AUTOMATION' && interpreted.kind === 'AUTOMATION') return { ...interpreted,
     draft: mergeFields(before.draft, interpreted.draft, latest) as typeof interpreted.draft };
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: an open position request keeps what it already settled (protocol, network, pair, the percentage of a partial
+  // removal) unless the answer states another; a percentage never survives into a collection, an exit or a read.
+  if (before?.kind === 'POSITION' && interpreted.kind === 'POSITION') {
+    const select = interpreted.select ?? before.select ?? null;
+    return { ...interpreted, protocol: interpreted.protocol ?? before.protocol, network: interpreted.network ?? before.network,
+      percent: interpreted.operation !== 'DECREASE' ? null : interpreted.percent ?? (before.operation === 'DECREASE' ? before.percent : null), ...select ? { select } : {} };
+  }
   // BUILD-FLOFI-INTELLIGENCE-001: an open goal keeps every value already settled unless the latest message states a different one.
   if (before?.kind === 'GOAL' && interpreted.kind === 'GOAL') return { ...interpreted, goal: { ...interpreted.goal,
     source: mergeFields(before.goal.source, interpreted.goal.source, latest) as typeof interpreted.goal.source,
@@ -144,6 +151,10 @@ export function answerDraftField(intent: CopilotIntentV2, expected: readonly Dra
 }
 /** BUILD-P1: the slots an open request has filled (per step; a liquidity deposit per token), for the clarification budget's progress test. */
 export function draftSlots(intent: CopilotIntentV2): readonly string[] {
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position request's slots (which position by network, protocol, pair or order; the portion): an answer that
+  // settles one of them is progress, so answering FloFi's position questions never exhausts the clarification budget.
+  if (intent.kind === 'POSITION') return [...(['protocol', 'network', 'percent'] as const).flatMap(field => intent[field] === null ? [] : [`0:${field}`]),
+    ...intent.select?.ordinal ? ['0:ordinal'] : [], ...(intent.select?.assets ?? []).map(asset => `0:asset:${asset.toUpperCase()}`)];
   const actions = intent.kind === 'ACTION' ? [intent.action] : intent.kind === 'COMPOSITION' ? intent.actions : [];
   return actions.flatMap((action, step) => Object.entries(action).flatMap(([field, value]): string[] => {
     if (field === 'type') return [];

@@ -60,6 +60,19 @@ export function describeProposal(before: EditorState, after: EditorState, comman
         (removed.length ? `; removed steps: ${removed.map(node => node.nodeId).join(', ')}` : ''),
       'Applying only prepares the operation for simulation. Nothing is removed until you simulate, review and sign in your wallet.']);
   }
+  if (command.type === 'MANAGE_LIQUIDITY_POSITION') {
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: one verified mainnet position's operation; the workflow holds that position's pool step only.
+    const { choice: { position, operation, partBps, close }, pool } = command;
+    const removed = before.workflow.nodes.filter(node => !node.actionType.startsWith('mock-') && !after.workflow.nodes.some(next => next.nodeId === node.nodeId));
+    const id = position.protocol === 'UNISWAP_V3' ? `Uniswap v3 position #${position.positionId}` : `Orca position ${position.positionId}`;
+    const what = operation === 'COLLECT' ? 'collect its fees and owed tokens (liquidity unchanged)' : operation === 'DECREASE' ? `remove ${partBps! / 100}% of its liquidity and collect the released tokens and fees`
+      : `remove all liquidity and collect everything owed${close ? position.protocol === 'ORCA' ? ', then close the position (rent refunded)' : ', then burn the position NFT' : '; the position NFT stays in the wallet'}`;
+    return Object.freeze([after.workflow === before.workflow ? `Revision ${before.workflow.revision} (workflow unchanged)` : `Revision ${before.workflow.revision} → ${after.workflow.revision}`,
+      `${id} on ${position.network}: ${what}`,
+      `Position step: ${pool.token0.symbol}/${pool.token1.symbol} fee ${pool.feeTier / 10_000}%, ticks ${pool.tickLower} to ${pool.tickUpper}; owner ${position.owner}; slippage ${pool.slippageBps} bps` +
+        (removed.length ? `; removed steps: ${removed.map(node => node.nodeId).join(', ')}` : ''),
+      'Applying only prepares the operation for simulation. Nothing is removed or collected until you review, confirm and sign in your wallet. Real funds on mainnet.']);
+  }
   if(command.type==='AUTHOR_LENDING')return [`Revision ${before.workflow.revision} → ${after.workflow.revision}`,`Supply ${command.input.supply} Aave USDC → health checkpoint HF ≥ 2.0 → Borrow ${command.input.borrow} Aave USDC → Swap exactly borrowed USDC to WETH`, `Owner ${command.input.owner}; Base Sepolia; slippage ${command.input.slippage} bps`, 'Debt remains after Swap. If Swap fails, borrowed USDC and debt remain; no automatic repayment or retry.', 'Acceptance replaces the workflow and invalidates previous simulation, Manifest and Review. Full public path must pass before any transaction.'];
   if (command.type === 'AUTHOR_CROSS_CHAIN_LIQUIDITY') return Object.freeze([
     `Revision ${before.workflow.revision} → ${after.workflow.revision}`,

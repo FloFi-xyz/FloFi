@@ -24,6 +24,9 @@ import { POOL_READS_PER_TURN, type PoolPriceRead } from '../domain/pool-range';
 import { POOL_READ_TIMEOUT_MS, poolReader } from '../state/copilot-pool-reads';
 import { activeNetworkScope } from '../domain/network-scope';
 import { reconciledRemaining } from '../domain/copilot-reconciled-context';
+import { liquidityRemovalNamed, mergeLiquidityFacts, positionOwnersKey, positionScanFacts, POSITION_FACT_LIMITS, type CopilotLiquidityFacts,
+  type CopilotPositionWallet } from '../domain/copilot-positions';
+import type { LiquidityPositionView } from '../domain/liquidity-positions';
 import { useSolanaComposition } from '../state/solana-composition-store';
 import { workflowSteps } from '../domain/workflow-steps';
 import { ensureCopilotCatalogs } from '../state/copilot-catalogs';
@@ -133,6 +136,12 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
   }, [report]);
   // Read-only Solana Devnet facts fetched for the last turn that needed them (pool price, the wallet's FloFi positions): never the model's words.
   const fetched = useRef<{ readonly owner: string | null; readonly price: CopilotVerified['orcaPrice']; readonly positions: CopilotVerified['orcaPositions'] }>({ owner: null, price: null, positions: null });
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the connected wallets' verified liquidity positions, read through FloFi's discovery route for the current
+   * owners (one read per connected EVM account and Solana mainnet session), cached per owners and conversation epoch. A wallet change, a new
+   * conversation (owner or workflow) or a read that finished for other owners never reaches the engine; a new request re-reads stale facts.
+   */
+  const positionFacts = useRef<{ readonly key: string; readonly at: number; readonly facts: CopilotLiquidityFacts } | null>(null), positionEpoch = useRef(0);
   useEffect(() => {
     let stopped = false;
     const pending = copilotStatus().then(result => result.mode, () => 'off' as const);
@@ -167,18 +176,40 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       capability: { environment: now.environment, executionSupported: now.capability.executionSupported, executionReady: now.capability.executionReady,
         evidenceCeiling: now.capability.evidenceCeiling, blockers: now.capability.blockers.filter(item => item.dimension === 'EXECUTE' || item.dimension === 'AUTHORIZE') },
       simulation, walletConnected: Boolean(now.wallet.account) });
-    const solanaOwner = now.orca.owner, loaded = fetched.current;
-    const verified: CopilotVerified = { orcaPrice: loaded.price, solanaOwner, orcaPositions: solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
-      remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the public product reads the Solana mainnet session (never a Devnet one); engineering certification keeps the
+    // Devnet Orca owner, its Devnet positions and reconciled Devnet leftovers for its Devnet path.
+    const engineering = activeNetworkScope() === 'ENGINEERING', owners = positionOwners(now), loaded = fetched.current;
+    const solanaOwner = engineering ? now.orca.owner : owners.solana, cached = positionFacts.current;
+    const liquidity = devnetPositions(now) ? undefined : !owners.evm && !owners.solana ? { wallets: [], positions: [] }
+      : cached && cached.key === positionOwnersKey(owners) ? cached.facts : undefined;
+    const verified: CopilotVerified = { orcaPrice: engineering ? loaded.price : null, solanaOwner,
+      orcaPositions: engineering && solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
+      remaining: engineering ? reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) : [], ...liquidity ? { liquidity } : {} };
     const view = learningView.current;
     const interfaceLanguage = interfaceLanguageRef.current;
     return { ...interfaceLanguage ? { interfaceLanguage } : {}, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
       verified, ...view?.enabled ? { learning: view.learning } : {}, surface: 'WEB', poolReads: true };
   }, []);
   const environmentNow = useCallback((): CopilotEnvironment => ({ ...contextNow(), ...recipientsNow() }), [contextNow, recipientsNow]);
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: reads the current owners' verified positions (bounded); fresh facts are reused, a stale or foreign read is dropped. */
+  const loadPositions = useCallback(async () => {
+    const owners = positionOwners(latest.current), key = positionOwnersKey(owners), epoch = positionEpoch.current, cached = positionFacts.current;
+    if (cached && cached.key === key && Date.now() - cached.at < POSITION_FACT_LIMITS.freshMs) return;
+    const wallets: Pick<CopilotPositionWallet, 'namespace' | 'address'>[] = [...owners.evm ? [{ namespace: 'eip155' as const, address: owners.evm }] : [],
+      ...owners.solana ? [{ namespace: 'solana' as const, address: owners.solana }] : []];
+    if (!wallets.length) return;
+    const parts = await Promise.all(wallets.map(readWalletPositions));
+    if (epoch !== positionEpoch.current || positionOwnersKey(positionOwners(latest.current)) !== key) return;
+    positionFacts.current = { key, at: Date.now(), facts: mergeLiquidityFacts(parts) };
+  }, []);
   /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */
-  const loadVerified = useCallback(async (intent: unknown) => {
+  const loadVerified = useCallback(async (intent: unknown, request = '') => {
     const shape = JSON.stringify(intent) ?? '';
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position request (or an Aave Withdraw worded about liquidity, which FloFi reads as one) reads the connected
+    // wallets' verified mainnet positions; only engineering certification with a Solana Devnet session reads its Devnet positions below.
+    if ((/"kind":"POSITION"/.test(shape) || (/"type":"WITHDRAW"/.test(shape) && liquidityRemovalNamed(request))) && !devnetPositions(latest.current)) {
+      await loadPositions(); return;
+    }
     // BUILD-P1: a mainnet percentage range reads its own pool on request (`readPool`); the Devnet price is only ever read in engineering certification.
     if (!/"kind":"POSITION"/.test(shape) && !(/"rangeUnit":"PERCENT"/.test(shape) && activeNetworkScope() === 'ENGINEERING')) return;
     const owner = latest.current.orca.owner;
@@ -186,7 +217,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     fetched.current = { owner, price: price?.ok ? { price: price.value.price, tickCurrentIndex: price.value.tickCurrentIndex } : null,
       positions: positions?.ok ? positions.value.map(p => ({ positionMint: p.positionMint, status: p.status, tickLower: p.tickLower, tickUpper: p.tickUpper, liquidity: p.liquidity }))
         : owner === fetched.current.owner && !/"kind":"POSITION"/.test(shape) ? fetched.current.positions : null };
-  }, []);
+  }, [loadPositions]);
   // Every proposal the user can see becomes a referent, including exact-grammar proposals ("make it 2" after one).
   const pendingCommand = workflow.pending?.command;
   useEffect(() => { if (pendingCommand) conversation.current = recordProposal(conversation.current, environmentNow(), pendingCommand); }, [pendingCommand, environmentNow]);
@@ -250,6 +281,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     generation.current += 1;
     conversation.current = emptyConversation(); committing.current = null; watched.current = null; appliedWorkflow.current = null;
     conversationKey.current = null; fetched.current = { owner: null, price: null, positions: null };
+    positionFacts.current = null; positionEpoch.current += 1;
   }, []);
   const language = useCallback(() => conversation.current.language, []);
   /** Whether FloFi's own clarification question is open (the request still misses a required field). */
@@ -263,7 +295,8 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     const state = conversation.current, request = engineAwaitingAmount(state);
     if (!request || !state.draft) return null;
     const now = latest.current, store = now.workflow;
-    const snapshot = { workflow: store.state.workflow, pending: store.pending, wallet: now.wallet.account, walletChainId: now.wallet.chainId, solanaOwner: now.orca.owner };
+    const snapshot = { workflow: store.state.workflow, pending: store.pending, wallet: now.wallet.account, walletChainId: now.wallet.chainId,
+      solanaOwner: activeNetworkScope() === 'ENGINEERING' ? now.orca.owner : positionOwners(now).solana };
     return contextChange(state.draft.snapshot, snapshot) ? null : { request, evm: now.wallet.account, solana: now.orca.owner, workflow: store.state.workflow };
   }, []);
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: FloFi just explained a DeFi concept, so "não entendi" refers to it (not to an execution blocker). */
@@ -312,6 +345,13 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     try {
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a short answer about a position (FloFi's open position question, or a change right after it prepared one) is
+      // resolved locally from the verified facts: facts older than POSITION_FACT_LIMITS.freshMs are read again first, never for longer than a moment
+      // (a slow read leaves the facts already known; Simulate and Review read the position again in any case).
+      const positioned = conversation.current.draft?.intent.kind === 'POSITION' || conversation.current.referents[0]?.command.type === 'MANAGE_LIQUIDITY_POSITION';
+      if (positioned && !devnetPositions(latest.current))
+        await Promise.race([loadPositions().catch(() => undefined), new Promise(resolve => setTimeout(resolve, POSITION_REFRESH_WAIT_MS))]);
+      if (ended()) return dropped;
       // The workflow, proposal and wallet this message is written against, taken before FloFi reads the saved names: a change while it reads them
       // (or while the model interprets) discards the late answer, exactly as without the read.
       const sent = contextNow();
@@ -358,7 +398,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       const options = learningView.current?.enabled ? { identity: identity.current, aliases: start.turn.state.aliases ?? [], adapted: start.turn.state.adapted ?? [] } : undefined;
       try { result = await copilotInterpret(start.request, options) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
-      if (result.ok) await Promise.all([ensureCopilotCatalogs(start.turn.state.segment.join('\n'), result.intent), loadVerified(result.intent)]);
+      if (result.ok) await Promise.all([ensureCopilotCatalogs(start.turn.state.segment.join('\n'), result.intent), loadVerified(result.intent, start.turn.state.segment.join('\n'))]);
       let finished = finishTurn(start.turn, result, environmentNow());
       const later: PoolPriceRead[] = [];
       while (finished.reply.pool && later.length < POOL_READS_PER_TURN) {
@@ -371,7 +411,7 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
       measure(finished.reply, finished.next, result.ok ? String((result.intent as { kind?: unknown } | null)?.kind ?? '') || null : null);
       return show(await settle(finished.reply));
     } finally { setBusy(false); }
-  }, [contextNow, recipientsNow, environmentNow, show, settle, loadVerified]);
+  }, [contextNow, recipientsNow, environmentNow, show, settle, loadVerified, loadPositions]);
   /** The Copilot's reply, or null when it is not enabled on this server (the caller shows its exact-grammar guidance). */
   const respond = useCallback(async (text: string): Promise<CopilotReply | null> => {
     const resolved = await (status.current ?? Promise.resolve<CopilotMode>('off'));
@@ -386,6 +426,28 @@ export function useCopilotInterpreter({ direct = false, interfaceLanguage }: { d
     awaitingAmount: awaitingAmountNow };
 }
 
+type Now = { readonly wallet: { readonly account: string | null }; readonly jupiter: { readonly session: { readonly chain: string; readonly account: { readonly address: string } } | null } };
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owners whose positions the chat may read now: the connected EVM account and the Solana mainnet session. */
+const positionOwners = (now: Now) => ({ evm: now.wallet.account?.toLowerCase() ?? null,
+  solana: now.jupiter.session?.chain === 'solana:mainnet' ? now.jupiter.session.account.address : null });
+/** How long a local position answer waits for stale facts to be read again before it uses the facts already known. */
+const POSITION_REFRESH_WAIT_MS = 4_000;
+/** Engineering certification only: a Solana Devnet session keeps the Devnet position path (FloFi-registered Devnet positions). */
+const devnetPositions = (now: Now) => activeNetworkScope() === 'ENGINEERING' && now.jupiter.session?.chain === 'solana:devnet';
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: one wallet's verified positions through FloFi's same-origin discovery route (`x-flofi-account`; only a wallet
+ * linked or proven in this session is read), bounded in time. A refusal or failure is said as such (UNVERIFIED, UNAVAILABLE), never as "no positions".
+ */
+async function readWalletPositions(wallet: Pick<CopilotPositionWallet, 'namespace' | 'address'>): Promise<{ readonly wallet: CopilotPositionWallet; readonly positions: readonly LiquidityPositionView[] }> {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), POSITION_FACT_LIMITS.timeoutMs);
+  try {
+    const response = await fetch('/api/dashboard/positions', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal, headers: { 'x-flofi-account': wallet.address } });
+    const body = await response.json().catch(() => null) as { readonly ok?: unknown; readonly code?: unknown; readonly value?: unknown } | null;
+    if (response.status === 403 && body?.code === 'POSITION_WALLET_UNVERIFIED') return { wallet: { ...wallet, status: 'UNVERIFIED' }, positions: [] };
+    if (!response.ok || body?.ok !== true) return { wallet: { ...wallet, status: 'UNAVAILABLE' }, positions: [] };
+    return positionScanFacts(wallet, body.value);
+  } catch { return { wallet: { ...wallet, status: 'UNAVAILABLE' }, positions: [] }; } finally { clearTimeout(timer); }
+}
 /** BUILD-P1: the web chat's pool reads, through the existing read-only server actions (see `state/copilot-pool-reads.ts`). */
 const readPool = poolReader({ orca: solanaMainnetLiquidityPrice, catalog: catalogLiquidityPrice });
 const withPoolReads = (env: CopilotEnvironment, reads: readonly PoolPriceRead[]): CopilotEnvironment =>

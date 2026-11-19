@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mentionedNetworks } from './copilot-authoring';
 import type { CopilotAction } from './copilot-intent';
-import { grounds, isLexiconTarget, lexiconMatches, statedSource, targetAsset, targetEnvironment, targetKind, targetNetwork, validateLexiconEntry,
+import { grounds, isLexiconTarget, lexiconMatches, LIQUIDITY_WORDS, statedSource, targetAsset, targetEnvironment, targetKind, targetNetwork, validateLexiconEntry,
   type LexiconEntry, type LexiconSource, type LexiconTarget } from './copilot-lexicon';
 import { NETWORKS } from './network-registry';
 
@@ -203,7 +203,10 @@ const named = (text: string, value: LexiconTarget): boolean => {
   const network = targetNetwork(value), asset = targetAsset(value);
   if (network) return (mentionedNetworks(text) as readonly string[]).includes(network);
   if (asset) return ASSET_MENTION(asset).test(text);
-  return OPERATION_MENTIONS[value.slice('operation:'.length)]?.test(text) ?? false;
+  const operation = value.slice('operation:'.length);
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: "retirar liquidez" / "sacar da pool" names a removal from a liquidity position, not an Aave Withdraw.
+  if (operation === 'WITHDRAW' && LIQUIDITY_WORDS.test(text) && !/(?<![\p{L}])aave(?![\p{L}])/iu.test(text)) return false;
+  return OPERATION_MENTIONS[operation]?.test(text) ?? false;
 };
 /**
  * How each field of a proposal was read. `request`: the open request's text up to FloFi's first question; `answers`: the user's answers to it;

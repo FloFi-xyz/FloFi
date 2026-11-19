@@ -4,6 +4,9 @@ import { applyCommand, FIXTURE, OTHER_ADDRESS } from './copilot-test-fixtures';
 import { act, CopilotSession, intent, NO_TARGET, type ModelAnswer } from './copilot-session.test-harness';
 import type { CopilotFactsInput } from './copilot-answers';
 import type { CopilotVerified } from './copilot-conversation';
+import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
+import { liquidityPositionOperations, type LiquidityPositionView } from './liquidity-positions';
+import { TEST_WALLET } from './copilot-test-fixtures';
 
 /**
  * BUILD-COPILOT-002 deterministic eval corpus. Each case is a short conversation driven through the real engine, the real
@@ -44,6 +47,37 @@ const ORCA_PRICE = { price: '150', tickCurrentIndex: -18_880 }, SOLANA_OWNER = '
 const POSITION = { positionMint: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', status: 'ACTIVE', tickLower: -19_200, tickUpper: -18_560, liquidity: '1000000000' };
 const solanaVerified = (extra: Partial<CopilotVerified> = {}): CopilotVerified => ({ orcaPrice: ORCA_PRICE, solanaOwner: SOLANA_OWNER, orcaPositions: [], remaining: [], ...extra });
 const devnetSwap = (amount: string) => act.swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount });
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the connected wallets' verified mainnet positions (scripted discovery views): Uniswap v3 WETH/USDC 0.05% on
+// Base and on Arbitrum One with the same token id, and Orca SOL/USDC on Solana. A model never names a position: FloFi selects it from these facts.
+const LP_SOLANA_OWNER = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+function lpUniswap(chain: 'eip155:8453' | 'eip155:42161', extra: Partial<LiquidityPositionView> = {}): LiquidityPositionView {
+  const [weth, usdc] = chain === 'eip155:8453' ? ['0x4200000000000000000000000000000000000006', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913']
+    : ['0x82af49447d8a07e3bd95bd0d56f35241523fbab1', '0xaf88d065e77c8cc2239327c5edb3a432268e5831'];
+  const pool = catalogPoolOn(chain, { symbol: 'WETH', address: weth, decimals: 18 }, { symbol: 'USDC', address: usdc, decimals: 6 }, 500);
+  const view = { ref: { protocol: 'UNISWAP_V3' as const, chain, network: chain === 'eip155:8453' ? 'Base' : 'Arbitrum One', manager: pool.positionManager, pool: pool.pool,
+      positionId: '123456', owner: TEST_WALLET }, token0: { symbol: pool.token0.symbol, address: pool.token0.address, decimals: pool.token0.decimals },
+    token1: { symbol: pool.token1.symbol, address: pool.token1.address, decimals: pool.token1.decimals }, feeTier: 500, tickLower: -200_000, tickUpper: -190_000,
+    price: { base: 'USDC', quote: 'WETH' }, lowerPrice: '0.000207', upperPrice: '0.000560', currentPrice: '0.000333', rangeState: 'IN_RANGE' as const, liquidity: '123456789',
+    principal: ['500000000000000000', '1500000000'] as const, recordedOwed: ['0', '0'] as const, collectable: ['1000000000000000', '2500000'] as const, status: 'OPEN' as const,
+    manageable: { ok: true } as const, observedAt: '2026-11-19T00:00:00.000Z', observedAtHeight: 30_000_000, ...extra };
+  return { ...view, operations: liquidityPositionOperations(view) };
+}
+const LP_ORCA: LiquidityPositionView = (() => {
+  const O = ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY;
+  const view = { ref: { protocol: 'ORCA' as const, chain: O.chain, network: 'Solana', manager: O.programs.whirlpool, pool: O.pool.address,
+      positionId: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', owner: LP_SOLANA_OWNER }, token0: { symbol: 'SOL', address: O.token0.mint, decimals: 9 },
+    token1: { symbol: 'USDC', address: O.token1.mint, decimals: 6 }, feeTier: 3000, tickLower: -19_200, tickUpper: -18_560, price: { base: 'SOL', quote: 'USDC' },
+    lowerPrice: '146.5', upperPrice: '156.2', currentPrice: '150.1', rangeState: 'IN_RANGE' as const, liquidity: '1000000000', principal: ['100000000', '15000000'] as const,
+    recordedOwed: ['1000', '50000'] as const, collectable: null, status: 'OPEN' as const, manageable: { ok: true } as const, observedAt: '2026-11-19T00:00:00.000Z',
+    observedAtHeight: 380_000_000 };
+  return { ...view, operations: liquidityPositionOperations(view) };
+})();
+const LP_BASE = lpUniswap('eip155:8453'), LP_ARB = lpUniswap('eip155:42161', { rangeState: 'BELOW_RANGE' });
+const LP_WALLETS = [{ namespace: 'eip155' as const, address: TEST_WALLET, status: 'COMPLETE' as const }, { namespace: 'solana' as const, address: LP_SOLANA_OWNER, status: 'COMPLETE' as const }];
+const lpVerified = (positions: readonly LiquidityPositionView[], wallets: NonNullable<CopilotVerified['liquidity']>['wallets'] = LP_WALLETS): CopilotVerified =>
+  ({ orcaPrice: null, solanaOwner: LP_SOLANA_OWNER, orcaPositions: null, remaining: [], liquidity: { wallets, positions } });
+const lp = (operation: string, extra: Record<string, unknown> = {}, language: 'EN' | 'PT' = 'EN') =>
+  ({ version: '2', language, kind: 'POSITION', operation, protocol: null, network: null, percent: null, select: null, ...extra });
 const fundedPool = (extra: Record<string, unknown> = {}) => act.liquidity({ deposits: [{ asset: 'SOL', maxAmount: '0.05' }], rangeUnit: 'PERCENT', lower: null, upper: '10',
   funding: 'SWAP_OUTPUT', ...extra });
 
@@ -600,10 +634,70 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: '0.05', expect: P('ADD_SOLANA_COMPOSITION', { local: true }) }] },
   { id: 'S05', category: 'adversarial', language: 'EN', verified: solanaVerified(), turns: [{ user: 'Add liquidity with the remaining tokens from my whole wallet in a 10% range',
     model: intent.action(fundedPool({ funding: 'REMAINING', deposits: [{ asset: 'DEVUSDC', maxAmount: '250' }] })), expect: Q({ contains: ['only from a reconciled execution'] }) }] },
-  { id: 'S06', category: 'unsupported', language: 'EN', turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owner's verified mainnet positions (S06/S07); the engineering Devnet path keeps its own cases (S06D/S07D).
+  { id: 'S06', category: 'unsupported', language: 'EN', verified: lpVerified([], []), turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
+    expect: U(['Connect the wallet that holds the position (an EVM wallet for Uniswap v3, a Solana wallet for Orca)'], { absent: ['Devnet'] }) }] },
+  { id: 'S07', category: 'direct', language: 'EN', verified: lpVerified([LP_BASE]), turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
+    expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'DECREASE', partBps: 5000, close: false, position: { chain: 'eip155:8453', positionId: '123456' } } },
+      sentence: 'remove 50% of the liquidity of Uniswap v3 position #123456 WETH/USDC on Base' }) }] },
+  { id: 'S06D', category: 'unsupported', language: 'EN', turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
     expect: U(['Connect a Solana Devnet wallet first']) }] },
-  { id: 'S07', category: 'direct', language: 'EN', verified: solanaVerified({ orcaPositions: [POSITION] }), turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
+  { id: 'S07D', category: 'direct', language: 'EN', verified: solanaVerified({ orcaPositions: [POSITION] }), turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
     expect: P('MANAGE_SOLANA_POSITION', { input: { operation: 'DECREASE_PARTIAL', partBps: 5000 } }) }] },
+  { id: 'S10', category: 'read-only', language: 'EN', verified: lpVerified([LP_BASE, LP_ARB, LP_ORCA]), turns: [{ user: 'Which of my pools are in range?', model: lp('LIST'),
+    expect: { kind: 'ANSWER', contains: ['2 of your 3 liquidity positions are in range:', 'position #123456 on Base — in range'], absent: ['Arbitrum One', 'APY'] } }] },
+  { id: 'S11', category: 'read-only', language: 'PT', verified: lpVerified([LP_BASE, LP_ARB, LP_ORCA]), turns: [{ user: 'Quais são as minhas pools?', model: lp('LIST', {}, 'PT'),
+    expect: { kind: 'ANSWER', contains: ['Você tem 3 posições de liquidez', 'na Arbitrum One — fora da faixa'] } }] },
+  { id: 'S12', category: 'multi-turn', language: 'EN', verified: lpVerified([LP_BASE, LP_ARB, LP_ORCA]), turns: [
+    { user: 'Remove 50% of my liquidity', model: lp('DECREASE', { percent: '50' }), expect: Q({ contains: ['Which position do you mean?'] }) },
+    { user: 'the first one', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'DECREASE', partBps: 5000, position: { chain: 'eip155:8453' } } } }) }] },
+  { id: 'S13', category: 'multi-turn', language: 'PT', verified: lpVerified([LP_BASE, LP_ARB, LP_ORCA]), turns: [
+    { user: 'Retira metade da minha liquidez', model: lp('DECREASE', { percent: '50' }, 'PT'), expect: Q({ contains: ['Qual posição você quer dizer?'] }) },
+    { user: 'a segunda', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'DECREASE', partBps: 5000, position: { chain: 'eip155:42161' } } } }) }] },
+  { id: 'S14', category: 'direct', language: 'PT', verified: lpVerified([LP_BASE, LP_ORCA]), turns: [{ user: 'Coleta minhas taxas da Uniswap na Base',
+    model: lp('COLLECT', { protocol: 'UNISWAP_V3', network: 'BASE' }, 'PT'),
+    expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'COLLECT', partBps: null, close: false } }, contains: ['A liquidez continua na posição.'] }) }] },
+  { id: 'S15', category: 'clarification', language: 'EN', verified: lpVerified([LP_BASE]), turns: [
+    { user: 'Take some liquidity out of my Base position', model: lp('DECREASE', { network: 'BASE' }), expect: Q({ options: ['25%', '50%', '75%', 'All (exit)'] }) },
+    { user: 'only the fees', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'COLLECT' } } }) }] },
+  { id: 'S16', category: 'multi-turn', language: 'EN', verified: lpVerified([LP_BASE]), turns: [
+    { user: 'Withdraw everything from my WETH/USDC position', model: lp('EXIT', { select: { ordinal: null, assets: ['WETH', 'USDC'] } }),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'EXIT', close: false } }, contains: ['The position NFT stays in your wallet.'] }) },
+    { user: 'yes, close it', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'EXIT', close: true } }, contains: ['its NFT is burned'] }) }] },
+  { id: 'S17', category: 'direct', language: 'EN', verified: lpVerified([LP_BASE, LP_ORCA]), turns: [{ user: 'Close my Orca position', model: lp('CLOSE', { protocol: 'ORCA' }),
+    expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'EXIT', close: true, position: { protocol: 'ORCA' } } }, contains: ['rent of its accounts is refunded'] }) }] },
+  // An interpreter that read "retira metade da minha liquidez" as an Aave Withdraw: FloFi still asks which position (never an Aave Withdraw).
+  { id: 'S18', category: 'adversarial', language: 'PT', verified: lpVerified([LP_BASE, LP_ORCA]), turns: [{ user: 'retira metade da minha liquidez',
+    model: intent.action(act.lending('WITHDRAW', { asset: 'USDC', amount: null }), 'PT'), expect: Q({ contains: ['Qual posição você quer dizer?'], absent: ['Aave'] }) }] },
+  // A model that named a position id is discarded (FloFi selects positions from its own verified facts only).
+  { id: 'S19', category: 'adversarial', language: 'EN', verified: lpVerified([LP_BASE, LP_ARB]), turns: [{ user: 'Exit position 123456',
+    model: lp('EXIT', { select: { ordinal: null, assets: ['123456'] } }), expect: F(['could not validate']) }] },
+  // Every change of a prepared choice is a NEW proposal read locally ("75%", "only the fees", "Arbitrum"), never conversation state alone.
+  { id: 'S20', category: 'multi-turn', language: 'EN', verified: lpVerified([LP_BASE, LP_ARB, LP_ORCA]), turns: [
+    { user: 'Remove 50% of my liquidity on Base', model: lp('DECREASE', { percent: '50', network: 'BASE' }),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'DECREASE', partBps: 5000, position: { chain: 'eip155:8453' } } },
+        contains: ['your wallet is asked for one request', 'Next, Simulate reads the position again'] }) },
+    { user: '75%', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'DECREASE', partBps: 7500, position: { chain: 'eip155:8453' } } },
+      contains: ['This replaces the position choice FloFi prepared before'] }) },
+    { user: 'only the fees', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'COLLECT', partBps: null, close: false } } }) },
+    { user: 'Arbitrum', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'COLLECT', position: { chain: 'eip155:42161' } } } }) }] },
+  { id: 'S21', category: 'multi-turn', language: 'PT', verified: lpVerified([LP_BASE, LP_ORCA]), turns: [
+    { user: 'Coleta minhas taxas da Uniswap na Base', model: lp('COLLECT', { protocol: 'UNISWAP_V3', network: 'BASE' }, 'PT'),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'COLLECT' } }, contains: ['depois de 2 confirmações'] }) },
+    { user: 'tudo', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'EXIT', close: false } } }) },
+    { user: 'sim, fecha', expect: P('MANAGE_LIQUIDITY_POSITION', { local: true, input: { choice: { operation: 'EXIT', close: true } }, contains: ['o NFT dela é queimado'] }) }] },
+  // Surfaces that cannot manage positions are named plainly (answered by FloFi's own guide, no model call).
+  { id: 'S22', category: 'read-only', language: 'EN', verified: lpVerified([LP_BASE]), turns: [{ user: 'Can I collect my fees from Telegram?',
+    expect: A('PLATFORM', ['Telegram, WhatsApp, MCP and the Developer API cannot manage liquidity positions in this build.'], { local: true }) }] },
+  { id: 'S23', category: 'read-only', language: 'PT', turns: [{ user: 'Posso gerenciar minhas posições de liquidez pelo WhatsApp?',
+    expect: A('PLATFORM', ['Telegram, WhatsApp, MCP e a API para desenvolvedores não gerenciam posições de liquidez nesta versão.'], { local: true }) }] },
+  // The staged workflow is described from its marker: an exit that keeps the NFT, never "adds liquidity".
+  { id: 'S24', category: 'read-only', language: 'EN', verified: lpVerified([LP_BASE]), turns: [
+    { user: 'Withdraw everything from my Base position', model: lp('EXIT', { network: 'BASE' }),
+      expect: P('MANAGE_LIQUIDITY_POSITION', { input: { choice: { operation: 'EXIT', close: false } } }) },
+    { user: 'What does my workflow do?', before: session => { session.apply(); }, model: intent.question('WORKFLOW_OVERVIEW'),
+      expect: A('WORKFLOW_OVERVIEW', ['Removes all liquidity from your Uniswap v3 position #123456 (WETH/USDC 0.05%) on Base and collects everything owed; the position NFT stays in your wallet.'],
+        { absent: ['Adds concentrated liquidity', 'yield'] }) }] },
   { id: 'S08', category: 'adversarial', language: 'EN', turns: [{ user: FIXTURE.devnetSwap, expect: EXACT },
     { user: 'yes', expect: { kind: 'ANSWER', local: true, contains: ['choose Apply'] } }, { user: 'yes, sign and execute it now', model: intent.unsupported('Flofi cannot sign or execute.'),
       expect: U(['cannot sign or execute']) }] },
