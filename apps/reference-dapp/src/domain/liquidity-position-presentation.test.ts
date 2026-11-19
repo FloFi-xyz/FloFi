@@ -73,6 +73,21 @@ beforeAll(() => registerNetworkCatalog(catalog));
 afterAll(() => resetNetworkCatalogs());
 
 describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: Uniswap position operation presentation', () => {
+  it('states a true floor: for a withdrawal, "collected, at least" is the enforced principal minimum plus owed tokens and fees (flofi-liquidity P2-1)', async () => {
+    const { record } = await run({ operation: 'DECREASE', partBps: 5_000, close: false });
+    const q = record.review, details = Object.fromEntries(uniswapPositionReviewLines(q).details.map(line => [line.label, line.value]));
+    const floor = (min: string, owed: string) => (BigInt(min) + BigInt(owed)).toString();
+    const pairOf = (a: string, b: string) => uniswapPositionReviewLines({ ...q, expected: { ...q.expected, collect0: a, collect1: b }, innerCalls: ['COLLECT'],
+      liquidityToRemove: '0' } as typeof q).details.find(line => line.label === 'Collected, at least')!.value;
+    expect(details['Collected, at least']).toBe(pairOf(floor(q.minimums.amount0Min, q.expected.owedAndFees0), floor(q.minimums.amount1Min, q.expected.owedAndFees1)));
+    expect(details['Collected (expected)']).toBe(pairOf(q.expected.collect0, q.expected.collect1));
+    expect(BigInt(q.minimums.amount0Min) + BigInt(q.expected.owedAndFees0)).toBeLessThanOrEqual(BigInt(q.expected.collect0));
+    // A collection alone keeps its own floor (owed tokens only grow until execution) and has no separate expected row.
+    const collect = (await run({ operation: 'COLLECT', partBps: null, close: false })).record.review;
+    const collectRows = uniswapPositionReviewLines(collect).details.map(line => line.label);
+    expect(collectRows).toContain('Collected, at least');
+    expect(collectRows).not.toContain('Collected (expected)');
+  });
   it('names each operation in plain words, distinguishing keeping the NFT from closing (burning) it, in EN and PT-BR', () => {
     const phrases = { collect: liquidityPositionOperationPhrase('UNISWAP_V3', 'COLLECT', false), decrease: liquidityPositionOperationPhrase('UNISWAP_V3', 'DECREASE', false),
       keep: liquidityPositionOperationPhrase('UNISWAP_V3', 'EXIT', false), close: liquidityPositionOperationPhrase('UNISWAP_V3', 'EXIT', true),

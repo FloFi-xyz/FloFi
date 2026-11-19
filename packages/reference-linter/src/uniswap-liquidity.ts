@@ -72,5 +72,8 @@ export function validateUniswapLiquidityWorkflow(workflow: SemanticWorkflow): Co
   if (nodes.length !== 1 || workflow.nodes.some(n => n.nodeId !== id && !n.actionType.startsWith('mock-')) ||
       workflow.resourceEdges.some(e => e.fromNodeId === id || e.toNodeId === id) ||
       workflow.nodes.some(n => n.dependencies.includes(id))) fail('UNISWAP_LIQUIDITY_ISOLATED_ONLY');
-  return { ...validateUniswapLiquidityNode(nodes[0]!), nodeId: id, management: readConcentratedLiquidityManagement(nodes[0]!).management };
+  const management = readConcentratedLiquidityManagement(nodes[0]!).management;
+  // A Uniswap v3 position is its manager's decimal token id (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001).
+  if (management && !/^[1-9][0-9]{0,77}$/.test(management.positionId)) fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID');
+  return { ...validateUniswapLiquidityNode(nodes[0]!), nodeId: id, management };
 }

@@ -26,6 +26,7 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
   'Owed tokens and fees': 'Tokens devidos e taxas',
   'Owed tokens and fees (recorded)': 'Tokens devidos e taxas (registrados)',
   'Collected, at least': 'Coletado, no mínimo',
+  'Collected (expected)': 'Coletado (esperado)',
   'Fees collected, at least': 'Taxas coletadas, no mínimo',
   'Collected (owed tokens and fees included)': 'Coletado (tokens devidos e taxas incluídos)',
   'Collected (owed tokens and fees included) · Token 1': 'Coletado (tokens devidos e taxas incluídos) · Token 1',

@@ -127,7 +127,8 @@ export function workflowPositionManagement(workflow: { readonly nodes: readonly 
 /**
  * A workflow that holds a position-management node (well-formed or not) beside any other financial step. A position operation runs as its
  * workflow's ONLY financial step (one runtime, one wallet request): the Editor never produces such a mix — adding, duplicating or chatting
- * another step onto a position workflow is refused, so it can never be grouped into a workflow run or simulated as a sequence step of it.
+ * another step onto a position workflow is refused. A mix restored from elsewhere (saved or handed-off bytes) is not produced here and fails
+ * closed at the runtimes, which accept only an isolated position node (`*_ISOLATED_ONLY`).
  */
 export function workflowMixesPositionManagement(workflow: { readonly nodes: readonly { readonly actionType: string; readonly inputs?: readonly { readonly name: string }[] }[] }): boolean {
   const financial = workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));

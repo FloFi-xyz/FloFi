@@ -141,5 +141,23 @@ revenue. The Admin FinOps presentation of PR #219 is unchanged.
 - Model understanding is proven with the closed replay and deterministic resolution, not with a live model.
 - Uniswap NFTs held by an approved operator (not the owner) and staked/wrapped NFTs are out of scope; Orca bundled positions likewise.
 - `base-liquidity.test.ts` "16-attempt limit" can approach the default 5 s test timeout under heavy CPU contention (observed locally only).
+- **Activation follows the existing owner-execution gates (owner decision before deployment).** No new gate or variable was added (the build
+  may not change gates or environment variables). Position operations use the same owner-execution switch as minting on that network
+  (`GRYLOO_<NETWORK>_OWNER_EXECUTION` / the Orca mainnet switch): a deployment where that switch is already on offers collect, withdrawal, exit and
+  close with real funds as soon as this build is deployed, with no public-network evidence yet (§10). Owner wallet authorization, owner-only
+  recipients and explicit close still apply. The owner should acknowledge this, or keep the switch off until a first supervised operation.
+- A restored workflow that mixes a position step with other steps (not producible in the Editor) fails closed at the runtimes rather than being
+  refused when loaded.
+- A collect-only (or empty-position close) request left uncertain whose nonce is never spent keeps the position claimed until the owner's wallet
+  spends that nonce (it may still execute); a lapsed PREPARED attempt, or an uncertain request that can no longer change liquidity, releases it.
+- A non-revert RPC error (other than a transport failure) at begin/hand-off reads as "position not found" and clears the authorization (fails closed).
+- Discovery: empty positions are not listed (closing an empty Uniswap NFT or refunding an empty Orca position is not offered from the Dashboard);
+  Orca manageability does not pre-check the pool's emitting reward slot (Simulate refuses with `ORCA_POOL_REWARDS_UNSUPPORTED`). The Dashboard scan
+  cache is invalidated after Uniswap operations only (Orca waits for the 30 s cache); the chat keeps its own position facts for 20 s.
+- Existing, not introduced here: in open beta mode liquidity runs (mint and position) have no run-ownership binding beyond the owner argument.
+- PT-BR text outside this build's components (execution timeline "Carteira confirmation…", "Orca Whirlpool s", "Your Workflow" heading) is unchanged.
+- Data privacy: PostgreSQL 18 evidence comes from CI (local runs used 16.15); hosted Neon and LGPD/GDPR acceptance remain separate; the existing
+  0016 tombstone and owner-history events keep wallet and run id permanently (now also for position runs); `admin_run_facts` keeps derived run
+  facts for every format (unchanged by 0016 and 0031).
 
 <!-- §12 (reviews, gates, tested SHA, CI, rollout order and the no-transaction confirmation) is completed at certification. -->

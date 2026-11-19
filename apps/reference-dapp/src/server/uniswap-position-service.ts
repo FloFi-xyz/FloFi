@@ -439,7 +439,21 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
    */
   function releasable(other: UniswapPositionRecord, attempt: UniswapPositionAttempt, chainSeconds: number): boolean {
     if (attempt.state !== 'SUBMISSION_RESULT_UNKNOWN' || !attempt.conflictingTransactionHash) return false;
-    return canonical(other.review.innerCalls) === canonical(['COLLECT']) || other.review.deadline !== null && chainSeconds > Number(other.review.deadline);
+    // No decrease (collect alone, or collect + burn of an empty position): it cannot change the position's liquidity (flofi-liquidity P3-3).
+    return !other.review.innerCalls.includes('DECREASE_LIQUIDITY') || other.review.deadline !== null && chainSeconds > Number(other.review.deadline);
+  }
+  /**
+   * A PREPARED attempt whose Review lapsed can never reach a wallet (hand-off refuses a lapsed Review) and workers never observe PREPARED: it is
+   * concluded not submitted under that run's own lease, exactly as its owner's observation would, so an abandoned tab (or a run someone else
+   * prepared for this owner's public position) never blocks the position or the owner's nonce (flofi-security P3, flofi-workflow P3).
+   */
+  async function concludeLapsedPrepared(holder: string): Promise<UniswapPositionRecord> {
+    return locked(holder, async () => {
+      const fresh = await load(holder), attempt = fresh.attempts.at(-1);
+      if (attempt?.state !== 'PREPARED' || now().getTime() < Date.parse(fresh.review.expiresAt)) return fresh;
+      return save(replaceAttempt({ ...fresh, authorization: null, error: 'UNISWAP_WALLET_NOT_SUBMITTED' },
+        { ...attempt, state: 'CANCELLED', note: 'UNISWAP_WALLET_NOT_SUBMITTED' }));
+    });
   }
   async function withPositionClaim<T>(record: UniswapPositionRecord, chainSeconds: number, action: () => Promise<T>): Promise<T> {
     const key = `${record.review.chainId}-${record.review.contracts.positionManager}-${record.review.position.tokenId}`, name = key + '.unipm-position';
@@ -450,6 +464,7 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
         if (holder === record.id) continue;
         let other: UniswapPositionRecord;
         try { other = await load(holder); } catch { fail('UNISWAP_POSITION_OPERATION_IN_PROGRESS'); }
+        if (other.attempts.at(-1)?.state === 'PREPARED' && now().getTime() >= Date.parse(other.review.expiresAt)) other = await concludeLapsedPrepared(holder);
         if (other.verdict === 'PENDING' && other.attempts.some(a => a.state === 'CONFIRMED' || ACTIVE.includes(a.state) && !releasable(other, a, chainSeconds)))
           fail('UNISWAP_POSITION_OPERATION_IN_PROGRESS');
       }
@@ -526,14 +541,17 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
     let touched = false;
     if (!burned) {
       if (nftTransfers.length) fail('UNISWAP_POSITION_BURN_MISMATCH');
-      const after = await readPosition(R, tokenId, at), expectedAfter = BigInt(review.position.liquidity) - removing;
+      // The decrease removes exactly the reviewed liquidity from whatever the position held just before it: anyone may add liquidity to any
+      // position between the Review and inclusion, so the expectation starts from the previous block, not from the Review (flofi-liquidity P3-1).
+      const [after, prior] = await Promise.all([readPosition(R, tokenId, at), readPosition(R, tokenId, before)]);
+      const expectedAfter = prior.liquidity - removing;
       // Collect at uint128-max leaves nothing owed; the decrease left exactly the reviewed remainder.
       if (after.owner !== owner || after.liquidity !== expectedAfter || after.tokensOwed0 !== 0n || after.tokensOwed1 !== 0n) {
         // The read is at the END of the block. Anyone may add liquidity to any position (increaseLiquidity), and the owner or an approved operator
         // may act on it later in the same block: then the end-of-block state is not this transaction's, and its own verified receipt (exact events,
         // transfers and minimums above) is the proof — scoped to the transaction, as for shared-block balances. Otherwise the run diverged.
         // (flofi-liquidity #3: a third party can no longer turn a correct withdrawal into DIVERGENT.)
-        touched = shared || await touchedLaterInBlock(R, raw, at, tokenId);
+        touched = shared || await touchedByOthersInBlock(R, raw, at, tokenId);
         if (!touched) fail('UNISWAP_POSITION_STATE_MISMATCH');
       }
       liquidityAfter = touched ? expectedAfter.toString() : after.liquidity.toString();
@@ -543,15 +561,15 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       principal0: principal0.toString(), principal1: principal1.toString(), collected0: collected0.toString(), collected1: collected1.toString(), burned,
       blockNumber, transactionHash: hash, ...shared || touched ? { reconciliationScope: 'TRANSACTION' as const } : {} };
   }
-  /** Whether a later transaction of the same block emitted a position-manager event for this token id (increase, decrease, collect or transfer). */
-  async function touchedLaterInBlock(R: UniswapPositionPoolRuntime, receipt: Record<string, unknown>, at: string, tokenId: bigint): Promise<boolean> {
+  /** Whether another transaction of the same block (before or after this one) emitted a position-manager event for this token id. */
+  async function touchedByOthersInBlock(R: UniswapPositionPoolRuntime, receipt: Record<string, unknown>, at: string, tokenId: bigint): Promise<boolean> {
     const index = quantity(receipt.transactionIndex), NPM = R.profile.positionManager;
     const logs = await R.rpc('eth_getLogs', [{ fromBlock: at, toBlock: at, address: NPM }]);
     if (!Array.isArray(logs)) fail('UNISWAP_RPC_INVALID');
     const byId = new Set<string>([TOPIC.increaseLiquidity, PTOPIC.decreaseLiquidity, PTOPIC.collect]);
     return (logs as unknown[]).filter(isObject).some(l => {
       const topics = Array.isArray(l.topics) ? l.topics : [];
-      if (typeof l.address !== 'string' || l.address.toLowerCase() !== NPM || quantity(l.transactionIndex) <= index) return false;
+      if (typeof l.address !== 'string' || l.address.toLowerCase() !== NPM || quantity(l.transactionIndex) === index) return false;
       return byId.has(String(topics[0])) && topics.length >= 2 && quantity(topics[1]) === tokenId
         || topics[0] === TOPIC.transfer && topics.length === 4 && quantity(topics[3]) === tokenId;
     });
@@ -781,12 +799,14 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
           if (record.review.deadline !== null && latest.timestamp > Number(record.review.deadline))
             return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' },
               { ...attempt, state: 'NOT_FOUND', note: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' }));
+          // An observation that learns nothing new appends nothing: polling a long-uncertain request never grows the log (flofi-liquidity P3-4).
+          const unchanged = (next: UniswapPositionRecord) => canonical(next) === canonical(record) ? record : save(next);
           if (found.pendingTx && sameEvmIntent(found.pendingTx, attempt.tx, attempt.nonce)) {
             const h = hex(found.pendingTx.hash);
-            return save(replaceAttempt({ ...record, error: 'UNISWAP_TRANSACTION_PENDING' }, { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? h,
+            return unchanged(replaceAttempt({ ...record, error: 'UNISWAP_TRANSACTION_PENDING' }, { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? h,
               replacementHash: attempt.transactionHash && attempt.transactionHash !== h ? h : attempt.replacementHash }));
           }
-          return save({ ...record, error: hash ? 'UNISWAP_TRANSACTION_PENDING' : 'UNISWAP_TRANSACTION_NOT_OBSERVED' });
+          return unchanged({ ...record, error: hash ? 'UNISWAP_TRANSACTION_PENDING' : 'UNISWAP_TRANSACTION_NOT_OBSERVED' });
         }
         const foundHash = hex(found.tx.hash);
         if (!R.sameIntent(attempt, found.tx)) {

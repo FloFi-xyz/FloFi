@@ -120,7 +120,7 @@ export function liquidityPositionResultRows(step: PositionStep, stage: 'simulate
   // The step's own result: the principal expected back (an Orca withdrawal names it "Expected withdrawal"), or a collection's lower bound.
   if (step.result) push(step.resultLabel === 'Expected withdrawal' ? 'Expected principal returned' : step.resultLabel, step.result);
   push('Minimum principal (enforced)', detail('Minimum principal (enforced)') ?? step.minimum);
-  for (const label of ['Owed tokens and fees', 'Collected, at least', 'Fees collected, at least']) push(label, detail(label));
+  for (const label of ['Owed tokens and fees', 'Collected (expected)', 'Collected, at least', 'Fees collected, at least']) push(label, detail(label));
   if (stage === 'execute') push('Tokens returned', detail('Tokens returned'));
   for (const label of ['Position NFT', 'Account rent refunded']) push(label, detail(label));
   if (stage === 'execute') for (const label of ['Deadline', 'Position Manager', 'Wallet requests']) push(label, detail(label));

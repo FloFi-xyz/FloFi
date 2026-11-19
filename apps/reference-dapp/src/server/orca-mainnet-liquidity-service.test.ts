@@ -167,6 +167,10 @@ describe('Orca liquidity service lifecycle on Solana mainnet-beta (MOCKED loopba
     await expect(s.service.simulate(workflow(), owner, { operation: 'EXIT', positionMint: mint })).rejects.toThrow('ORCA_POSITION_AUTHORITY_MISMATCH');
     // The owner's other position is unaffected (before this fix, the whole listing — and so every simulate — failed for this owner).
     expect((await reviewed(s, 'DECREASE_PARTIAL', other, 2500)).review.operation).toBe('DECREASE_PARTIAL');
+    // The position account is then closed elsewhere while the owner's (now empty) token account remains: listed with its reason, blocking nothing.
+    s.env.state.positions.delete(orcaPositionAddress(mint));
+    expect((await s.service.positions(owner)).find(p => p.positionMint === mint)).toMatchObject({ status: 'UNMANAGEABLE', code: 'ORCA_POSITION_NOT_FOUND' });
+    expect((await reviewed(s, 'COLLECT' as OrcaLiquidityOperation, other).catch(cause => (cause as Error).message))).not.toBe('ORCA_POSITION_NOT_FOUND');
   });
   it('refuses a discovered position it cannot manage with the engine’s own reason, and journals nothing', async () => {
     const s = await setup(), owner = s.wallet.owner;

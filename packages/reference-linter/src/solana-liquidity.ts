@@ -51,5 +51,9 @@ export function validateSolanaLiquidityWorkflow(workflow: SemanticWorkflow): Con
   if (nodes.length !== 1 || workflow.nodes.some(n => n.nodeId !== id && !n.actionType.startsWith('mock-')) ||
       workflow.resourceEdges.some(e => e.fromNodeId === id || e.toNodeId === id) ||
       workflow.nodes.some(n => n.dependencies.includes(id))) fail('SOLANA_LIQUIDITY_ISOLATED_ONLY');
-  return { ...validateSolanaLiquidityNode(nodes[0]!), nodeId: id, management: readConcentratedLiquidityManagement(nodes[0]!).management };
+  const management = readConcentratedLiquidityManagement(nodes[0]!).management;
+  // An Orca position is its base58 mint, and an Orca exit always closes the position (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001).
+  if (management && (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(management.positionId) || management.operation === 'EXIT' && !management.close))
+    fail('SOLANA_LIQUIDITY_DECLARATION_INVALID');
+  return { ...validateSolanaLiquidityNode(nodes[0]!), nodeId: id, management };
 }

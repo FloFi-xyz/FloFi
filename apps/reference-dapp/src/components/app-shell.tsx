@@ -159,6 +159,11 @@ export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider>
  * operation on its own position (`orcaPositionRequestOf`), the Devnet engineering command its staged operation; without a staged choice the
  * previous Review's operation is simulated again (OPEN when there is none). A staged withdrawal or collection is never simulated as OPEN.
  */
+/** The previous Orca run's operation, only while that run still belongs to exactly the current workflow (never a retired record's). */
+export function solanaPoolPrevious(review: { operation: string; accounts: { positionMint: string }; partBps: number | null } | null | undefined, retired: boolean):
+  { operation: string; positionMint: string; partBps: number | null } | null {
+  return review && !retired ? { operation: review.operation, positionMint: review.accounts.positionMint, partBps: review.partBps } : null;
+}
 export function solanaPoolSimulation(staged: StagedPosition | null, previous: { operation: string; positionMint: string; partBps: number | null } | null | undefined,
   workflow?: { readonly nodes: readonly unknown[] } | null):
   { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT'; positionMint: string | undefined; partBps: number | undefined } {
@@ -480,8 +485,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : simulationSource.kind === 'uniswap-pool' ? () => uniswapRefreshInPlace(uniswapLiquidity.record, uniswapLiquidity.retired) ? uniswapLiquidity.refresh() : uniswapLiquidity.simulate()
     : simulationSource.kind === 'solana-composition' ? solanaComposition.simulate
     : simulationSource.kind === 'solana-pool' ? () => {
-      const next = solanaPoolSimulation(stagedPosition, solanaReview ? { operation: solanaReview.operation, positionMint: solanaReview.accounts.positionMint, partBps: solanaReview.partBps } : null,
-        runtimeWorkflow);
+      // A previous run's operation is simulated again only while that run still belongs to exactly this workflow: a retired record (another
+      // workflow, e.g. a new deposit at the same range) never turns a deposit into its withdrawal, collect or exit (flofi-workflow P2).
+      const next = solanaPoolSimulation(stagedPosition, solanaPoolPrevious(solanaReview, solanaLiquidity.retired), runtimeWorkflow);
       return solanaLiquidity.simulate(next.operation, next.positionMint, next.partBps);
     }
     : simulationSource.kind === 'solana-swap' ? jupiter.simulate

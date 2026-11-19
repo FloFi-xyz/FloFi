@@ -30,7 +30,9 @@ Safe + Roles with a disposable executor key) remains local-fork only and is not 
 
 Managing an existing concentrated-liquidity position (collect fees, partial withdrawal, exit, close) on Uniswap v3 (Base, Arbitrum One,
 Ethereum, Robinhood Chain) and Orca Whirlpools (Solana mainnet) is Mode A only, exactly as minting. The connected wallet must be the position's
-owner verified on chain at Review, begin and hand-off (never an approved operator); it is the sole signer and sender of ONE request per operation
+owner verified on chain (Uniswap: `ownerOf` at Review, begin and hand-off, never an approved operator; Orca: the owner's own Token-2022 position
+token, amount 1, no delegate, at Review, then enforced on chain by the Whirlpools position authority over the owner-signed reviewed bytes); it is
+the sole signer and sender of ONE request per operation
 (Uniswap: one NonfungiblePositionManager call or its own atomic `multicall`; Orca: one transaction). No token approval is requested. Tokens are paid
 only to the owner; the Uniswap NFT is burned only when the owner explicitly asked to close and only after a full decrease and collect in the same
 request (an Orca exit always closes, as reviewed). The operation is part of the canonical workflow (its management marker), so an authorization

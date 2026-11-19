@@ -34,7 +34,7 @@ vi.mock('../app/solana-mainnet-liquidity-action', () => ({ solanaMainnetLiquidit
   solanaMainnetLiquiditySimulate: async (...args: unknown[]) => { f.mainnet.push(args); return { ok: false, code: 'ORCA_SIMULATION_RECORDED_BY_TEST' }; },
   solanaMainnetLiquidityReview: refused, solanaMainnetLiquidityInvalidate: refused, solanaMainnetLiquidityBegin: refused, solanaMainnetLiquidityWalletFailure: refused,
   solanaMainnetLiquiditySubmit: refused, solanaMainnetLiquidityObserve: refused, solanaMainnetLiquidityStatus: refused }));
-const { solanaPoolSimulation } = await import('./app-shell');
+const { solanaPoolPrevious, solanaPoolSimulation } = await import('./app-shell');
 const { SolanaLiquidityProvider, useSolanaLiquidity, solanaLiquidityNetworkOf } = await import('../state/solana-liquidity-store');
 
 const MINT = 'Fm7mfcbKeHsUo2u8nDWjpcAfNudKk7XqzGu1QW8k6PJx';
@@ -118,6 +118,14 @@ describe('Simulate of a staged position operation (Orca)', () => {
     expect(f.mainnet).toHaveLength(1);
     // An unmarked workflow keeps the deposit default.
     expect(solanaPoolSimulation(null, null, initialEditor().workflow as unknown as SemanticWorkflow)).toEqual({ operation: 'OPEN', positionMint: undefined, partBps: undefined });
+  });
+  it('a retired run (another workflow, e.g. a new deposit at the same range) never lends its withdrawal to a deposit: it simulates an OPEN (flofi-workflow P2)', () => {
+    const review = { operation: 'DECREASE_PARTIAL', accounts: { positionMint: MINT }, partBps: 5_000 };
+    const deposit = initialEditor().workflow as unknown as SemanticWorkflow;
+    expect(solanaPoolSimulation(null, solanaPoolPrevious(review, true), deposit)).toEqual({ operation: 'OPEN', positionMint: undefined, partBps: undefined });
+    // The same run of exactly this workflow is simulated again as itself.
+    expect(solanaPoolSimulation(null, solanaPoolPrevious(review, false), deposit)).toEqual({ operation: 'DECREASE_PARTIAL', positionMint: MINT, partBps: 5_000 });
+    expect(solanaPoolPrevious(null, false)).toBeNull();
   });
   it('Solana mainnet scoping: with no authored position the product and a mainnet session use Solana mainnet; only the engineering scope defaults to Devnet', () => {
     expect(solanaLiquidityNetworkOf({ authored: null, stagedMainnet: false, record: null, sessionChain: 'solana:mainnet', publicMainnet: false })).toBe('Solana');

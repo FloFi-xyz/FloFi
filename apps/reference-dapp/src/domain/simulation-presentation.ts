@@ -300,7 +300,12 @@ export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: 
     ...removing ? [{ label: 'Expected principal returned', value: pair(q.expected.principal0, q.expected.principal1) },
       { label: 'Minimum principal (enforced)', value: `${pair(q.minimums.amount0Min, q.minimums.amount1Min)} · ${formatBps(q.slippageBps)}` }] : [],
     { label: 'Owed tokens and fees', value: `≥ ${pair(q.expected.owedAndFees0, q.expected.owedAndFees1)}` },
-    { label: 'Collected, at least', value: pair(q.expected.collect0, q.expected.collect1) },
+    // A floor only where it is one: for a withdrawal or exit, the chain enforces the principal minimums (the price may move within slippage until
+    // inclusion) plus owed tokens and fees (which only grow); the simulated total is shown apart as expected (flofi-liquidity P2-1).
+    ...removing ? [{ label: 'Collected (expected)', value: pair(q.expected.collect0, q.expected.collect1) },
+      { label: 'Collected, at least', value: pair((BigInt(q.minimums.amount0Min) + BigInt(q.expected.owedAndFees0)).toString(),
+        (BigInt(q.minimums.amount1Min) + BigInt(q.expected.owedAndFees1)).toString()) }]
+      : [{ label: 'Collected, at least', value: pair(q.expected.collect0, q.expected.collect1) }],
     { label: 'Tokens returned', value: `${q.token0.symbol} and ${q.token1.symbol} to ${q.recipient}` },
     { label: 'Position NFT', value: q.close ? 'Burned (closed)' : 'Stays in your wallet' },
     { label: 'Deadline', value: q.deadline === null ? 'None (collect only)' : new Date(Number(q.deadline) * 1000).toISOString() },

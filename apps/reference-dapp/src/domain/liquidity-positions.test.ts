@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA } from '@defi-workflow-engine/action-registry';
-import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { readConcentratedLiquidity, readConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
+import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
+import { markConcentratedLiquidityManagement, readConcentratedLiquidity, readConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import { editorReducer, initialEditor } from './editor';
 import { liquidityPositionChoiceValid, liquidityPositionOperations, orcaPositionRequestOf, uniswapPositionRequestOf, workflowMixesPositionManagement,
   type LiquidityPositionChoice, type LiquidityPositionRef } from './liquidity-positions';
@@ -90,5 +90,16 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 liquidity position choices', () =>
       source: 'CANVAS', baseRevision: managed.workflow.revision }, context);
     expect(mixed.error).toBe('POSITION_WORKFLOW_HAS_OTHER_STEPS');
     expect(mixed.workflow).toBe(managed.workflow);
+  });
+  it('the linters refuse a marker the protocol cannot mean: an Orca exit that keeps the position, or a position id of the other protocol', () => {
+    const pool = { token0: { symbol: 'SOL', address: ORCA.token0.mint, decimals: 9 }, token1: { symbol: 'USDC', address: ORCA.token1.mint, decimals: 6 }, feeTier: ORCA.feeTier,
+      tickLower: -39_104, tickUpper: -36_992, amount0: '123000000', amount1: '4500000', slippageBps: 100 };
+    const managed = editorReducer(initialEditor(), { type: 'MANAGE_LIQUIDITY_POSITION', choice: choice(orca, 'EXIT', null, true), pool, source: 'CHAT', baseRevision: 0 }, context);
+    expect(managed.error).toBeNull();
+    const remark = (management: Parameters<typeof markConcentratedLiquidityManagement>[1]) => ({ ...managed.workflow, nodes: managed.workflow.nodes.map(node =>
+      node.actionType === 'asset.liquidity.concentrated' ? markConcentratedLiquidityManagement(readConcentratedLiquidityManagement(node as never).node, management) : node) });
+    expect(() => validateAuthoringWorkflow(remark({ positionId: MINT, operation: 'EXIT', partBps: null, close: true }) as never, context)).not.toThrow();
+    expect(() => validateAuthoringWorkflow(remark({ positionId: MINT, operation: 'EXIT', partBps: null, close: false }) as never, context)).toThrow('SOLANA_LIQUIDITY_DECLARATION_INVALID');
+    expect(() => validateAuthoringWorkflow(remark({ positionId: '42', operation: 'COLLECT', partBps: null, close: false }) as never, context)).toThrow('SOLANA_LIQUIDITY_DECLARATION_INVALID');
   });
 });

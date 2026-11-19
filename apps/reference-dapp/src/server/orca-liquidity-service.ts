@@ -41,7 +41,9 @@ export type OrcaPositionEntry = { positionMint: string; runs: { id: string; oper
   code?: string };
 type RegistryLine = { positionMint: string; id: string; operation: OrcaLiquidityOperation };
 /** The chain's own verification refusals of a registered position (never a transport failure). */
-const UNMANAGEABLE = ['ORCA_POSITION_AUTHORITY_MISMATCH', 'ORCA_POSITION_POOL_MISMATCH', 'ORCA_POSITION_INVALID'];
+const UNMANAGEABLE = ['ORCA_POSITION_AUTHORITY_MISMATCH', 'ORCA_POSITION_POOL_MISMATCH', 'ORCA_POSITION_INVALID',
+  // The position account is gone (e.g. transferred then closed elsewhere) while the owner's empty token account remains (flofi-liquidity P2-2).
+  'ORCA_POSITION_NOT_FOUND'];
 const code = (cause: unknown, fallback: string) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : fallback;
 const X = 'ORCA_LIQUIDITY';
 /**

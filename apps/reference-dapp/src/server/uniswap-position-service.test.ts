@@ -57,7 +57,7 @@ function marking(service: UniswapLiquidityService): UniswapLiquidityService {
     positionBegin: (id, owner, w) => service.positionBegin(id, owner, of(id, w)),
   } as UniswapLiquidityService;
 }
-type Faults = { ownerOf: boolean; endOfBlock: { block: string; liquidityDelta: bigint; laterLog: boolean } | null };
+type Faults = { ownerOf: boolean; endOfBlock: { block: string; liquidityDelta: bigint; laterLog: boolean; priorToo?: boolean } | null };
 type Setup = { chain: UniswapLiquidityChain; service: UniswapLiquidityService; raw: UniswapLiquidityService; dir: string; faults: Faults };
 async function setup(options: { confirmations?: number; executionEnabled?: boolean } = {}): Promise<Setup> {
   const chain = createUniswapLiquidityChain({ profile: PROFILE, tick: TICK, usdc: USDC_IS_0 ? 1_000_000_000n : 10_000_000n, weth: USDC_IS_0 ? 10_000_000n : 1_000_000_000n });
@@ -70,7 +70,8 @@ async function setup(options: { confirmations?: number; executionEnabled?: boole
     if (faults.ownerOf && method === 'eth_call' && data.startsWith('0x6352211e')) throw new Error('PUBLIC_RPC_UNAVAILABLE');
     const end = faults.endOfBlock;
     // A later transaction of the same block (a third party's increaseLiquidity) changed the position: the end-of-block read shows it.
-    if (end && method === 'eth_call' && data.startsWith('0x99fbab88') && params[1] === end.block) {
+    const priorBlock = end ? '0x' + (BigInt(end.block) - 1n).toString(16) : null;
+    if (end && method === 'eth_call' && data.startsWith('0x99fbab88') && (params[1] === end.block || end.priorToo && params[1] === priorBlock)) {
       const answer = String(await chain.rpc(method, params)), words = answer.slice(2).match(/.{64}/g)!;
       words[7] = (BigInt('0x' + words[7]) + end.liquidityDelta).toString(16).padStart(64, '0');
       return '0x' + words.join('');
@@ -373,6 +374,41 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 Uniswap v3 position management (MO
         expect(done.error).toBe('UNISWAP_POSITION_STATE_MISMATCH');
       }
     }
+  });
+
+  it('liquidity a third party added before inclusion (an earlier block) never turns a correct withdrawal into DIVERGENT (flofi-liquidity P3-1)', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'DECREASE', partBps: 5_000 }));
+    await s.service.positionReview(run.id, run.review.commitment, w);
+    const begun = await s.service.positionBegin(run.id, UNI_OWNER, w);
+    await s.service.positionHandoff(run.id);
+    const hash = s.chain.wallet.send(begun.transaction);
+    const receipt = await s.chain.rpc('eth_getTransactionReceipt', [hash]) as { blockNumber: string };
+    // The position held 777 more liquidity from the previous block on (someone's increaseLiquidity): the decrease still removed exactly the reviewed share.
+    s.faults.endOfBlock = { block: receipt.blockNumber, liquidityDelta: 777n, laterLog: false, priorToo: true, ...{ tokenId } } as Faults['endOfBlock'];
+    await s.service.positionReport(run.id, { kind: 'HASH', hash });
+    const done = await s.service.positionObserve(run.id);
+    expect(done).toMatchObject({ verdict: 'RECONCILED', result: { liquidityRemoved: '1000000000', liquidityAfter: '1000000777' } });
+    expect(done.result).not.toHaveProperty('reconciliationScope');
+  });
+
+  it('a PREPARED attempt whose Review lapsed (an abandoned tab, or a run someone else prepared for this owner) never blocks the position or the nonce', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const abandoned = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'EXIT' }));
+    await s.service.positionReview(abandoned.id, abandoned.review.commitment, w);
+    await s.service.positionBegin(abandoned.id, UNI_OWNER, w);   // never handed off
+    const next = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'DECREASE', partBps: 2_500 }));
+    await s.service.positionReview(next.id, next.review.commitment, w);
+    // While its Review is valid, the prepared request may still be handed to the wallet: the position stays claimed.
+    await expect(s.service.positionBegin(next.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_POSITION_OPERATION_IN_PROGRESS');
+    // Once it lapsed it can never be handed off: it is concluded not submitted and the position (and the owner's nonce) are free again.
+    s.chain.advance(Math.ceil((Date.parse(abandoned.review.expiresAt) - s.chain.clock().getTime()) / 1000) + 5);
+    const fresh = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'DECREASE', partBps: 2_500 }));
+    expect(await execute(s, fresh.id, w)).toMatchObject({ verdict: 'RECONCILED', result: { liquidityRemoved: '500000000' } });
+    expect((await s.service.positionStatus(abandoned.id)).attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_WALLET_NOT_SUBMITTED' });
+    await expect(s.service.positionHandoff(abandoned.id)).rejects.toThrow();
   });
 
   it('a read the node never answered is retried, never a Review change: the authorization stays and nothing is prepared', async () => {
