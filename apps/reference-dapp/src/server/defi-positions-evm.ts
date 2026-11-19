@@ -223,7 +223,7 @@ function uniswapView(profile: UniswapCatalogLiquidity, owner: string, management
   // Manageable only on the verified CREATE2 pool of two catalog tokens at a standard tier (the runtime refuses anything else again at Review).
   let verified = false;
   if (t0 && t1) try { verified = catalogPoolOn(profile.chainId, t0, t1, position.fee).pool === pool; } catch { verified = false; }
-  let spot: { sqrt: bigint; tick: number } | null = null;
+  let spot: { sqrt: bigint; tick: number } | null;
   try {
     const raw = rpcHex(slot0).slice(2);
     const tickWord = BigInt(`0x${raw.slice(64, 128)}`) & 0xffffffn;
