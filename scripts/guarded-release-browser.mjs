@@ -105,6 +105,13 @@ const definitions = [
   // Authorize), the owner's one Position Manager request through the same runtime, reconciliation and recovery; a 50% withdrawal, a fees-only
   // collect, an exit that closes, a declined request and an expired Review, one path in Portuguese. MOCKED evidence only; nothing is broadcast.
   ['liquidity-position-management', ['liquidity-position-management.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_LIQUIDITY_POSITIONS_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing Orca Whirlpools positions opened elsewhere, in the public Mainnet-only product, on the MOCKED
+  // loopback copy of the mainnet-beta pool (8552): the owner's Sign-In With Solana, Dashboard discovery (facts; capability-driven actions that only
+  // prepare; a delegated position listed with its reason and no action), the Editor stages (each operation simulated as itself on the real server
+  // actions; Execute's MOCKED boundary: no Authorize), the owner's one signed transaction through the same runtime, reconciliation and recovery:
+  // a 50% withdrawal then an exit that closes, and a fees-only collect in Portuguese. MOCKED evidence only; nothing is broadcast.
+  ['orca-position-management', ['orca-position-management.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_E2E_NETWORK_SCOPE: 'PUBLIC_MAINNET',
+    FLOFI_ORCA_POSITIONS_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['journey-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'journey', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-ADMIN-001: the private Admin console (sign-in refusal and grant, dashboards, AI settings) on a disposable loopback database.
@@ -287,7 +294,7 @@ for (const [index, name] of selection.entries()) {
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
     'FLOFI_FLIGHT_TEAM_E2E', 'FLOFI_FLIGHT_TEAM_CLOCK', 'FLOFI_FLIGHT_TEAM_ACCOUNTS', 'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS', 'FLOFI_E2E_NETWORK_SCOPE', 'FLOFI_NETWORK_SCOPE',
-    'FLOFI_USER_FUNDED_E2E', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL']) delete env[key];
+    'FLOFI_USER_FUNDED_E2E', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL', 'FLOFI_ORCA_POSITIONS_E2E']) delete env[key];
   Object.assign(env, settings);
   // Each profile keeps its own artifacts (a later profile never wipes them) and its own JUnit file for the CI test report.
   const output = join(results, name), junit = join(results, 'junit', `${name}.xml`);
