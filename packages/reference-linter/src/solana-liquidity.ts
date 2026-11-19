@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type ConcentratedLiquidityFields,
-  type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquidityManagement, type ConcentratedLiquidityFields,
+  type ConcentratedLiquidityManagement, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as devnet, orcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 
 type NodeLike = { actionType: string; chainId: string };
@@ -21,7 +21,10 @@ const sorted = (v: unknown): string => JSON.stringify(v, (_, item) => item && ty
 export function validateSolanaLiquidityNode(node: SemanticWorkflow['nodes'][number]): ConcentratedLiquidityFields {
   if (!isConcentratedLiquidityNode(node)) fail('SOLANA_LIQUIDITY_ACTION_INVALID');
   let fields: ConcentratedLiquidityFields;
-  try { fields = readConcentratedLiquidity(node); } catch { return fail('SOLANA_LIQUIDITY_DECLARATION_INVALID'); }
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management node is the position's own node plus a valid management marker; the node itself is
+  // validated without it (the workflow validator reports the management, and every deposit runtime refuses a marked node).
+  let unmarked: SemanticWorkflow['nodes'][number];
+  try { unmarked = readConcentratedLiquidityManagement(node).node; fields = readConcentratedLiquidity(unmarked); } catch { return fail('SOLANA_LIQUIDITY_DECLARATION_INVALID'); }
   if (!fields.chain.startsWith('solana:')) fail('LIQUIDITY_RUNTIME_UNSUPPORTED');
   const profile = orcaLiquidityProfile(fields.chain) ?? fail('SOLANA_CLUSTER_UNSUPPORTED');
   const t0 = profile.token0, t1 = profile.token1;
@@ -38,15 +41,19 @@ export function validateSolanaLiquidityNode(node: SemanticWorkflow['nodes'][numb
   // Closed declaration: the node must be byte-equivalent to the canonical construction.
   let canonical: SemanticWorkflow['nodes'][number];
   try { canonical = createConcentratedLiquidityNode(node.nodeId, fields); } catch { return fail('SOLANA_LIQUIDITY_DECLARATION_INVALID'); }
-  if (sorted(node) !== sorted(canonical)) fail('SOLANA_LIQUIDITY_DECLARATION_INVALID');
+  if (sorted(unmarked) !== sorted(canonical)) fail('SOLANA_LIQUIDITY_DECLARATION_INVALID');
   return fields;
 }
 /** One isolated position node; authoring templates may coexist but never connect to it. */
-export function validateSolanaLiquidityWorkflow(workflow: SemanticWorkflow): ConcentratedLiquidityFields & { nodeId: string } {
+export function validateSolanaLiquidityWorkflow(workflow: SemanticWorkflow): ConcentratedLiquidityFields & { nodeId: string; management: ConcentratedLiquidityManagement | null } {
   const nodes = workflow.nodes.filter(isConcentratedLiquidityNode);
   const id = nodes[0]?.nodeId ?? '';
   if (nodes.length !== 1 || workflow.nodes.some(n => n.nodeId !== id && !n.actionType.startsWith('mock-')) ||
       workflow.resourceEdges.some(e => e.fromNodeId === id || e.toNodeId === id) ||
       workflow.nodes.some(n => n.dependencies.includes(id))) fail('SOLANA_LIQUIDITY_ISOLATED_ONLY');
-  return { ...validateSolanaLiquidityNode(nodes[0]!), nodeId: id };
+  const management = readConcentratedLiquidityManagement(nodes[0]!).management;
+  // An Orca position is its base58 mint, and an Orca exit always closes the position (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001).
+  if (management && (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(management.positionId) || management.operation === 'EXIT' && !management.close))
+    fail('SOLANA_LIQUIDITY_DECLARATION_INVALID');
+  return { ...validateSolanaLiquidityNode(nodes[0]!), nodeId: id, management };
 }

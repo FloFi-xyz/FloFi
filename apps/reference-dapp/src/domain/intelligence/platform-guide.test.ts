@@ -21,8 +21,17 @@ describe('platform guide', () => {
       ['Onde vejo minhas automações?', 'AUTOMATIONS'], ['Como revogo uma autorização?', 'AUTHORIZATIONS'], ['Quero salvar uma carteira como favorita.', 'SAVED_WALLETS'],
       ['Como vejo as transações anteriores?', 'HISTORY'], ['Não quero mais receber essas notificações.', 'NOTIFICATIONS'], ['Quais redes vocês suportam?', 'SUPPORTED_NETWORKS'],
       ['how do I connect my wallet?', 'CONNECT_WALLET'], ['where can I see my automations?', 'AUTOMATIONS'], ['how do I delete my account?', 'DELETE_ACCOUNT'],
-      ['Quero mudar a configuração dessa automação.', 'AUTOMATIONS'], ['onde ficam meus destinatários salvos?', 'SAVED_RECIPIENTS']];
+      ['Quero mudar a configuração dessa automação.', 'AUTOMATIONS'], ['onde ficam meus destinatários salvos?', 'SAVED_RECIPIENTS'],
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: where liquidity positions are managed, and the surfaces that cannot (an agent question stays AI_AGENTS).
+      ['Can I collect my fees from Telegram?', 'LIQUIDITY_POSITIONS'], ['Posso gerenciar minhas posições de liquidez pelo WhatsApp?', 'LIQUIDITY_POSITIONS'],
+      ['how do I manage my liquidity positions?', 'LIQUIDITY_POSITIONS'], ['Can I close my pool position through MCP?', 'LIQUIDITY_POSITIONS'],
+      ['Como uso a FloFi pelo ChatGPT?', 'AI_AGENTS']];
     for (const [text, topic] of cases) expect([text, matchPlatformTopic(text)]).toEqual([text, topic]);
+    // A position word starts a word ("help" is not "lp", "depositar" is not "posição"): earlier topics keep their questions (flofi-chat review P3).
+    expect(matchPlatformTopic('How can Claude help me?')).toBe('AI_AGENTS');
+    expect(matchPlatformTopic('How do I get help with Telegram notifications?')).toBe('NOTIFICATIONS');
+    expect(matchPlatformTopic('Posso depositar USDC na Aave pelo Telegram?')).not.toBe('LIQUIDITY_POSITIONS');
+    expect(matchPlatformTopic('Qual a composição das taxas do agente?')).not.toBe('LIQUIDITY_POSITIONS');
     // Requests are not configuration questions.
     expect(matchPlatformTopic('swap 1 ETH to USDC on Base')).toBeNull();
     // A question about the user's own workflow is answered from its canonical facts (eval Q11), not by FloFi's guide.

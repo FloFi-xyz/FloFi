@@ -5,7 +5,7 @@ import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { CROSSCHAIN_ROUTER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, solanaSwapRuntime } from '@defi-workflow-engine/action-registry';
 import { isPristineDraft, type Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
-import { simulationAmount, simulationProvider } from './simulation-presentation';
+import { isUniswapPositionRecord, liquidityPositionActionLabel, simulationAmount, simulationProvider } from './simulation-presentation';
 import { shellChainLabel } from './product-shell';
 import type { ExecutionStepEvidence } from './execution-step-evidence';
 import { EXECUTION_PHASE_LABEL, type ExecutionPhase } from './execution-phase';
@@ -18,6 +18,7 @@ import type { useJupiter } from '../state/jupiter-store';
 import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import type { useSolanaComposition } from '../state/solana-composition-store';
 import type { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
+import type { useUniswapPosition } from '../state/uniswap-position-store';
 import type { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import type { useSolanaTransfer } from '../state/solana-transfer-store';
 import type { useModeA } from '../state/mode-a-store';
@@ -39,7 +40,8 @@ export type ExecutionLifecycleSource =
   | { kind: 'solana-swap'; state: ReadonlyStore<ReturnType<typeof useJupiter>> }
   | { kind: 'solana-pool'; state: ReadonlyStore<ReturnType<typeof useSolanaLiquidity>> }
   | { kind: 'solana-composition'; state: ReadonlyStore<ReturnType<typeof useSolanaComposition>> }
-  | { kind: 'uniswap-pool'; state: ReadonlyStore<ReturnType<typeof useUniswapLiquidity>> }
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a mint run (the mint store) or a position-management run (the Uniswap position store). */
+  | { kind: 'uniswap-pool'; state: ReadonlyStore<ReturnType<typeof useUniswapLiquidity>> | ReadonlyStore<ReturnType<typeof useUniswapPosition>> }
   | { kind: 'transfer'; state: ReadonlyStore<ReturnType<typeof useRobinhoodTransfer>> }
   | { kind: 'solana-transfer'; state: ReadonlyStore<ReturnType<typeof useSolanaTransfer>> }
   | { kind: 'fork-swap'; state: ReadonlyStore<ReturnType<typeof useModeA>> }
@@ -135,6 +137,8 @@ function notSubmittedReason(op: LifecycleOperation, attempt: { readonly state: s
  */
 export function projectExecutionLifecycle(currentWorkflow: Workflow, context: ReviewContext, source: ExecutionLifecycleSource, options: { readonly freshWorkflow?: boolean } = {}): ExecutionLifecycle {
   let workflow = currentWorkflow, runKey: string | null = null, local = false, restored = false, superseded = false;
+  /** A position-management run names its step by its operation (never by the pool node's descriptive maxima, which it never deposits). */
+  let positionStep: { readonly nodeId: string; readonly action: string; readonly input: string } | null = null;
   const reconciliation = source.kind === 'fork-swap' ? source.state.execution?.evidence.at(-1)?.outcome : source.kind === 'fork-pool' ? source.state.status?.reconciliation?.outcome : null;
   const runUncertain = ['DIVERGENT', 'INCONCLUSIVE'].includes(reconciliation ?? '') || 'record' in source.state && source.state.record && 'verdict' in source.state.record && ['DIVERGENT', 'INCONCLUSIVE'].includes(source.state.record.verdict);
   const runFailed = source.kind === 'lending' && source.state.record?.status === 'FAILED';
@@ -255,6 +259,18 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     case 'uniswap-pool': {
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
+      if (isUniswapPositionRecord(r)) {
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: one operation, one wallet request; a never-sent attempt of an earlier Review does not hold it.
+        const nodeId = composerActions(workflow)[0]?.nodeId ?? '', chain = `eip155:${r.review.chainId}`, q = r.review;
+        const attempts = r.attempts.filter(a => !supersededUnsent(a, q.commitment)); superseded ||= attempts.length < r.attempts.length;
+        const a = attempts.at(-1), title = liquidityPositionActionLabel(q.operation, q.close);
+        add(q.operation, nodeId, title, chain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled && r.verdict === 'RECONCILED'), false,
+          simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
+        notSubmittedReason(operations.at(-1)!, a);
+        const share = q.operation === 'EXIT' ? '100%' : q.partBps !== null ? `${(q.partBps / 100).toFixed(2).replace(/\.?0+$/, '')}%` : null;
+        positionStep = { nodeId, action: title, input: share ? `${share} · #${q.position.tokenId}` : `#${q.position.tokenId}` };
+        break;
+      }
       const nodeId = composerActions(workflow)[0]?.nodeId ?? '', chain = `eip155:${r.review.chainId}`;
       // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): a Review refreshed in place lists only the requests still needed (an approval whose
       // allowance now suffices is not asked again), so the run's confirmed steps are kept from its attempts, as for lending; a never-sent
@@ -365,6 +381,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       tokens: [...new Set(`${card.amount} ${card.detail ?? ''} ${card.bridgePair ?? ''}`.match(/\b(?:devUSDC|USDC|WETH|ETH|WSOL|SOL|USDT)\b/g) ?? [])],
       state: status, label: intent && completed ? 'Settled' : live?.label ?? labels[status], ...live?.labelArgs ? { labelArgs: live.labelArgs } : {}, operations: own };
   });
+  if (positionStep) for (const step of steps) if (step.id === positionStep.nodeId) { step.action = positionStep.action; step.input = positionStep.input; step.provider = 'Uniswap V3'; }
   // These legacy records retain requests, but no original workflow. Display their
   // actual operations without borrowing amounts or actions from the current Build.
   if (planUnavailable) {

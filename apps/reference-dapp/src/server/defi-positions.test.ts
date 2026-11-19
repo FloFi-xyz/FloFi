@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
-import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA } from '@defi-workflow-engine/action-registry';
-import { base58Encode, encodeMockedWhirlpool, orcaPositionAddress, publicKeyBytes, supplyCall, supplyWord, UNISWAP_Q96,
-  type AaveMarketCatalog, type AaveReserveStatus, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { base58Encode, createMockedSolanaDevnetOrca, createMockedSolanaWallet, encodeMockedWhirlpool, encodeUniswapCollect, orcaPositionAddress, orcaPositionTokenAccount, publicKeyBytes, supplyCall, supplyWord,
+  UNISWAP_MAX_UINT128, UNISWAP_Q96, type AaveMarketCatalog, type AaveReserveStatus, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { liquidityPositionKey, liquidityPositionRefValid } from '../domain/liquidity-positions';
 import type { PriceObservation } from '../automations/price-source';
-import { valuePositionAmounts } from './defi-positions';
+import { readWalletPositions, solanaPositionSource, valuePositionAmounts } from './defi-positions';
+import { ORCA_MAINNET_HARNESS_RPC } from './orca-mainnet-harness';
 import { aavePositions, uniswapPositions, UNISWAP_POSITION_DEPLOYMENTS, type ValuePositionAsset } from './defi-positions-evm';
 import { orcaPositions } from './defi-positions-solana';
 import type { Rpc } from './public-testnet-service';
@@ -61,7 +63,10 @@ const TOKEN0 = '0x' + 'a'.repeat(40), TOKEN1 = '0x' + 'b'.repeat(40), POOL = '0x
 const words = (...values: (string | bigint)[]) => '0x' + values.map(supplyWord).join('');
 const int = (value: bigint) => value & ((1n << 256n) - 1n);
 const nft = words(0n, 0n, TOKEN0, TOKEN1, 3000n, int(-60n), 60n, 1_000_000_000n, 0n, 0n, 123n, 0n);
-function uniswapFixture(options: { owner?: string; count?: bigint; reorg?: boolean; badPool?: boolean; badCode?: boolean } = {}): Rpc {
+const VERIFIED_POOL = catalogPoolOn('eip155:8453', { symbol: 'AAA', address: TOKEN0, decimals: 6 }, { symbol: 'BBB', address: TOKEN1, decimals: 6 }, 3000).pool;
+const catalogOf = (assets: readonly [string, string][]): AssetCatalog => ({ chain: 'eip155:8453', assets: assets.map(([symbol, address]) =>
+  ({ kind: 'ERC20', symbol, address, decimals: 6 })) } as unknown as AssetCatalog);
+function uniswapFixture(options: { owner?: string; count?: bigint; reorg?: boolean; badPool?: boolean; badCode?: boolean; pool?: string; collect?: 'OK' | 'FAIL' } = {}): Rpc {
   return async (method, params) => {
     const at = '0x64';
     if (method === 'eth_chainId') return '0x2105';
@@ -73,7 +78,13 @@ function uniswapFixture(options: { owner?: string; count?: bigint; reorg?: boole
     }
     if (method === 'eth_call') {
       expect(params[1]).toBe(at);
-      const query = params[0] as { to: string; data: string };
+      const query = params[0] as { to: string; data: string; from?: string };
+      // The owner's static collect: owed tokens (123) plus fees not yet checkpointed (77) of token0, 9 of token1.
+      if (query.to === uniswap.positionManager && query.data === encodeUniswapCollect({ tokenId: 7n, recipient: OWNER, amount0Max: UNISWAP_MAX_UINT128,
+        amount1Max: UNISWAP_MAX_UINT128 })) {
+        if (options.collect !== 'OK' || query.from !== OWNER) throw new Error('FIXTURE_REVERT');
+        return words(200n, 9n);
+      }
       if (query.to === uniswap.positionManager) {
         if (query.data === supplyCall('factory()')) return words(uniswap.factory);
         if (query.data === supplyCall('balanceOf(address)', OWNER)) return words(options.count ?? 1n);
@@ -82,13 +93,46 @@ function uniswapFixture(options: { owner?: string; count?: bigint; reorg?: boole
         if (query.data === supplyCall('positions(uint256)', 7n)) return nft;
       }
       if (query.to === uniswap.factory && query.data === supplyCall('getPool(address,address,uint24)', TOKEN0, TOKEN1, 3000n))
-        return words(options.badPool ? 0n : POOL);
+        return words(options.badPool ? 0n : options.pool ?? POOL);
       if ([TOKEN0, TOKEN1].includes(query.to) && query.data === supplyCall('decimals()')) return words(6n);
-      if (query.to === POOL && query.data === supplyCall('slot0()')) return words(UNISWAP_Q96, 0n, 0n, 1n, 1n, 0n, 1n);
+      if ([POOL, VERIFIED_POOL].includes(query.to) && query.data === supplyCall('slot0()')) return words(UNISWAP_Q96, 0n, 0n, 1n, 1n, 0n, 1n);
     }
     throw new Error('FIXTURE_READ_UNAVAILABLE');
   };
 }
+
+describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position management view (Uniswap)', () => {
+  const scan = (rpc: Rpc, catalog: AssetCatalog | null) => uniswapPositions(rpc, uniswap, OWNER, NOW, [], unvalued, true, { network: 'Base', catalog });
+  it('binds network, manager, verified pool, token id and owner, and reports exactly what collect would pay (owed tokens apart from fresh fees)', async () => {
+    const result = await scan(uniswapFixture({ pool: VERIFIED_POOL, collect: 'OK' }), catalogOf([['AAA', TOKEN0], ['BBB', TOKEN1]]));
+    const view = result.positions[0]!.liquidity!;
+    expect(view.ref).toEqual({ protocol: 'UNISWAP_V3', chain: 'eip155:8453', network: 'Base', manager: uniswap.positionManager, pool: VERIFIED_POOL, positionId: '7', owner: OWNER });
+    expect(liquidityPositionRefValid(view.ref)).toBe(true);
+    expect(view).toMatchObject({ token0: { symbol: 'AAA', decimals: 6 }, token1: { symbol: 'BBB' }, feeTier: 3000, tickLower: -60, tickUpper: 60,
+      liquidity: '1000000000', principal: ['2995354', '2995354'], recordedOwed: ['123', '0'], collectable: ['200', '9'], status: 'OPEN', rangeState: 'IN_RANGE',
+      manageable: { ok: true }, operations: ['COLLECT', 'DECREASE', 'EXIT'], observedAtHeight: 100, price: { base: 'BBB', quote: 'AAA' } });
+    expect(view.currentPrice).not.toBeNull();
+  });
+  it('shows a position it cannot manage, but offers nothing for it: a pool it cannot verify, or a catalog it could not read now', async () => {
+    const unverified = await scan(uniswapFixture({ collect: 'OK' }), catalogOf([['AAA', TOKEN0], ['BBB', TOKEN1]]));
+    expect(unverified.positions[0]!.liquidity).toMatchObject({ manageable: { ok: false, reason: 'POOL_NOT_VERIFIED' }, operations: [] });
+    const noCatalog = await scan(uniswapFixture({ pool: VERIFIED_POOL, collect: 'OK' }), null);
+    expect(noCatalog.positions[0]!.liquidity).toMatchObject({ manageable: { ok: false, reason: 'POOL_NOT_VERIFIED' }, operations: [] });
+    const notListed = await scan(uniswapFixture({ pool: VERIFIED_POOL, collect: 'OK' }), catalogOf([['AAA', TOKEN0]]));
+    expect(notListed.positions[0]!.liquidity!.manageable).toEqual({ ok: false, reason: 'POOL_NOT_VERIFIED' });
+  });
+  it('reports collectable amounts as unavailable (null), never zero, when the static collect cannot be read', async () => {
+    const result = await scan(uniswapFixture({ pool: VERIFIED_POOL, collect: 'FAIL' }), catalogOf([['AAA', TOKEN0], ['BBB', TOKEN1]]));
+    expect(result.positions[0]!.liquidity).toMatchObject({ collectable: null, recordedOwed: ['123', '0'], operations: ['COLLECT', 'DECREASE', 'EXIT'] });
+  });
+  it('keys a position by chain and manager: the same token id on two networks is two positions', () => {
+    const base = { protocol: 'UNISWAP_V3' as const, network: 'Base', manager: uniswap.positionManager, pool: VERIFIED_POOL, positionId: '7', owner: OWNER, chain: 'eip155:8453' };
+    const arbitrum = { ...base, network: 'Arbitrum One', chain: 'eip155:42161', manager: UNISWAP_POSITION_DEPLOYMENTS['arbitrum-one'].positionManager };
+    expect(liquidityPositionKey(base)).not.toBe(liquidityPositionKey(arbitrum));
+    expect(liquidityPositionRefValid({ ...base, positionId: '07' })).toBe(false);
+    expect(liquidityPositionRefValid({ ...base, extra: true })).toBe(false);
+  });
+});
 
 describe('Uniswap wallet-held positions', () => {
   const scan = (rpc: Rpc) => uniswapPositions(rpc, uniswap, OWNER, NOW, [], unvalued);
@@ -110,23 +154,25 @@ describe('Uniswap wallet-held positions', () => {
 });
 
 const solanaKey = (n: number) => base58Encode(new Uint8Array(32).fill(n));
-const SOL_OWNER = solanaKey(1), MINT = solanaKey(2), ATA = solanaKey(3), SOL_OTHER = solanaKey(4);
+const SOL_OWNER = solanaKey(1), MINT = solanaKey(2), LEGACY_ATA = solanaKey(3), SOL_OTHER = solanaKey(4);
 const raw = (owner: string, data: Uint8Array) => ({ owner, lamports: 1, data: [Buffer.from(data).toString('base64'), 'base64'] });
-function tokenAccount(owner: string) {
+function tokenAccount(owner: string, delegate = false) {
   const data = new Uint8Array(165);
+  if (delegate) { new DataView(data.buffer).setUint32(72, 1, true); data.set(publicKeyBytes(solanaKey(9)), 76); }
   data.set(publicKeyBytes(MINT), 0);
   data.set(publicKeyBytes(owner), 32);
   new DataView(data.buffer).setBigUint64(64, 1n, true);
   data[108] = 1;
   return raw(ORCA.programs.token2022, data);
 }
-function orcaFixture(options: { fail?: 'all' | 'one'; empty?: boolean; transferred?: boolean; oldSlot?: boolean } = {}): SolanaRpc {
+function orcaFixture(options: { fail?: 'all' | 'one'; empty?: boolean; transferred?: boolean; oldSlot?: boolean; ata?: string; delegate?: boolean } = {}): SolanaRpc {
+  const ATA = options.ata ?? LEGACY_ATA;
   return async (method, params) => {
     if (method === 'getGenesisHash') return ORCA.genesisHash;
     if (method === 'getTokenAccountsByOwner') {
       const program = (params[1] as { programId: string }).programId;
       if (options.fail === 'all' || options.fail === 'one' && program === ORCA.programs.token) throw new Error('RPC_UNAVAILABLE');
-      return { context: { slot: 10 }, value: options.empty || program === ORCA.programs.token ? [] : [{ pubkey: ATA, account: tokenAccount(SOL_OWNER) }] };
+      return { context: { slot: 10 }, value: options.empty || program === ORCA.programs.token ? [] : [{ pubkey: ATA, account: tokenAccount(SOL_OWNER, options.delegate) }] };
     }
     if (method === 'getMultipleAccounts') {
       expect(params).toEqual([[ORCA.pool.address, ATA, orcaPositionAddress(MINT)], { encoding: 'base64', commitment: 'confirmed', minContextSlot: 10 }]);
@@ -140,7 +186,7 @@ function orcaFixture(options: { fail?: 'all' | 'one'; empty?: boolean; transferr
       view.setBigUint64(112, 123n, true);
       return { context: { slot: options.oldSlot ? 9 : 11 }, value: [
         raw(ORCA.programs.whirlpool, encodeMockedWhirlpool(ORCA.whirlpoolsConfig, { pool: ORCA.pool, feeRate: ORCA.feeTier })),
-        tokenAccount(options.transferred ? SOL_OTHER : SOL_OWNER), raw(ORCA.programs.whirlpool, data),
+        tokenAccount(options.transferred ? SOL_OTHER : SOL_OWNER, options.delegate), raw(ORCA.programs.whirlpool, data),
       ] };
     }
     throw new Error('FIXTURE_METHOD_DENIED');
@@ -149,6 +195,16 @@ function orcaFixture(options: { fail?: 'all' | 'one'; empty?: boolean; transferr
 
 describe('Orca direct standalone position discovery', () => {
   const scan = (rpc: SolanaRpc) => orcaPositions(rpc, SOL_OWNER, NOW, unvalued);
+  it('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: offers management only for the owner\'s own Token-2022 position account with no delegate', async () => {
+    const own = orcaPositionTokenAccount(SOL_OWNER, MINT);
+    const managed = (await scan(orcaFixture({ ata: own }))).positions[0]!.liquidity!;
+    expect(managed).toMatchObject({ ref: { protocol: 'ORCA', chain: ORCA.chain, network: ORCA.network, manager: ORCA.programs.whirlpool, pool: ORCA.pool.address,
+      positionId: MINT, owner: SOL_OWNER }, manageable: { ok: true }, recordedOwed: ['123', '0'], collectable: null, status: 'OPEN',
+      operations: ['COLLECT', 'DECREASE', 'EXIT'], tickLower: -39104, tickUpper: -36992, price: { base: 'SOL', quote: 'USDC' }, observedAtHeight: 11 });
+    expect(liquidityPositionRefValid(managed.ref)).toBe(true);
+    expect((await scan(orcaFixture())).positions[0]!.liquidity).toMatchObject({ manageable: { ok: false, reason: 'LEGACY_POSITION_TOKEN' }, operations: [] });
+    expect((await scan(orcaFixture({ ata: own, delegate: true }))).positions[0]!.liquidity).toMatchObject({ manageable: { ok: false, reason: 'DELEGATED_POSITION_TOKEN' } });
+  });
   it('checks ownership and the registered pool at one confirmed slot, returning principal and recorded fees separately', async () => {
     const result = await scan(orcaFixture());
     expect(result).toMatchObject({ status: 'COMPLETE', positions: [{ type: 'LIQUIDITY', id: MINT, assets: [
@@ -162,5 +218,64 @@ describe('Orca direct standalone position discovery', () => {
     expect(await scan(orcaFixture({ transferred: true }))).toMatchObject({ status: 'PARTIAL', positions: [] });
     await expect(scan(orcaFixture({ fail: 'all' }))).rejects.toThrow('POSITION_SOLANA_RPC_INVALID');
     await expect(scan(orcaFixture({ oldSlot: true }))).rejects.toThrow('POSITION_SOLANA_RPC_INVALID');
+  });
+});
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Dashboard's Orca scan on the MOCKED loopback copy of the mainnet-beta pool (the browser suite's harness,
+ * `e2e/solana-devnet-harness.mjs` `/mainnet-rpc`): positions opened outside FloFi, read as MOCKED and never from a public endpoint.
+ */
+describe('Orca positions on the MOCKED mainnet loopback harness', () => {
+  const seeded = () => {
+    const env = createMockedSolanaDevnetOrca({ liquidityProfile: ORCA }), owner = createMockedSolanaWallet().owner;
+    env.fund(owner, 3_000_000_000n, 50_000_000n);
+    const managed = env.seedPosition({ owner, liquidity: 40_000_000n, tickLower: -39104, tickUpper: -36992, feeOwedA: 1_234n, feeOwedB: 56n });
+    const delegated = env.seedPosition({ owner, liquidity: 10_000_000n, tickLower: -39104, tickUpper: -36992, delegate: createMockedSolanaWallet().owner });
+    return { env, owner, managed, delegated };
+  };
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  it('reads only the loopback harness, as MOCKED, on a local server running it; never on a hosted deployment or without the switch', () => {
+    const harness = { endpoint: ORCA_MAINNET_HARNESS_RPC, loopback: true, provenance: 'MOCKED' };
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, null)).toEqual(harness);
+    // The harness wins over a local live switch (the app's Orca mainnet runtime does the same), so a MOCKED server never reads a public endpoint.
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ORCA_MAINNET: 'live', GRYLOO_SOLANA_RPC_URL: 'https://rpc.example/key' }, null)).toEqual(harness);
+    for (const hosted of [{ VERCEL: '1' }, { FLOFI_DEPLOYMENT: 'hosted' }, { RAILWAY_PROJECT_ID: 'p' }])
+      expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', ...hosted }, null)).toBeNull();
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED' }, null)).toBeNull();
+    expect(solanaPositionSource({}, null)).toBeNull();
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live' }, null)).toEqual({ endpoint: ORCA.rpc, loopback: false, provenance: 'PUBLIC_MAINNET' });
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live', GRYLOO_SOLANA_RPC_URL: 'https://rpc.example/key' }, null)).toMatchObject({ endpoint: 'https://rpc.example/key' });
+    expect(() => solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live', GRYLOO_SOLANA_RPC_URL: 'http://rpc.example' }, null)).toThrow('POSITION_SOLANA_RPC_CONFIGURATION_INVALID');
+    // A deployment's own flow mode decides there; only its live mode reads positions.
+    expect(solanaPositionSource({}, 'live')).toEqual({ endpoint: ORCA.rpc, loopback: false, provenance: 'PUBLIC_MAINNET' });
+    for (const mode of ['off', 'harness']) expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live' }, mode)).toBeNull();
+  });
+  it('lists positions opened outside FloFi: a manageable one with its recorded fees (collectable unavailable, never 0), a delegated one with its reason', async () => {
+    const { env, owner, managed, delegated } = seeded();
+    const result = await orcaPositions(env.rpc, owner, NOW, unvalued);
+    expect(result.status).toBe('COMPLETE');
+    const views = new Map(result.positions.map(position => [position.id, position.liquidity!]));
+    expect(views.get(managed)).toMatchObject({ ref: { protocol: 'ORCA', positionId: managed, owner, pool: ORCA.pool.address }, manageable: { ok: true }, status: 'OPEN',
+      rangeState: 'IN_RANGE', liquidity: '40000000', recordedOwed: ['1234', '56'], collectable: null, operations: ['COLLECT', 'DECREASE', 'EXIT'], observedAtHeight: env.state.slot });
+    expect(views.get(managed)!.principal.every(units => units !== null && BigInt(units) > 0n)).toBe(true);
+    expect(views.get(delegated)).toMatchObject({ manageable: { ok: false, reason: 'DELEGATED_POSITION_TOKEN' }, operations: [], recordedOwed: ['0', '0'] });
+  });
+  it('the Dashboard reads a proven Solana wallet\'s positions from the loopback harness only, as MOCKED test data', async () => {
+    const { env, owner, managed, delegated } = seeded();
+    for (const key of ['API_BASE_URL', 'FLOFI_RUNTIME', 'DATABASE_URL', 'VERCEL', 'RAILWAY_PROJECT_ID', 'RAILWAY_ENVIRONMENT_ID', 'FLOFI_DEPLOYMENT', 'GRYLOO_ORCA_MAINNET',
+      'GRYLOO_SOLANA_RPC_URL']) vi.stubEnv(key, undefined);
+    vi.stubEnv('GRYLOO_ORCA_MAINNET_HARNESS', 'MOCKED_LOOPBACK_ONLY');
+    const urls = new Set<string>();
+    vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+      urls.add(String(url));
+      const call = JSON.parse(init.body) as { id: number; method: string; params: unknown[] };
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: call.id, result: await env.rpc(call.method, call.params) }, (_, v) => typeof v === 'bigint' ? v.toString() : v));
+    });
+    const scans = await readWalletPositions({ namespace: 'solana', address: owner });
+    expect(scans).toMatchObject([{ protocol: 'Orca Whirlpools', network: 'Solana', provenance: 'MOCKED', status: 'COMPLETE' }]);
+    expect(scans[0]!.positions.map(position => position.id).sort()).toEqual([managed, delegated].sort());
+    // Test data is never valued with a price feed.
+    expect(scans[0]!.positions.flatMap(position => position.assets).every(asset => asset.valuation === null)).toBe(true);
+    expect([...urls]).toEqual([ORCA_MAINNET_HARNESS_RPC]);
   });
 });

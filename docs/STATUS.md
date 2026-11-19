@@ -7,6 +7,22 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 — Mainnet liquidity position management (Orca, Uniswap v3)
+
+**Status: pull request for CircleCI certification of its exact head. The owner authorized the merge and deployment once every check is green.
+Evidence is local and MOCKED only (unit, disposable PostgreSQL, MOCKED browser profiles). There are no live mainnet reads and no financial
+certification. Migration 0031 is certified
+and not applied; the schema stays at 28. No transaction was signed or sent, and no environment variable, gate, fee policy or platform
+configuration changed.**
+- Owners discover and inspect their positions, collect fees, withdraw part of the liquidity, exit, and close only on explicit request, from the
+  Editor, the Dashboard and the web chat. This covers Orca Whirlpools (SOL/USDC, Solana mainnet) and Uniswap v3 (Base, Arbitrum One, Ethereum,
+  Robinhood Chain). MCP, Telegram, WhatsApp and the Developer API state that position management is web-only.
+- Each operation goes through one canonical runtime per protocol. The owner signs one wallet request, and every recipient is the owner.
+  Settlement waits for the confirmation depth of PR #218, and "never executed" is judged at one block.
+- Owner decision before activation: position operations follow the existing per-network owner-execution switch (build record §11, §12.5).
+
+See the [build record](builds/BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001.md) and the [0031 release](deploy/RELEASE-POSITION-PURGE-0031.md).
+
 ## BUILD-FLOFI-UNIFIED-COPILOT-001 Release B — ships migration 0028 (saved recipients)
 
 **Status: PR prepared for owner review. Not merged, and Neon has not been migrated.** Release A (PR #199, `67f4e84`) is deployed, and

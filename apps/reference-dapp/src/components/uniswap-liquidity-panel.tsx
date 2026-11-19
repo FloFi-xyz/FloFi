@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { requotedMessage } from '../domain/simulation-presentation';
+import { liquidityPositionActionLabel, requotedMessage, simulationError, uniswapPositionReviewLines } from '../domain/simulation-presentation';
+import { useOptionalUniswapPosition, useUniswapPosition } from '../state/uniswap-position-store';
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
@@ -166,7 +167,7 @@ const explorer = (hash: string, profile: { explorer: string }) => profile.explor
 
 export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
-  const { state } = useWorkflow(), wallet = useBuild009Wallet(), lp = useUniswapLiquidity();
+  const { state } = useWorkflow(), wallet = useBuild009Wallet(), lp = useUniswapLiquidity(), positionEngaged = Boolean(useOptionalUniswapPosition()?.engaged);
   const node = state.workflow.nodes.find(n => uniswapLiquidityDetails(n) || robinhoodLiquidityDetails(n)), fields = node ? uniswapLiquidityDetails(node) : null;
   const rhFields = node ? robinhoodLiquidityDetails(node) : null;
   const record = lp.record, r = record?.review, last = record?.attempts.at(-1);
@@ -186,6 +187,8 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
   const { profile, network, realFunds, robinhood, evidenceSlug } = liquidityRunNetwork(r?.chainId ?? node?.chainId);
   const t0 = r?.token0 ?? USDC_VIEW, t1 = r?.token1 ?? WETH_VIEW, amount0 = tokenAmount(t0), amount1 = tokenAmount(t1);
   const stepLabel = stepLabelOf(t0.symbol, t1.symbol);
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged (or attached) position operation is presented and executed by the position store, never as a deposit.
+  if (positionEngaged) return <UniswapPositionPanel view={view}/>;
   return <section className="panel" aria-label={tr(`${network} liquidity`)}><h2>{tr(view === 'simulate' ? 'Simulate liquidity position' : 'Review liquidity position')}</h2>
     {fields && <p>{tr("Concentrated liquidity on ")}{network}{tr(" via Uniswap v3: up to ")}{tr(fields.maxUsdc)}{tr(" USDC and ")}{tr(fields.maxWeth)}{tr(" WETH between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" USDC per WETH.")}</p>}
     {rhFields && <p>{tr("Concentrated liquidity on ")}{network}{tr(" via Uniswap v3: up to ")}{tr(`${rhFields.amountA} ${rhFields.tokenA} and ${rhFields.amountB} ${rhFields.tokenB}`)}
@@ -238,6 +241,53 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
     </>}
     {info && <p role="status">{tr(catalogLiquidityCopy(networkCopy(message(info) ?? 'Execution needs attention. Inspect technical details and observe any existing transaction.', network), network))}</p>}
     {lp.busy && <p role="status">{tr("Working…")}</p>}
+    <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({ error: info, run: record?.id, commitment: r?.commitment, calls: r?.calls, attempts: record?.attempts, verdict: record?.verdict }, null, 2)}</pre></details>
+  </section>;
+}
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the engineering (technical details) panel of a Uniswap position operation (collect, withdrawal, exit,
+ * explicit close): READ-ONLY. BUILD-FLOFI-UX-EDITOR-FINOPS-001: the Editor's stages own every action — Simulate runs the simulation, Execute holds
+ * the Review's ONE "Authorize workflow" (or "Refresh review") and the status checks — so this panel repeats none of them; it shows the same Review
+ * rows (`uniswapPositionReviewLines`), the run's attempts and its reconciled result. FloFi never signs or sends; an unknown outcome is only observed.
+ */
+function UniswapPositionPanel({ view }: { view: 'simulate' | 'execute' }) {
+  const { t: tr } = useLocale();
+  const position = useUniswapPosition();
+  const record = position.record, r = record?.review;
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const fresh = r ? Math.max(0, Math.round((Date.parse(r.expiresAt) - clock) / 1000)) : 0;
+  const authorized = Boolean(record?.authorization && record.authorization === r?.commitment);
+  const lines = r && !position.retired ? uniswapPositionReviewLines(r) : null;
+  const info = position.error ?? record?.error;
+  const request = position.request;
+  return <section className="panel" aria-label={tr('Uniswap position')} data-position-panel="read-only"><h2>{tr(view === 'simulate' ? 'Simulate position operation' : 'Review position operation')}</h2>
+    {request && <p>{tr(liquidityPositionActionLabel(request.operation, request.close))} · #{request.tokenId}</p>}
+    <p role="note">{tr('This uses real funds. One wallet request to the Uniswap Position Manager; FloFi never signs or sends.')}</p>
+    <p className="muted">{tr('Simulate, authorize and follow this operation from the Editor: Simulate shows its result, Execute its Review and your one wallet request.')}</p>
+    {position.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
+    {lines && <dl className="swap-summary" aria-label={tr('Position operation review')}>
+      {lines.details.map(line => <div key={line.label}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}</dd></div>)}
+      <dt>{tr('Maximum network fee')}</dt><dd>{tr(r!.fees.totalUpperBoundWei ?? r!.fees.executionFeeUpperBoundWei)} wei</dd>
+      {/* The catalog's own phrase with its parameter (a bare "Valid for 30s" is caught by the generic "{0}s" template and stays English). */}
+      <dt>{tr('Review freshness')}</dt><dd>{fresh > 0 ? tr('Valid for {0}s', fresh) : tr('Expired — simulate again')}</dd>
+    </dl>}
+    {lines && <ul aria-label={tr('Position operation notices')}>{lines.warnings.map(w => <li key={w.message}>{tr(w.message)}</li>)}</ul>}
+    {view === 'execute' && record && <>
+      {authorized && !position.executionEnabled && <p role="status">{tr("Execution is not enabled on this server. Simulation and Review remain read-only.")}</p>}
+      {position.requoted && <p className="bridge-requote-reason" role="status">{tr(requotedMessage(position.requoted.code))}</p>}
+      {record.attempts.length > 0 && <ol aria-label={tr('Position transactions')}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.state.toLowerCase().replaceAll('_', ' '))}
+        {a.transactionHash && <> · <code>{a.replacementHash ?? a.transactionHash}</code></>}</li>)}</ol>}
+      {record.result && record.evidence && <section aria-label={tr('Position result')} className="swap-result"><h3>{tr('Reconciled')}</h3>
+        <dl className="swap-summary"><dt>{tr('Liquidity removed')}</dt><dd>{tr(record.result.liquidityRemoved)}</dd>
+          <dt>{tr('Liquidity remaining')}</dt><dd>{tr(record.result.liquidityAfter ?? '0')}</dd>
+          <dt>{tr('Collected (owed tokens and fees included)')}</dt><dd>{tr(record.result.collected0)} + {tr(record.result.collected1)}</dd>
+          <dt>{tr('Position NFT')}</dt><dd>{tr(record.result.burned ? 'Burned (closed)' : 'Stays in your wallet')}</dd></dl>
+        <p>{tr("Evidence: ")}{tr(record.evidence.evidenceClass)}</p></section>}
+    </>}
+    {info && <p role="status">{tr(simulationError(info))}</p>}
+    {position.busy && <p role="status">{tr("Working…")}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({ error: info, run: record?.id, commitment: r?.commitment, calls: r?.calls, attempts: record?.attempts, verdict: record?.verdict }, null, 2)}</pre></details>
   </section>;
 }

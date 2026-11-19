@@ -14,6 +14,7 @@
 import { ACCOUNT_WORKSPACES, SECONDARY_WORKSPACES } from '../secondary-workspaces';
 import { COPILOT_NETWORK_IDS, networkOfCopilot } from '../network-registry';
 import type { CopilotLanguage } from '../copilot-messages';
+import { positionNetworksText } from '../copilot-positions';
 import { foldText } from './concepts';
 
 export const PLATFORM_MODES = ['EXPLAIN', 'NAVIGATE', 'READ', 'PREPARE_CHANGE', 'APPLY_CHANGE'] as const;
@@ -22,8 +23,9 @@ export const PLATFORM_SURFACES = ['WEB', 'TELEGRAM', 'WHATSAPP', 'MCP'] as const
 export type PlatformSurface = (typeof PLATFORM_SURFACES)[number];
 /** What the owner needs for the action on that screen. */
 export type PlatformRequirement = 'NONE' | 'ACCOUNT_SESSION' | 'WALLET_PROOF' | 'OWNER_SIGNATURE';
-export const PLATFORM_TOPICS = ['CONNECT_WALLET', 'SUPPORTED_NETWORKS', 'SAVED_WALLETS', 'SAVED_RECIPIENTS', 'AUTOMATIONS', 'AUTHORIZATIONS', 'NOTIFICATIONS',
-  'ACCOUNT_SETTINGS', 'PRIVACY_SECURITY', 'HISTORY', 'EXECUTION_STATUS', 'WORKFLOW_SAVING', 'DELETE_ACCOUNT', 'AI_AGENTS'] as const;
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: LIQUIDITY_POSITIONS is matched first, so "can I collect my fees from Telegram / MCP?" is answered plainly.
+export const PLATFORM_TOPICS = ['LIQUIDITY_POSITIONS', 'CONNECT_WALLET', 'SUPPORTED_NETWORKS', 'SAVED_WALLETS', 'SAVED_RECIPIENTS', 'AUTOMATIONS', 'AUTHORIZATIONS',
+  'NOTIFICATIONS', 'ACCOUNT_SETTINGS', 'PRIVACY_SECURITY', 'HISTORY', 'EXECUTION_STATUS', 'WORKFLOW_SAVING', 'DELETE_ACCOUNT', 'AI_AGENTS'] as const;
 export type PlatformTopic = (typeof PLATFORM_TOPICS)[number];
 
 const route = (id: string): string => [...SECONDARY_WORKSPACES, ...ACCOUNT_WORKSPACES].find(item => item.id === id)!.href;
@@ -38,7 +40,23 @@ type Entry = { readonly modes: readonly PlatformMode[]; readonly path: keyof typ
   readonly unless?: RegExp;
   readonly copy: Readonly<Record<CopilotLanguage, { readonly label: string; readonly text: string }>> };
 const ALL: readonly PlatformSurface[] = PLATFORM_SURFACES;
+/**
+ * Words about the owner's liquidity positions, and the surfaces that cannot manage them in this build. Each starts a word ("help" is not "lp",
+ * "deposit" is not "position", "composição" is not "posição"), and fees are a position's only when collected (flofi-chat review P3).
+ */
+const POSITION_WORDS = '(?<![a-z])(?:posic|posit|pool|liquidez|liquidity|lp\\b|(?:collect|colet)\\w*(?:\\s+\\w+){0,2}\\s+(?:fees|taxas|rendimentos)|nft da posic|position nft)';
+const OTHER_SURFACES = '(?:telegram|whatsapp|mcp|api|developer api|api (?:de|para) desenvolvedores|agente|agent|chatgpt|claude)';
 const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: where the owner's liquidity positions are managed, and where they are NOT (said plainly on every surface).
+  LIQUIDITY_POSITIONS: { modes: ['EXPLAIN', 'NAVIGATE'], path: 'dashboard', requires: 'WALLET_PROOF', surfaces: ALL,
+    keywords: [new RegExp(`${POSITION_WORDS}\\w*.{0,60}?\\b${OTHER_SURFACES}\\b`), new RegExp(`\\b${OTHER_SURFACES}\\b.{0,60}?${POSITION_WORDS}`),
+      /(?:onde|where|como|how)\b.{0,30}?\b(?:gerenci|manage|administr)\w*\s+(?:as\s+|os\s+|my\s+|minhas\s+|meus\s+)?(?:posic|position|pool|liquidez|liquidity)/],
+    copy: { EN: { label: 'Dashboard', text: `Your liquidity positions on ${positionNetworksText('EN')} are managed in the FloFi web app: Dashboard → My DeFi Positions, or ask ` +
+      'in the web chat ("collect my fees", "remove half of my liquidity", "close my Orca position"). Each operation is prepared for Simulate and authorized on Execute, and your ' +
+      'wallet signs it. Telegram, WhatsApp, MCP and the Developer API cannot manage liquidity positions in this build.' },
+      PT: { label: 'Painel', text: `Suas posições de liquidez na ${positionNetworksText('PT')} são gerenciadas no app web do FloFi: Painel → Minhas posições DeFi, ou peça ` +
+      'no chat web ("coleta minhas taxas", "retira metade da minha liquidez", "fecha minha posição na Orca"). Cada operação é preparada para o Simular e autorizada em Executar, e ' +
+      'sua carteira assina. Telegram, WhatsApp, MCP e a API para desenvolvedores não gerenciam posições de liquidez nesta versão.' } } },
   CONNECT_WALLET: { modes: ['EXPLAIN', 'NAVIGATE'], path: 'credentials', requires: 'NONE', surfaces: ALL,
     keywords: [/(?:conect|connect|ligar|vincul|link|usar|use|adicionar|add|trocar de|switch)\w*\s+(?:a\s+|o\s+|my\s+|minha\s+|meu\s+)?(?:phantom|metamask|meta mask|rabby|coinbase wallet|backpack|solflare|carteira|wallet)/, /(?:como|how)\s+(?:eu\s+)?(?:conecto|connect)/],
     copy: { EN: { label: 'Credentials', text: 'Use Connect wallet in FloFi and choose your wallet: Phantom (Solana or EVM), MetaMask, Rabby, Coinbase Wallet, Backpack or Solflare. FloFi only reads your public address; your wallet asks you to approve every signature, and FloFi never asks for a seed phrase. Connected and saved wallets are listed in Credentials.' },

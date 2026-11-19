@@ -14,7 +14,7 @@
  * (`NEXT_PUBLIC_FLOFI_JOURNEY_TELEMETRY=on`, inlined at build time: without it no browser sends anything) and for the server
  * (`FLOFI_JOURNEY_TELEMETRY=on`: without it `/api/flofi/journey` reads and logs nothing). Policy: docs/privacy/JOURNEY-TELEMETRY.md.
  */
-import { NETWORKS } from './network-registry';
+import { NETWORKS } from './network-registry.ts';
 export const JOURNEY_MARKS = Object.freeze(['intent', 'first_quote', 'best_quote', 'review_requested', 'review_ready', 'authorize_clicked', 'wallet_open',
   'user_decision', 'submission', 'hash', 'confirmation', 'reconciliation'] as const);
 export type JourneyMark = typeof JOURNEY_MARKS[number];

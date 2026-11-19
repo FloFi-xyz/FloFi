@@ -34,8 +34,9 @@ import { koraGasForFlow } from '../src/gas-abstraction/kora/runtime.ts';
 import { readKoraGasConfig } from '../src/gas-abstraction/config.ts';
 import { createOrcaLiquidityService, type OrcaLiquidityRecord, type OrcaLiquidityWalletDiagnostic } from '../src/server/orca-liquidity-service.ts';
 import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionRecord } from '../src/server/solana-composition-service.ts';
-import { createUniswapLiquidityService, uniswapNeedsObservation, type UniswapLiquidityRecord,
+import { createUniswapLiquidityService, uniswapRunNeedsObservation, type UniswapLiquidityRecord,
   type UniswapWalletDiagnostic } from '../src/server/uniswap-liquidity-service.ts';
+import { parseUniswapPositionRequest, type UniswapPositionRecord } from '../src/server/uniswap-position-service.ts';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../src/server/public-testnet-rpc.ts';
 import { UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../src/server/uniswap-liquidity-mock.ts';
 import { createRouterService, ROUTER_RUN_ID, routerNeedsObservation, type RouterRecord, type RouterWalletDiagnostic } from '../src/server/router-service.ts';
@@ -447,8 +448,9 @@ const solanaOwner = (value: unknown) => typeof value === 'string' && SOLANA_ADDR
 const signedTransaction = (value: unknown) => typeof value === 'string' && value.length <= 8_192 && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
 const solanaDiagnostic = (value: unknown) => isObject(value) && ['CONNECT', 'SIGN', 'PREFLIGHT'].includes(String(value.stage)) && typeof value.code === 'string' &&
   JSON.stringify(value).length <= 16_384;
-const liquidityRequest = (value: unknown) => isObject(value) && ['OPEN', 'DECREASE_PARTIAL', 'EXIT'].includes(String(value.operation)) &&
-  solanaOwner(value.positionMint) && (value.partBps === undefined || Number.isSafeInteger(value.partBps)) &&
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT (fees only) removes no liquidity, so it never carries a portion.
+const liquidityRequest = (value: unknown) => isObject(value) && ['OPEN', 'DECREASE_PARTIAL', 'EXIT', 'COLLECT'].includes(String(value.operation)) &&
+  solanaOwner(value.positionMint) && (value.partBps === undefined || Number.isSafeInteger(value.partBps) && value.operation !== 'COLLECT') &&
   Object.keys(value).every(k => ['operation', 'positionMint', 'partBps'].includes(k));
 type SolanaRecord = { id: string; review: { owner: string; workflow: SemanticWorkflow }; provenance: 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
   authorization: string | null; verdict: string; notSubmitted?: boolean; error: string | null; journal: TransferRecord['journal']; evidence: unknown;
@@ -679,6 +681,7 @@ function compositionEvidence(record: SolanaCompositionRecord) {
  * public simulation and Review; the owner's browser wallet sends each exact approval and the mint. The API records the
  * reported hash; workers only observe and reconcile (their transport cannot send) and never touch PREPARED attempts.
  */
+const positionRequest = (value: unknown) => { try { parseUniswapPositionRequest(value); return true; } catch { return false; } };
 const uniswapEvmResult = (value: unknown) => isObject(value) && (value.kind === 'HASH' ? typeof value.hash === 'string' && HASH.test(value.hash) && Object.keys(value).length === 2
   : (value.kind === 'UNKNOWN' || value.kind === 'REJECTED') && (value.code === undefined || typeof value.code === 'string' && CODE.test(value.code)) &&
     Object.keys(value).every(k => k === 'kind' || k === 'code'));
@@ -706,7 +709,9 @@ function liquidityFlow(name: 'uniswap-liquidity' | NonNullable<CatalogNetworkRun
   methods: {
     info: { mutates: false, validate: shape() },
     price: { mutates: false, validate: catalogNetwork ? shape(v => v === servedChain, catalogPair) : optionalShape(0, v => v === 'eip155:84532' || v === 'eip155:11155111') },
-    simulate: { mutates: true, validate: shape(workflow, account) },
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a catalog mainnet also simulates a position operation (third argument). Every later method keeps its name
+    // and dispatches by the run's kind, so Flight recovery, beta owner binding and the worker apply to position runs unchanged.
+    simulate: { mutates: true, validate: catalogNetwork ? optionalShape(2, workflow, account, positionRequest) : shape(workflow, account) },
     refresh: { mutates: true, validate: shape(id(RUN)) },
     review: { mutates: true, validate: shape(id(RUN), commitment, workflow) },
     invalidate: { mutates: true, validate: shape(id(RUN)) },
@@ -730,26 +735,40 @@ function liquidityFlow(name: 'uniswap-liquidity' | NonNullable<CatalogNetworkRun
         catalog: { chain: network.chain, catalogFor: catalog ?? (async () => { throw new Error(network.catalogUnavailableCode); }) } })
       : createUniswapLiquidityService({ storage, rpc, ...chains ? { rpcs: chains.rpcs } : {}, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_TESTNET',
         executionEnabled: env.GRYLOO_UNISWAP_LIQUIDITY_EXECUTION !== 'DISABLED', ...mode === 'harness' ? { mockedCodePins: UNI_MOCK_CODE_PINS } : {} });
+    const position = (i: unknown) => s.isPositionRun(i as string);
     const table: Record<string, (args: Args) => Promise<unknown>> = {
       info: async () => ({ executionEnabled: s.executionEnabled }),
       price: ([chain, pair]) => s.price(chain as string | undefined, pair as Parameters<typeof s.price>[1]),
-      simulate: ([w, a]) => s.simulate(w, a as string),
-      refresh: ([i]) => s.refresh(i as string),
-      review: ([i, c, w]) => s.review(i as string, c as string, w as SemanticWorkflow),
-      invalidate: ([i]) => s.invalidate(i as string),
-      begin: ([i, a, w]) => s.begin(i as string, a as string, w as SemanticWorkflow),
-      handoff: ([i]) => s.handoff(i as string),
-      report: ([i, r]) => s.report(i as string, r as Parameters<typeof s.report>[1]),
-      walletFailure: ([i, d]) => s.walletFailure(i as string, d as UniswapWalletDiagnostic),
-      observe: ([i]) => s.observe(i as string),
-      status: ([i]) => s.load(i as string),
+      simulate: ([w, a, r]) => r === undefined ? s.simulate(w, a as string) : s.positionSimulate(w, a as string, r),
+      refresh: async ([i]) => await position(i) ? s.positionRefresh(i as string) : s.refresh(i as string),
+      review: async ([i, c, w]) => await position(i) ? s.positionReview(i as string, c as string, w as SemanticWorkflow) : s.review(i as string, c as string, w as SemanticWorkflow),
+      invalidate: async ([i]) => await position(i) ? s.positionInvalidate(i as string) : s.invalidate(i as string),
+      begin: async ([i, a, w]) => await position(i) ? s.positionBegin(i as string, a as string, w as SemanticWorkflow) : s.begin(i as string, a as string, w as SemanticWorkflow),
+      handoff: async ([i]) => await position(i) ? s.positionHandoff(i as string) : s.handoff(i as string),
+      report: async ([i, r]) => await position(i) ? s.positionReport(i as string, r as Parameters<typeof s.report>[1]) : s.report(i as string, r as Parameters<typeof s.report>[1]),
+      walletFailure: async ([i, d]) => await position(i) ? s.positionWalletFailure(i as string, d as UniswapWalletDiagnostic) : s.walletFailure(i as string, d as UniswapWalletDiagnostic),
+      observe: ([i]) => s.observeAny(i as string),
+      status: ([i]) => s.loadAny(i as string),
     };
-    return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
+    return { call: (method, args) => table[method]!(args), load: runId => s.loadAny(runId), observe: runId => s.observeAny(runId) };
   },
-  needsObservation: uniswapNeedsObservation,
+  needsObservation: uniswapRunNeedsObservation,
   projector(name, bytes): Projection | null {
     if (!name.endsWith('.jsonl')) return null;
-    const record = lastRecord<UniswapLiquidityRecord>(bytes), observe = uniswapNeedsObservation(record), evidence = evidenceOf(record);
+    const any = lastRecord<UniswapLiquidityRecord | UniswapPositionRecord>(bytes);
+    if (any.format === 'flofi.uniswap-position-run.v1') {
+      // A position-management run (collect, partial withdrawal, exit, close): one wallet request per run, the operation is its attempt step.
+      const run = any, observe = uniswapRunNeedsObservation(run), evidence = evidenceOf(run);
+      const open = run.attempts.find(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state));
+      return { run: { runId: run.id, workflowId: run.workflow.workflowId, flow: flowName,
+        status: run.verdict !== 'PENDING' ? run.verdict : open ? open.state : run.authorization ? 'AUTHORIZED' : 'SIMULATED',
+        provenance: run.provenance, ownerAccount: run.owner, recoveryOf: null, errorCode: errorCode(run.error), needsObservation: observe, hasEvidence: evidence !== null,
+        attempts: run.attempts.map(a => ({ attemptId: a.attemptId, step: a.step, state: a.state, nonce: a.nonce, transactionHash: a.transactionHash,
+          preparedAtBlock: a.preparedAtBlock, reconciled: a.reconciled })),
+        journal: [] },
+        work: work(flowName, run.id, observe, open?.state === 'SUBMITTING' ? 60_000 : 5_000, evidence !== null) };
+    }
+    const record = any, observe = uniswapRunNeedsObservation(record), evidence = evidenceOf(record);
     const open = record.attempts.find(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state));
     return { run: { runId: record.id, workflowId: record.workflow.workflowId, flow: flowName,
       status: record.verdict !== 'PENDING' ? record.verdict : open ? open.state : record.authorization ? 'AUTHORIZED' : 'SIMULATED',

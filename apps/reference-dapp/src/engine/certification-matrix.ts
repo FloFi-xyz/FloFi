@@ -63,15 +63,28 @@ const OTHER_ROWS: readonly (Omit<CertificationRow, 'liveEvidence' | 'status' | '
     protocols: ['orca.whirlpools-devnet-liquidity'], flow: 'orca-liquidity', webRuntime: 'solana-pool', ownerWalletExecutionImplemented: true,
     channels: { canvas: true, approve: false, copilot: false, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,
     registryEvidence: null, implemented: true, why: 'Orca decrease/exit (MANAGE_SOLANA_POSITION) in the Canvas only; the strategy grammar has no remove action.' },
-  { id: 'remove-liquidity-solana', action: 'remove_liquidity', network: 'solana', destinationNetwork: null, funds: 'REAL_FUNDS',
-    protocols: ['orca.whirlpools-mainnet-liquidity'], flow: 'orca-liquidity-mainnet', webRuntime: 'solana-pool', ownerWalletExecutionImplemented: true,
-    channels: { canvas: true, approve: false, copilot: false, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: 'orca-liquidity-mainnet',
-    registryEvidence: null, implemented: true, why: 'Same Orca engine on mainnet-beta, Canvas only, behind GRYLOO_ORCA_MAINNET and the owner-execution gate.' },
-  ...(['base-sepolia', 'ethereum-sepolia', 'base', 'arbitrum-one', 'ethereum', 'robinhood'] as const).map(network => ({
-    id: `remove-liquidity-${network}`, action: 'remove_liquidity', network, destinationNetwork: null, funds: network.endsWith('sepolia') ? 'TEST_FUNDS' as const : 'REAL_FUNDS' as const,
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing an existing position (collect fees, partial withdrawal, exit [and close]) through the canonical
+  // pipeline: the Editor stages (Canvas) and Web Chat author MANAGE_LIQUIDITY_POSITION, whose canonical node names the operation; one owner-signed
+  // transaction per operation. MCP, Telegram and the Developer API have no position-management tool or schema in this build (not offered).
+  ...([['remove_liquidity', 'remove-liquidity', 'Partial withdrawal (any share the owner chooses) or full exit'],
+    ['collect_liquidity_fees', 'collect-liquidity-fees', 'Collect owed tokens and fees (liquidity unchanged)']] as const).flatMap(([action, slug, what]) => [
+    { id: `${slug}-solana`, action, network: 'solana', destinationNetwork: null, funds: 'REAL_FUNDS' as const,
+      protocols: ['orca.whirlpools-mainnet-liquidity'], flow: 'orca-liquidity-mainnet', webRuntime: 'solana-pool', ownerWalletExecutionImplemented: true,
+      channels: { canvas: true, approve: false, copilot: true, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED' as const, developerApi: false }, agentRollout: null,
+      registryEvidence: null, implemented: true,
+      why: `${what} on the verified Orca SOL/USDC pool (an Orca exit always closes the position), for positions FloFi opened or the chain verifies as the owner's own; Canvas (Editor stages) and Web Chat, behind GRYLOO_ORCA_MAINNET and the owner-execution gate. MCP, Telegram and the Developer API cannot manage positions.` },
+    ...(['base', 'arbitrum-one', 'ethereum', 'robinhood'] as const).map(network => ({
+      id: `${slug}-${network}`, action, network, destinationNetwork: null, funds: 'REAL_FUNDS' as const,
+      protocols: ['uniswap.v3'], flow: `${network === 'arbitrum-one' ? 'arbitrum' : network}-liquidity`, webRuntime: 'uniswap-pool', ownerWalletExecutionImplemented: true,
+      channels: { canvas: true, approve: false, copilot: true, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED' as const, developerApi: false }, agentRollout: null,
+      registryEvidence: null, implemented: true,
+      why: `${what} of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions.` })),
+  ]),
+  ...(['base-sepolia', 'ethereum-sepolia'] as const).map(network => ({
+    id: `remove-liquidity-${network}`, action: 'remove_liquidity', network, destinationNetwork: null, funds: 'TEST_FUNDS' as const,
     protocols: ['uniswap.v3'], flow: null, webRuntime: null, ownerWalletExecutionImplemented: false,
     channels: { canvas: false, approve: false, copilot: false, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED' as const, developerApi: false }, agentRollout: null,
-    registryEvidence: null, implemented: false, why: 'The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route.' })),
+    registryEvidence: null, implemented: false, why: 'Position management runs on the catalog mainnets only (UNISWAP_POSITION_NETWORK_UNSUPPORTED); the testnet engines mint initialized-pool positions only.' })),
   { id: 'swap-then-add-liquidity-solana-devnet', action: 'swap_then_add_liquidity', network: 'solana-devnet', destinationNetwork: null, funds: 'TEST_FUNDS',
     protocols: ['orca.whirlpools-devnet', 'orca.whirlpools-devnet-liquidity'], flow: 'solana-composition', webRuntime: 'solana-composition', ownerWalletExecutionImplemented: true,
     channels: { canvas: true, approve: false, copilot: false, mcp: false, telegram: false, whatsapp: 'POLICY_BLOCKED', developerApi: false }, agentRollout: null,

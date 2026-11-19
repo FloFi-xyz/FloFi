@@ -16,14 +16,15 @@ import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
 import { useSolanaComposition } from './solana-composition-store';
 import { useUniswapLiquidity } from './uniswap-liquidity-store';
-import { uniswapReviewAuthorizable } from '../domain/uniswap-liquidity-continuation';
+import { uniswapPositionReviewAuthorizable, uniswapReviewAuthorizable } from '../domain/uniswap-liquidity-continuation';
+import { useOptionalUniswapPosition } from './uniswap-position-store';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
 import { useSolanaTransfer } from './solana-transfer-store';
 import { useAcross } from './across-store';
 import { useBuild009Wallet } from './build009-wallet-store';
 import { useExecutionEnvironment } from './capability-store';
 import { reviewedManifest, reviewApprovalCall, type ReviewAuthorization, type ReviewWallet } from '../domain/review-presentation';
-import { simulationAmount, type SimulationSource } from '../domain/simulation-presentation';
+import { liquidityPositionOperationPhrase, simulationAmount, type SimulationSource } from '../domain/simulation-presentation';
 import { walletChainRef } from '../wallet/evm-networks';
 import { ownerBoundSwapReview, quoteDecimals, swapProfile } from '../domain/public-testnet-swap';
 import { solanaWalletChainRef } from '../wallet/environment';
@@ -65,6 +66,8 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
   const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), across = useAcross();
   const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment(), solanaComposition = useSolanaComposition(), solanaTransfer = useSolanaTransfer();
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged (or attached) Uniswap position-management run is served by the position store.
+  const uniswapPosition = useOptionalUniswapPosition();
   const { restorationEpoch } = useWorkflow();
   const authorization: ReviewAuthorization = { key: null, manifest: null, owner: null, chain: null, ready: false, accepted: false, approve: null, approvals: [], tokens: [], limits: [], technical: null };
   const attach = (key: string, manifest: unknown, policy: unknown, accepted: boolean, approve: (() => void | Promise<void>) | null, ready: boolean, technical: unknown) => {
@@ -220,6 +223,20 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       break;
     }
     case 'uniswap-pool': {
+      if (uniswapPosition?.engaged) {
+        const r = uniswapPosition.record, q = r?.review; if (!r || !q) break;
+        // One exact Position Manager request: no token permission, no deposit; the owner authorizes the operation, its minimums and recipient.
+        attach(`${r.id}:${q.commitment}`, null, null, r.authorization === q.commitment, uniswapPosition.review,
+          !uniswapPosition.busy && !uniswapPosition.retired && uniswapPositionReviewAuthorizable(r), q);
+        authorization.owner = q.owner; authorization.chain = `eip155:${q.chainId}`;
+        for (const token of [q.token0, q.token1]) authorization.tokens.push({ ...token, chain: authorization.chain });
+        authorization.limits.push({ label: 'Operation', value: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close) },
+          { label: 'Position', value: `#${q.position.tokenId}` });
+        if (q.liquidityToRemove !== '0') authorization.limits.push({ label: 'Minimum principal', value: `${simulationAmount(q.minimums.amount0Min, q.token0.decimals, q.token0.symbol)} + ${
+          simulationAmount(q.minimums.amount1Min, q.token1.decimals, q.token1.symbol)}` }, { label: 'Max slippage', value: `${(q.slippageBps / 100).toFixed(2)}%` });
+        authorization.limits.push({ label: 'Recipient', value: q.recipient });
+        calls(q.calls, authorization.chain, 'Uniswap Position Manager'); break;
+      }
       const r = uniswapPool.record, q = r?.review; if (!r || !q) break;
       // EXEC-01: a Review refreshed in place after a confirmed approval (or after a request refused before the wallet) is authorized again
       // explicitly; its earlier attempts stay on the run.

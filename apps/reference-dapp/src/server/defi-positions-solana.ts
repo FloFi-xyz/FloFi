@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as PROFILE } from '@defi-workflow-engine/action-registry';
-import { decodeOrcaPosition, decodeRpcAccount, decodeSplTokenAccount, decodeWhirlpool, orcaLiquidityAmounts,
-  orcaPositionAddress, readSolanaAccounts, verifySolanaCluster, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { decodeOrcaPosition, decodeRpcAccount, decodeSplTokenAccount, decodeToken2022Account, decodeWhirlpool, orcaLiquidityAmounts, orcaPositionAddress,
+  orcaPositionTokenAccount, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick, readSolanaAccounts, verifySolanaCluster, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { liquidityPositionOperations, type LiquidityPositionView } from '../domain/liquidity-positions';
 import { isSolanaPublicKey } from '@defi-workflow-engine/workflow-contracts';
 import type { DefiPosition, PositionScan } from '../domain/defi-positions';
 import type { ValuePositionAsset } from './defi-positions-evm';
@@ -73,8 +74,31 @@ export async function orcaPositions(rpc: SolanaRpc, owner: string, now: Date, va
       if (!liquidity && position.feeOwedA === '0' && position.feeOwedB === '0') continue;
       const amounts = orcaLiquidityAmounts({ tickCurrentIndex: pool.tickCurrentIndex, sqrtPrice: BigInt(pool.sqrtPrice) },
         position.tickLowerIndex, position.tickUpperIndex, liquidity, false);
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the verified engine manages a Token-2022 position token held in the owner's own associated account with no
+      // delegate and no reward owed; any other holding is shown but not offered for management (the engine would refuse it at Review).
+      const token2022 = candidate.program === PROFILE.programs.token2022;
+      const delegated = token2022 && decodeToken2022Account(certificate.data).delegate !== null;
+      const manageable = !token2022 || candidate.tokenAccount !== orcaPositionTokenAccount(owner, candidate.mint) ? { ok: false, reason: 'LEGACY_POSITION_TOKEN' } as const
+        : delegated ? { ok: false, reason: 'DELEGATED_POSITION_TOKEN' } as const
+          : position.rewardOwed.some(reward => reward !== '0') ? { ok: false, reason: 'REWARDS_UNSUPPORTED' } as const : { ok: true } as const;
+      const recordedOwed = [position.feeOwedA, position.feeOwedB] as const;
+      const price = (sqrt: bigint) => orcaPriceFromSqrtPrice(sqrt, PROFILE.token0.decimals, PROFILE.token1.decimals);
+      const view: LiquidityPositionView = { ref: { protocol: 'ORCA', chain: PROFILE.chain, network: PROFILE.network, manager: PROFILE.programs.whirlpool,
+          pool: PROFILE.pool.address, positionId: position.positionMint, owner },
+        token0: { symbol: PROFILE.token0.symbol, address: PROFILE.token0.mint, decimals: PROFILE.token0.decimals },
+        token1: { symbol: PROFILE.token1.symbol, address: PROFILE.token1.mint, decimals: PROFILE.token1.decimals },
+        feeTier: PROFILE.feeTier, tickLower: position.tickLowerIndex, tickUpper: position.tickUpperIndex,
+        // USDC per SOL, the orientation of FloFi's Orca Review.
+        price: { base: PROFILE.token0.symbol, quote: PROFILE.token1.symbol },
+        lowerPrice: price(orcaSqrtPriceAtTick(position.tickLowerIndex)), upperPrice: price(orcaSqrtPriceAtTick(position.tickUpperIndex)),
+        currentPrice: price(BigInt(pool.sqrtPrice)), rangeState: amounts.state === 'IN_RANGE' ? 'IN_RANGE' : amounts.state === 'BELOW_RANGE' ? 'BELOW_RANGE' : 'ABOVE_RANGE',
+        liquidity: liquidity.toString(), principal: [amounts.amount0.toString(), amounts.amount1.toString()], recordedOwed,
+        // Fees accrued since the last checkpoint are credited only on chain (update_fees_and_rewards); the Review's simulation states them exactly.
+        collectable: null, status: liquidity > 0n ? 'OPEN' : 'EMPTY', manageable,
+        operations: liquidityPositionOperations({ manageable, liquidity: liquidity.toString(), recordedOwed, collectable: null }),
+        observedAt: now.toISOString(), observedAtHeight: snapshot.slot };
       positions.set(position.positionMint, {
-        id: position.positionMint, type: 'LIQUIDITY',
+        id: position.positionMint, type: 'LIQUIDITY', liquidity: view,
         assets: [{ token: PROFILE.token0, units: amounts.amount0, owed: position.feeOwedA }, { token: PROFILE.token1, units: amounts.amount1, owed: position.feeOwedB }]
           .map(({ token, units, owed }) => value({ address: token.mint, decimals: token.decimals, symbol: token.symbol, units: units.toString(),
             ...owed !== '0' && { recordedOwedUnits: owed } })),

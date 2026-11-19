@@ -17,6 +17,8 @@ vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.stores.
 vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./universal-router-store', () => ({ useUniversalRouter: () => ({ record: null, busy: false, error: null, retired: false, executionEnabled: false, signing: false, review: () => undefined, execute: () => undefined, observe: () => undefined }) })); // BUILD-CROSSCHAIN-UNIVERSAL-001: idle
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => f.stores.uniswapPool }));
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Uniswap position store serves a staged position operation (idle unless a test engages it).
+vi.mock('./uniswap-position-store', () => ({ useOptionalUniswapPosition: () => f.stores.uniswapPosition ?? null }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => f.stores.transfer }));
 
 beforeEach(() => {
@@ -186,4 +188,27 @@ it('preserves composition wallet setup and first worker start before any busines
   (s.status as { prepared: { installation: unknown[] } }).prepared.installation.push({ index: 1, hash: '0x' + 'b'.repeat(64) });
   expect(useExecutionStart('composition', wallet)).toMatchObject({ started: true, next: s.runWorker, nextLabel: 'Start authorized execution' });
   expect(s.installNext).not.toHaveBeenCalled(); expect(s.runWorker).not.toHaveBeenCalled();
+});
+
+describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged Uniswap position operation', () => {
+  it('starts only the position run\'s one wallet request under its current authorized Review, never continues, and observes only', () => {
+    const execute = vi.fn(), observe = vi.fn();
+    const run = { format: 'flofi.uniswap-position-run.v1', authorization: '0xpos', verdict: 'PENDING', attempts: [] as unknown[], review: { commitment: '0xpos' } };
+    f.stores.uniswapPosition = { engaged: true, busy: false, retired: false, executionEnabled: true, execute, observe, record: run };
+    const ready = useExecutionStart('uniswap-pool', wallet());
+    expect(ready).toMatchObject({ ready: true, started: false });
+    expect(ready.start).toBe(execute); expect(ready.check).toBe(observe); expect(execute).not.toHaveBeenCalled();
+    // Not authorized, disabled, busy or retired: nothing starts.
+    for (const patch of [{ record: { ...run, authorization: null } }, { executionEnabled: false }, { busy: true }, { retired: true }]) {
+      f.stores.uniswapPosition = { engaged: true, busy: false, retired: false, executionEnabled: true, execute, observe, record: run, ...patch };
+      expect(useExecutionStart('uniswap-pool', wallet()).ready, JSON.stringify(patch)).toBe(false);
+    }
+    // A request already handed to the wallet (or confirmed) is never started again, and there is no next request to continue.
+    for (const state of ['SUBMITTING', 'PENDING', 'CONFIRMED', 'CANCELLED']) {
+      f.stores.uniswapPosition = { engaged: true, busy: false, retired: false, executionEnabled: true, execute, observe,
+        record: { ...run, attempts: [{ state, reviewCommitment: '0xpos', transactionHash: state === 'CANCELLED' ? null : '0x' + 'a'.repeat(64), replacementHash: null }] } };
+      const result = useExecutionStart('uniswap-pool', wallet());
+      expect(result.ready, state).toBe(false); expect(result.started, state).toBe(true); expect(result.next ?? null, state).toBeNull();
+    }
+  });
 });

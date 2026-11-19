@@ -8,6 +8,8 @@ import { projectExecutionStepEvidence } from '../../domain/execution-step-eviden
 import { object, sameOwner } from './run-mapping';
 import type { DashboardRunDetail } from './types';
 
+const UNISWAP_RUN_FORMATS: readonly string[] = ['flofi.uniswap-liquidity-run.v1', 'flofi.uniswap-position-run.v1'];
+
 export function projectDashboardRecord(detail: DashboardRunDetail, context: ReviewContext) {
   const record = detail.record;
   if (!object(record)) return null;
@@ -21,6 +23,9 @@ export function projectDashboardRecord(detail: DashboardRunDetail, context: Revi
     : /^(base|arbitrum|ethereum|robinhood)-liquidity$/.test(detail.run.flow) ? 'uniswap-pool'
     : /^(base|arbitrum|ethereum)-aave$/.test(detail.run.flow) ? 'supply' : null);
   if (!kind) return null;
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap liquidity namespace holds mint runs and position-management runs (collect, withdrawal, exit,
+  // close). Each format has its own projection; a record of any other shape is never projected as either.
+  if (kind === 'uniswap-pool' && !UNISWAP_RUN_FORMATS.includes(String(record.format))) return null;
   const review = object(record.review) ? record.review : null;
   const latestReview = kind === 'lending' && Array.isArray(record.reviews) && object(record.reviews.at(-1)) ? record.reviews.at(-1) : review;
   const saved = kind === 'universal' || kind === 'router' || kind === 'uniswap-pool' || kind === 'public' ? record.workflow : latestReview?.workflow;

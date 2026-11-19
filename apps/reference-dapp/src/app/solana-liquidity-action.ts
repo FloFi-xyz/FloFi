@@ -32,10 +32,11 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   try { return { ok: true, value: await action(current()) }; }
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'ORCA_LIQUIDITY_SERVICE_UNAVAILABLE' }; }
 }
-type Request = { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT'; positionMint: string; partBps?: number };
+type Request = { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT'; positionMint: string; partBps?: number };
 const request = (value: Request): Request => {
-  if (!value || !['OPEN', 'DECREASE_PARTIAL', 'EXIT'].includes(value.operation) || typeof value.positionMint !== 'string' ||
-      value.partBps !== undefined && !Number.isSafeInteger(value.partBps)) throw new Error('ORCA_LIQUIDITY_INPUT_INVALID');
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT (fees only) removes no liquidity, so it never carries a portion.
+  if (!value || !['OPEN', 'DECREASE_PARTIAL', 'EXIT', 'COLLECT'].includes(value.operation) || typeof value.positionMint !== 'string' ||
+      value.partBps !== undefined && !Number.isSafeInteger(value.partBps) || value.operation === 'COLLECT' && value.partBps !== undefined) throw new Error('ORCA_LIQUIDITY_INPUT_INVALID');
   return { operation: value.operation, positionMint: value.positionMint, ...value.partBps === undefined ? {} : { partBps: value.partBps } };
 };
 export async function solanaLiquidityInfo() {

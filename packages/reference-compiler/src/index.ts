@@ -76,6 +76,8 @@ export * from './account-code.js';
 export * from './solana-transfer.js';
 export * from './solana-transfer-mock.js';
 export * from './uniswap-public-liquidity.js';
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: collect / decrease / exit / burn calldata for an existing Uniswap v3 position.
+export * from './uniswap-position-management.js';
 export * from './crosschain-router.js';
 export * from './universal-relay.js';
 export * from './universal-artifacts.js';

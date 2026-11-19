@@ -11,6 +11,8 @@ import type { useJupiter } from '../state/jupiter-store';
 import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import type { useSolanaComposition } from '../state/solana-composition-store';
 import type { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
+import type { useUniswapPosition } from '../state/uniswap-position-store';
+import type { UniswapPositionRecord, UniswapPositionReview } from '../server/uniswap-position-service';
 import type { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import type { useSolanaTransfer } from '../state/solana-transfer-store';
 import type { useModeA } from '../state/mode-a-store';
@@ -20,6 +22,7 @@ import type { useLiquidity } from '../state/liquidity-store';
 import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
+import { liquidityPositionActionLabel, liquidityPositionOperationPhrase, percentOfBps } from './liquidity-position-summary';
 import { REVIEW_EXPIRED_REFRESH } from './execution-result';
 import { boundRecipientOwned } from './destination-wallet';
 import { quoteDecimals } from './public-testnet-swap';
@@ -46,7 +49,8 @@ export type SimulationSource =
   | { kind: 'solana-swap'; state: Snapshot<ReturnType<typeof useJupiter>> }
   | { kind: 'solana-pool'; state: Snapshot<ReturnType<typeof useSolanaLiquidity>> }
   | { kind: 'solana-composition'; state: Snapshot<ReturnType<typeof useSolanaComposition>> }
-  | { kind: 'uniswap-pool'; state: Snapshot<ReturnType<typeof useUniswapLiquidity>> }
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the mint store, or (a staged or attached position-management run) the Uniswap position store. */
+  | { kind: 'uniswap-pool'; state: Snapshot<ReturnType<typeof useUniswapLiquidity>> | Snapshot<ReturnType<typeof useUniswapPosition>> }
   | { kind: 'transfer'; state: Snapshot<ReturnType<typeof useRobinhoodTransfer>> }
   | { kind: 'solana-transfer'; state: Snapshot<ReturnType<typeof useSolanaTransfer>> }
   | { kind: 'fork-swap'; state: Snapshot<ReturnType<typeof useModeA>> }
@@ -161,6 +165,15 @@ export function simulationError(error: string): string {
   // ADR-0010 §4: paying the Solana network fee in USDC/USDT through Pimlico (only offered when the wallet's SOL cannot pay it).
   const kora = /^KORA_/.test(error) || error === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? koraMessage(error) : null;
   if (kora) return kora;
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation's own refusals (Uniswap v3 and Orca), before the broad rules below.
+  if (/^(?:UNISWAP|ORCA)_POSITION_NOTHING_TO_COLLECT$/.test(error)) return 'This position has nothing to collect right now, so nothing was simulated or sent.';
+  if (/^(?:UNISWAP|ORCA)_POSITION_EMPTY$/.test(error)) return 'This position has no liquidity left to remove, so nothing was simulated or sent.';
+  if (/^(?:UNISWAP|ORCA)_POSITION_(?:OWNER_MISMATCH|AUTHORITY_MISMATCH)$/.test(error)) return 'The connected wallet does not own this position (it may have moved), so nothing was simulated or sent. Refresh your positions.';
+  if (/^(?:UNISWAP|ORCA)_POSITION_OPERATION_IN_PROGRESS$/.test(error)) return 'Another operation on this position is still being executed or checked. Wait for it to finish; nothing was sent.';
+  if (/^(?:UNISWAP|ORCA)_POSITION_OPERATION_ALREADY_CONFIRMED$/.test(error)) return 'This position operation already completed and is never repeated. Refresh your positions before preparing another.';
+  if (/^(?:UNISWAP|ORCA)_POSITION_NOT_FOUND$/.test(error)) return 'This position no longer exists on this network, so nothing was simulated or sent. Refresh your positions.';
+  if (/^(?:UNISWAP|ORCA)_POSITION_CHOICE_(?:REQUIRED|CHANGED)$/.test(error)) return 'Choose the position operation again from your positions. Nothing was simulated or sent.';
+  if (error === 'UNISWAP_AWAITING_CONFIRMATIONS') return 'Included on chain. FloFi records it once the network\'s confirmation depth is reached; nothing will be sent again.';
   // BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): a 0x Gasless swap's own refusals and outcomes (a changed mechanism is worded above).
   if (error === 'TOKEN_GAS_MECHANISM_MISMATCH') return 'How the network fee is paid changed since your Review (your ETH balance moved), so nothing was signed or sent. Review the updated swap.';
   if (/^ZEROX_(?:SIGNER_MISMATCH|SIGNATURE_INVALID|SIGNATURE_REFUSED)$/.test(error)) return 'The signature did not match the reviewed swap, so nothing was submitted. Authorize again with the reviewed wallet.';
@@ -257,6 +270,66 @@ export function simulationError(error: string): string {
   if (/SIMULATION_FAILED|SIMULATION_UNEXPECTED|SIMULATED_[A-Z_]*MISMATCH|SIMULATED_[A-Z_]*BELOW|SIMULATION_INVALID/i.test(error)) return 'The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.';
   return 'FloFi could not complete this simulation, and nothing was sent. Check the workflow on the Canvas, then simulate again.';
 }
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap position-management run (collect, withdrawal, exit, close), never a mint. */
+export const isUniswapPositionRecord = (record: unknown): record is UniswapPositionRecord =>
+  Boolean(record && typeof record === 'object' && (record as { format?: unknown }).format === 'flofi.uniswap-position-run.v1');
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the position operation's words live with the Editor's position summary (one source for every stage). */
+export { liquidityPositionActionLabel, liquidityPositionOperationPhrase } from './liquidity-position-summary';
+const rangeStateLabel: Readonly<Record<string, string>> = { IN_RANGE: 'In range', BELOW_RANGE: 'Out of range (below)', ABOVE_RANGE: 'Out of range (above)' };
+/**
+ * The Review of one Uniswap position operation: protocol, network, position, pool and fee tier, range and state, the operation in plain words,
+ * liquidity removed and remaining, expected principal and the enforced minimums with the slippage, the collected amount as a LOWER BOUND, the owed
+ * tokens and fees, tokens returned as the pool's own tokens, deadline, network fee bound, real funds and the one wallet request.
+ */
+export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: string; input: string; pair: string; result: string | null; resultLabel: string;
+  minimum: string | null; details: SimulationLine[]; warnings: { severity: SimulationWarning['severity']; message: string }[] } {
+  const amount = (units: string, token: { decimals: number; symbol: string }) => simulationAmount(units, token.decimals, token.symbol) ?? '—';
+  const pair = (a: string, b: string) => `${amount(a, q.token0)} + ${amount(b, q.token1)}`;
+  const removing = q.liquidityToRemove !== '0', fee = `${(q.pool.fee / 10_000).toString()}%`;
+  const share = q.operation === 'EXIT' ? '100%' : q.operation === 'DECREASE' && q.partBps !== null ? percentOfBps(q.partBps) : null;
+  const details: SimulationLine[] = [
+    { label: 'Operation', value: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close) },
+    { label: 'Protocol', value: 'Uniswap V3' }, { label: 'Network', value: q.network },
+    { label: 'Position', value: `#${q.position.tokenId}` },
+    { label: 'Pool', value: `${q.token0.symbol}/${q.token1.symbol} · ${fee}` },
+    { label: 'Price range', value: `${q.position.lowerPrice}–${q.position.upperPrice} ${q.token0.symbol} per ${q.token1.symbol}` },
+    { label: 'Range state', value: rangeStateLabel[q.position.state] ?? q.position.state },
+    { label: 'Current price', value: `${q.pool.price} ${q.token0.symbol} per ${q.token1.symbol}` },
+    ...removing ? [{ label: 'Liquidity removed', value: `${q.liquidityToRemove} of ${q.position.liquidity}${share ? ` (${share})` : ''}` },
+      { label: 'Liquidity remaining', value: q.liquidityAfter }] : [{ label: 'Liquidity', value: `${q.position.liquidity} (unchanged)` }],
+    ...removing ? [{ label: 'Expected principal returned', value: pair(q.expected.principal0, q.expected.principal1) },
+      { label: 'Minimum principal (enforced)', value: `${pair(q.minimums.amount0Min, q.minimums.amount1Min)} · ${formatBps(q.slippageBps)}` }] : [],
+    { label: 'Owed tokens and fees', value: `≥ ${pair(q.expected.owedAndFees0, q.expected.owedAndFees1)}` },
+    // A floor only where it is one: for a withdrawal or exit, the chain enforces the principal minimums (the price may move within slippage until
+    // inclusion) plus owed tokens and fees (which only grow); the simulated total is shown apart as expected (flofi-liquidity P2-1).
+    ...removing ? [{ label: 'Collected (expected)', value: pair(q.expected.collect0, q.expected.collect1) },
+      { label: 'Collected, at least', value: pair((BigInt(q.minimums.amount0Min) + BigInt(q.expected.owedAndFees0)).toString(),
+        (BigInt(q.minimums.amount1Min) + BigInt(q.expected.owedAndFees1)).toString()) }]
+      : [{ label: 'Collected, at least', value: pair(q.expected.collect0, q.expected.collect1) }],
+    // Word-free, so no generic translation template is needed (one would half-translate unrelated English lines; flofi-frontend-ux review P3-5).
+    { label: 'Tokens returned', value: `${q.token0.symbol} + ${q.token1.symbol} → ${q.recipient}` },
+    { label: 'Position NFT', value: q.close ? 'Burned (closed)' : 'Stays in your wallet' },
+    { label: 'Deadline', value: q.deadline === null ? 'None (collect only)' : new Date(Number(q.deadline) * 1000).toISOString() },
+    { label: 'Wallet requests', value: '1' },
+    { label: 'Position Manager', value: q.contracts.positionManager },
+  ];
+  const warnings: { severity: SimulationWarning['severity']; message: string }[] = [
+    { severity: 'attention', message: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close) },
+    // A withdrawal shows an expected total and its floor apart: only "Collected, at least" is a lower bound (flofi-frontend-ux review P3-1).
+    removing ? { severity: 'info', message: '"Collected, at least" adds the principal minimum the chain enforces to the owed tokens and fees read now; "Collected (expected)" can come in lower within your slippage limit. Fees accrued until execution are also collected.' }
+      : { severity: 'info', message: 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.' },
+    { severity: 'info', message: 'Owed tokens and fees can include principal withdrawn earlier and not collected; they are not only trading fees.' },
+    { severity: 'info', message: 'Tokens are returned to your wallet as the pool\'s own tokens; nothing is swapped or unwrapped.' },
+    ...removing ? [{ severity: 'info' as const, message: 'The withdrawal reverts on chain if the principal returned is below the enforced minimum (your slippage limit).' }] : [],
+    ...q.close ? [{ severity: 'attention' as const, message: 'Closing burns the position NFT. This cannot be undone.' }] : [],
+    ...q.position.state !== 'IN_RANGE' ? [{ severity: 'info' as const, message: 'The position is out of range: it earns no fees until the price returns to its range.' }] : [],
+    { severity: 'attention', message: 'This uses real funds. One wallet request to the Uniswap Position Manager; FloFi never signs or sends.' },
+  ];
+  return { action: liquidityPositionActionLabel(q.operation, q.close), input: share ? `${share} · #${q.position.tokenId}` : `#${q.position.tokenId}`,
+    pair: `${q.token0.symbol}/${q.token1.symbol} · ${fee}`, result: removing ? pair(q.expected.principal0, q.expected.principal1) : `≥ ${pair(q.expected.collect0, q.expected.collect1)}`,
+    resultLabel: removing ? 'Expected principal returned' : 'Collected, at least', minimum: removing ? pair(q.minimums.amount0Min, q.minimums.amount1Min) : null, details, warnings };
+}
+const formatBps = (value: number) => `${percentOfBps(value)} slippage`;
 const iso = (value: string) => Date.parse(value);
 const seconds = (value: string | number) => Number(value) * 1000;
 const live = (provenance: string) => ['PUBLIC_MAINNET', 'PUBLIC_TESTNET', 'PUBLIC_DEVNET', 'FORK_REPRODUCED', 'LIVE_READ_ONLY'].includes(provenance);
@@ -537,7 +610,21 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       break;
     }
     case 'uniswap-pool': {
-      const r = source.state.record; if (!r) break; const q = r.review;
+      const r = source.state.record; if (!r) break;
+      if (isUniswapPositionRecord(r)) {
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation — never presented as a deposit (no maxima, no approvals).
+        const q = r.review;
+        if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), q.deadline === null ? Infinity : seconds(q.deadline)), r.error)) break;
+        const s = step(q.nodeId), lines = uniswapPositionReviewLines(q);
+        if (s) {
+          Object.assign(s, { action: lines.action, input: lines.input, pair: lines.pair, networks: [q.network], result: lines.result, resultLabel: lines.resultLabel,
+            provider: 'Uniswap V3', minimum: lines.minimum, details: lines.details, configuredSlippage: bps(q.slippageBps), slippage: lines.minimum ? bps(q.slippageBps) : null });
+        }
+        networkFees(q.fees);
+        for (const w of lines.warnings) warn(w.severity, w.message);
+        break;
+      }
+      const q = r.review;
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), seconds(q.deadline)), r.error)) break;
       const s = step(q.nodeId);
       const amounts = [simulationAmount(q.simulation.mint.amount0, q.token0.decimals, q.token0.symbol), simulationAmount(q.simulation.mint.amount1, q.token1.decimals, q.token1.symbol)];
@@ -550,11 +637,36 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const r = source.state.record; if (!r) break; const q = r.review;
       if (!guard(same(q.workflow), r.provenance, iso(q.expiresAt), r.error)) break;
       const s = step(q.nodeId), sim = q.simulationResult, opening = q.operation === 'OPEN';
-      const amounts = [simulationAmount(opening ? sim.depositedA : sim.withdrawnPrincipalA, q.token0.decimals, solanaSymbol(q.token0.symbol, q.cluster)), simulationAmount(opening ? sim.depositedB : sim.withdrawnPrincipalB, q.token1.decimals, solanaSymbol(q.token1.symbol, q.cluster))];
-      result(s, null, amounts.every(Boolean) ? amounts.join(' + ') : null, 'Orca Whirlpools', null, q.intent.slippageBps);
-      if (s) s.resultLabel = opening ? 'Expected pool contribution' : 'Expected withdrawal';
-      range(s, q.range, `${solanaSymbol(q.token1.symbol, q.cluster)} per SOL`); fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT moves fees only (liquidity unchanged); a withdrawal returns principal and collects fees.
+      const operation: string = q.operation, collecting = operation === 'COLLECT';
+      const sym0 = solanaSymbol(q.token0.symbol, q.cluster), sym1 = solanaSymbol(q.token1.symbol, q.cluster);
+      const amounts = collecting ? [simulationAmount(sim.collectedFeesA, q.token0.decimals, sym0), simulationAmount(sim.collectedFeesB, q.token1.decimals, sym1)]
+        : [simulationAmount(opening ? sim.depositedA : sim.withdrawnPrincipalA, q.token0.decimals, sym0), simulationAmount(opening ? sim.depositedB : sim.withdrawnPrincipalB, q.token1.decimals, sym1)];
+      result(s, null, amounts.every(Boolean) ? `${collecting ? '≥ ' : ''}${amounts.join(' + ')}` : null, 'Orca Whirlpools', null, q.intent.slippageBps);
+      if (s) s.resultLabel = opening ? 'Expected pool contribution' : collecting ? 'Fees collected, at least' : 'Expected withdrawal';
+      if (s && !opening) {
+        const share = operation === 'EXIT' ? '100%' : q.partBps !== null ? percentOfBps(q.partBps) : null, mint = q.accounts.positionMint;
+        s.action = liquidityPositionActionLabel(operation, operation === 'EXIT');
+        s.input = share ? `${share} · ${mint}` : mint; s.networks = [q.cluster === 'devnet' ? 'Solana Devnet' : 'Solana'];
+        const min = [simulationAmount(q.operationPlan.tokenA, q.token0.decimals, sym0), simulationAmount(q.operationPlan.tokenB, q.token1.decimals, sym1)];
+        if (!collecting && min.every(Boolean)) s.minimum = min.join(' + ');
+        // The Editor's Simulate result and Execute Review state the network and what happens to the position NFT (an Orca exit always closes it).
+        s.details.push({ label: 'Operation', value: liquidityPositionOperationPhrase('ORCA', operation, operation === 'EXIT') }, { label: 'Protocol', value: 'Orca Whirlpools' },
+          { label: 'Network', value: s.networks[0]! }, { label: 'Position', value: mint }, { label: 'Pool', value: `${sym0}/${sym1} · ${q.pool.feeRate / 10_000}%` },
+          ...collecting ? [] : [{ label: 'Liquidity removed', value: `${q.expected.liquidity}` }, { label: 'Liquidity remaining', value: q.expected.positionLiquidityAfter }],
+          { label: 'Fees collected, at least', value: `${simulationAmount(sim.collectedFeesA, q.token0.decimals, sym0) ?? '—'} + ${simulationAmount(sim.collectedFeesB, q.token1.decimals, sym1) ?? '—'}` },
+          { label: 'Position NFT', value: operation === 'EXIT' ? 'Closed (account rent refunded)' : 'Stays in your wallet' },
+          { label: 'Wallet requests', value: '1' });
+        warn('attention', liquidityPositionOperationPhrase('ORCA', operation, operation === 'EXIT'));
+        warn('info', 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.');
+        warn('info', 'Tokens are returned to your wallet as the pool\'s own tokens; wrapped SOL is closed back to SOL in the same transaction.');
+        if (q.cluster !== 'devnet') warn('attention', 'This uses real funds. One wallet request; FloFi never signs or sends.');
+      }
+      if (opening) range(s, q.range, `${sym1} per SOL`);
+      else if (s && /^\d+(\.\d+)?$/.test(q.range.lowerPrice) && /^\d+(\.\d+)?$/.test(q.range.upperPrice)) s.details.push({ label: 'Price range', value: `${q.range.lowerPrice}–${q.range.upperPrice} ${sym1} per SOL` });
+      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
       if (BigInt(sim.rentPaidLamports) > 0n) fee('Account deposits', sim.rentPaidLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
+      if (!opening && BigInt(sim.rentRefundedLamports) > 0n && s) s.details.push({ label: 'Account rent refunded', value: simulationAmount(sim.rentRefundedLamports, 9, 'SOL') ?? '—' });
       break;
     }
     case 'solana-composition': {

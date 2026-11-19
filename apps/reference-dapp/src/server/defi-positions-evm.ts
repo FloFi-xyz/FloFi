@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { createHash } from 'node:crypto';
-import { UNISWAP_V3_ARBITRUM_LIQUIDITY, UNISWAP_V3_BASE_LIQUIDITY, UNISWAP_V3_ETHEREUM_LIQUIDITY, UNISWAP_V3_ROBINHOOD_CATALOG,
-  type CanonicalAsset, type UniswapCatalogLiquidity } from '@defi-workflow-engine/action-registry';
-import { decodeUniswapPosition, rpcHash, rpcHex, rpcRecord, sqrtRatioAtTick, supplyCall, UNISWAP_Q96,
-  type AaveMarketCatalog } from '@defi-workflow-engine/reference-compiler';
+import { catalogAsset, catalogPoolOn, UNISWAP_V3_ARBITRUM_LIQUIDITY, UNISWAP_V3_BASE_LIQUIDITY, UNISWAP_V3_ETHEREUM_LIQUIDITY, UNISWAP_V3_ROBINHOOD_CATALOG,
+  type AssetCatalog, type CanonicalAsset, type UniswapCatalogLiquidity } from '@defi-workflow-engine/action-registry';
+import { decodeUniswapAmounts, decodeUniswapPosition, encodeUniswapCollect, rpcHash, rpcHex, rpcRecord, sqrtRatioAtTick, supplyCall, UNISWAP_MAX_UINT128,
+  UNISWAP_Q96, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick, uniswapRangeState, type AaveMarketCatalog } from '@defi-workflow-engine/reference-compiler';
+import { liquidityPositionOperations, type LiquidityPositionView } from '../domain/liquidity-positions';
 import { type DefiPosition, type PositionAsset, type PositionScan } from '../domain/defi-positions';
 import { shortAddress } from '../domain/wallet-portfolio';
 import { type CatalogNetworkId } from './catalog-networks';
@@ -97,9 +98,15 @@ function uniswapAmounts(slot0: unknown, lower: number, upper: number, liquidity:
   return [liquidity * UNISWAP_Q96 * (hi - between) / hi / between, liquidity * (between - lo) / UNISWAP_Q96];
 }
 
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: what discovery adds for position management. `network` names the position's network; `catalog` is the
+ * network's validated asset catalog (a pool is manageable only when both tokens are catalog ERC-20s, the same rule the runtime applies; null
+ * means it could not be verified now, so no operation is offered).
+ */
+export type UniswapManagementScan = { readonly network: string; readonly catalog: AssetCatalog | null };
 /** Directly held NFTs on a pinned position manager. Factory, ownership and pool state are read at one canonical block. */
 export async function uniswapPositions(rpc: Rpc, profile: UniswapCatalogLiquidity, owner: string, now: Date,
-  catalogAssets: readonly CanonicalAsset[], value: ValuePositionAsset, verifyCode = true): Promise<ScanData> {
+  catalogAssets: readonly CanonicalAsset[], value: ValuePositionAsset, verifyCode = true, management?: UniswapManagementScan): Promise<ScanData> {
   const { chainId, factory, positionManager: manager } = profile;
   if (BigInt(rpcHex(await rpc('eth_chainId', []))) !== BigInt(chainId)) throw new Error('POSITION_CHAIN_INVALID');
   const block = rpcRecord(await rpc('eth_getBlockByNumber', ['latest', false])), at = rpcHex(block.number), hash = rpcHash(block.hash);
@@ -172,6 +179,12 @@ export async function uniswapPositions(rpc: Rpc, profile: UniswapCatalogLiquidit
   const poolValues = uniquePools.length ? await read(uniquePools.map(pool => call(pool, 'slot0()'))) : [];
   const slots = new Map(uniquePools.map((pool, i) => [pool, poolValues[i]]));
   const metadata = new Map(catalogAssets.map(asset => [asset.address, asset] as const));
+  // Exactly what collect would pay now: a static call of the manager's own collect from the owner (it pokes the pool first, so fees accrued since
+  // the last checkpoint are included). It cannot go through Multicall3 (the caller must be the owner); a failed read is "unavailable", never zero.
+  const collectable = management ? await Promise.all(positions.map(position => rpc('eth_call', [{ from: owner, to: manager,
+    data: encodeUniswapCollect({ tokenId: position.id, recipient: owner, amount0Max: UNISWAP_MAX_UINT128, amount1Max: UNISWAP_MAX_UINT128 }) }, at])
+    .then(result => { const amounts = decodeUniswapAmounts(rpcHex(result)); return [amounts.amount0.toString(), amounts.amount1.toString()] as const; })
+    .catch(() => null))) : [];
   const entries = positions.map((position, i): DefiPosition => {
     let amounts: [bigint, bigint] | null = null;
     try {
@@ -188,8 +201,47 @@ export async function uniswapPositions(rpc: Rpc, profile: UniswapCatalogLiquidit
       return value({ address: token, symbol, decimals: scale ?? 0, units: scale === undefined || !amounts ? null : amounts[j]!.toString(),
         ...scale !== undefined && owed > 0n && { recordedOwedUnits: owed.toString() } });
     });
-    return { id: position.id.toString(), type: 'LIQUIDITY', assets };
+    const liquidity = management ? uniswapView(profile, owner, management, position, poolReads[i] ?? null, slots.get(poolReads[i] ?? ''), decimals, amounts,
+      collectable[i] ?? null, Number(BigInt(at)), now) : null;
+    return { id: position.id.toString(), type: 'LIQUIDITY', assets, ...liquidity ? { liquidity } : {} };
   });
   await canonical();
   return { status: incomplete ? 'PARTIAL' : 'COMPLETE', positions: entries, observedAt: now.toISOString() };
+}
+
+function uniswapView(profile: UniswapCatalogLiquidity, owner: string, management: UniswapManagementScan,
+  position: { id: bigint; token0: string; token1: string; fee: number; tickLower: number; tickUpper: number; liquidity: bigint; tokensOwed0: bigint; tokensOwed1: bigint },
+  pool: string | null, slot0: string | null | undefined, decimals: ReadonlyMap<string, number>, amounts: [bigint, bigint] | null,
+  collectable: readonly [string, string] | null, height: number, now: Date): LiquidityPositionView | null {
+  const d0 = decimals.get(position.token0), d1 = decimals.get(position.token1);
+  if (!pool || d0 === undefined || d1 === undefined) return null;
+  const asset = (address: string, scale: number) => {
+    const known = management.catalog ? catalogAsset(management.catalog, { address }) : null;
+    return known && known.kind === 'ERC20' && known.decimals === scale ? { symbol: known.symbol, address, decimals: scale } : null;
+  };
+  const t0 = asset(position.token0, d0), t1 = asset(position.token1, d1);
+  // Manageable only on the verified CREATE2 pool of two catalog tokens at a standard tier (the runtime refuses anything else again at Review).
+  let verified = false;
+  if (t0 && t1) try { verified = catalogPoolOn(profile.chainId, t0, t1, position.fee).pool === pool; } catch { verified = false; }
+  let spot: { sqrt: bigint; tick: number } | null;
+  try {
+    const raw = rpcHex(slot0).slice(2);
+    const tickWord = BigInt(`0x${raw.slice(64, 128)}`) & 0xffffffn;
+    spot = { sqrt: BigInt(`0x${raw.slice(0, 64)}`), tick: Number(tickWord >= 0x800000n ? tickWord - 0x1000000n : tickWord) };
+  } catch { spot = null; }
+  const recordedOwed = [position.tokensOwed0.toString(), position.tokensOwed1.toString()] as const;
+  const manageable = verified ? { ok: true } as const : { ok: false, reason: 'POOL_NOT_VERIFIED' } as const;
+  const view = { manageable, liquidity: position.liquidity.toString(), recordedOwed, collectable };
+  return { ref: { protocol: 'UNISWAP_V3', chain: `eip155:${profile.chainId}`, network: management.network, manager: profile.positionManager, pool,
+      positionId: position.id.toString(), owner },
+    token0: t0 ?? { symbol: shortAddress(position.token0), address: position.token0, decimals: d0 },
+    token1: t1 ?? { symbol: shortAddress(position.token1), address: position.token1, decimals: d1 },
+    feeTier: position.fee, tickLower: position.tickLower, tickUpper: position.tickUpper,
+    // The pool's quote orientation used by Review: token0 per one token1 (a higher tick is a lower quote price).
+    price: { base: t1?.symbol ?? shortAddress(position.token1), quote: t0?.symbol ?? shortAddress(position.token0) },
+    lowerPrice: uniswapQuotePriceAtTick(position.tickUpper, d0, d1), upperPrice: uniswapQuotePriceAtTick(position.tickLower, d0, d1),
+    currentPrice: spot ? uniswapQuotePriceAtSqrt(spot.sqrt, d0, d1) : null,
+    rangeState: spot ? uniswapRangeState(spot.tick, position.tickLower, position.tickUpper) : null,
+    liquidity: position.liquidity.toString(), principal: amounts ? [amounts[0].toString(), amounts[1].toString()] : [null, null], recordedOwed, collectable,
+    status: position.liquidity > 0n ? 'OPEN' : 'EMPTY', manageable, operations: liquidityPositionOperations(view), observedAt: now.toISOString(), observedAtHeight: height };
 }

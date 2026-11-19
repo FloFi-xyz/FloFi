@@ -1002,4 +1002,47 @@ The application still ships 0028 for the ordinary deployment migration. Its exac
 2. Before activating 0030, verify that each database consumer and restart path runs the certificate-bearing release. Keep a build with this exact certificate available for rollback. Confirm the intended database and tenant out of band.
 3. From that reviewed checkout, with a direct `DATABASE_MIGRATION_URL` set in the operator environment, run `node apps/reference-dapp/backend/admin-cli.ts finops-sync-migrate --tenant default`. For an isolated preview, pass `--preview-branch <branch>` instead. The command requires exact existing schema 29, validates both SQL digests and the history, and applies only the missing certified migration. A successful repeat applies nothing. Do not edit the ledger or issue ad hoc DDL.
 4. Configure dedicated billing credentials and enable `FLOFI_FINOPS_SYNC=enabled` on the existing worker only after activation. Set the matching `FLOFI_FINOPS_BILLING_TENANT`. The default cadence is 24 hours and `FLOFI_FINOPS_SYNC_HOURS` accepts whole hours from 6 through 168. On the first activation, verify provider scope and currency using the Admin coverage and an independently obtained billing extract.
-5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.
+5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Once 0031 (§23) is also active, only a build carrying the §23 certificate (0029–0031) is a rollback target. Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.
+
+## 23. Certificate 0031_position_history_purge
+
+| Base history | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0028 `saved_recipients` plus certified 0029 `finops_ledger` and 0030 `finops_sync` | 0031 `position_history_purge` | `c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d` |
+
+BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 adds Uniswap v3 position-management runs (`flofi.uniswap-position-run.v1`: collect, partial withdrawal, exit,
+close). 0016's owner-history purge retains every snapshot shape it does not know, so an owner cannot delete even a never-authorized position
+simulation today (`RUN_DELETE_REFUSED`, fail-safe). 0031 closes that gap and changes nothing else:
+
+- It **redefines only `disposable_execution_snapshot(jsonb,text,text)`** (`CREATE OR REPLACE`, same signature, `IMMUTABLE`, still no `PUBLIC`
+  privilege): 0016's body byte for byte, plus one branch for `flofi.uniswap-position-run.v1` that requires all and only that record's keys
+  (`format`, `id`, `provenance`, `workflow`, `owner`, `request`, `review`, `authorization`, `attempts`, `result`, `evidence`, `verdict`, `error`; a
+  snapshot lacking one is retained), and `result` added to the values that must be null (a test proves the body equals 0016's plus exactly these). Every historic snapshot of the run must still pass: no authorization (an authorized-then-invalidated run
+  is kept), no attempt, no observed result, no evidence, verdict `PENDING`, and none of 0016's signature/submission/receipt keys anywhere.
+- Every other check of `purge_unstarted_execution` is unchanged and still applies: tenant and owner, run status, `has_evidence`,
+  `needs_observation`, `attention_required`, recovery links, attempts, evidence objects, live leases, queued or shared work items, idempotency,
+  MCP handoffs, workflow-run steps, automations, delegated steps, **any INTENT log naming the run** (a position run's `.unipm-position` claim and
+  `.unilp-intent` owner-nonce reservation are INTENT logs, written only from `begin`), and journals. Tombstones, the immutable audit, the
+  append-only protections and the resurrection guards are untouched.
+- Migration 0016 itself is immutable and unchanged; no table, column, index, trigger, row or privilege changes. `SET LOCAL lock_timeout = '5s'`:
+  replacing the function waits at most 5 s for a session altering it, then the migration rolls back completely (proven).
+
+**Compatibility.** A v28 build carrying this certificate serves schema 31; a build carrying only the previous certificate (0029–0030, i.e. `main`
+before this build) refuses it with `MIGRATION_HISTORY_MISMATCH`, so this build must serve every database consumer before 0031 is applied.
+Builds before this one never create position runs, and for every other format the predicate is byte-identical, so their purge behaviour does
+not change. The v28 runner never changes a database ahead of it, and the ordinary deployment migration still ships schema 28.
+
+**Evidence** (disposable PostgreSQL 16 locally; CI runs PostgreSQL 18): `packages/cloud-runtime/test/certificate-0031.pg.test.ts` — exact bytes and
+certificate, schema 31 served only through it, a catalog diff of exactly one redefined function with unchanged privileges, rows and log bytes
+surviving, which synthetic snapshots become deletable (an unstarted or refreshed position simulation) and which stay protected (authorized,
+invalidated after authorization, prepared, submitted, uncertain, reconciled, result- or evidence-bearing, divergent, signed, receipt-bearing,
+tampered, wrong id or owner, other tenant, observed or evidenced projections, a live lease, an INTENT naming the run, a queued work item), a
+deletion racing an authorization (never both), a failing 0031 and a lock timeout rolling back completely, and the emergency reversal restoring the
+exact schema-30 catalog. `apps/reference-dapp/backend/uniswap-position-purge.pg.test.ts` — real position runs from the production runtime on the
+backend's PostgreSQL storage: refused before 0031, the operator command refusing schemas below 30 and never applying 0029/0030 itself, then only the
+never-authorized simulation deleted through the authenticated owner-history route; authorized-then-invalidated, prepared and reconciled runs kept.
+`FLOFI_TEST_CERTIFIED_AHEAD=1` runs the owner-history, position-purge and liquidity cloud suites on schema 31.
+
+**Activation, rollout and rollback**: [RELEASE-POSITION-PURGE-0031.md](./RELEASE-POSITION-PURGE-0031.md). Not applied anywhere by this build.
+Once 0031 is active, a build carrying only the §22 certificate (0029–0030) refuses the database: §22's rollback targets become builds carrying this
+certificate.

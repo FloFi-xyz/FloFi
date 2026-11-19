@@ -19,6 +19,7 @@ import { circleUnavailableReason } from '../domain/token-fee';
 import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 import { OperationSummary } from './operation-summary';
+import { liquidityPositionResultRows, positionWorkflowOf } from '../domain/liquidity-position-summary';
 
 export type ReviewSummaryPanelProps = {
   workflow: Workflow; context: ReviewContext; source: SimulationSource; authorization: ReviewAuthorization; wallet: ReviewWallet;
@@ -70,10 +71,18 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const step = sim.steps[sim.steps.length - 1];
   const canvas = props.canvasWorkflow ?? workflow;
   const until = review.expiresAt !== null && review.expiresAt > now ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management workflow (its canonical node's marker) states its operation's own rows — liquidity
+  // removed and remaining, principal and its enforced minimum, owed tokens and fees as lower bounds, the position NFT — never a deposit's amounts.
+  // The step the runtime simulates and reviews (a sequence's current step, or the whole one-step workflow) decides, never the rest of the Canvas.
+  const position = positionWorkflowOf(workflow);
+  const positionRows = (rowsFor: 'simulate' | 'execute') => step ? liquidityPositionResultRows(step, rowsFor).map(row =>
+    <div key={row.label} data-position-row={row.label}><dt>{t(row.label)}</dt><dd className="numeric">{t(row.value)}</dd></div>) : null;
   // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.
   const resultRows = <>
-    {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
-    {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
+    {position ? positionRows(stage) : <>
+      {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
+      {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
+    </>}
     {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
       // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
       const paidTo = paidToPimlicoNote(line);
@@ -88,18 +97,21 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   if (stage === 'execute') {
     // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review keeps the workflow's summary (only what the owner configured) and marks the fee and
     // the permissions as needing a refreshed Review; no stale figure is shown as current and nothing can be authorized from it.
-    if (expired) return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="expired">
+    if (expired) return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="expired" data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       <ExpiredReviewAlert/>
       <OperationSummary workflow={canvas} context={context}/>
       <dl className="review-panel-rows">
         <div><dt>{t('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed"/></dd></div>
-        <div><dt>{t('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review"/></dd></div>
-        {typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
+        {/* A position operation is one Position Manager (or Whirlpools) request that spends no token: structurally no permission and one wallet
+            request, whatever the refreshed figures; every amount is marked for the refreshed Review. */}
+        <div><dt>{t('Token permission')}</dt><dd>{position ? t('None — this operation needs no token permission') : <RefreshBadge text="Depends on the updated review"/>}</dd></div>
+        {position ? <div><dt>{t('Wallet requests')}</dt><dd>1</dd></div>
+          : typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
       </dl>
       {technical}
     </section>;
-    if (!ready) return <section className="review-panel-approved review-panel-execute" aria-label={t('Simulation')} data-review-state={busy ? 'busy' : 'pending'}>
+    if (!ready) return <section className="review-panel-approved review-panel-execute" aria-label={t('Simulation')} data-review-state={busy ? 'busy' : 'pending'} data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       <h2>{t('Workflow simulation')}</h2>
       <p className="review-panel-status" role="status">{t(busy ? 'Simulating workflow…' : props.unavailableReason ?? 'Simulation checks expected outcomes and costs before anything is signed or sent.')}</p>
@@ -107,7 +119,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       {technical}
     </section>;
     // C1: the valid Review — what the owner authorizes, its costs and permissions, before any wallet request. The ONE action is the footer's.
-    return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="ready">
+    return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="ready" data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       {until && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{t('Review valid until {0}', until)}</p>}
       <p className="eyebrow">{t('REVIEW')}</p>
@@ -118,7 +130,9 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
         {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.address}`}><dt>{t('Token permission')}</dt>
           <dd>{approval.unlimited ? t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')
             : t('{0} uses up to {1}', t(approval.spender), t(approval.value))}</dd></div>)}
-        {typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
+        {/* A position operation asks for no token permission (its rows already state its one wallet request). */}
+        {position && !review.approvals.length && <div data-position-row="Token permission"><dt>{t('Token permission')}</dt><dd>{t('None — this operation needs no token permission')}</dd></div>}
+        {!position && typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
       </dl>
       <p className="review-panel-note">{t(sim.fees.some(isIncludedNetworkFee) ? 'You sign; 0x sends the swap and takes the network fee out of it. FloFi never signs or pays for you.'
         : 'Your wallet pays the network fee. FloFi never signs or sends for you.')}</p>
@@ -130,7 +144,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // and holds the ONE primary action (Simulate workflow); a valid result states the expected outcome and costs with no authorization language
   // (the footer's "Review operation" leads to Execute, where the Review is authorized); an expired result shows no stale figure.
   const awaiting = !busy && !ready && !expired;
-  return <section className="review-panel-approved simulation-context-panel" aria-label={t(ready ? 'Simulation result' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'}>
+  return <section className="review-panel-approved simulation-context-panel" aria-label={t(ready ? 'Simulation result' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'} data-position-operation={position?.management.operation}>
     <SimulationPanelHead title={ready ? 'Simulation result' : expired ? 'Simulation expired' : 'Simulate workflow'}
       subtitle={ready ? until ? t('Valid until {0}. Nothing has been signed or sent.', until) : t('Nothing has been signed or sent.')
         : expired ? t('Simulate again to refresh the expected result and costs. The previous values are no longer current.')

@@ -13,6 +13,7 @@ import { editorReducer, initialEditor } from '../domain/editor';
 import { uniswapBandInput, type UniswapLiquidityInput } from '../domain/uniswap-liquidity-authoring';
 import { createUniswapLiquidityChain, UNI_DELEGATION_MANAGER, UNI_MOCK_CODE_PINS, UNI_OWNER, UNI_RELAYER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
 import { createUniswapLiquidityService, uniswapNeedsObservation, validateUniswapLiquidityLog, type UniswapBegin, type UniswapLiquidityRecord } from './uniswap-liquidity-service';
+import type { Rpc } from './public-testnet-service';
 
 function workflow(patch: Partial<UniswapLiquidityInput> = {}): SemanticWorkflow {
   const band = uniswapBandInput((sqrtRatioAtTick(225_600) + 123_456_789n).toString(), 1_000);
@@ -233,6 +234,27 @@ describe('Base Sepolia Uniswap v3 liquidity: execution, recovery and reconciliat
     await expect(service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_POSITION_MAY_EXIST_OBSERVE');
     expect(begun.attempt.step).toBe('MINT');
     expect(chain.counters.sends).toBe(1);
+  });
+  it('a mint mined between the nonce discovery and the head read is never recorded as not executed (flofi-wallet-execution P2-1, mint parity)', async () => {
+    const chain = createUniswapLiquidityChain(), w = workflow();
+    chain.externalAllowance('token0', 10n ** 9n); chain.externalAllowance('token1', 10n ** 18n);
+    // Runs once, right before the next `latest` head read is answered: the held mint is mined AT its deadline, and the head is already past it.
+    let beforeLatest: (() => void) | undefined;
+    const rpc: Rpc = async (method, params) => {
+      if (beforeLatest && method === 'eth_getBlockByNumber' && params[0] === 'latest') { const hook = beforeLatest; beforeLatest = undefined; hook(); }
+      return chain.rpc(method, params);
+    };
+    const service = createUniswapLiquidityService({ storage: createFileExecutionStorage(await mkdtemp(join(tmpdir(), 'flofi-unilp-')), 'UNISWAP_LIQUIDITY_BUSY'), rpc,
+      provenance: 'MOCKED', mockedCodePins: UNI_MOCK_CODE_PINS, now: chain.clock });
+    const run = await reviewed(service, w);
+    const { begun } = await execute(service, chain, run.id, w, { hold: true });
+    expect(begun.attempt.step).toBe('MINT');
+    chain.advance(Number(decodeUniswapMint(begun.transaction.data).deadline) - (Math.floor(chain.clock().getTime() / 1000) - 1) - 2);
+    beforeLatest = () => { chain.wallet.release(); chain.advance(30); };
+    const observed = await service.observe(run.id);
+    expect(beforeLatest).toBeUndefined();
+    expect(observed.attempts.at(-1)!.state).not.toBe('NOT_FOUND');
+    expect((await service.observe(run.id)).attempts.at(-1)!.state).toBe('CONFIRMED');
   });
   it('a reported hash of a different transaction freezes the run for attention; the owner nonce is one economic identity across runs', async () => {
     const { service, chain } = await setup(), w = workflow();

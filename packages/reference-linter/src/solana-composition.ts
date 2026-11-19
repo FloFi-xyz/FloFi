@@ -25,6 +25,8 @@ export function validateSolanaCompositionWorkflow(workflow: SemanticWorkflow): B
   if (composed.binding.id !== SOLANA_DEVNET_SWAP_LIQUIDITY.id) fail('COMPOSITION_UNSUPPORTED');
   validateSolanaSwapWorkflow(projectCompositionProducer(workflow));
   const position = validateSolanaLiquidityWorkflow({ ...workflow, nodes: [composed.isolatedConsumer], resourceEdges: [] });
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a composition deposits; it never manages an existing position.
+  if (position.management) fail('COMPOSITION_UNSUPPORTED');
   if ((composed.source.token === 0 ? position.amount0Max : position.amount1Max) === '0') fail('SOLANA_COMPOSITION_CAP_REQUIRED');
   return composed;
 }

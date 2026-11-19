@@ -5,6 +5,7 @@ import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as profile } from '@defi-workflow-eng
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createOrcaLiquidityService, type OrcaLiquidityService, type OrcaLiquidityWalletDiagnostic } from '../server/orca-liquidity-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
+import { ORCA_MAINNET_HARNESS_RPC as HARNESS } from '../server/orca-mainnet-harness';
 import { cloudFlow } from './cloud-flow';
 
 /**
@@ -14,7 +15,6 @@ import { cloudFlow } from './cloud-flow';
  * and wallet signature; FloFi never signs. The position-mint key for OPEN is generated in the browser and never sent here.
  */
 let service: OrcaLiquidityService | null = null;
-const HARNESS = 'http://127.0.0.1:8552/mainnet-rpc';
 function current(): OrcaLiquidityService {
   const harness = process.env.GRYLOO_ORCA_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY';
   const journalDir = process.env.GRYLOO_ORCA_MAINNET_JOURNAL;
@@ -33,10 +33,11 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   try { return { ok: true, value: await action(current()) }; }
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'ORCA_LIQUIDITY_SERVICE_UNAVAILABLE' }; }
 }
-type Request = { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT'; positionMint: string; partBps?: number };
+type Request = { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT'; positionMint: string; partBps?: number };
 const request = (value: Request): Request => {
-  if (!value || !['OPEN', 'DECREASE_PARTIAL', 'EXIT'].includes(value.operation) || typeof value.positionMint !== 'string' ||
-      value.partBps !== undefined && !Number.isSafeInteger(value.partBps)) throw new Error('ORCA_LIQUIDITY_INPUT_INVALID');
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT (fees only) removes no liquidity, so it never carries a portion.
+  if (!value || !['OPEN', 'DECREASE_PARTIAL', 'EXIT', 'COLLECT'].includes(value.operation) || typeof value.positionMint !== 'string' ||
+      value.partBps !== undefined && !Number.isSafeInteger(value.partBps) || value.operation === 'COLLECT' && value.partBps !== undefined) throw new Error('ORCA_LIQUIDITY_INPUT_INVALID');
   return { operation: value.operation, positionMint: value.positionMint, ...value.partBps === undefined ? {} : { partBps: value.partBps } };
 };
 export async function solanaMainnetLiquidityInfo() {

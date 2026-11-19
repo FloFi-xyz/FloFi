@@ -10,7 +10,8 @@ import { describeProposal } from '../domain/proposal';
 import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from '../domain/network-scope';
 import { chainReducer, checkChainAccess, initialChainState, type ChainState } from '../domain/artifact-chain';
 import { generateMockedChain, generationEligibility, type Eligibility } from '../domain/mock-artifacts';
-import type { Command } from '../domain/commands';
+import type { Command, LiquidityPositionPoolInput } from '../domain/commands';
+import { liquidityPositionChoiceValid, type LiquidityPositionChoice } from '../domain/liquidity-positions';
 import type { Direction } from '../domain/swap-authoring';
 import type { UniswapLiquidityInput } from '../domain/uniswap-liquidity-authoring';
 import type {SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
@@ -80,8 +81,18 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   commitChatCommand(command: Command): ChatCommit;
   /** Undoes a chat commit only while it is still the latest history entry (the workflow is exactly `expected`); otherwise nothing changes. */
   undoChatCommit(commit: { readonly before: Workflow; readonly expected: Workflow }): boolean;
-  /** The position operation an applied position-management proposal prepared for the Simulate panel (never simulated, reviewed or signed here). */
-  stagedPosition: StagedPosition | null;
+  /**
+   * The position operation an applied position-management command prepared for Simulate (never simulated, reviewed or signed here). It holds
+   * only while the workflow is exactly the one that command produced: any other command, a new or restored workflow, an undo or any edit of the
+   * position's node clears it, and so does `clearStagedPosition` (the shell calls it when another wallet than the position's owner connects).
+   */
+  stagedPosition: StagedPosition | null; clearStagedPosition(): void;
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Dashboard's "Collect fees" / "Remove liquidity" / "Close position" — the owner's explicit choice for one
+   * verified position, committed as MANAGE_LIQUIDITY_POSITION (the same reducer, guards and undoable history as a chat commit) and staged for
+   * Simulate. Preparation only: nothing is simulated, reviewed or signed; the owner still reviews and signs in their wallet.
+   */
+  stageLiquidityPosition(choice: LiquidityPositionChoice, pool: LiquidityPositionPoolInput): ChatCommit;
   review: ReviewResult | null; reviewError: string | null;
   /**
    * BUILD-FLOFI-CHAT-E2E-FIX-002: a workflow of several independent owner-wallet actions runs as an ordered sequence of one-action steps
@@ -119,7 +130,41 @@ export type SequenceView = { readonly steps: WorkflowSequence['steps']; readonly
   /** The amount a funded current step spends (native units), or null when it spends its authored amount. */ readonly bound: string | null;
   /** Why the current funded step cannot use its producer's delivery: nothing provable was delivered, or its card refused the bound amount. */
   readonly fundingIssue: 'DELIVERY_NOT_PROVEN' | 'NOTHING_DELIVERED' | 'BOUND_REFUSED' | null; readonly finished: boolean };
-export type StagedPosition = { readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT'; readonly partBps: number | null; readonly serial: number };
+/**
+ * A staged position operation. `positionId`, `operation` and `partBps` are the Orca runtime's words (the Devnet engineering MANAGE_SOLANA_POSITION,
+ * and an Orca mainnet choice); `choice` is the full verified choice of MANAGE_LIQUIDITY_POSITION (Uniswap v3 or Orca mainnet), null for the Devnet
+ * engineering command. `workflowId`, `revision` and `node` bind it to exactly the workflow the command produced.
+ */
+export type StagedPosition = { readonly positionId: string; readonly operation: 'COLLECT' | 'DECREASE_PARTIAL' | 'EXIT'; readonly partBps: number | null;
+  readonly choice: LiquidityPositionChoice | null; readonly serial: number; readonly workflowId: string; readonly revision: number; readonly node: string };
+/** The position node(s) a staged operation is bound to: every financial (non-template) node of the workflow, canonical JSON. */
+const stagedNode = (workflow: { readonly nodes: readonly { readonly actionType: string }[] }) => JSON.stringify(workflow.nodes.filter(node => !node.actionType.startsWith('mock-')));
+/** Whether a staged operation still describes exactly this workflow (its identity, revision and position node). */
+export const stagedHolds = (staged: Pick<StagedPosition, 'workflowId' | 'revision' | 'node'>, workflow: { readonly workflowId: string; readonly revision: number;
+  readonly nodes: readonly { readonly actionType: string }[] }) => staged.workflowId === workflow.workflowId && staged.revision === workflow.revision && staged.node === stagedNode(workflow);
+/** Per tab only: a reload of the same workflow keeps the owner's staged choice, so a staged withdrawal can never be simulated as a deposit. */
+export const STAGED_POSITION_KEY = 'flofi:staged-position';
+/** The staged operation a position-management command produces on `workflow` (null for every other command). */
+export function stagedPositionOf(command: Command, workflow: Workflow, serial: number): StagedPosition | null {
+  const binding = { serial, workflowId: workflow.workflowId, revision: workflow.revision, node: stagedNode(workflow) };
+  if (command.type === 'MANAGE_SOLANA_POSITION') return { positionId: command.positionMint, operation: command.operation, partBps: command.partBps, choice: null, ...binding };
+  if (command.type !== 'MANAGE_LIQUIDITY_POSITION') return null;
+  const { choice } = command;
+  return { positionId: choice.position.positionId, operation: choice.operation === 'DECREASE' ? 'DECREASE_PARTIAL' : choice.operation, partBps: choice.partBps, choice, ...binding };
+}
+function readStoredStaged(): StagedPosition | null {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(STAGED_POSITION_KEY) ?? 'null') as StagedPosition | null;
+    if (!value || typeof value !== 'object' || !liquidityPositionChoiceValid(value.choice) || typeof value.workflowId !== 'string' || !Number.isSafeInteger(value.revision) ||
+        typeof value.node !== 'string') return null;
+    const choice = value.choice;
+    return { positionId: choice.position.positionId, operation: choice.operation === 'DECREASE' ? 'DECREASE_PARTIAL' : choice.operation, partBps: choice.partBps, choice,
+      serial: 1, workflowId: value.workflowId, revision: value.revision, node: value.node };
+  } catch { return null; }
+}
+function storeStaged(staged: StagedPosition | null) {
+  try { if (staged?.choice) window.sessionStorage.setItem(STAGED_POSITION_KEY, JSON.stringify(staged)); else window.sessionStorage.removeItem(STAGED_POSITION_KEY); } catch { /* optional */ }
+}
 type Workflow = EditorState['workflow'];
 export type ChatCommit = { readonly ok: true; readonly before: Workflow; readonly expected: Workflow } | { readonly ok: false; readonly error: string };
 const Context = createContext<Store | null>(null);
@@ -213,7 +258,25 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const undo = useCallback(() => dispatchHistory({ type: 'UNDO' }), []);
   const redo = useCallback(() => dispatchHistory({ type: 'REDO' }), []);
   const [pending, setPending] = useState<Pending | null>(null);
-  const [stagedPosition, setStagedPosition] = useState<StagedPosition | null>(null);
+  const [stagedRaw, setStagedRaw] = useState<StagedPosition | null>(null);
+  const setStagedPosition = useCallback((update: StagedPosition | null | ((current: StagedPosition | null) => StagedPosition | null)) => setStagedRaw(current => {
+    const next = typeof update === 'function' ? update(current) : update;
+    if (next !== current) storeStaged(next);
+    return next;
+  }), []);
+  // A staged choice holds only for exactly the workflow its command produced; anything else (an edit, undo, restore, new workflow) clears it.
+  const stagedPosition = stagedRaw && stagedHolds(stagedRaw, state.workflow) ? stagedRaw : null;
+  useEffect(() => { if (stagedRaw && !stagedHolds(stagedRaw, state.workflow)) setStagedPosition(null); }, [stagedRaw, state.workflow, setStagedPosition]);
+  // The product Editor (/app) keeps a staged choice across a reload of the same tab, only onto exactly the workflow it was staged for.
+  const storedStaged = useRef<StagedPosition | null | undefined>(undefined);
+  useEffect(() => {
+    if (!persistCanvas) return;
+    if (storedStaged.current === undefined) storedStaged.current = readStoredStaged();
+    const stored = storedStaged.current;
+    if (!stored) return;
+    if (stagedHolds(stored, state.workflow)) { storedStaged.current = null; setStagedRaw(current => current ?? stored); }
+    else if (persistenceReady && state.workflow.workflowId !== stored.workflowId) { storedStaged.current = null; storeStaged(null); }
+  }, [persistCanvas, persistenceReady, state.workflow]);
   useEffect(() => {
     // History/restoration can change a reviewed field without invoking its input handler.
     setPending(current => {
@@ -400,26 +463,29 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'COMMAND', command: pending.command, context,
       ...(pending.authoringId ? { authoringId: pending.authoringId, authoringAmount: pending.authoringAmount! } : {}) });
     const command = pending.command;
-    if (command.type === 'MANAGE_SOLANA_POSITION') setStagedPosition(current => ({ positionMint: command.positionMint, operation: command.operation, partBps: command.partBps,
-      serial: (current?.serial ?? 0) + 1 }));
-    else setStagedPosition(null);
+    setStagedPosition(current => preview.error ? null : stagedPositionOf(command, preview.workflow, (current?.serial ?? 0) + 1));
     setPending(null);
   }
-  const commitChatCommand = useCallback((command: Command): ChatCommit => {
+  const commitCommand = useCallback((command: Command): ChatCommit => {
     const current = editorRef.current;
-    if (command.source !== 'CHAT') return { ok: false, error: 'CHAT_COMMAND_REQUIRED' };
     const preview = editorReducer(current, command, context);
     if (preview.error) return { ok: false, error: preview.error };
-    if (preview.workflow === current.workflow && command.type !== 'MANAGE_SOLANA_POSITION') return { ok: false, error: 'NO_CHANGE' };
+    // A position-management command may leave the workflow as it is (the position's node already describes it): its staged choice is the change.
+    const staging = command.type === 'MANAGE_SOLANA_POSITION' || command.type === 'MANAGE_LIQUIDITY_POSITION';
+    if (preview.workflow === current.workflow && !staging) return { ok: false, error: 'NO_CHANGE' };
     const introduced = testNetworksIntroduced(current.workflow, preview.workflow);
     if (introduced.length) return { ok: false, error: testNetworkMessage(introduced) };
     dispatchHistory({ type: 'COMMAND', command, context });
     setPending(null);
-    if (command.type === 'MANAGE_SOLANA_POSITION') setStagedPosition(staged => ({ positionMint: command.positionMint, operation: command.operation, partBps: command.partBps,
-      serial: (staged?.serial ?? 0) + 1 }));
-    else setStagedPosition(null);
+    setStagedPosition(staged => stagedPositionOf(command, preview.workflow, (staged?.serial ?? 0) + 1));
     return { ok: true, before: current.workflow, expected: preview.workflow };
-  }, [context]);
+  }, [context, setStagedPosition]);
+  const commitChatCommand = useCallback((command: Command): ChatCommit => command.source !== 'CHAT' ? { ok: false, error: 'CHAT_COMMAND_REQUIRED' } : commitCommand(command), [commitCommand]);
+  const stageLiquidityPosition = useCallback((choice: LiquidityPositionChoice, pool: LiquidityPositionPoolInput): ChatCommit => {
+    if (!liquidityPositionChoiceValid(choice)) return { ok: false, error: 'LIQUIDITY_POSITION_CHOICE_INVALID' };
+    return commitCommand({ type: 'MANAGE_LIQUIDITY_POSITION', choice, pool, source: 'CANVAS', baseRevision: editorRef.current.workflow.revision });
+  }, [commitCommand]);
+  const clearStagedPosition = useCallback(() => setStagedPosition(null), [setStagedPosition]);
   const undoChatCommit = useCallback((commit: { readonly before: Workflow; readonly expected: Workflow }) => {
     const latest = historyRef.current, previous = latest.past.at(-1);
     if (latest.editor.workflow !== commit.expected || previous?.workflow !== commit.before) return false;
@@ -544,7 +610,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const saved = viewportMemory.current;
     if (saved?.id === canvasId) delete saved[stacked ? 'stacked' : 'standard'];
   }, [canvasId]);
-  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
+  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, restoreLiquidityCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
     canvasRestoring: pendingRestorations > 0, trackCanvasRestoration,
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
@@ -552,7 +618,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, readCanvasViewport, rememberCanvasViewport, forgetCanvasViewport,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, clearStagedPosition, stageLiquidityPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, sequenceRestore, completeSequenceStep, recordExecutedAction, executedActions,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;

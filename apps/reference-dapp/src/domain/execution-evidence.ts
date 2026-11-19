@@ -6,7 +6,7 @@ import type { EvidenceBundle } from '@defi-workflow-engine/workflow-contracts';
 import { baseAssetRegistry } from '@defi-workflow-engine/action-registry';
 import { executionExplorer, type ExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import type { EvidenceComparison } from './execution-step-evidence';
-import { simulationAmount } from './simulation-presentation';
+import { isUniswapPositionRecord, simulationAmount } from './simulation-presentation';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { shellChainLabel } from './product-shell';
@@ -239,6 +239,30 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
     }
     case 'uniswap-pool': {
       const record = source.state.record; if (!record) break;
+      if (isUniswapPositionRecord(record)) {
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: what the confirmed position operation did, read from its receipt events (never a deposit).
+        const chain = `eip155:${record.review.chainId}`, q = record.review, id = q.operation, result = record.result;
+        evidence.wallet = record.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
+        for (const attempt of record.attempts) {
+          identifier(attempt.step, 'Action transaction', attempt.transactionHash, 'transaction', chain, attempt.state);
+          identifier(attempt.step, 'Replacement transaction', attempt.replacementHash, 'transaction', chain, attempt.state);
+          fee(attempt.step, chain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei); failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
+        }
+        identifier(id, 'Position ID', q.position.tokenId);
+        if (record.verdict === 'RECONCILED' && result) {
+          if (result.liquidityRemoved !== '0') {
+            op(id).values.push({ label: 'Liquidity removed', value: result.liquidityRemoved }, { label: 'Liquidity remaining', value: result.liquidityAfter ?? '0' });
+            amount(id, 'Principal returned · Token 1', result.principal0, q.token0.decimals, q.token0.symbol, q.expected.principal0);
+            amount(id, 'Principal returned · Token 2', result.principal1, q.token1.decimals, q.token1.symbol, q.expected.principal1);
+          }
+          // Collect pays everything owed at execution: at least the Review's amount (fees accrued meanwhile are included).
+          amount(id, 'Collected (owed tokens and fees included) · Token 1', result.collected0, q.token0.decimals, q.token0.symbol, q.expected.collect0);
+          amount(id, 'Collected (owed tokens and fees included) · Token 2', result.collected1, q.token1.decimals, q.token1.symbol, q.expected.collect1);
+          op(id).values.push({ label: 'Position NFT', value: result.burned ? 'Burned (closed)' : 'Stays in your wallet' });
+        }
+        detail('Position Manager', q.contracts.positionManager, true); detail('Pool', q.contracts.pool, true);
+        break;
+      }
       const chain = `eip155:${record.review.chainId}`;
       evidence.wallet = record.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
       for (const attempt of record.attempts) {

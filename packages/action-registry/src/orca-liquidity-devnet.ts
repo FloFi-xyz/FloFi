@@ -32,7 +32,13 @@ export const ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY = Object.freeze({
   metadataUpdateAuth: '3axbTs2z5GBy6usVbNVoqEgZMng3vZvMnAoX29BFfwhr',
   /** Anchor sha256("global:<name>")[0..8]. */
   instructions: Object.freeze({ openPositionWithTokenExtensions: 'd42f5f5c726683fa', increaseLiquidityV2: '851d59df45eeb00a',
-    decreaseLiquidityV2: '3a7fbc3e4f52c460', collectFeesV2: 'cf755fbfe5b4e20f', closePositionWithTokenExtensions: '01b6873b9b1963df' }),
+    decreaseLiquidityV2: '3a7fbc3e4f52c460', collectFeesV2: 'cf755fbfe5b4e20f', closePositionWithTokenExtensions: '01b6873b9b1963df',
+    /**
+     * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: update_fees_and_rewards (accounts: whirlpool w, position w, tick_array_lower, tick_array_upper; no signer;
+     * data is the discriminator only). collect_fees_v2 pays only the position's stored fee_owed; fees accrued since the last modify-liquidity are
+     * credited by this instruction, which the program refuses (LiquidityZero) on a position without liquidity.
+     */
+    updateFeesAndRewards: '9ae6fa0decd14bdf' }),
   /** Anchor sha256("event:<name>")[0..8]; equal to the events observed in Devnet simulation logs. */
   events: Object.freeze({ positionOpened: 'edaff3e693756579', liquidityIncreased: '1e0790b566fe9ba1', liquidityDecreased: 'a601244770cab5ab' }),
   /** sha256("account:Position")[0..8]. */
@@ -47,5 +53,9 @@ export const ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY = Object.freeze({
   environment: 'PUBLIC_TESTNET', provenance: 'PUBLIC_DEVNET', executedEvidence: 'DEVNET_EXECUTED', bundleEnvironment: 'TESTNET_EXECUTED', realFunds: false,
   contractVersion: 'orca-whirlpools-devnet', explorerTx: (signature: string) => `${ORCA_WHIRLPOOLS_DEVNET.explorer}/tx/${signature}?cluster=devnet`,
 });
-export type OrcaLiquidityOperation = 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT';
-export const ORCA_LIQUIDITY_OPERATIONS: readonly OrcaLiquidityOperation[] = Object.freeze(['OPEN', 'DECREASE_PARTIAL', 'EXIT']);
+/**
+ * One reviewed owner transaction each. BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT collects the position's trading fees only; it never changes
+ * liquidity and never closes the position.
+ */
+export type OrcaLiquidityOperation = 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT';
+export const ORCA_LIQUIDITY_OPERATIONS: readonly OrcaLiquidityOperation[] = Object.freeze(['OPEN', 'DECREASE_PARTIAL', 'EXIT', 'COLLECT']);

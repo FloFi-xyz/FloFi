@@ -6,8 +6,10 @@ import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createUniswapLiquidityService, type UniswapLiquidityService, type UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
+import type { UniswapPositionRecord, UniswapPositionRequest } from '../server/uniswap-position-service';
+import { forgetWalletPositions } from '../server/defi-positions-cache';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, ethereumSepoliaSwapRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../server/public-testnet-rpc';
-import { UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
+import { UNI_MOCK_CATALOG_PINS, UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
   type CatalogNetworkRuntime } from '../server/catalog-networks';
@@ -61,10 +63,15 @@ function catalogService(network: CatalogNetworkRuntime): UniswapLiquidityService
   if (!journalDir || !isAbsolute(journalDir)) throw new Error('UNISWAP_LIQUIDITY_STORAGE_NOT_CONFIGURED');
   let service = catalogServices.get(network.id);
   if (!service) {
-    service = createUniswapLiquidityService({ storage: createFileExecutionStorage(join(journalDir, 'liquidity'), 'UNISWAP_LIQUIDITY_BUSY'),
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the loopback MOCKED harness (`e2e/base-mainnet-serve.ts`) serves synthetic contract code, so its runs
+    // check the synthetic pins and follow the harness clock, exactly like the Base Sepolia harness above. `live` always uses the verified pins and
+    // the wall clock (the service refuses synthetic pins unless provenance is MOCKED).
+    const harness = mode === 'harness', liquidityDir = join(journalDir, 'liquidity');
+    service = createUniswapLiquidityService({ storage: createFileExecutionStorage(liquidityDir, 'UNISWAP_LIQUIDITY_BUSY'),
       rpc: async () => { throw new Error('UNISWAP_NETWORK_UNAVAILABLE'); }, rpcs: { [network.chain]: network.rpc(mode, process.env, network.liquidityRpcMethods) },
-      provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: network.ownerExecutionEnabled(mode, process.env),
-      catalog: { chain: network.chain, catalogFor: network.catalogFor(mode) } });
+      provenance: harness ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: network.ownerExecutionEnabled(mode, process.env),
+      catalog: { chain: network.chain, catalogFor: network.catalogFor(mode), ...harness ? { codePins: UNI_MOCK_CATALOG_PINS } : {} },
+      ...harness ? { mockedCodePins: UNI_MOCK_CODE_PINS, now: harnessClock(liquidityDir) } : {} });
     catalogServices.set(network.id, service);
   }
   return service;
@@ -179,4 +186,53 @@ export async function uniswapLiquidityObserve(id: string) {
 export async function uniswapLiquidityStatus(id: string) {
   return withFlightOwner(async () => { return run('status', [id], s => s.load(id));
   });
+}
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing an existing Uniswap v3 position on a catalog mainnet (collect, partial withdrawal, exit, explicit close).
+ * The same flows and method names as minting (the run id's kind selects the operation), the same Flight gates, and the owner's wallet signs each
+ * request; FloFi never signs or sends. Simulate and Review are read-only.
+ */
+export async function uniswapPositionSimulate(workflow: SemanticWorkflow, owner: string, request: UniswapPositionRequest) {
+  return withFlightAccess(async () => run('simulate', [workflow, owner, request], s => s.positionSimulate(workflow, owner, request)));
+}
+export async function uniswapPositionRefresh(id: string) {
+  return withFlightAccess(async () => run('refresh', [id], s => s.positionRefresh(id)));
+}
+export async function uniswapPositionReview(id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => run('review', [id, commitment, workflow], s => s.positionReview(id, commitment, workflow)));
+}
+export async function uniswapPositionInvalidate(id: string) {
+  return withFlightOwner(async () => run('invalidate', [id], s => s.positionInvalidate(id)));
+}
+export async function uniswapPositionBegin(id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => run('begin', [id, owner, workflow], s => s.positionBegin(id, owner, workflow)));
+}
+export async function uniswapPositionHandoff(id: string) {
+  return withFlightAccess(async () => run('handoff', [id], s => s.positionHandoff(id)));
+}
+export async function uniswapPositionReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
+  return withFlightOwner(async () => run('report', [id, result], s => s.positionReport(id, result)));
+}
+export async function uniswapPositionWalletFailure(id: string, diagnostic: UniswapWalletDiagnostic) {
+  return withFlightOwner(async () => run('walletFailure', [id, diagnostic], s => s.positionWalletFailure(id, diagnostic)));
+}
+export async function uniswapPositionObserve(id: string) {
+  return withFlightOwner(async () => landed(await run('observe', [id], s => s.positionObserve(id))));
+}
+export async function uniswapPositionStatus(id: string) {
+  return withFlightOwner(async () => landed(await run('status', [id], s => s.positionStatus(id))));
+}
+/**
+ * A position operation that reached a final verdict changed the owner's positions on chain: the Dashboard's cached scan of that wallet from before
+ * it is dropped (`forgetWalletPositions`), so the owner never keeps reading the pre-operation facts. Read-only; the result is returned unchanged.
+ */
+function landed<T>(result: { ok: true; value: T } | { ok: false; code: string }) {
+  if (result.ok) {
+    const record = result.value as Partial<UniswapPositionRecord> | null;
+    if (record?.format === 'flofi.uniswap-position-run.v1' && record.owner && (record.verdict === 'RECONCILED' || record.verdict === 'DIVERGENT'))
+      forgetWalletPositions({ namespace: 'eip155', address: record.owner.toLowerCase() },
+        Date.parse(record.evidence?.observedAt ?? record.attempts?.findLast(a => a.transactionHash)?.createdAt ?? ''));
+  }
+  return result;
 }

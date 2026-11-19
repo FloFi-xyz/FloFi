@@ -17,6 +17,7 @@ import { uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
 import { transferDetails } from './robinhood-transfer-authoring';
 import { catalogSwapDetails } from './catalog-swap-authoring';
+import { liquidityPositionSummaryOf, type LiquidityPositionSummary } from './liquidity-position-summary';
 
 /** Display projections only. No editable values, validation rules or execution states live here. */
 export function composerActions(workflow: Workflow) {
@@ -59,7 +60,18 @@ const providerLabels: Record<string, string> = {
   'solana.system-transfer': 'System Program', 'solana.spl-transfer': 'SPL Token',
   'evm.native-transfer': 'Wallet send', 'evm.token-transfer': 'Token transfer',
 };
-export function composerSummary(workflow: Workflow, node: Workflow['nodes'][number], context: ReviewContext) {
+/** What a Canvas card, the Simulate panel, the Review and the chat say about one step (display only). */
+export type ComposerSummary = { action: string; provider: string; chain: string; amount: string; detail: string | undefined; bridgePair: string | undefined; linked: boolean;
+  liquidityValues?: { amount: string; token: string }[];
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the step manages an existing position (its management marker); it never deposits. */
+  position?: LiquidityPositionSummary;
+  risk: string | undefined };
+export function composerSummary(workflow: Workflow, node: Workflow['nodes'][number], context: ReviewContext): ComposerSummary {
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management step names its operation and its position ("Remove 50% of liquidity · Uniswap v3
+  // position #123"), never "Pool / Liquidity" with the node's descriptive maxima as if they were deposited (no deposit inputs, no pool editing).
+  const managed = liquidityPositionSummaryOf(node);
+  if (managed) return { action: managed.title, provider: managed.provider, chain: shellChainLabel(node.chainId), amount: managed.subject, detail: managed.pair ?? undefined,
+    bridgePair: undefined, linked: false, position: managed, risk: undefined };
   // BUILD-RH-002: a catalog swap reads its assets from the network catalog; buying a Stock Token with USDG is the Stocks card.
   const catalogSwap = catalogSwapDetails(node);
   const action = catalogSwap?.stockPurchase ? 'Stocks' : actionLabels[node.actionType] ?? 'Action';

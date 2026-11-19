@@ -13,6 +13,7 @@ import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, create
 import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, authoringAssetSymbol, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
+import { workflowPositionManagement } from './liquidity-positions';
 import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS } from './slippage-policy';
 import { CATALOG_LIQUIDITY_NETWORKS, createCatalogLiquidityNode, catalogLiquidityDetails, robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, type CatalogLiquidityNetwork } from './robinhood-liquidity-authoring';
 
@@ -228,6 +229,9 @@ export function selectCryptoToken(selection: CryptoSelection, side: 'source' | '
 }
 type Node = Workflow['nodes'][number];
 export function cryptoSelectionOf(node: Node): CryptoSelection | null {
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a step that manages an existing position is that position's own node: its network, pair and range are the
+  // position's, never re-picked on the Canvas (a pool selection would re-author it as a deposit). The owner changes it from the Dashboard or chat.
+  if (workflowPositionManagement({ nodes: [node] })) return null;
   const network = [...swaps, ...pools, ...lending, ...transfers].find(profile => profile.chain === node.chainId)?.network;
   if (!network) return null;
   const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);

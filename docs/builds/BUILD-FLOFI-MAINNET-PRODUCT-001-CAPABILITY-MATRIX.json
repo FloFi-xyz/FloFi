@@ -1289,17 +1289,17 @@
       "channels": {
         "canvas": true,
         "approve": false,
-        "copilot": false,
+        "copilot": true,
         "mcp": false,
         "telegram": false,
         "whatsapp": "POLICY_BLOCKED",
         "developerApi": false
       },
-      "agentRollout": "orca-liquidity-mainnet",
+      "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
       "status": "IMPLEMENTED_UNCERTIFIED",
-      "reason": "Same Orca engine on mainnet-beta, Canvas only, behind GRYLOO_ORCA_MAINNET and the owner-execution gate."
+      "reason": "Partial withdrawal (any share the owner chooses) or full exit on the verified Orca SOL/USDC pool (an Orca exit always closes the position), for positions FloFi opened or the chain verifies as the owner's own; Canvas (Editor stages) and Web Chat, behind GRYLOO_ORCA_MAINNET and the owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
     },
     {
       "id": "remove-liquidity-base",
@@ -1310,13 +1310,13 @@
       "protocols": [
         "uniswap.v3"
       ],
-      "flow": null,
-      "webRuntime": null,
-      "ownerWalletExecutionImplemented": false,
+      "flow": "base-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
+        "canvas": true,
         "approve": false,
-        "copilot": false,
+        "copilot": true,
         "mcp": false,
         "telegram": false,
         "whatsapp": "POLICY_BLOCKED",
@@ -1325,8 +1325,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "NOT_IMPLEMENTED",
-      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Partial withdrawal (any share the owner chooses) or full exit of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
     },
     {
       "id": "remove-liquidity-arbitrum-one",
@@ -1337,13 +1337,13 @@
       "protocols": [
         "uniswap.v3"
       ],
-      "flow": null,
-      "webRuntime": null,
-      "ownerWalletExecutionImplemented": false,
+      "flow": "arbitrum-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
+        "canvas": true,
         "approve": false,
-        "copilot": false,
+        "copilot": true,
         "mcp": false,
         "telegram": false,
         "whatsapp": "POLICY_BLOCKED",
@@ -1352,8 +1352,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "NOT_IMPLEMENTED",
-      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Partial withdrawal (any share the owner chooses) or full exit of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
     },
     {
       "id": "remove-liquidity-ethereum",
@@ -1364,13 +1364,13 @@
       "protocols": [
         "uniswap.v3"
       ],
-      "flow": null,
-      "webRuntime": null,
-      "ownerWalletExecutionImplemented": false,
+      "flow": "ethereum-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
+        "canvas": true,
         "approve": false,
-        "copilot": false,
+        "copilot": true,
         "mcp": false,
         "telegram": false,
         "whatsapp": "POLICY_BLOCKED",
@@ -1379,8 +1379,8 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "NOT_IMPLEMENTED",
-      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Partial withdrawal (any share the owner chooses) or full exit of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
     },
     {
       "id": "remove-liquidity-robinhood",
@@ -1391,13 +1391,13 @@
       "protocols": [
         "uniswap.v3"
       ],
-      "flow": null,
-      "webRuntime": null,
-      "ownerWalletExecutionImplemented": false,
+      "flow": "robinhood-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
       "channels": {
-        "canvas": false,
+        "canvas": true,
         "approve": false,
-        "copilot": false,
+        "copilot": true,
         "mcp": false,
         "telegram": false,
         "whatsapp": "POLICY_BLOCKED",
@@ -1406,8 +1406,143 @@
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "NOT_IMPLEMENTED",
-      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Partial withdrawal (any share the owner chooses) or full exit of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
+    },
+    {
+      "id": "collect-liquidity-fees-solana",
+      "action": "collect_liquidity_fees",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "orca.whirlpools-mainnet-liquidity"
+      ],
+      "flow": "orca-liquidity-mainnet",
+      "webRuntime": "solana-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": false,
+        "copilot": true,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Collect owed tokens and fees (liquidity unchanged) on the verified Orca SOL/USDC pool (an Orca exit always closes the position), for positions FloFi opened or the chain verifies as the owner's own; Canvas (Editor stages) and Web Chat, behind GRYLOO_ORCA_MAINNET and the owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
+    },
+    {
+      "id": "collect-liquidity-fees-base",
+      "action": "collect_liquidity_fees",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "base-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": false,
+        "copilot": true,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Collect owed tokens and fees (liquidity unchanged) of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
+    },
+    {
+      "id": "collect-liquidity-fees-arbitrum-one",
+      "action": "collect_liquidity_fees",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "arbitrum-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": false,
+        "copilot": true,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Collect owed tokens and fees (liquidity unchanged) of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
+    },
+    {
+      "id": "collect-liquidity-fees-ethereum",
+      "action": "collect_liquidity_fees",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "ethereum-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": false,
+        "copilot": true,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Collect owed tokens and fees (liquidity unchanged) of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
+    },
+    {
+      "id": "collect-liquidity-fees-robinhood",
+      "action": "collect_liquidity_fees",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "robinhood-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": false,
+        "copilot": true,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Collect owed tokens and fees (liquidity unchanged) of the owner's Uniswap v3 position NFT on the network's verified catalog pool: one atomic NonfungiblePositionManager request (decrease + collect [+ burn only when the owner asks to close]); Canvas (Editor stages) and Web Chat, behind the network's liquidity runtime and owner-execution gate. MCP, Telegram and the Developer API cannot manage positions."
     },
     {
       "id": "sequence-user-funded-groups",

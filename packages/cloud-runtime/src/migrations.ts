@@ -82,10 +82,13 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
   {
     // FinOps is optional at v28. 0029 adds the ledger and 0030 adds
     // isolated schedules and meter snapshots. Neither is applied by default.
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: 0031 redefines only 0016's snapshot predicate so owner-requested disposal also recognizes
+    // provably unstarted Uniswap position-management simulations. Applied by an operator command on exact schema 30; never by default.
     base: { version: 28, name: 'saved_recipients', sha256: 'ee73e909b6747c47c0bca877c8621d55229348177f0e7c6d68e47000a8fca64f' },
     migrations: [{ version: 29, name: 'finops_ledger', sha256: '9c04f837b7409622b6b485a21facafb25ce1d579ea2bd492ae859e71795c8de7' },
-      { version: 30, name: 'finops_sync', sha256: '63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b' }],
-    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#22-certificate-0030_finops_sync',
+      { version: 30, name: 'finops_sync', sha256: '63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b' },
+      { version: 31, name: 'position_history_purge', sha256: 'c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#23-certificate-0031_position_history_purge',
   },
   {
     // BUILD-FLOFI-UNIFIED-COPILOT-001 (Release A): the v27 build keeps working on a database with 0028 — one new table, flofi_account_recipients

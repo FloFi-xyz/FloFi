@@ -2,7 +2,7 @@
 /** Read-only projection of existing attempts, observations and reconciliation. */
 import type { ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 import type { ExecutionLifecycle, ExecutionLifecycleSource, LifecycleStep } from './execution-lifecycle';
-import { simulationAmount } from './simulation-presentation';
+import { isUniswapPositionRecord, simulationAmount } from './simulation-presentation';
 import { quoteDecimals } from './public-testnet-swap';
 
 export type EvidenceComparison = { label: string; planned: string; actual: string };
@@ -84,7 +84,16 @@ export function projectExecutionStepEvidence(source: ExecutionLifecycleSource, p
       break;
     }
     case 'uniswap-pool': {
-      for (const attempt of source.state.record?.attempts ?? []) add(attempt.step, attempt.reconciled);
+      const record = source.state.record;
+      if (isUniswapPositionRecord(record)) {
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation reconciles from its receipt events; the principal it returned against the Review.
+        const q = record.review, result = record.result, done = record.verdict === 'RECONCILED' && Boolean(result);
+        for (const attempt of record.attempts) add(attempt.step, attempt.reconciled && done, false, attempt.reconciled && done && result && result.liquidityRemoved !== '0' ? [
+          ...comparison('Principal returned · Token 1', q.expected.principal0, result.principal0, q.token0.decimals, q.token0.symbol),
+          ...comparison('Principal returned · Token 2', q.expected.principal1, result.principal1, q.token1.decimals, q.token1.symbol)] : []);
+        break;
+      }
+      for (const attempt of record?.attempts ?? []) add(attempt.step, attempt.reconciled);
       break;
     }
     case 'solana-swap': case 'solana-pool': case 'solana-transfer': {

@@ -16,8 +16,12 @@ export const UNISWAP_REFRESH_IN_PLACE = /^UNISWAP_(?:REVIEW_EXPIRED|STATE_CHANGE
 /** The run log holds at most 16 attempts; a continuation keeps room for the (at most three) remaining requests. */
 const ATTEMPT_ROOM = 16 - 3;
 
-/** A confirmed, reconciled approval: evidence that stays, never authority for what follows. */
-export const confirmedApproval = (a: Attempt) => a.step !== 'MINT' && a.state === 'CONFIRMED' && a.reconciled;
+/**
+ * A confirmed, reconciled approval: evidence that stays, never authority for what follows. BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (defence in depth):
+ * only an exact APPROVE_* step counts. A position-management step (COLLECT / DECREASE / EXIT) is never an approval, so a confirmed withdrawal
+ * can never make a position run "resumable" by the mint continuation.
+ */
+export const confirmedApproval = (a: Attempt) => /^APPROVE_TOKEN[01]$/.test(a.step) && a.state === 'CONFIRMED' && a.reconciled;
 /**
  * Every attempt of the run is either a confirmed, reconciled approval or was cancelled before any broadcast (no hash): nothing of it is
  * pending, unknown, reverted or minted, so a refreshed Review of the same run can never repeat or race a request. Anything else keeps the
@@ -48,4 +52,34 @@ export function uniswapReviewAuthorizable(record: Run | null | undefined): boole
 /** The run's attempts that still hold their step: a never-sent attempt of an earlier Review (superseded by a refresh) does not. */
 export function currentUniswapAttempts<T extends Attempt>(record: { readonly attempts: readonly T[]; readonly review: { readonly commitment: string } }): T[] {
   return record.attempts.filter(a => !supersededUnsent(a, record.review.commitment));
+}
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap position run (one wallet request per run) whose Review stopped standing before that request
+ * (expired, the position or pool moved, fees moved) is refreshed in place exactly like a mint run (`requoted`): the server refused before any
+ * nonce reservation or wallet request, so nothing was sent, and the refreshed Review waits for the owner's explicit authorization.
+ */
+export const UNISWAP_POSITION_REFRESH_IN_PLACE = /^(?:UNISWAP_(?:REVIEW_EXPIRED|POSITION_STATE_CHANGED_REVIEW_REQUIRED|STATE_CHANGED_REVIEW_REQUIRED|FEES_CHANGED_REVIEW_REQUIRED|GAS_CHANGED_REVIEW_REQUIRED|L1_FEES_CHANGED_REVIEW_REQUIRED)|STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED)$/;
+type PositionRun = { readonly format: 'flofi.uniswap-position-run.v1'; readonly verdict: string; readonly attempts: readonly Attempt[] };
+/**
+ * A position run may be refreshed in place only while nothing of it can have reached the network: every attempt was cancelled before any
+ * broadcast (no hash). A confirmed, pending, unknown or reverted operation never gets a new Review on the same run (the server refuses it too).
+ */
+export function uniswapPositionRunResumable(record: PositionRun | null | undefined): boolean {
+  if (!record || record.format !== 'flofi.uniswap-position-run.v1' || record.verdict !== 'PENDING' || record.attempts.length > ATTEMPT_ROOM) return false;
+  return record.attempts.every(a => a.state === 'CANCELLED' && !a.transactionHash && !a.replacementHash);
+}
+/** The current Review of a position run may be authorized: no attempt yet, or only never-sent attempts of EARLIER Reviews (refreshed since). */
+export function uniswapPositionReviewAuthorizable(record: (PositionRun & { readonly review: { readonly commitment: string } }) | null | undefined): boolean {
+  if (!record || record.format !== 'flofi.uniswap-position-run.v1' || record.verdict !== 'PENDING') return false;
+  return record.attempts.every(a => supersededUnsent(a, record.review.commitment));
+}
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (Editor C2, "Refresh review"): Simulate again / Refresh review of a position workflow refreshes the SAME run
+ * in place — a fresh read-only simulation and Review of the same request, nothing sent — when that run still stands for this workflow and choice
+ * (`retired` false), nothing of it can have reached the network (`uniswapPositionRunResumable`) and the connected wallet is the run's owner.
+ * Otherwise a new simulation starts (another wallet or choice); a run that is final or holds a sent request is never refreshed, only observed.
+ */
+export function uniswapPositionRefreshInPlace(record: (PositionRun & { readonly owner: string }) | null | undefined, retired: boolean, account: string | null | undefined): boolean {
+  return Boolean(record && !retired && account && account.toLowerCase() === record.owner.toLowerCase() && uniswapPositionRunResumable(record));
 }

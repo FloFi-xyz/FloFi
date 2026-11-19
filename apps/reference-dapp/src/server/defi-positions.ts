@@ -14,6 +14,9 @@ import { aavePositions, POSITION_EVM_METHODS, uniswapPositions, UNISWAP_POSITION
 import { orcaPositions } from './defi-positions-solana';
 import { cloudFlowMode } from './flow-runtime';
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc';
+import { ORCA_MAINNET_HARNESS_RPC } from './orca-mainnet-harness';
+import { recordLiquidityOutcome } from './liquidity-lifecycle-telemetry';
+import { positionScanCache, type CachedPositionScan } from './defi-positions-cache';
 import { CANONICAL_STABLECOINS, defaultMode, EVM_NETWORKS } from './wallet-portfolio';
 
 const registeredAssets: Readonly<Record<CatalogNetworkId, readonly CanonicalAsset[]>> = {
@@ -23,7 +26,9 @@ const registeredAssets: Readonly<Record<CatalogNetworkId, readonly CanonicalAsse
 const SOLANA_SETUP = { protocol: 'Orca Whirlpools', network: ORCA.network, chain: ORCA.chain } as const;
 const CACHE_LIMIT = 200, COMPLETE_TTL_MS = 30_000, PARTIAL_TTL_MS = 5_000, BUDGET_MS = 12_000;
 const limiter = createCopilotLimiter({ windowMs: 60_000, maxConcurrent: 2, maxPerWindow: 16 });
-const cache = new Map<string, { readonly read: Promise<readonly PositionScan[]>; expires: number }>();
+type CachedScan = CachedPositionScan;
+/** The shared per-wallet scan cache (server/defi-positions-cache.ts), which position actions reach without importing this module. */
+const cache: Map<string, CachedScan> = positionScanCache;
 let processPriceSource: PriceSource | null | undefined;
 
 function snapshotState(source: Pick<PositionScan, 'protocol' | 'network' | 'chain'>, status: PositionScan['status']): PositionScan {
@@ -103,31 +108,56 @@ function evmScans(owner: string, now: Date, signal: AbortSignal): readonly Promi
         const mode = await defaultMode(id, process.env);
         if (mode === 'off') return snapshotState(uniswap, 'NETWORK_UNAVAILABLE');
         const rpc = rpcBeforeDeadline(network.rpc(mode, process.env, POSITION_EVM_METHODS), signal);
-        return { ...uniswap, ...await uniswapPositions(rpc, UNISWAP_POSITION_DEPLOYMENTS[id], owner, now, registeredAssets[id], unvalued, mode === 'live'),
-          provenance: mode === 'live' ? 'PUBLIC_MAINNET' : 'MOCKED' };
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the network's validated catalog decides which pools FloFi can manage; if it cannot be read in time,
+        // positions are still shown but no operation is offered.
+        const catalog = await budget(network.catalogFor(mode)(network.chain), signal).catch(() => null);
+        return { ...uniswap, ...await uniswapPositions(rpc, UNISWAP_POSITION_DEPLOYMENTS[id], owner, now, registeredAssets[id], unvalued, mode === 'live',
+          { network: network.name, catalog }), provenance: mode === 'live' ? 'PUBLIC_MAINNET' : 'MOCKED' };
       }),
     ];
   });
 }
+type Env = Readonly<Record<string, string | undefined>>;
+/**
+ * Where the Dashboard reads Orca positions on Solana mainnet-beta (`cloud`: the deployment's `orca-liquidity-mainnet` mode, null in local mode):
+ * the configured (or public) mainnet RPC when that flow is live. BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a local server running the MOCKED Orca
+ * mainnet harness (`GRYLOO_ORCA_MAINNET_HARNESS=MOCKED_LOOPBACK_ONLY`, the same switch as the app's Orca mainnet runtime) reads only the loopback
+ * copy of the pool, as MOCKED, never a public endpoint; a hosted deployment never reads the harness. Null: no position read here.
+ */
+export function solanaPositionSource(env: Env, cloud: string | null): { readonly endpoint: string; readonly loopback: boolean; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED' } | null {
+  const harness = env.GRYLOO_ORCA_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY';
+  if (cloud === null && harness) return isHostedDeployment(env) ? null : { endpoint: ORCA_MAINNET_HARNESS_RPC, loopback: true, provenance: 'MOCKED' };
+  if ((cloud ?? (env.GRYLOO_ORCA_MAINNET === 'live' ? 'live' : 'off')) !== 'live') return null;
+  return { endpoint: solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'POSITION_SOLANA_RPC_CONFIGURATION_INVALID') ?? ORCA.rpc, loopback: false, provenance: 'PUBLIC_MAINNET' };
+}
 async function solanaScan(owner: string, now: Date, signal: AbortSignal): Promise<PositionScan> {
-  const localEnabled = process.env.GRYLOO_ORCA_MAINNET === 'live' && process.env.GRYLOO_ORCA_MAINNET_HARNESS !== 'MOCKED_LOOPBACK_ONLY';
-  const mode = (await cloudFlowMode('orca-liquidity-mainnet')) ?? (localEnabled ? 'live' : 'off');
-  if (mode !== 'live') return snapshotState(SOLANA_SETUP, 'NETWORK_UNAVAILABLE');
-  const endpoint = solanaRpcOverride(process.env.GRYLOO_SOLANA_RPC_URL, 'POSITION_SOLANA_RPC_CONFIGURATION_INVALID') ?? ORCA.rpc;
-  const transport = createSolanaRpc(endpoint, false);
+  const source = solanaPositionSource(process.env, await cloudFlowMode('orca-liquidity-mainnet'));
+  if (!source) return snapshotState(SOLANA_SETUP, 'NETWORK_UNAVAILABLE');
+  const transport = createSolanaRpc(source.endpoint, source.loopback);
   const rpc = rpcBeforeDeadline((method, params) => {
     if (method !== 'getGenesisHash' && method !== 'getTokenAccountsByOwner' && method !== 'getMultipleAccounts')
       return Promise.reject(new Error('POSITION_SOLANA_METHOD_DENIED'));
     return transport(method, params);
   }, signal);
-  return { ...SOLANA_SETUP, ...await orcaPositions(rpc, owner, now, unvalued), provenance: 'PUBLIC_MAINNET' };
+  return { ...SOLANA_SETUP, ...await orcaPositions(rpc, owner, now, unvalued), provenance: source.provenance };
 }
 
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: content-free discovery outcomes per liquidity network (bucketed counts; no address or position id). */
+function discoveryOutcomes(scans: readonly PositionScan[]): void {
+  for (const scan of scans) {
+    if (scan.protocol === 'Aave V3' || scan.status === 'UNSUPPORTED' || scan.status === 'NETWORK_UNAVAILABLE') continue;
+    const protocol = scan.protocol === 'Orca Whirlpools' ? 'ORCA' as const : 'UNISWAP_V3' as const, provenance = scan.provenance ?? 'UNKNOWN';
+    if (scan.status !== 'UNAVAILABLE')
+      recordLiquidityOutcome({ outcome: 'POSITIONS_DISCOVERED', protocol, network: scan.network, count: scan.positions.filter(position => position.liquidity).length, provenance });
+    if (scan.status !== 'COMPLETE') recordLiquidityOutcome({ outcome: 'INSPECTION_UNAVAILABLE', protocol, network: scan.network, code: `POSITION_SCAN_${scan.status}`, provenance });
+  }
+}
 async function readPositions(owner: PositionWallet): Promise<readonly PositionScan[]> {
   const started = new Date();
   const signal = AbortSignal.timeout(BUDGET_MS);
   const scans = await Promise.all(owner.namespace === 'eip155' ? evmScans(owner.address, started, signal)
     : [scanOne(SOLANA_SETUP, signal, () => solanaScan(owner.address, started, signal))]);
+  discoveryOutcomes(scans);
   const requested = new Set<PriceFeedAsset>();
   for (const scan of scans) {
     if (scan.provenance !== 'PUBLIC_MAINNET') continue;
@@ -149,7 +179,7 @@ export function readWalletPositions(owner: PositionWallet): Promise<readonly Pos
   const release = limiter.acquire();
   if (!release) return Promise.reject(new Error('POSITION_SCAN_BUSY'));
   const read = readPositions(owner).finally(release);
-  const entry = { read, expires: now + BUDGET_MS };
+  const entry = { read, startedAt: now, expires: now + BUDGET_MS };
   cache.set(key, entry);
   void read.then(scans => {
     entry.expires = Date.now() + (scans.every(scan => scan.status === 'COMPLETE' || scan.status === 'UNSUPPORTED') ? COMPLETE_TTL_MS : PARTIAL_TTL_MS);
@@ -157,3 +187,5 @@ export function readWalletPositions(owner: PositionWallet): Promise<readonly Pos
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
   return read;
 }
+/** Re-exported for the Dashboard's own callers and tests. */
+export { forgetWalletPositions } from './defi-positions-cache';

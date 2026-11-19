@@ -23,8 +23,9 @@ const SETTLEMENT: Readonly<Record<string, Settlement>> = {
   'asset.swap.exact-input|uniswap.v3': { proof: 'Reviewed calldata; owner Transfer of the exact input, pool and router WETH movements, WETH9 Withdrawal for native ETH out; balance lower bound when the window is the owner\'s alone; EIP-7702 shapes verified; 0x Gasless settlements from the trade\'s own logs and Permit2 nonce',
     finality: 'Transfer-profile confirmation depth (2 on L2, 3 on Ethereum), canonical block re-read until then', suites: SWAP_SUITES },
   'asset.swap.exact-input|weth9.wrap': { proof: 'Exactly one WETH9 Deposit or Withdrawal of the amount for the owner', finality: 'Transfer-profile confirmation depth', suites: [S + 'base-swap.test.ts'] },
-  'asset.liquidity.concentrated|uniswap.v3': { proof: 'Approval and IncreaseLiquidity events, position NFT owner, token balance deltas', finality: 'Transfer-profile confirmation depth',
-    suites: [S + 'robinhood-liquidity.test.ts', S + 'arbitrum-liquidity.test.ts', S + 'base-liquidity.test.ts', S + 'ethereum-liquidity.test.ts'] },
+  'asset.liquidity.concentrated|uniswap.v3': { proof: 'Mint: Approval and IncreaseLiquidity events, position NFT owner, token balance deltas. Position management (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001): the reviewed request only; DecreaseLiquidity and the pool Burn of exactly the reviewed liquidity at or above the minimums, one Collect to the owner with pool → owner token transfers, nothing leaving the owner, the position read back at the receipt block (remaining liquidity, nothing owed) or burned (Transfer to zero, ownerOf reverts), and owner balance deltas',
+    finality: 'Transfer-profile confirmation depth', suites: [S + 'robinhood-liquidity.test.ts', S + 'arbitrum-liquidity.test.ts', S + 'base-liquidity.test.ts', S + 'ethereum-liquidity.test.ts',
+      S + 'uniswap-position-service.test.ts'] },
   'asset.transfer|evm.native-transfer': { proof: 'The owner\'s own transaction to/value and the exact owner balance change when it is the owner\'s only transaction in the block; relayed native transfers refused',
     finality: 'Profile minimumConfirmations, reorg re-check', suites: ['packages/reference-reconciler/test/native-transfer.test.ts', S + 'robinhood-transfer-mainnet.test.ts', S + 'smart-account-transfer.test.ts'] },
   'asset.transfer|evm.token-transfer': { proof: 'Exact ERC-20 Transfer logs and both balances', finality: 'Profile minimumConfirmations, reorg re-check',
@@ -37,8 +38,9 @@ const SETTLEMENT: Readonly<Record<string, Settlement>> = {
   'asset.swap.exact-input|jupiter.swap-v2': { proof: 'Finalized transaction and its own pre/post token balances, fee accounted', finality: 'Finalized commitment', suites: [S + 'jupiter-service.test.ts'] },
   'asset.transfer|solana.system-transfer': { proof: 'Finalized transaction meta balances', finality: 'Finalized commitment', suites: [S + 'solana-transfer-service.test.ts'] },
   'asset.transfer|solana.spl-transfer': { proof: 'Finalized transaction token balances', finality: 'Finalized commitment', suites: [S + 'solana-transfer-service.test.ts'] },
-  'asset.liquidity.concentrated|orca.whirlpools-mainnet-liquidity': { proof: 'Finalized transaction and the position account', finality: 'Finalized commitment',
-    suites: [S + 'orca-mainnet-liquidity-service.test.ts', 'packages/reference-reconciler/test/orca-mainnet-liquidity.test.ts'] },
+  'asset.liquidity.concentrated|orca.whirlpools-mainnet-liquidity': { proof: 'Finalized transaction and the position account; COLLECT (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001): the fee checkpoint and collect_fees_v2 vault outflows to the owner with liquidity and principal unchanged and the position authority re-verified',
+    finality: 'Finalized commitment',
+    suites: [S + 'orca-mainnet-liquidity-service.test.ts', 'packages/reference-reconciler/test/orca-mainnet-liquidity.test.ts', 'packages/reference-compiler/test/orca-mainnet-liquidity.test.ts'] },
 };
 /** How a step's settlement reaches every surface, for every row above. */
 const PROPAGATION = [

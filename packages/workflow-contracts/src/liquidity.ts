@@ -133,3 +133,50 @@ export function readConcentratedLiquiditySource(node: ConcentratedLiquidityNode)
   const source: ConcentratedLiquiditySource = { token: last.name === LIQUIDITY_SOURCE_INPUTS[0] ? 0 : 1, nodeId: last.value.nodeId, outputId: last.value.outputId };
   return { node: { ...node, inputs: node.inputs.slice(0, -1), dependencies: [] }, source };
 }
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing an existing position. The canonical node of a position-management workflow is the position's own
+ * isolated node (its exact pair, fee tier and ticks; the maxima are descriptive) plus ONE extra IDENTIFIER input naming the operation and the
+ * position: `COLLECT:<id>`, `DECREASE:<id>:<bps>` (1–9999) or `EXIT:<id>:close|keep`. Because the operation is in the node, any change of operation,
+ * portion, close or position changes the workflow (revision and hash), so a Review of another choice can never be authorized. The strict reader
+ * above rejects a marked node (one input too many), so a deposit runtime never accepts one: a management workflow is never compiled as a deposit.
+ */
+export const LIQUIDITY_MANAGEMENT_INPUT = 'position-management';
+export type ConcentratedLiquidityOperation = 'COLLECT' | 'DECREASE' | 'EXIT';
+export type ConcentratedLiquidityManagement = {
+  /** A Uniswap v3 NonfungiblePositionManager token id (decimal) or an Orca position mint (base58). */
+  readonly positionId: string; readonly operation: ConcentratedLiquidityOperation;
+  /** Basis points of the position's liquidity, for DECREASE only (1–9999); null otherwise. */
+  readonly partBps: number | null;
+  /** EXIT only: also close (burn) the position. */
+  readonly close: boolean;
+};
+const POSITION_ID = '([1-9][0-9]{0,77}|[1-9A-HJ-NP-Za-km-z]{32,44})';
+const MANAGEMENT = new RegExp(`^(?:COLLECT:${POSITION_ID}|DECREASE:${POSITION_ID}:([1-9][0-9]{0,3})|EXIT:${POSITION_ID}:(close|keep))$`);
+function managementValue(m: ConcentratedLiquidityManagement): string {
+  if (!m || typeof m !== 'object' || typeof m.positionId !== 'string' || typeof m.close !== 'boolean') throw new Error('LIQUIDITY_MANAGEMENT_INVALID');
+  const value = m.operation === 'COLLECT' && m.partBps === null && !m.close ? `COLLECT:${m.positionId}`
+    : m.operation === 'DECREASE' && Number.isSafeInteger(m.partBps) && m.partBps! >= 1 && m.partBps! <= 9_999 && !m.close ? `DECREASE:${m.positionId}:${m.partBps}`
+      : m.operation === 'EXIT' && m.partBps === null ? `EXIT:${m.positionId}:${m.close ? 'close' : 'keep'}` : null;
+  if (value === null || !MANAGEMENT.test(value)) throw new Error('LIQUIDITY_MANAGEMENT_INVALID');
+  return value;
+}
+/** Marks an isolated, unmarked concentrated-liquidity node as the management of one existing position. */
+export function markConcentratedLiquidityManagement(node: ConcentratedLiquidityNode, management: ConcentratedLiquidityManagement): ConcentratedLiquidityNode {
+  if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || node.dependencies.length !== 0 || node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') ||
+      node.inputs.some(input => input.name === LIQUIDITY_MANAGEMENT_INPUT)) throw new Error('LIQUIDITY_MANAGEMENT_INVALID');
+  return { ...node, inputs: [...node.inputs, { name: LIQUIDITY_MANAGEMENT_INPUT, kind: 'IDENTIFIER', value: managementValue(management) }] };
+}
+/** Splits a node into its unmarked node and its management, if any. A malformed, duplicated or bound marker fails closed. */
+export function readConcentratedLiquidityManagement(node: ConcentratedLiquidityNode): { readonly node: ConcentratedLiquidityNode; readonly management: ConcentratedLiquidityManagement | null } {
+  const marks = node.inputs.filter(input => input.name === LIQUIDITY_MANAGEMENT_INPUT);
+  if (!marks.length) return { node, management: null };
+  const mark = marks[0]!;
+  const match = marks.length === 1 && mark.kind === 'IDENTIFIER' && typeof mark.value === 'string' ? MANAGEMENT.exec(mark.value) : null;
+  if (!match || node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || node.dependencies.length !== 0 || node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE'))
+    throw new Error('LIQUIDITY_MANAGEMENT_INVALID');
+  const management: ConcentratedLiquidityManagement = match[1] !== undefined ? { positionId: match[1], operation: 'COLLECT', partBps: null, close: false }
+    : match[2] !== undefined ? { positionId: match[2], operation: 'DECREASE', partBps: Number(match[3]), close: false }
+      : { positionId: match[4]!, operation: 'EXIT', partBps: null, close: match[5] === 'close' };
+  return { node: { ...node, inputs: node.inputs.filter(input => input.name !== LIQUIDITY_MANAGEMENT_INPUT) }, management };
+}
