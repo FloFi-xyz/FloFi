@@ -7387,7 +7387,8 @@
         "apps/reference-dapp/src/server/wallet-portfolio.ts",
         "apps/reference-dapp/src/server/solana-token-amount.ts",
         "apps/reference-dapp/src/server/wallet-activity.ts",
-        "apps/reference-dapp/src/server/defi-positions.ts"
+        "apps/reference-dapp/src/server/defi-positions.ts",
+        "apps/reference-dapp/src/server/defi-positions-cache.ts"
       ],
       "suites": [
         "action-registry.asset-registry",

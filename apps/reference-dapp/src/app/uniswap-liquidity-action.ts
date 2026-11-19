@@ -7,7 +7,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createUniswapLiquidityService, type UniswapLiquidityService, type UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
 import type { UniswapPositionRecord, UniswapPositionRequest } from '../server/uniswap-position-service';
-import { forgetWalletPositions } from '../server/defi-positions';
+import { forgetWalletPositions } from '../server/defi-positions-cache';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, ethereumSepoliaSwapRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../server/public-testnet-rpc';
 import { UNI_MOCK_CATALOG_PINS, UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';

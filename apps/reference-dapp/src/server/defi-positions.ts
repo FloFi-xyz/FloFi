@@ -16,6 +16,7 @@ import { cloudFlowMode } from './flow-runtime';
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc';
 import { ORCA_MAINNET_HARNESS_RPC } from './orca-mainnet-harness';
 import { recordLiquidityOutcome } from './liquidity-lifecycle-telemetry';
+import { positionScanCache, type CachedPositionScan } from './defi-positions-cache';
 import { CANONICAL_STABLECOINS, defaultMode, EVM_NETWORKS } from './wallet-portfolio';
 
 const registeredAssets: Readonly<Record<CatalogNetworkId, readonly CanonicalAsset[]>> = {
@@ -25,12 +26,9 @@ const registeredAssets: Readonly<Record<CatalogNetworkId, readonly CanonicalAsse
 const SOLANA_SETUP = { protocol: 'Orca Whirlpools', network: ORCA.network, chain: ORCA.chain } as const;
 const CACHE_LIMIT = 200, COMPLETE_TTL_MS = 30_000, PARTIAL_TTL_MS = 5_000, BUDGET_MS = 12_000;
 const limiter = createCopilotLimiter({ windowMs: 60_000, maxConcurrent: 2, maxPerWindow: 16 });
-type CachedScan = { readonly read: Promise<readonly PositionScan[]>; readonly startedAt: number; expires: number };
-/**
- * Held on globalThis: the Dashboard route and the position server actions can run as separate bundles of one server process, and the actions must
- * reach the very cache the route serves (`forgetWalletPositions`).
- */
-const cache: Map<string, CachedScan> = ((globalThis as unknown as Record<symbol, Map<string, CachedScan> | undefined>)[Symbol.for('flofi.defi-positions.cache')] ??= new Map());
+type CachedScan = CachedPositionScan;
+/** The shared per-wallet scan cache (server/defi-positions-cache.ts), which position actions reach without importing this module. */
+const cache: Map<string, CachedScan> = positionScanCache;
 let processPriceSource: PriceSource | null | undefined;
 
 function snapshotState(source: Pick<PositionScan, 'protocol' | 'network' | 'chain'>, status: PositionScan['status']): PositionScan {
@@ -189,14 +187,5 @@ export function readWalletPositions(owner: PositionWallet): Promise<readonly Pos
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
   return read;
 }
-/**
- * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owner's own position operation landed at `changedAt` (its reconciliation time), so a cached scan of that
- * wallet that STARTED before it no longer describes the positions: it is dropped, and the next Dashboard or chat read scans again instead of serving
- * the pre-operation facts for up to 30 s. A scan started after the change is already fresh and kept. Reads nothing; true when a scan was dropped.
- */
-export function forgetWalletPositions(owner: PositionWallet, changedAt: number): boolean {
-  const key = positionsWalletKey(owner), entry = cache.get(key);
-  if (!entry || !Number.isFinite(changedAt) || entry.startedAt >= changedAt) return false;
-  cache.delete(key);
-  return true;
-}
+/** Re-exported for the Dashboard's own callers and tests. */
+export { forgetWalletPositions } from './defi-positions-cache';
