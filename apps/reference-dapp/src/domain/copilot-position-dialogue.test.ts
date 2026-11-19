@@ -11,7 +11,7 @@ import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA } from '@defi-
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { FIXTURE, OTHER_ADDRESS, TEST_WALLET } from './copilot-test-fixtures';
 import { finishTurn, startTurn, type CopilotReply, type CopilotVerified } from './copilot-conversation';
-import { liquidityPositionOperations, type LiquidityPositionView } from './liquidity-positions';
+import { liquidityPositionOperations, workflowPositionManagement, type LiquidityPositionView } from './liquidity-positions';
 import { mergeLiquidityFacts, positionNetworksText, positionScanFacts, readPositionAnswer, type CopilotLiquidityFacts } from './copilot-positions';
 import { glossaryEntries, type LexiconEntry } from './copilot-lexicon';
 import { copilotCopy } from './copilot-messages';
@@ -29,7 +29,10 @@ const ARB_USDC = { symbol: 'USDC', address: '0xaf88d065e77c8cc2239327c5edb3a4322
 const ETH_WETH = { symbol: 'WETH', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', decimals: 18 };
 const ETH_USDC = { symbol: 'USDC', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 };
 type ViewPatch = Partial<Omit<LiquidityPositionView, 'operations'>>;
-const UNISWAP_NETWORKS = { 'eip155:8453': ['Base', BASE_WETH, BASE_USDC], 'eip155:42161': ['Arbitrum One', ARB_WETH, ARB_USDC], 'eip155:1': ['Ethereum', ETH_WETH, ETH_USDC] } as const;
+const RH_WETH = { symbol: 'WETH', address: '0x0bd7d308f8e1639fab988df18a8011f41eacad73', decimals: 18 };
+const RH_USDG = { symbol: 'USDG', address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+const UNISWAP_NETWORKS = { 'eip155:8453': ['Base', BASE_WETH, BASE_USDC], 'eip155:42161': ['Arbitrum One', ARB_WETH, ARB_USDC], 'eip155:1': ['Ethereum', ETH_WETH, ETH_USDC],
+  'eip155:4663': ['Robinhood Chain', RH_WETH, RH_USDG] } as const;
 /** A verified Uniswap v3 view as discovery builds it: the CREATE2 pool of the pinned factory, the pinned position manager, the owner's own NFT. */
 function uniswap(chain: keyof typeof UNISWAP_NETWORKS, positionId: string, patch: ViewPatch = {}): LiquidityPositionView {
   const [network, a, b] = UNISWAP_NETWORKS[chain], profile = catalogPoolOn(chain, a, b, 500);
@@ -364,6 +367,19 @@ describe('the staged workflow, PR #219’s Simulate → Execute flow and the one
       'Depois, o Simular lê a posição de novo e mostra o Resultado da simulação (o que é removido ou coletado, com os valores mínimos); em seguida, você autoriza em Executar. ' +
       'O FloFi nunca autoriza nem assina por você.']));
     for (const reply of [base, eth, orcaReply, pt]) expect(textOf(reply)).not.toMatch(NEVER);
+  });
+  it('manages a Robinhood Chain position too (the fourth catalog network): its own pool, slippage and confirmation depth, staged on its own chain', () => {
+    const rh = uniswap('eip155:4663', '42', { principal: ['1000000000000000000', '3000000000'] });
+    const s = session([rh]);
+    const reply = s.say('Exit my Robinhood Chain position and close it', position('CLOSE', { network: 'ROBINHOOD' }))!;
+    expect(choiceOf(reply).choice).toEqual({ position: rh.ref, operation: 'EXIT', partBps: null, close: true });
+    expect(reply.notes).toContain('Position operation: no token approval; your wallet is asked for one request, a single transaction to the Uniswap v3 position manager on ' +
+      'Robinhood Chain, and FloFi records the result after 2 confirmations.');
+    s.apply();
+    expect(s.workflow.nodes.filter(node => !node.actionType.startsWith('mock-')).map(node => [node.actionType, node.chainId])).toEqual([['asset.liquidity.concentrated', 'eip155:4663']]);
+    // The canonical workflow carries the marker the runtimes read (the same one the chat describes).
+    expect(workflowPositionManagement(s.workflow)).toEqual({ protocol: 'UNISWAP_V3', chain: 'eip155:4663',
+      management: { positionId: '42', operation: 'EXIT', partBps: null, close: true } });
   });
   it('describes the staged workflow from its canonical marker — collect / remove N% / exit [and close] — never as adding liquidity (EN and PT)', () => {
     const s = session();
