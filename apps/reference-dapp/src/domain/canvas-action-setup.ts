@@ -26,7 +26,7 @@ import { abbreviatedAssetReference, createUniversalBridgeFromInput, universalBri
 /** `cryptoRecipient` (UX-001): the Send card's typed "To" text, committed only as the transfer's canonical `recipient` on Apply. */
 export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string; readonly cryptoRecipient?: string; readonly followOnIssue?: FollowOnSelection['issue'] } &
   ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } |
-  /** `stocks`: the Stocks card (BUILD-RH-002): a Robinhood Chain catalog swap that buys a Stock Token with USDG. */
+  /** `stocks`: a Robinhood Chain catalog swap between a Stock Token and USDG. */
   { readonly action: 'swap'; readonly direction?: Direction; readonly stocks?: true } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
 /**
  * Bridge drafts keep each network's asset reference independently. Assets outside certified fixed routes require a reviewed Universal Router proposal.

@@ -288,7 +288,7 @@ describe('UX-002 canonical composer projections', () => {
       composer: true, step: 1, selected: true, vertical: false,
       summary: { action: 'Stocks', provider: 'Uniswap', chain: 'Robinhood Chain', amount: '0 USDG', detail: 'USDG → AAPL', bridgePair: undefined, linked: false, risk: undefined },
       validation: { findings: [], status: 'Draft', tone: 'neutral', message: undefined, next: undefined },
-      stocks: { equity: 'AAPL', onEquityChange: vi.fn() },
+      stocks: { equity: 'AAPL', side: 'destination', onEquityChange: vi.fn() },
       amountEditor: { value: '0', changed: false, canApply: false, onChange: vi.fn(), onReview: () => null, onApply: vi.fn() },
     } }));
     expect(titled(html)).toContain('1. Stocks'); expect(html).toContain('Uniswap'); expect(html).toContain('Robinhood Chain');

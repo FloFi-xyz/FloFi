@@ -510,6 +510,14 @@
       "path": "apps/reference-dapp/e2e/ux-polish-004.spec.ts",
       "stage": "browser"
     },
+    "app.e2e.owner-history": {
+      "path": "apps/reference-dapp/e2e/owner-history.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.workflow-ux-authoring": {
+      "path": "apps/reference-dapp/e2e/workflow-ux-authoring.spec.ts",
+      "stage": "browser"
+    },
     "app.e2e.editor-wallet-batch": {
       "path": "apps/reference-dapp/e2e/editor-wallet-batch.spec.ts",
       "stage": "browser"
@@ -1618,6 +1626,22 @@
       "path": "apps/reference-dapp/src/components/wallet-activity.test.tsx",
       "stage": "unit"
     },
+    "app.components.saved-workflows": {
+      "path": "apps/reference-dapp/src/components/saved-workflows.test.tsx",
+      "stage": "unit"
+    },
+    "app.domain.robinhood-authoring": {
+      "path": "apps/reference-dapp/src/domain/robinhood-authoring.test.ts",
+      "stage": "unit"
+    },
+    "app.state.public-testnet-store": {
+      "path": "apps/reference-dapp/src/state/public-testnet-store.test.tsx",
+      "stage": "unit"
+    },
+    "app.server.robinhood-swap": {
+      "path": "apps/reference-dapp/src/server/robinhood-swap.test.ts",
+      "stage": "unit"
+    },
     "app.app.api.dashboard.activity.route": {
       "path": "apps/reference-dapp/src/app/api/dashboard/activity/route.test.ts",
       "stage": "unit"
@@ -1918,6 +1942,10 @@
     "app.components.execute-details-choice",
     "app.server.wallet-activity",
     "app.components.wallet-activity",
+    "app.components.saved-workflows",
+    "app.domain.robinhood-authoring",
+    "app.state.public-testnet-store",
+    "app.server.robinhood-swap",
     "app.app.api.dashboard.activity.route",
     "app.app.api.automations.overview.route",
     "app.app.api.account.presence.route",
@@ -3934,6 +3962,8 @@
         "app.e2e.editor-redesign",
         "app.e2e.ux-polish-004",
         "app.e2e.portfolio-ux004",
+        "app.e2e.owner-history",
+        "app.components.saved-workflows",
         "app.e2e.editor-workflow-run",
         "app.components.review-summary-panel",
         "app.e2e.dashboard-productization",
@@ -4761,6 +4791,9 @@
       "suites": [
         "action-registry.engineering-regression",
         "app.server.base-swap",
+        "app.domain.robinhood-authoring",
+        "app.server.robinhood-swap",
+        "app.e2e.workflow-ux-authoring",
         "reference-compiler.compile.fork",
         "reference-compiler.jupiter",
         "reference-compiler.native-eth",
@@ -8110,6 +8143,7 @@
       ],
       "suites": [
         "app.state.account-presence",
+        "app.state.public-testnet-store",
         "action-registry.engineering-regression",
         "app.platform.engineering-continuity",
         "app.platform.parity",

@@ -14,6 +14,7 @@ import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr, sendChatCommand } from './fixtures';
 import { continueToBuilder, editorSectionAction, editorSteps, expectChatSection, expectEditorSection, navigationDrawer, navigationLink, navigationTrigger, openChat, openEditorSection, openNavigation } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
+import { EDITOR_WORKFLOW_STORAGE_KEY } from '../src/domain/editor-persistence';
 
 /** The drawer's first three items: New workflow (Chat), Editor, Dashboard. */
 const primaryItems = (page: Page) => navigationDrawer(page).getByRole('link').filter({ hasNotText: /Your workflows|Automations|Credentials|Agents|Passkeys|Seus fluxos|Automações|Credenciais|Agentes|Chaves de acesso/ });
@@ -29,6 +30,78 @@ const noOverflow = async (page: Page) => expect.poll(() => page.evaluate(() => d
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/build-estimate', route => route.fulfill({ json: { ok: false, code: 'ESTIMATE_UNAVAILABLE' } }));
 });
+
+test('a remembered Canvas reload keeps Chat out of the initial frame', async ({ page, networkGuard }, testInfo) => {
+  await open(page);
+  await request(page).fill('Swap 1 USDC to WETH on Base slippage 50 bps');
+  await request(page).press('Enter');
+  await expectEditorSection(page, 'Build');
+  const before = await readWorkflowIr(page);
+  await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? 'null')?.workflow?.revision,
+    EDITOR_WORKFLOW_STORAGE_KEY)).toBe(1);
+  let release!: () => void;
+  const hydration = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/_next/static/**', async route => {
+    if (route.request().resourceType() === 'script') await hydration;
+    await route.continue();
+  });
+  try {
+    await page.reload({ waitUntil: 'commit' });
+    await expect(page.locator('.editor-restore-status')).toBeVisible();
+    await expect(page.locator('#build-entry-request')).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath('canvas-before-hydration.png') });
+  } finally { release(); }
+  await expectEditorSection(page, 'Build');
+  expect(await readWorkflowIr(page)).toBe(before);
+  await expect(page.locator('html')).not.toHaveAttribute('data-editor-restoring');
+  networkGuard.assertClean();
+});
+
+for (const width of [1440, 390]) {
+  test(`the ${width}px Editor switches its palette in one frame and restores it before hydration`, async ({ page, networkGuard }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await open(page);
+    await openEditorSection(page, 'Build');
+    await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const toggle = page.getByRole('switch', { name: 'Theme', exact: true });
+    await expect(toggle).not.toBeChecked();
+
+    for (const theme of ['dark', 'light', 'dark'] as const) {
+      const frames = await toggle.evaluate(control => new Promise<{ theme: string | undefined; mixed: boolean }[]>(resolve => {
+        const samples: { theme: string | undefined; mixed: boolean }[] = [];
+        control.addEventListener('click', () => {
+          function sample() {
+            const root = document.documentElement;
+            const panelColor = root.dataset.theme === 'dark' ? 'rgb(21, 24, 31)' : 'rgb(255, 255, 255)';
+            const panels = document.querySelectorAll('.top-bar, .header-settings-menu, .composer-card');
+            samples.push({ theme: root.dataset.theme, mixed: panels.length !== 3 || [...panels].some(panel => getComputedStyle(panel).backgroundColor !== panelColor) });
+            if (samples.length < 6) requestAnimationFrame(sample);
+            else resolve(samples);
+          }
+          requestAnimationFrame(sample);
+        }, { once: true });
+        (control as HTMLButtonElement).click();
+      }));
+      await testInfo.attach(`theme-frames-${theme}`, { body: JSON.stringify(frames), contentType: 'application/json' });
+      expect(frames.every(frame => frame.theme === theme && !frame.mixed)).toBe(true);
+      await expect(toggle).toHaveAttribute('aria-checked', String(theme === 'dark'));
+      await noOverflow(page);
+      await page.screenshot({ path: testInfo.outputPath(`theme-${theme}-${width}.png`) });
+    }
+
+    // The stylesheet and inline bootstrap still load. With the client bundle blocked,
+    // only the document's first theme can affect the page.
+    await page.route('**/_next/static/**', route => route.request().resourceType() === 'script' ? route.abort() : route.continue());
+    await page.reload();
+    await expect(page.locator('.app-shell')).toHaveAttribute('inert', '');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('.top-bar')).toHaveCSS('background-color', 'rgb(21, 24, 31)');
+    await page.screenshot({ path: testInfo.outputPath(`before-hydration-${width}.png`) });
+    networkGuard.assertClean();
+  });
+}
 
 test('a fresh visit opens on Build 0 without a wallet, with the reference composition and no network selector', async ({ page, networkGuard }) => {
   await page.setViewportSize({ width: 1240, height: 871 });

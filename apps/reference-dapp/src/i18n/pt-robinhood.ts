@@ -4,6 +4,8 @@ export const portugueseRobinhood: Readonly<Record<string, string>> = {
   'Featured': 'Destaques', 'Search assets': 'Pesquisar ativos', 'Search Stock Tokens': 'Pesquisar Stock Tokens',
   'Search by symbol or company name…': 'Pesquise por símbolo ou nome da empresa…', 'Loading Robinhood Stock Tokens…': 'Carregando os Stock Tokens da Robinhood…',
   'Robinhood Stock Tokens are unavailable right now.': 'Os Stock Tokens da Robinhood estão indisponíveis no momento.',
+  'Robinhood currently does not allow selling this Stock Token.': 'A Robinhood não permite vender este Stock Token no momento.',
+  'Robinhood currently does not allow buying this Stock Token.': 'A Robinhood não permite comprar este Stock Token no momento.',
   'No Stock Token matches this search.': 'Nenhum Stock Token corresponde a esta pesquisa.', 'Stock Token results': 'Resultados de Stock Tokens',
   '{0} Stock Tokens · type to search': '{0} Stock Tokens · digite para pesquisar', 'Stock Token details': 'Detalhes do Stock Token',
   '{0} shares per token': '{0} ações por token', 'Shares per token': 'Ações por token',

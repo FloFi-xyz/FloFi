@@ -16,7 +16,7 @@ import { ownerByRecord } from '../domain/sequence-restore';
 import { shortAddress } from '../accounts/account-model';
 import { presentSequence, sequenceFundingMessage, sequenceUnservedMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
 import { composerActions, composerSummary } from '../domain/composer-presentation';
-import { setupSummary } from '../domain/canvas-action-setup';
+import { actionReviewValue, setupSummary } from '../domain/canvas-action-setup';
 import { shellChainLabel } from '../domain/product-shell';
 import type { PendingEdit } from '../state/flofi-conversation';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
@@ -206,19 +206,17 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const bridgeSwap = useBridgeSwap();
   const across = useAcross();
   // BUILD0-UX-001: a fresh visit of the public workspace opens on Build 0 (the intent entry); every other surface keeps Build (Build 1).
-  // `entryAuto` stays true only while the owner has not chosen a section, so a restored workflow or recovered run may still move past it.
+  // Derive the default from the current route until the owner picks a section or a workflow is restored.
   const entryLanding = buildEntryLanding({ pathname, engineering, approval: Boolean(approvalSlot || autoPrepare), surface });
-  const [section, setSection] = useState<ProductSection>(() => entryLanding ? BUILD_ENTRY : 'Build');
-  const [entryAuto, setEntryAuto] = useState(entryLanding);
+  const [section, setSection] = useState<ProductSection | null>(null);
   const [entryDraft, setEntryDraft] = useState('');
   // BUILD-FLOFI-FLIGHT-001: the request typed on /board arrives once as an editable draft in the Build entry (never sent on its own).
   useFlightDraft(entryLanding ? setEntryDraft : null);
   const dashboardRoute = resolveDashboardRoute(pathname);
   const secondaryRoute = secondaryWorkspaceRoute(pathname);
-  const tab = dashboardRoute ? 'Dashboard' : section;
+  const tab = dashboardRoute ? 'Dashboard' : section ?? (entryLanding ? BUILD_ENTRY : 'Build');
   const setTab = useCallback((section: ProductSection) => {
     if ((authoringIncomplete || approvalGate) && (section === 'Simulate' || section === 'Execute')) return;
-    setEntryAuto(false);
     if (navigate && section === 'Dashboard') { navigate('/app/dashboard'); return; }
     setSection(section);
     if (navigate && (dashboardRoute || secondaryRoute)) navigate('/app');
@@ -226,12 +224,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const [workflowName, setWorkflowName] = useState('Your Workflow');
   const connectedWallet = useBuild009Wallet();
   const walletIdentity = useExecutionEnvironment();
-  const solanaSession = useJupiter().session;
+  const jupiterWallet = useJupiter();
+  const solanaSession = jupiterWallet.session;
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001: the Simulate canvas quotes with the connected addresses (display only).
   const estimateOwners = useMemo(() => ({ evm: connectedWallet.account, solana: solanaSession?.account.address ?? null }), [connectedWallet.account, solanaSession]);
   const owner = walletIdentity.walletKind === 'solana'
     ? solanaSession ? { namespace: 'solana' as const, address: solanaSession.account.address } : null
     : connectedWallet.account ? { namespace: 'eip155' as const, address: connectedWallet.account } : null;
+  const walletRestoring = !owner && (connectedWallet.restoring || jupiterWallet.restoring);
   const proof = useWalletProof(owner?.namespace ?? null, solanaSession?.chain ?? defaultProofChain());
   // BUILD-AUTOMATION-002: "Automate this workflow" is offered only where automations run; it carries the exact Canvas workflow (shared state).
   const [automationsReady, setAutomationsReady] = useState(false), [automateCanvas, setAutomateCanvas] = useState(false);
@@ -622,7 +622,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // serves as a whole already counts its own steps in its run; a step-by-step workflow is counted here, over all of its steps.
   const stepPrepared = Boolean(authorization.key && !simulationSource.state.busy && (canvasAction.kind === 'approve' || canvasAction.kind === 'execute'));
   // P0 hotfix (FIX 2, production 2026-11-13: Swap RECONCILED, Bridge "Not started" with no reason): the next step's refused simulation is shown.
-  const stepRefusal = sequenceContinuing && !simulationSource.state.busy && simulationSource.state.error ? simulationError(simulationSource.state.error) : null;
+  const stepRefusal = sequenceContinuing && !simulationSource.state.busy && simulationSource.state.error ? simulationError(simulationSource.state.error, simulationSource.kind) : null;
   const workflowProgress = sequence ? workflowProgressView({ sequence: sequencePresentation, live: liveStep, prepared: stepPrepared, refusal: stepRefusal }) : null;
   const continuationSimulation = sequenceContinuing ? projectSimulation(runtimeWorkflow, context, simulationSource).steps[0] ?? null : null;
   const continuationStep = sequence && sequencePresentation ? sequencePresentation.steps[sequence.cursor] ?? null : null;
@@ -637,7 +637,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       status: simulationSource.state.busy || canvasAction.processing ? 'SIMULATING' : sequenceIssue || sequenceRestore || walletIssue || networkAction ? 'BLOCKED'
         : (canvasAction.kind === 'approve' || canvasAction.kind === 'execute') && !canvasAction.disabled ? 'READY' : 'SIMULATE',
       reason: sequenceIssue ?? walletIssue ?? (networkAction ? tr('Switch your wallet to {0} to continue with this step.', networkAction.network) : null)
-        ?? (simulationSource.state.error ? simulationError(simulationSource.state.error) : null) } : null;
+        ?? (simulationSource.state.error ? simulationError(simulationSource.state.error, simulationSource.kind) : null) } : null;
   const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)
     ? `${state.workflow.workflowId}:${state.workflow.revision}:${restorationEpoch}:${signer}:${reviewBinding.wallet.chain}:${connectedWallet.revision}:${jupiter.revision}` : null;
   const preparedFor = useRef<string | null>(null);
@@ -748,11 +748,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // typed value) and applies or discards it only on the owner's explicit answer, through the same card actions the Canvas uses.
   const orderedActions = composerActions(state.workflow);
   const pendingEdits: PendingEdit[] = [
-    ...actionSetup ? [{ nodeId: actionSetup.id, step: orderedActions.length + 1, action: setupSummary(actionSetup, context).action, value: setupSummary(actionSetup, context).amount }] : [],
+    ...actionSetup ? [{ nodeId: actionSetup.id, step: orderedActions.length + 1, action: setupSummary(actionSetup, context).action,
+      value: setupSummary(actionSetup, context).amount, draft: actionReviewValue(actionSetup, actionSetup.id, undefined) }] : [],
     ...Object.entries(amountInputs).filter(([id]) => id !== actionSetup?.id).map(([id, value]) => {
       const index = orderedActions.findIndex(node => node.nodeId === id), node = orderedActions[index];
-      const card = node ? composerSummary(state.workflow, node, context) : null, symbol = card?.amount.split(' ').slice(1).join(' ');
-      return { nodeId: id, step: index + 1, action: card?.action ?? 'Action', value: `${value}${symbol ? ` ${symbol}` : ''}` };
+      const card = node ? composerSummary(state.workflow, node, context) : null;
+      const selection = cryptoSelections[id], symbol = selection?.from ?? card?.amount.split(' ').slice(1).join(' ');
+      return { nodeId: id, step: index + 1, action: card?.action ?? 'Action', value: `${value}${symbol ? ` ${symbol}` : ''}`,
+        draft: actionReviewValue(null, id, value, bridgeNetworkInputs[id], selection, recipientInputs[id]) };
     })];
   const resolveEdit = (nodeId: string, apply: boolean): string | null => {
     if (!pendingEdits.some(edit => edit.nodeId === nodeId)) return 'This edit is no longer pending.';
@@ -864,8 +867,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // records and gates). A request the owner is typing in Build 0 is never discarded: the entry stays, naming the workflow it would add to.
   const entryFresh = buildEntryFresh({ workflow: state.workflow, restorationEpoch, authoringIncomplete, executionSurface: Boolean(executionSurface),
     execution: Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started, proposal: Boolean(proposal) });
-  const leaveEntry = tab === BUILD_ENTRY && entryAuto && !entryFresh && !canvasRestoring && !entryDraft.trim() && !conversation.busy;
-  useEffect(() => { if (leaveEntry) { setEntryAuto(false); setSection('Build'); } }, [leaveEntry]);
+  const canvasReady = !isPristineDraft(state.workflow) || !canvasRestoring;
+  if (tab === BUILD_ENTRY && section === null && !entryFresh && canvasReady && !entryDraft.trim() && !conversation.busy) setSection('Build');
   // Every shell that calls `simulateAgain` (the workspace and the /approve signing surface) states a Flight refusal the run keeps its words over.
   const flightHref = flightNotice ? FLIGHT_REFUSAL_HREF[flightNotice.action] : null;
   const flightNoticeView = flightNotice && <div className="error-banner flight-run-notice" role="alert"><strong>{tr(flightNotice.title)}</strong>
@@ -881,17 +884,17 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       startNewWorkflow={navigate ? () => { startNewWorkflow(); navigate('/app'); } : undefined}/>
   </div>;
   if (secondaryRoute) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
-    <main id="workspace" className="main secondary-workspace" tabIndex={-1} aria-label={tr('{0} workspace', tr(secondaryRoute.label))}><SecondaryProductWorkspace workspace={secondaryRoute.id} workflows={{ ...workflows, loading: library.loading, connected: Boolean(owner), activityAccount: owner?.address ?? null, verification: owner && library.error === 'WALLET_SESSION_REQUIRED' ? <WorkflowVerification namespace={owner.namespace} account={owner.address} proof={proof}/> : undefined,
+    <main id="workspace" className="main secondary-workspace" tabIndex={-1} aria-label={tr('{0} workspace', tr(secondaryRoute.label))}><SecondaryProductWorkspace workspace={secondaryRoute.id} workflows={{ ...workflows, loading: library.loading, connected: Boolean(owner), restoring: walletRestoring, verification: owner && library.error === 'WALLET_SESSION_REQUIRED' ? <WorkflowVerification namespace={owner.namespace} account={owner.address} proof={proof}/> : undefined,
       // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the execution history moved here from the Dashboard (same records, same server-checked actions).
       records: secondaryRoute.id === 'workflows' && owner ? <DashboardWorkspace mode="records" workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} workflowProgress={workflowProgress}
         wallet={{ ...reviewBinding.wallet, account: owner.address }} context={context} runId={null} build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)}
         openWorkflow={{ names: new Map(library.list?.items.map(item => [item.workflowId, item.name] as const) ?? []), open: id => { void reopenWorkflow(id); } }} signInPrompt={library.error === 'WALLET_SESSION_REQUIRED'}/> : undefined }}
-      automations={{ owner, proof, openChat: () => setTab(BUILD_ENTRY), onPropose: command => { propose(command); setTab('Build'); },
+      automations={{ owner, restoring: walletRestoring, proof, openChat: () => setTab(BUILD_ENTRY), onPropose: command => { propose(command); setTab('Build'); },
         canvas: automateCanvas ? { workflow: state.workflow, name: workflowName, dismiss: () => setAutomateCanvas(false) } : null }}/>
 </main>
   </div>;
   if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
-    <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context}
+    <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context} restoring={walletRestoring}
       workflowProgress={workflowProgress} runId={dashboardRoute?.runId ?? null} portfolio={<PortfolioWidget evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
       positions={<DefiPositions evm={connectedWallet.account} solana={solanaSession?.account.address ?? null} prepare={prepareLiquidityPosition}/>}
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)} create={entry ? startNewChatWorkflow : undefined}/></main>
@@ -901,6 +904,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (tab === BUILD_ENTRY) return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className="main build-entry-workspace" tabIndex={-1} aria-label={tr('Chat')}>
+      <p className="editor-restore-status" role="status">{tr('Loading…')}</p>
       <BuildEntry conversation={conversation} workflow={state.workflow} proposal={proposal} actions={orderedActions.length} draft={entryDraft} setDraft={setEntryDraft}
         interactive={interactive} openBuilder={() => setTab('Build')}/>
     </main>

@@ -19,8 +19,7 @@ const CARD_FIELDS: readonly { readonly type: SecureFieldType; readonly label: st
   { type: 'securityCode', label: 'Security code', placeholder: 'CVC' },
 ];
 
-export function CardEntryFrame({ cardOrigin, appOrigin, client, providerName, theme }: { cardOrigin: string; appOrigin: string; client: CardProviderClient; providerName: string;
-  theme: 'light' | 'dark' }) {
+export function CardEntryFrame({ cardOrigin, appOrigin, client, providerName }: { cardOrigin: string; appOrigin: string; client: CardProviderClient; providerName: string }) {
   const { t: tr } = useLocale();
   const baseId = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const sdk = useRef<MercadoPagoInstance | null>(null);
@@ -30,7 +29,7 @@ export function CardEntryFrame({ cardOrigin, appOrigin, client, providerName, th
   const [error, setError] = useState('');
   const post = (message: CardFrameMessage) => window.parent.postMessage(message, appOrigin);
   // The provider's SDK loads only on the card origin and only when the product frames this page.
-  useEffect(() => { document.documentElement.dataset.theme = theme; setFramed(window.parent !== window && location.origin === cardOrigin); }, [theme, cardOrigin]);
+  useEffect(() => { setFramed(window.parent !== window && location.origin === cardOrigin); }, [cardOrigin]);
   // Escape cancels Add card as it did when the form lived in the product's dialog (key events in this frame never reach the dialog).
   useEffect(() => {
     if (!framed) return;
@@ -85,7 +84,8 @@ export function CardEntryFrame({ cardOrigin, appOrigin, client, providerName, th
     if (typeof token !== 'string') { setPhase('ready'); setError('Check the card details and try again.'); return; }
     post({ type: 'flofi-card-token', token, email });
   }
-  if (framed === false) return <main className="card-entry-standalone"><p>{tr('Open Add card from Credentials in FloFi.')}</p></main>;
+  if (framed === null) return <main className="card-entry-standalone" role="status"><p>{tr('Loading…')}</p></main>;
+  if (!framed) return <main className="card-entry-standalone"><p>{tr('Open Add card from Credentials in FloFi.')}</p></main>;
   if (phase === 'unavailable') return <main className="card-entry-body" role="status"><p>{tr('Secure card entry could not be loaded. Nothing was collected. Try again later.')}</p></main>;
   return <main className="card-entry-frame-page"><form className="card-entry-form" aria-label={tr('Add a card')} aria-busy={phase !== 'ready'} noValidate
     onSubmit={event => { event.preventDefault(); void submit(event.currentTarget); }}>

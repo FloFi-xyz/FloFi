@@ -34,6 +34,7 @@ export const portugueseApprovedUx: Readonly<Record<string, string>> = {
   "Connect wallet": "Conectar carteira",
   "Wallet connection": "Conexão da carteira",
   "Restoring wallet…": "Restaurando a carteira…",
+  "Loading wallets…": "Carregando carteiras…",
   "What do you want to": "O que você quer",
   "do?": "fazer?",
   "e.g. swap 10 USDC for ETH on Base": "Ex.: trocar 10 USDC por ETH na Base",

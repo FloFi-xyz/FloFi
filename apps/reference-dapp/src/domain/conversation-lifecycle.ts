@@ -62,7 +62,7 @@ export type PendingQuestion =
    */
   | { readonly kind: 'CONFIRM_CONTINUE_REVIEW'; readonly binding: ReviewBinding; readonly runKey: string | null }
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: a Canvas card has a typed amount that was never applied; apply it (YES) or discard it (NO) before the Review. */
-  | { readonly kind: 'RESOLVE_EDIT'; readonly nodeId: string; readonly workflowId: string; readonly revision: number };
+  | { readonly kind: 'RESOLVE_EDIT'; readonly nodeId: string; readonly workflowId: string; readonly revision: number; readonly draft?: string | undefined };
 export type Answer = 'YES' | 'NO' | 'UNCLEAR';
 
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();

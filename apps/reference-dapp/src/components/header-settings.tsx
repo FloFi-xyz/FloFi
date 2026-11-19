@@ -2,7 +2,7 @@
 'use client';
 import { useLocale } from '../i18n/locale';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { learningAvailability } from '../app/learning-action';
@@ -10,6 +10,7 @@ import { disconnectToLogin } from '../accounts/disconnect';
 import { useAccountsOffered, useFloFiPrivy } from '../accounts/privy-context';
 import { forgetAccountPresence, useAccountPresence } from '../state/account-presence';
 import { useProductBootstrap } from '../state/product-bootstrap';
+import { lightTheme, readTheme, selectTheme, subscribeTheme } from '../accounts/account-theme';
 
 /**
  * P0 approved UX (board 03b): Settings holds preferences and the account — Language, Theme, My account, Privacy and memory, Support, and the
@@ -26,10 +27,9 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, sh
   const [open, setOpen] = useState(false);
   // Language remains a presentation preference.
   const { language, setLanguage } = useLocale();
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const theme = useSyncExternalStore(subscribeTheme, readTheme, lightTheme);
   const container = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
-  const themeTransition = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
   // BUILD-CHAT-LEARNING-002: Privacy & memory is listed only where the deployment keeps learning data. BUILD-FLOFI-UX-FIX-003: the product page
   // states the tier with its first HTML (no request, no row appearing after the menu opens); elsewhere it is read once at idle time.
@@ -68,27 +68,6 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, sh
   async function disconnect() { if (signedIn && disconnectDisabled) await disconnectToLogin(privy); else onDisconnect(); }
   const languageDescriptionId = useId(), themeDescriptionId = useId(), disconnectDescriptionId = useId();
   useEffect(() => {
-    let saved: 'light' | 'dark' = 'light';
-    try { if (localStorage.getItem('flofi.theme') === 'dark') saved = 'dark'; } catch { /* Preferences are optional when storage is unavailable. */ }
-    setTheme(saved);
-    document.documentElement.dataset.theme = saved;
-    return () => {
-      if (themeTransition.current) clearTimeout(themeTransition.current);
-      delete document.documentElement.dataset.themeTransition;
-    };
-  }, []);
-  function selectTheme(value: 'light' | 'dark') {
-    if (themeTransition.current) clearTimeout(themeTransition.current);
-    document.documentElement.dataset.themeTransition = 'true';
-    setTheme(value);
-    document.documentElement.dataset.theme = value;
-    try { localStorage.setItem('flofi.theme', value); } catch { /* The theme still applies for this visit. */ }
-    themeTransition.current = setTimeout(() => {
-      delete document.documentElement.dataset.themeTransition;
-      themeTransition.current = null;
-    }, 320);
-  }
-  useEffect(() => {
     if (!open) return;
     function outside(event: PointerEvent) {
       if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false);
@@ -121,7 +100,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport, sh
         <span id={languageDescriptionId} className="sr-only">{tr("Current language: ")}{tr(language === 'EN' ? 'English' : 'Português')}</span>
       </div>
       <div className="header-settings-row"><span>{tr("Theme")}</span>
-        <button type="button" className="header-settings-choices" role="switch" aria-label={tr("Theme")} aria-checked={theme === 'dark'}
+        <button type="button" className="header-settings-choices header-settings-theme" role="switch" aria-label={tr("Theme")} aria-checked={theme === 'dark'}
           aria-describedby={themeDescriptionId} title={tr(theme === 'dark' ? 'Switch to Light theme' : 'Switch to Dark theme')}
           onClick={() => selectTheme(theme === 'light' ? 'dark' : 'light')}>
         <span aria-hidden="true" data-selected={theme === 'light'}>

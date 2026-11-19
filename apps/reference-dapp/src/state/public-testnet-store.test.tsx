@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog } from '@defi-workflow-engine/action-registry';
 import { PublicTestnetProvider, usePublicTestnet } from './public-testnet-store';
 import { catalogSwapAvailability, publicAvailability, publicBegin, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
 import type { PublicRun } from '../server/public-testnet-service';
@@ -9,6 +11,7 @@ import { initialEditor } from '../domain/editor';
 import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { reviewFixture } from '../test-utils/review-fixture';
 import { composeStrategy } from '../engine/strategy-engine';
+import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
 import { floFiRefusal, publicSwapMessage, rejected } from './public-testnet-store';
 import { FloFiProviderError } from '../wallet/flofi-evm-provider';
 
@@ -36,7 +39,7 @@ beforeEach(() => {
   vi.mocked(publicRefresh).mockResolvedValue({ ok: true, value: { ...run, quote: { ...run.quote, manifestHash: 'fresh-manifest' }, reviewedManifestHash: null } });
   vi.mocked(publicReview).mockImplementation(async () => ({ ok: true, value: { ...run, reviewedManifestHash: 'fresh-manifest' } }));
 });
-afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
+afterEach(() => { host.unmount(); vi.unstubAllGlobals(); resetNetworkCatalogs(); });
 
 describe('public swap durable recovery and explicit fresh Review', () => {
   it('prepares Arbitrum through the existing server action with the connected owner, without requesting a signature', async () => {
@@ -75,6 +78,41 @@ describe('public swap durable recovery and explicit fresh Review', () => {
     expect(store.run).toEqual(newest);
     expect(publicPrepare).toHaveBeenCalledTimes(2);
     expect(publicBegin).not.toHaveBeenCalled(); expect(publicReport).not.toHaveBeenCalled();
+  });
+  it('retires a prepared Stock Token buy when the accepted revision sells the token', async () => {
+    const registry = readFileSync(new URL('../../../../packages/action-registry/test/fixtures/robinhood-rhj-assets-2026-10-11.json', import.meta.url), 'utf8');
+    registerNetworkCatalog(robinhoodNetworkCatalog(parseRobinhoodStockTokenRegistry(registry, '2026-10-11T02:00:00.000Z')));
+    const buy = composeStrategy({ action: 'swap', network: 'robinhood', inputAsset: 'USDG', outputAsset: 'AAPL', amount: '10' });
+    const sell = composeStrategy({ action: 'swap', network: 'robinhood', inputAsset: 'AAPL', outputAsset: 'USDG', amount: '0.25' });
+    if (!buy.ok || !sell.ok) throw Error('STOCK_TOKEN_TEST_WORKFLOW_INVALID');
+    const forward = buy.workflow as Workflow;
+    const reverse = { ...forward, nodes: sell.workflow.nodes, revision: forward.revision + 1 } as Workflow;
+    const account = '0x1111111111111111111111111111111111111111';
+    f.workflow = forward;
+    vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
+    vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
+    f.session.mockResolvedValue({ account, chainId: '0x1237' });
+    vi.mocked(publicPrepare).mockResolvedValueOnce({ ok: true, value: { ...run, attempts: [], workflow: buy.workflow, quote: { ...run.quote, chainId: 4663 } } });
+    read(); await settle(); store.simulate(); await settle();
+    expect(store).toMatchObject({ retired: false, run: { workflow: forward } });
+
+    f.workflow = reverse;
+    read();
+    expect(store.retired).toBe(true);
+    store.review(); await settle();
+    expect(store.error).toBe('REVIEW_REQUIRED');
+    store.execute(); await settle();
+    expect(store.error).toBe('REVIEW_REQUIRED');
+    expect(publicReview).not.toHaveBeenCalled();
+    expect(publicBegin).not.toHaveBeenCalled();
+
+    vi.mocked(publicPrepare).mockResolvedValueOnce({ ok: true, value: { ...run, attempts: [], workflow: reverse as PublicRun['workflow'],
+      quote: { ...run.quote, chainId: 4663, revision: reverse.revision } } });
+    store.simulate(); await settle();
+    expect(publicPrepare).toHaveBeenLastCalledWith(reverse, account);
+    expect(store).toMatchObject({ retired: false, run: { workflow: reverse } });
+    expect(publicBegin).not.toHaveBeenCalled();
+    expect(publicReport).not.toHaveBeenCalled();
   });
   it('reports a browser-saved hash after an UNKNOWN wallet result during recovery', async () => {
     const attemptId = run.quote.executionId + '.swap.1', hash = '0x' + 'a'.repeat(64);

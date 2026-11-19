@@ -54,7 +54,7 @@ export function proxy(request: NextRequest) {
   }
   if (isCardPath(pathname)) return notFound();
   // BUILD-FLOFI-AUTH-WALLETS-001: sign-in and wallet onboarding get a per-request nonce policy. Next.js reads the request's policy to put
-  // the nonce on its own scripts; the account layout reads `x-nonce` for its theme bootstrap.
+  // the nonce on its own scripts; the root layout reads `x-nonce` for its theme bootstrap.
   if (isAccountPage(pathname)) return withNonce(request, nonce => accountPagePolicy(nonce, process.env, { signIn: pathname === '/login' }));
   // BUILD-FLOFI-PRIVY-UX-001: every product page hosts the Privy signer, so it runs only FloFi's own scripts (account-csp.ts). This policy
   // replaces next.config.ts's for these paths, so it carries their framing rules too.

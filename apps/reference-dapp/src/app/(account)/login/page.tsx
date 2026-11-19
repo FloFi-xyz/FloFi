@@ -27,5 +27,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Search
   const moveAsked = one(params.move) === '1';
   // A returning, still-valid session goes straight on, unless the page shows an error.
   if (state.account && !code && !reauth && !moveAsked) redirect(needsWalletOnboarding(state.account) ? '/onboarding/wallets' : returnTo);
-  return <SignInScreen state={state} initialError={code} returnTo={returnTo} mode={reauth ? 'reauth' : moveAsked ? 'move' : null}/>;
+  const returningFromOAuth = params.privy_oauth_code !== undefined || params.privy_oauth_state !== undefined;
+  return <SignInScreen state={state} initialError={code} returnTo={returnTo} returningFromOAuth={returningFromOAuth} mode={reauth ? 'reauth' : moveAsked ? 'move' : null}/>;
 }

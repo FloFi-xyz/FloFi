@@ -9,7 +9,7 @@
 import { ownDeclaration } from './node-declaration';
 import { formatAssetAmount, parseAssetAmount, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { catalogSwapKind, createCatalogSwapNode, isCatalogSwapNode, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapKind, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { resolveNetworkAsset } from './asset-catalogs';
+import { resolveNetworkAsset, ROBINHOOD_NETWORK } from './asset-catalogs';
 import { SWAP_PROFILES, type CatalogSwapProfile } from './public-testnet-swap';
 import { parseSlippage } from './swap-authoring';
 
@@ -44,7 +44,7 @@ export function createCatalogSwapAuthoringNode(nodeId: string, input: CatalogSwa
     input: from.ref, output: to.ref });
 }
 export type CatalogSwapDetails = { readonly network: CatalogSwapNetwork; readonly from: string; readonly to: string; readonly fromAsset: CanonicalAsset | null;
-  readonly toAsset: CanonicalAsset | null; readonly units: string; readonly amount: string; readonly slippage: number; readonly stockPurchase: boolean;
+  readonly toAsset: CanonicalAsset | null; readonly units: string; readonly amount: string; readonly slippage: number; readonly stockSide: 'source' | 'destination' | null;
   /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a pool swap, or a WETH9 wrap / unwrap of the network's native ETH. */ readonly kind: CatalogSwapKind };
 /** A canonical catalog swap's display details. Unresolved assets (catalog not loaded) keep a neutral label, never a guess. */
 export function catalogSwapDetails(node: { readonly actionType: string; readonly chainId: string }): CatalogSwapDetails | null {
@@ -62,6 +62,14 @@ export function catalogSwapDetails(node: { readonly actionType: string; readonly
   // The native side is ETH by its canonical identity, also when no catalog is loaded (it is never a token address).
   const from = fields.input.address === null ? 'ETH' : label(fromAsset, fields.input.decimals, fields.input.officialId);
   const to = fields.output.address === null ? 'ETH' : label(toAsset, fields.output.decimals, fields.output.officialId);
+  const stockSide = network !== ROBINHOOD_NETWORK ? null
+    : from === 'USDG' && fields.output.officialId !== null ? 'destination' : to === 'USDG' && fields.input.officialId !== null ? 'source' : null;
   return { network, from, to, fromAsset, toAsset, units: fields.amount, amount: formatAssetAmount(fields.amount, fields.input.decimals),
-    slippage: fields.slippageBps, stockPurchase: fromAsset?.symbol === 'USDG' && fields.output.officialId !== null, kind: catalogSwapKind(fields) };
+    slippage: fields.slippageBps, stockSide, kind: catalogSwapKind(fields) };
+}
+
+export function stockTradingRefusal(code: string): string | null {
+  if (code === 'STOCK_TOKEN_NOT_DISPOSABLE') return 'Robinhood currently does not allow selling this Stock Token.';
+  if (code === 'STOCK_TOKEN_NOT_ACQUIRABLE') return 'Robinhood currently does not allow buying this Stock Token.';
+  return null;
 }

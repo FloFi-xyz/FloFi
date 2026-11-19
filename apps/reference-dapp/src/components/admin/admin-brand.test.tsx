@@ -17,18 +17,14 @@ describe('BUILD-FLOFI-UX-UI-002 admin identity', () => {
     expect(html).not.toContain('/flofi-logo.png');
     for (const theme of ['light', 'dark'] as const) {
       const symbol = `/brand/flofi-symbol-${theme}.svg`, wordmark = `/brand/flofi-wordmark-${theme}.png`;
-      expect(html).toContain(theme === 'dark' ? `srcSet="${symbol}"` : `src="${symbol}"`);
-      expect(html).toContain(theme === 'dark' ? `srcSet="${wordmark}"` : `src="${wordmark}"`);
+      expect(html).toContain(`data-artwork="${theme}" src="${symbol}"`);
+      expect(html).toContain(`data-artwork="${theme}" src="${wordmark}"`);
     }
-    // Dark artwork follows the same media query as the console palette in admin.css.
-    expect(html.match(/media="\(prefers-color-scheme: dark\)"/g)).toHaveLength(2);
-    expect(file('../../app/admin/admin.css').toString()).toContain('@media (prefers-color-scheme:dark)');
     // Intrinsic sizes match the supplied artwork, so CSS scales them without distortion.
     expect(html).toContain('width="370" height="345"');
     expect(html).toContain('width="738" height="280"');
-    // One accessible name: the wordmark reads "FloFi", the symbol is decorative.
-    expect(html).toContain('alt="FloFi"');
-    expect(html.match(/alt=""/g)).toHaveLength(1);
+    // CSS makes only one wordmark visible. Either one carries the accessible name.
+    expect(html.match(/alt="FloFi"/g)).toHaveLength(2);
     expect(html).toContain('Admin');
     expect(html).toContain('Private console');
   });

@@ -15,6 +15,8 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 
 export const EDITOR_WORKFLOW_STORAGE_KEY = 'flofi:editor-workflow:v1';
 const FORMAT = 'flofi.editor-workflow.v1';
+/** This hint only keeps Chat out of the first paint while the store validates and restores the draft. */
+export const EDITOR_RESTORE_BOOTSTRAP = `try{const raw=localStorage.getItem('${EDITOR_WORKFLOW_STORAGE_KEY}');if(raw&&raw.length<=263000){const draft=JSON.parse(raw);if(draft?.format==='${FORMAT}'&&Array.isArray(draft.workflow?.nodes)&&draft.workflow.nodes.length)document.documentElement.dataset.editorRestoring='true'}}catch{}`;
 const WORKFLOW_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 type ReadStorage = Pick<Storage, 'getItem'> | null;
 type WriteStorage = Pick<Storage, 'setItem'> | null;

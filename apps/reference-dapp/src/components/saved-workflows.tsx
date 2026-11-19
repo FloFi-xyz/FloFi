@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { WalletActivity } from './wallet-activity';
-import { transactionKey } from '../domain/wallet-activity';
+import { useRef, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
 import type { OwnerWorkflow, WorkflowList as LibraryList } from '../domain/saved-workflow';
 import { WalletProof, type Namespace, type useWalletProof } from './wallet-proof';
 import { HistoryActions } from './history-actions';
-import { DashboardIcon, WorkflowLibraryContext, WorkflowList, dateLabel, type WorkflowEntry, type WorkflowLibrary } from './dashboard/dashboard-view';
+import { DashboardIcon, WorkflowLibraryContext, WorkflowList, WorkflowRow, dateLabel, type WorkflowEntry, type WorkflowLibrary } from './dashboard/dashboard-view';
 import { StatusTag } from './dashboard/dashboard-status';
 import type { HistoryDisposition } from '@defi-workflow-engine/cloud-runtime';
 export function WorkflowVerification({ namespace, proof, account }: { namespace: Namespace; proof: ReturnType<typeof useWalletProof>; account: string | null }) {
@@ -20,16 +18,11 @@ export function WorkflowVerification({ namespace, proof, account }: { namespace:
   </div>;
 }
 export type WorkflowNavigation = { list: LibraryList | null; busy: boolean; error: string | null;
-  loading?: boolean; connected?: boolean; verification?: ReactNode;
+  loading?: boolean; connected?: boolean; restoring?: boolean; verification?: ReactNode;
   /** BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: the wallet's execution records (executed history and records that need attention), in the same list. */
   records?: ReactNode;
   /** P0 approved UX (board 11): the page's primary "Create workflow", opening the Chat entry. */
   create?: (() => void) | undefined;
-  /**
-   * BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the connected wallet whose on-chain received and sent movements the History lists beside its
-   * workflow records (All · Workflows · Received · Sent). Absent: the page lists workflow records only, as before.
-   */
-  activityAccount?: string | null | undefined;
   open(id: string): void; refresh(): void; changeHistory?(id: string, action: 'DELETE' | 'ARCHIVE'): Promise<HistoryDisposition> };
 /**
  * Saved workflows are the library entries the owner saved and never executed (`saved` with no recorded run, as the workflow library reports);
@@ -41,16 +34,12 @@ export const savedOnly = (list: LibraryList | null) => list?.items.filter(item =
 function LibraryRow({ item, executed, busy, open, actions }: { item: OwnerWorkflow; executed: boolean; busy: boolean; open?: ((id: string) => void) | undefined; actions: ReactNode }) {
   const { t, language } = useLocale();
   const name = item.name ?? t('Workflow'), date = dateLabel(item.updatedAt, language === 'PT' ? 'PT' : 'EN');
-  return <div className="ux-row">
-    <span className="ux-row-icon"><DashboardIcon kind="workflow"/></span>
-    <div className="ux-row-main"><h3 className="ux-row-name"><span>{name}</span></h3>
-      {date && <p className="ux-row-meta"><time dateTime={item.updatedAt}>{t(executed ? 'Updated {0}' : 'Saved {0}', date)}</time></p>}</div>
-    <div className="ux-row-actions">
-      <StatusTag tone={executed ? 'success' : 'neutral'}>{t(executed ? 'Executed' : 'Saved')}</StatusTag>
-      <button type="button" className="ux-button saved-workflow-open" disabled={busy} onClick={() => open?.(item.workflowId)} aria-label={t('Open workflow: {0}', name)}>{t('Open')}</button>
-      {actions}
-    </div>
-  </div>;
+  return <WorkflowRow icon={<DashboardIcon kind="workflow"/>} name={<span title={name}>{name}</span>}
+    metadata={date && <time dateTime={item.updatedAt}>{t(executed ? 'Updated {0}' : 'Saved {0}', date)}</time>}>
+    <StatusTag tone={executed ? 'success' : 'neutral'}>{t(executed ? 'Executed' : 'Saved')}</StatusTag>
+    <button type="button" className="ux-button" disabled={busy} onClick={() => open?.(item.workflowId)} aria-label={t('Open workflow: {0}', name)}>{t('Open')}</button>
+    {actions}
+  </WorkflowRow>;
 }
 
 /**
@@ -58,24 +47,9 @@ function LibraryRow({ item, executed, busy, open, actions }: { item: OwnerWorkfl
  * attention first, then saved workflows, then executed ones (`records`, the canonical execution records, render it with the library rows this
  * page hands them). Open, archive and delete stay exactly the existing, server-checked actions.
  */
-const HISTORY_VIEWS = [['ALL', 'All'], ['WORKFLOWS', 'Workflows'], ['IN', 'Received'], ['OUT', 'Sent']] as const;
-type HistoryView = (typeof HISTORY_VIEWS)[number][0];
-export function YourWorkflows({ list = null, busy = false, loading = false, error = null, connected = true, verification, records, create, open, refresh, changeHistory, activityAccount = null }: Partial<WorkflowNavigation>) {
+export function YourWorkflows({ list = null, busy = false, loading = false, error = null, connected = true, restoring = false, verification, records, create, open, refresh, changeHistory }: Partial<WorkflowNavigation>) {
   const { t } = useLocale();
   const refreshRecords = useRef<(() => void) | null>(null);
-  const refreshActivity = useRef<(() => void) | null>(null);
-  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the History's view. Workflow records stay mounted (and loaded) behind Received and Sent; the wallet
-  // activity loads only once a view that shows it is opened, and is kept while the page lives.
-  const [view, setView] = useState<HistoryView>('ALL');
-  const [activityOpened, setActivityOpened] = useState(false);
-  if (view !== 'WORKFLOWS' && activityAccount && !activityOpened) setActivityOpened(true);
-  // The transactions FloFi's own execution records carry (as the records view loads them): the All view leaves those movements to their record,
-  // Received and Sent mark them "FloFi workflow". Kept by value so an unchanged list never re-renders the activity.
-  const [recorded, setRecorded] = useState<ReadonlySet<string>>(() => new Set());
-  const reportTransactions = useCallback((hashes: readonly string[]) => setRecorded(current => {
-    const next = new Set(hashes.map(transactionKey));
-    return next.size === current.size && [...next].every(hash => current.has(hash)) ? current : next;
-  }), []);
   const known = !loading && !error && list !== null;
   const entry = (item: OwnerWorkflow, executed: boolean): WorkflowEntry => {
     const actions = changeHistory ? <HistoryActions kind="workflow" change={action => changeHistory(item.workflowId, action)} changed={() => refresh?.()}/> : undefined;
@@ -88,20 +62,17 @@ export function YourWorkflows({ list = null, busy = false, loading = false, erro
     : error ? <p>{t('Your workflows are temporarily unavailable.')}</p>
     : !known ? <p>{t('Loading your workflows…')}</p>
     : <><h3>{t('No saved workflows waiting.')}</h3><p>{t('Build a workflow and save it from the Canvas; it will appear here.')}</p></>;
-  const library: WorkflowLibrary = { saved, executed, known, savedEmpty, refreshRecords, reportTransactions };
+  const library: WorkflowLibrary = { saved, executed, known, savedEmpty, refreshRecords };
   return <section className="ux-page saved-workflows workflows-hub" aria-label={t('Your workflows')}>
     <header className="ux-page-head"><div><h1>{t('Your workflows')}</h1><p>{t('Open a workflow to continue where you left off.')}</p></div>
       <div className="ux-page-head-actions">
-        {connected && <button type="button" className="ux-button ux-button-small" disabled={busy || loading} onClick={() => { refresh?.(); refreshRecords.current?.(); refreshActivity.current?.(); }}
+        {connected && <button type="button" className="ux-button ux-button-small" disabled={busy || loading} onClick={() => { refresh?.(); refreshRecords.current?.(); }}
           aria-label={t('Refresh workflows')}><span aria-hidden="true">↻</span> {t(loading ? 'Refreshing…' : 'Refresh')}</button>}
         {create && <button type="button" className="ux-button ux-button-primary" onClick={create}><DashboardIcon kind="plus"/>{t('Create workflow')}</button>}
       </div></header>
-    {!connected ? <div className="ux-panel ux-list-empty"><p>{t('Connect a wallet from the header to see your workflows.')}</p></div> : <>
+    {restoring ? <p className="muted" role="status">{t('Restoring wallet…')}</p> : !connected ? <div className="ux-panel ux-list-empty"><p>{t('Connect a wallet from the header to see your workflows.')}</p></div> : <>
       {error === 'WALLET_SESSION_REQUIRED' && (verification ?? <div className="ux-panel ux-notice" role="status"><p>{t('This wallet is not held by a FloFi account you are signed in to. Verify it once to save and reopen its workflows; this signs a message only and never moves funds.')}</p><button type="button" className="ux-button ux-button-small" onClick={refresh}>{t('Retry')}</button></div>)}
       {error && error !== 'WALLET_SESSION_REQUIRED' && <div className="ux-panel ux-notice" role="alert"><p>{t('Your workflows are temporarily unavailable.')}</p><button type="button" className="ux-button ux-button-small" disabled={busy || loading} onClick={refresh}>{t('Retry')}</button></div>}
-      {activityAccount && <div className="ux-chips history-views" role="group" aria-label={t('History view')}>{HISTORY_VIEWS.map(([id, label]) =>
-        <button key={id} type="button" className="ux-chip" aria-pressed={view === id} onClick={() => setView(id)}>{t(label)}</button>)}</div>}
-      <div className="history-workflows" hidden={view === 'IN' || view === 'OUT'}>
       {loading && <p className="muted" role="status">{t('Loading your workflows…')}</p>}
       {records ? <WorkflowLibraryContext.Provider value={library}>{records}</WorkflowLibraryContext.Provider>
         : <WorkflowList attention={[]} saved={saved} executed={executed} known={{ ATTENTION: false, SAVED: known, EXECUTED: false }} empty={{
@@ -109,10 +80,6 @@ export function YourWorkflows({ list = null, busy = false, loading = false, erro
           ATTENTION: <p>{t('Attention appears here when execution records are available.')}</p>, SAVED: savedEmpty,
           EXECUTED: <p>{t('Executed workflows will appear here when their records are available.')}</p> }}/>}
       {list?.hasMore && <p className="muted">{t('Showing up to 100 workflows.')}</p>}
-      </div>
-      {activityAccount && activityOpened && <div className="history-activity" hidden={view === 'WORKFLOWS'}>
-        <WalletActivity account={activityAccount} filter={view === 'IN' ? 'IN' : view === 'OUT' ? 'OUT' : 'ALL'} recorded={recorded} refreshRef={refreshActivity}
-          epoch={error === 'WALLET_SESSION_REQUIRED' ? 'unverified' : 'verified'}/></div>}
     </>}
   </section>;
 }

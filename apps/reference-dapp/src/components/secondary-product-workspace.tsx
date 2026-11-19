@@ -465,9 +465,13 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
   const [cardEntry, setCardEntry] = useState(false);
   // BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 (P1-03): the signed-in account's wallets join this one section (read after load, public data only).
   const [account, setAccount] = useState<AccountState | null>(null);
+  const [accountLoaded, setAccountLoaded] = useState(false);
   // BUILD-FLOFI-MAINNET-EXEC-002 (review round 2): a wallet linked, removed or renamed here also refreshes the bridge destination resolution.
   // BUILD-FLOFI-UNIFIED-COPILOT-001: saved recipients are re-read with the account too (statuses follow the account's wallets; never another session's list).
-  const loadAccount = useCallback(() => { invalidateAccountWallets(); invalidateSavedRecipients(); void accountState().then(setAccount, () => setAccount(null)); }, []);
+  const loadAccount = useCallback(() => {
+    invalidateAccountWallets(); invalidateSavedRecipients();
+    void accountState().then(setAccount, () => setAccount(null)).finally(() => setAccountLoaded(true));
+  }, []);
   useEffect(() => { loadAccount(); }, [loadAccount]);
   // A Google/Apple/email link that failed returns here with a classified code.
   useEffect(() => {
@@ -513,11 +517,12 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
     else if (session.account.address !== entry.address) mismatch(session.account.address);
   }
   const createImport = signedIn && account!.availability.managedWallets;
+  const walletsLoading = !entries.length && (!accountLoaded || evm.restoring || solana.restoring);
   return <div className="ux-page credentials">
     <header className="ux-page-head"><div><h1>{tr("Credentials")}</h1><p>{tr("Wallets and payment methods you use with FloFi. Saving here never approves anything.")}</p></div></header>
     <p className="workspace-notice" role="status">{status ? tr(status) : connection.notice ? tr(...connection.notice) : ''}</p>
     <section className="ux-panel" aria-labelledby="credentials-wallets">
-      <div className="ux-panel-head"><div><h2 id="credentials-wallets">{tr("Wallets")}</h2><span className="ux-count">{entries.length}</span></div>
+      <div className="ux-panel-head"><div><h2 id="credentials-wallets">{tr("Wallets")}</h2>{!walletsLoading && <span className="ux-count">{entries.length}</span>}</div>
         {/* Board 13: one "Add wallet" that opens both existing paths (connect a wallet you have; create or import a FloFi wallet). */}
         {createImport ? <MoreMenu label={tr("Add wallet")} trigger={<><WorkspaceIcon name="plus" size={18}/>{tr("Add wallet")}</>} items={[
           { key: 'connect', label: tr('Connect a wallet you already have'), disabled: busy, onSelect: () => void addWallet() },
@@ -528,7 +533,8 @@ function CredentialsWorkspace({ access }: { access?: DelegationAccess | undefine
       {entries.length ? <ul className="ux-list">{entries.map(entry => <li key={entry.key}><WalletCredentialCard
         entry={entry} busy={busy} accountView={signedIn ? account : null} onConnect={target => void activate(target)} onDisconnect={() => disconnect(entry)} onSave={save}
         onStatus={setStatus} onAccountChanged={loadAccount}/></li>)}</ul>
-        : <p className="ux-panel-text">{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p>}
+        : walletsLoading ? <p className="ux-panel-text" role="status">{tr('Loading wallets…')}</p>
+          : <p className="ux-panel-text">{tr("Add a wallet to save its public address here. FloFi never holds your keys.")}</p>}
     </section>
     <SavedRecipientsSection account={account}/>
     {/* BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the account's sign-in methods (Google, email, wallet) live on their own page, outside the product. */}

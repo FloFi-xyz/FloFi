@@ -47,13 +47,14 @@ export const LOGOUT_TIMEOUT_MS = 10_000;
 
 /** BUILD-FLOFI-IDENTITY-RECOVERY-UX-001: the sign-in methods of another account, named by kind only (never an address). */
 export const METHOD_KIND_LABEL: Readonly<Record<string, string>> = { google: 'Google', apple: 'Apple', email: 'Email', eip155: 'Web3 wallet', solana: 'Solana wallet' };
-export function SignInScreen({ state, initialError, returnTo, mode = null }: { state: AccountState; initialError: string | null; returnTo: string;
+export function SignInScreen({ state, initialError, returnTo, returningFromOAuth = false, mode = null }: { state: AccountState; initialError: string | null; returnTo: string;
+  returningFromOAuth?: boolean;
   /** `reauth`: confirm the account already signed in (a step-up). `move`: sign in to the account that keeps everything (a duplicate is closing). */
   mode?: 'reauth' | 'move' | null }) {
   const { t } = useLocale();
   const privy = useFloFiPrivy();
   const [open, setOpen] = useState<Method | null>(null);
-  const [busy, setBusy] = useState<Method | 'finish' | null>(null);
+  const [busy, setBusy] = useState<Method | 'finish' | null>(privy && returningFromOAuth ? 'finish' : null);
   const [error, setError] = useState<string | null>(initialError);
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [sent, setSent] = useState<string | null>(null), [notice, setNotice] = useState('');
   const emailId = useId(), codeId = useId(), statusId = useId();
@@ -66,6 +67,7 @@ export function SignInScreen({ state, initialError, returnTo, mode = null }: { s
   const prepared = mounted && ready && !authenticated;
   useEffect(() => {
     if (oauthReturn()) { started.current = true; returning.current = true; setBusy('finish'); }
+    else if (returningFromOAuth) setBusy(null);
     setMounted(true);
   }, []);
   const available = state.availability, configured = privy !== null;

@@ -35,6 +35,7 @@ import { walletNonceMessage } from './wallet-nonce';
 import { basisPointsLabel, bridgeIncludedCost, HIGH_BRIDGE_COST_BASIS_POINTS } from './bridge-costs';
 import { shellChainLabel } from './product-shell';
 import { networkIdentity } from './network-registry';
+import { stockTradingRefusal } from './catalog-swap-authoring';
 
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
@@ -155,10 +156,10 @@ function koraMessage(error: string): string | null {
   return 'The network fee could not be paid in USDC or USDT for this step, so nothing was sent. Add SOL for the network fee, then simulate again.';
 }
 export const SINGLE_SWAP_NATIVE_FEE_MESSAGE = 'Add funds for the network fee, then simulate again. This swap pays its network fee in ETH on this network; paying it in USDC is not available for a single swap yet, so nothing was signed.';
-export function simulationError(error: string): string {
+export function simulationError(error: string, kind?: SimulationSource['kind']): string {
   // P0 (owner test 2026-11-12): a Flight Beta refusal (e.g. BETA_WALLET_NOT_LINKED) says what to do; it used to fall through to "Simulation failed".
-  const flight = flightRefusalMessage(error);
-  if (flight) return flight;
+  const refusal = flightRefusalMessage(error) ?? (kind === 'public' ? stockTradingRefusal(error) : null);
+  if (refusal) return refusal;
   // BUILD-FLOFI-E2E-RELIABILITY-001: FloFi Wallet (Privy) refusals keep their own sentence, as on the Canvas.
   const floFiWallet = /^FLOFI_WALLET_/.test(error) ? floFiWalletMessage(error) : null;
   if (floFiWallet) return floFiWallet;
@@ -352,7 +353,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
   const warn = (severity: SimulationWarning['severity'], message: string, technical = false) => view.warnings.push({ severity, message, ...technical ? { technical: true as const } : {} });
   const stop = (message: string) => { view.status = 'blocked'; view.message = message; warn('blocking', message); return view; };
   if (source.state.busy) { view.message = 'Updating the simulation…'; return view; }
-  if (source.state.error) return stop(simulationError(source.state.error));
+  if (source.state.error) return stop(simulationError(source.state.error, source.kind));
   // BUILD-FLOFI-MAINNET-EXEC-002 (review P1): a bridge re-quoted in place after a refusal shows its fresh, authorizable Review — with why the earlier
   // one could not run (visible, never technical) — instead of blocking it.
   const requoted = 'requoted' in source.state ? (source.state as { readonly requoted?: { readonly code: string } | null }).requoted : null;
@@ -378,7 +379,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
   };
   const guard = (bound: boolean, provenance: string, expiry: number, error?: string | null, chainTime = false): boolean => {
     if (!bound) { stop('The workflow has changed. Simulate again before continuing.'); return false; }
-    if (error) { stop(simulationError(error)); return false; }
+    if (error) { stop(simulationError(error, source.kind)); return false; }
     if (!live(provenance)) return false;
     view.expiresAt = !chainTime && Number.isFinite(expiry) ? expiry : null;
     if (!Number.isFinite(expiry) || !chainTime && now >= expiry) { stop('This result has expired. Refresh the simulation before continuing.'); return false; }

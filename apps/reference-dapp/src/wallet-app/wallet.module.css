@@ -25,6 +25,8 @@
 .language button{border:0;background:transparent;color:var(--w-muted);font:500 12px/1 var(--font-ibm-plex-mono),monospace;padding:6px 8px;border-radius:999px;min-height:28px;cursor:pointer}
 .language button[aria-pressed="true"]{background:var(--w-raised);color:var(--w-ink)}
 .themeToggle{width:34px;height:34px;border-radius:50%;border:1px solid var(--w-line);background:var(--w-raised);color:var(--w-ink);display:grid;place-items:center;padding:0;cursor:pointer}
+.themeToggle svg:last-child,:global(:root[data-theme="light"]) .themeToggle svg:first-child{display:none}
+:global(:root[data-theme="light"]) .themeToggle svg:last-child{display:block}
 .account{display:flex;align-items:center;gap:12px;border:1px solid var(--w-line);border-radius:16px;padding:10px 12px;background:var(--w-panel)}
 .account > div{flex:1;min-width:0}
 .account small{display:block;color:var(--w-muted);font-size:12px}

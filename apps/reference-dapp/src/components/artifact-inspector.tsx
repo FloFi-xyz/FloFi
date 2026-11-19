@@ -151,18 +151,19 @@ export function ActionSettingsPopover({ selectedId, select, open, close }: { sel
 export function ActionSettingsContent(props: InspectorProps) {
   const { t: tr } = useLocale();
   const { state, context, actionSetup = null, amountInputs = {}, cryptoSelections = {}, editCanvasAmount, editCryptoSelection } = useWorkflow();
-  // BUILD-RH-002: the Stocks card (a draft or a canonical Robinhood Chain stock purchase) edits its own selection and amount.
+  // The Stocks card edits its configured amount and the Stock Token on either side.
   const setup = actionSetup?.id === props.selectedId && actionSetup.action === 'swap' && actionSetup.stocks ? actionSetup : null;
   const node = setup ? null : state.workflow.nodes.find(item => item.nodeId === props.selectedId && composerSummary(state.workflow, item, context).action === 'Stocks');
   const input = node ? cryptoInputOf(node) : null;
   const selection = setup?.cryptoSelection ?? (node ? cryptoSelections[node.nodeId] ?? input?.selection : null);
   if (!selection || (!setup && !node)) return <CanonicalArtifactInspector {...props}/>;
   const id = (setup?.id ?? node?.nodeId)!;
+  const stockSide = selection.from === 'USDG' ? 'destination' : 'source';
   return <section className="inspector-body" aria-label={tr("Stocks settings")}>
     <h2>{tr("Stocks settings")}</h2>
     <p className="composer-editor-context">{tr("Stocks · Uniswap · ")}{tr(selection.network)}</p>
-    <StocksConfiguration amount={setup ? setup.amount : amountInputs[id] ?? input?.amount ?? ''} source={selection.from} equity={selection.to ?? ''} onAmountChange={amount => editCanvasAmount(id, amount)}
-      onEquityChange={symbol => { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } }}/>
+    <StocksConfiguration amount={setup ? setup.amount : amountInputs[id] ?? input?.amount ?? ''} source={selection.from} equity={(stockSide === 'source' ? selection.from : selection.to) ?? ''} onAmountChange={amount => editCanvasAmount(id, amount)}
+      onEquityChange={symbol => { try { editCryptoSelection(id, selectCryptoToken(selection, stockSide, symbol)); } catch { /* not in the current catalog */ } }}/>
   </section>;
 }
 function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {

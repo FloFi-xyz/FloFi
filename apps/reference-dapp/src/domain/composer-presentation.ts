@@ -72,9 +72,9 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const managed = liquidityPositionSummaryOf(node);
   if (managed) return { action: managed.title, provider: managed.provider, chain: shellChainLabel(node.chainId), amount: managed.subject, detail: managed.pair ?? undefined,
     bridgePair: undefined, linked: false, position: managed, risk: undefined };
-  // BUILD-RH-002: a catalog swap reads its assets from the network catalog; buying a Stock Token with USDG is the Stocks card.
+  // A Robinhood Chain catalog swap between USDG and an official Stock Token is a Stocks card in either direction.
   const catalogSwap = catalogSwapDetails(node);
-  const action = catalogSwap?.stockPurchase ? 'Stocks' : actionLabels[node.actionType] ?? 'Action';
+  const action = catalogSwap?.stockSide ? 'Stocks' : actionLabels[node.actionType] ?? 'Action';
   const lending = lendingDetails(workflow);
   const swap = swapDetails(node, context), solana = solanaSwapDetails(node);
   const router = routerDetails(node), bridge = bridgeDetails(node), universal = universalBridgeDetails(node);

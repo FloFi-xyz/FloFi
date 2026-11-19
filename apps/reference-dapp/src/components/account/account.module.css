@@ -31,7 +31,9 @@
 .language button[aria-pressed="true"]{background:var(--acc-raised);color:var(--acc-ink)}
 .themeToggle{position:relative;width:52px;height:30px;border-radius:999px;border:1px solid var(--acc-line);background:var(--acc-raised);padding:0;color:var(--acc-ink)}
 .themeToggle span{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--acc-ink);color:var(--acc-panel);display:grid;place-items:center}
-.themeToggle[aria-checked="false"] span{transform:translateX(22px)}
+.themeToggle svg:last-child,:global(:root[data-theme="light"]) .themeToggle svg:first-child{display:none}
+:global(:root[data-theme="light"]) .themeToggle svg:last-child{display:block}
+:global(:root[data-theme="light"]) .themeToggle span{transform:translateX(22px)}
 .content{flex:1;display:flex;flex-direction:column;justify-content:center;width:100%;max-width:520px;margin:0 auto;padding:40px 0}
 .contentStart{justify-content:flex-start;padding-top:28px}
 .crumbs{font-size:13px;color:var(--acc-muted);margin:24px 0 0}
@@ -202,7 +204,7 @@
 .steps span{flex:1;text-align:center;border-radius:10px;padding:8px 0;font-size:13px;background:rgb(35 67 217 / .18);border:1px solid rgb(147 166 255 / .3);color:#DDE3FF}
 .mobileBrand{display:none}
 @media (prefers-reduced-motion:no-preference){
-  .method,.primary,.quiet,.tile,.themeToggle span{transition:background-color .16s ease,border-color .16s ease,transform .2s ease,filter .16s ease}
+  .method,.primary,.quiet,.tile{transition:background-color .16s ease,border-color .16s ease,transform .2s ease,filter .16s ease}
   .chip{animation:float 6s ease-in-out infinite alternate}
   .chip:nth-of-type(2n){animation-duration:7.5s}
   .orbitTrack{animation:orbit 48s linear infinite}

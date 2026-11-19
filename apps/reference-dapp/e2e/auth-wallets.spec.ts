@@ -612,7 +612,10 @@ test('a Privy session left in the browser is never reused by /login on its own',
   expect(await accountCookie(context)).toBeUndefined();
 
   // The test provider never completes a redirect. FloFi abandons the old document, preserving the intended destination for the next attempt.
-  await page.goto('/login?returnTo=%2Fapp%2Fcredentials&privy_oauth_code=e2e-unanswered&privy_oauth_state=e2e-unanswered');
+  const response = await page.goto('/login?returnTo=%2Fapp%2Fcredentials&privy_oauth_code=e2e-unanswered&privy_oauth_state=e2e-unanswered');
+  const document = await response!.text();
+  expect(document).toContain('data-signing-in="true"');
+  expect(document).not.toContain('aria-label="Sign-in methods"');
   await expect(page.getByText('Signing you in…', { exact: true })).toBeVisible();
   await expect(page).toHaveURL('/login?returnTo=%2Fapp%2Fcredentials&error=PRIVY_SIGN_IN_INTERRUPTED', { timeout: 30_000 });
   await expect(page.getByRole('alert').filter({ hasText: 'Sign-in was interrupted' })).toBeVisible();

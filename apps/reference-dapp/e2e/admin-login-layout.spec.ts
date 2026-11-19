@@ -86,4 +86,18 @@ for (const scheme of ['light', 'dark'] as const) {
       networkGuard.assertClean();
     });
   }
+
+  test(`Admin uses the saved ${scheme} palette and artwork before hydration when the system theme differs`, async ({ page, networkGuard }, info) => {
+    await page.emulateMedia({ colorScheme: scheme === 'dark' ? 'light' : 'dark' });
+    await page.addInitScript(theme => localStorage.setItem('flofi.theme', theme), scheme);
+    await page.route('**/_next/static/**', route => route.request().resourceType() === 'script' ? route.abort() : route.continue());
+    await page.goto('/admin/login');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+    const visible = page.locator(`.admin-brand [data-artwork="${scheme}"]`);
+    await expect(visible.first()).toBeVisible();
+    await expect(visible.last()).toBeVisible();
+    for (const point of await topRowPaint(page)) expect(point.color).toEqual([...PAGE[scheme]]);
+    await page.screenshot({ path: info.outputPath(`admin-login-saved-${scheme}.png`) });
+    networkGuard.assertClean();
+  });
 }

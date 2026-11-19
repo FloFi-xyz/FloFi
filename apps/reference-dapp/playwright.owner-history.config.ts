@@ -32,7 +32,5 @@ export default defineConfig({
     trace: 'off', screenshot: 'only-on-failure' },
   webServer: { command: 'pnpm start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 60_000,
     env: { PORT: String(E2E_APP_PORT), NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
-      FLOFI_RUNTIME: 'embedded', DATABASE_URL: database.href, FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET,
-      // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the History's wallet activity reads the MOCKED loopback fixture (never a public provider).
-      GRYLOO_WALLET_ACTIVITY_HARNESS: 'MOCKED_LOOPBACK_ONLY' } },
+      FLOFI_RUNTIME: 'embedded', DATABASE_URL: database.href, FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET } },
 });

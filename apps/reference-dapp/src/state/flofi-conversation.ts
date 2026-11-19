@@ -97,7 +97,7 @@ export type ConversationBridge = LifecycleView & {
    */
   readonly continuable?: boolean | undefined;
 };
-export type PendingEdit = { readonly nodeId: string; readonly step: number; readonly action: string; readonly value: string };
+export type PendingEdit = { readonly nodeId: string; readonly step: number; readonly action: string; readonly value: string; readonly draft?: string | undefined };
 type Question = { readonly open: PendingQuestion; readonly language: ConversationLanguage };
 type Workflow = LifecycleView['workflow'];
 type Commit = { readonly before: Workflow; readonly expected: Workflow; readonly role: 'flofi' | 'ai'; readonly language: ConversationLanguage; readonly notes: readonly string[]; readonly reviewed: boolean;
@@ -471,7 +471,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const edit = view.pendingEdits?.[0];
     if (edit && view.resolveEdit) {
       const workflow = latest.current.state.workflow;
-      setQuestion({ open: { kind: 'RESOLVE_EDIT', nodeId: edit.nodeId, workflowId: workflow.workflowId, revision: workflow.revision }, language });
+      setQuestion({ open: { kind: 'RESOLVE_EDIT', nodeId: edit.nodeId, workflowId: workflow.workflowId, revision: workflow.revision, draft: edit.draft }, language });
       say(scope, language, (language, c) => [c.editPending(edit.step, translate(language, edit.action), edit.value), { question: c.editQuestion, options: [c.applyEdit, c.discardEdit] }]);
       return;
     }
@@ -590,9 +590,18 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const language = open.language, verdict = classifyAnswer(text, open.open.kind), view = latest.current.bridge;
     if (open.open.kind === 'NEXT_STEP') return false;
     if (open.open.kind === 'RESOLVE_EDIT') {
+      const { nodeId, workflowId, revision, draft } = open.open;
+      const workflow = latest.current.state.workflow;
+      const current = view.pendingEdits?.find(edit => edit.nodeId === nodeId);
+      if (workflow.workflowId !== workflowId || !current) {
+        setQuestion(null);
+        say(scope, language, (language, c) => [c.editRefused(translate(language, 'This edit is no longer pending.')), { options: [c.review] }]);
+        return true;
+      }
+      if (workflow.revision !== revision || current.draft !== draft) { startReview(scope, language); return true; }
       if (verdict === 'UNCLEAR') { say(scope, language, (_, c) => [c.unclear, { options: [c.applyEdit, c.discardEdit] }]); return true; }
       setQuestion(null);
-      const refused = view.resolveEdit ? view.resolveEdit(open.open.nodeId, verdict === 'YES') : 'This edit is no longer pending.';
+      const refused = view.resolveEdit ? view.resolveEdit(nodeId, verdict === 'YES') : 'This edit is no longer pending.';
       if (refused) { say(scope, language, (language, c) => [c.editRefused(translate(language, refused)), { options: [c.review] }]); return true; }
       say(scope, language, (_, c) => verdict === 'YES' ? c.editApplied : c.editDiscarded);
       resume.current = { scope, language, until: 'EDIT', error: null };

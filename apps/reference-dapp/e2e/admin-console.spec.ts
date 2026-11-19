@@ -63,7 +63,7 @@ test('admin console: refusal until granted, overview with network distribution, 
       await page.emulateMedia({ colorScheme });
       const brand = page.locator('.admin-sign-in .admin-brand');
       await expect(brand.getByRole('img', { name: 'FloFi', exact: true })).toBeVisible();
-      await expect.poll(() => brand.locator('img').evaluateAll(images => images.map(image => {
+      await expect.poll(() => brand.locator('img:visible').evaluateAll(images => images.map(image => {
         const img = image as HTMLImageElement;
         return img.complete && img.naturalWidth > 0 ? new URL(img.currentSrc).pathname : null;
       }))).toEqual([`/brand/flofi-symbol-${colorScheme}.svg`, `/brand/flofi-wordmark-${colorScheme}.png`]);

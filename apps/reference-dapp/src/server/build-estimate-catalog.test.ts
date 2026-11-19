@@ -28,6 +28,8 @@ const CASES: readonly Case[] = [
     pair: c => [baseAsset(c, 'USDC'), baseAsset(c, 'cbBTC')], rate: (i, o) => ({ [i]: 1_000_000_000_000_000n, [o]: 10n ** 21n }), amount: '100000000', expected: '0.001' },
   { name: 'Robinhood Chain USDG → TSLA (Stock Token)', chain: 'eip155:4663', env: { GRYLOO_ROBINHOOD_MAINNET: 'live', NODE_ENV: 'development' }, catalog: officialCatalog,
     pair: c => [rhAsset(c, 'USDG'), rhAsset(c, 'TSLA')], rate: (i, o) => ({ [i]: 2_600_000_000_000_000_000_000_000_000n, [o]: 384_000_000n }), amount: '10000000', expected: '' },
+  { name: 'Robinhood Chain TSLA (Stock Token) → USDG', chain: 'eip155:4663', env: { GRYLOO_ROBINHOOD_MAINNET: 'live', NODE_ENV: 'development' }, catalog: officialCatalog,
+    pair: c => [rhAsset(c, 'TSLA'), rhAsset(c, 'USDG')], rate: i => ({ [i]: 384_000_000n }), amount: '250000000000000000', expected: '96' },
 ];
 const T0 = Date.parse('2026-10-11T22:06:20.000Z');
 function setup(c: Case, pool = true) {
