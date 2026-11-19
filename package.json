@@ -13,7 +13,7 @@
     "test": "vitest run packages apps/reference-dapp/src apps/reference-dapp/backend --exclude '**/*.fork.test.ts' --exclude '**/*.pg.test.ts' --exclude '**/*.live.test.ts' --exclude '**/*.remote.test.ts' --maxWorkers=4 --testTimeout=30000",
     "test:anvil": "vitest run packages/reference-compiler/test/anvil-compatibility.fork.test.ts",
     "test:fork": "vitest run .fork.test.ts",
-    "test:postgres": "vitest run .pg.test.ts --maxWorkers=2 --testTimeout=120000",
+    "test:postgres": "vitest run .pg.test.ts --maxWorkers=2 --testTimeout=120000 --hookTimeout=120000",
     "test:copilot-live": "vitest run .live.test.ts --testTimeout=600000",
     "test:channels-live": "vitest run apps/reference-dapp/src/channels/telegram/telegram.live.test.ts --testTimeout=60000",
     "test:cloud-remote": "vitest run .remote.test.ts --testTimeout=900000",
