@@ -12,7 +12,7 @@ import type { Tab } from './top-bar';
  * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, A2/B2/C2): the stepper is the discreet stage indicator of the Editor's own header (`editor-chrome.tsx`),
  * never the global top bar, whose navigation names the product areas. P0 approved UX (board 03b / 16): each step shows one of three looks —
  * `current` (filled accent pill), `reachable` (outlined pill, clickable: any other step the shell allows) and `closed` (muted, dashed number, the
- * existing reason as tooltip and accessible description). An earlier step is never shown as done (no ✓): only each section states its results,
+ * existing reason as tooltip and in its accessible name, ": <reason>"). An earlier step is never shown as done (no ✓): only each section states its results,
  * and moving forward is always the footer's lifecycle action.
  */
 const STEPS = [
@@ -36,21 +36,29 @@ export function EditorStepper({ tab, setTab, disabled, incomplete, closedReason,
   const { t: tr } = useLocale();
   const current = STEPS.findIndex(step => step.tab === tab);
   const reason = closedReason ?? (incomplete ? 'Configure the action amount on the Canvas first' : null);
-  // A closed step's reason is also shown when it is pressed (touch and keyboard users never see a hover tooltip); it is a polite status.
-  const [notice, setNotice] = useState<string | null>(null);
-  return <nav className="editor-stepper" aria-label={tr('Editor steps')}>
+  // Whether a step is closed, and why: while the shell refuses both (`disabled`), or — only ahead of the current stage — while its own eligibility
+  // is unmet. Recomputed on every render, so a reason is never shown for a step that has since opened.
+  const closure = (index: number) => {
+    const step = STEPS[index]!, own = step.tab === 'Build' ? null : stageReasons?.[step.tab] ?? null;
+    const closed = step.tab !== 'Build' && (disabled || index > current && own !== null);
+    return { closed, reason: closed ? (disabled ? reason : own) : null };
+  };
+  // A closed step's reason is also shown when it is pressed (touch and keyboard users never see a hover tooltip): only while that step is still
+  // closed, with its current reason; Escape or leaving the step dismisses it.
+  const [pressed, setPressed] = useState<number | null>(null);
+  const pressedClosure = pressed === null ? null : closure(pressed);
+  const notice = pressedClosure?.closed ? pressedClosure.reason : null;
+  return <nav className="editor-stepper" aria-label={tr('Editor steps')} onKeyDown={event => { if (event.key === 'Escape') setPressed(null); }}>
     <ol>{STEPS.map((step, index) => {
-      const own = step.tab === 'Build' ? null : stageReasons?.[step.tab] ?? null;
-      // A stage is closed while the shell refuses both (`disabled`), or — only ahead of the current stage — while its own eligibility is unmet.
-      const closed = step.tab !== 'Build' && (disabled || index > current && own !== null);
-      const stepReason = disabled ? reason : own;
+      const { closed, reason: stepReason } = closure(index);
       const look = stepLook(index, current, closed);
       const state = index === current ? 'current' : index < current ? 'before' : 'after';
       return <li key={step.tab} data-step-state={state} data-step-look={look}>
         {index > 0 && <span className="editor-stepper-line" aria-hidden="true"/>}
         <button type="button" aria-current={index === current ? 'step' : undefined} aria-disabled={closed || undefined}
           title={closed && stepReason ? tr(stepReason) : look === 'reachable' ? tr(index < current ? 'Back to {0}' : 'Open {0}', tr(step.label)) : undefined}
-          onClick={() => { if (closed) { setNotice(stepReason); return; } setNotice(null); if (index !== current) setTab(step.tab); }}>
+          onBlur={() => setPressed(null)}
+          onClick={() => { if (closed) { setPressed(index); return; } setPressed(null); if (index !== current) setTab(step.tab); }}>
           <span className="editor-stepper-number" aria-hidden="true">{index + 1}</span>
           <span className="editor-stepper-label">{tr(step.label)}</span>
           {closed && stepReason && <span className="sr-only">{`: ${tr(stepReason)}`}</span>}

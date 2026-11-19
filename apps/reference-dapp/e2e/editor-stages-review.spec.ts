@@ -123,11 +123,19 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(page.locator('.canvas-head .canvas-head-stages').getByRole('navigation', { name: /^(Editor steps|Etapas do editor)$/ })).toBeVisible();
   // Create, empty: the future stages are closed and say why.
   await expect(editorSectionAction(page, 'Simulate')).toHaveAccessibleName(W.simulateClosed);
+  // Pressing a closed stage says why (no hover needed) and opens nothing; Escape dismisses it (forced past Playwright's aria-disabled check).
+  await editorSectionAction(page, 'Simulate').click({ force: true });
+  await expect(editorSteps(page).getByRole('status')).toHaveText(W.simulateClosed);
+  await expectEditorSection(page, 'Build');
+  await page.keyboard.press('Escape');
+  await expect(editorSteps(page).getByRole('status')).toHaveCount(0);
   await evidence(page, 'create-empty');
   await say(page, 'swap 3 USDC to WETH on Base slippage 50 bps', W.card[0]!);
   await say(page, 'supply 0.0013 WETH to Aave on Base', W.card[1]!);
   await say(page, 'borrow 0.8 USDC on Base', W.card[2]!);
   await expect(editorSectionAction(page, 'Simulate')).not.toHaveAttribute('aria-disabled', 'true');
+  // A reason is never left on screen for a stage that has since opened.
+  await expect(editorSteps(page).getByRole('status')).toHaveCount(0);
   await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(W.executeClosed);
   // No authorization copy on Create; its one primary action is the footer's Simulate.
   await expect(page.locator('main')).not.toContainText(W.authorizing);

@@ -210,10 +210,12 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   // C1/C2: with the Review shown (before anything is authorized), it states the status itself (valid until / expired), so the generic status line
   // and the authorization line would only repeat it.
   const reviewShown = Boolean(props.review && !continuation);
+  // …except a blocker the Review does not state: execution unavailable (with its reason) or already started is always said beside it.
+  const blockerBesideReview = !live && ['Execution unavailable', 'Execution already started'].includes(statusLabel);
   const statusPanel = reviewBlock ? reviewPanel : <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
     {reviewShown && props.review}
     {/* A live run keeps its own status beside a Review offered for its next request; before a run, the Review states the status itself. */}
-    {!grouped && (live || !reviewShown) && status}
+    {!grouped && (live || !reviewShown || blockerBesideReview) && status}
     {!live && !grouped && !continuation && !reviewShown && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
     {live && <p className="execution-status-progress">{progress ? tr(STEPS_COMPLETED, progress.completed, progress.total)
       : result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
