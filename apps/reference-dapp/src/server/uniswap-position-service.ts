@@ -187,7 +187,6 @@ export type UniswapPositionDeps = {
 export function validateUniswapPositionLog(bytes: Uint8Array, idPattern: RegExp, chainId: number | null = null): void {
   try { validatePositionLines(bytes, idPattern, chainId); } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
 }
-/** Every collect inside a reviewed request pays the owner, and nobody else (flofi-liquidity #7). */
 /**
  * Every attempt of the run was cancelled before any broadcast (no hash): the only runs the server refreshes, re-authorizes or prepares again. A
  * sent, reverted or expired request is observed, never continued — the Editor's own gate (`uniswapPositionRunResumable`), enforced here too
@@ -195,6 +194,7 @@ export function validateUniswapPositionLog(bytes: Uint8Array, idPattern: RegExp,
  */
 const neverSent = (record: { readonly attempts: readonly UniswapPositionAttempt[] }) =>
   record.attempts.every(a => a.state === 'CANCELLED' && !a.transactionHash && !a.replacementHash);
+/** Every collect inside a reviewed request pays the owner, and nobody else (flofi-liquidity #7). */
 const collectsToOwner = (data: string, owner: string) => decodeUniswapPositionRequest(data).every(c => c.kind !== 'COLLECT' || decodeUniswapCollect(c.data).recipient === owner);
 function validatePositionLines(bytes: Uint8Array, idPattern: RegExp, chainId: number | null): void {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
