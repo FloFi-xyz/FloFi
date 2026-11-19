@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PositionScan } from '../../domain/defi-positions';
 import { LocaleProvider } from '../../i18n/locale';
-import { DefiPositions, liquidityPositionActions, liquidityPositionChoiceFor, liquidityPositionPoolOf, PositionResults } from './defi-positions';
+import { DefiPositions, liquidityPositionActions, liquidityPositionChoiceFor, liquidityPositionPoolOf, PositionResults, PreparationRefusal } from './defi-positions';
 import { readFileSync } from 'node:fs';
 import { liquidityPositionChoiceValid, type LiquidityPositionView } from '../../domain/liquidity-positions';
 
@@ -108,6 +108,23 @@ describe('Dashboard liquidity position actions', () => {
     }
     // The node is prepared on the verified pool and range; an unavailable principal is never invented.
     expect(liquidityPositionPoolOf(uniswap({ principal: [null, '9000'] }))).toMatchObject({ feeTier: 500, tickLower: -71_090, tickUpper: -67_080, amount0: '0', amount1: '9000', slippageBps: 100 });
+  });
+
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 within the Editor: the open workflow's rules (the shell's `positionPreparationRefusal`) as the owner reads them.
+  it('a refused preparation says why: other steps (start a new workflow, an explicit click), a workflow still executing (nothing changed), or a failure (EN and PT)', () => {
+    const startNew = vi.fn();
+    const other = renderToStaticMarkup(<PreparationRefusal code="POSITION_WORKFLOW_HAS_OTHER_STEPS" startNew={startNew}/>);
+    expect(other).toContain('Your current workflow has other steps.');
+    expect(other).toContain('>Start a new workflow</button>');
+    const executing = renderToStaticMarkup(<PreparationRefusal code="POSITION_WORKFLOW_EXECUTING" startNew={startNew}/>);
+    expect(executing).toContain('Your current workflow is still being executed or checked. Follow it in Operate;');
+    expect(executing).not.toMatch(/<button/);
+    expect(renderToStaticMarkup(<PreparationRefusal code="LIQUIDITY_POSITION_CHOICE_INVALID" startNew={startNew}/>)).toContain('This position could not be prepared.');
+    const pt = renderToStaticMarkup(<LocaleProvider initialLanguage="PT"><PreparationRefusal code="POSITION_WORKFLOW_EXECUTING" startNew={startNew}/>
+      <PreparationRefusal code="POSITION_WORKFLOW_HAS_OTHER_STEPS" startNew={startNew}/></LocaleProvider>);
+    expect(pt).toContain('Acompanhe-o em Operar');
+    expect(pt).toContain('Iniciar um novo fluxo');
+    expect(startNew).not.toHaveBeenCalled();
   });
 
   it('the actions only prepare: the component reaches no runtime, wallet or server action, and keeps its wrapping layout (PR #210 .ux-row unchanged)', () => {
