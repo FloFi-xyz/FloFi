@@ -310,6 +310,50 @@ const portuguese: Readonly<Record<string, string>> = {
   'Observed month-to-month cost difference (same days)': 'Diferença de custo observada entre meses (mesmos dias)',
   'Closed days of this month less the same number of days of the previous month.': 'Dias completos deste mês menos o mesmo número de dias do mês anterior.',
   'Alchemy (RPC providers total)': 'Alchemy (total de provedores RPC)',
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the dashboard's period bar, headline and coverage summary, grouped figures and simulator groups.
+  'Selected period': 'Período selecionado',
+  'Amounts in USD': 'Valores em USD',
+  'Recorded value: {0}': 'Valor registrado: {0}',
+  'Month to date': 'Mês até hoje',
+  'End-of-month projection': 'Projeção para o fim do mês',
+  'Month to date vs previous month': 'Mês até hoje vs. mês anterior',
+  'Partial: only the recorded sources are included.': 'Parcial: inclui apenas as fontes registradas.',
+  'How these values are calculated': 'Como estes valores são calculados',
+  'No cost records for this period': 'Nenhum registro de custo neste período',
+  'Partial financial coverage': 'Cobertura financeira parcial',
+  'Cost coverage complete for this period': 'Cobertura de custos completa neste período',
+  'Expense totals are unavailable until financial records exist for the selected period.': 'Os totais de despesas ficam indisponíveis até que existam registros financeiros para o período selecionado.',
+  'Some cost sources have no complete record for the selected period. Totals add only the recorded amounts and are not the complete cost of operating FloFi.': 'Algumas fontes de custo não têm registro completo no período selecionado. Os totais somam apenas os valores registrados e não representam o custo completo de operação da FloFi.',
+  'Every required cost source has a complete record for the selected period.': 'Todas as fontes de custo obrigatórias têm registro completo no período selecionado.',
+  'Cost sources by data quality': 'Fontes de custo por qualidade dos dados',
+  '{0} cost sources': '{0} fontes de custo',
+  'How data quality is classified': 'Como a qualidade dos dados é classificada',
+  'Headline indicators': 'Indicadores principais',
+  'Other cost indicators': 'Outros indicadores de custo',
+  'AI costs, variable costs, margins and break-even are in their own sections below.': 'Custos de IA, custos variáveis, margens e ponto de equilíbrio estão nas seções abaixo.',
+  'Usage': 'Uso',
+  'Reliability': 'Confiabilidade',
+  'Costs': 'Custos',
+  'Token usage by provider, model and surface is in the table below.': 'O uso de tokens por provedor, modelo e superfície está na tabela abaixo.',
+  'List-price estimates are reported separately from provider charges.': 'As estimativas por preço de tabela são apresentadas separadamente das cobranças dos provedores.',
+  'How AI costs are estimated': 'Como os custos de IA são estimados',
+  'Workflow lifecycle': 'Ciclo de vida dos fluxos',
+  'Cost per workflow': 'Custo por fluxo',
+  'Direct costs are workflow-linked costs only. The fully allocated cost divides every recorded operating cost of the period by the completed workflows.': 'Custos diretos são apenas os custos vinculados aos fluxos. O custo totalmente alocado divide todos os custos operacionais registrados no período pelos fluxos concluídos.',
+  'Average steps and planned actions': 'Média de etapas e ações planejadas',
+  'Collected revenue': 'Receita recebida',
+  'Margins': 'Margens',
+  'Break-even': 'Ponto de equilíbrio',
+  'Methodology: record precedence, reconciliation, currency, UTC periods, cohorts and revenue recognition': 'Metodologia: precedência de registros, conciliação, moeda, períodos UTC, coortes e reconhecimento de receita',
+  'Financial data': 'Dados financeiros',
+  'Sync details': 'Detalhes da sincronização',
+  'User and activity assumptions': 'Premissas de usuários e atividade',
+  'Workflow and completion assumptions': 'Premissas de fluxos e conclusão',
+  'Revenue assumptions': 'Premissas de receita',
+  'Variable costs': 'Custos variáveis',
+  'Gas sponsorship assumptions': 'Premissas de patrocínio de gas',
+  'Fixed infrastructure costs': 'Custos fixos de infraestrutura',
+  'Scenario outputs from the assumptions above — not recorded financial performance.': 'Resultados do cenário a partir das premissas acima — não é o desempenho financeiro registrado.',
 };
 
 export function finopsCopy(language: Language) {
@@ -322,5 +366,23 @@ export function finopsCopy(language: Language) {
     : Number(value).toLocaleString(locale, { style: 'currency', currency, maximumFractionDigits: 8 });
   const count = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 2 });
   const time = (value: string | null) => value ? value.slice(0, 16).replace('T', ' ') + ' UTC' : copy('Unavailable');
-  return { copy, money, count, time };
+  /**
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001: a recorded amount for reading on the dashboard — never a changed number. From 1 unit up it shows cents; below
+   * that it keeps four decimals (0.17676573 → $0.1768), and below one cent four significant digits (0.000012345 → $0.00001235), so a real
+   * micro-cost never reads as $0.00. A
+   * missing value stays "Unavailable", never zero. `exact` is the recorded value at full precision (`money`), for the tooltip and the detailed
+   * tables; exports and the investor report keep `money` itself.
+   */
+  const display = (value: string | number | null, currency = 'USD'): { readonly text: string; readonly exact: string } => {
+    if (value === null) return { text: copy('Unavailable'), exact: copy('Unavailable') };
+    const number = Number(value), exact = money(value, currency);
+    if (!Number.isFinite(number)) return { text: exact, exact };
+    const magnitude = Math.abs(number);
+    const text = magnitude === 0 || magnitude >= 1
+      ? number.toLocaleString(locale, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : magnitude >= 0.01 ? number.toLocaleString(locale, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 4 })
+      : number.toLocaleString(locale, { style: 'currency', currency, minimumSignificantDigits: 1, maximumSignificantDigits: 4 });
+    return { text, exact };
+  };
+  return { copy, money, count, time, display };
 }

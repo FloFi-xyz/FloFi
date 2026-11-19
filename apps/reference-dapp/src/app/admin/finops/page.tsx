@@ -24,19 +24,20 @@ export default async function FinopsPage({ searchParams }: { searchParams: Promi
     actions={<a className="admin-button" href={reportUrl}>{copy("Investor reporting")}</a>}>
     <FinopsFilters language={language} filter={filter} action="/admin/finops"/>
     <nav className="admin-actions admin-finops-no-print" aria-label={copy("FinOps sections")}>
-      <a href="#finops-overview">{copy("Overview")}</a><a href="#finops-infrastructure">{copy("Infrastructure Costs")}</a><a href="#finops-ai">{copy("AI Economics")}</a>
-      <a href="#finops-integrations">{copy('Financial integrations')}</a>
+      <a href="#finops-overview">{copy("Overview")}</a><a href="#finops-integrations">{copy('Financial integrations')}</a>
+      <a href="#finops-infrastructure">{copy("Infrastructure Costs")}</a><a href="#finops-ai">{copy("AI Economics")}</a>
       <a href="#finops-workflow">{copy("Workflow Economics")}</a><a href="#finops-revenue">{copy("Revenue & Margins")}</a><a href="#finops-growth">{copy("Growth Simulator")}</a>
+      <a href="#finops-coverage">{copy("Data quality and methodology")}</a>
     </nav>
     <FinopsOverview language={language} report={report}/>
     <Section id="finops-integrations" title={copy('Financial integrations')}>
       <FinopsIntegrations integrations={report.integrations} {...context.principal.role === 'OPERATOR' ? { csrf: context.csrf } : {}}/>
     </Section>
-    <FinopsInfrastructure language={language} report={report}/>
-    {context.principal.role === 'OPERATOR' && report.ledger.status === 'available' ?
-      <Section id="finops-imports" title={copy("Manage financial records")}><FinopsImports csrf={context.csrf}
-        adapters={report.integrations.available ? [] : configuredBillingScopes(process.env, host.tenantId)} filter={{ range: filter.preset, ...Object.fromEntries(query) }}/></Section>
-      : null}
+    {/* BUILD-FLOFI-UX-EDITOR-FINOPS-001: financial record management stays with the costs it records, collapsed so it never dominates the dashboard. */}
+    <FinopsInfrastructure language={language} report={report} records={context.principal.role === 'OPERATOR' && report.ledger.status === 'available' ?
+      <details className="admin-details admin-finops-records" id="finops-imports"><summary>{copy("Manage financial records")}</summary><div className="admin-details-body"><FinopsImports csrf={context.csrf}
+        adapters={report.integrations.available ? [] : configuredBillingScopes(process.env, host.tenantId)} filter={{ range: filter.preset, ...Object.fromEntries(query) }}/></div></details>
+      : null}/>
     <FinopsAi language={language} report={report}/>
     <FinopsWorkflow language={language} report={report}/>
     <FinopsRevenue language={language} report={report}/>

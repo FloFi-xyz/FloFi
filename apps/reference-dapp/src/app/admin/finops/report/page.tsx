@@ -23,15 +23,15 @@ export default async function FinopsInvestorPage({ searchParams }: { searchParam
     actions={<a className="admin-button admin-finops-no-print" href={'/admin/finops?' + query.toString()}>{copy("Back to FinOps")}</a>}>
     <FinopsFilters language={language} filter={filter} action="/admin/finops/report"/>
     <article className="admin-finops-print" aria-label={copy("Investor financial report")}>
-      <FinopsOverview language={language} report={report}/>
-      <Section id="finops-provider-report" title={copy("Infrastructure cost breakdown")}><FinopsCostBreakdown language={language} report={report}/></Section>
-      <FinopsAi language={language} report={report}/>
-      <FinopsWorkflow language={language} report={report}/>
-      <FinopsRevenue language={language} report={report}/>
+      <FinopsOverview language={language} report={report} mode="report"/>
+      <Section id="finops-provider-report" title={copy("Infrastructure cost breakdown")}><FinopsCostBreakdown language={language} report={report} mode="report"/></Section>
+      <FinopsAi language={language} report={report} mode="report"/>
+      <FinopsWorkflow language={language} report={report} mode="report"/>
+      <FinopsRevenue language={language} report={report} mode="report"/>
       <Section id="finops-growth" title={copy("Scalability scenarios")} description={copy("Estimates are based on assumptions chosen for this report.")}>
         <FinopsScenario investor={{ csrf: context.csrf, filter: { range: filter.preset, ...Object.fromEntries(query) } }}/>
       </Section>
-      <FinopsCoverage language={language}/>
+      <FinopsCoverage language={language} mode="report"/>
     </article>
   </AdminShell>;
 }
