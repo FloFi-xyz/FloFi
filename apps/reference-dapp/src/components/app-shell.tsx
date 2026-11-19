@@ -2,7 +2,9 @@
 'use client';
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
-import { uniswapRefreshInPlace } from '../domain/uniswap-liquidity-continuation';
+import { uniswapPositionRunResumable, uniswapRefreshInPlace } from '../domain/uniswap-liquidity-continuation';
+import { orcaPositionRequestOf, type LiquidityPositionChoice } from '../domain/liquidity-positions';
+import type { LiquidityPositionPoolInput } from '../domain/commands';
 import { flightWalletAccess } from '../app/flight-wallet-action';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
@@ -33,7 +35,7 @@ import { CompositionProvider, useComposition } from '../state/composition-store'
 import { CompositionPanel } from './composition-panel';
 import { useModeA } from '../state/mode-a-store';
 import { FlightBoarding, useFlightDraft } from '../flight/app-boarding';
-import { useWorkflow } from '../state/workflow-store';
+import { useWorkflow, type StagedPosition } from '../state/workflow-store';
 import { useLiquidity } from '../state/liquidity-store';
 import { LiquidityPanel } from './liquidity-panel';
 import { BridgePanel } from './bridge-panel';
@@ -106,6 +108,7 @@ import { useSolanaComposition } from '../state/solana-composition-store';
 import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import { UniswapLiquidityPanel } from './uniswap-liquidity-panel';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
+import { UniswapPositionProvider, useUniswapPosition, useUniswapPositionExecutionLifecycle } from '../state/uniswap-position-store';
 import { RouterPanel } from './router-panel';
 import { useRouter } from '../state/router-store';
 import { UniversalBridgePanel } from './universal-bridge-panel';
@@ -141,7 +144,21 @@ import { useProductBootstrap } from '../state/product-bootstrap';
 type ProductNavigation = { engineering?: boolean; pathname?: string | null; navigate?: (path: string) => void;
   approvalSlot?: ((element: HTMLDivElement | null) => void) | undefined; approvalGate?: boolean;
   surface?: 'workspace' | 'signing'; approvalWallet?: string | null; autoPrepare?: boolean; onViewInFloFi?: (() => void) | undefined };
-export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider><CompositionProvider><CanvasCardInputsProvider><PoolPriceRangeProvider><AppShellContent {...props}/></PoolPriceRangeProvider></CanvasCardInputsProvider></CompositionProvider></ModeBProvider>; }
+export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider><CompositionProvider><CanvasCardInputsProvider><PoolPriceRangeProvider><UniswapPositionProvider><AppShellContent {...props}/></UniswapPositionProvider></PoolPriceRangeProvider></CanvasCardInputsProvider></CompositionProvider></ModeBProvider>; }
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: what "Simulate" runs for a staged position operation. An Orca mainnet choice simulates exactly its own
+ * operation on its own position (`orcaPositionRequestOf`), the Devnet engineering command its staged operation; without a staged choice the
+ * previous Review's operation is simulated again (OPEN when there is none). A staged withdrawal or collection is never simulated as OPEN.
+ */
+export function solanaPoolSimulation(staged: StagedPosition | null, previous: { operation: string; positionMint: string; partBps: number | null } | null | undefined):
+  { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT'; positionMint: string | undefined; partBps: number | undefined } {
+  const orca = staged && (!staged.choice || staged.choice.position.protocol === 'ORCA') ? staged : null;
+  if (orca?.choice) { const request = orcaPositionRequestOf(orca.choice); return { operation: request.operation, positionMint: request.positionMint, partBps: request.partBps }; }
+  if (orca) return { operation: orca.operation, positionMint: orca.positionId, partBps: orca.partBps ?? undefined };
+  const operation = (previous?.operation ?? 'OPEN') as 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT';
+  return { operation, positionMint: operation === 'OPEN' ? undefined : previous?.positionMint, partBps: previous?.partBps ?? undefined };
+}
 
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();
 const shortAccount = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
@@ -153,7 +170,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   useEffect(() => { setInteractive(true); }, []);
   const { state, context, reviewError, authoringIncomplete, restoreWorkflow, restorationEpoch, propose, createNewWorkflow, newWorkflow, runtimeWorkflow, sequence, sequenceRestore, completeSequenceStep,
     recordExecutedAction, executedActions, amountInputs, actionSetup, commitCanvasAmount, cancelCanvasAmount, removeActionSetup, pending: proposal, canvasRestoring,
-    review: workflowReview, cryptoSelections = {}, bridgeNetworkInputs = {}, recipientInputs = {} } = useWorkflow();
+    review: workflowReview, cryptoSelections = {}, bridgeNetworkInputs = {}, recipientInputs = {}, stagedPosition = null, clearStagedPosition, stageLiquidityPosition } = useWorkflow();
   // BUILD-FLOFI-CHAT-E2E-FIX-002: every runtime path below serves `runtimeWorkflow` — the canonical workflow, or the current step of a sequence of
   // independent owner-wallet actions (Swap → Bridge). The Canvas, chat and saving keep the canonical `state.workflow`.
   // UX-004: a run recovered (or just finished) into the visit's initial draft is not re-attached to a workflow the owner created afresh.
@@ -229,6 +246,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const supply = useSupply();
   const transfer = useRobinhoodTransfer(), solanaTransfer = useSolanaTransfer(), lending = useLending(), jupiter = useJupiter();
   const solanaLiquidity = useSolanaLiquidity(), uniswapLiquidity = useUniswapLiquidity(), routerState = useRouter(), solanaComposition = useSolanaComposition();
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged Uniswap position operation (or that store's own run of this workflow) is served by the position store.
+  const uniswapPosition = useUniswapPosition();
+  // A staged position belongs to its verified owner: another connected wallet clears it (nothing was simulated or signed for it).
+  const stagedOwner = stagedPosition?.choice?.position.owner ?? null, stagedOrca = stagedPosition?.choice?.position.protocol === 'ORCA';
+  const stagedSigner = stagedOrca ? solanaSession?.account.address ?? null : connectedWallet.account?.toLowerCase() ?? null;
+  useEffect(() => { if (stagedOwner && stagedSigner && stagedSigner !== stagedOwner) clearStagedPosition?.(); }, [stagedOwner, stagedSigner, clearStagedPosition]);
   const universal = useUniversalRouter();
   const publicTestnet = usePublicTestnet();
   // BUILD-FLOFI-UNIVERSAL-E2E-001: the runtime that serves this workflow comes from its own actions and networks. A run a store recovered
@@ -321,7 +344,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : runtime.kind === 'transfer' ? { kind: 'transfer', state: transfer }
     : runtime.kind === 'lending' ? { kind: 'lending', state: lending }
     : runtime.kind === 'supply' ? { kind: 'supply', state: supply }
-    : runtime.kind === 'uniswap-pool' ? { kind: 'uniswap-pool', state: uniswapLiquidity }
+    : runtime.kind === 'uniswap-pool' ? { kind: 'uniswap-pool', state: uniswapPosition.engaged ? uniswapPosition : uniswapLiquidity }
     : runtime.kind === 'solana-composition' ? { kind: 'solana-composition', state: solanaComposition }
     : runtime.kind === 'solana-pool' ? { kind: 'solana-pool', state: solanaLiquidity }
     : runtime.kind === 'solana-swap' ? { kind: 'solana-swap', state: jupiter }
@@ -348,7 +371,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const stepChain = runtimeWorkflow.nodes[0]?.chainId ?? null;
   const flightSigner = flightSignerFor(stepChain, { evm: connectedWallet.account ?? null, solana: solanaSession?.account.address ?? null, fallback: reviewBinding.wallet.account });
   const [flightBlock, setFlightBlock] = useState<{ readonly owner: string; readonly code: string; readonly workflowId: string } | null>(null);
-  const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
+  // The position store's run has its own lifecycle projection (the same projections the shared hook applies to the mint run).
+  const positionServed = simulationSource.kind === 'uniswap-pool' && uniswapPosition.engaged;
+  const sharedProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet), positionProgress = useUniswapPositionExecutionLifecycle(reviewBinding.wallet);
+  const executionProgress = positionServed ? positionProgress : sharedProgress;
   const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
   // BUILD-FIX-UX-001: a final run of another (new or edited) workflow has not started this workflow's execution; its record is unchanged.
   const executionStart = executionProgress.started && !currentExecution(executionProgress) ? { ...recordedStart, started: false } : recordedStart;
@@ -431,9 +457,16 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : simulationSource.kind === 'supply' ? supply.simulate
     // EXEC-01: "Simulate again" of a started liquidity run (an approval landed, nothing pending) refreshes that same run in place: the
     // confirmed approval is kept and only the remaining requests are reviewed again. A run with nothing landed starts a new simulation.
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged Uniswap position operation simulates exactly that operation (`uniswapPositionRequestOf`); a run
+    // whose request was refused before the wallet (nothing sent) is refreshed in place.
+    : positionServed ? () => uniswapPosition.record && !uniswapPosition.retired && uniswapPosition.record.attempts.length > 0 && uniswapPositionRunResumable(uniswapPosition.record)
+      ? uniswapPosition.refresh() : uniswapPosition.simulate()
     : simulationSource.kind === 'uniswap-pool' ? () => uniswapRefreshInPlace(uniswapLiquidity.record, uniswapLiquidity.retired) ? uniswapLiquidity.refresh() : uniswapLiquidity.simulate()
     : simulationSource.kind === 'solana-composition' ? solanaComposition.simulate
-    : simulationSource.kind === 'solana-pool' ? () => solanaLiquidity.simulate(solanaReview?.operation ?? 'OPEN', solanaReview?.operation === 'OPEN' ? undefined : solanaReview?.accounts.positionMint, solanaReview?.partBps ?? undefined)
+    : simulationSource.kind === 'solana-pool' ? () => {
+      const next = solanaPoolSimulation(stagedPosition, solanaReview ? { operation: solanaReview.operation, positionMint: solanaReview.accounts.positionMint, partBps: solanaReview.partBps } : null);
+      return solanaLiquidity.simulate(next.operation, next.positionMint, next.partBps);
+    }
     : simulationSource.kind === 'solana-swap' ? jupiter.simulate
     : simulationSource.kind === 'public' ? publicTestnet.simulate
     : simulationSource.kind === 'fork-swap' ? modeA.simulate
@@ -601,6 +634,25 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     setWorkflowEpoch(epoch => epoch + 1);
   }
   function startNewWorkflow() { resetForNewWorkflow(); setTab('Build'); }
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Dashboard's position actions PREPARE the workflow — the owner's choice is committed as
+   * MANAGE_LIQUIDITY_POSITION and staged — and open the Editor. Nothing is simulated, reviewed or signed here. A workflow with other steps is
+   * never rewritten silently: the owner explicitly starts a new workflow for the position (`fresh`).
+   */
+  const [queuedPosition, setQueuedPosition] = useState<{ readonly choice: LiquidityPositionChoice; readonly pool: LiquidityPositionPoolInput; readonly from: string } | null>(null);
+  function prepareLiquidityPosition(choice: LiquidityPositionChoice, pool: LiquidityPositionPoolInput, fresh = false): string | null {
+    if (!stageLiquidityPosition) return 'LIQUIDITY_POSITION_UNAVAILABLE';
+    if (fresh) { setQueuedPosition({ choice, pool, from: state.workflow.workflowId }); resetForNewWorkflow(); return null; }
+    const result = stageLiquidityPosition(choice, pool);
+    if (!result.ok) return result.error;
+    setTab('Build');
+    return null;
+  }
+  useEffect(() => {
+    if (!queuedPosition || state.workflow.workflowId === queuedPosition.from || !stageLiquidityPosition) return;
+    setQueuedPosition(null);
+    if (stageLiquidityPosition(queuedPosition.choice, queuedPosition.pool).ok) setTab('Build');
+  }, [queuedPosition, state.workflow.workflowId]);
   /**
    * BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): the sidebar's and the Dashboard's "New workflow". The same clean start as "Create new
    * workflow" (new identity; Canvas, selection, proposal, Review binding and Copilot conversation reset; wallet connection and sign-in kept),
@@ -786,7 +838,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (tab === 'Dashboard') return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     <main id="workspace" className="main" tabIndex={-1} aria-label={tr("Dashboard")}><DashboardWorkspace workflowName={workflowName} progress={executionProgress} recovery={executionProgress.recovery} wallet={reviewBinding.wallet} context={context}
       workflowProgress={workflowProgress} runId={dashboardRoute?.runId ?? null} portfolio={<PortfolioWidget evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
-      positions={<DefiPositions evm={connectedWallet.account} solana={solanaSession?.account.address ?? null}/>}
+      positions={<DefiPositions evm={connectedWallet.account} solana={solanaSession?.account.address ?? null} prepare={prepareLiquidityPosition}/>}
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)} create={entry ? startNewChatWorkflow : undefined}/></main>
   </div>;
   // BUILD0-UX-001: Build 0 has no Canvas, chat panel or summary bar; its request continues in the same conversation, shown in Build 1.

@@ -12,3 +12,13 @@
 .row ul { padding-inline-start: 1rem; }
 .row small { display: block; }
 .row strong small { display: inline; }
+/* BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a liquidity position's facts and its prepare-only actions; wraps on narrow screens. */
+.liquidity { display: grid; gap: .5rem; min-width: 0; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: .25rem .75rem; margin: 0; min-width: 0; }
+.facts > div { min-width: 0; overflow-wrap: anywhere; }
+.facts dt { font-size: .8125rem; color: var(--muted); }
+.facts dd { margin: 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0; }
+.actions label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.actions select { color: inherit; background: var(--surface); font: inherit; max-width: 100%; }
+.note { margin: 0; font-size: .8125rem; color: var(--muted); }

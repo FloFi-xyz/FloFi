@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { supersededUnsent } from '../domain/execution-lifecycle';
-import { currentUniswapAttempts } from '../domain/uniswap-liquidity-continuation';
+import { currentUniswapAttempts, uniswapPositionReviewAuthorizable } from '../domain/uniswap-liquidity-continuation';
+import { useOptionalUniswapPosition } from './uniswap-position-store';
 import type { ExecutionStart } from '../domain/execution-presentation';
 import type { ReviewWallet } from '../domain/review-presentation';
 import type { SimulationSource } from '../domain/simulation-presentation';
@@ -27,6 +28,8 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
   const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), solanaComposition = useSolanaComposition();
   const solanaTransfer = useSolanaTransfer();
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged (or attached) Uniswap position-management run is served by the position store.
+  const position = useOptionalUniswapPosition(), positionRun = position?.engaged ? position : null;
   const result: ExecutionStart = { ready: false, started: false, start: null, prompt: null, expiresAt: null };
   const attach = (ready: boolean, started: boolean, start: () => void | Promise<void>, prompt = 'Confirm the next transaction in your wallet.') => Object.assign(result, { ready, started, start, prompt });
   const localWallet = (session: { account: string } | null, connect: () => void) => {
@@ -93,6 +96,14 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       if (!solanaComposition.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
     }
     case 'uniswap-pool': {
+      if (positionRun) {
+        // One operation, one wallet request: only under the run's current, authorized Review, nothing pending, nothing confirmed yet.
+        const r = positionRun.record, attempts = r ? r.attempts.filter(a => !supersededUnsent(a, r.review.commitment)) : [], last = attempts.at(-1);
+        const pending = Boolean(last && r?.verdict === 'PENDING' && ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
+        attach(Boolean(r && r.authorization === r.review.commitment && !positionRun.retired && !positionRun.busy && !pending && r.verdict === 'PENDING' &&
+          positionRun.executionEnabled && uniswapPositionReviewAuthorizable(r)), attempts.length > 0, positionRun.execute);
+        if (!positionRun.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
+      }
       // EXEC-01: as for the bridges, a never-sent attempt of an earlier Review (superseded by the in-place refresh) is not this run's request.
       const r = uniswapPool.record, attempts = r ? currentUniswapAttempts(r) : [], last = attempts.at(-1);
       const pending = Boolean(last && r?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
@@ -166,6 +177,8 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
         result.nextLabel = 'Continue to add liquidity'; break;
       }
       case 'uniswap-pool': {
+        // A position run has one wallet request: there is never a next one to continue.
+        if (positionRun) { safeNext = false; break; }
         // EXEC-01: after the in-place refresh the remaining step was never attempted under the CURRENT, newly authorized Review.
         const r = uniswapPool.record, attempts = r ? currentUniswapAttempts(r) : [], next = r?.review.calls.find(c => !attempts.some(a => a.step === c.step && a.state === 'CONFIRMED'));
         safeNext = Boolean(r && next && !attempts.some(a => a.step === next.step));
@@ -191,7 +204,7 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
     result.next = result.ready && safeNext ? result.start : null;
   }
   result.check = kind === 'supply' ? supply.observe : kind === 'lending' ? lending.observe : kind === 'router' ? router.observe : kind === 'universal' ? universal.observe : kind === 'public' ? publicSwap.observe
-    : kind === 'solana-swap' ? jupiter.observe : kind === 'solana-transfer' ? solanaTransfer.observe : kind === 'solana-pool' ? solanaPool.observe : kind === 'solana-composition' ? solanaComposition.observe : kind === 'uniswap-pool' ? uniswapPool.observe : kind === 'transfer' ? transfer.observe
+    : kind === 'solana-swap' ? jupiter.observe : kind === 'solana-transfer' ? solanaTransfer.observe : kind === 'solana-pool' ? solanaPool.observe : kind === 'solana-composition' ? solanaComposition.observe : kind === 'uniswap-pool' ? positionRun?.observe ?? uniswapPool.observe : kind === 'transfer' ? transfer.observe
     : kind === 'fork-swap' ? () => { const a = modeA.execution?.attempts.at(-1); if (a && (a.stepId === 'step-approve' || a.stepId === 'step-swap')) modeA.observe(a.stepId); }
     : kind === 'delegated-swap' ? modeB.refresh : kind === 'composition' ? composition.refresh : null;
   return result;

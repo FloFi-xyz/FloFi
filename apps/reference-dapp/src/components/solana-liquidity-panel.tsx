@@ -9,6 +9,7 @@ import { usePoolContributionInputs } from './canvas-card-inputs';
 import { TokenAmountInput } from './token-amount-input';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
+import { liquidityPositionOperationPhrase } from '../domain/simulation-presentation';
 import { useJupiter } from '../state/jupiter-store';
 import { useSolanaLiquidity, type LiquidityOperation } from '../state/solana-liquidity-store';
 import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
@@ -122,23 +123,27 @@ const message = (code: string | null | undefined, devnet = true) => !code ? null
 const amounts = (devnet: boolean) => ({ sol: (lamports: string | null | undefined) => lamports ? `${formatTokenAmount(lamports, 9)} ${devnet ? 'Devnet SOL' : 'SOL'}` : '--',
   usdc: (units: string | null | undefined) => units ? `${formatTokenAmount(units, 6)} ${devnet ? 'devUSDC' : 'USDC'}` : '--' });
 const labels: Record<LiquidityOperation, string> = { OPEN: 'Open position and add liquidity', DECREASE_PARTIAL: 'Partially remove liquidity and collect fees',
-  EXIT: 'Remove all liquidity, collect fees and close the position' };
+  EXIT: 'Remove all liquidity, collect fees and close the position', COLLECT: 'Collect fees (liquidity unchanged)' };
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: what an operation's simulate and execute buttons name. */
+const subject = (operation: string) => operation === 'OPEN' ? 'position' : operation === 'COLLECT' ? 'collection' : 'removal';
 
 export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
-  const { state, stagedPosition } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
+  const { state, stagedPosition: staged } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
+  // Only an Orca operation (the Devnet engineering command or an Orca mainnet choice) is staged here; a Uniswap choice never is.
+  const stagedPosition = staged && (!staged.choice || staged.choice.position.protocol === 'ORCA') ? staged : null;
   const node = state.workflow.nodes.find(n => solanaLiquidityDetails(n)), fields = node ? solanaLiquidityDetails(node) : null;
   const record = liquidity.record, review = record?.review, attempt = record?.attempt, sim = review?.simulationResult;
   // An applied chat selection must stay on that mint; a missing selection never falls back to another position.
   const active = liquidity.positions?.find(p => ['ACTIVE', 'EMPTY', 'OPEN_PENDING'].includes(p.status) &&
-    (!stagedPosition || p.positionMint === stagedPosition.positionMint)) ?? null;
+    (!stagedPosition || p.positionMint === stagedPosition.positionId)) ?? null;
   const [operation, setOperation] = useState<LiquidityOperation>('OPEN'), [part, setPart] = useState('5000'), [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   // HOTFIX-WORKFLOW-CONCURRENCY-001: opening another position is always possible; an applied position-management proposal (below) selects its own operation.
   useEffect(() => { setOperation('OPEN'); }, [active?.positionMint, active?.status]);
   // A position-management proposal the owner applied (from the Copilot) only preselects its operation for this position; nothing is simulated.
   useEffect(() => {
-    if (!stagedPosition || !active || active.positionMint !== stagedPosition.positionMint || active.status === 'OPEN_PENDING') return;
+    if (!stagedPosition || !active || active.positionMint !== stagedPosition.positionId || active.status === 'OPEN_PENDING') return;
     setOperation(stagedPosition.operation);
     if (stagedPosition.partBps !== null) setPart(String(stagedPosition.partBps));
   }, [stagedPosition, active?.positionMint, active?.status]);
@@ -172,13 +177,13 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
       <div role="group" aria-label={tr("Liquidity operation")}>
         <label htmlFor="orca-operation">{tr("Operation")}</label>
         <select id="orca-operation" value={operation} onChange={e => setOperation(e.target.value as LiquidityOperation)}>
-          {(['OPEN', 'DECREASE_PARTIAL', 'EXIT'] as const).filter(op => op === 'OPEN' || Boolean(active && active.status !== 'OPEN_PENDING'))
+          {(['OPEN', 'COLLECT', 'DECREASE_PARTIAL', 'EXIT'] as const).filter(op => op === 'OPEN' || Boolean(active && active.status !== 'OPEN_PENDING'))
             .map(op => <option key={op} value={op}>{tr(labels[op])}</option>)}
         </select>
         {operation === 'DECREASE_PARTIAL' && <label>{tr("Portion to remove (basis points, 1–9999)")}<input aria-label={tr("Portion to remove (bps)")} inputMode="numeric" maxLength={4} value={part} onChange={e => setPart(e.target.value)}/></label>}
       </div>
       <button type="button" disabled={liquidity.busy || !liquidity.owner || Boolean(stagedPosition && !active)} onClick={() => void liquidity.simulate(operation, operation === 'OPEN' ? undefined : active?.positionMint,
-        operation === 'DECREASE_PARTIAL' ? Number(part) : undefined)}>{tr("Simulate ")}{tr(operation === 'OPEN' ? 'position' : 'removal')}</button>
+        operation === 'DECREASE_PARTIAL' ? Number(part) : undefined)}>{tr("Simulate ")}{tr(subject(operation))}</button>
       {review && sim && !liquidity.retired && <dl className="swap-summary" aria-label={tr("Liquidity simulation")}>
         <dt>{tr("Operation")}</dt><dd>{tr(labels[review.operation])}{tr(" (1 transaction; the full lifecycle is open, partial removal, then exit)")}</dd>
         <dt>{tr("Network")}</dt><dd>{tr(devnet ? "Solana Devnet (genesis " : "Solana Mainnet (genesis ")}{tr(review.genesisHash)})</dd><dt>{tr("Provider")}</dt><dd>{tr("Orca Whirlpools · program ")}<code>{tr(review.program)}</code></dd>
@@ -193,9 +198,11 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
           <dt>{tr("Slippage bounds")}</dt><dd>{tr(review.intent.slippageBps)}{tr(" bps → at most ")}{tr(sol(review.operationPlan.tokenA))}{tr(" and ")}{tr(usdc(review.operationPlan.tokenB))}{tr(", never above your maxima")}</dd>
           <dt>{tr("Expected residual")}</dt><dd>{tr(sol(sim.residualTokenA))}{tr(devnet ? " not deposited (stays in your wallet) · devUSDC balance after " : " not deposited (stays in your wallet) · USDC balance after ")}{tr(usdc(sim.residualTokenB))}</dd>
         </> : <>
+          <dt>{tr("What happens")}</dt><dd>{tr(liquidityPositionOperationPhrase('ORCA', review.operation, review.operation === 'EXIT'))}</dd>
           <dt>{tr("Liquidity removed")}</dt><dd>{tr(review.expected.liquidity)}{tr(" of the position (remaining ")}{tr(review.expected.positionLiquidityAfter)})</dd>
           <dt>{tr("Expected principal returned")}</dt><dd>{tr(sol(review.expected.amountA))} + {tr(usdc(review.expected.amountB))}{tr("; minimum ")}{tr(sol(review.operationPlan.tokenA))} + {tr(usdc(review.operationPlan.tokenB))} ({tr(review.intent.slippageBps)}{tr(" bps)")}</dd>
           <dt>{tr("Fees collected (simulated)")}</dt><dd>{tr(sol(sim.collectedFeesA))} + {tr(usdc(sim.collectedFeesB))}{tr(" (separate from principal)")}</dd>
+          <dt>{tr("Fees collected, at least")}</dt><dd>{tr("At least the simulated amount; fees accrued until execution are also collected. Tokens return as the pool's own tokens.")}</dd>
         </>}
         <dt>{tr("Owner balances")}</dt><dd>{tr(sol(review.ownerBalances.lamports))} · {tr(usdc(review.ownerBalances.tokenB ?? '0'))}</dd>
         <dt>{tr("Token accounts")}</dt><dd>{tr("wrapped SOL (temporary, closed in the same transaction) ")}<code>{tr(review.accounts.ownerTokenA)}</code>{tr(devnet ? " · devUSDC " : " · USDC ")}<code>{tr(review.accounts.ownerTokenB)}</code>{tr(" · position token (Token-2022) ")}<code>{tr(review.accounts.positionTokenAccount)}</code></dd>
@@ -219,7 +226,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
         : "This position uses real funds on Solana Mainnet. Your wallet will ask you to sign one exact transaction; Flofi never signs for you.")}</p>}
       {record && !record.authorization && !attempt && !liquidity.retired && <button type="button" disabled={liquidity.busy || fresh === 0} onClick={() => void liquidity.review()}>{tr("Accept liquidity review")}</button>}
       {record?.authorization && !attempt && !liquidity.executionEnabled && <p role="status">{tr(message('ORCA_LIQUIDITY_EXECUTION_NOT_ENABLED', devnet))}</p>}
-      {canExecuteNow && <button type="button" className="primary" disabled={liquidity.busy} onClick={() => void liquidity.execute()}>{tr("Execute ")}{tr(review?.operation === 'OPEN' ? 'position' : 'removal')}</button>}
+      {canExecuteNow && <button type="button" className="primary" disabled={liquidity.busy} onClick={() => void liquidity.execute()}>{tr("Execute ")}{tr(subject(review?.operation ?? 'OPEN'))}</button>}
       {attempt && !record?.evidence && <p>{tr("Transaction: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}
       {pending && <button type="button" disabled={liquidity.busy} onClick={() => void liquidity.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
       {record?.evidence && observation && effects && <section aria-label={tr("Liquidity result")} className="swap-result">

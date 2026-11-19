@@ -25,6 +25,8 @@ vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.stores.
 vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./universal-router-store', () => ({ useUniversalRouter: () => ({ record: null, busy: false, error: null, retired: false, executionEnabled: false, signing: false, review: () => undefined, execute: () => undefined, observe: () => undefined }) })); // BUILD-CROSSCHAIN-UNIVERSAL-001: idle
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => f.stores.uniswapPool }));
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Uniswap position store serves a staged position operation (idle unless a test engages it).
+vi.mock('./uniswap-position-store', () => ({ useOptionalUniswapPosition: () => f.stores.uniswapPosition ?? null }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => f.stores.transfer }));
 // BUILD-SOLANA-TRANSFER-UX-001: the Solana transfer runtime is mounted too; none of these workflows is a Solana transfer, so it stays idle.
 vi.mock('./solana-transfer-store', () => ({ useSolanaTransfer: () => ({ record: null, busy: false, retired: false, recovered: false, error: null }) }));
@@ -225,5 +227,31 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 no false "Wallet changed" whil
     const key = '9'.repeat(32) + 'Ab', bound = { ...none, restorationEpoch: 2 };
     expect(reviewBindingAdopts(bound, { account: key, chain: 'solana:mainnet' }, 2, key, 'solana')).toBe(true);
     expect(reviewBindingAdopts(bound, { account: key.toLowerCase(), chain: 'solana:mainnet' }, 2, key, 'solana')).toBe(false);
+  });
+});
+
+describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged Uniswap position operation', () => {
+  it('binds the position run\'s own Review (one Position Manager request, no token permission) and its owner, operation, minimums and recipient', () => {
+    const owner = reviewOwner.toLowerCase(), review = vi.fn();
+    const q = { commitment: '0xpos', operation: 'DECREASE', partBps: 5_000, close: false, chainId: 8453, owner, recipient: owner, liquidityToRemove: '10', slippageBps: 100,
+      position: { tokenId: '42' }, minimums: { amount0Min: '990000', amount1Min: '9900' },
+      token0: { symbol: 'USDC', address: '0x' + '1'.repeat(40), decimals: 6 }, token1: { symbol: 'cbBTC', address: '0x' + '2'.repeat(40), decimals: 8 },
+      calls: [{ step: 'DECREASE', to: '0x' + '3'.repeat(40), data: '0xac9650d8' }] };
+    f.stores.uniswapPool = { record: null, busy: false, retired: false, review: vi.fn() };
+    f.stores.uniswapPosition = { engaged: true, busy: false, retired: false, review, record: { format: 'flofi.uniswap-position-run.v1', id: 'balp-pos', authorization: null,
+      verdict: 'PENDING', attempts: [], review: q } };
+    f.stores.wallet = { revision: 0, account: reviewOwner, chainId: '0x2105' };
+    const { authorization } = useReviewAuthorization('uniswap-pool');
+    expect(authorization).toMatchObject({ key: 'balp-pos:0xpos', owner, chain: 'eip155:8453', ready: true, accepted: false, approvals: [] });
+    expect(authorization.approve).toBe(review);
+    expect(authorization.limits).toEqual(expect.arrayContaining([{ label: 'Operation', value: 'Remove part of the position\'s liquidity and collect' },
+      { label: 'Position', value: '#42' }, { label: 'Minimum principal', value: '0.99 USDC + 0.000099 cbBTC' }, { label: 'Recipient', value: owner }]));
+    // A declined request under the current Review is not authorized again as it is (the owner refreshes it first).
+    f.state = undefined;
+    f.stores.uniswapPosition.record = { ...f.stores.uniswapPosition.record as object, attempts: [{ state: 'CANCELLED', reviewCommitment: '0xpos', transactionHash: null, replacementHash: null }] };
+    expect(useReviewAuthorization('uniswap-pool').authorization.ready).toBe(false);
+    // Not engaged: the mint store (here without a run) keeps serving the pool node; the position run is not presented.
+    f.state = undefined; f.stores.uniswapPosition = { ...f.stores.uniswapPosition, engaged: false };
+    expect(useReviewAuthorization('uniswap-pool').authorization.key).toBeNull();
   });
 });

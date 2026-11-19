@@ -4,7 +4,8 @@ import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
-import { useWorkflow } from './workflow-store';
+import { useWorkflow, type StagedPosition } from './workflow-store';
+import { activeNetworkScope } from '../domain/network-scope';
 import { useJupiter } from './jupiter-store';
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
 import { createPositionMintSigner, signOrcaLiquidityTransaction, type PositionMintSigner } from '../wallet/position-mint-signer';
@@ -23,7 +24,8 @@ import type { OrcaLiquidityRecord, OrcaPositionEntry } from '../server/orca-liqu
  * The OPEN position-mint key lives only in this tab's memory as a non-extractable CryptoKey; it is never persisted, and
  * a reload makes an unsigned OPEN unexecutable (the server then records it as not submitted).
  */
-export type LiquidityOperation = 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT';
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: COLLECT collects the position's fees only (liquidity unchanged). */
+export type LiquidityOperation = 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT';
 export type PoolPrice = { price: string; lowerPrice: string; upperPrice: string; tickLower: number; tickUpper: number; tickCurrentIndex: number; slot: number;
   /** BUILD-SOLANA-MAINNET-001: the cluster whose pool this price was read from; a price is only ever used for that cluster. */ network?: 'Solana Devnet' | 'Solana' };
 export type SolanaLiquidityNetwork = 'Solana Devnet' | 'Solana';
@@ -44,6 +46,23 @@ const runtimes = {
     walletFailure: solanaMainnetLiquidityWalletFailure, submit: solanaMainnetLiquiditySubmit, observe: solanaMainnetLiquidityObserve, status: solanaMainnetLiquidityStatus },
 } as const;
 const networkOfRecord = (record: OrcaLiquidityRecord): SolanaLiquidityNetwork => record.review.chain === JUPITER_SOLANA_MAINNET.chain ? 'Solana' : 'Solana Devnet';
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the cluster the store serves. The authored position's own cluster first, then a staged Orca mainnet choice
+ * (an existing position on Solana mainnet), then the held run's cluster; with none of them the product (Mainnet-only) and a mainnet wallet
+ * session select Solana mainnet, so a mainnet owner is never read as "no wallet" on Devnet. Only the engineering scope defaults to Devnet.
+ */
+export function solanaLiquidityNetworkOf(input: { authored: SolanaLiquidityNetwork | null; stagedMainnet: boolean; record: SolanaLiquidityNetwork | null;
+  sessionChain: SolanaWalletChain | null; publicMainnet: boolean }): SolanaLiquidityNetwork {
+  return input.authored ?? (input.stagedMainnet ? 'Solana' : null) ?? input.record
+    ?? (input.publicMainnet || input.sessionChain === 'solana:mainnet' ? 'Solana' : 'Solana Devnet');
+}
+/** A staged mainnet choice (operation, position, share) that a run does not carry: that run's Review is not this choice's. */
+export function orcaRunMatchesChoice(record: Pick<OrcaLiquidityRecord, 'positionMint'> & { review: { operation: string; partBps: number | null } },
+  staged: { positionId: string; operation: string; partBps: number | null }): boolean {
+  return record.positionMint === staged.positionId && record.review.operation === staged.operation && (record.review.partBps ?? null) === staged.partBps;
+}
+/** The staged operation an Orca runtime serves (the Devnet engineering command, or an Orca mainnet choice); never a Uniswap choice. */
+const orcaStaged = (staged: StagedPosition | null | undefined) => staged && (!staged.choice || staged.choice.position.protocol === 'ORCA') ? staged : null;
 const unresolved = (r: OrcaLiquidityRecord | null) => Boolean(r?.attempt && r.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(r.attempt.state));
 function walletCode(cause: unknown): string {
   const value = cause as { code?: unknown; name?: unknown; message?: unknown } | null;
@@ -54,8 +73,10 @@ const bounded = (cause: unknown) => { try { const v = cause as Record<string, un
 const walletChange = (cause: unknown) => { const change = (cause as { change?: { format?: unknown } } | null)?.change; return change?.format === 'flofi.solana-wallet-change.v1' ? { change: change as SolanaWalletChange } : {}; };
 
 export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow();
+  const { state, stagedPosition } = useWorkflow();
   const jupiter = useJupiter();
+  // Only an Orca mainnet choice (MANAGE_LIQUIDITY_POSITION) binds a run; the Devnet engineering command keeps preselecting its panel only.
+  const staged = orcaStaged(stagedPosition), stagedChoice = staged?.choice ? staged : null;
   const [record, setRecord] = useState<OrcaLiquidityRecord | null>(null), [positions, setPositions] = useState<OrcaPositionEntry[] | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [recovered, setRecovered] = useState(false);
   const [enabled, setEnabled] = useState<Record<SolanaLiquidityNetwork, boolean>>({ 'Solana Devnet': false, Solana: false });
@@ -65,13 +86,15 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   const latest = useRef(workflow); latest.current = workflow;
   const authoredNetwork = workflow.nodes.map(node => solanaLiquidityDetails(node)?.network).find(Boolean) ?? null;
   const authored = authoredNetwork !== null;
-  const network: SolanaLiquidityNetwork = authoredNetwork ?? (record ? networkOfRecord(record) : 'Solana Devnet');
+  const network: SolanaLiquidityNetwork = solanaLiquidityNetworkOf({ authored: authoredNetwork, stagedMainnet: Boolean(stagedChoice), record: record ? networkOfRecord(record) : null,
+    sessionChain: jupiter.session?.chain ?? null, publicMainnet: activeNetworkScope() === 'PUBLIC_MAINNET' });
   const runtime = runtimes[network];
   // Only a session on this position's cluster is its owner; a session on the other cluster signs nothing here.
   const session = jupiter.session && jupiter.session.chain === runtime.walletChain ? jupiter.session : null;
   const owner = session?.account.address ?? null;
   const pristineRecovery = recovered && workflow.revision === 0;
-  const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery);
+  const retired = Boolean(record && (JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery
+    || stagedChoice && !orcaRunMatchesChoice(record, stagedChoice)));
   function accept(value: OrcaLiquidityRecord) { setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id, network: networkOfRecord(value) })); } catch { /* the server journal is authoritative */ } }
   useEffect(() => {
     let mounted = true;
@@ -97,7 +120,8 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
     const result = await runtimes[network].positions(address); if (!result.ok) throw new Error(result.code);
     setPositions(result.value);
   }, [network]);
-  useEffect(() => { if (owner && authored) refresh(owner).catch(() => undefined); }, [owner, authored, refresh]);
+  // The owner's positions are read for an authored position, and for a staged mainnet choice (its position must be found for this wallet).
+  useEffect(() => { if (owner && (authored || stagedChoice)) refresh(owner).catch(() => undefined); }, [owner, authored, Boolean(stagedChoice), refresh]);
   async function poll(id: string, api: (typeof runtimes)[SolanaLiquidityNetwork]) {
     for (let i = 0; i < 30; i++) {
       const observed = await api.observe(id); if (!observed.ok) throw new Error(observed.code);
@@ -117,6 +141,10 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
     if (!owner) throw new Error('ORCA_LIQUIDITY_SOLANA_WALLET_SELECTION_REQUIRED');
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged mainnet choice is simulated as exactly its operation on exactly its position — never as OPEN.
+    if (stagedChoice && (op !== stagedChoice.operation || positionMint !== stagedChoice.positionId || (partBps ?? null) !== stagedChoice.partBps))
+      throw new Error('ORCA_POSITION_CHOICE_CHANGED');
+    if (stagedChoice && stagedChoice.choice!.position.owner !== owner) throw new Error('ORCA_LIQUIDITY_WRONG_OWNER');
     const snapshot = latest.current;
     let mint = positionMint;
     if (op === 'OPEN') {
@@ -125,7 +153,8 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
       mint = mintSigner.current.address;
     }
     if (!mint) throw new Error('ORCA_POSITION_UNKNOWN');
-    const result = await runtime.simulate(snapshot, owner, { operation: op, positionMint: mint, ...partBps === undefined ? {} : { partBps } });
+    const request = { operation: op as Parameters<typeof runtime.simulate>[2]['operation'], positionMint: mint, ...partBps === undefined ? {} : { partBps } };
+    const result = await runtime.simulate(snapshot, owner, request);
     if (!result.ok) throw new Error(result.code);
     if (latest.current !== snapshot) throw new Error('ORCA_LIQUIDITY_SEMANTIC_REVISION_CHANGED');
     accept(result.value); setRecovered(false);

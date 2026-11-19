@@ -9,6 +9,9 @@ export function financialAttemptState(attempt: Attempt | null | undefined): stri
   // BUILD-FLOFI-LIQUIDITY-EXECUTION-UX-FIX-001 (EXEC-01): the Review expired before the wallet was asked (the server concludes the prepared attempt
   // at the hand-off, or the hand-off refused it as no longer authorized): never a refusal or a cancellation by the owner, and nothing was sent.
   if (attempt.state === 'CANCELLED' && /_(REVIEW_EXPIRED|WALLET_HANDOFF_NOT_AUTHORIZED)$/.test(attempt.note ?? '')) return 'NOT_SUBMITTED';
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap request refused before the wallet was asked because its Review no longer stood (the position, pool
+  // or fees moved) or the position changed hands: the attempt is concluded unsent (the service records CANCELLED for these only with no wallet invocation).
+  if (attempt.state === 'CANCELLED' && /^UNISWAP_(?:[A-Z0-9_]+_REVIEW_REQUIRED|POSITION_OWNER_MISMATCH)$/.test(attempt.note ?? '')) return 'NOT_SUBMITTED';
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a refusal FloFi made before the wallet's send method was ever called (the server records CANCELLED for
   // these only from PREPARED with no wallet invocation): the wallet's nonce disagreed, FloFi's own nonce read moved at the hand-off, the wallet
   // provider or the visible run changed, or a read failed first. Nothing of it can have reached the network.
