@@ -83,7 +83,14 @@ const robinhoodMainnetJournal = join(tmpdir(), 'gryloo-rh-002-' + Date.now() + '
 // list, a public chain or a broadcast.
 const baseMainnetHarness = process.env.GRYLOO_BASE_MAINNET_E2E === 'MOCKED_LOOPBACK_ONLY';
 if (process.env.GRYLOO_BASE_MAINNET_E2E && !baseMainnetHarness) throw new Error('Base mainnet E2E permits only the MOCKED loopback harness');
-const baseMainnetJournal = join(tmpdir(), 'gryloo-base-001-' + Date.now() + '-' + process.pid);
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing Uniswap v3 positions on the same MOCKED Base loopback harness (8562 `/__harness/uniswap`: positions
+// opened outside FloFi, discovered on the Dashboard and managed by the in-process MOCKED runtime); never a public network or a broadcast. The spec
+// authorizes as the owner through the very runtime the server actions run, so its workers share the server's journal (inherited, like the others).
+const liquidityPositionsHarness = process.env.FLOFI_LIQUIDITY_POSITIONS_E2E === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.FLOFI_LIQUIDITY_POSITIONS_E2E && !liquidityPositionsHarness) throw new Error('Liquidity positions E2E permits only the MOCKED loopback harness');
+if (liquidityPositionsHarness && !baseMainnetHarness) throw new Error('Liquidity positions E2E runs on the MOCKED Base mainnet harness (GRYLOO_BASE_MAINNET_E2E=MOCKED_LOOPBACK_ONLY)');
+const baseMainnetJournal = (liquidityPositionsHarness ? process.env.GRYLOO_BASE_JOURNAL : undefined) ?? join(tmpdir(), 'gryloo-base-001-' + Date.now() + '-' + process.pid);
+if (liquidityPositionsHarness) process.env.GRYLOO_BASE_JOURNAL = baseMainnetJournal;
 
 // BUILD-UNISWAP-LIQUIDITY-PUBLIC: Base Sepolia Uniswap liquidity browser tests use only the MOCKED loopback chain; never the public network or a broadcast.
 const uniswapHarness = process.env.GRYLOO_UNISWAP_LIQUIDITY_E2E === 'MOCKED_LOOPBACK_ONLY';
