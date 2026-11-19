@@ -27,7 +27,7 @@ import { chooseLanguage } from './app-origin';
 import { expectEditorSection, navigateTo, openEditorSection } from './build-entry-navigation';
 import { assertNoFinancialCanvasAction, chooseWallet, expect, openSimulationDetails, test } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signMessageRequests, signRequests } from './jupiter-fixtures';
-import { ORCA_RUN_KEY, orcaBalances, orcaOwnerRuntime, orcaPosition, orcaSent, ownerManagesOrca, resetOrcaPositions, type OrcaOwnerWallet,
+import { ORCA_RUN_KEY, orcaBalances, orcaOwnerRuntime, orcaPosition, orcaSent, orcaTrade, ownerManagesOrca, resetOrcaPositions, type OrcaOwnerWallet,
   type SeededOrcaPosition } from './orca-position-fixtures';
 
 /**
@@ -277,6 +277,11 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await openPositions(page);
     await rescanUntil(page, () => expect(fact(page, managed, W.principal)).toHaveText('1.6551 SOL + 39.8889 USDC', { timeout: 2_000 }));
     await expect(fact(page, managed, W.owed)).toHaveText('0 SOL + 0 USDC');
+    await expect(fact(page, managed, W.collectable)).toHaveText(W.unavailable);
+    // More trading since that checkpoint: the fees it earns are credited to the position only at its next checkpoint (the recorded owed fees
+    // stay 0), which is why the scan never states what a collect pays now.
+    await orcaTrade({ a: '500000', b: '120000' });
+    expect(await orcaPosition(managed)).toMatchObject({ liquidity: '5000000000', feeOwedA: '0', feeOwedB: '0' });
     await actions(page, managed).getByRole('button', { name: W.close, exact: true }).click();
     await prepared(page, 'EXIT', 'EN', id);
     await expect(card(page)).toContainText('Close position');
@@ -284,8 +289,11 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     const closing = await runtime.load(exit);
     expect(closing.review).toMatchObject({ operation: 'EXIT', partBps: null, operationPlan: { liquidityDelta: '5000000000', close: true }, expected: { positionLiquidityAfter: '0' } });
     await mockedBoundary(page, 'EXIT', subject);
+    // The exit's checkpoint credits the fees earned since, and its one transaction collects them with the remaining principal.
+    expect(closing.review.simulationResult).toMatchObject({ collectedFeesA: '500000', collectedFeesB: '120000' });
     const closed = await ownerManagesOrca(runtime, exit, wallet);
     expect(closed.record).toMatchObject({ verdict: 'RECONCILED', evidenceClass: 'MOCKED', attempt: { state: 'CONFIRMED' } });
+    expect(closed.record.observations.at(-1)!.effects).toMatchObject({ collectedFeesA: '500000', collectedFeesB: '120000' });
     expect(await orcaPosition(managed)).toBeNull();
     expect(await orcaSent()).toBe(2);
     const done = await recoveredExecute(page);
@@ -294,6 +302,8 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(done).toContainText(W.reconciled);
     // Everything that remained came back, and the position's three accounts were closed: their rent (0.00607568 SOL) refunded.
     await expect(done).toContainText(/Actual withdrawn · Token 1\s*1\.655158611 SOL/);
+    await expect(done).toContainText(/Fees collected · Token 1\s*0\.0005 SOL/);
+    await expect(done).toContainText(/Fees collected · Token 2\s*0\.12 USDC/);
     await expect(done).toContainText(/Account rent refunded\s*0\.00607568 SOL/);
     // The closed position is no longer listed; the delegated one still is, still without an action.
     await openPositions(page);

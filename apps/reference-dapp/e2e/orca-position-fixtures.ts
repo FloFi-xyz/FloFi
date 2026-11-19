@@ -54,6 +54,8 @@ export const orcaSent = () => orcaControl<number>({ action: 'sent' });
 export type OrcaHarnessPosition = { liquidity: string; feeOwedA: string; feeOwedB: string; tokenOwner: string | null; tokenAmount: string | null; delegate: string | null } | null;
 export const orcaPosition = (mint: string) => orcaControl<OrcaHarnessPosition>({ action: 'position', mint });
 export const orcaBalances = (owner: string) => orcaControl<{ lamports: string; usdc: string }>({ action: 'balances', owner });
+/** More pool trading since every position's last checkpoint: each position with liquidity is credited `fees` at its next checkpoint only. */
+export const orcaTrade = (fees: { a: string; b: string }) => orcaControl<boolean>({ action: 'trade', fees });
 
 /** The runtime the app's server actions run in MOCKED harness mode (src/app/solana-mainnet-liquidity-action.ts `current`). */
 export function orcaOwnerRuntime(): OrcaLiquidityService {
