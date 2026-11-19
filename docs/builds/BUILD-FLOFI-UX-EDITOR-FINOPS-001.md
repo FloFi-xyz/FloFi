@@ -60,9 +60,11 @@ It fails open for evidence, so a recovery or uncertain outcome is never hidden; 
 directly. Earlier stages stay reachable. Engineering and /approve surfaces keep their previous rule.
 
 **Create (A5) — Implemented.** Footer: step count, notices, one primary "Simular fluxo" (the existing control and its disabled reason). The
-whole-workflow path's note "…authorized at once…" and the per-step sequence note are no longer shown on Create (the sequence note, including the
-FIX-09 bridge limitation, is stated in the Simulate panel and the Execute Review before any authorization). The grouped "Simular fluxo" now opens
-Simulate and runs the same read-only `startReview` there (previously it opened Execute).
+whole-workflow path's note "…authorized at once…" is no longer shown on Create. A confirm-each-step workflow keeps its step note beside the
+action, as on main ("Confirm each step · Step 1 of 2: Swap … this result covers this step only."), also when the action is "Revisar operação";
+the note (including the FIX-09 bridge limitation) is also stated in the Simulate panel and the Execute Review before any authorization. After a
+valid simulation Create's action opens Execute ("Revisar operação" / "Abrir o progresso do fluxo"): no authorization is hosted on Create. The
+grouped "Simular fluxo" now opens Simulate and runs the same read-only `startReview` there (previously it opened Execute).
 
 **Simulate (A6, B2) — Implemented.** The panel docked in the Canvas frame (beside the graph from a ≥ 900 px frame, under it on narrower ones):
 title + one line, the operations as configured (icon, amount and assets, network chip), "O que a simulação faz?", the ONE primary action
@@ -99,8 +101,8 @@ All values are `readFinopsReport`'s own; nothing is recalculated, stored, synchr
   reconciled collected revenue — each with its quality badge, a period chip (blue for fixed calendar periods: month to date, projection, previous
   month; "Selected period" otherwise) and, when PARTIAL or UNAVAILABLE, the reason beside it. A coverage summary states partial coverage
   prominently ("…not the complete cost of operating FloFi") and counts cost sources by their existing quality (same inclusion rule as
-  `consolidate`; counts only, no score or percentage). Other indicators (overall, previous month, month-to-month change, per-chat, per-simulated,
-  per-active) are grouped; AI, variable, margin and break-even indicators live in their sections (no duplicates); the calculation basis of every
+  `consolidate`; counts only, no score or percentage). Other indicators (overall, previous month, per-chat, per-simulated, per-active) are
+  grouped; the month-to-month change stays out of the overview, as on main (its value remains in the report data); AI, variable, margin and break-even indicators live in their sections (no duplicates); the calculation basis of every
   indicator is one disclosure.
 - **Numbers (18):** `finopsCopy().display` — ≥ $1 two decimals, $0.01–$1 up to four decimals (0.17676573 → $0.1768), below one cent four
   significant digits (never $0.00 for a non-zero micro-cost); null stays "Unavailable". The recorded value is in the tooltip and screen-reader text;
@@ -141,6 +143,7 @@ refresh.
 | B2/C2 panel width | Beside the Canvas from a ≥ 900 px frame; under it on narrower frames and phones | Existing container-query layout, threshold lowered so 1440 px desktops match B2/C2. |
 | C2 wallet requests | Shown from the expired Review's own count | A structural count of prompts, not a price; fee and permissions are marked for refresh. |
 | C1 | Adds a "Review valid until HH:MM" status line at the top | Spec section 07: current financial status first. |
+| B2 "Detalhes técnicos" | The whole-workflow panel shows no Technical details before its first simulation (the step path keeps them) | Before the read-only Review runs there is no technical record to show; after it, the Review's technical details follow the result. |
 | C2 "Detalhes técnicos" | The expired Review has no Technical details disclosure | Specialist review (wallet-execution #7): its technical figures are the expired ones; nothing stale is offered as current. |
 | A2 header row | With the network chip and status pill, a ~1440 px window with the Assistant open wraps undo/redo/more onto a second header row | The existing chip and pill are kept; fitting one row would hide the stage labels. Wider windows and Simulate/Execute (no toolbar) keep one row. |
 
@@ -165,7 +168,42 @@ their findings and resolutions are in §10.
 
 ## 9. Evidence
 
-Filled in from the browser and CI runs.
+Evidence level: **technically tested** (MOCKED / closed loopback and CircleCI certification). Not accepted by product, not financially
+validated, no public execution.
+
+**Unit and static gates (local, Node 24.21.0 / pnpm 11.22.0).** Typecheck, lint, governance-lite (and its 21 tests) and
+`agent_guard.py check` pass. The component, domain and i18n suites pass (227 files, 3,308 tests), including the new ones: stage
+eligibility (`editor-stages.test.ts`), product areas (`product-areas.test.ts`), stage reasons in the indicator (`editor-stepper.test.tsx`),
+the expired Review's red footer tone (`approved-ux.test.ts`) and the FinOps presentation (`finops-views.test.tsx`, 8 tests). The database
+suites need PostgreSQL; CircleCI's `certification-unit` (with its database) passed on every certified revision of this branch.
+
+**Browser — local full sweep.** Every guarded profile was run one by one on the loopback harness (59 profiles, no fail-fast between them):
+52 passed; the 7 failures were (a) specs written for the old flow — authorizing from Simulate, opening Simulate/Execute on an empty workflow,
+the old Simulate dock name, the logo's old name — all updated (§3, commit history) and re-run green; (b) one product regression the sweep
+found and fixed: Create had lost a confirm-each-step workflow's step note; (c) full-page and element visual baselines, regenerated from
+CircleCI's own renders (local renders differ from CI's, as in earlier builds); (d) environment-only: `build009` needs the public LI.FI host
+(unreachable from this container; passes on CircleCI), `cow-loopback` needs a disposable `GRYLOO_COW_RUNTIME`, `composition-provenance` a
+CI-provisioned profile.
+
+**Lifecycle evidence (`e2e/editor-stages-review.spec.ts`, profile `editor-wallet-batch`, MOCKED loopback, the wallet only answers
+capabilities):** Create (empty → populated, future stages closed with their reasons) → Simulate before a simulation (B2) → whole-workflow
+simulation result (no authorization copy, "Review operation") → Execute C1 (valid Review, "Authorize workflow" in the footer, validity) →
+C2 (client clock only: "Your review expired", fee and permission marked for refresh, no Authorize, "Refresh review") → "Refresh review"
+in place → back to Create. No `eth_sendTransaction`, `wallet_sendCalls` or signature was requested at any point. Captured in PT and EN.
+
+**Screenshots** (`docs/builds/BUILD-FLOFI-UX-EDITOR-FINOPS-001/`, PT unless named EN; 1440×900 and 390 px phone):
+
+| File | What it shows |
+| --- | --- |
+| `compare-A2-create.png`, `compare-B2-simulate.png`, `compare-B2-simulate-result.png`, `compare-C1-execute-valid.png`, `compare-C2-execute-expired.png` | Caio's reference (left, cropped from the PDF) beside the implemented state (right) |
+| `before-desktop-create.png`, `before-desktop-simulate.png`, `before-mobile-create.png` | The same flows before this build (same loopback build and fixture) |
+| `after-pt-create-empty.png`, `after-pt-create-populated.png` | Create: closed future stages; one "Simular fluxo" |
+| `after-pt-simulate-awaiting.png`, `after-pt-simulate-result.png` | Simulate (B2) before and after the simulation; "Revisar operação" |
+| `after-pt-execute-valid.png` | Execute C1: valid Review, "Autorizar fluxo" |
+| `after-pt-execute-expired.png`, `after-pt-execute-expired-mobile.png`, `after-en-execute-expired.png` | Execute C2: expired Review, "Atualizar revisão"; phone; English |
+| `finops-*.png` | Admin FinOps sections from a test fixture (no production data), PT/EN, desktop and phone |
+
+**CircleCI.** Recorded in the PR (run, revision, every job) once certification completes.
 
 ## 10. Specialist review findings
 
