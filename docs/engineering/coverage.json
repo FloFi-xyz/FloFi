@@ -1701,6 +1701,10 @@
     "app.server.uniswap-position-networks": {
       "path": "apps/reference-dapp/src/server/uniswap-position-networks.test.ts",
       "stage": "unit"
+    },
+    "app.domain.liquidity-positions": {
+      "path": "apps/reference-dapp/src/domain/liquidity-positions.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1855,7 +1859,8 @@
     "app.server.uniswap-position-service",
     "app.server.liquidity-lifecycle-telemetry",
     "app.backend.uniswap-position-flow",
-    "app.server.uniswap-position-networks"
+    "app.server.uniswap-position-networks",
+    "app.domain.liquidity-positions"
   ],
   "modules": [
     {
@@ -4547,7 +4552,8 @@
         "app.state.uniswap-liquidity-store",
         "app.server.uniswap-position-service",
         "app.server.defi-positions",
-        "app.server.uniswap-position-networks"
+        "app.server.uniswap-position-networks",
+        "app.domain.liquidity-positions"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
