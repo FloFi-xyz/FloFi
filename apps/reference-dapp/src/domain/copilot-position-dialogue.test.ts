@@ -599,16 +599,18 @@ describe('FloFi’s own buttons are never the user’s words (flofi-chat final r
       expect(choiceOf(local(s, '25%')).choice).toMatchObject({ operation: 'DECREASE', partBps: 2500, position: index === 0 ? BASE.ref : ORCA_POSITION.ref });
     }
   });
-  it('a clicked position’s id and amounts never reach the model; FloFi’s own entries and the context card carry no Uniswap token id', () => {
-    const s = session();
-    const which = s.say('Remove some of my liquidity', position('DECREASE'))!;
-    local(s, which.options[0]!);
-    expect(choiceOf(local(s, '50%')).choice).toMatchObject({ partBps: 5000, position: BASE.ref });
-    s.say('what does it do?', intent.question('CONCEPT'));
-    const request = s.turns.at(-1)!.request;
-    expect(request).not.toBeNull();
-    expect(JSON.stringify(request)).not.toMatch(/123456|0\.5 WETH|1500 USDC/);
-    expect(JSON.stringify(request)).toContain('#[position]');
+  it('a clicked position’s id and amounts never reach the model; FloFi’s own entries and the context card carry no position id (Uniswap or Orca)', () => {
+    for (const [index, view, hidden] of [[0, BASE, /123456|0\.5 WETH|1500 USDC/], [2, ORCA_POSITION, /7xKX|gAsU|0\.1 SOL|15 USDC/]] as const) {
+      const s = session();
+      const which = s.say('Remove some of my liquidity', position('DECREASE'))!;
+      local(s, which.options[index]!);
+      expect(choiceOf(local(s, '50%')).choice).toMatchObject({ partBps: 5000, position: view.ref });
+      s.say('what does it do?', intent.question('CONCEPT'));
+      const request = s.turns.at(-1)!.request;
+      expect(request).not.toBeNull();
+      expect(JSON.stringify(request)).not.toMatch(hidden);
+      expect(JSON.stringify(request)).toContain('[position]');
+    }
   });
   it('“my second position” is the second one FloFi lists: one it cannot manage is refused, never swapped for the only manageable one', () => {
     const unverified = uniswap('eip155:8453', '99', { manageable: { ok: false, reason: 'POOL_NOT_VERIFIED' } });

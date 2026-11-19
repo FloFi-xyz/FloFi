@@ -58,7 +58,7 @@ import { groundedProse } from './intelligence/grounding';
 import { liquidityPositionChoiceValid, liquidityPositionKey, type LiquidityPositionChoice, type LiquidityPositionOperation, type LiquidityPositionView } from './liquidity-positions';
 import { assetNamed, closeNamed, describePosition, halfNamed, liquidityRemovalNamed, ordinalNamed, pairMatches, pairName, positionDetails, positionKey, positionLine,
   positionNetworksText, positionOptionLabel, positionSlippageBps, positionStepWallet, POSITION_FACT_LIMITS, protocolName, rangeFilterNamed, readPositionAnswer, shortPositionId,
-  statedPercent, POSITION_ID, type CopilotLiquidityFacts } from './copilot-positions';
+  statedPercent, redactPositionIds, type CopilotLiquidityFacts } from './copilot-positions';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
   NO_ADAPTATION, proposalReadings, type Adaptation, type AdaptationEvent, type LearningObservation, type ProposalReading, type ReadingField,
   type ReadingFields } from './copilot-adaptation';
@@ -300,10 +300,10 @@ const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCa
 const segmentText = (state: CopilotConversation) => state.segment.join('\n');
 /**
  * Flofi's own transcript entries never carry an address (a carried beneficiary, a connected wallet, EVM or Solana): the model needs none. Nor a
- * Uniswap v3 position id ("#123456", "#1234…5678"): with its chain it resolves to the owner (`ownerOf`).
+ * position id (`redactPositionIds`): it singles out the owner on chain.
  */
-const redact = (text: string) => text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]')
-  .replace(POSITION_ID, '#[position]').slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
+const redact = (text: string) => redactPositionIds(text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]'))
+  .slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
 function bounded(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
   let out = entries.map(entry => entry.role === 'assistant' ? { role: entry.role, text: redact(entry.text) } : entry)
     .slice(-COPILOT_V2_LIMITS.maxTranscriptMessages);
