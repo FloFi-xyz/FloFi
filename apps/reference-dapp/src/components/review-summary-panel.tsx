@@ -19,8 +19,7 @@ import { circleUnavailableReason } from '../domain/token-fee';
 import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 import { OperationSummary } from './operation-summary';
-import { workflowPositionManagement } from '../domain/liquidity-positions';
-import { liquidityPositionResultRows } from '../domain/liquidity-position-summary';
+import { liquidityPositionResultRows, positionWorkflowOf } from '../domain/liquidity-position-summary';
 
 export type ReviewSummaryPanelProps = {
   workflow: Workflow; context: ReviewContext; source: SimulationSource; authorization: ReviewAuthorization; wallet: ReviewWallet;
@@ -74,7 +73,8 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const until = review.expiresAt !== null && review.expiresAt > now ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null;
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management workflow (its canonical node's marker) states its operation's own rows — liquidity
   // removed and remaining, principal and its enforced minimum, owed tokens and fees as lower bounds, the position NFT — never a deposit's amounts.
-  const position = workflowPositionManagement(canvas) ?? workflowPositionManagement(workflow);
+  // The step the runtime simulates and reviews (a sequence's current step, or the whole one-step workflow) decides, never the rest of the Canvas.
+  const position = positionWorkflowOf(workflow);
   const positionRows = (rowsFor: 'simulate' | 'execute') => step ? liquidityPositionResultRows(step, rowsFor).map(row =>
     <div key={row.label} data-position-row={row.label}><dt>{t(row.label)}</dt><dd className="numeric">{t(row.value)}</dd></div>) : null;
   // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.

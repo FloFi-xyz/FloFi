@@ -10,7 +10,7 @@
  * Amounts a source could not verify are null ("unavailable"), never zero. Owed tokens a Uniswap position carries may include principal withdrawn
  * earlier without collecting, so they are never labelled as yield.
  */
-import { readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
+import { LIQUIDITY_MANAGEMENT_INPUT, readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 export type LiquidityPositionProtocol = 'UNISWAP_V3' | 'ORCA';
 /** COLLECT: owed tokens and fees only (liquidity unchanged). DECREASE: a share of the position's liquidity. EXIT: all of it (Orca also closes the position). */
 export type LiquidityPositionOperation = 'COLLECT' | 'DECREASE' | 'EXIT';
@@ -123,6 +123,15 @@ export function workflowPositionManagement(workflow: { readonly nodes: readonly 
     return management && (protocol === 'uniswap-v3' || protocol === 'orca-whirlpools')
       ? { protocol: protocol === 'uniswap-v3' ? 'UNISWAP_V3' : 'ORCA', chain: node.chainId, management } : null;
   } catch { return null; }
+}
+/**
+ * A workflow that holds a position-management node (well-formed or not) beside any other financial step. A position operation runs as its
+ * workflow's ONLY financial step (one runtime, one wallet request): the Editor never produces such a mix — adding, duplicating or chatting
+ * another step onto a position workflow is refused, so it can never be grouped into a workflow run or simulated as a sequence step of it.
+ */
+export function workflowMixesPositionManagement(workflow: { readonly nodes: readonly { readonly actionType: string; readonly inputs?: readonly { readonly name: string }[] }[] }): boolean {
+  const financial = workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+  return financial.length > 1 && financial.some(node => node.actionType === 'asset.liquidity.concentrated' && (node.inputs ?? []).some(input => input.name === LIQUIDITY_MANAGEMENT_INPUT));
 }
 /** The Uniswap position runtime's request a marked workflow names. */
 export const uniswapPositionRequestOfMarker = (m: ConcentratedLiquidityManagement) => ({ operation: m.operation, tokenId: m.positionId, partBps: m.partBps, close: m.close });

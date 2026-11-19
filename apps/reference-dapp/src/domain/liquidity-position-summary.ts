@@ -70,6 +70,14 @@ export function liquidityPositionSummaryOf(node: { readonly actionType: string; 
 }
 
 /**
+ * The position operation a whole (runtime) workflow IS: exactly one financial step, and that step manages a position. A workflow holding a marked
+ * node beside other steps is not presented as a position operation (each runtime step is presented by its own projection).
+ */
+export function positionWorkflowOf(workflow: { readonly nodes: readonly { readonly actionType: string }[] }): LiquidityPositionSummary | null {
+  const financial = workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+  return financial.length === 1 ? liquidityPositionSummaryOf(financial[0] as { readonly actionType: string; readonly chainId: string }) : null;
+}
+/**
  * Whether preparing `choice` from the Dashboard would replace steps the owner authored: any financial step other than this very position's own
  * node (another position, a deposit, a swap…). The Editor then asks before replacing (the owner starts a new workflow for the position); a workflow
  * that already manages this same position simply takes the new choice (a new revision, so no earlier Review can be authorized for it).

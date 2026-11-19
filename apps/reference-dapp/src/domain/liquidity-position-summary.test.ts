@@ -11,14 +11,16 @@ import { readConcentratedLiquidityManagement, type SemanticWorkflow } from '@def
 import { editorReducer, initialEditor } from './editor';
 import { composerActions, composerSummary } from './composer-presentation';
 import { canSelectCryptoAssets, cryptoSelectionOf } from './crypto-action-picker';
-import { canEditCanvasAmount } from './canvas-action-setup';
+import { canEditCanvasAmount, canvasAmountMessage } from './canvas-action-setup';
+import { planCanvasDuplicate } from './editor-history';
+import { workflowMixesPositionManagement } from './liquidity-positions';
 import { canvasCardFlow, canvasCardParams } from './canvas-card-summary';
 import { editorOverview } from './editor-overview';
 import { editorStageReasons } from './editor-stages';
 import { projectSimulation } from './simulation-presentation';
 import { projectReview } from './review-presentation';
 import { liquidityPositionResultRows, liquidityPositionSubject, liquidityPositionSummaryOf, liquidityPositionTitle, positionPreparationConflict,
-  positionPreparationRefusal } from './liquidity-position-summary';
+  positionPreparationRefusal, positionWorkflowOf } from './liquidity-position-summary';
 import { uniswapPositionRefreshInPlace } from './uniswap-liquidity-continuation';
 import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
 import { operationSteps } from '../components/operation-summary';
@@ -105,6 +107,26 @@ describe('the configured position operation (Create)', () => {
     expect(overview.steps[0]).toMatchObject({ action: 'Remove 50% of liquidity', flow: 'Uniswap v3 position #123' });
   });
 
+  it('Create keeps a position operation its workflow\'s only step: adding, chatting or duplicating another step is refused with the separate-workflow reason', () => {
+    const workflow = uni('DECREASE', 5_000), state = { workflow, error: null };
+    for (const command of [{ type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '50' } as const,
+      { type: 'ADD_CRYPTO_ACTION', input: { selection: { action: 'swap', network: 'Base', from: 'USDC', to: 'WETH' }, amount: '1', slippage: '50' } } as const]) {
+      for (const source of ['CANVAS', 'CHAT'] as const) {
+        const next = editorReducer(state, { ...command, source, baseRevision: workflow.revision } as Parameters<typeof editorReducer>[1], context);
+        expect(next, `${command.type} ${source}`).toEqual({ workflow, error: 'POSITION_WORKFLOW_HAS_OTHER_STEPS' });
+      }
+    }
+    expect(canvasAmountMessage(new Error('POSITION_WORKFLOW_HAS_OTHER_STEPS'))).toBe('This action cannot be combined with the current workflow. Check its settings or use a separate workflow.');
+    expect(planCanvasDuplicate(workflow, {}, [only(workflow).nodeId], context)).toBeNull();
+    // Another operation on the same position stays a new revision of the same one-step workflow; removing the step empties it.
+    const other = editorReducer(state, { type: 'MANAGE_LIQUIDITY_POSITION', choice: uniswapChoice('123', 'EXIT', null, true), pool: UNI_POOL, source: 'CANVAS', baseRevision: workflow.revision }, context);
+    expect(other.error).toBeNull();
+    expect(other.workflow.revision).toBe(workflow.revision + 1);
+    expect(summary(other.workflow).action).toBe('Close position');
+    expect(composerActions(editorReducer(state, { type: 'REMOVE', nodeId: only(workflow).nodeId, source: 'CANVAS', baseRevision: workflow.revision }, context).workflow)).toEqual([]);
+    expect(workflowMixesPositionManagement(workflow)).toBe(false);
+  });
+
   it('Simulate opens for a position workflow (it has an action); Execute waits for its simulation', () => {
     const workflow = orca('COLLECT');
     const actionable = workflow.nodes.some(node => !node.actionType.startsWith('mock-'));
@@ -167,6 +189,12 @@ describe('preparing a position from the Dashboard on the open workflow', () => {
     expect(positionPreparationRefusal(uni('DECREASE', 5_000), choice, true)).toBe('POSITION_WORKFLOW_EXECUTING');
     expect(translate('PT', 'Your current workflow is still being executed or checked. Follow it in Operate; prepare this position once it has finished. Nothing was changed.'))
       .toContain('Operar');
+  });
+  it('a workflow is presented as a position operation only when that operation is its one step', () => {
+    expect(positionWorkflowOf(uni('EXIT', null, true))).toMatchObject({ title: 'Close position', management: { operation: 'EXIT', close: true } });
+    const swap = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '50', source: 'CHAT', baseRevision: 0 }, context).workflow;
+    expect(positionWorkflowOf({ ...swap, nodes: [...swap.nodes, only(uni('COLLECT'))] })).toBeNull();
+    expect(positionWorkflowOf(swap)).toBeNull();
   });
   it('a malformed or absent marker is not a position (display only; every runtime refuses it)', () => {
     expect(liquidityPositionSummaryOf(only(unmarked(uni('COLLECT'))))).toBeNull();
