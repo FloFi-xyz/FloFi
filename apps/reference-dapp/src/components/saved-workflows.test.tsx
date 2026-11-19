@@ -23,19 +23,19 @@ describe('Your workflows secondary workspace presentation', () => {
     const html = render({ items: [{ ...row, runCount: 3, lastRunId: 'latest-run', lastStatus: 'RECONCILED', hasEvidence: true }], hasMore: false });
     expect(html).toContain('Saved<span class="ux-chip-count">0</span>');
     // It stays reopenable (and can be archived) as an executed workflow of the library, once.
-    expect(html).toContain('data-tone="success">Executed</span>'); expect(html.match(/<span>My saved name<\/span>/g)).toHaveLength(1);
+    expect(html).toContain('data-tone="success">Executed</span>'); expect(html.match(/<span title="My saved name">My saved name<\/span>/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Open workflow: My saved name"');
     for (const value of ['RECONCILED', 'latest-run', 'View run', 'Evidence available', '>Saved</span>']) expect(html).not.toContain(value);
   });
   it('keeps an executed-only identity out of Saved without inventing a saved name', () => {
     const html = render({ items: [{ ...row, name: null, saved: false, version: null, runCount: 1, lastRunId: 'historical-run', lastStatus: 'RECONCILED' }], hasMore: false });
     expect(html).toContain('Saved<span class="ux-chip-count">0</span>'); expect(html).not.toContain('historical-run'); expect(html).not.toContain('My saved name');
-    expect(html.match(/<span>Workflow<\/span>/g)).toHaveLength(1); expect(html).toContain('data-tone="success">Executed</span>');
+    expect(html.match(/<span title="Workflow">Workflow<\/span>/g)).toHaveLength(1); expect(html).toContain('data-tone="success">Executed</span>');
   });
   it('renders ONE list: records that need attention first, then saved, then executed, with accurate counts and no per-block paragraphs (board 11)', () => {
     const owner = '0x' + '1'.repeat(40);
     const run: DashboardRun = { runId: 'executed-run', workflowId: 'ran-id', flow: 'base-sepolia-swap', status: 'RECONCILED', ownerAccount: owner, provenance: 'PUBLIC_TESTNET',
-      hasEvidence: false, errorCode: null, needsObservation: false, attentionRequired: false, createdAt: null, updatedAt: null };
+      hasEvidence: false, errorCode: null, needsObservation: false, attentionRequired: false, createdAt: null, updatedAt: row.updatedAt };
     const runs = [projectDashboardRun({ ...run, runId: 'attention-run', workflowId: 'other', status: 'UNKNOWN' }), projectDashboardRun(run)];
     const library = { items: [row, { ...row, workflowId: 'ran-id', name: 'Ran once', runCount: 1 }, { ...row, workflowId: 'archived-runs', name: 'Runs not listed', runCount: 2 }], hasMore: false };
     const records = <DashboardView mode="records" account={owner} connection="CONNECTED" runs={runs} hasMore={false} loading={false} build={vi.fn()} openRun={vi.fn()} verify={vi.fn()}
@@ -44,10 +44,12 @@ describe('Your workflows secondary workspace presentation', () => {
     expect(html.match(/class="ux-workflow-list"/g)).toHaveLength(1); expect(html.match(/<ul class="ux-panel ux-list ux-workflow-rows"/g)).toHaveLength(1);
     for (const [chip, count] of [['All', 4], ['Needs attention', 1], ['Saved', 1], ['Executed', 2]] as const) expect(html).toContain(`${chip}<span class="ux-chip-count">${count}</span>`);
     expect(html).toContain('aria-pressed="true">All');
-    const order = ['/app/dashboard/runs/attention-run', '<span>My saved name</span>', '/app/dashboard/runs/executed-run', '<span>Runs not listed</span>'].map(value => html.indexOf(value));
+    const order = ['/app/dashboard/runs/attention-run', '>My saved name</span>', '/app/dashboard/runs/executed-run', '>Runs not listed</span>'].map(value => html.indexOf(value));
     expect(order.every(index => index >= 0)).toBe(true); expect([...order].sort((a, b) => a - b)).toEqual(order);
     // A library workflow whose run is listed is reached through that run (named, reopenable, its own Archive in the run's details), never twice.
-    expect(html).not.toContain('<span>Ran once</span>'); expect(html).toContain('Open workflow: Ran once'); expect(html).toContain('aria-label="More workflow actions"');
+    expect(html.match(/>Ran once<\/span>/g)).toHaveLength(1); expect(html).toContain('Open workflow: Ran once'); expect(html).toContain('aria-label="More workflow actions"');
+    expect(html.match(/ux-row-icon.*?ux-row-main.*?ux-row-name.*?<time.*?ux-row-actions.*?ux-tag.*?class="ux-button"/g)).toHaveLength(4);
+    expect(html).toContain('dashboard-status-attention" data-tone="attention"><span class="dashboard-status-marker" aria-hidden="true"></span>Unresolved');
     // One page primary; no explanatory paragraph per block, no disabled control.
     expect(html.match(/ux-button-primary/g)).toHaveLength(1); expect(html).toContain('Create workflow');
     for (const removed of ['Saved and not executed yet', 'Workflows you executed and the results recorded for them.', 'Unresolved, interrupted or incomplete records', 'disabled=""'])
@@ -60,12 +62,13 @@ describe('Your workflows secondary workspace presentation', () => {
     expect(html).toContain(`<span class="navigation-row-label">${label}</span>`);
     for (const value of ['navigation-workflows', 'My saved name', 'Refresh', 'Loading', 'temporarily unavailable', 'No workflows yet']) expect(html).not.toContain(value);
     const workspace = renderToStaticMarkup(<LocaleProvider initialLanguage={language}><SecondaryProductWorkspace workspace="workflows" workflows={{ list: { items: [{ ...row, name: 'Save workflow' }], hasMore: false }, busy: false, error: null, open: vi.fn(), refresh: vi.fn() }}/></LocaleProvider>);
-    expect(workspace).toContain(`<h1>${label}</h1>`); expect(workspace).toContain('<span>Save workflow</span>'); expect(workspace).not.toContain('navigation-drawer');
+    expect(workspace).toContain(`<h1>${label}</h1>`); expect(workspace).toContain('<span title="Save workflow">Save workflow</span>'); expect(workspace).not.toContain('navigation-drawer');
     expect(secondaryWorkspaceRoute('/app/workflows/')?.id).toBe('workflows');
   });
   it('offers a shared refresh control and keeps saved ownership actions in a collapsed menu', () => {
     const html = renderToStaticMarkup(<YourWorkflows list={{ items: [row], hasMore: false }} open={vi.fn()} refresh={vi.fn()} changeHistory={vi.fn()}/>);
-    expect(html).toContain('aria-label="Refresh workflows"');
+    expect(html.match(/aria-label="Refresh workflows"/g)).toHaveLength(1);
+    for (const removed of ['Wallet activity', 'Refresh wallet activity', 'History view', 'Network coverage']) expect(html).not.toContain(removed);
     // Open is the visible row action; Archive (and Delete, with its confirmation) stay in the ··· menu.
     expect(html).toContain('>Open</button>'); expect(html).toContain('aria-label="More workflow actions"');
     expect(html).toMatch(/role="group"[^>]*hidden=""/);
@@ -80,5 +83,7 @@ describe('Your workflows secondary workspace presentation', () => {
     const error = renderToStaticMarkup(<YourWorkflows error="WORKFLOW_UNAVAILABLE" refresh={vi.fn()}/>);
     expect(error).toContain('Your workflows are temporarily unavailable.'); expect(error).toContain('Retry');
     expect(renderToStaticMarkup(<YourWorkflows connected={false}/>)).toContain('Connect a wallet from the header');
+    expect(renderToStaticMarkup(<YourWorkflows connected={false} restoring list={{ items: [row], hasMore: false }}/>)).toContain('Restoring wallet…');
+    expect(renderToStaticMarkup(<YourWorkflows connected={false} restoring/>)).not.toContain('Connect a wallet from the header');
   });
 });

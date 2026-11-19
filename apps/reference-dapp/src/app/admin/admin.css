@@ -1,18 +1,24 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 /* BUILD-ADMIN-001: the private console's own stylesheet. FloFi's palette and type, scoped to `.admin-root`; nothing here styles the product. */
-.admin-root{
-  --a-page:#f8fafd;--a-paper:#fff;--a-soft:#f4f7fb;--a-line:#dce4ef;--a-ink:#14233a;--a-muted:#52627a;--a-blue:#1d5fca;--a-blue-soft:#eaf2ff;
-  --a-ok:#15803d;--a-ok-soft:#e9f8ef;--a-bad:#a11c29;--a-bad-soft:#fff1f2;--a-warn:#915e08;--a-warn-soft:#fff5de;--a-neutral:#64748b;--a-neutral-soft:#eef1f6;
-  --a-focus:#1d5fca;--a-radius:12px;
-  /* Chart tokens (validated: 5 network-family slots, adjacent CVD ΔE ≥ 8.4, light and dark). Status colors are reserved for outcomes. */
-  --a-s1:#2a78d6;--a-s2:#eb6834;--a-s3:#1baf7a;--a-s4:#eda100;--a-s5:#e87ba4;--a-other:#b4b2a9;--a-axis:#c3c2b7;
-  --a-st-good:#0ca30c;--a-st-critical:#d03b3b;--a-st-serious:#ec835a;--a-st-warning:#fab219;--a-st-neutral:#898781;
-  color-scheme:light;min-height:100vh;background:var(--a-page);color:var(--a-ink);font-family:var(--font-outfit),system-ui,sans-serif;font-size:15px;line-height:1.45;
+html:has(.admin-root){
+  color-scheme:light dark;
+  --a-page:light-dark(#f8fafd,#0b0d12);
+  background:var(--a-page)
 }
-@media (prefers-color-scheme:dark){
-  .admin-root{--a-page:#0b0d12;--a-paper:#15181f;--a-soft:#1c2029;--a-line:#2a2f3a;--a-ink:#f4f5f7;--a-muted:#a4abb8;--a-blue:#93a6ff;--a-blue-soft:#1a2350;
-    --a-ok:#4ade80;--a-ok-soft:#10261a;--a-bad:#ff9fae;--a-bad-soft:#2a1519;--a-warn:#f5b94a;--a-warn-soft:#33270f;--a-neutral:#a4abb8;--a-neutral-soft:#1c2029;
-    --a-focus:#93a6ff;--a-s1:#3987e5;--a-s2:#d95926;--a-s3:#199e70;--a-s4:#c98500;--a-s5:#d55181;--a-other:#5f5e58;--a-axis:#383835;color-scheme:dark}
+html[data-theme="light"]:has(.admin-root){color-scheme:light}
+html[data-theme="dark"]:has(.admin-root){color-scheme:dark}
+html:has(.admin-root) body{background:var(--a-page)}
+.admin-root{
+  --a-paper:light-dark(#fff,#15181f);--a-soft:light-dark(#f4f7fb,#1c2029);--a-line:light-dark(#dce4ef,#2a2f3a);
+  --a-ink:light-dark(#14233a,#f4f5f7);--a-muted:light-dark(#52627a,#a4abb8);--a-blue:light-dark(#1d5fca,#93a6ff);--a-blue-soft:light-dark(#eaf2ff,#1a2350);
+  --a-ok:light-dark(#15803d,#4ade80);--a-ok-soft:light-dark(#e9f8ef,#10261a);--a-bad:light-dark(#a11c29,#ff9fae);--a-bad-soft:light-dark(#fff1f2,#2a1519);
+  --a-warn:light-dark(#915e08,#f5b94a);--a-warn-soft:light-dark(#fff5de,#33270f);--a-neutral:light-dark(#64748b,#a4abb8);--a-neutral-soft:light-dark(#eef1f6,#1c2029);
+  --a-focus:var(--a-blue);--a-radius:12px;
+  /* Chart tokens (validated: 5 network-family slots, adjacent CVD ΔE ≥ 8.4, light and dark). Status colors are reserved for outcomes. */
+  --a-s1:light-dark(#2a78d6,#3987e5);--a-s2:light-dark(#eb6834,#d95926);--a-s3:light-dark(#1baf7a,#199e70);--a-s4:light-dark(#eda100,#c98500);
+  --a-s5:light-dark(#e87ba4,#d55181);--a-other:light-dark(#b4b2a9,#5f5e58);--a-axis:light-dark(#c3c2b7,#383835);
+  --a-st-good:#0ca30c;--a-st-critical:#d03b3b;--a-st-serious:#ec835a;--a-st-warning:#fab219;--a-st-neutral:#898781;
+  min-height:100vh;background:var(--a-page);color:var(--a-ink);font-family:var(--font-outfit),system-ui,sans-serif;font-size:15px;line-height:1.45;
 }
 /* BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 (P2): the console paints the viewport from its topmost pixel. Root cause of the white strip: a page's
    first child top margin (the sign-in's 12vh) collapsed through `.admin-root` and `body` (neither has padding, border or its own formatting
@@ -20,8 +26,6 @@
    `flow-root` keeps child margins inside the console (no margin collapse, no layout change otherwise). The document background matches the
    console only while an Admin page is in the DOM (`:has`), so overscroll and any gap never flash white; the product's styling is untouched. */
 .admin-root{display:flow-root}
-html:has(.admin-root),html:has(.admin-root) body{background:#f8fafd}
-@media (prefers-color-scheme:dark){html:has(.admin-root),html:has(.admin-root) body{background:#0b0d12}}
 .admin-root *{box-sizing:border-box}
 .admin-root a{color:var(--a-blue)}
 .admin-root :focus-visible{outline:2px solid var(--a-focus);outline-offset:2px}
@@ -39,7 +43,13 @@ html:has(.admin-root),html:has(.admin-root) body{background:#f8fafd}
   height:100vh;overflow-y:auto}
 .admin-brand-link{text-decoration:none;color:inherit;padding:0 6px;border-radius:8px}
 .admin-brand{display:flex;align-items:center;gap:10px;font-weight:600}
-.admin-brand picture,.admin-brand img{display:block;flex:none}
+.admin-brand img{display:block;flex:none}
+.admin-brand [data-artwork="dark"],:root[data-theme="dark"] .admin-brand [data-artwork="light"]{display:none}
+:root[data-theme="dark"] .admin-brand [data-artwork="dark"]{display:block}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme]) .admin-brand [data-artwork="light"]{display:none}
+  :root:not([data-theme]) .admin-brand [data-artwork="dark"]{display:block}
+}
 .admin-brand-symbol img{width:auto;height:28px}
 .admin-brand-name{display:flex;align-items:center;gap:6px}
 .admin-brand-name img{width:auto;height:19px}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import type { ReviewWallet } from '../../domain/review-presentation';
@@ -16,6 +16,8 @@ import type { DashboardDetailResponse, DashboardRun, DashboardSnapshot } from '.
 import { DashboardView, type OpenWorkflow } from './dashboard-view';
 import { WALLET_PROOF_CHANGED } from '../../domain/wallet-proof-events';
 import { RunDetailView } from './run-detail-view';
+
+const runReturnPath = () => window.location.hash === '#from-workflows' ? '/app/workflows' as const : '/app/dashboard' as const;
 
 /**
  * BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the run summaries this page last listed for one wallet (this tab's memory only, never
@@ -37,12 +39,13 @@ function forgetListed(runId?: string) {
  * that need attention, in its one list); the Dashboard (`dashboard`) keeps the overview: what needs the owner, the current execution, the
  * wallet portfolio and one line of history.
  */
-export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, positions, openWorkflow, signInPrompt, workflowProgress }: {
+export function DashboardWorkspace({ workflowName, progress, recovery, wallet, context, runId, build, create, execute, navigate, mode = 'dashboard', portfolio, positions, openWorkflow, signInPrompt, workflowProgress, restoring = false }: {
   workflowName: string; progress: ExecutionLifecycle; recovery: ExecutionRecovery; wallet: ReviewWallet; context: ReviewContext;
   runId: string | null; build(): void; execute(): void; navigate(path: string): void;
   /** P0 approved UX (board 10): the Dashboard's "Create workflow" opens the Chat entry when the shell passes it (otherwise `build`). */
   create?: (() => void) | undefined;
   mode?: 'dashboard' | 'records'; portfolio?: ReactNode; positions?: ReactNode; openWorkflow?: OpenWorkflow | undefined; signInPrompt?: boolean;
+  restoring?: boolean;
   /** P0 hotfix (execution continuity): the whole workflow's step count for the current run (the same numbers as Execute and the Assistant). */
   workflowProgress?: { readonly completed: number; readonly total: number } | null;
 }) {
@@ -54,9 +57,20 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const isCurrent = Boolean(runId && ownedCurrent?.run.runId === runId);
   const [version, refresh] = useState(0);
   const latestAccount = useRef(account); latestAccount.current = account;
-  // BUILD-FLOFI-CHAT-E2E-DASHBOARD-UX-001: a record opened from Your workflows (`#from-workflows`) returns there; read after hydration.
-  const [returnTo, setReturnTo] = useState<'/app/dashboard' | '/app/workflows'>('/app/dashboard');
-  useEffect(() => { setReturnTo(runId && window.location.hash === '#from-workflows' ? '/app/workflows' : '/app/dashboard'); }, [runId]);
+  // A direct load cannot report where Back leads until the browser supplies the fragment.
+  const [runOrigin, setRunOrigin] = useState<{ runId: string; path: ReturnType<typeof runReturnPath> } | null>(null);
+  useLayoutEffect(() => {
+    if (!runId) return;
+    const update = () => setRunOrigin({ runId, path: runReturnPath() });
+    update();
+    window.addEventListener('hashchange', update);
+    window.addEventListener('popstate', update);
+    return () => {
+      window.removeEventListener('hashchange', update);
+      window.removeEventListener('popstate', update);
+    };
+  }, [runId]);
+  const returnTo = runOrigin?.runId === runId ? runOrigin.path : null;
   // A wallet proven anywhere on the page (Your workflows, Save, /approve) re-reads the history: a read, never another signature.
   useEffect(() => {
     const changed = () => { forgetListed(); refresh(value => value + 1); };
@@ -178,7 +192,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     if (id === ownedCurrent?.run.runId) setCurrentVisibility({ key: currentKey, disposition });
     window.dispatchEvent(new CustomEvent('flofi:history-changed', { detail: { account, id } }));
     refresh(value => value + 1);
-    if (runId) navigate(returnTo);
+    if (runId) navigate(runReturnPath());
   }
   const history = account ? { change: (id: string) => (action: 'DELETE' | 'ARCHIVE') => changeRunHistory(account, id, action), changed: historyChanged } : undefined;
 
@@ -204,14 +218,14 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
         : 'Wallet verification was not completed. Your execution records have not changed.' });
     } finally { setVerifying(false); }
   }
-  if (runId) return <RunDetailView view={isCurrent ? currentDisposition === 'DELETED' || currentDisposition === null ? null : ownedCurrent : historical} detail={ownedDetail} loading={loading}
+  if (runId) return <RunDetailView view={isCurrent ? currentDisposition === 'DELETED' || currentDisposition === null ? null : ownedCurrent : historical} detail={ownedDetail} loading={loading} restoring={restoring}
     connection={!account ? 'DISCONNECTED' : visible?.response?.connection ?? null}
-    back={() => navigate(returnTo)} backLabel={returnTo === '/app/workflows' ? ' Back to Your workflows' : ' Back to Dashboard'} build={build} execute={execute} refresh={() => refresh(value => value + 1)}
+    back={() => navigate(runReturnPath())} backLabel={returnTo && (returnTo === '/app/workflows' ? ' Back to Your workflows' : ' Back to Dashboard')} build={build} execute={execute} refresh={() => refresh(value => value + 1)}
     {...history ? { history: { change: history.change(runId), changed: disposition => historyChanged(runId, disposition) } } : {}}/>;
   const runs = dashboardRunIndex(account, snapshot?.runs ?? [], visibleCurrent).filter(view => removed?.owner !== account || !removed.ids.includes(view.run.runId));
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
     loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
-    loading={loading} build={build} create={create} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}${mode === 'records' ? '#from-workflows' : ''}`)} verify={() => void verify()} verifying={verifying}
+    loading={loading} restoring={restoring} build={build} create={create} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}${mode === 'records' ? '#from-workflows' : ''}`)} verify={() => void verify()} verifying={verifying}
     verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}
     mode={mode} portfolio={portfolio} positions={positions} openRecords={() => navigate('/app/workflows')} openWorkflow={openWorkflow} signInPrompt={Boolean(signInPrompt)}/>;
 }

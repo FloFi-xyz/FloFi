@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { forgetAaveReserves } from './aave-reserve-reads';
-import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useMemo, type Dispatch, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState, useMemo, type Dispatch, type ReactNode } from 'react';
 import { BaseObservationError, createReviewContext, lintWorkflow, reviewContextForChain, type ReviewContext, type ReviewResult } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, type EditorState } from '../domain/editor';
 import { editorHistoryReducer, initialEditorHistory } from '../domain/editor-history';
@@ -250,6 +250,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (stored?.fresh) setNewWorkflow(true);
     setPersistenceReady(true);
   }, [persistCanvas]);
+  useLayoutEffect(() => {
+    if (persistenceReady) delete document.documentElement.dataset.editorRestoring;
+  }, [persistenceReady]);
   useEffect(() => { if (persistCanvas && persistenceReady) persistEditor(editorStorage(), state.workflow, newWorkflow); }, [persistCanvas, persistenceReady, state.workflow, newWorkflow]);
   const moveCanvasNodes = useCallback((positions: Readonly<Record<string, { x: number; y: number }>>) =>
     dispatchHistory({ type: 'MOVE', positions }), []);

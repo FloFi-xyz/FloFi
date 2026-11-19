@@ -54,6 +54,25 @@ async function enterCard(page: Page, holder = 'APRO', pan: string = TEST_CARD.pa
 
 test.beforeEach(async () => { await resetCardHarness(); });
 
+test('a direct dark card URL paints the dark palette before hydration and waits for its frame', async ({ page }) => {
+  const sdk = await installMercadoPagoSdkStandIn(page);
+  let release!: () => void;
+  const hydration = new Promise<void>(resolve => { release = resolve; });
+  await page.route(url => url.origin === CARD_ORIGIN && url.pathname.startsWith('/_next/static/'), async route => {
+    if (route.request().resourceType() === 'script') await hydration;
+    await route.continue();
+  });
+  try {
+    await page.goto(`${CARD_ORIGIN}/card-entry?theme=dark`, { waitUntil: 'commit' });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(11, 13, 18)');
+    await expect(page.locator('.card-entry-standalone')).toHaveText('Loading…');
+    await expect(page.locator('.card-entry-form')).toHaveCount(0);
+  } finally { release(); }
+  await expect(page.locator('.card-entry-standalone')).toHaveText('Open Add card from Credentials in FloFi.');
+  expect(sdk).toEqual([]);
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme}: Add card collects the card only in Mercado Pago's secure fields and keeps only safe metadata`, async ({ page }) => {
     const errors: string[] = [];

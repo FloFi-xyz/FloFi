@@ -510,8 +510,8 @@ export type ComposerCardData = {
   contextualProposal?: boolean;
   tokenSelection?: { references?: { source: string | undefined; destination: string | undefined }; source: readonly string[]; destination: readonly string[]; onSelect(side: 'source' | 'destination', symbol: string): void };
   networkSelection?: { source: readonly string[]; destination: readonly string[]; valid: boolean; unavailable?: readonly string[]; onSelect(side: 'source' | 'destination', network: string): void };
-  /** BUILD-RH-002: the Stocks card, a Robinhood Chain swap that pays USDG for the selected Stock Token. */
-  stocks?: { equity: string; onEquityChange(equity: string): void };
+  /** The Stock Token side of a Robinhood Chain swap against USDG. */
+  stocks?: { equity: string; side: 'source' | 'destination'; onEquityChange?(equity: string): void };
   supplyProposal?: { formId: string; reviewLabel?: string; canReview: boolean; hasProposal: boolean; canApply: boolean; onApply(): void };
   recipient?: CardRecipient;
   /** BUILD-FLOFI-MAINNET-EXEC-002: a Bridge card's destination wallet (auto-filled, editable). */
@@ -557,7 +557,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const [amountError, setAmountError] = useState<string | null>(null);
   const [fiatFirst, setFiatFirst] = useState(false);
-  const stocksCard = Boolean(card.stocks);
+  const stocksCard = card.summary.action === 'Stocks';
   const amountBox = !card.inspection && (card.summary.action === 'Swap' || card.summary.action === 'Bridge' || stocksCard);
   const bridgeCard = !card.inspection && card.summary.action === 'Bridge';
   const poolCard = !card.inspection && card.summary.action === 'Pool / Liquidity';
@@ -566,6 +566,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const [stocksPanelOpen, setStocksPanelOpen] = useState(false);
   const stocksPanelId = useId();
   const [tokenPanel, setTokenPanel] = useState<'source' | 'destination' | null>(null);
+  const stockEquity = card.stocks?.onEquityChange ? { symbol: card.stocks.equity, expanded: stocksPanelOpen, controls: stocksPanelId,
+    onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); } } : null;
   const tokenPanelId = useId();
   const tokenTrigger = useRef<HTMLButtonElement | null>(null);
   const [bridgePanel, setBridgePanel] = useState<'source' | 'destination' | null>(null);
@@ -598,6 +600,12 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const amountParts = card.summary.amount.match(/^(\d+(?:\.\d+)?) (\S+)$/);
   const pair = card.summary.detail ?? card.summary.bridgePair;
   const [pairSource, pairDestination] = pair?.split(' → ') ?? [];
+  const onInvert = bridgeCard ? card.onInvertBridge : (card.summary.action === 'Swap' || stocksCard) ? card.actionSelection?.onInvert : undefined;
+  function invertPair() {
+    setAmountError(null);
+    setStocksPanelOpen(false);
+    onInvert?.();
+  }
   const [sourceNetwork = 'Network not specified', destinationNetwork = sourceNetwork] = card.summary.chain.split(' → ');
   const editor = card.amountEditor ? { ...card.amountEditor, onChange: (value: string) => { setAmountError(null); card.amountEditor!.onChange(value); } } : undefined;
   // BUILD-FIX-UX-001: an ordinary amount edit applies directly to the editable workflow. A chat (Copilot) proposal keeps its own review.
@@ -697,13 +705,15 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
         // Leaving this step (pointer or touch: a decimal keypad may have no Enter key) applies a valid draft too; focus within the step,
         // its pickers or its Canvas node (selecting the card) does not.
         onBlur={commitOnLeave}>
-        <ValuePair relationship="directional" onInvert={bridgeCard ? card.onInvertBridge : card.summary.action === 'Swap' && !stocksCard ? card.actionSelection?.onInvert : undefined}>
+        <ValuePair relationship="directional" onInvert={stocksCard && onInvert ? invertPair : onInvert}>
         <ValueBox source caption="You send" amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
-          network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+          network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)}
+          {...stocksCard ? (card.stocks?.side === 'source' && stockEquity ? { equity: stockEquity } : {}) : { picker: picker('source') }}
+          hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>
         <ValueBox round caption={networkPending ? 'You receive' : 'You receive, approximately'} {...networkPending ? { placeholder: 'calculated after the network' } : {}}
           amount={networkPending ? undefined : estimate?.expected ?? expiredEstimate?.expected ?? (quote.status === 'calculating' ? undefined : '—')} loading={!networkPending && quote.status === 'calculating' && !estimate} token={pairDestination ?? '—'} network={destinationNetwork}
-          {...card.stocks ? { equity: { symbol: card.stocks.equity, onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); }, expanded: stocksPanelOpen, controls: stocksPanelId } } : { picker: picker('destination') }}
+          {...stocksCard ? (card.stocks?.side === 'destination' && stockEquity ? { equity: stockEquity } : {}) : { picker: picker('destination') }}
           hint="Estimated output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
@@ -822,6 +832,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     onTokenChange={symbol => card.tokenSelection?.onSelect(bridgePanel, symbol)}
     onNetworkChange={network => { card.networkSelection?.onSelect(bridgePanel, network); setAmountError(null); }} onCollapse={collapseBridge}/>;
   return poolCard ? <div ref={poolNodeRef} className="composer-pool-node">{tr(content)}{tr(tokens)}{poolPanelOpen && <PoolPricePanel strategy={poolRange.preset} onSelect={poolRange.selectPreset} onCollapse={() => setPoolPanelOpen(false)}/>}</div> : card.stocks ? <div ref={poolNodeRef} className="composer-stocks-node">{tr(content)}
-    {stocksPanelOpen && <StocksPanel id={stocksPanelId} equity={card.stocks.equity} onChange={card.stocks.onEquityChange} onCollapse={() => setStocksPanelOpen(false)}/>}
+    {stocksPanelOpen && card.stocks.onEquityChange && <StocksPanel id={stocksPanelId} equity={card.stocks.equity} onChange={equity => {
+      setAmountError(null);
+      card.stocks?.onEquityChange?.(equity);
+    }} onCollapse={() => setStocksPanelOpen(false)}/>}
   </div> : !card.inspection && (amountBox || ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action)) ? <div ref={poolNodeRef} className="composer-token-node">{tr(content)}{tr(tokens)}{tr(bridge)}</div> : content;
 }

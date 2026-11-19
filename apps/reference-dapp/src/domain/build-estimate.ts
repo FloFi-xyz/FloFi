@@ -6,6 +6,7 @@ import { bridgeEstimateRequest } from './bridge-estimate';
 import { parseTokenAmount } from './jupiter-authoring';
 import { cryptoSelectionOf } from './crypto-action-picker';
 import { flightRefusalMessage } from './flight-refusal';
+import { stockTradingRefusal } from './catalog-swap-authoring';
 import { certifiedRouterRoute, routerDetails } from './router-authoring';
 
 /** Presentation data only. Deliberately excludes Review, calldata, execution IDs and financial authority. */
@@ -68,8 +69,8 @@ export function requestBuildEstimate(load: (signal: AbortSignal) => Promise<Buil
 /** User-facing diagnosis. Technical codes and correlation IDs remain available separately. */
 export function buildEstimateFailureMessage(code: string): string {
   // P0: the quote endpoint shares the Flight gate; its refusal is named, never 'the quote provider or network is unavailable'.
-  const flight = flightRefusalMessage(code);
-  if (flight) return flight;
+  const refusal = flightRefusalMessage(code) ?? stockTradingRefusal(code);
+  if (refusal) return refusal;
   if (/BELOW_MINIMUM|AMOUNT_TOO_LOW/.test(code)) return 'The amount is below the provider minimum. Choose a larger amount or another provider.';
   if (/ABOVE_MAXIMUM|AMOUNT_TOO_HIGH/.test(code)) return 'The amount is above the provider maximum. Choose a smaller amount or another provider.';
   if (/INSUFFICIENT_LIQUIDITY/.test(code)) return 'The provider has insufficient liquidity for these assets and this amount. Try another provider or try again later.';

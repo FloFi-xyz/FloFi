@@ -5,13 +5,6 @@
   --text-primary:var(--ink);--text-secondary:var(--muted);--success:#137A3F;--success-surface:#E6F5EC;--warning-text:#8A5A00;--warning-surface:#FFF4E0;--danger-surface:var(--danger-soft)}
 /* P0 approved UX (board 16 §5): the Beta Mainnet notice uses the attention pair of the active theme (amber text on its own surface). */
 :root{--beta-notice-bg:var(--warning-surface);--beta-notice-line:var(--warning-surface);--beta-notice-ink:var(--warning-text)}
-/* Animate the canvas gradient's colors without changing its approved final appearance. */
-@property --canvas-start{syntax:"<color>";inherits:true;initial-value:#fbfdff}
-@property --canvas-end{syntax:"<color>";inherits:true;initial-value:#f4f8ff}
-@media(prefers-reduced-motion:no-preference){
-  :root[data-theme-transition]{transition:--canvas-start 240ms ease,--canvas-end 240ms ease}
-  :root[data-theme-transition] body,:root[data-theme-transition] .app-shell,:root[data-theme-transition] .app-shell *{transition-property:background-color,border-color,color,box-shadow;transition-duration:240ms;transition-timing-function:ease}
-}
 /* Approved graphite system. Existing product tokens resolve through this one palette. */
 :root[data-theme="dark"]{
   color-scheme:dark;
@@ -352,7 +345,7 @@
 .header-settings-menu .header-settings-choices:active{background:var(--blue-soft)}
 @media(prefers-reduced-motion:no-preference){
   .header-settings-choices::before{transition:transform 240ms cubic-bezier(.22,1,.36,1),background-color 220ms ease,border-color 220ms ease}
-  .header-settings-choices>span{transition:color 220ms ease}
+  .header-settings-choices:not(.header-settings-theme)>span{transition:color 220ms ease}
 }
 .header-settings-separator{margin:5px 4px;border:0;border-top:1px solid var(--line)}
 .header-settings-menu .header-settings-action{display:flex;align-items:center;gap:8px}
@@ -747,13 +740,6 @@
 .navigation-row svg{flex:none}
 .navigation-row:hover:not(:disabled){background:var(--soft);color:var(--ink)}
 .navigation-row[aria-current=page]{background:var(--blue-soft);border-color:var(--accent-line);color:var(--blue);font-weight:600}
-/* Keep drawer motion independent of the existing page theme transition. */
-@media(prefers-reduced-motion:no-preference){
-  :root[data-theme-transition] .app-shell .navigation-layer{transition:visibility 0s linear 220ms}
-  :root[data-theme-transition] .app-shell .navigation-layer[data-open=true]{transition-delay:0s}
-  :root[data-theme-transition] .app-shell .navigation-drawer{transition:transform 220ms ease-out,background-color 240ms ease,border-color 240ms ease,color 240ms ease}
-  :root[data-theme-transition] .app-shell .navigation-backdrop{transition:opacity 220ms ease-out,background-color 240ms ease}
-}
 @media(max-width:480px){.navigation-drawer{width:88vw;max-width:320px}}
 @media(prefers-reduced-motion:reduce){:root .app-shell :is(.navigation-layer,.navigation-drawer,.navigation-backdrop){transition:none}}
 /* BUILD UX POLISH 004 (UX-01): above 800 px the same navigation is a persistent rail below the header — icons only (64 px, the Canvas rail's
@@ -1684,8 +1670,6 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 
 /* Reusable workflow library follows the existing secondary workspace visual language. */
 .saved-workflow-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-.saved-workflow-open { width: 100%; justify-content: space-between; padding: 18px 20px; text-align: left; }
-.saved-workflow-open > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* BUILD-BRAND-UX-001: responsive presentation; financial gates remain in their stores. */
 .mobile-build-navigation { display: none; }
@@ -1997,6 +1981,9 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 
 /* BUILD0-UX-001: Build 0 (Chat) fills the workspace edge to edge (its own dotted field). */
 .main.build-entry-workspace{max-width:none;margin:0;padding:0}
+.editor-restore-status{display:none;margin:0;padding:28px 24px;color:var(--muted)}
+:root[data-editor-restoring] .build-entry-workspace>.editor-restore-status{display:block}
+:root[data-editor-restoring] .build-entry-workspace>:not(.editor-restore-status){display:none}
 /* BUILD-FLOFI-CHAT-EDITOR-UX-001: the Editor's footer opens its simulation and execution sections; secondary to the Canvas lifecycle action. */
 .summary-sections{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
 .summary-bar .summary-sections button:not(:disabled){background:var(--soft);border-color:var(--line);color:var(--ink)}

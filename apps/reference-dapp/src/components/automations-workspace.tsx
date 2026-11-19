@@ -30,7 +30,7 @@ import { actionText, conditionText, ERROR_TEXT, KIND_LABEL, OCCURRENCE_LABEL, OU
 
 export type AutomationNavigation = { readonly owner: WorkflowOwner | null; readonly proof: ReturnType<typeof useWalletProof>; readonly onPropose: (command: Command) => void;
   /** BUILD-AUTOMATION-002: "Automate this workflow" — the exact Canvas workflow, when the owner came from the Canvas. */
-  readonly openChat?: () => void; readonly canvas?: CanvasAutomationDraft | null };
+  readonly openChat?: () => void; readonly canvas?: CanvasAutomationDraft | null; readonly restoring?: boolean };
 type Kind = RuleView['kind'];
 type Asset = 'ETH' | 'BTC' | 'SOL';
 
@@ -361,7 +361,7 @@ function useStableOwner(owner: WorkflowOwner | null | undefined): WorkflowOwner 
   return useMemo(() => owner ? { namespace: owner.namespace, address: owner.address } : null, [key]);
 }
 
-export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openChat, canvas = null }: Partial<AutomationNavigation>) {
+export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openChat, canvas = null, restoring = false }: Partial<AutomationNavigation>) {
   const { t } = useLocale(), text = useAutomationText();
   const owner = useStableOwner(ownerProp);
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -476,7 +476,7 @@ export function AutomationsWorkspace({ owner: ownerProp, proof, onPropose, openC
       // P0 approved UX (board 12): a deployment without automations shows one "Coming soon" state, never a form or a disabled control.
       : !enabled ? <section className="ux-panel ux-empty automation-coming-soon" aria-label={t('Automations')}><StatusTag tone="soon">{t('Coming soon')}</StatusTag>
         <h2>{t('Recurring buys, price triggers and daily watches')}</h2><p>{t('Automations are not enabled on this deployment.')}</p></section>
-        : !owner ? <div className="ux-panel ux-list-empty"><p>{t('Connect a wallet from the header to use automations.')}</p></div>
+        : !owner ? <div className="ux-panel ux-list-empty" role={restoring ? 'status' : undefined}><p>{t(restoring ? 'Restoring wallet…' : 'Connect a wallet from the header to use automations.')}</p></div>
           : verificationRequired ? <div className="ux-panel ux-list-empty"><p>{t('Verify wallet ownership to use automations.')}</p>{proof && <WalletProof namespace={owner.namespace} proof={{ ...proof, proven: null }}/>}</div>
             : !overview ? <div role="status"><p>{t(error ? 'Automations could not be loaded. Try again.' : 'Loading automations…')}</p>{error && <button type="button" className="ux-button ux-button-small" onClick={() => void refresh(true)}>{t('Retry')}</button>}</div> : <>
               {/* Board 12: "Waiting for you" opens the page only while something waits; empty, the page starts with creating. */}

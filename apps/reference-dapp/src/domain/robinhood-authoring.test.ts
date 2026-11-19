@@ -9,8 +9,8 @@ import { parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog } from '@defi
 import { hashArtifactBytes, readCatalogSwapNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { featuredStockSymbols, registerNetworkCatalog, resetNetworkCatalogs, searchNetworkAssets, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
-import { canvasAmountCommand, canvasAmountMessage, setupSummary } from './canvas-action-setup';
-import { cryptoInputOf, cryptoNetworks, cryptoSelectionOf, createCryptoActionNode, selectCryptoToken, validCryptoSelection } from './crypto-action-picker';
+import { canvasAmountCommand, canvasAmountMessage, canvasAuthoringIncomplete, setupSummary } from './canvas-action-setup';
+import { cryptoInputOf, cryptoNetworks, cryptoSelectionOf, createCryptoActionNode, invertCryptoSelection, selectCryptoToken, validCryptoSelection } from './crypto-action-picker';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { editorReducer } from './editor';
 import { composerSummary } from './composer-presentation';
@@ -83,6 +83,37 @@ describe('the Stocks card is a canonical Robinhood Chain swap', () => {
     expect(cryptoSelectionOf(node)).toEqual({ action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'AAPL' });
     expect(cryptoInputOf(node)).toMatchObject({ amount: '25', slippage: String(SWAP_DEFAULT_SLIPPAGE_BPS) });
   });
+  it('reverses a draft and an applied Stocks step without carrying amounts across denominations', () => {
+    registerNetworkCatalog(catalog);
+    const forward = stocksSetup();
+    const id = forward.actionSetup!.id, selection = forward.actionSetup!.cryptoSelection!;
+    const reverse = invertCryptoSelection(selection)!;
+    const typed = editorHistoryReducer(forward, { type: 'EDIT_CANVAS_AMOUNT', id, amount: '25', context });
+    const reversed = editorHistoryReducer(typed, { type: 'EDIT_CRYPTO_SELECTION', id, selection: reverse, context });
+    expect(reversed.actionSetup).toMatchObject({ amount: '0', cryptoSelection: { from: 'AAPL', to: 'USDG' } });
+    expect(setupSummary(reversed.actionSetup!, context)).toMatchObject({ action: 'Stocks', amount: '0 AAPL', detail: 'AAPL → USDG' });
+    expect(() => canvasAmountCommand(reversed.editor, reversed.actionSetup, reversed.amountInputs, id, context)).toThrow(/AMOUNT/);
+
+    const purchase = apply(forward, '25');
+    const current = editorHistoryReducer(initialEditorHistory(), { type: 'RESTORE_WORKFLOW', workflow: purchase });
+    const nodeId = purchase.nodes[0]!.nodeId;
+    const draft = editorHistoryReducer(current, { type: 'EDIT_CRYPTO_SELECTION', id: nodeId, selection: reverse, context });
+    expect(draft.editor.workflow).toBe(current.editor.workflow);
+    expect(draft.amountInputs[nodeId]).toBe('');
+    expect(canvasAuthoringIncomplete(draft.actionSetup, draft.amountInputs)).toBe(true);
+    const saleInput = editorHistoryReducer(draft, { type: 'EDIT_CANVAS_AMOUNT', id: nodeId, amount: '0.125000000001', context });
+    const result = editorReducer(saleInput.editor, canvasAmountCommand(saleInput.editor, null, saleInput.amountInputs, nodeId, context, {}, saleInput.cryptoSelections), context);
+    expect(result.error).toBeNull();
+    expect(result.workflow.revision).toBe(purchase.revision + 1);
+    const node = result.workflow.nodes[0]!;
+    const original = readCatalogSwapNode(purchase.nodes[0]!);
+    expect(readCatalogSwapNode(node as Parameters<typeof readCatalogSwapNode>[0])).toMatchObject({ input: original.output, output: original.input, amount: '125000000001000000' });
+    expect(composerSummary(result.workflow, node, context)).toMatchObject({ action: 'Stocks', amount: '0.125000000001 AAPL', detail: 'AAPL → USDG' });
+    const restored = editorHistoryReducer(saleInput, { type: 'EDIT_CRYPTO_SELECTION', id: nodeId, selection, context });
+    expect(restored.amountInputs[nodeId]).toBeUndefined();
+    expect(restored.cryptoSelections[nodeId]).toBeUndefined();
+    expect(cryptoInputOf(restored.editor.workflow.nodes[0]!)?.amount).toBe('25');
+  });
   it('a non-featured search result (PLTR) configures the same card and flows into the same IR shape', () => {
     registerNetworkCatalog(catalog);
     const pltr = searchNetworkAssets(ROBINHOOD_CHAIN, 'palantir', { assetClass: 'STOCK_TOKEN' })[0]!;
@@ -94,7 +125,7 @@ describe('the Stocks card is a canonical Robinhood Chain swap', () => {
     const workflow = apply(history, '10');
     const node = workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input')!;
     expect(readCatalogSwapNode(node).output).toEqual({ chain: 'eip155:4663', address: pltr.address, decimals: 18, officialId: pltr.stock!.officialId });
-    expect(catalogSwapDetails(node)).toMatchObject({ from: 'USDG', to: 'PLTR', stockPurchase: true });
+    expect(catalogSwapDetails(node)).toMatchObject({ from: 'USDG', to: 'PLTR', stockSide: 'destination' });
   });
   it('keeps the workflow hash stable for the same intent, and changes it when the asset changes', () => {
     registerNetworkCatalog(catalog);
@@ -106,13 +137,16 @@ describe('the Stocks card is a canonical Robinhood Chain swap', () => {
       selection: selectCryptoToken(history.actionSetup!.cryptoSelection!, 'destination', 'TSLA'), context });
     expect(hash(apply(history, '25'))).not.toBe(hash(a));
   });
-  it('shows a canonical stock purchase without the catalog as a neutral label, never a guessed symbol', () => {
+  it('shows canonical stock swaps without the catalog using the neutral label', () => {
     registerNetworkCatalog(catalog);
     const workflow = apply(stocksSetup(), '1');
+    const sale = createCryptoActionNode('node-002', { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'AAPL', to: 'USDG' }, amount: '1', slippage: '50' });
     resetNetworkCatalogs();
     const node = workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input')!;
-    expect(catalogSwapDetails(node)).toMatchObject({ from: 'USDG', to: 'Stock Token', stockPurchase: true });
+    expect(catalogSwapDetails(node)).toMatchObject({ from: 'USDG', to: 'Stock Token', stockSide: 'destination' });
+    expect(catalogSwapDetails(sale)).toMatchObject({ from: 'Stock Token', to: 'USDG', stockSide: 'source' });
     expect(cryptoSelectionOf(node)).toBeNull();
+    expect(cryptoSelectionOf(sale)).toBeNull();
   });
 });
 

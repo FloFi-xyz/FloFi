@@ -6,6 +6,8 @@ import { product } from '../config/product';
 import { LocaleProvider } from '../i18n/locale';
 import { documentLanguage, englishPinnedPath, languageMigrationScript } from '../i18n/language';
 import { requestLanguage } from '../server/request-language';
+import { defaultTheme, THEME_BOOTSTRAP } from '../accounts/account-theme';
+import { EDITOR_RESTORE_BOOTSTRAP } from '../domain/editor-persistence';
 import './base.css';
 import './fonts.css';
 
@@ -20,7 +22,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // Only without a cookie (and off the English-pinned surfaces): a legacy preference kept in storage alone is migrated once, before the first
   // paint (the script writes the cookie and reloads hidden only when storage holds the other language). The proxy's nonce allows it.
   const migrate = !chosen && !englishPinnedPath(pathname);
-  return <html lang={documentLanguage(language)} className="flofi-fonts"><head>
+  return <html lang={documentLanguage(language)} className="flofi-fonts" data-theme={defaultTheme(pathname)} suppressHydrationWarning><head>
+    {pathname !== '/card-entry' && <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }}/>}
+    {pathname === '/app' && <script nonce={nonce} dangerouslySetInnerHTML={{ __html: EDITOR_RESTORE_BOOTSTRAP }}/>}
     {migrate && <script nonce={nonce} dangerouslySetInnerHTML={{ __html: languageMigrationScript(language) }}/>}
     <link rel="preload" href="/fonts/outfit-92684e4acde79ef0.woff2" as="font" type="font/woff2" crossOrigin="anonymous"/>
     <link rel="preload" href="/fonts/ibm-plex-mono-c36f509c0a8f9f85.woff2" as="font" type="font/woff2" crossOrigin="anonymous"/>

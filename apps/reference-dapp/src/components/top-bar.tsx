@@ -105,7 +105,8 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const walletNotice = solanaActive ? connection.notice : build009.notice ?? connection.notice;
   const provider = solanaActive ? jupiter.session ? { name: jupiter.session.wallet.name, icon: jupiter.session.wallet.icon ?? null } : null
     : build009.account ? build009.provider : null;
-  const restoring = solanaActive ? jupiter.restoring : build009.restoring;
+  const restoring = (solanaActive ? jupiter.restoring : build009.restoring)
+    || (!build009.account && !jupiter.session && jupiter.restoring);
   const fork = info?.available ? info : null;
   const solanaAddress = jupiter.session?.account.address;
   const solanaTitle = solanaAddress && jupiter.session

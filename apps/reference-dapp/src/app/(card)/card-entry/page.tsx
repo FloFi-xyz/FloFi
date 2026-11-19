@@ -15,14 +15,16 @@ import '../../globals.css';
  */
 export default async function CardEntryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await connection();
-  const params = await searchParams, card = cardOrigin(process.env), status = cardProviderStatus(process.env);
+  const params = await searchParams, card = cardOrigin(process.env), status = cardProviderStatus(process.env), request = await headers();
   // Only on the card origin, whatever path alias reached this page (the proxy routes the card host; this is the page's own check).
-  if (!card || ((await headers()).get('host') ?? '').toLowerCase() !== card.host.toLowerCase()) notFound();
+  if (!card || (request.get('host') ?? '').toLowerCase() !== card.host.toLowerCase()) notFound();
   const language = params.lang === 'PT' ? 'PT' : 'EN', theme = params.theme === 'dark' ? 'dark' : 'light';
   // The page's language is set on its content (from the opener's `lang`): the card host has no saved preference, so the document's own
   // language is the product default.
   return <LocaleProvider initialLanguage={language}><div lang={documentLanguage(language)}>
-    {status.available ? <CardEntryFrame cardOrigin={card.origin} appOrigin={card.appOrigin} client={status.client} providerName={status.provider.name} theme={theme}/>
+    {theme === 'dark' && <script nonce={request.get('x-nonce') ?? undefined}
+      dangerouslySetInnerHTML={{ __html: "document.documentElement.dataset.theme='dark'" }}/>}
+    {status.available ? <CardEntryFrame cardOrigin={card.origin} appOrigin={card.appOrigin} client={status.client} providerName={status.provider.name}/>
       : <CardEntryUnavailable appOrigin={card.appOrigin}/>}
   </div></LocaleProvider>;
 }

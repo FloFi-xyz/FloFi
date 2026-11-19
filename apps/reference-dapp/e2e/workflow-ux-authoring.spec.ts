@@ -4,7 +4,7 @@
  * chain reads only), every financial gate off, live-quote answers replayed in the browser. MOCKED evidence; no provider, Review or execution.
  */
 import type { Locator, Page } from '@playwright/test';
-import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { hashArtifactBytes, readCatalogSwapNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { test, expect, assertPassiveWallet, installPassiveWallet, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { composeStrategy } from '../src/engine/strategy-engine';
@@ -358,5 +358,71 @@ test.describe('UX-007 fast live quote feedback', () => {
     expect(seen).toHaveLength(1); expect(seen[0]!.body.workflow.nodes.some(node => node.chainId === 'eip155:4663')).toBe(true);
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
     await assertPassiveWallet(page); networkGuard.assertClean();
+  });
+
+  test('Stocks reversal clears the forward quote and keeps the reverse pair on Enter', async ({ page, networkGuard }, testInfo) => {
+    let finishForward!: () => void, forwardFinished!: () => void;
+    const heldForward = new Promise<void>(resolve => { finishForward = resolve; });
+    const delayedForwardFinished = new Promise<void>(resolve => { forwardFinished = resolve; });
+    const seen: { spend: string; amount: string }[] = [];
+    await page.route('**/api/build-estimate', async route => {
+      const { workflow, nodeId } = JSON.parse(route.request().postData()!) as Seen['body'];
+      const node = workflow.nodes.find(item => item.nodeId === nodeId)!;
+      const fields = readCatalogSwapNode(node);
+      const sell = fields.input.officialId !== null;
+      seen.push({ spend: sell ? 'AAPL' : 'USDG', amount: fields.amount });
+      const delayed = !sell && fields.amount === '12000000';
+      if (delayed) await heldForward;
+      try {
+        const expected = sell ? '48' : delayed ? '9.99' : '0.026';
+        await route.fulfill({ json: fields.amount === '250000000000000000' ? { ok: false, code: 'STOCK_TOKEN_NOT_DISPOSABLE' }
+          : { ok: true, estimate: { workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))),
+            nodeId, chain: node.chainId, provider: 'Uniswap V3', expected, minimum: expected, symbol: sell ? 'USDG' : 'AAPL', slippageBps: fields.slippageBps,
+            expiresAt: new Date(Date.now() + 60_000).toISOString() } } });
+      } catch (cause) { if (!delayed) throw cause; }
+      finally { if (delayed) forwardFinished(); }
+    });
+    try {
+      await page.clock.install();
+      await open(page);
+      await page.getByRole('button', { name: 'Stocks', exact: true }).click();
+      const card = cards(page).first();
+      const forward = card.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true });
+      const reverse = card.getByRole('textbox', { name: 'Stocks amount (AAPL)', exact: true });
+      const output = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
+      await forward.fill('10');
+      await expect(output.locator('.composer-amount-value')).toHaveText('0.026');
+      await forward.press('Enter');
+      await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
+      await testInfo.attach('stocks-buy', { body: await card.screenshot(), contentType: 'image/png' });
+      await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
+      await forward.fill('12');
+      await page.clock.runFor(200);
+      await expect.poll(() => seen).toContainEqual({ spend: 'USDG', amount: '12000000' });
+      await card.getByRole('button', { name: 'Switch From and To tokens', exact: true }).click();
+      await page.clock.resume();
+      await expect(reverse).toHaveValue('');
+      await expect(card.locator('.composer-amount').getByRole('button', { name: 'Select stock' })).toBeVisible();
+      await expect(output).toContainText('USDG');
+      await expect(output.locator('.composer-amount-value')).toHaveText('—');
+      await expect(card).toContainText('Not applied to the workflow yet.');
+      await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
+
+      await reverse.fill('0.25');
+      await expect(card.locator('.composer-quote-note')).toHaveText('Robinhood currently does not allow selling this Stock Token.');
+      await reverse.fill('0.125000000001');
+      await reverse.press('Enter');
+      await expect(revision(page)).toHaveAttribute('data-workflow-revision', '2');
+      await expect(output.locator('.composer-amount-value')).toHaveText('48');
+      finishForward();
+      await delayedForwardFinished;
+      await expect(output.locator('.composer-amount-value')).toHaveText('48');
+      const workflow = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
+      expect(readCatalogSwapNode(workflow.nodes[0]!)).toMatchObject({ input: { decimals: 18, officialId: expect.any(String) },
+        output: { decimals: 6, officialId: null }, amount: '125000000001000000' });
+      expect(seen).toContainEqual({ spend: 'AAPL', amount: '125000000001000000' });
+      await testInfo.attach('stocks-sell', { body: await card.screenshot(), contentType: 'image/png' });
+      await assertPassiveWallet(page); networkGuard.assertClean();
+    } finally { finishForward(); }
   });
 });

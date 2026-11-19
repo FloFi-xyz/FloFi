@@ -297,6 +297,21 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     expect(chat.messages.some(message => message.text === 'Discarded. The step keeps its previous amount.')).toBe(true);
     expect(simulate).toHaveBeenCalledTimes(1);
   });
+  it('asks about the new draft if the pending swap direction changes before Apply', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const nodeId = editor.workflow.nodes[0]!.nodeId;
+    const resolveEdit = vi.fn(() => null);
+    reviewedPatch = { pendingEdits: [{ nodeId, step: 1, action: 'Stocks', value: '25 USDG', draft: 'buy' }], resolveEdit };
+    lifecycle(reviewedPatch);
+    expect(last(await say('Review workflow')).text).toContain('25 USDG');
+    reviewedPatch = { ...reviewedPatch, pendingEdits: [{ nodeId, step: 1, action: 'Stocks', value: '0.125 AAPL', draft: 'sell' }] };
+    lifecycle(reviewedPatch);
+    const chat = await say('Apply it');
+    expect(last(chat).text).toContain('0.125 AAPL');
+    expect(last(chat).options).toEqual(['Apply it', 'Discard it']);
+    expect(resolveEdit).not.toHaveBeenCalled();
+    expect(simulate).not.toHaveBeenCalled();
+  });
   it('the wallet on Arbitrum for a Base step: the chat offers the existing network switch and continues the review once the wallet switched', async () => {
     await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     const request = vi.fn(() => { reviewedPatch = { ...reviewedPatch, networkAction: undefined, walletNetwork: 'Base Sepolia' }; });

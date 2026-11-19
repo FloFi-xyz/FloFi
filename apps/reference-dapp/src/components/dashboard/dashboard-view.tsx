@@ -42,36 +42,39 @@ function runAction(flow: string) {
       : /borrow/.test(flow) ? 'borrow' : /transfer/.test(flow) ? 'transfer' : 'action';
 }
 
+export function WorkflowRow({ icon, name, metadata, children }: { icon: ReactNode; name: ReactNode; metadata: ReactNode; children: ReactNode }) {
+  return <div className="ux-row">
+    <span className="ux-row-icon" aria-hidden="true">{icon}</span>
+    <div className="ux-row-main"><h3 className="ux-row-name">{name}</h3>
+      {metadata && <p className="ux-row-meta">{metadata}</p>}
+    </div>
+    <div className="ux-row-actions">{children}</div>
+  </div>;
+}
+
 /**
- * One execution record as a row (P0 approved UX, board 11): name, steps · network · date, its exact status, a visible Open and a ··· with the
- * existing, server-checked Archive and Delete. The record's facts stay behind the name's disclosure.
+ * An execution record keeps its status and actions in the row, with additional facts in the name's disclosure.
  */
-function RunCard({ view, openRun, history, attention = false, openWorkflow, libraryActions }: { view: DashboardRunView; openRun(runId: string): void;
-  history?: RunHistory | undefined; attention?: boolean; openWorkflow?: OpenWorkflow | undefined; libraryActions?: ReactNode }) {
+function RunCard({ view, openRun, history, attention = false, inHistory = false, openWorkflow, libraryActions }: { view: DashboardRunView; openRun(runId: string): void;
+  history?: RunHistory | undefined; attention?: boolean; inHistory?: boolean; openWorkflow?: OpenWorkflow | undefined; libraryActions?: ReactNode }) {
   const { t: tr, language } = useLocale();
   const updated = dateLabel(view.run.updatedAt, language), detailsId = useId();
   const [expanded, setExpanded] = useState(false);
   const name = openWorkflow?.names.get(view.run.workflowId);
   const label = name ?? (view.current ? view.title : tr(view.title));
-  const facts = [view.total !== null ? tr(view.total === 1 ? '{0} step' : '{0} steps', view.total) : null, view.networks.length ? tr(view.networks.join(' → ')) : null]
-    .filter((value): value is string => Boolean(value));
+  const facts = inHistory ? [] : [view.total !== null ? tr(view.total === 1 ? '{0} step' : '{0} steps', view.total) : null, view.networks.length ? tr(view.networks.join(' → ')) : null].filter(Boolean);
   return <article className={`ux-record${view.current ? ' ux-record-current' : ''}`}>
-    <div className="ux-row">
-      <span className="ux-row-icon"><ActionIcon action={runAction(view.run.flow)}/></span>
-      <div className="ux-row-main">
-        <h3 className="ux-row-name"><button type="button" className="ux-row-toggle" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}
-          aria-label={tr(expanded ? 'Hide details for {0}' : 'Show details for {0}', label)}>
-          <span title={name ?? view.title}>{label}</span><span aria-hidden="true" className="ux-row-chevron">{expanded ? '⌃' : '⌄'}</span>
-        </button></h3>
-        {(facts.length > 0 || updated) && <p className="ux-row-meta">{facts.join(' · ')}{facts.length > 0 && updated ? ' · ' : ''}{updated && <time dateTime={view.run.updatedAt!}>{updated}</time>}</p>}
-      </div>
-      <div className="ux-row-actions">
-        <DashboardStatusBadge status={view.status}/>
-        <a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)}
-          aria-label={tr(view.current ? 'View current run: {0}' : 'Open record: {0}', label)}>{tr(view.current ? 'View current run' : 'Open')}</a>
-        {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change(view.run.runId)} changed={disposition => history.changed(view.run.runId, disposition)}/>}
-      </div>
-    </div>
+    <WorkflowRow icon={<ActionIcon action={runAction(view.run.flow)}/>}
+      name={<button type="button" className="ux-row-toggle" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}
+        aria-label={tr(expanded ? 'Hide details for {0}' : 'Show details for {0}', label)}>
+        <span title={label}>{label}</span><span aria-hidden="true" className="ux-row-chevron">{expanded ? '⌃' : '⌄'}</span>
+      </button>}
+      metadata={(facts.length > 0 || updated) && <>{facts.join(' · ')}{facts.length > 0 && updated ? ' · ' : ''}{updated && <time dateTime={view.run.updatedAt!}>{updated}</time>}</>}>
+      <DashboardStatusBadge status={view.status}/>
+      <a className="ux-button" href={runHref(view.run.runId)} onClick={openRunLink(openRun, view.run.runId)}
+        aria-label={tr(view.current ? 'View current run: {0}' : 'Open record: {0}', label)}>{tr(view.current ? 'View current run' : 'Open')}</a>
+      {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change(view.run.runId)} changed={disposition => history.changed(view.run.runId, disposition)}/>}
+    </WorkflowRow>
     <div id={detailsId} className="ux-record-details" hidden={!expanded}>
       <p className="dashboard-run-message">{tr(view.message)}</p>
       {attention && view.attention.length > 0 && <ul className="dashboard-run-attention">{view.attention.map(message => <li key={message}>{tr(message)}</li>)}</ul>}
@@ -125,9 +128,7 @@ export type Known = Readonly<Record<Exclude<WorkflowCategory, 'ALL'>, boolean>>;
  * run by the page's Refresh.
  */
 export type WorkflowLibrary = { readonly saved: readonly WorkflowEntry[]; readonly executed: readonly WorkflowEntry[]; readonly known: boolean;
-  readonly savedEmpty: ReactNode; readonly refreshRecords: RefObject<(() => void) | null>;
-  /** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the transaction hashes the loaded execution records carry (wallet activity deduplication). */
-  readonly reportTransactions?: (hashes: readonly string[]) => void };
+  readonly savedEmpty: ReactNode; readonly refreshRecords: RefObject<(() => void) | null> };
 export const WorkflowLibraryContext = createContext<WorkflowLibrary | null>(null);
 
 const CATEGORIES: readonly (readonly [WorkflowCategory, string])[] = [['ALL', 'All'], ['ATTENTION', 'Needs attention'], ['SAVED', 'Saved'], ['EXECUTED', 'Executed']];
@@ -165,9 +166,9 @@ export function WorkflowList({ attention, saved, executed, known, more = false, 
   </div>;
 }
 
-export function DashboardView({ account, connection, runs, hasMore, loading, build, create, openRun, verify, verifying, verificationIssue, refresh, history, loadMore, loadingMore, pageIssue,
+export function DashboardView({ account, restoring = false, connection, runs, hasMore, loading, build, create, openRun, verify, verifying, verificationIssue, refresh, history, loadMore, loadingMore, pageIssue,
   mode = 'dashboard', portfolio, positions, openRecords, openWorkflow, signInPrompt }: {
-  account: string | null; connection: DashboardConnection | null; runs: DashboardRunView[]; hasMore: boolean; loading: boolean;
+  account: string | null; restoring?: boolean; connection: DashboardConnection | null; runs: DashboardRunView[]; hasMore: boolean; loading: boolean;
   loadMore?: () => void; loadingMore?: boolean; pageIssue?: string | null;
   build(): void; openRun(runId: string): void; verify(): void; verifying: boolean; verificationIssue: string | null; refresh(): void;
   /** P0 approved UX (board 10): "Create workflow" opens the Chat entry where the shell provides it; otherwise `build`. */
@@ -185,9 +186,6 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
     library.refreshRecords.current = refresh;
     return () => { if (library.refreshRecords.current === refresh) library.refreshRecords.current = null; };
   });
-  // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the History's wallet activity learns which transactions these records already show.
-  const recordedHashes = runs.flatMap(view => view.run.attempts?.flatMap(attempt => attempt.transactionHash ? [attempt.transactionHash] : []) ?? []).join(',');
-  useEffect(() => { if (mode === 'records') library?.reportTransactions?.(recordedHashes ? recordedHashes.split(',') : []); }, [recordedHashes, mode, library?.reportTransactions]);
   const attention = runs.filter(needsAttention);
   const current = runs.filter(run => run.current);
   const executed = runs.filter(run => !needsAttention(run));
@@ -210,7 +208,7 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
     const actions = new Map(library?.executed.filter(entry => entry.workflowId && listed.has(entry.workflowId)).map(entry => [entry.workflowId!, entry.actions] as const) ?? []);
     const firstRun = new Map<string, string>();
     for (const view of runs) if (!firstRun.has(view.run.workflowId)) firstRun.set(view.run.workflowId, view.run.runId);
-    const card = (view: DashboardRunView, flagged = false) => ({ key: `run:${view.run.runId}`, node: <RunCard view={view} openRun={openRun} history={history} attention={flagged} openWorkflow={openWorkflow}
+    const card = (view: DashboardRunView, flagged = false) => ({ key: `run:${view.run.runId}`, node: <RunCard view={view} openRun={openRun} history={history} attention={flagged} inHistory openWorkflow={openWorkflow}
       libraryActions={firstRun.get(view.run.workflowId) === view.run.runId ? actions.get(view.run.workflowId) : undefined}/> });
     const unavailable = 'Executed workflows will appear here when their records are available.';
     const empty: Record<WorkflowCategory, ReactNode> = {
@@ -238,7 +236,10 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
   const executedKnown = connection === 'CONNECTED' && !loading;
   return <div className="dashboard-workspace ux-page ux-dashboard">
     <header className="ux-page-head"><div><h1>{tr("Dashboard")}</h1><p>{tr("Your wallet and what needs you.")}</p></div></header>
-    {!account ? <section className="ux-panel ux-empty dashboard-disconnected" role="status"><span className="ux-empty-icon"><DashboardIcon kind="wallet"/></span><h2>{tr("Connect your wallet to view your execution history.")}</h2><p>{tr("Use the wallet control in the FloFi header.")}</p><p className="dashboard-empty-note">{tr("Your wallet portfolio, execution status and workflow records will appear here.")}</p></section> : <>
+    {!account ? <section className="ux-panel ux-empty dashboard-disconnected" role="status"><span className="ux-empty-icon"><DashboardIcon kind="wallet"/></span>
+      <h2>{tr(restoring ? 'Restoring wallet…' : 'Connect your wallet to view your execution history.')}</h2>
+      {!restoring && <><p>{tr('Use the wallet control in the FloFi header.')}</p><p className="dashboard-empty-note">{tr('Your wallet portfolio, execution status and workflow records will appear here.')}</p></>}
+    </section> : <>
       <div className={`ux-dashboard-now${shownNeeds.length ? ' ux-dashboard-now-split' : ''}`}>
         {shownNeeds.length > 0 && <section className="ux-panel ux-panel-attention dashboard-attention-required" aria-labelledby="dashboard-needs-you">
           <div className="ux-panel-head"><div><h2 id="dashboard-needs-you">{tr("Needs you")}</h2><span className="ux-count" aria-label={tr(needsYou.length === 1 ? '{0} record needs you' : '{0} records need you', needsYou.length)}>{needsYou.length}</span></div></div>

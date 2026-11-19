@@ -66,6 +66,16 @@ describe('Robinhood Chain catalog swap: Simulate and Review', () => {
     expect(q).toMatchObject({ outputSymbol: 'PLTR', outputToken: pltr.address, fee: 3000, expectedOut: '50000000000000000' });
     expect(q.stocks?.[0]?.officialId).toBe(pltr.stock!.officialId);
   });
+  it('refuses a reverse quote when the issuer disallows selling or no pool can quote that direction', async () => {
+    const sell = catalogSwapWorkflow(tsla, usdg, '250000000000000000');
+    const unavailable = { ...catalog, assets: catalog.assets.map(asset => asset.symbol === 'TSLA'
+      ? { ...asset, stock: { ...asset.stock!, trading: { ...asset.stock!.trading, disposable: false } } } : asset) };
+    await expect(service({ catalogFor: async () => unavailable }).prepare(sell)).rejects.toThrow('STOCK_TOKEN_NOT_DISPOSABLE');
+    for (const pool of chain.state.pools.values()) Object.assign(pool, { rate: { ...pool.rate, [tsla.address!]: 0n } });
+    const s = service();
+    await expect(s.prepare(sell)).rejects.toThrow('POOL_UNUSABLE');
+    await expect(s.prepare(catalogSwapWorkflow(usdg, tsla, '100000000'))).resolves.toMatchObject({ quote: { expectedOut: '260000000000000000' } });
+  });
   it('binds a non-1.0 multiplier (AAPL) and shows it as shares per token', async () => {
     const aapl = asset(catalog, 'AAPL');
     chain.addPool(usdg.address!, aapl.address!, { fee: 500, liquidity: 10n ** 20n, rate: { [usdg.address!]: 4_000_000_000_000_000_000_000_000n, [aapl.address!]: 1n } });
@@ -145,6 +155,30 @@ describe('Robinhood Chain catalog swap: authoring identity', () => {
 describe('Robinhood Chain catalog swap: owner execution, recovery and reconciliation', () => {
   /** The owner's wallet in this test: the mock chain applies exactly the prepared transaction (never anything else). */
   const wallet = (tx: { from: string; to: string; data: string; value: string }) => chain.apply(tx);
+  it('uses the sell direction for the quote, wallet balance, allowance and prepared swap', async () => {
+    const amount = 250000000000000000n;
+    const s = service(), { quote } = await s.prepare(catalogSwapWorkflow(tsla, usdg, String(amount)));
+    expect(quote).toMatchObject({ inputToken: tsla.address, inputDecimals: 18, inputSymbol: 'TSLA', outputToken: usdg.address,
+      outputDecimals: 6, outputSymbol: 'USDG', amountIn: String(amount), expectedOut: '96000000', minimumOut: '95520000',
+      stocks: [expect.objectContaining({ side: 'input', officialId: tsla.stock!.officialId })] });
+    await s.review(quote.executionId, quote.manifestHash);
+    await expect(s.begin(quote.executionId, owner)).rejects.toThrow('INSUFFICIENT_INPUT');
+    chain.fund(tsla.address!, owner, amount);
+    chain.state.allowances.set(`${usdg.address}:${owner}:${UNI.router}`, 10n ** 24n);
+    const approval = await s.begin(quote.executionId, owner);
+    expect(approval.attempt.step).toBe('approval');
+    expect(approval.tx.to).toBe(tsla.address);
+    expect(approval.tx.data).toBe('0x095ea7b3' + UNI.router.slice(2).padStart(64, '0') + amount.toString(16).padStart(64, '0'));
+    await s.report(quote.executionId, approval.attempt.attemptId, { kind: 'HASH', txHash: wallet(approval.tx) });
+    expect((await s.observe(quote.executionId)).attempts.at(-1)?.state).toBe('CONFIRMED');
+    const fresh = await s.refresh(quote.executionId);
+    await s.review(quote.executionId, fresh.quote.manifestHash);
+    const swap = await s.begin(quote.executionId, owner);
+    expect(swap.attempt.step).toBe('swap');
+    expect(swap.tx.to).toBe(UNI.router);
+    expect(swap.tx.data).toMatch(new RegExp('^0x04e45aaf' + tsla.address!.slice(2).padStart(64, '0') + usdg.address!.slice(2).padStart(64, '0')));
+    expect(swap.attempt).toMatchObject({ state: 'PREPARED' });
+  });
   it('refuses begin without the deployment real-funds opt-in, before persisting any attempt', async () => {
     const s = service({ executionEnabled: false }), run = await s.prepare(catalogSwapWorkflow(usdg, tsla, '100000000'));
     s.review(run.quote.executionId, run.quote.manifestHash);

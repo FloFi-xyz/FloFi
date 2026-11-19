@@ -5,25 +5,19 @@
  * (decorative, hidden from assistive technology except its text). On phones the brand becomes a band above the task.
  * The theme defaults to dark here unless the person chose light; the choice is the same `flofi.theme` preference the app uses.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { AccountIcon } from './account-icons';
 import styles from './account.module.css';
 
-import { THEME_KEY } from '../../accounts/account-theme';
+import { darkTheme, readTheme, selectTheme, subscribeTheme } from '../../accounts/account-theme';
 
 function ThemeToggle() {
   const { t } = useLocale();
-  const [dark, setDark] = useState(true);
-  useEffect(() => { setDark(document.documentElement.dataset.theme !== 'light'); }, []);
-  function toggle() {
-    const next = dark ? 'light' : 'dark';
-    setDark(!dark);
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem(THEME_KEY, next); } catch { /* applies for this visit */ }
-  }
-  return <button type="button" role="switch" aria-checked={dark} aria-label={t('Dark theme')} className={styles.themeToggle} onClick={toggle}>
-    <span><AccountIcon name={dark ? 'moon' : 'sun'} size={14}/></span></button>;
+  const dark = useSyncExternalStore(subscribeTheme, readTheme, darkTheme) === 'dark';
+  return <button type="button" role="switch" aria-checked={dark} aria-label={t('Dark theme')} className={styles.themeToggle}
+    onClick={() => selectTheme(dark ? 'light' : 'dark')}>
+    <span><AccountIcon name="moon" size={14}/><AccountIcon name="sun" size={14}/></span></button>;
 }
 function LanguageSwitch() {
   const { t, language, setLanguage } = useLocale();

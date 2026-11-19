@@ -96,6 +96,13 @@
 .ux-page .ux-chip[aria-pressed="true"] .ux-chip-count{color:var(--accent)}
 .ux-page .ux-chip[data-tone="attention"] .ux-chip-count{color:var(--warning-text)}
 .ux-page .ux-workflow-rows{padding:4px 22px}
+.ux-page .ux-workflow-rows .ux-row{padding:10px 0}
+.ux-page .ux-workflow-rows :is(.ux-row-name,.ux-row-toggle){min-height:24px;display:flex;align-items:center}
+.ux-page .ux-workflow-rows :is(.ux-row-name>span,.ux-row-toggle>span:first-child){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Compact rows keep status + Open + ··· together when they fit; wrapping stays allowed so UX-01
+   (320 px at 125%) never clips a status tag or button past the row. */
+.ux-page .ux-workflow-rows .ux-row-actions>.ux-tag{flex:0 1 auto;min-width:0;overflow-wrap:anywhere}
+.ux-page .ux-workflow-rows .ux-row-actions>:is(.ux-button,.history-actions){flex:none}
 .ux-page .ux-list-empty{display:grid;gap:6px;padding:28px 22px;text-align:left}
 .ux-page .ux-list-empty h3{margin:0;font-size:16px;font-weight:600;color:var(--ink)}
 .ux-page .ux-list-empty p{margin:0;font-size:15px;line-height:1.5;color:var(--muted)}
@@ -182,6 +189,7 @@
   .ux-page .ux-panel-row,.ux-page .ux-workflow-rows{padding:4px 16px}
   .ux-page .ux-row{flex-wrap:wrap}
   .ux-page .ux-row-actions{flex-basis:100%;justify-content:flex-start;padding-left:54px}
+  .ux-page .ux-workflow-rows .ux-row-actions{justify-content:flex-end;padding-left:0;gap:8px}
   .ux-page .ux-record-details,.ux-page .ux-wallet-row .ux-inline-form{margin-left:0}
   .ux-page .ux-page-head-actions{width:100%}
   .ux-page .automation-choices{grid-template-columns:minmax(0,1fr)}
@@ -189,13 +197,10 @@
 @media(pointer:coarse){
   .ux-page :is(.ux-button,.ux-button-small,.ux-link,.ux-chip,.ux-row-toggle,.ux-menu-list>*,.ux-details>summary){min-height:44px}
   .ux-page :is(.ux-icon-button,.history-actions>button.workspace-action){min-width:44px;min-height:44px}
+  .ux-page .ux-workflow-rows :is(.ux-row-name,.ux-row-toggle){min-height:44px}
 }
 
-/* BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001 (History): All · Workflows · Received · Sent, and the wallet's on-chain movements in the existing
-   History language (panel, list rows, tags). Received amounts are green with a "+"; sent amounts carry a minus sign in the ink color. */
-.ux-page .history-views{margin:4px 0 16px}
-/* The workflow records keep the page's own spacing: their wrapper only exists to hide them behind Received and Sent. */
-.ux-page .history-workflows:not([hidden]){display:contents}
+/* Wallet activity: received amounts are green with a "+"; sent amounts carry a minus sign in the ink color. */
 .ux-page .wallet-activity{display:grid;gap:10px}
 .ux-page .wallet-activity .ux-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .ux-page .wallet-activity .ux-panel-head>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

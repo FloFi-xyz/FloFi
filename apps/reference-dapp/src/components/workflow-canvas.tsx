@@ -676,9 +676,14 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
       const earlier = composerActions(workflow).slice(0, index < 0 ? undefined : index);
       return opening ? earlier.filter(node => node.actionType === opening).map(node => lendingNodeAsset(node as SemanticWorkflow['nodes'][number])).filter((asset): asset is string => Boolean(asset)) : [];
     }
-    // BUILD-RH-002: the Stocks card edits the destination Stock Token of its Robinhood Chain swap (featured shortcut or search result).
-    const stocksData = (id: string, selection: CryptoSelection, editable = true) => ({ equity: selection.to ?? '',
-      onEquityChange: (symbol: string) => { if (editable && symbol !== selection.to) { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } } } });
+    const stocksData = (id: string, selection: CryptoSelection, editable = true): NonNullable<ComposerCardData['stocks']> => {
+      const side = selection.from === 'USDG' ? 'destination' : 'source';
+      const equity = (side === 'source' ? selection.from : selection.to) ?? '';
+      return { equity, side, ...(editable ? { onEquityChange: (symbol: string) => {
+        if (symbol === equity) return;
+        try { editCryptoSelection(id, selectCryptoToken(selection, side, symbol)); } catch { /* not in the current catalog */ }
+      } } : {}) };
+    };
     const selectedSummary = (summary: ReturnType<typeof composerSummary>, selection?: CryptoSelection | null) => !selection ? summary : {
       ...summary, chain: selection.network, provider: cryptoProfile(selection)!.provider,
       amount: `${summary.amount.split(' ')[0]} ${selection.from}`, detail: selection.action === 'swap' ? `${selection.from} → ${selection.to}` : summary.detail,
@@ -844,6 +849,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
         ...(['supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(node.actionType) && reviewedAmountEdit(node) ? { formId: supplyReviewFormId(node.nodeId) } : {}),
         value: amountInputs[node.nodeId] ?? composerSummary(workflow, node, context).amount.split(' ')[0]!,
         changed: amountInputs[node.nodeId] !== undefined,
+        ...(composerSummary(workflow, node, context).action === 'Stocks' && cryptoSelections[node.nodeId] ? { autoApply: false } : {}),
         canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && (!routerDetails(node) || bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true).valid) && pending?.valid && pending.authoringId === node.nodeId && pending.authoringAmount === actionReviewValue(null, node.nodeId, amountInputs[node.nodeId], bridgeNetworkInputs[node.nodeId], cryptoSelections[node.nodeId], recipientInputs[node.nodeId]) && pending.command.baseRevision === workflow.revision),
         onChange: (value: string) => editCanvasAmount(node.nodeId, value),
         onReview: () => reviewCanvasAmount(node.nodeId), onCancel: () => cancelCanvasAmount(node.nodeId),

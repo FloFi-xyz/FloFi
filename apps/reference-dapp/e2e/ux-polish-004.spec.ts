@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD UX POLISH 004 — navigation, direct access to the Editor and Canvas usability. UX only: nothing here simulates, quotes, signs or sends,
- * no wallet is asked for anything, and the network guard refuses every request outside the loopback app.
+ * BUILD UX POLISH 004 — navigation, direct access to the Editor and Canvas usability. Nothing simulates, quotes, signs or sends.
+ * The restoration regression uses only passive reads from an injected wallet double. The network guard allows only the loopback app.
  * - UX-01: above 800 px navigation is a persistent rail, collapsed (icons) by default; the chevron beside the logo shows the names and groups and
  *   hides them again; collapsed items name themselves in a tooltip; Log out, Terms and Privacy stay reachable; the workspace takes the freed width;
  *   the Canvas and its workflow are untouched. At 800 px and below the ☰ drawer is unchanged.
- * - UX-02: the FloFi logo opens the Dashboard (a client navigation; the session, wallet and Canvas stay).
+ * - UX-02: the FloFi logo opens Operate; the session, wallet and Canvas stay during client navigation.
  * - UX-03: "Prefer the editor? Build it manually" under the suggestions opens the Editor in one click, creating nothing; requests still work.
  * - UXA-02: a mouse wheel over the Canvas zooms around the cursor (the same viewport transform as + / −), a trackpad still pans, drags pan without
  *   moving cards, card drags move only the card, and neither the page nor the chat scrolls because of the Canvas (nor the Canvas because of them).
  */
 import type { Locator, Page } from '@playwright/test';
 import { test, expect, sendChatCommand } from './fixtures';
-import { chooseLanguage } from './app-origin';
-import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openNavigation, openProductSection, railToggle } from './build-entry-navigation';
+import { chooseLanguage, E2E_APP_ORIGIN } from './app-origin';
+import { WALLET_HINT_COOKIE } from '../src/wallet/wallet-hint';
+import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openEditorSection, openNavigation, openProductSection, railToggle } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => {
   // Cards may ask for a display estimate; none is needed here (and none may reach a provider).
@@ -443,6 +444,142 @@ test.describe('UX-02 the logo opens Operate', () => {
     await expect(page.getByRole('navigation', { name: 'Áreas do produto', exact: true })).toHaveCount(0);
     networkGuard.assertClean();
   });
+});
+
+test('direct Dashboard and history visits open Chat without an Editor frame, and Back preserves a chosen Editor', async ({ page, networkGuard }, testInfo) => {
+  const areas = page.getByRole('navigation', { name: 'Product areas', exact: true });
+  const area = (name: string) => areas.getByRole('link', { name, exact: true });
+  for (const [path, label] of [['/app/dashboard', 'Dashboard'], ['/app/workflows', 'Your workflows workspace']] as const) {
+    await page.goto(path);
+    await expect(page.locator('.app-shell')).not.toHaveAttribute('inert');
+    await expect(main(page)).toHaveAccessibleName(label);
+    await page.evaluate(() => {
+      const frames: string[] = [];
+      Object.defineProperty(window, '__navigationFrames', { value: frames });
+      const record = () => {
+        const workspace = document.querySelector('main#workspace');
+        const frame = `${location.pathname} | ${workspace?.getAttribute('aria-label') ?? '(empty)'}`;
+        if (frames.at(-1) !== frame) frames.push(frame);
+        requestAnimationFrame(record);
+      };
+      record();
+    });
+    await area('Operate').click();
+    await expect(page).toHaveURL('/app');
+    await expect.soft(main(page)).toHaveAccessibleName('Chat');
+    await page.goBack();
+    await expect(page).toHaveURL(path);
+    await expect(main(page)).toHaveAccessibleName(label);
+    await page.goForward();
+    await expect(page).toHaveURL('/app');
+    await expect.soft(main(page)).toHaveAccessibleName('Chat');
+    const frames = await page.evaluate(() => new Promise<string[]>(resolve => requestAnimationFrame(() =>
+      resolve((window as unknown as { __navigationFrames: string[] }).__navigationFrames))));
+    await testInfo.attach(`navigation-frames-${path.split('/').at(-1)}.json`, { body: JSON.stringify(frames, null, 2), contentType: 'application/json' });
+    expect(frames).toContain('/app | Chat');
+    expect(frames).toContain(`${path} | ${label}`);
+    expect([...new Set(frames)].sort()).toEqual([`/app | Chat`, `${path} | ${label}`].sort());
+  }
+
+  await openEditorSection(page, 'Build');
+  await expectEditorSection(page, 'Build');
+  await addSwapCard(page);
+  const before = await cardPositions(page);
+  await area('Dashboard').click();
+  await expect(page).toHaveURL('/app/dashboard');
+  await page.goBack();
+  await expect(page).toHaveURL('/app');
+  await expectEditorSection(page, 'Build');
+  expect(await cardPositions(page)).toEqual(before);
+  networkGuard.assertClean();
+});
+
+test('remembered wallet restoration does not show disconnected history before the provider answers', async ({ context, page, networkGuard }, testInfo) => {
+  const account = '0x1111111111111111111111111111111111111111';
+  const historyReads: (string | undefined)[] = [];
+  await page.route(url => url.pathname === '/api/dashboard/history', async route => {
+    historyReads.push(route.request().headers()['x-flofi-account']);
+    await route.fulfill({ json: { ok: true, value: { connection: 'NOT_FOUND', account, detail: null } } });
+  });
+  await context.addCookies([{ name: WALLET_HINT_COOKIE, value: 'evm', url: E2E_APP_ORIGIN }]);
+  await page.addInitScript(() => {
+    const calls: string[] = [], frames: string[] = [];
+    let settle!: (accounts: string[]) => void;
+    const pending = new Promise<string[]>(resolve => { settle = resolve; });
+    Object.defineProperties(window, {
+      __walletRestore: { value: { calls, frames, settle } },
+      ethereum: { configurable: true, value: { isMetaMask: true, async request({ method }: { method: string }) {
+        calls.push(method);
+        if (method === 'eth_accounts') return pending;
+        if (method === 'eth_chainId') return '0x2105';
+        throw new Error(`Passive wallet refused ${method}`);
+      } } },
+    });
+    const record = () => {
+      const workspace = document.querySelector('main#workspace');
+      if (workspace) {
+        const frame = (workspace as HTMLElement).innerText;
+        if (frames.at(-1) !== frame) frames.push(frame);
+      }
+      requestAnimationFrame(record);
+    };
+    requestAnimationFrame(record);
+  });
+
+  const routes = [
+    ['/app/dashboard', 'Connect your wallet to view your execution history.'],
+    ['/app/dashboard/runs/wallet-restoration-record', 'Connect the wallet used for this execution'],
+    ['/app/workflows', 'Connect a wallet from the header to see your workflows.'],
+    ['/app/credentials', 'Add a wallet to save its public address here. FloFi never holds your keys.'],
+  ] as const;
+  for (const [path, disconnected] of routes) {
+    const response = await page.goto(path, { waitUntil: 'domcontentloaded' });
+    expect(response?.ok()).toBe(true);
+    const disconnectedInDocument = (await response!.text()).includes(disconnected);
+    await expect(main(page)).toBeVisible();
+    await expect(page.locator('.header-wallet')).toContainText('Restoring wallet…');
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __walletRestore: { calls: string[] } }).__walletRestore.calls)).toContain('eth_accounts');
+    const restored = path.includes('/runs/');
+    const evidence = await page.evaluate(accounts => new Promise<{ frames: string[]; calls: string[] }>(resolve => requestAnimationFrame(() => {
+      const probe = (window as unknown as { __walletRestore: { frames: string[]; calls: string[]; settle(accounts: string[]): void } }).__walletRestore;
+      const frames = [...probe.frames], calls = [...probe.calls];
+      probe.settle(accounts);
+      resolve({ frames, calls });
+    })), restored ? [account] : []);
+    await testInfo.attach(`wallet-restore-${path.split('/').at(-1)}.json`, { body: JSON.stringify({ disconnectedInDocument, ...evidence }, null, 2), contentType: 'application/json' });
+    expect(disconnectedInDocument).toBe(false);
+    expect(evidence.frames.length).toBeGreaterThan(0);
+    expect(evidence.frames.every(frame => !frame.includes(disconnected))).toBe(true);
+    expect(evidence.calls.every(method => method === 'eth_accounts' || method === 'eth_chainId')).toBe(true);
+    if (restored) {
+      await expect(page.locator('.header-wallet')).toContainText('0x1111…1111');
+      await expect(main(page).getByRole('heading', { name: 'Run not found', exact: true })).toBeVisible();
+    } else {
+      await expect(main(page)).toContainText(disconnected);
+    }
+  }
+  expect(historyReads).toEqual([account]);
+  networkGuard.assertClean();
+});
+
+test('a run detail opened from Workflows never shows a Dashboard back action', async ({ page, networkGuard }, testInfo) => {
+  let release!: () => void;
+  const hydration = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/_next/static/**', async route => {
+    if (route.request().resourceType() === 'script') await hydration;
+    await route.continue();
+  });
+  try {
+    await page.goto('/app/dashboard/runs/history-origin#from-workflows', { waitUntil: 'commit' });
+    await expect(main(page)).toBeVisible();
+    await expect(page.locator('.dashboard-back')).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath('run-origin-before-hydration.png') });
+  } finally { release(); }
+  await expect(page.getByRole('button', { name: 'Back to Your workflows' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Back to Dashboard' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to Your workflows' }).click();
+  await expect(page).toHaveURL('/app/workflows');
+  networkGuard.assertClean();
 });
 
 test.describe('UX-03 direct access to the manual Editor', () => {
