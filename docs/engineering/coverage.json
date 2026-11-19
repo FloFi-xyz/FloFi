@@ -1741,6 +1741,14 @@
     "app.domain.liquidity-position-presentation": {
       "path": "apps/reference-dapp/src/domain/liquidity-position-presentation.test.ts",
       "stage": "unit"
+    },
+    "app.server.base-position-harness": {
+      "path": "apps/reference-dapp/src/server/base-position-harness.test.ts",
+      "stage": "unit"
+    },
+    "app.e2e.liquidity-position-management": {
+      "path": "apps/reference-dapp/e2e/liquidity-position-management.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -1903,7 +1911,8 @@
     "app.state.uniswap-position-store",
     "app.wallet.uniswap-position-eip1193",
     "app.components.app-shell-position-simulation",
-    "app.domain.liquidity-position-presentation"
+    "app.domain.liquidity-position-presentation",
+    "app.server.base-position-harness"
   ],
   "modules": [
     {
@@ -2832,7 +2841,9 @@
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
         "app.e2e.uniswap-liquidity-continuation",
-        "app.state.uniswap-liquidity-store"
+        "app.state.uniswap-liquidity-store",
+        "app.server.base-position-harness",
+        "app.e2e.liquidity-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -3891,7 +3902,8 @@
         "app.server.wallet-activity",
         "app.components.wallet-activity",
         "app.components.defi-positions",
-        "app.components.app-shell-position-simulation"
+        "app.components.app-shell-position-simulation",
+        "app.e2e.liquidity-position-management"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -7238,7 +7250,9 @@
         "app.server.liquidity-lifecycle-telemetry",
         "app.backend.uniswap-position-flow",
         "app.server.uniswap-position-networks",
-        "app.backend.uniswap-position-purge.pg"
+        "app.backend.uniswap-position-purge.pg",
+        "app.server.base-position-harness",
+        "app.e2e.liquidity-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7321,7 +7335,9 @@
         "app.server.wallet-portfolio",
         "app.server.solana-token-amount",
         "app.server.wallet-activity",
-        "app.server.defi-positions"
+        "app.server.defi-positions",
+        "app.server.base-position-harness",
+        "app.e2e.liquidity-position-management"
       ],
       "gaps": [
         "Catalog/discovery and offline provider responses do not certify provider uptime or real execution.",
@@ -7867,7 +7883,8 @@
         "app.e2e.uniswap-liquidity-continuation",
         "app.state.uniswap-liquidity-store",
         "app.state.uniswap-position-store",
-        "app.components.app-shell-position-simulation"
+        "app.components.app-shell-position-simulation",
+        "app.e2e.liquidity-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
