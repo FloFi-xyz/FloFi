@@ -62,5 +62,6 @@ export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
   'This workflow has no supported simulation route on the selected public mainnets.': 'Esta operação não tem uma rota de simulação compatível nas redes principais selecionadas.',
   'Connect the wallet required for this workflow before simulating.': 'Conecte a carteira necessária para esta operação antes de simular.',
   'The simulation provider is temporarily unavailable. Try checking again shortly.': 'O serviço de simulação está temporariamente indisponível. Tente verificar novamente em instantes.',
+  'Checking whether simulation is available on this network…': 'Verificando se a simulação está disponível nesta rede…',
   'The previous quote expired. Simulate again to check a fresh quote before Review.': 'A cotação anterior expirou. Simule novamente para conferir uma nova cotação antes de autorizar.',
 };

@@ -34,7 +34,9 @@ const definitions = [
     'chat-message-wrapping.spec.ts',
     // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): 25% · 50% · 75% · Max under FloFi's amount question (real component, fixture balances).
     'amount-shortcuts.spec.ts'], {}],
-  ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts', 'chat-review-overflow.spec.ts'], {}],
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the Simulate panel's disclosure across its layouts (regression of the main 0ea35d5 post-merge red).
+  ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts', 'chat-review-overflow.spec.ts',
+    'simulate-panel-disclosure.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],

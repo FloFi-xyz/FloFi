@@ -699,6 +699,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const unavailableReason = simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
+    availabilityChecking: 'availabilityKnown' in simulationSource.state && simulationSource.state.availabilityKnown === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null;
   const simulationReason = sequenceIssue ?? unavailableReason;
   /** The same reason in a given language (the chat's messages follow the interface language; `unavailableReason` is a catalog key). */

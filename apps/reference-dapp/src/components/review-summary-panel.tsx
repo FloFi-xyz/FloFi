@@ -62,7 +62,12 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const busy = Boolean(source.state.busy);
   const expired = !busy && review.status === 'expired';
   const blocked = !busy && sim.status === 'blocked';
-  const technical = props.technical ? <details className="review-panel-technical"><summary>{t(blocked ? 'Technical details, for support' : 'Technical details')}</summary>
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (post-merge red on main 0ea35d5): the owner's open/closed choice belongs to the panel, not to whichever
+  // layout is on screen. The panel switches between its blocker, waiting, result and expired layouts as the simulation changes; an uncontrolled
+  // <details> was re-created closed on every switch, hiding what the owner had just opened.
+  const [technicalOpen, setTechnicalOpen] = useState(false);
+  const technical = props.technical ? <details className="review-panel-technical" open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)}>
+    <summary>{t(blocked ? 'Technical details, for support' : 'Technical details')}</summary>
     {blocked && source.state.error && <p className="review-panel-code"><code>{source.state.error}</code></p>}{props.technical}</details> : null;
   const action = props.action ? <div className="simulation-panel-action">{props.action}</div> : null;
   if (blocked && !expired) return <BlockerPanel message={props.unavailableReason ?? status.message} title={status.label} error={source.state.error ?? null}
