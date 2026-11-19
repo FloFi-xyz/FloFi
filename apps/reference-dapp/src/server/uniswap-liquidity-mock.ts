@@ -21,3 +21,12 @@ export const UNI_MOCK_CODE_PINS = Object.freeze({ factory: sha(UNI_MOCK_CODE[pro
 export const UNI_MOCK_RPC_URL = 'http://127.0.0.1:8556/rpc';
 /** SHA-256 of synthetic runtime code (MOCKED harness pins only). */
 export const uniMockCodePin = sha;
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (catalog-network browser harness): synthetic code of the catalog networks' pinned base assets, the same
+ * whichever side of a pool the asset is on, so ONE set of catalog pins serves the in-process MOCKED harness runtime of every catalog pool
+ * (`e2e/uniswap-liquidity-harness.ts` serves it with `catalogTokenCode`). Accepted only with MOCKED provenance, like every pin here.
+ */
+export const UNI_MOCK_CATALOG_TOKEN_CODE = Object.freeze({ usdc: '0x600a600a', weth: '0x600b600b', usdg: '0x600c600c' });
+export const UNI_MOCK_CATALOG_PINS: Readonly<Record<'usdc' | 'weth' | 'usdg' | 'stockTokenProxy', string>> = Object.freeze({
+  usdc: sha(UNI_MOCK_CATALOG_TOKEN_CODE.usdc), weth: sha(UNI_MOCK_CATALOG_TOKEN_CODE.weth), usdg: sha(UNI_MOCK_CATALOG_TOKEN_CODE.usdg),
+  stockTokenProxy: sha(UNI_MOCK_STOCK_PROXY_CODE) });

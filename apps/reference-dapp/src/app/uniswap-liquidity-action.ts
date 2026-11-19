@@ -8,7 +8,7 @@ import { createFileExecutionStorage } from '@defi-workflow-engine/reference-exec
 import { createUniswapLiquidityService, type UniswapLiquidityService, type UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
 import type { UniswapPositionRequest } from '../server/uniswap-position-service';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, ethereumSepoliaSwapRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../server/public-testnet-rpc';
-import { UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
+import { UNI_MOCK_CATALOG_PINS, UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
   type CatalogNetworkRuntime } from '../server/catalog-networks';
@@ -62,10 +62,15 @@ function catalogService(network: CatalogNetworkRuntime): UniswapLiquidityService
   if (!journalDir || !isAbsolute(journalDir)) throw new Error('UNISWAP_LIQUIDITY_STORAGE_NOT_CONFIGURED');
   let service = catalogServices.get(network.id);
   if (!service) {
-    service = createUniswapLiquidityService({ storage: createFileExecutionStorage(join(journalDir, 'liquidity'), 'UNISWAP_LIQUIDITY_BUSY'),
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the loopback MOCKED harness (`e2e/base-mainnet-serve.ts`) serves synthetic contract code, so its runs
+    // check the synthetic pins and follow the harness clock, exactly like the Base Sepolia harness above. `live` always uses the verified pins and
+    // the wall clock (the service refuses synthetic pins unless provenance is MOCKED).
+    const harness = mode === 'harness', liquidityDir = join(journalDir, 'liquidity');
+    service = createUniswapLiquidityService({ storage: createFileExecutionStorage(liquidityDir, 'UNISWAP_LIQUIDITY_BUSY'),
       rpc: async () => { throw new Error('UNISWAP_NETWORK_UNAVAILABLE'); }, rpcs: { [network.chain]: network.rpc(mode, process.env, network.liquidityRpcMethods) },
-      provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: network.ownerExecutionEnabled(mode, process.env),
-      catalog: { chain: network.chain, catalogFor: network.catalogFor(mode) } });
+      provenance: harness ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: network.ownerExecutionEnabled(mode, process.env),
+      catalog: { chain: network.chain, catalogFor: network.catalogFor(mode), ...harness ? { codePins: UNI_MOCK_CATALOG_PINS } : {} },
+      ...harness ? { mockedCodePins: UNI_MOCK_CODE_PINS, now: harnessClock(liquidityDir) } : {} });
     catalogServices.set(network.id, service);
   }
   return service;

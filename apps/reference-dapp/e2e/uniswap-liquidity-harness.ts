@@ -10,7 +10,7 @@
 import { ARBITRUM_ONE, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { markConcentratedLiquidityManagement, readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement,
   type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { uniMockCode, uniMockCodePin, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
+import { uniMockCode, uniMockCodePin, UNI_MOCK_CATALOG_PINS, UNI_MOCK_CATALOG_TOKEN_CODE, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, UNISWAP_POSITION_SELECTORS as PSEL, UNISWAP_POSITION_TOPICS as PTOPIC, decodeUniswapApprove,
   decodeUniswapBurn, decodeUniswapCollect, decodeUniswapDecreaseLiquidity, decodeUniswapMint, decodeUniswapMulticall, sqrtRatioAtTick, uniswapAmountsForLiquidity,
   uniswapComposition } from '@defi-workflow-engine/reference-compiler';
@@ -65,13 +65,22 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
   /** The owner's EOA is already EIP-7702-delegated to the MetaMask delegator (code `0xef0100‖impl`). */ delegatedOwner?: boolean;
   /** BUILD-ETHEREUM-001: the liquidity profile the chain stands in for (Base Sepolia by default). */ profile?: UniswapPoolProfile;
   /** BUILD-RH-002: Stock Token sides of a Robinhood Chain pool, keyed by address. */
-  stocks?: Readonly<Record<string, { uid: string; multiplierWad: bigint; scheduledWad?: bigint; effectiveAt?: number }>> } = {}) {
+  stocks?: Readonly<Record<string, { uid: string; multiplierWad: bigint; scheduledWad?: bigint; effectiveAt?: number }>>;
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the catalog's pinned base assets (USDC, WETH, USDG) carry the side-independent synthetic code
+   * `UNI_MOCK_CATALOG_TOKEN_CODE`, so `catalogPins` equals `UNI_MOCK_CATALOG_PINS`, the pins the in-process MOCKED harness runtime uses for any pool.
+   */
+  catalogTokenCode?: boolean } = {}) {
   const profile: UniswapPoolProfile = options.profile ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY;
   const t0 = profile.token0.address, t1 = profile.token1.address, NPM = profile.positionManager, POOL = profile.pool;
   const stocks = new Map(Object.entries(options.stocks ?? {}).map(([address, stock]) => [address, { ...stock }]));
-  const CODE: Readonly<Record<string, string>> = { ...uniMockCode(profile), ...Object.fromEntries([...stocks.keys()].map(address => [address, UNI_MOCK_STOCK_PROXY_CODE])) };
+  const pinnedAssets: readonly (readonly [string, keyof typeof UNI_MOCK_CATALOG_TOKEN_CODE])[] = [[UNISWAP_V3_ROBINHOOD.usdg, 'usdg'], [UNISWAP_V3_ROBINHOOD.weth, 'weth'],
+    [UNISWAP_V3_BASE.usdc, 'usdc'], [UNISWAP_V3_BASE.weth, 'weth'], [UNISWAP_V3_ETHEREUM.usdc, 'usdc'], [UNISWAP_V3_ETHEREUM.weth, 'weth'],
+    [UNISWAP_V3_ARBITRUM.usdc, 'usdc'], [UNISWAP_V3_ARBITRUM.weth, 'weth']];
+  const CODE: Readonly<Record<string, string>> = { ...uniMockCode(profile), ...Object.fromEntries([...stocks.keys()].map(address => [address, UNI_MOCK_STOCK_PROXY_CODE])),
+    ...options.catalogTokenCode ? Object.fromEntries(pinnedAssets.filter(([address]) => [t0, t1].includes(address)).map(([address, key]) => [address, UNI_MOCK_CATALOG_TOKEN_CODE[key]])) : {} };
   /** Synthetic pins of the catalog's base assets and Stock Token proxy, as a MOCKED Robinhood Chain service accepts them. */
-  const catalogPins = { stockTokenProxy: uniMockCodePin(UNI_MOCK_STOCK_PROXY_CODE),
+  const catalogPins = options.catalogTokenCode ? { ...UNI_MOCK_CATALOG_PINS } : { stockTokenProxy: uniMockCodePin(UNI_MOCK_STOCK_PROXY_CODE),
     ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.usdg) ? { usdg: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.usdg]!) } : {},
     ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.weth]!) } : {},
     // BUILD-BASE-001: Base's pinned USDC and WETH (listed Base tokens carry no pin: code presence and decimals() only).
@@ -238,6 +247,13 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     if ((to === t0 || to === t1) && sel === SEL.balanceOf) return '0x' + w(s.balances[to]![arg(0)] ?? 0n);
     if ((to === t0 || to === t1) && sel === SEL.allowance) return '0x' + w(s.allowances[allowanceKey(to, arg(0), arg(1))] ?? 0n);
     if (to === NPM && sel === SEL.balanceOf) return '0x' + w(BigInt(Object.values(s.owners).filter(o => o === arg(0)).length));
+    // ERC721Enumerable tokenOfOwnerByIndex(address,uint256) (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 discovery): the owner's ids in mint order.
+    if (to === NPM && sel === '0x2f745c59') {
+      const owned = Object.entries(s.owners).filter(([, o]) => o === arg(0)).map(([id]) => BigInt(id)).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+      const index = BigInt('0x' + data.slice(74, 138));
+      if (index >= BigInt(owned.length)) throw new Error('MOCK_REVERT');
+      return '0x' + w(owned[Number(index)]!);
+    }
     if (to === NPM && sel === SEL.ownerOf) { const id = BigInt('0x' + data.slice(10)).toString(); if (!s.owners[id]) throw new Error('MOCK_REVERT'); return '0x' + aw(s.owners[id]!); }
     if (to === NPM && sel === SEL.positions) {
       const p = s.positions[BigInt('0x' + data.slice(10)).toString()];
