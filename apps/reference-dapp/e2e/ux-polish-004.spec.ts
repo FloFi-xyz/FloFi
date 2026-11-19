@@ -11,7 +11,7 @@
  *   moving cards, card drags move only the card, and neither the page nor the chat scrolls because of the Canvas (nor the Canvas because of them).
  */
 import type { Locator, Page } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { test, expect, sendChatCommand } from './fixtures';
 import { chooseLanguage } from './app-origin';
 import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openNavigation, openProductSection, railToggle } from './build-entry-navigation';
 
@@ -130,11 +130,15 @@ test.describe('UX-01 collapsible navigation rail', () => {
   // every item and Log out in view and the current one marked. From 1360 px the expanded rail moves the workspace aside; below, it floats over
   // it (the workspace keeps the width it was designed for, giving up only the collapsed 64 px).
   for (const theme of ['light', 'dark'] as const) {
-    test(`${theme} desktop rail keeps Build, Simulate, Execute and the Dashboard usable at 1024, 1280 and 1440 px`, async ({ page, networkGuard }) => {
+    test(`${theme} desktop rail keeps Build, Simulate and the Dashboard usable (Execute closed until simulated) at 1024, 1280 and 1440 px`, async ({ page, networkGuard }) => {
       test.setTimeout(240_000);
       await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-      // An empty workflow: every section opens (an unconfigured card would rightly keep Simulate and Execute closed).
+      // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): a stage opens only once it is eligible. A configured swap opens
+      // Simulate; nothing can be simulated in this profile, so Execute stays closed, saying why (its chrome is Simulate's: header, rail, footer).
       await openBuilder(page);
+      await sendChatCommand(page, 'Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
+      await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+      await expect(editorStep(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       for (const width of [1024, 1280, 1440]) {
         await page.setViewportSize({ width, height: 900 });
@@ -142,7 +146,7 @@ test.describe('UX-01 collapsible navigation rail', () => {
           if ((await rail(page).getAttribute('data-expanded')) !== String(expanded)) await railToggle(page).click();
           await expect(rail(page)).toHaveAttribute('data-expanded', String(expanded));
           // Every section with the default (collapsed) rail; the Editor's Canvas and the Dashboard with the names shown.
-          for (const section of expanded ? ['Build', 'Dashboard'] as const : ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
+          for (const section of expanded ? ['Build', 'Dashboard'] as const : ['Build', 'Simulate', 'Dashboard'] as const) {
             const label = `${theme} ${width}px ${expanded ? 'expanded' : 'collapsed'} ${section}`;
             await openProductSection(page, section);
             await expectProductSection(page, section);
@@ -319,7 +323,8 @@ test.describe('UX-01 collapsible navigation rail', () => {
     await expect(tooltip).toHaveCount(0);
     // Tab leaves the rail (no trap): after Privacy comes the logo, then the workspace's own controls.
     for (let step = 0; step < 12 && await page.evaluate(() => Boolean(document.activeElement?.closest('.navigation-layer'))); step++) await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'FloFi — ir para o Painel', exact: true })).toBeFocused();
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (A2): the logo opens Operate.
+    await expect(page.getByRole('link', { name: 'FloFi — ir para Operar', exact: true })).toBeFocused();
     await expect(tooltip).toHaveCount(0);
     // Enter on the chevron expands (names visible, no tooltip).
     await railToggle(page).focus(); await page.keyboard.press('Enter');
