@@ -187,9 +187,14 @@ export function lexiconAssets(text: string, lexicon: readonly LexiconEntry[]): {
   return lexiconMatches(text, lexicon).flatMap(({ entry }) => { const asset = targetAsset(entry.target); return asset && statedSource(entry.source) ? [{ asset, entry }] : []; });
 }
 export const lexiconNamedNetworkIds = (text: string, lexicon: readonly LexiconEntry[]): CopilotNetworkId[] => unique(lexiconNetworks(text, lexicon).map(item => item.network));
+/** Words about the user's liquidity positions ("liquidez", "pool", "posição", "liquidity", "position"). */
+export const LIQUIDITY_WORDS = /(?<![\p{L}])(?:liquidity|liquidez|pools?|lp|posi[cç](?:[aã]o|[oõ]es)|positions?)(?![\p{L}])/iu;
 /** The entries a model request may show as glossary data: matched in the open request, the user's own first, bounded. */
 export function glossaryEntries(text: string, lexicon: readonly LexiconEntry[], limit: number = LEXICON_LIMITS.maxGlossary): LexiconEntry[] {
-  const matched = unique(lexiconMatches(text, lexicon).map(match => match.entry));
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: "sacar/retirar" means an Aave Withdraw only when the request is not about the user's liquidity ("retirar
+  // liquidez", "sacar da pool" remove liquidity from a position): such a request never carries an Aave Withdraw reading to the model.
+  const position = LIQUIDITY_WORDS.test(text) && !/(?<![\p{L}])aave(?![\p{L}])/iu.test(text);
+  const matched = unique(lexiconMatches(text, lexicon).map(match => match.entry)).filter(entry => !(position && entry.target === 'operation:WITHDRAW'));
   return matched.sort((a, b) => PRECEDENCE[a.source] - PRECEDENCE[b.source]).slice(0, Math.max(0, Math.min(limit, LEXICON_LIMITS.maxGlossary)));
 }
 

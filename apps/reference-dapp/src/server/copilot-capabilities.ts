@@ -11,6 +11,7 @@ import { AUTHORING_CAPABILITIES, bridgeOffers, universalNames, catalogCapability
 import { declaredNetworkSymbols } from '../domain/asset-catalogs';
 import { COPILOT_NETWORK_IDS, networkIdentity, networkOfCopilot, type NetworkIdentity } from '../domain/network-registry';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
+import { positionNetworksText } from '../domain/copilot-positions';
 import { supportedAssets } from '../engine/capability-catalog';
 import type { NetworkId, StrategyAction } from '../engine/strategy-spec';
 import type { NetworkScope } from '../domain/network-scope';
@@ -78,6 +79,9 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
     `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3 (asset = one listed reserve of that network's market, by its symbol): ${[...lending].map(([network, assets]) => `${network.name}: ${assets.join(', ')}`).join('; ')}; nothing else. ` +
       `Native ETH is not a reserve (WETH is). Availability (frozen, paused, caps, liquidity, collateral, health factor) is checked on chain at Simulate. ${lendingAmountScopeText('EN')}`,
     `- LIQUIDITY: ${[...pools, catalogPools].join('; ')}.`,
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing the owner's existing positions, from the runtime registries (catalog Uniswap v3 deployments, the Orca pool).
+    `- POSITION (the user's existing liquidity positions, read and selected by FloFi from the connected wallets): list or inspect them, collect fees and owed tokens, ` +
+      `remove part of the liquidity, exit (remove all) or close: ${positionNetworksText('EN')}. Each operation is only prepared for the owner's Review and wallet signature.`,
     '- AUTOMATION: SCHEDULED_DCA, PRICE_TRIGGER (USD below/above), DAILY_WATCH using the existing owner-confirmed Automation domain.',
     '- COMPOSITION: ordered sequences of the registered actions, including swaps, bridges, lending, transfers and liquidity. Each step uses its own verified runtime and fresh review; an earlier delivered token can fund a later step.',
     ...composition.length ? [`- Atomic engineering composition: ${join(composition, 'or')}.`] : [],

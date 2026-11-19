@@ -12,6 +12,7 @@ import { COPILOT_EVAL_CASES, type Category, type EvalCase, type Expect, type Tur
 import { CopilotSession, type TurnRecord } from './copilot-session.test-harness';
 import { TEST_WALLET } from './copilot-test-fixtures';
 import { CONCEPT_IDS, conceptNumbers } from './intelligence/concepts';
+import { positionFactNumbers } from './copilot-positions';
 import { AUTOMATION_FAQ } from '../automations/explain';
 
 /**
@@ -75,7 +76,10 @@ function checkInvariants(c: EvalCase, turn: Turn, record: TurnRecord, session: C
       .concat(['50', '100'], bounds.map(value => canonicalDecimal(value))));
     const sentence = reply.sentence ?? '';
     const ungrounded = numberTokens(sentence).filter(token => !allowedNumbers.has(canonicalDecimal(token)));
-    const allowedAddresses = new Set([...[...userTexts, ...(c.setup ?? [])].flatMap(text => [...addressesOf(text)]), TEST_WALLET.toLowerCase()]);
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation names the verified position's own pool, manager, tokens and owner — facts FloFi read
+    // itself (`session.verified`), never an address a model wrote.
+    const allowedAddresses = new Set([...[...userTexts, ...(c.setup ?? []), JSON.stringify(session.verified?.liquidity ?? null)].flatMap(text => [...addressesOf(text)]),
+      TEST_WALLET.toLowerCase()]);
     const strangers = [...addressesOf(serialized)].filter(address => !allowedAddresses.has(address));
     if (ungrounded.length || strangers.length) { metrics.ungroundedValues += 1; throw new Error(`${where}: ungrounded ${[...ungrounded, ...strangers].join(', ')} in ${sentence}`); }
   }
@@ -86,8 +90,10 @@ function checkInvariants(c: EvalCase, turn: Turn, record: TurnRecord, session: C
     // itself declares are allowed (never a live value: those questions are MARKET_DATA, see E08).
     const catalog = reply.topic === 'CONCEPT' ? CONCEPT_IDS.flatMap(id => conceptNumbers(id))
       : reply.topic === 'AUTOMATIONS' ? Object.values(AUTOMATION_FAQ).flatMap(answer => [answer.EN, answer.PT]).flatMap(text => numberTokens(text)) : [];
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: an answer about the owner's positions shows only the verified values FloFi read (ids, fee tiers, amounts, prices).
+    const positions = positionFactNumbers(session.verified?.liquidity);
     const allowed = new Set([...readingsOf(JSON.stringify(facts)), '2.0', '0.05', String(facts.steps.length), String(facts.findings.length), String(facts.revision),
-      ...catalog.flatMap(token => [token, ...readingsOf(token)])]);
+      ...[...catalog, ...positions].flatMap(token => [token, ...readingsOf(token)])]);
     const invented = numberTokens(replyText(reply)).filter(token => !allowed.has(canonicalDecimal(token)) && !allowed.has(token));
     if (invented.length) { metrics.inventedRuntimeFacts += 1; throw new Error(`${where}: answer states numbers Flofi does not hold: ${invented.join(', ')}`); }
   }

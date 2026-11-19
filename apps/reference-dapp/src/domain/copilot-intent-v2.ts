@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_LIQUIDITY_PROTOCOLS, COPILOT_MISSING_FIELDS, COPILOT_V2_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
+import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_LIQUIDITY_PROTOCOLS, COPILOT_MISSING_FIELDS, COPILOT_SYMBOL, COPILOT_V2_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
   CopilotIntentError, type CopilotAction, type CopilotAsset, type CopilotDeposit, type CopilotFeeTier, type CopilotMissingField, type CopilotNetwork,
   type CopilotRouting } from './copilot-intent';
 import { parseAutomationDraft, AUTOMATION_DRAFT_SCHEMA, type AutomationDraft } from './copilot-automation';
@@ -31,8 +31,14 @@ export const COPILOT_QUESTION_TOPICS = ['WORKFLOW_OVERVIEW', 'STEP_COUNT', 'STEP
 export const COPILOT_AUTOMATION_OPERATIONS = ['LIST', 'STATUS', 'EXPLAIN', 'WHY_NOT_RUN', 'PAUSE', 'RESUME', 'ARCHIVE', 'RESCHEDULE'] as const;
 export type CopilotAutomationOperation = (typeof COPILOT_AUTOMATION_OPERATIONS)[number];
 export const COPILOT_V2_MISSING_FIELDS = [...COPILOT_MISSING_FIELDS, 'inputAsset', 'outputAsset', 'target'] as const;
-/** Managing an existing FloFi-registered position: remove part of its liquidity, or all of it and close it. */
-export const COPILOT_POSITION_OPERATIONS = ['DECREASE', 'EXIT'] as const;
+/**
+ * Managing the owner's existing liquidity positions (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: per-position workflow actions the owner asks for, each
+ * prepared for Review). LIST and INSPECT are reads FloFi answers from its own verified facts. COLLECT collects owed tokens and fees only; DECREASE
+ * removes a share of the liquidity; EXIT removes all of it (an Orca exit also closes the position); CLOSE is an exit that also closes (burns) the
+ * position, or closes an emptied one. The model never names which position: FloFi selects it from the connected wallets' verified positions.
+ */
+export const COPILOT_POSITION_OPERATIONS = ['LIST', 'INSPECT', 'COLLECT', 'DECREASE', 'EXIT', 'CLOSE'] as const;
+export type CopilotPositionOperation = (typeof COPILOT_POSITION_OPERATIONS)[number];
 export const COPILOT_V2_LIMITS = Object.freeze({ ...COPILOT_LIMITS, maxDeposits: 2, maxReuseFields: COPILOT_REUSE_FIELDS.length,
   maxTranscriptMessages: 16, maxUserTurns: 8, maxSegmentUserTurns: 6, maxClarifications: 3, maxReferents: 4, maxRequestCharacters: 12_000,
   /** BUILD-FLOFI-INTELLIGENCE-001: a model-written explanation (QUESTION/GOAL `answer`), shown only when grounded (`intelligence/grounding.ts`). */
@@ -70,9 +76,16 @@ export type CopilotGoal = {
   /** User-stated position parameters; retained while FloFi plans its conversion and funding steps. */
   readonly liquidity?: Extract<CopilotAction, { type: 'LIQUIDITY' }> | null;
 };
-/** "Remove 50% of my liquidity", "exit my position": FloFi selects the position from the connected wallet's verified FloFi positions. */
-export type CopilotPositionRequest = { readonly operation: (typeof COPILOT_POSITION_OPERATIONS)[number]; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
-  readonly network: CopilotNetwork | null; readonly percent: string | null };
+/**
+ * Which of the owner's positions the user described, in their own words only: "the second one" (an ordinal), "my WETH/USDC position" (the pair's
+ * symbols). Never an id, a mint, a token id or an address: FloFi resolves the position against its own verified facts.
+ */
+export type CopilotPositionSelect = { readonly ordinal: CopilotOrdinal | null; readonly assets: readonly string[] };
+/** "Remove 50% of my liquidity", "exit my position": FloFi selects the position from the connected wallets' verified positions. */
+export type CopilotPositionRequest = { readonly operation: CopilotPositionOperation; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
+  readonly network: CopilotNetwork | null;
+  /** DECREASE only: the percentage the user wrote; null for every other operation. */ readonly percent: string | null;
+  /** Absent in recorded (older) answers. */ readonly select?: CopilotPositionSelect | null };
 type Common = { readonly version: '2'; readonly language: CopilotLanguage };
 export type CopilotIntentV2 = Common & (
   | { readonly kind: 'AUTOMATION'; readonly draft: AutomationDraft }
@@ -117,6 +130,14 @@ function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
   if (changes.rangeUnit === 'FULL' ? range !== 1 : changes.rangeUnit === 'PERCENT' ? range !== 2 || changes.lower !== null : range !== 0 && range !== 3) return fail();
   if (requireOne && !CHANGE_KEYS.some(key => key === 'deposits' ? deposits.length > 0 : changes[key] !== null) && !changes.feeTier) return fail();
   return changes;
+}
+/** A position the user described by ordinal or pair: symbols only (a token id, mint or address never fits `COPILOT_SYMBOL`), at most the pair's two. */
+function parseSelect(value: unknown): CopilotPositionSelect | null {
+  if (value === null) return null;
+  const v = exact(value, ['ordinal', 'assets']);
+  const assets = list(v.assets, 2).map(item => typeof item === 'string' && COPILOT_SYMBOL.test(item) && item.toUpperCase() !== 'OTHER' ? item : fail());
+  if (new Set(assets.map(asset => asset.toUpperCase())).size !== assets.length) return fail();
+  return { ordinal: nullableOneOf(COPILOT_ORDINALS, v.ordinal), assets };
 }
 /** An optional model explanation: absent, null, or bounded safe text (grounding is checked where the facts are known). */
 const answerOf = (value: unknown): string | null => value === undefined || value === null ? null : text(value, COPILOT_V2_LIMITS.maxAnswerLength);
@@ -182,9 +203,13 @@ export function parseCopilotIntentV2(value: unknown): CopilotIntentV2 {
       return { ...common(v), kind, goal: parseGoal(v.goal), ...answered ? { answer: answerOf(v.answer) } : {} };
     }
     case 'POSITION': {
-      const v = keys(['operation', 'protocol', 'network', 'percent']);
-      return { ...common(v), kind, operation: oneOf(COPILOT_POSITION_OPERATIONS, v.operation), protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol),
-        network: nullableOneOf(COPILOT_V2_NETWORKS, v.network), percent: amount(v.percent) };
+      const selected = !!value && typeof value === 'object' && Object.hasOwn(value, 'select');
+      const v = keys(selected ? ['operation', 'protocol', 'network', 'percent', 'select'] : ['operation', 'protocol', 'network', 'percent']);
+      const operation = oneOf(COPILOT_POSITION_OPERATIONS, v.operation), percent = amount(v.percent);
+      // A percentage belongs to a partial removal only: a collection, an exit or a read never carries one.
+      if (percent !== null && operation !== 'DECREASE') return fail();
+      return { ...common(v), kind, operation, protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol), network: nullableOneOf(COPILOT_V2_NETWORKS, v.network), percent,
+        ...selected ? { select: parseSelect(v.select) } : {} };
     }
     case 'AUTOMATION_MANAGE': { const v = keys(['operation']); return { ...common(v), kind, operation: oneOf(COPILOT_AUTOMATION_OPERATIONS, v.operation) }; }
     case 'CLARIFICATION_REQUIRED': {
@@ -256,10 +281,16 @@ export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: 
   object({ ...head('REPEAT'), target: TARGET, changes: CHANGES }),
   object({ ...head('REMOVE'), target: TARGET }),
   object({ ...head('INSERT'), position: choice(['BEFORE', 'AFTER'], 'Where the new step goes relative to the anchor.'), anchor: TARGET, action: ACTION }),
-  object({ ...head('POSITION'), operation: choice(COPILOT_POSITION_OPERATIONS, 'DECREASE to remove part of an existing position\'s liquidity, EXIT to remove all of it and close the position.'),
+  object({ ...head('POSITION'), operation: choice(COPILOT_POSITION_OPERATIONS, 'The user\'s EXISTING liquidity positions: LIST to show them (also "which are in range?"), ' +
+    'INSPECT one position\'s details or what it can collect, COLLECT only its fees and owed tokens (liquidity unchanged), DECREASE part of its liquidity, EXIT to remove all of it, ' +
+    'CLOSE when the user explicitly asks to close (burn) the position.'),
     protocol: nullableChoice(COPILOT_LIQUIDITY_PROTOCOLS, 'The pool protocol only if the user named it; null otherwise.'),
     network: nullableChoice(COPILOT_V2_NETWORKS, 'The network only if the user named it; null otherwise.'),
-    percent: nullableString('For DECREASE: the percentage to remove exactly as written ("50" for 50%, "50" for half); null if not stated, and null for EXIT.') }),
+    percent: nullableString('For DECREASE only: the percentage to remove exactly as written ("50" for 50%, "50" for half); null if not stated, and always null for every other operation.'),
+    select: { anyOf: [object({ ordinal: nullableChoice(COPILOT_ORDINALS, 'Only if the user picked a position by order ("the first one", "a segunda", "o último"); null otherwise.'),
+      assets: { type: 'array', description: 'The pair\'s token symbols only if the user named them ("my WETH/USDC position"); empty otherwise. Never an id, mint or address.',
+        items: string('Token symbol.') } }), { type: 'null' }],
+    description: 'Which position the user described, by order or pair; null when they did not. FloFi selects the position itself.' } }),
   object({ ...head('QUESTION'), topic: choice(COPILOT_QUESTION_TOPICS, 'What the read-only question is about.'),
     target: { anyOf: [TARGET, { type: 'null' }], description: 'The step the question is about, if any.' }, answer: ANSWER }),
   object({ ...head('GOAL'), goal: GOAL, answer: ANSWER }),

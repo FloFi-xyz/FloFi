@@ -2381,6 +2381,240 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Show my liquidity positions"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "LIST",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Quais são as minhas pools?"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "POSITION",
+      "operation": "LIST",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Which of my pools are in range?"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "LIST",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "How much can I collect from my Uniswap position?"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "INSPECT",
+      "protocol": "UNISWAP_V3",
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Collect my fees on Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "COLLECT",
+      "protocol": null,
+      "network": "BASE",
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Coleta minhas taxas da Uniswap"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "POSITION",
+      "operation": "COLLECT",
+      "protocol": "UNISWAP_V3",
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Só os rendimentos"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "POSITION",
+      "operation": "COLLECT",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Remove 50% of my liquidity"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "DECREASE",
+      "protocol": null,
+      "network": null,
+      "percent": "50",
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Retira metade da minha liquidez"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "POSITION",
+      "operation": "DECREASE",
+      "protocol": null,
+      "network": null,
+      "percent": "50",
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Withdraw everything from my WETH/USDC position"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "EXIT",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": {
+       "ordinal": null,
+       "assets": [
+        "WETH",
+        "USDC"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Quero sair completamente dessa pool"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "POSITION",
+      "operation": "EXIT",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Close my Orca position"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "CLOSE",
+      "protocol": "ORCA",
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
   }
  ]
 }
