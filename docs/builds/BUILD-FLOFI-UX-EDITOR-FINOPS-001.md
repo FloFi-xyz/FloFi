@@ -204,3 +204,15 @@ Three read-only specialists reviewed the diff (advisory; they cannot run command
 | 4 | MINOR — AI cost lost its calculation basis | Fixed: basis and title restored in the AI section. |
 | 5 | MINOR — AI coverage warnings became a grey footnote | Fixed: warning alerts. |
 | 6–10 | NITs: coverage filter by category, period form (`required` only for custom, select sync), Sync details placement, wording, dead `admin-sr-only` CSS | Fixed. |
+
+## 11. Concurrent main integration
+
+While this build was in progress, `main` advanced from `b1de6c1` (this build's baseline) to `3ebe3d0`:
+
+| Merged | Change | Overlap with this build |
+| --- | --- | --- |
+| FloFi-xyz/FloFi#220 (`952aae6`, merge `3ebe3d0`) | Offline Claude Auto Mode handback verification: `docs/engineering/CLAUDE-CODE.md`, `scripts/verify_claude_agents.py`, `scripts/test_ci_claude_agents.py` | None: no shared file, component, Editor state, lifecycle, navigation or FinOps code |
+
+`origin/main` was merged into the branch (merge commit, no rebase, no history rewritten) after this build's work was committed. There were
+no conflicts. The merged tooling's own suite (`scripts/test_ci_claude_agents.py`, 34 tests), governance-lite and the engineering check pass on
+the integrated tree, and certification runs against the integrated commit. `origin/main` is checked again before merging.
