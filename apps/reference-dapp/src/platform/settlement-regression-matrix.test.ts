@@ -38,8 +38,9 @@ const SETTLEMENT: Readonly<Record<string, Settlement>> = {
   'asset.swap.exact-input|jupiter.swap-v2': { proof: 'Finalized transaction and its own pre/post token balances, fee accounted', finality: 'Finalized commitment', suites: [S + 'jupiter-service.test.ts'] },
   'asset.transfer|solana.system-transfer': { proof: 'Finalized transaction meta balances', finality: 'Finalized commitment', suites: [S + 'solana-transfer-service.test.ts'] },
   'asset.transfer|solana.spl-transfer': { proof: 'Finalized transaction token balances', finality: 'Finalized commitment', suites: [S + 'solana-transfer-service.test.ts'] },
-  'asset.liquidity.concentrated|orca.whirlpools-mainnet-liquidity': { proof: 'Finalized transaction and the position account', finality: 'Finalized commitment',
-    suites: [S + 'orca-mainnet-liquidity-service.test.ts', 'packages/reference-reconciler/test/orca-mainnet-liquidity.test.ts'] },
+  'asset.liquidity.concentrated|orca.whirlpools-mainnet-liquidity': { proof: 'Finalized transaction and the position account; COLLECT (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001): the fee checkpoint and collect_fees_v2 vault outflows to the owner with liquidity and principal unchanged and the position authority re-verified',
+    finality: 'Finalized commitment',
+    suites: [S + 'orca-mainnet-liquidity-service.test.ts', 'packages/reference-reconciler/test/orca-mainnet-liquidity.test.ts', 'packages/reference-compiler/test/orca-mainnet-liquidity.test.ts'] },
 };
 /** How a step's settlement reaches every surface, for every row above. */
 const PROPAGATION = [

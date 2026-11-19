@@ -668,8 +668,10 @@ export function assessOrcaLiquidityEffects(input: { operation: OrcaLiquidityOper
     } else if (input.positionState !== false) {
       const expectedAfter = (BigInt(pre.position?.liquidity ?? '0') - BigInt(plan.liquidityDelta)).toString();
       if (!post.position || post.position.liquidity !== expectedAfter || post.position.feeOwedA !== '0' || post.position.feeOwedB !== '0') fail('ORCA_POSITION_STATE_MISMATCH');
-      // The COLLECT refresh also checkpoints rewards: a reward it would leave owed is one FloFi cannot collect and one that blocks a later close.
-      if (operation === 'COLLECT' && post.position!.rewardOwed.some(r => r !== '0')) fail('ORCA_POSITION_REWARDS_UNSUPPORTED');
+      // The COLLECT refresh and a partial decrease also checkpoint rewards (decrease_liquidity_v2 updates them like update_fees_and_rewards): a
+      // reward either would leave owed is one FloFi cannot collect and one that would then block every later operation, the exit included.
+      // Simulation only (the reconciler passes positionState: false): a settled transaction is never re-judged by this rule (flofi-liquidity #6).
+      if ((operation === 'COLLECT' || operation === 'DECREASE_PARTIAL') && post.position!.rewardOwed.some(r => r !== '0')) fail('ORCA_POSITION_REWARDS_UNSUPPORTED');
     }
     if (lamportsDelta !== principalA + feesA + rentRefunded - rentPaid - input.feeLamports) fail('ORCA_LIQUIDITY_BALANCE_MISMATCH');
   }

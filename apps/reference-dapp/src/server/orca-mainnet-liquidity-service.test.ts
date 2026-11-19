@@ -155,6 +155,19 @@ describe('Orca liquidity service lifecycle on Solana mainnet-beta (MOCKED loopba
     await expect(s.service.simulate(workflow(), owner, { operation: 'COLLECT', positionMint: mint })).rejects.toThrow('ORCA_POSITION_NOT_FOUND');
     expect(s.env.state.sent).toHaveLength(2);
   });
+  it('a registered position that stops verifying (its token delegated) is listed UNMANAGEABLE with its reason and blocks nothing else', async () => {
+    const s = await setup(), owner = s.wallet.owner, mint = externalPosition(s), other = externalPosition(s);
+    const partial = await reviewed(s, 'DECREASE_PARTIAL', mint, 5000);
+    await s.service.begin(partial.id, owner, workflow());
+    // The owner then delegates the position token (e.g. to a farm): the chain no longer proves FloFi may manage it here.
+    const account = orcaPositionTokenAccount(owner, mint);
+    s.env.state.tokens2022.set(account, { ...s.env.state.tokens2022.get(account)!, delegate: createMockedSolanaWallet().owner });
+    const listed = await s.service.positions(owner);
+    expect(listed).toEqual([expect.objectContaining({ positionMint: mint, status: 'UNMANAGEABLE', code: 'ORCA_POSITION_AUTHORITY_MISMATCH', liquidity: null })]);
+    await expect(s.service.simulate(workflow(), owner, { operation: 'EXIT', positionMint: mint })).rejects.toThrow('ORCA_POSITION_AUTHORITY_MISMATCH');
+    // The owner's other position is unaffected (before this fix, the whole listing — and so every simulate — failed for this owner).
+    expect((await reviewed(s, 'DECREASE_PARTIAL', other, 2500)).review.operation).toBe('DECREASE_PARTIAL');
+  });
   it('refuses a discovered position it cannot manage with the engine’s own reason, and journals nothing', async () => {
     const s = await setup(), owner = s.wallet.owner;
     const refusals: [string, string][] = [

@@ -322,7 +322,7 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
         const tx = mined.get(params[0] as string), left = tx ? preconfirmed.get(tx.hash) ?? 0 : 0;
         if (tx && left > 0) preconfirmed.set(tx.hash, left - 1);
         return tx ? { transactionHash: tx.hash, status: hx(tx.status), blockNumber: hx(tx.block), blockHash: left > 0 ? '0x' + '0'.repeat(64) : blockOf(tx.block, false).hash,
-          from: tx.from, to: tx.to,
+          from: tx.from, to: tx.to, transactionIndex: hx(BigInt([...mined.values()].filter(other => other.block === tx.block).indexOf(tx))),
           gasUsed: hx(tx.gasUsed), effectiveGasPrice: hx(gasPrice), ...profile.gasPriceOracle ? { l1Fee: hx(1_000_000_000n) } : {}, logs: tx.logs } : null;
       }
       case 'eth_getTransactionByHash': { const tx = mined.get(params[0] as string) ?? pendingTxs.find(p => p.hash === params[0]); return tx ? txView(tx) : null; }

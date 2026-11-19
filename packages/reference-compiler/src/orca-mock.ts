@@ -25,7 +25,12 @@ export type MockedOrcaOptions = { actualOutput?: (quoted: bigint) => bigint; fai
    * update_fees_and_rewards, once until `trade()` models more trading. Like the program, collect_fees_v2 pays only the stored fee owed
    * (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001); it never credits fees itself.
    */
-  accrueFees?: { a: string; b: string }; failLiquidity?: boolean; poolRewardMint?: string; poolRewardEmissionsX64?: bigint; poolFeeRate?: number; extraVaultOutflowB?: bigint;
+  accrueFees?: { a: string; b: string };
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a reward (reward_infos[0].amount_owed) a position earned from a slot that emitted in the past, credited at
+   * its next checkpoint (increase/decrease liquidity, update_fees_and_rewards) as the program does — a reward FloFi cannot collect.
+   */
+  accrueRewards?: bigint; failLiquidity?: boolean; poolRewardMint?: string; poolRewardEmissionsX64?: bigint; poolFeeRate?: number; extraVaultOutflowB?: bigint;
   /** Shift the pool price between simulation and execution (price movement), in ticks. */
   priceShiftTicks?: number;
   /**
@@ -112,7 +117,10 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
       if (source!.mint === WSOL && from !== POOL.tokenVaultA) s.lamportsOf.set(from, (s.lamportsOf.get(from) ?? 0n) - amount);
       if (target!.mint === WSOL && to !== POOL.tokenVaultA) s.lamportsOf.set(to, (s.lamportsOf.get(to) ?? 0n) + amount);
     };
-    const accrue = (key: string, p: Position) => { if (options.accrueFees && p.liquidity > 0n && !s.accrued.has(key)) { s.accrued.add(key); p.feeOwedA += BigInt(options.accrueFees.a); p.feeOwedB += BigInt(options.accrueFees.b); } };
+    const accrue = (key: string, p: Position) => {
+      if (options.accrueRewards && p.liquidity > 0n) p.rewardOwed = [(p.rewardOwed?.[0] ?? 0n) + options.accrueRewards, ...(p.rewardOwed ?? []).slice(1)];
+      if (options.accrueFees && p.liquidity > 0n && !s.accrued.has(key)) { s.accrued.add(key); p.feeOwedA += BigInt(options.accrueFees.a); p.feeOwedB += BigInt(options.accrueFees.b); }
+    };
     const authority = (owner: string, positionToken: string, mint: string) => { const t = s.tokens2022.get(positionToken); if (!t || t.owner !== owner || t.mint !== mint || t.amount !== 1n) fault({ Custom: 6017 }); };
     if (d === I.openPositionWithTokenExtensions) {
       const args = decodeOrcaOpenPosition(i.data);

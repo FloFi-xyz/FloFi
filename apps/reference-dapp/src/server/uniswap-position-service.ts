@@ -26,6 +26,7 @@ import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schem
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { sameEvmIntent } from './evm-submission-discovery.ts';
 import { verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
+import { readNotAnswered } from './public-testnet-rpc.ts';
 import { recordLiquidityOutcome, type LiquidityOutcome } from './liquidity-lifecycle-telemetry.ts';
 import type { UniswapAttemptState, UniswapReceipt, UniswapTokenView, UniswapTx, UniswapWalletDiagnostic } from './uniswap-liquidity-service.ts';
 
@@ -164,6 +165,8 @@ export type UniswapPositionPoolRuntime = {
 };
 export type UniswapPositionDeps = {
   readonly provenance: UniswapPositionProvenance; readonly executionEnabled: boolean; readonly now: () => Date; readonly idPrefix: string;
+  /** The served catalog network's chain id (its run id prefix names it); null only for a testnet service, which refuses position runs. */
+  readonly chainId: number | null;
   readonly storage: ExecutionStorage;
   /** The run log validator of the shared namespace (mint and position runs): every run name is checked by the liquidity service. */
   readonly runName: (id: string) => string;
@@ -181,10 +184,12 @@ export type UniswapPositionDeps = {
 };
 
 /** Append-only run history: identity, request, reviewed call, hashes, terminal states, result and evidence never change. */
-export function validateUniswapPositionLog(bytes: Uint8Array, idPattern: RegExp): void {
-  try { validatePositionLines(bytes, idPattern); } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
+export function validateUniswapPositionLog(bytes: Uint8Array, idPattern: RegExp, chainId: number | null = null): void {
+  try { validatePositionLines(bytes, idPattern, chainId); } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
 }
-function validatePositionLines(bytes: Uint8Array, idPattern: RegExp): void {
+/** Every collect inside a reviewed request pays the owner, and nobody else (flofi-liquidity #7). */
+const collectsToOwner = (data: string, owner: string) => decodeUniswapPositionRequest(data).every(c => c.kind !== 'COLLECT' || decodeUniswapCollect(c.data).recipient === owner);
+function validatePositionLines(bytes: Uint8Array, idPattern: RegExp, chainId: number | null): void {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   if (!text.endsWith('\n') || bytes.length > 16_777_216) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
   let prior: UniswapPositionRecord | null = null;
@@ -198,12 +203,16 @@ function validatePositionLines(bytes: Uint8Array, idPattern: RegExp): void {
         review.owner !== run.owner || review.recipient !== run.owner || review.position.owner !== run.owner || review.commitment !== uniswapPositionReviewCommitment(review) ||
         canonical(parseUniswapPositionRequest(run.request)) !== canonical(run.request) || run.request.operation !== review.operation ||
         run.request.tokenId !== review.position.tokenId || run.request.partBps !== review.partBps || run.request.close !== review.close ||
+        // The namespace's network (the run id prefix names it), the request's own collect recipient, and every attempt's chain (F4 parity).
+        (chainId !== null && review.chainId !== chainId) || !Number.isSafeInteger(review.chainId) ||
         !Array.isArray(review.calls) || review.calls.length !== 1 || review.calls[0].to !== review.contracts.positionManager ||
+        !collectsToOwner(review.calls[0].data, run.owner) ||
         canonical(decodeUniswapPositionRequest(review.calls[0].data).map(c => c.kind)) !== canonical(review.innerCalls) ||
         (run.authorization !== null && run.authorization !== review.commitment) || !Array.isArray(run.attempts) || run.attempts.length > 16 ||
         !['PENDING', 'RECONCILED', 'DIVERGENT'].includes(run.verdict) || new Set(run.attempts.map(a => a.attemptId)).size !== run.attempts.length ||
         run.attempts.some(a => !isObject(a as unknown) || !a.attemptId.startsWith(run.id + '.') || a.step !== run.request.operation || a.tx.from !== run.owner ||
-          a.tx.to !== review.contracts.positionManager || decodeUniswapPositionRequest(a.tx.data).length < 1 ||
+          a.tx.to !== review.contracts.positionManager || decodeUniswapPositionRequest(a.tx.data).length < 1 || !collectsToOwner(a.tx.data, run.owner) ||
+          BigInt(a.tx.chainId) !== BigInt(review.chainId) ||
           (a.transactionHash !== null && !HASH.test(a.transactionHash)) || (a.replacementHash !== null && !HASH.test(a.replacementHash)) ||
           (a.reconciled && (a.state !== 'CONFIRMED' || a.transactionHash === null))) ||
         run.attempts.filter(a => ACTIVE.includes(a.state)).length > 1 ||
@@ -231,8 +240,8 @@ function validatePositionLines(bytes: Uint8Array, idPattern: RegExp): void {
 }
 export const isUniswapPositionLog = (bytes: Uint8Array | null) => {
   if (!bytes) return false;
-  const first = utf8(bytes).split('\n', 1)[0] ?? '';
-  return first.includes(`"format":"${UNISWAP_POSITION_RUN_FORMAT}"`);
+  // `format` is always the record's first serialized key: a workflow value elsewhere on the line can never make a mint log look like a position log.
+  return utf8(bytes.subarray(0, 64)).startsWith(`{"format":"${UNISWAP_POSITION_RUN_FORMAT}",`);
 };
 export function uniswapPositionNeedsObservation(value: unknown): boolean {
   const record = value as UniswapPositionRecord, last = record.attempts.at(-1);
@@ -243,7 +252,7 @@ type Simulated = { gasUsed: bigint; decreased: { amount0: bigint; amount1: bigin
 
 export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
   const { provenance, now, storage: { log, leases } } = deps;
-  const validate = (bytes: Uint8Array) => validateUniswapPositionLog(bytes, new RegExp(`^${deps.idPrefix}-[a-f0-9]{32}$`));
+  const validate = (bytes: Uint8Array) => validateUniswapPositionLog(bytes, new RegExp(`^${deps.idPrefix}-[a-f0-9]{32}$`), deps.chainId);
   async function load(id: string): Promise<UniswapPositionRecord> {
     const bytes = await log.read(deps.runName(id));
     if (!bytes) fail('UNISWAP_LIQUIDITY_RUN_NOT_FOUND');
@@ -280,8 +289,10 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
   async function readPosition(R: UniswapPositionPoolRuntime, tokenId: bigint, at: string) {
     const { profile } = R;
     let owner: string;
+    // Only the manager's own answer (a revert: no such token) means "not found"; a read the node never answered is retried, never a Review
+    // change, so a transient RPC failure can never clear the owner's authorization (flofi-liquidity #4).
     try { owner = addressAt(await ethCall(R, profile.positionManager, SEL.ownerOf + word(tokenId), at)); }
-    catch { return fail('UNISWAP_POSITION_NOT_FOUND'); }
+    catch (cause) { if (readNotAnswered(cause)) throw cause; return fail('UNISWAP_POSITION_NOT_FOUND'); }
     const position = decodeUniswapPosition(await ethCall(R, profile.positionManager, SEL.positions + word(tokenId), at));
     if (position.token0 !== profile.token0.address || position.token1 !== profile.token1.address || position.fee !== profile.feeTier) fail('UNISWAP_POSITION_POOL_MISMATCH');
     if (position.liquidity >= 1n << 128n || position.tokensOwed0 >= 1n << 128n || position.tokensOwed1 >= 1n << 128n) fail('UNISWAP_RPC_INVALID');
@@ -416,23 +427,38 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
     return state;
   }
 
-  /** Position claims: while any run of this position may still execute or awaits reconciliation, no other run of it prepares a request. */
-  async function claimPosition(record: UniswapPositionRecord): Promise<void> {
+  /**
+   * Position claims: while any run of this position may still execute or awaits reconciliation, no other run of it prepares a request. The
+   * position lease is held across the claim, the owner-nonce reservation and the durable PREPARED attempt (`action`), so two runs of one
+   * position can never both pass the claim (flofi-liquidity #2).
+   *
+   * An uncertain attempt whose reserved nonce another transaction consumed is never concluded as "not executed" (the wallet may have used
+   * another nonce), but it stops blocking the position once it provably cannot change the position's liquidity any more: a collect-only request
+   * (it can only pay owed tokens to the owner; every later Review re-reads them), or a request whose on-chain deadline has passed (`checkDeadline`
+   * reverts it at any nonce). Every later run still re-verifies the exact liquidity at begin and hand-off (flofi-liquidity #1, flofi-workflow F2).
+   */
+  function releasable(other: UniswapPositionRecord, attempt: UniswapPositionAttempt, chainSeconds: number): boolean {
+    if (attempt.state !== 'SUBMISSION_RESULT_UNKNOWN' || !attempt.conflictingTransactionHash) return false;
+    return canonical(other.review.innerCalls) === canonical(['COLLECT']) || other.review.deadline !== null && chainSeconds > Number(other.review.deadline);
+  }
+  async function withPositionClaim<T>(record: UniswapPositionRecord, chainSeconds: number, action: () => Promise<T>): Promise<T> {
     const key = `${record.review.chainId}-${record.review.contracts.positionManager}-${record.review.position.tokenId}`, name = key + '.unipm-position';
-    await leases.hold(key, async () => {
+    return leases.hold(key, async () => {
       const existing = utf8(await log.read(name));
       const holders = [...new Set(existing.trimEnd().split('\n').filter(Boolean).map(line => (JSON.parse(line) as { runId: string }).runId))];
       for (const holder of holders) {
         if (holder === record.id) continue;
         let other: UniswapPositionRecord;
         try { other = await load(holder); } catch { fail('UNISWAP_POSITION_OPERATION_IN_PROGRESS'); }
-        if (other.verdict === 'PENDING' && other.attempts.some(a => ACTIVE.includes(a.state) || a.state === 'CONFIRMED')) fail('UNISWAP_POSITION_OPERATION_IN_PROGRESS');
+        if (other.verdict === 'PENDING' && other.attempts.some(a => a.state === 'CONFIRMED' || ACTIVE.includes(a.state) && !releasable(other, a, chainSeconds)))
+          fail('UNISWAP_POSITION_OPERATION_IN_PROGRESS');
       }
       if (!holders.includes(record.id)) {
         const entry = JSON.stringify({ runId: record.id }) + '\n';
         if (existing === '') { if (!await log.create(name, new TextEncoder().encode(entry))) fail('UNISWAP_POSITION_OPERATION_IN_PROGRESS'); }
         else await log.extend(name, new TextEncoder().encode(existing + entry), () => undefined);
       }
+      return action();
     });
   }
 
@@ -486,16 +512,10 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
     if (burned) {
       if (nftTransfers.length !== 1 || topicAddress((nftTransfers[0]!.topics as unknown[])[1]) !== owner || quantity((nftTransfers[0]!.topics as unknown[])[2]) !== 0n)
         fail('UNISWAP_POSITION_BURN_MISMATCH');
-      let stillOwned = false;
-      try { await ethCall(R, NPM, SEL.ownerOf + word(tokenId), at); stillOwned = true; } catch { stillOwned = false; }
+      let stillOwned: boolean;
+      // The burn is proven by the NFT Transfer to zero in the verified receipt; the read-back must be the manager's own revert, never a transport failure.
+      try { await ethCall(R, NPM, SEL.ownerOf + word(tokenId), at); stillOwned = true; } catch (cause) { if (readNotAnswered(cause)) throw cause; stillOwned = false; }
       if (stillOwned) fail('UNISWAP_POSITION_BURN_MISMATCH');
-    } else {
-      if (nftTransfers.length) fail('UNISWAP_POSITION_BURN_MISMATCH');
-      const after = await readPosition(R, tokenId, at);
-      // Collect at uint128-max leaves nothing owed; the decrease left exactly the reviewed remainder.
-      if (after.owner !== owner || after.liquidity !== BigInt(review.position.liquidity) - removing || after.tokensOwed0 !== 0n || after.tokensOwed1 !== 0n)
-        fail('UNISWAP_POSITION_STATE_MISMATCH');
-      liquidityAfter = after.liquidity.toString();
     }
     const balance = async (token: string, block: string) => wordAt(await ethCall(R, token, SEL.balanceOf + addrWord(owner), block), 0);
     const [b0, a0, b1, a1, nonceBefore, nonceAfter] = await Promise.all([balance(profile.token0.address, before), balance(profile.token0.address, at),
@@ -503,10 +523,38 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       R.rpc('eth_getTransactionCount', [owner, at]).then(quantity)]);
     // HOTFIX-WORKFLOW-CONCURRENCY-001 precedent: other owner transactions in the same block also move balances; the receipt then proves the effects alone.
     const shared = nonceAfter - nonceBefore > 1n;
+    let touched = false;
+    if (!burned) {
+      if (nftTransfers.length) fail('UNISWAP_POSITION_BURN_MISMATCH');
+      const after = await readPosition(R, tokenId, at), expectedAfter = BigInt(review.position.liquidity) - removing;
+      // Collect at uint128-max leaves nothing owed; the decrease left exactly the reviewed remainder.
+      if (after.owner !== owner || after.liquidity !== expectedAfter || after.tokensOwed0 !== 0n || after.tokensOwed1 !== 0n) {
+        // The read is at the END of the block. Anyone may add liquidity to any position (increaseLiquidity), and the owner or an approved operator
+        // may act on it later in the same block: then the end-of-block state is not this transaction's, and its own verified receipt (exact events,
+        // transfers and minimums above) is the proof — scoped to the transaction, as for shared-block balances. Otherwise the run diverged.
+        // (flofi-liquidity #3: a third party can no longer turn a correct withdrawal into DIVERGENT.)
+        touched = shared || await touchedLaterInBlock(R, raw, at, tokenId);
+        if (!touched) fail('UNISWAP_POSITION_STATE_MISMATCH');
+      }
+      liquidityAfter = touched ? expectedAfter.toString() : after.liquidity.toString();
+    }
     if (!shared && (a0 - b0 !== collected0 || a1 - b1 !== collected1)) fail('UNISWAP_POSITION_BALANCE_DELTA_MISMATCH');
     return { tokenId: tokenId.toString(), operation: review.operation, liquidityRemoved: removing.toString(), liquidityAfter,
       principal0: principal0.toString(), principal1: principal1.toString(), collected0: collected0.toString(), collected1: collected1.toString(), burned,
-      blockNumber, transactionHash: hash, ...shared ? { reconciliationScope: 'TRANSACTION' as const } : {} };
+      blockNumber, transactionHash: hash, ...shared || touched ? { reconciliationScope: 'TRANSACTION' as const } : {} };
+  }
+  /** Whether a later transaction of the same block emitted a position-manager event for this token id (increase, decrease, collect or transfer). */
+  async function touchedLaterInBlock(R: UniswapPositionPoolRuntime, receipt: Record<string, unknown>, at: string, tokenId: bigint): Promise<boolean> {
+    const index = quantity(receipt.transactionIndex), NPM = R.profile.positionManager;
+    const logs = await R.rpc('eth_getLogs', [{ fromBlock: at, toBlock: at, address: NPM }]);
+    if (!Array.isArray(logs)) fail('UNISWAP_RPC_INVALID');
+    const byId = new Set<string>([TOPIC.increaseLiquidity, PTOPIC.decreaseLiquidity, PTOPIC.collect]);
+    return (logs as unknown[]).filter(isObject).some(l => {
+      const topics = Array.isArray(l.topics) ? l.topics : [];
+      if (typeof l.address !== 'string' || l.address.toLowerCase() !== NPM || quantity(l.transactionIndex) <= index) return false;
+      return byId.has(String(topics[0])) && topics.length >= 2 && quantity(topics[1]) === tokenId
+        || topics[0] === TOPIC.transfer && topics.length === 4 && quantity(topics[3]) === tokenId;
+    });
   }
   async function buildEvidence(record: UniswapPositionRecord, R: UniswapPositionPoolRuntime, attempt: UniswapPositionAttempt, result: UniswapPositionResult): Promise<UniswapPositionEvidence> {
     const profile = R.profile, at = tag(result.blockNumber), receipt = attempt.receipt!;
@@ -651,12 +699,14 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       catch (cause) { if (cause instanceof Error && /^UNISWAP_.*_REVIEW_REQUIRED$/.test(cause.message)) return changed(cause.message); throw cause; }
       if (expiring()) return expired();
       if (record.attempts.length >= 16) fail('UNISWAP_ATTEMPT_LIMIT_SIMULATE_AGAIN');
-      await claimPosition(record);
-      await R.reserveNonce(record, attemptId, nonce);
       const attempt: UniswapPositionAttempt = { attemptId, step: record.request.operation, state: 'PREPARED', reviewCommitment: record.review.commitment,
         nonce: nonce.toString(), preparedAtBlock: state.block.number, createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null, receipt: null,
         reconciled: false, note: null };
-      record = await save({ ...record, attempts: [...record.attempts, attempt], error: null });
+      const claimed = record;
+      record = await withPositionClaim(claimed, state.block.timestamp, async () => {
+        await R.reserveNonce(claimed, attemptId, nonce);
+        return save({ ...claimed, attempts: [...claimed.attempts, attempt], error: null });
+      });
       return { record, attempt, transaction: tx };
     }); },
     /** The handoff boundary: SUBMITTING is durable before the browser calls the wallet. */
@@ -738,9 +788,13 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
           return save({ ...record, error: hash ? 'UNISWAP_TRANSACTION_PENDING' : 'UNISWAP_TRANSACTION_NOT_OBSERVED' });
         }
         const foundHash = hex(found.tx.hash);
-        if (!R.sameIntent(attempt, found.tx))
+        if (!R.sameIntent(attempt, found.tx)) {
+          // Already recorded: observing it again appends nothing (the log never grows with unchanged snapshots).
+          if (attempt.state === 'SUBMISSION_RESULT_UNKNOWN' && attempt.conflictingTransactionHash === foundHash && record.authorization === null &&
+              record.error === 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION') return record;
           return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' },
             { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', conflictingTransactionHash: foundHash, note: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' }));
+        }
         const replaced = attempt.transactionHash !== null && attempt.transactionHash !== foundHash;
         const current: UniswapPositionAttempt = { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? foundHash, replacementHash: replaced ? foundHash : attempt.replacementHash };
         hash = foundHash;

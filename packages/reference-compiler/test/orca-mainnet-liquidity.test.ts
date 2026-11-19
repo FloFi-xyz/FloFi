@@ -263,6 +263,16 @@ describe('Orca position lifecycle on Solana mainnet-beta: partial removal, colle
     for (const held of [legacy, delegated])
       await expect(simulateOrcaLiquidity(workflow(mainnet), s.wallet.owner, { operation: 'COLLECT', positionMint: held.mint }, s.env.rpc, NOW)).rejects.toThrow('ORCA_POSITION_AUTHORITY_MISMATCH');
   });
+  it('refuses a partial withdrawal whose checkpoint would leave a reward owed (it would block every later operation, the exit included)', async () => {
+    // A slot that emitted in the past still owes an older position a reward; decrease_liquidity_v2 checkpoints it like update_fees_and_rewards.
+    const s = setup(mainnet, { accrueRewards: 7n }), held = externalPosition(s, { liquidity: 1_000_000n, feeOwedB: 5n });
+    await expect(simulateOrcaLiquidity(workflow(mainnet), s.wallet.owner, { operation: 'DECREASE_PARTIAL', positionMint: held.mint, partBps: 5000 }, s.env.rpc, NOW))
+      .rejects.toThrow('ORCA_POSITION_REWARDS_UNSUPPORTED');
+    await expect(simulateOrcaLiquidity(workflow(mainnet), s.wallet.owner, { operation: 'COLLECT', positionMint: held.mint }, s.env.rpc, NOW))
+      .rejects.toThrow('ORCA_POSITION_REWARDS_UNSUPPORTED');
+    // Nothing was executed: the position is unchanged.
+    expect(s.env.state.positions.get(held.position)).toMatchObject({ liquidity: 1_000_000n });
+  });
   it('the MOCKED program pays only checkpointed fees: a bare collect pays the stored owed only, and update_fees_and_rewards refuses an empty position', async () => {
     const s = setup(mainnet, { accrueFees: { a: '777', b: '33' } }), open = await landOpen(s);
     const message = async (accounts: ReturnType<typeof orcaLiquidityAccounts>, plan: OrcaLiquidityPlan) => {

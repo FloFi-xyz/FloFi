@@ -35,9 +35,13 @@ export type OrcaLiquidityWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFL
 export type OrcaLiquidityRecord = OrcaLiquidityRun & { observations: OrcaLiquidityObservation[]; evidence: ReturnType<typeof buildOrcaLiquidityEvidence> | null;
   error: string | null; evidenceClass: OrcaLiquidityEvidenceClass; notSubmitted?: boolean; submissionError?: string; walletDiagnostic?: OrcaLiquidityWalletDiagnostic };
 export type OrcaPositionEntry = { positionMint: string; runs: { id: string; operation: OrcaLiquidityOperation; state: string | null; verdict: string; signature: string | null }[];
-  status: 'OPEN_PENDING' | 'ACTIVE' | 'EMPTY' | 'CLOSED' | 'NOT_CREATED'; liquidity: string | null; tickLower: number | null; tickUpper: number | null;
-  feeOwedA: string | null; feeOwedB: string | null; slot: number | null };
+  status: 'OPEN_PENDING' | 'ACTIVE' | 'EMPTY' | 'CLOSED' | 'NOT_CREATED' | 'UNMANAGEABLE'; liquidity: string | null; tickLower: number | null; tickUpper: number | null;
+  feeOwedA: string | null; feeOwedB: string | null; slot: number | null;
+  /** UNMANAGEABLE only: why the chain no longer proves this owner may manage it here (e.g. the position token was transferred or delegated). */
+  code?: string };
 type RegistryLine = { positionMint: string; id: string; operation: OrcaLiquidityOperation };
+/** The chain's own verification refusals of a registered position (never a transport failure). */
+const UNMANAGEABLE = ['ORCA_POSITION_AUTHORITY_MISMATCH', 'ORCA_POSITION_POOL_MISMATCH', 'ORCA_POSITION_INVALID'];
 const code = (cause: unknown, fallback: string) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : fallback;
 const X = 'ORCA_LIQUIDITY';
 /**
@@ -147,7 +151,18 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
         const r = await load(l.id);
         return { id: r.id, operation: r.operation, state: r.attempt?.state ?? null, verdict: r.verdict, signature: r.attempt?.signature ?? null, record: r };
       }));
-      const chain = await inspectOrcaPosition(input.rpc, owner, positionMint, profile);
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (flofi-liquidity #5): one registered position that no longer verifies (its token transferred, delegated
+      // or moved into a farm) is reported as UNMANAGEABLE with its own refusal; it never blocks the owner's other positions or a new OPEN.
+      // A read the node never answered still fails the listing (unknown is never reported as a state).
+      let chain: Awaited<ReturnType<typeof inspectOrcaPosition>>;
+      try { chain = await inspectOrcaPosition(input.rpc, owner, positionMint, profile); }
+      catch (cause) {
+        const refusal = code(cause, '');
+        if (!UNMANAGEABLE.includes(refusal)) throw cause;
+        result.push({ positionMint, runs: runs.map(r => ({ id: r.id, operation: r.operation, state: r.state, verdict: r.verdict, signature: r.signature })),
+          status: 'UNMANAGEABLE', code: refusal, liquidity: null, tickLower: null, tickUpper: null, feeOwedA: null, feeOwedB: null, slot: null });
+        continue;
+      }
       const open = runs.find(r => r.operation === 'OPEN');
       const pendingOpen = open && !orcaLiquidityAttemptResolved(open.record);
       const status: OrcaPositionEntry['status'] = chain.exists ? BigInt(chain.position.liquidity) > 0n ? 'ACTIVE' : 'EMPTY'
@@ -184,6 +199,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       } else {
         const entry = known.find(p => p.positionMint === positionMint);
         if (entry) {
+          if (entry.status === 'UNMANAGEABLE') throw new Error(entry.code ?? 'ORCA_POSITION_AUTHORITY_MISMATCH');
           if (entry.status === 'OPEN_PENDING') throw new Error(`${X}_OPEN_UNRESOLVED`);
           if (entry.status === 'CLOSED' || entry.status === 'NOT_CREATED') throw new Error('ORCA_POSITION_NOT_FOUND');
         } else {

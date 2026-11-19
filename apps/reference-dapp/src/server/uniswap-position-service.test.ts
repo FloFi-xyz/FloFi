@@ -4,7 +4,7 @@
  * Uniswap liquidity service on a MOCKED in-process Base chain. No network, no key, no send path but the scripted owner wallet; evidence is
  * MOCKED, never MAINNET_EXECUTED.
  */
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -18,7 +18,8 @@ import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-ca
 import { createUniswapLiquidityChain, managedPositionWorkflow, UNI_MOCK_CODE_PINS, UNI_OWNER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import { createUniswapLiquidityService, uniswapRunNeedsObservation, type UniswapLiquidityService } from './uniswap-liquidity-service';
-import { parseUniswapPositionRequest, type UniswapPositionRequest } from './uniswap-position-service';
+import { isUniswapPositionLog, parseUniswapPositionRequest, uniswapPositionReviewCommitment, validateUniswapPositionLog, type UniswapPositionRecord,
+  type UniswapPositionRequest, type UniswapPositionReview } from './uniswap-position-service';
 import { setLiquidityOutcomeSink } from './liquidity-lifecycle-telemetry';
 import type { Rpc } from './public-testnet-service';
 
@@ -56,16 +57,38 @@ function marking(service: UniswapLiquidityService): UniswapLiquidityService {
     positionBegin: (id, owner, w) => service.positionBegin(id, owner, of(id, w)),
   } as UniswapLiquidityService;
 }
-type Setup = { chain: UniswapLiquidityChain; service: UniswapLiquidityService; raw: UniswapLiquidityService };
+type Faults = { ownerOf: boolean; endOfBlock: { block: string; liquidityDelta: bigint; laterLog: boolean } | null };
+type Setup = { chain: UniswapLiquidityChain; service: UniswapLiquidityService; raw: UniswapLiquidityService; dir: string; faults: Faults };
 async function setup(options: { confirmations?: number; executionEnabled?: boolean } = {}): Promise<Setup> {
   const chain = createUniswapLiquidityChain({ profile: PROFILE, tick: TICK, usdc: USDC_IS_0 ? 1_000_000_000n : 10_000_000n, weth: USDC_IS_0 ? 10_000_000n : 1_000_000_000n });
   const dir = await mkdtemp(join(tmpdir(), 'flofi-base-pm-'));
   const sepolia: Rpc = async () => { throw new Error('BASE_SEPOLIA_CLIENT_MUST_NOT_BE_USED'); };
-  const service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: sepolia, rpcs: { 'eip155:8453': chain.rpc },
+  // A transport failure the node never answered (as the paced read client reports it), injectable for ownerOf reads only.
+  const faults: Faults = { ownerOf: false, endOfBlock: null };
+  const rpc: Rpc = async (method, params) => {
+    const data = String((params[0] as { data?: string })?.data ?? '');
+    if (faults.ownerOf && method === 'eth_call' && data.startsWith('0x6352211e')) throw new Error('PUBLIC_RPC_UNAVAILABLE');
+    const end = faults.endOfBlock;
+    // A later transaction of the same block (a third party's increaseLiquidity) changed the position: the end-of-block read shows it.
+    if (end && method === 'eth_call' && data.startsWith('0x99fbab88') && params[1] === end.block) {
+      const answer = String(await chain.rpc(method, params)), words = answer.slice(2).match(/.{64}/g)!;
+      words[7] = (BigInt('0x' + words[7]) + end.liquidityDelta).toString(16).padStart(64, '0');
+      return '0x' + words.join('');
+    }
+    if (end && method === 'eth_getLogs') {
+      const filter = params[0] as { fromBlock: string; address: string };
+      if (filter.fromBlock !== end.block || !end.laterLog) return [];
+      const tokenWord = '0x' + String(faults.endOfBlock && (end as { tokenId?: string }).tokenId ? BigInt((end as { tokenId?: string }).tokenId!).toString(16) : '0').padStart(64, '0');
+      return [{ address: filter.address, transactionIndex: '0x63', logIndex: '0x0', data: '0x',
+        topics: ['0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35f', tokenWord] }];
+    }
+    return chain.rpc(method, params);
+  };
+  const service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: sepolia, rpcs: { 'eip155:8453': rpc },
     provenance: 'MOCKED', now: chain.clock, mockedCodePins: UNI_MOCK_CODE_PINS, executionEnabled: options.executionEnabled ?? true,
     ...options.confirmations !== undefined ? { confirmations: options.confirmations } : {},
     catalog: { chain: 'eip155:8453', catalogFor: async () => catalog, codePins: chain.catalogPins } });
-  return { chain, service: marking(service), raw: service };
+  return { chain, service: marking(service), raw: service, dir, faults };
 }
 const request = (patch: Partial<UniswapPositionRequest> & { tokenId: string }): UniswapPositionRequest =>
   ({ operation: 'COLLECT', partBps: null, close: false, ...patch });
@@ -284,6 +307,123 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 Uniswap v3 position management (MO
     // The second run's Review was bound to the old liquidity: it can never re-apply the same 50% to the new state.
     await expect(s.service.positionBegin(second.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_POSITION_STATE_CHANGED_REVIEW_REQUIRED');
     expect(s.chain.counters.sends).toBe(1);
+  });
+
+  it('an uncertain attempt whose nonce another transaction consumed stops blocking the position only once it can no longer change liquidity', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const lines = async (id: string) => (await readFile(join(s.dir, id + '.jsonl'), 'utf8')).trimEnd().split('\n').length;
+    // Another transaction from the owner's account (another dapp) consumes the nonce FloFi reserved; FloFi's own request was never seen.
+    const consumeNonce = (tx: { from: string; to: string; data: string; chainId: string }) => s.chain.wallet.send({ ...tx, to: OTHER, data: '0x' }, { revert: true });
+    // 1. A collect-only request: even if the wallet sent it at another nonce, it can only pay owed tokens to the owner.
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    s.chain.accrueFees(tokenId, 1_000n, 2_000n);
+    const collect = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId }));
+    await s.service.positionReview(collect.id, collect.review.commitment, w);
+    const begun = await s.service.positionBegin(collect.id, UNI_OWNER, w);
+    await s.service.positionHandoff(collect.id);
+    await s.service.positionReport(collect.id, { kind: 'UNKNOWN' });
+    consumeNonce(begun.transaction);
+    const uncertain = await s.service.positionObserve(collect.id);
+    expect(uncertain.attempts.at(-1)).toMatchObject({ state: 'SUBMISSION_RESULT_UNKNOWN', note: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+    expect(uncertain.verdict).toBe('PENDING');
+    // Observing it again changes nothing and appends nothing (the run is never concluded as "not executed").
+    const before = await lines(collect.id);
+    expect((await s.service.positionObserve(collect.id)).attempts.at(-1)!.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+    expect(await lines(collect.id)).toBe(before);
+    // A later exit of the same position is not locked out; it re-verifies the exact liquidity itself.
+    const exit = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'EXIT', close: true }));
+    expect(await execute(s, exit.id, w)).toMatchObject({ verdict: 'RECONCILED', result: { burned: true } });
+    // 2. A decrease keeps blocking until its own on-chain deadline has passed (it could still execute at another nonce until then).
+    const second = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 4_000_000_000n });
+    const half = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId: second, operation: 'DECREASE', partBps: 5_000 }));
+    await s.service.positionReview(half.id, half.review.commitment, w);
+    const halfBegun = await s.service.positionBegin(half.id, UNI_OWNER, w);
+    await s.service.positionHandoff(half.id);
+    await s.service.positionReport(half.id, { kind: 'UNKNOWN' });
+    consumeNonce(halfBegun.transaction);
+    expect((await s.service.positionObserve(half.id)).attempts.at(-1)!.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+    const other = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId: second, operation: 'EXIT' }));
+    await s.service.positionReview(other.id, other.review.commitment, w);
+    await expect(s.service.positionBegin(other.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_POSITION_OPERATION_IN_PROGRESS');
+    s.chain.advance(Number(half.review.deadline) - half.review.block.timestamp + 120);
+    const fresh = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId: second, operation: 'EXIT' }));
+    expect(await execute(s, fresh.id, w)).toMatchObject({ verdict: 'RECONCILED', result: { liquidityRemoved: '4000000000', liquidityAfter: '0', burned: false } });
+    // The uncertain run itself stays uncertain and observable: nothing claims it did not execute.
+    expect((await s.service.positionStatus(half.id)).attempts.at(-1)!.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+  });
+
+  it('a later transaction in the same block that touches the position never turns a correct withdrawal into DIVERGENT; an unexplained difference does', async () => {
+    for (const laterLog of [true, false]) {
+      const s = await setup(), w = positionWorkflow();
+      const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+      const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'DECREASE', partBps: 5_000 }));
+      await s.service.positionReview(run.id, run.review.commitment, w);
+      const begun = await s.service.positionBegin(run.id, UNI_OWNER, w);
+      await s.service.positionHandoff(run.id);
+      const hash = s.chain.wallet.send(begun.transaction);
+      const receipt = await s.chain.rpc('eth_getTransactionReceipt', [hash]) as { blockNumber: string };
+      s.faults.endOfBlock = { block: receipt.blockNumber, liquidityDelta: 777n, laterLog, ...{ tokenId } } as Faults['endOfBlock'];
+      await s.service.positionReport(run.id, { kind: 'HASH', hash });
+      const done = await s.service.positionObserve(run.id);
+      if (laterLog) {
+        // Proven by the transaction's own receipt (exact decrease, burn, collect and transfers); scoped to the transaction, honestly.
+        expect(done).toMatchObject({ verdict: 'RECONCILED', result: { liquidityRemoved: '1000000000', liquidityAfter: '1000000000', reconciliationScope: 'TRANSACTION' } });
+      } else {
+        expect(done.verdict).toBe('DIVERGENT');
+        expect(done.error).toBe('UNISWAP_POSITION_STATE_MISMATCH');
+      }
+    }
+  });
+
+  it('a read the node never answered is retried, never a Review change: the authorization stays and nothing is prepared', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'EXIT' }));
+    await s.service.positionReview(run.id, run.review.commitment, w);
+    s.faults.ownerOf = true;
+    await expect(s.service.positionBegin(run.id, UNI_OWNER, w)).rejects.toThrow('PUBLIC_RPC_UNAVAILABLE');
+    expect(await s.service.positionStatus(run.id)).toMatchObject({ authorization: run.review.commitment, attempts: [] });
+    s.faults.ownerOf = false;
+    expect(await execute(s, run.id, w)).toMatchObject({ verdict: 'RECONCILED' });
+  });
+
+  it('two runs of one position never both prepare a request, even when their begins race', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const runs = await Promise.all([request({ tokenId, operation: 'EXIT' }), request({ tokenId, operation: 'DECREASE', partBps: 2_500 })]
+      .map(r => s.service.positionSimulate(w, UNI_OWNER, r)));
+    for (const run of runs) await s.service.positionReview(run.id, run.review.commitment, w);
+    const results = await Promise.allSettled(runs.map(run => s.service.positionBegin(run.id, UNI_OWNER, w)));
+    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    const prepared = await Promise.all(runs.map(run => s.service.positionStatus(run.id)));
+    expect(prepared.flatMap(run => run.attempts)).toHaveLength(1);
+  });
+
+  it('the run log validator binds the network, every attempt\'s chain and the collect recipient; only a position log is read as one', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'EXIT' }));
+    await s.service.positionReview(run.id, run.review.commitment, w);
+    await s.service.positionBegin(run.id, UNI_OWNER, w);
+    const bytes = await readFile(join(s.dir, run.id + '.jsonl'));
+    const pattern = /^balp-[a-f0-9]{32}$/, encode = (lines: unknown[]) => new TextEncoder().encode(lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+    expect(() => validateUniswapPositionLog(bytes, pattern, 8453)).not.toThrow();
+    expect(() => validateUniswapPositionLog(bytes, pattern, 42161)).toThrow('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+    const last = JSON.parse(new TextDecoder().decode(bytes).trimEnd().split('\n').at(-1)!) as UniswapPositionRecord;
+    // An attempt for another chain, or a reviewed collect paying anyone but the owner (with a recomputed commitment), is corrupt.
+    const otherChain = { ...last, attempts: last.attempts.map(a => ({ ...a, tx: { ...a.tx, chainId: '0xa4b1' } })) };
+    expect(() => validateUniswapPositionLog(encode([otherChain]), pattern, 8453)).toThrow('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+    const ownerWord = UNI_OWNER.slice(2).padStart(64, '0'), otherWord = OTHER.slice(2).padStart(64, '0');
+    const call = { ...last.review.calls[0]!, data: last.review.calls[0]!.data.split(ownerWord).join(otherWord) };
+    const diverted = { ...last.review, calls: [call] } as UniswapPositionReview;
+    const tampered = { ...last, authorization: null, attempts: [], review: { ...diverted, commitment: uniswapPositionReviewCommitment(diverted) } };
+    expect(call.data).not.toBe(last.review.calls[0]!.data);
+    expect(() => validateUniswapPositionLog(encode([tampered]), pattern, 8453)).toThrow('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+    // A mint log whose workflow happens to contain the position format string is never mistaken for a position log.
+    const mint = await s.raw.simulate(w, UNI_OWNER);
+    expect(isUniswapPositionLog(await readFile(join(s.dir, mint.id + '.jsonl')))).toBe(false);
+    expect(isUniswapPositionLog(new TextEncoder().encode(JSON.stringify({ format: 'flofi.uniswap-liquidity-run.v1', note: '"format":"flofi.uniswap-position-run.v1"' }) + '\n'))).toBe(false);
+    expect(isUniswapPositionLog(bytes)).toBe(true);
   });
 
   it('records a position change only at the network confirmation depth (PR #218), never at inclusion', async () => {

@@ -748,7 +748,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
    */
   const positionsOnly = () => { if (!input.catalog || provenance === 'PUBLIC_TESTNET') fail('UNISWAP_POSITION_NETWORK_UNSUPPORTED'); };
   const positions = createUniswapPositionRuntime({
-    provenance: provenance === 'PUBLIC_TESTNET' ? 'MOCKED' : provenance, executionEnabled, now, idPrefix, storage: input.storage, runName,
+    provenance: provenance === 'PUBLIC_TESTNET' ? 'MOCKED' : provenance, executionEnabled, now, idPrefix, chainId: served?.chainId ?? null, storage: input.storage, runName,
     newRunId: () => `${idPrefix}-` + randomBytes(16).toString('hex'),
     depth: chainId => provenance === 'PUBLIC_MAINNET' ? MAINNET_LIQUIDITY_CONFIRMATIONS[chainId] ?? fail('UNISWAP_PROFILE_INVALID') : provenance === 'MOCKED' ? input.confirmations ?? 0 : 0,
     runtimeOfWorkflow: async workflow => { positionsOnly(); return runtimeOfWorkflow(workflow); },
