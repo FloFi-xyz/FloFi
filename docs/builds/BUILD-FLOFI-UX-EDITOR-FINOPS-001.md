@@ -246,6 +246,14 @@ Three read-only specialists reviewed the diff (advisory; they cannot run command
 | 5 | MINOR — AI coverage warnings became a grey footnote | Fixed: warning alerts. |
 | 6–10 | NITs: coverage filter by category, period form (`required` only for custom, select sync), Sync details placement, wording, dead `admin-sr-only` CSS | Fixed. |
 
+**Delta re-review (after the fixes, at `035122d`).** The same three specialists re-checked their findings and the changes since their review.
+
+| Specialist | Result | Resolution |
+| --- | --- | --- |
+| flofi-wallet-execution | Findings 1, 2, 3, 5 and 7 resolved; 4 partially (a footer action during a live Canvas run carries no step note; the progress list states the step). No gating regression: handlers, `disabled` and click-time checks unchanged; Create no longer hosts Authorize, Continue or Recover. Low: with the Review shown, an execution blocker ("Execution unavailable" + reason, "Execution already started") was hidden. The fail-open edge (§8) judged acceptable: only a simulate action is reachable there. | Fixed: Execute states those blockers beside the Review. Step note during a live run: recorded follow-up. |
+| flofi-frontend-ux | M1, M2, m1, m4, m5, m6 resolved; red `expired` tone legible in both themes. Medium: the pressed-step notice could stay on screen after the stage opened. Low: status announcements on expiry, notice live region mounted with its text, an e2e PT/EN landmark matcher, a comment. | Fixed: the notice shows only while that stage is still closed, with its current reason, and clears on Escape or blur (browser-tested in `editor-stages-review.spec.ts`); comment corrected. Announcement and matcher points recorded as follow-ups (an always-mounted status region would collide with existing unscoped `getByRole('status')` checks). |
+| flofi-admin-analytics | 9 of 10 resolved; finding 1 (month-to-month change) verified against main: no component on main rendered it (only `report.ts` and unused copy), so nothing was lost. No capability, precision or permission loss; no sync on render. Low: "1 cost sources", limitations shown twice in an integration row, terminology and a reason line that states the basis. | Fixed: singular "1 cost source" (PT "1 fonte de custo"); limitations stated once. Terminology and basis wording recorded as follow-ups. |
+
 ## 11. Concurrent main integration
 
 While this build was in progress, `main` advanced from `b1de6c1` (this build's baseline) to `3ebe3d0`:
