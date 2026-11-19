@@ -1681,6 +1681,14 @@
     "app.platform.settlement-regression-matrix": {
       "path": "apps/reference-dapp/src/platform/settlement-regression-matrix.test.ts",
       "stage": "unit"
+    },
+    "app.domain.editor-stages": {
+      "path": "apps/reference-dapp/src/domain/editor-stages.test.ts",
+      "stage": "unit"
+    },
+    "app.components.admin.finops-views": {
+      "path": "apps/reference-dapp/src/components/admin/finops-views.test.tsx",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2682,7 +2690,8 @@
         "apps/reference-dapp/src/app/developers/page.tsx",
         "apps/reference-dapp/src/app/faq/page.tsx",
         "apps/reference-dapp/src/app/editor.css",
-        "apps/reference-dapp/src/app/terms/page.tsx"
+        "apps/reference-dapp/src/app/terms/page.tsx",
+        "apps/reference-dapp/src/app/editor-workspace.css"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -3515,7 +3524,8 @@
         "app.admin.session",
         "app.admin.settings.pg",
         "app.e2e.admin-login-layout",
-        "app.e2e.admin-console"
+        "app.e2e.admin-console",
+        "app.components.admin.finops-views"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -3778,7 +3788,10 @@
         "apps/reference-dapp/src/components/canvas-execution-badge.tsx",
         "apps/reference-dapp/src/components/wallet-activity.tsx",
         "apps/reference-dapp/src/components/dashboard/defi-positions.module.css",
-        "apps/reference-dapp/src/components/dashboard/defi-positions.tsx"
+        "apps/reference-dapp/src/components/dashboard/defi-positions.tsx",
+        "apps/reference-dapp/src/components/editor-chrome.tsx",
+        "apps/reference-dapp/src/components/operation-summary.tsx",
+        "apps/reference-dapp/src/components/simulation-context-panel.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -4751,7 +4764,9 @@
         "apps/reference-dapp/src/domain/settlement-sync.ts",
         "apps/reference-dapp/src/domain/canvas-execution.ts",
         "apps/reference-dapp/src/domain/wallet-activity.ts",
-        "apps/reference-dapp/src/domain/defi-positions.ts"
+        "apps/reference-dapp/src/domain/defi-positions.ts",
+        "apps/reference-dapp/src/domain/editor-stages.ts",
+        "apps/reference-dapp/src/domain/product-areas.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -4775,7 +4790,8 @@
         "app.state.settlement-sync",
         "app.domain.execution-ux-reliability",
         "app.domain.canvas-execution",
-        "app.server.wallet-activity"
+        "app.server.wallet-activity",
+        "app.domain.editor-stages"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5070,7 +5086,8 @@
         "apps/reference-dapp/src/i18n/pt-identity-recovery.ts",
         "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts",
         "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts",
-        "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts"
+        "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts",
+        "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
