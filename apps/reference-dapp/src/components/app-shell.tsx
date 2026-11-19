@@ -936,9 +936,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // action opens Execute instead; Simulate, its processing state and every prerequisite control stay as before.
   const createNavigation = chatFirst && !groupedPrimary && !simulationSource.state.busy && !sequenceRestore && !walletIssue && !networkAction
     && ['approve', 'execute', 'continue', 'recover'].includes(canvasAction.kind);
-  const createAction = createNavigation ? <button type="button" className="primary editor-review-operation" data-lifecycle-action="review-operation" onClick={() => setTab('Execute')}>
-    {tr(canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Review operation' : 'Open workflow progress')}<span aria-hidden="true">{' →'}</span></button>
-    : simulateActionFor(null);
+  // A step of a confirm-each-step workflow keeps its note beside the action (as on main): a step's result never reads as the whole workflow's.
+  const createAction = createNavigation ? <div className="canvas-lifecycle-control">
+      {sequenceNote && <p className="canvas-sequence-note" role="note">{sequenceNote}</p>}
+      <button type="button" className="primary editor-review-operation" data-lifecycle-action="review-operation" onClick={() => setTab('Execute')}>
+        {tr(canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Review operation' : 'Open workflow progress')}<span aria-hidden="true">{' →'}</span></button></div>
+    : simulateActionFor(sequenceNote);
   const footerAction = tab === 'Execute' ? chatFirst ? executeFooterAction : reviewBlock ? reviewFooterAction : undefined
     : tab === 'Build' ? createAction : tab === 'Simulate' && chatFirst ? reviewOperation : undefined;
   const footerStatusSource = !chatFirst ? undefined : tab === 'Execute' ? executeSimulation : tab === 'Simulate' && groupedPrimary ? groupedSimulationFooter : footerSimulation;
