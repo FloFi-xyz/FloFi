@@ -5,6 +5,7 @@ import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as profile } from '@defi-workflow-eng
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createOrcaLiquidityService, type OrcaLiquidityService, type OrcaLiquidityWalletDiagnostic } from '../server/orca-liquidity-service';
 import { createSolanaRpc, solanaRpcOverride } from '../server/solana-rpc';
+import { ORCA_MAINNET_HARNESS_RPC as HARNESS } from '../server/orca-mainnet-harness';
 import { cloudFlow } from './cloud-flow';
 
 /**
@@ -14,7 +15,6 @@ import { cloudFlow } from './cloud-flow';
  * and wallet signature; FloFi never signs. The position-mint key for OPEN is generated in the browser and never sent here.
  */
 let service: OrcaLiquidityService | null = null;
-const HARNESS = 'http://127.0.0.1:8552/mainnet-rpc';
 function current(): OrcaLiquidityService {
   const harness = process.env.GRYLOO_ORCA_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY';
   const journalDir = process.env.GRYLOO_ORCA_MAINNET_JOURNAL;

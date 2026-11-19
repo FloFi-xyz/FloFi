@@ -7262,7 +7262,8 @@
         "apps/reference-dapp/src/server/uniswap-liquidity-mock.ts",
         "apps/reference-dapp/src/server/uniswap-liquidity-service.ts",
         "apps/reference-dapp/src/server/defi-positions-solana.ts",
-        "apps/reference-dapp/src/server/uniswap-position-service.ts"
+        "apps/reference-dapp/src/server/uniswap-position-service.ts",
+        "apps/reference-dapp/src/server/orca-mainnet-harness.ts"
       ],
       "suites": [
         "app.server.copilot-pool-integration",
