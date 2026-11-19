@@ -57,6 +57,8 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
   'Remove liquidity': 'Remover liquidez',
   'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.':
     'O valor coletado é um mínimo: você recebe pelo menos o valor mostrado; as taxas acumuladas até a execução também são coletadas.',
+  '"Collected, at least" is the floor the chain enforces; "Collected (expected)" can come in lower within your slippage limit. Fees accrued until execution are also collected.':
+    '"Coletado, no mínimo" é o piso que a rede garante; "Coletado (esperado)" pode vir menor dentro do seu limite de slippage. As taxas acumuladas até a execução também são coletadas.',
   'Owed tokens and fees can include principal withdrawn earlier and not collected; they are not only trading fees.':
     'Tokens devidos e taxas podem incluir capital retirado antes e ainda não coletado; não são apenas taxas de negociação.',
   "Tokens are returned to your wallet as the pool's own tokens; nothing is swapped or unwrapped.":
@@ -140,5 +142,4 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
 export const portugueseLiquidityPositionValues: Readonly<Record<string, string>> = {
   '{0} of {1} ({2})': '{0} de {1} ({2})',
   '{0} (unchanged)': '{0} (sem alteração)',
-  '{0} and {1} to {2}': '{0} e {1} para {2}',
 };

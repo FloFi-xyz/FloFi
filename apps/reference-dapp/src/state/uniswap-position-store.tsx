@@ -220,7 +220,7 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
       const tx = begun.transaction;
       // The exact reviewed envelope: network, owner, no value, the reviewed Position Manager and call data, the reviewed gas and fee caps.
       if (begun.record.review.commitment !== reviewedRecord.review.commitment || begun.attempt.reviewCommitment !== reviewedRecord.review.commitment ||
-          !uniswapPositionWalletTransactionMatches(reviewedRecord.review, tx)) throw new Error('UNISWAP_TRANSACTION_ARTIFACT_CHANGED');
+          !uniswapPositionWalletTransactionMatches(reviewedRecord.review, tx, begun.attempt.nonce)) throw new Error('UNISWAP_TRANSACTION_ARTIFACT_CHANGED');
       await validateSession(begun.attempt.nonce);
       accept(unwrap(await uniswapPositionHandoff(id)));
       if (latestWallet.current.account?.toLowerCase() !== session.account.toLowerCase() || latestWallet.current.chainId !== session.chainId) throw new Error('UNISWAP_WRONG_OWNER');

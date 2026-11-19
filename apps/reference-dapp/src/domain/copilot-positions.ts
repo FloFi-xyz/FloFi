@@ -97,6 +97,9 @@ export const protocolName = (protocol: LiquidityPositionRef['protocol']) => prot
 /** Pool fee in hundredths of a basis point as a percentage ("500" → "0.05"). */
 export const feePercent = (feeTier: number) => String(feeTier / 10_000);
 export const pairName = (view: Pick<LiquidityPositionView, 'token0' | 'token1'>) => `${view.token0.symbol}/${view.token1.symbol}`;
+/** A Uniswap v3 position id as FloFi writes it ("#123456", "#1234…5678"): with its chain it resolves to the owner (`ownerOf`), so FloFi's own transcript
+ * entries and context cards replace it before a model reads them. */
+export const POSITION_ID = /#\d+(?:…\d+)?/g;
 /** A short, recognizable id: a Uniswap token id, or the first and last characters of an Orca position mint. */
 export const shortPositionId = (ref: Pick<LiquidityPositionRef, 'protocol' | 'positionId'>) => ref.protocol === 'UNISWAP_V3'
   ? `#${ref.positionId.length > 10 ? `${ref.positionId.slice(0, 4)}…${ref.positionId.slice(-4)}` : ref.positionId}` : `${ref.positionId.slice(0, 4)}…${ref.positionId.slice(-4)}`;

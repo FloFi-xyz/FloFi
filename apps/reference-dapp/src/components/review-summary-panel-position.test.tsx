@@ -135,7 +135,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     const valid = text(render(bound, 'execute', 'PT', observedAt));
     const authorizing = rows(render(bound, 'execute', 'PT', observedAt));
     expect(authorizing['Intervalo de preço']).toMatch(/^[\d.]+–[\d.]+ \S+ por \S+$/);
-    expect(authorizing['Tokens devolvidos']).toMatch(/^\S+ e \S+ para 0x[0-9a-f]{40}$/);
+    expect(authorizing['Tokens devolvidos']).toMatch(/^\S+ \+ \S+ → 0x[0-9a-f]{40}$/);
     expect(Object.values(authorizing).join(' ')).not.toMatch(/\bof\b|\bper\b|\(unchanged\)|\band\b.*\bto\b/);
     expect(valid).toContain('Você está autorizando');
     expect(valid).toContain('Nenhuma — esta operação não precisa de permissão de token');

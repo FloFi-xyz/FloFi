@@ -188,6 +188,17 @@ export function validateUniswapPositionLog(bytes: Uint8Array, idPattern: RegExp,
   try { validatePositionLines(bytes, idPattern, chainId); } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
 }
 /** Every collect inside a reviewed request pays the owner, and nobody else (flofi-liquidity #7). */
+/**
+ * Every attempt of the run was cancelled before any broadcast (no hash): the only runs the server refreshes, re-authorizes or prepares again. A
+ * sent, reverted or expired request is observed, never continued — the Editor's own gate (`uniswapPositionRunResumable`), enforced here too
+ * (flofi-wallet-execution P3-4).
+ */
+const neverSent = (record: { readonly attempts: readonly UniswapPositionAttempt[] }) =>
+  record.attempts.every(a => a.state === 'CANCELLED' && !a.transactionHash && !a.replacementHash);
+/** True only when the owner's nonce of `attempt` is provably unused at block `at` (an unreadable count is never proof). */
+async function nonceUnusedAt(R: { readonly rpc: Rpc }, attempt: UniswapPositionAttempt, at: number): Promise<boolean> {
+  try { return quantity(await R.rpc('eth_getTransactionCount', [attempt.tx.from.toLowerCase(), tag(at)])) <= BigInt(attempt.nonce); } catch { return false; }
+}
 const collectsToOwner = (data: string, owner: string) => decodeUniswapPositionRequest(data).every(c => c.kind !== 'COLLECT' || decodeUniswapCollect(c.data).recipient === owner);
 function validatePositionLines(bytes: Uint8Array, idPattern: RegExp, chainId: number | null): void {
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -445,7 +456,9 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
   /**
    * A PREPARED attempt whose Review lapsed can never reach a wallet (hand-off refuses a lapsed Review) and workers never observe PREPARED: it is
    * concluded not submitted under that run's own lease, exactly as its owner's observation would, so an abandoned tab (or a run someone else
-   * prepared for this owner's public position) never blocks the position or the owner's nonce (flofi-security P3, flofi-workflow P3).
+   * prepared for this owner's public position) never blocks that position (flofi-security P3, flofi-workflow P3). Its nonce reservation is released
+   * here too, but only when another run claims the SAME position: a mint or another position of the owner still sees the lapsed PREPARED as in use
+   * (`UNISWAP_OWNER_NONCE_IN_USE`, failing closed) until that run is observed (flofi-wallet-execution P3-2, a documented follow-up).
    */
   async function concludeLapsedPrepared(holder: string): Promise<UniswapPositionRecord> {
     return locked(holder, async () => {
@@ -670,6 +683,7 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       const record = await load(id);
       if (record.verdict !== 'PENDING' || active(record)) fail('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
       if (record.attempts.some(a => a.state === 'CONFIRMED')) fail('UNISWAP_POSITION_OPERATION_ALREADY_CONFIRMED');
+      if (!neverSent(record)) fail('UNISWAP_POSITION_RUN_FINAL_SIMULATE_AGAIN');
       return save({ ...record, review: await buildReview(record.workflow, record.owner, record.request), authorization: null, error: null });
     }); },
     async review(id: string, commitment: string, workflow: SemanticWorkflow): Promise<UniswapPositionRecord> { return locked(id, async () => {
@@ -677,6 +691,7 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       if (!sameWorkflow(workflow, record.workflow)) fail('UNISWAP_SEMANTIC_REVISION_CHANGED');
       if (record.verdict !== 'PENDING' || active(record)) fail('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
       if (record.attempts.some(a => a.state === 'CONFIRMED')) fail('UNISWAP_POSITION_OPERATION_ALREADY_CONFIRMED');
+      if (!neverSent(record)) fail('UNISWAP_POSITION_RUN_FINAL_SIMULATE_AGAIN');
       if (commitment !== record.review.commitment) fail('UNISWAP_REVIEW_CHANGED');
       if (now().getTime() >= Date.parse(record.review.expiresAt) - HANDOFF_MARGIN_MS) fail('UNISWAP_REVIEW_EXPIRED');
       return save({ ...record, authorization: commitment, error: null });
@@ -695,6 +710,7 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       if (record.verdict !== 'PENDING') fail(record.verdict === 'RECONCILED' ? 'UNISWAP_POSITION_OPERATION_ALREADY_CONFIRMED' : 'UNISWAP_RECONCILIATION_REQUIRED');
       if (active(record)) fail('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
       if (record.attempts.some(a => a.state === 'CONFIRMED')) fail('UNISWAP_POSITION_OPERATION_ALREADY_CONFIRMED');
+      if (!neverSent(record)) fail('UNISWAP_POSITION_RUN_FINAL_SIMULATE_AGAIN');
       if (record.authorization !== record.review.commitment) fail('UNISWAP_REVIEW_REQUIRED');
       const expiring = () => now().getTime() >= Date.parse(record.review.expiresAt) - HANDOFF_MARGIN_MS;
       const expired = async (): Promise<never> => {
@@ -794,9 +810,11 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
       if (raw === null) {
         const found = await R.discoverByNonce(attempt);
         if (!found.consumed) {
-          // Only a decrease carries a deadline; a request past it can never execute. Collect alone stays observation-only.
+          // Only a decrease carries a deadline; a request past it can never execute. Collect alone stays observation-only. "Never executed" is
+          // judged at ONE block: its timestamp is past the deadline AND the owner's nonce is still unused at that same block. The discovery above
+          // read an earlier (or another node's) head, so a withdrawal mined in between is never recorded as not executed (flofi-wallet-execution P2-1).
           const latest = await R.head();
-          if (record.review.deadline !== null && latest.timestamp > Number(record.review.deadline))
+          if (record.review.deadline !== null && latest.timestamp > Number(record.review.deadline) && await nonceUnusedAt(R, attempt, latest.number))
             return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' },
               { ...attempt, state: 'NOT_FOUND', note: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' }));
           // An observation that learns nothing new appends nothing: polling a long-uncertain request never grows the log (flofi-liquidity P3-4).

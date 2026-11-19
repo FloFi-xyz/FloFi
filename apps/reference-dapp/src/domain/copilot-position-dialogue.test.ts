@@ -586,3 +586,51 @@ describe('reading verified facts and short answers', () => {
     for (const [text, expected] of cases) expect(readPositionAnswer(text), text).toEqual(expected);
   });
 });
+
+describe('FloFi’s own buttons are never the user’s words (flofi-chat final review)', () => {
+  it('clicking a position button never turns its fee tier into the portion: FloFi asks how much (Uniswap 0.05%, Orca 0.3%)', () => {
+    for (const index of [0, 2]) {
+      const s = session();
+      const which = s.say('Remove some of my liquidity', position('DECREASE'))!;
+      expect(which).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POSITION_WHICH' });
+      const asked = local(s, which.options[index]!);
+      expect(asked, which.options[index]).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POSITION_PORTION' });
+      expect(asked.command).toBeUndefined();
+      expect(choiceOf(local(s, '25%')).choice).toMatchObject({ operation: 'DECREASE', partBps: 2500, position: index === 0 ? BASE.ref : ORCA_POSITION.ref });
+    }
+  });
+  it('a clicked position’s id and amounts never reach the model; FloFi’s own entries and the context card carry no Uniswap token id', () => {
+    const s = session();
+    const which = s.say('Remove some of my liquidity', position('DECREASE'))!;
+    local(s, which.options[0]!);
+    expect(choiceOf(local(s, '50%')).choice).toMatchObject({ partBps: 5000, position: BASE.ref });
+    s.say('what does it do?', intent.question('CONCEPT'));
+    const request = s.turns.at(-1)!.request;
+    expect(request).not.toBeNull();
+    expect(JSON.stringify(request)).not.toMatch(/123456|0\.5 WETH|1500 USDC/);
+    expect(JSON.stringify(request)).toContain('#[position]');
+  });
+  it('“my second position” is the second one FloFi lists: one it cannot manage is refused, never swapped for the only manageable one', () => {
+    const unverified = uniswap('eip155:8453', '99', { manageable: { ok: false, reason: 'POOL_NOT_VERIFIED' } });
+    const s = session([BASE, unverified]);
+    const reply = s.say('Collect the fees of my second position', position('COLLECT', { select: { ordinal: 'SECOND', assets: [] } }))!;
+    expect(reply.command).toBeUndefined();
+    expect(reply.kind).not.toBe('CLARIFICATION');
+    expect(textOf(reply)).toContain('#99');
+    expect(textOf(reply)).not.toContain('#123456');
+    const third = session([BASE, unverified, ARB]).say('Collect the fees of my second position', position('COLLECT', { select: { ordinal: 'SECOND', assets: [] } }))!;
+    expect(third.command).toBeUndefined();
+    // An ordinal FloFi cannot resolve never falls back to the only eligible position: FloFi asks.
+    const fifth = session([BASE, unverified]).say('Collect the fees of my fifth position', position('COLLECT', { select: { ordinal: 'FIFTH', assets: [] } }))!;
+    expect(fifth.command).toBeUndefined();
+  });
+  it('a withdrawal of a token amount the user wrote stays an Aave Withdraw, even when it mentions a pool', () => {
+    for (const [text, language] of [['sacar 10 USDC do pool na Base', 'PT'], ['withdraw 10 USDC from the lending pool on Base', 'EN']] as const) {
+      const reply = session(undefined, language).say(text, intent.action(act.lending('WITHDRAW', { asset: 'USDC', amount: '10', network: 'BASE' }), language))!;
+      expect(reply.command?.type, text).toBe('ADD_WITHDRAW');
+    }
+    // A share of the liquidity is still a position removal.
+    const share = session(undefined, 'PT').say('retira 50% da minha liquidez da pool', intent.action(act.lending('WITHDRAW', { asset: 'USDC', amount: '50', network: 'BASE' }), 'PT'))!;
+    expect(share).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POSITION_WHICH' });
+  });
+});

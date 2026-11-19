@@ -12,7 +12,7 @@ const tx = { nonce: '0x7', chainId: '0x2105', from: OWNER, to: NPM, data: CALL.d
 
 describe('uniswapPositionWalletTransactionMatches', () => {
   it('accepts exactly the reviewed request', () => {
-    expect(uniswapPositionWalletTransactionMatches(review, tx)).toBe(true);
+    expect(uniswapPositionWalletTransactionMatches(review, tx, '7')).toBe(true);
   });
   it('refuses any widened field: network, sender, value, target, call data, gas limit, fee caps or an extra field', () => {
     const widened: Record<string, unknown>[] = [
@@ -20,13 +20,20 @@ describe('uniswapPositionWalletTransactionMatches', () => {
       { to: '0x7777777777777777777777777777777777777777' }, { data: tx.data.slice(0, -2) + '01' }, { data: tx.data.toUpperCase().replace('0X', '0x') },
       { gas: '0x493e1' }, { maxFeePerGas: '0x77359401' }, { maxPriorityFeePerGas: '0xf4241' }, { gasPrice: '0x1' }, { gas: 'not-hex' },
     ];
-    for (const patch of widened) expect(uniswapPositionWalletTransactionMatches(review, { ...tx, ...patch } as typeof tx), JSON.stringify(patch)).toBe(false);
+    for (const patch of widened) expect(uniswapPositionWalletTransactionMatches(review, { ...tx, ...patch } as typeof tx, '7'), JSON.stringify(patch)).toBe(false);
+  });
+  it('refuses a request at any nonce other than the one the server reserved for the attempt, or without one', () => {
+    expect(uniswapPositionWalletTransactionMatches(review, tx, '8')).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches(review, { ...tx, nonce: '0x8' }, '7')).toBe(false);
+    const { nonce: _nonce, ...withoutNonce } = tx; void _nonce;
+    expect(uniswapPositionWalletTransactionMatches(review, withoutNonce, '7')).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches(review, { ...tx, nonce: '7' }, '7')).toBe(false);
   });
   it('refuses a Review that is not one Position Manager request of its own operation', () => {
-    expect(uniswapPositionWalletTransactionMatches({ ...review, calls: [] }, tx)).toBe(false);
-    expect(uniswapPositionWalletTransactionMatches({ ...review, calls: [CALL, CALL] }, tx)).toBe(false);
-    expect(uniswapPositionWalletTransactionMatches({ ...review, operation: 'EXIT' }, tx)).toBe(false);
-    expect(uniswapPositionWalletTransactionMatches({ ...review, contracts: { positionManager: '0x7777777777777777777777777777777777777777' } }, tx)).toBe(false);
-    expect(uniswapPositionWalletTransactionMatches({ ...review, chainId: 84532 }, tx)).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches({ ...review, calls: [] }, tx, '7')).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches({ ...review, calls: [CALL, CALL] }, tx, '7')).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches({ ...review, operation: 'EXIT' }, tx, '7')).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches({ ...review, contracts: { positionManager: '0x7777777777777777777777777777777777777777' } }, tx, '7')).toBe(false);
+    expect(uniswapPositionWalletTransactionMatches({ ...review, chainId: 84532 }, tx, '7')).toBe(false);
   });
 });

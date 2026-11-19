@@ -40,8 +40,11 @@ type Entry = { readonly modes: readonly PlatformMode[]; readonly path: keyof typ
   readonly unless?: RegExp;
   readonly copy: Readonly<Record<CopilotLanguage, { readonly label: string; readonly text: string }>> };
 const ALL: readonly PlatformSurface[] = PLATFORM_SURFACES;
-/** Words about the owner's liquidity positions, and the surfaces that cannot manage them in this build. */
-const POSITION_WORDS = '(?:posic|posit|pool|liquidez|liquidity|lp\\b|taxas|fees|rendimentos|nft da posic|position nft)';
+/**
+ * Words about the owner's liquidity positions, and the surfaces that cannot manage them in this build. Each starts a word ("help" is not "lp",
+ * "deposit" is not "position", "composição" is not "posição"), and fees are a position's only when collected (flofi-chat review P3).
+ */
+const POSITION_WORDS = '(?<![a-z])(?:posic|posit|pool|liquidez|liquidity|lp\\b|(?:collect|colet)\\w*(?:\\s+\\w+){0,2}\\s+(?:fees|taxas|rendimentos)|nft da posic|position nft)';
 const OTHER_SURFACES = '(?:telegram|whatsapp|mcp|api|developer api|api (?:de|para) desenvolvedores|agente|agent|chatgpt|claude)';
 const GUIDE: Readonly<Record<PlatformTopic, Entry>> = {
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: where the owner's liquidity positions are managed, and where they are NOT (said plainly on every surface).

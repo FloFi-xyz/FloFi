@@ -58,7 +58,7 @@ import { groundedProse } from './intelligence/grounding';
 import { liquidityPositionChoiceValid, liquidityPositionKey, type LiquidityPositionChoice, type LiquidityPositionOperation, type LiquidityPositionView } from './liquidity-positions';
 import { assetNamed, closeNamed, describePosition, halfNamed, liquidityRemovalNamed, ordinalNamed, pairMatches, pairName, positionDetails, positionKey, positionLine,
   positionNetworksText, positionOptionLabel, positionSlippageBps, positionStepWallet, POSITION_FACT_LIMITS, protocolName, rangeFilterNamed, readPositionAnswer, shortPositionId,
-  statedPercent, type CopilotLiquidityFacts } from './copilot-positions';
+  statedPercent, POSITION_ID, type CopilotLiquidityFacts } from './copilot-positions';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
   NO_ADAPTATION, proposalReadings, type Adaptation, type AdaptationEvent, type LearningObservation, type ProposalReading, type ReadingField,
   type ReadingFields } from './copilot-adaptation';
@@ -299,8 +299,9 @@ const REPEAT_CUE = /\b(?:same|again|repeat|once more|as before|like before|mesm[
 const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 const segmentText = (state: CopilotConversation) => state.segment.join('\n');
 /** Flofi's own transcript entries never carry an address (a carried beneficiary, a connected wallet, EVM or Solana): the model needs none. */
+/** A Uniswap v3 position id ("#123456", "#1234…5678") resolves to its owner on chain (`ownerOf`): FloFi's own entries never carry one either. */
 const redact = (text: string) => text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]')
-  .slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
+  .replace(POSITION_ID, '#[position]').slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
 function bounded(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
   let out = entries.map(entry => entry.role === 'assistant' ? { role: entry.role, text: redact(entry.text) } : entry)
     .slice(-COPILOT_V2_LIMITS.maxTranscriptMessages);
@@ -1253,7 +1254,10 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
     if (option || amount) {
       if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
       // "Yes" to a question with exactly one offered answer is that answer, in Flofi's own words.
-      const next = withUser(state, picked), extras = draft.extras ?? {};
+      // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (flofi-chat review P1/P2): a position button is recorded as a neutral choice, never as its label — the
+      // label's fee tier ("0.05%") is not the user's percentage, and its token id and amounts never reach the model's transcript.
+      const listedPosition = draft.code === POSITION_WHICH && option?.fill.kind === 'EXTRAS' && option.fill.extras.position !== undefined;
+      const next = withUser(state, listedPosition ? POSITION_OPTION_CHOSEN : picked), extras = draft.extras ?? {};
       // BUILD-CHAT-LEARNING-001: answering FloFi's own question is a content-free clarification signal (and says whether a glossary suggestion held).
       const signals: LearningSignal[] = ['CLARIFICATION_ANSWERED', ...option && draft.suggestion
         ? [copilotNetworksMentioned(option.label).includes(draft.suggestion) ? 'SUGGESTION_CONFIRMED' as const : 'SUGGESTION_REJECTED' as const] : []];
@@ -1465,7 +1469,9 @@ function resolveIntentCore(intent: CopilotIntentV2, state: CopilotConversation, 
     case 'ACTION': case 'COMPOSITION': {
       // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: "retira metade da minha liquidez" is a removal from the user's liquidity positions, never an Aave Withdraw,
       // whatever the interpreter read; a request that names Aave ("sacar meu USDC da Aave") stays an Aave Withdraw.
-      if (intent.kind === 'ACTION' && intent.action.type === 'WITHDRAW' && liquidityRemovalNamed(segmentText(state)))
+      // A withdrawal of a token amount the user wrote ("sacar 10 USDC do pool") is an Aave Withdraw as before: a position removal is a share, never a
+      // token amount (flofi-chat review P3).
+      if (intent.kind === 'ACTION' && intent.action.type === 'WITHDRAW' && liquidityRemovalNamed(segmentText(state)) && !tokenAmountWithdrawal(intent.action, segmentText(state)))
         return resolvePosition(positionIntentOf(intent, segmentText(state)), state, env, extras);
       let actions = intent.kind === 'ACTION' ? [intent.action] : intent.actions;
       // Mainnet combinations share the canonical sequence runtime. Historical engineering compositions keep their atomic runtime.
@@ -1768,6 +1774,8 @@ function positionPrincipal(position: CopilotPosition, tick: number): { readonly 
 type PositionIntent = Extract<CopilotIntentV2, { kind: 'POSITION' }>;
 /** FloFi's own questions about a position: a short answer under them is read locally (`positionTurn`), never by the model. */
 const POSITION_WHICH = 'COPILOT_POSITION_WHICH', POSITION_PORTION = 'COPILOT_POSITION_PORTION';
+/** The user's entry for a position button FloFi listed: no digit, percentage, network, protocol or ordinal the request could be grounded in. */
+const POSITION_OPTION_CHOSEN = '[chose one of the positions FloFi listed]';
 /**
  * "Show my pools", "collect my fees on Base", "remove 50% of my liquidity", "close my Orca position": one per-position workflow action the owner
  * asks for, prepared for Review (FloFi never chooses, rebalances or acts on a position by itself). The connected wallets' verified positions
@@ -1783,6 +1791,11 @@ function resolvePosition(intent: PositionIntent, state: CopilotConversation, env
   return resolveLiquidityPosition(intent, state, env, extras);
 }
 /** An Aave Withdraw the interpreter read from words about the user's liquidity ("retira metade da minha liquidez"): that request as a position request. */
+/** An Aave Withdraw whose asset and amount are the user's own words, with no percentage: never a liquidity-position removal. */
+function tokenAmountWithdrawal(action: CopilotAction, text: string): boolean {
+  return action.type === 'WITHDRAW' && action.asset !== null && action.amount !== null && assetNamed(text, action.asset) && groundedAmount(text, action.amount)
+    && statedPercent(text) === null;
+}
 function positionIntentOf(intent: Extract<CopilotIntentV2, { kind: 'ACTION' }>, text: string): PositionIntent {
   const network = 'network' in intent.action ? intent.action.network : null;
   const all = /(?<![\p{L}])(?:all|everything|tudo|toda|inteira|completamente|totalmente)(?![\p{L}])/iu.test(text);
@@ -1882,9 +1895,16 @@ function resolveLiquidityPosition(intent: PositionIntent, state: CopilotConversa
     return { ...result, reply: { ...result.reply, notes: candidates.slice(0, POSITION_FACT_LIMITS.maxListed)
       .map(view => p.cannotLine(describePosition(view, language), p.reason[positionRefusal(view, needed)])) } };
   }
-  if (!chosen && filter.ordinal) chosen = pick(eligible, filter.ordinal) ?? null;
-  // Exactly one eligible position is the one meant; several are never auto-selected: FloFi asks which, with buttons.
-  if (!chosen && eligible.length === 1) chosen = eligible[0]!;
+  // An ordinal counts the positions as FloFi lists them (every matching position, manageable or not): the one named is the one meant, and one that
+  // cannot do this operation is refused, never swapped for another (flofi-chat review P2).
+  if (!chosen && filter.ordinal) {
+    const named = pick(candidates, filter.ordinal);
+    if (named && !named.operations.includes(needed)) return refused(state, m, p.cannot(describePosition(named, language), p.reason[positionRefusal(named, needed)]));
+    chosen = named ?? null;
+  }
+  // Exactly one eligible position is the one meant (unless the user named an ordinal FloFi could not resolve); several are never auto-selected:
+  // FloFi asks which, with buttons.
+  if (!chosen && !filter.ordinal && eligible.length === 1) chosen = eligible[0]!;
   if (!chosen) {
     const shown = eligible.slice(0, POSITION_FACT_LIMITS.maxOptions), keep: Extras = { ...extras, ...portion ? { portion } : {} };
     const options = shown.map(view => ({ label: positionOptionLabel(view, language), fill: { kind: 'EXTRAS' as const, extras: { ...keep, position: positionKey(view) } } }));

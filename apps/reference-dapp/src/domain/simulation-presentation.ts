@@ -306,7 +306,8 @@ export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: 
       { label: 'Collected, at least', value: pair((BigInt(q.minimums.amount0Min) + BigInt(q.expected.owedAndFees0)).toString(),
         (BigInt(q.minimums.amount1Min) + BigInt(q.expected.owedAndFees1)).toString()) }]
       : [{ label: 'Collected, at least', value: pair(q.expected.collect0, q.expected.collect1) }],
-    { label: 'Tokens returned', value: `${q.token0.symbol} and ${q.token1.symbol} to ${q.recipient}` },
+    // Word-free, so no generic translation template is needed (one would half-translate unrelated English lines; flofi-frontend-ux review P3-5).
+    { label: 'Tokens returned', value: `${q.token0.symbol} + ${q.token1.symbol} → ${q.recipient}` },
     { label: 'Position NFT', value: q.close ? 'Burned (closed)' : 'Stays in your wallet' },
     { label: 'Deadline', value: q.deadline === null ? 'None (collect only)' : new Date(Number(q.deadline) * 1000).toISOString() },
     { label: 'Wallet requests', value: '1' },
@@ -314,7 +315,9 @@ export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: 
   ];
   const warnings: { severity: SimulationWarning['severity']; message: string }[] = [
     { severity: 'attention', message: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close) },
-    { severity: 'info', message: 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.' },
+    // A withdrawal shows an expected total and its floor apart: only "Collected, at least" is a lower bound (flofi-frontend-ux review P3-1).
+    removing ? { severity: 'info', message: '"Collected, at least" is the floor the chain enforces; "Collected (expected)" can come in lower within your slippage limit. Fees accrued until execution are also collected.' }
+      : { severity: 'info', message: 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.' },
     { severity: 'info', message: 'Owed tokens and fees can include principal withdrawn earlier and not collected; they are not only trading fees.' },
     { severity: 'info', message: 'Tokens are returned to your wallet as the pool\'s own tokens; nothing is swapped or unwrapped.' },
     ...removing ? [{ severity: 'info' as const, message: 'The withdrawal reverts on chain if the principal returned is below the enforced minimum (your slippage limit).' }] : [],

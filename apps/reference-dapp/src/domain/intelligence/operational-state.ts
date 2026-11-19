@@ -18,6 +18,7 @@ import type { CopilotConversation, CopilotEnvironment } from '../copilot-convers
 import { stepSummary } from '../copilot-answers';
 import { workflowSteps } from '../workflow-steps';
 import { networkIdentity } from '../network-registry';
+import { POSITION_ID } from '../copilot-positions';
 import { officialCatalogLoaded } from '../asset-catalogs';
 import { validatedDraftFields } from '../copilot-draft';
 
@@ -37,7 +38,7 @@ export type OperationalState = {
 };
 /** Wallet addresses, Solana public keys and node ids never leave FloFi in a context card. */
 export const redactCard = (text: string): string => text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]')
-  .replace(/node-\d+/g, 'step').replace(/eip155:\d+|solana:[A-Za-z0-9]+/g, '').slice(0, CONTEXT_CARD_LIMITS.maxSummaryLength);
+  .replace(/node-\d+/g, 'step').replace(/eip155:\d+|solana:[A-Za-z0-9]+/g, '').replace(POSITION_ID, '#[position]').slice(0, CONTEXT_CARD_LIMITS.maxSummaryLength);
 
 const OPERATION: Readonly<Record<string, string>> = { SWAP: 'swap', BRIDGE: 'bridge', SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw',
   LIQUIDITY: 'add_liquidity', TRANSFER: 'transfer' };

@@ -57,7 +57,9 @@ function marking(service: UniswapLiquidityService): UniswapLiquidityService {
     positionBegin: (id, owner, w) => service.positionBegin(id, owner, of(id, w)),
   } as UniswapLiquidityService;
 }
-type Faults = { ownerOf: boolean; endOfBlock: { block: string; liquidityDelta: bigint; laterLog: boolean; priorToo?: boolean } | null };
+type Faults = { ownerOf: boolean; endOfBlock: { block: string; liquidityDelta: bigint; laterLog: boolean; priorToo?: boolean } | null;
+  /** Runs once, right before the next `latest` head read is answered (a block mined between two reads of one observation). */
+  beforeLatest?: (() => void) | undefined };
 type Setup = { chain: UniswapLiquidityChain; service: UniswapLiquidityService; raw: UniswapLiquidityService; dir: string; faults: Faults };
 async function setup(options: { confirmations?: number; executionEnabled?: boolean } = {}): Promise<Setup> {
   const chain = createUniswapLiquidityChain({ profile: PROFILE, tick: TICK, usdc: USDC_IS_0 ? 1_000_000_000n : 10_000_000n, weth: USDC_IS_0 ? 10_000_000n : 1_000_000_000n });
@@ -66,6 +68,7 @@ async function setup(options: { confirmations?: number; executionEnabled?: boole
   // A transport failure the node never answered (as the paced read client reports it), injectable for ownerOf reads only.
   const faults: Faults = { ownerOf: false, endOfBlock: null };
   const rpc: Rpc = async (method, params) => {
+    if (faults.beforeLatest && method === 'eth_getBlockByNumber' && params[0] === 'latest') { const hook = faults.beforeLatest; faults.beforeLatest = undefined; hook(); }
     const data = String((params[0] as { data?: string })?.data ?? '');
     if (faults.ownerOf && method === 'eth_call' && data.startsWith('0x6352211e')) throw new Error('PUBLIC_RPC_UNAVAILABLE');
     const end = faults.endOfBlock;
@@ -391,6 +394,43 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 Uniswap v3 position management (MO
     const done = await s.service.positionObserve(run.id);
     expect(done).toMatchObject({ verdict: 'RECONCILED', result: { liquidityRemoved: '1000000000', liquidityAfter: '1000000777' } });
     expect(done.result).not.toHaveProperty('reconciliationScope');
+  });
+
+  it('a withdrawal mined between the nonce discovery and the head read is never recorded as not executed (flofi-wallet-execution P2-1)', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 1_000_000_000n });
+    const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'DECREASE', partBps: 5_000 }));
+    await s.service.positionReview(run.id, run.review.commitment, w);
+    const begun = await s.service.positionBegin(run.id, UNI_OWNER, w);
+    await s.service.positionHandoff(run.id);
+    await s.service.positionReport(run.id, { kind: 'HASH', hash: s.chain.wallet.send(begun.transaction, { hold: true }) });
+    // Two seconds before the deadline, the held withdrawal is mined AT the deadline right after FloFi's nonce discovery, and the head FloFi reads
+    // next is already past the deadline.
+    const chainSeconds = () => Math.floor(s.chain.clock().getTime() / 1000) - 1;
+    s.chain.advance(Number(begun.record.review.deadline) - chainSeconds() - 2);
+    s.faults.beforeLatest = () => { s.chain.wallet.release(); s.chain.advance(30); };
+    const observed = await s.service.positionObserve(run.id);
+    expect(s.faults.beforeLatest).toBeUndefined();
+    expect(observed.attempts.at(-1)!.state).not.toBe('NOT_FOUND');
+    expect(observed.error).not.toBe('UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED');
+    // The next observation finds and reconciles the withdrawal that executed.
+    expect((await s.service.positionObserve(run.id)).verdict).toBe('RECONCILED');
+  });
+
+  it('a run whose request expired unsent is observed, never refreshed, re-authorized or prepared again on the server (flofi-wallet-execution P3-4)', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 1_000_000_000n });
+    const run = await s.service.positionSimulate(w, UNI_OWNER, request({ tokenId, operation: 'DECREASE', partBps: 5_000 }));
+    await s.service.positionReview(run.id, run.review.commitment, w);
+    const begun = await s.service.positionBegin(run.id, UNI_OWNER, w);
+    await s.service.positionHandoff(run.id);
+    s.chain.advance(Number(begun.record.review.deadline) - begun.record.review.block.timestamp + 120);
+    const expired = await s.service.positionObserve(run.id);
+    expect(expired.attempts.at(-1)).toMatchObject({ state: 'NOT_FOUND', note: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' });
+    await expect(s.service.positionRefresh(run.id)).rejects.toThrow('UNISWAP_POSITION_RUN_FINAL_SIMULATE_AGAIN');
+    await expect(s.service.positionReview(run.id, expired.review.commitment, w)).rejects.toThrow('UNISWAP_POSITION_RUN_FINAL_SIMULATE_AGAIN');
+    await expect(s.service.positionBegin(run.id, UNI_OWNER, w)).rejects.toThrow();
+    expect(s.chain.counters.sends).toBe(0);
   });
 
   it('a PREPARED attempt whose Review lapsed (an abandoned tab, or a run someone else prepared for this owner) never blocks the position or the nonce', async () => {
