@@ -82,7 +82,18 @@ function notSubmittedWording(state: string, message: string): { chip: string; me
 }
 const NOT_SUBMITTED_RUN = ['CANCELLED', 'REJECTED', 'NOT_SUBMITTED', 'NOT_EXECUTED', 'EXPIRED'];
 
-export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? (run.flow.startsWith('crosschain-router-') ? 'Bridge' : 'Financial operation'), current = false): DashboardRunView {
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a liquidity run that manages an existing position is titled by its operation (its attempt step: Uniswap
+ * COLLECT / DECREASE / EXIT, Orca COLLECT / DECREASE_PARTIAL / EXIT); an OPEN, a mint or a run with no recorded attempt keeps the flow's title.
+ */
+const POSITION_TITLES: Readonly<Record<string, string>> = { COLLECT: 'Collect fees', DECREASE: 'Remove liquidity', DECREASE_PARTIAL: 'Remove liquidity', EXIT: 'Exit liquidity position' };
+export function dashboardRunTitle(run: Pick<DashboardRun, 'flow' | 'attempts'>): string {
+  const base = titles[run.flow] ?? (run.flow.startsWith('crosschain-router-') ? 'Bridge' : 'Financial operation');
+  if (base !== 'Liquidity workflow') return base;
+  const step = run.attempts?.map(attempt => attempt.step).find(step => Object.hasOwn(POSITION_TITLES, step));
+  return step ? POSITION_TITLES[step]! : base;
+}
+export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = dashboardRunTitle(run), current = false): DashboardRunView {
   const result = projectExecutionResult(progress);
   // A recorded unknown wallet or submission result: something may have been sent (the canonical lifecycle's INCONCLUSIVE).
   const unproven = recordedResultUnknown(run.errorCode);

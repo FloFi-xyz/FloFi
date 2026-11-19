@@ -134,7 +134,7 @@ export const domainPortuguese: Readonly<Record<string, string>> = {
   'Understand the outcome': 'Compreenda o resultado', 'Inspect the route, expected results and risks. Review the Strategy Manifest before authorizing.': 'Verifique a rota, os resultados esperados e os riscos. Revise o Strategy Manifest antes de autorizar.',
   'Authorize and track execution': 'Autorize e acompanhe a execução',
   'Confirm each required wallet action, follow reconciliation and inspect the final evidence.': 'Confirme cada ação necessária na carteira, acompanhe a reconciliação e verifique a evidência final.',
-  'Local mock': 'Simulação local', 'Local fork (31337)': 'Fork local (31337)', 'Aave workflow': 'Fluxo Aave', 'Liquidity workflow': 'Fluxo de liquidez', 'Workflow execution': 'Execução do fluxo',
+  'Local mock': 'Simulação local', 'Local fork (31337)': 'Fork local (31337)', 'Aave workflow': 'Fluxo Aave', 'Liquidity workflow': 'Fluxo de liquidez', 'Collect fees': 'Coletar taxas', 'Remove liquidity': 'Remover liquidez', 'Exit liquidity position': 'Sair da posição de liquidez', 'Workflow execution': 'Execução do fluxo',
   'FloFi has not established the final workflow outcome.': 'O FloFi não determinou o resultado final do fluxo.', 'In progress': 'Em curso',
   'Completed with attention': 'Concluído com pontos a verificar', 'Partially completed': 'Parcialmente concluído', 'Unresolved': 'Por resolver',
   'The run records a reconciled outcome.': 'A execução regista um resultado reconciliado.', 'Earlier completed actions remain recorded.': 'As ações anteriormente concluídas mantêm-se registradas.',

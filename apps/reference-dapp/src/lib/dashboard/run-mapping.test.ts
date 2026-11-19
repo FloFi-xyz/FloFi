@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { currentDashboardRun, dashboardRunIndex, projectDashboardRun, toDashboardRun } from './run-mapping';
+import { currentDashboardRun, dashboardRunIndex, dashboardRunTitle, projectDashboardRun, toDashboardRun } from './run-mapping';
 import { projectDashboardRecord } from './record-projection';
 import type { DashboardRun, DashboardRunDetail } from './types';
 import { reviewFixture, reviewOwner } from '../../test-utils/review-fixture';
@@ -111,5 +111,20 @@ describe('a bridge whose delivery is observed on the destination', () => {
   });
   it('a flagged record keeps its attention wording', () => {
     expect(projectDashboardRun(bridge({ attentionRequired: true })).message).not.toContain('observed on the destination chain');
+  });
+});
+
+describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position-management runs in History', () => {
+  const attempt = (step: string) => ({ attemptId: `r.${step.toLowerCase()}.1`, step, state: 'CONFIRMED', transactionHash: '0x' + '1'.repeat(64), reconciled: true });
+  it('names a collect, a withdrawal or an exit by its operation; an open, a mint or a run with no attempt keeps the flow title', () => {
+    expect(dashboardRunTitle({ flow: 'base-liquidity', attempts: [attempt('COLLECT')] })).toBe('Collect fees');
+    expect(dashboardRunTitle({ flow: 'arbitrum-liquidity', attempts: [attempt('DECREASE')] })).toBe('Remove liquidity');
+    expect(dashboardRunTitle({ flow: 'orca-liquidity-mainnet', attempts: [attempt('DECREASE_PARTIAL')] })).toBe('Remove liquidity');
+    expect(dashboardRunTitle({ flow: 'robinhood-liquidity', attempts: [attempt('EXIT')] })).toBe('Exit liquidity position');
+    expect(dashboardRunTitle({ flow: 'base-liquidity', attempts: [attempt('APPROVE_TOKEN0'), attempt('MINT')] })).toBe('Liquidity workflow');
+    expect(dashboardRunTitle({ flow: 'orca-liquidity-mainnet', attempts: [attempt('OPEN')] })).toBe('Liquidity workflow');
+    expect(dashboardRunTitle({ flow: 'ethereum-liquidity' })).toBe('Liquidity workflow');
+    // Another action's step names never retitle it.
+    expect(dashboardRunTitle({ flow: 'base-aave', attempts: [attempt('EXIT')] })).toBe('Aave workflow');
   });
 });

@@ -1693,6 +1693,10 @@
     "app.server.liquidity-lifecycle-telemetry": {
       "path": "apps/reference-dapp/src/server/liquidity-lifecycle-telemetry.test.ts",
       "stage": "unit"
+    },
+    "app.backend.uniswap-position-flow": {
+      "path": "apps/reference-dapp/backend/uniswap-position-flow.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1845,7 +1849,8 @@
     "app.platform.settlement-regression-matrix",
     "reference-compiler.uniswap-position-management",
     "app.server.uniswap-position-service",
-    "app.server.liquidity-lifecycle-telemetry"
+    "app.server.liquidity-lifecycle-telemetry",
+    "app.backend.uniswap-position-flow"
   ],
   "modules": [
     {
@@ -3268,7 +3273,8 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "app.backend.uniswap-position-flow"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -7156,7 +7162,8 @@
         "app.server.defi-positions",
         "reference-compiler.uniswap-position-management",
         "app.server.uniswap-position-service",
-        "app.server.liquidity-lifecycle-telemetry"
+        "app.server.liquidity-lifecycle-telemetry",
+        "app.backend.uniswap-position-flow"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
