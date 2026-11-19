@@ -89,8 +89,9 @@ export function saveCanvasLayout(workflowId: string, layout: CanvasLayout) {
 
 export type ToolboxMode = 'top' | 'floating';
 const toolboxModeKey = 'gryloo:toolbox-mode';
-/** BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): on a desktop Canvas the vertical rail ('floating') is the default home of the tools; on a phone
- * (≤700 px) the docked row stays the default, so every tool keeps its 44 px touch target. An owner's own choice is remembered everywhere.
+/** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (intentional change; approved reference "Criar", 19-11-2026): the docked row of named tools under the
+ * Editor header ('top') is the default home of the tools on every width — one compact area, Swap · Bridge · Send … each with its name. The vertical
+ * rail ('floating', the BUILD-FLOFI-BUILDER-UX-002 default) stays one ··· choice away, and an owner's own choice is remembered everywhere.
  * Layout preference only. */
 export const NARROW_TOOLBOX_QUERY = '(max-width: 700px)';
 export function readToolboxMode(): ToolboxMode {
@@ -98,8 +99,7 @@ export function readToolboxMode(): ToolboxMode {
     const stored = localStorage.getItem(toolboxModeKey);
     if (stored === 'top' || stored === 'floating') return stored;
   } catch { /* storage is optional */ }
-  try { return window.matchMedia(NARROW_TOOLBOX_QUERY).matches ? 'top' : 'floating'; }
-  catch { return 'floating'; }
+  return 'top';
 }
 export function saveToolboxMode(mode: ToolboxMode): void {
   try { localStorage.setItem(toolboxModeKey, mode); } catch { /* storage is optional */ }

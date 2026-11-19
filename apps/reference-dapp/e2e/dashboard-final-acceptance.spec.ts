@@ -164,7 +164,9 @@ test('current-run navigation remains a read-only path to Execute and survives un
   await page.evaluate(() => { window.flofiWorkspaceAcceptance.respond(0, 'unavailable'); window.flofiWorkspaceAcceptance.current(); });
   await expect(index.locator('.dashboard-current')).toContainText('In progress');
   await index.locator('.dashboard-current').getByRole('link').click();
-  await expect(index.locator('.dashboard-detail-heading')).toContainText('CURRENT EXECUTION');
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the record opens on its receipt; that it is the current execution is stated in its Technical details.
+  await expect(index.locator('.execution-receipt')).toBeVisible();
+  await expect(index.locator('.execution-receipt-record-context')).toContainText('Current execution');
   await index.getByRole('button', { name: 'Open current execution', exact: true }).click();
   expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.navigation())).toEqual(['/app/dashboard/runs/fixture-detail-run', 'Execute']);
   await index.getByRole('button', { name: 'Back to Dashboard' }).click(); await reads(page, 2);
@@ -183,14 +185,15 @@ for (const value of ['light', 'dark'] as const) test(`${value} long recorded amo
   const detail = workspace(page);
   for (const mode of ['completed', 'bridge-completed', 'cow-pending'] as const) {
     await page.evaluate(value => { window.flofiRunDetailAcceptance.show(value); window.flofiRunDetailAcceptance.longTitle(); window.flofiRunDetailAcceptance.longValues(); }, mode);
-    await expect(detail.locator('.dashboard-detail-heading h1')).toContainText('OwnerDefinedWorkflowName');
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a one-step receipt is titled by its operation; the long workflow name stays in the record's timeline.
+    await expect(detail.locator('.execution-plan h2')).toContainText('OwnerDefinedWorkflowName');
     await expect(detail.locator('.execution-plan')).toContainText('9'.repeat(60));
     for (const width of [320, 375, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await expect(detail.getByRole('button', { name: 'Back to Dashboard' })).toBeVisible();
     }
-    const disclosure = detail.getByText('View technical details', { exact: true });
+    const disclosure = detail.locator('.execution-receipt-technical > summary');
     await disclosure.focus();
     if (await detail.locator('details').getAttribute('open') !== null) await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');

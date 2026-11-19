@@ -18,7 +18,7 @@ import { feeShortfallView } from '../domain/approved-ux';
 import { circleUnavailableReason } from '../domain/token-fee';
 import { isIncludedNetworkFee, paidToPimlicoNote, SIGNATURES_LABEL } from '../domain/gas-payment';
 import type { NativeFeeShortfall } from '../user-funded/groups';
-import { OperationSummary } from './operation-summary';
+import { OperationSummary, WorkflowTechnicalFacts } from './operation-summary';
 import { liquidityPositionResultRows, positionWorkflowOf } from '../domain/liquidity-position-summary';
 
 export type ReviewSummaryPanelProps = {
@@ -66,9 +66,10 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // layout is on screen. The panel switches between its blocker, waiting, result and expired layouts as the simulation changes; an uncontrolled
   // <details> was re-created closed on every switch, hiding what the owner had just opened.
   const [technicalOpen, setTechnicalOpen] = useState(false);
-  const technical = props.technical ? <details className="review-panel-technical" open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)}>
-    <summary>{t(blocked ? 'Technical details, for support' : 'Technical details')}</summary>
-    {blocked && source.state.error && <p className="review-panel-code"><code>{source.state.error}</code></p>}{props.technical}</details> : null;
+  const disclosure = (content: ReactNode, label = 'Technical details') => <details className="review-panel-technical" open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)}>
+    <summary>{t(label)}</summary>{content}</details>;
+  const technical = props.technical ? disclosure(<>{blocked && source.state.error && <p className="review-panel-code"><code>{source.state.error}</code></p>}{props.technical}</>,
+    blocked ? 'Technical details, for support' : 'Technical details') : null;
   const action = props.action ? <div className="simulation-panel-action">{props.action}</div> : null;
   if (blocked && !expired) return <BlockerPanel message={props.unavailableReason ?? status.message} title={status.label} error={source.state.error ?? null}
     owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={action}/>;
@@ -105,16 +106,21 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
     if (expired) return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="expired" data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       <ExpiredReviewAlert/>
-      <OperationSummary workflow={canvas} context={context}/>
-      <dl className="review-panel-rows">
-        <div><dt>{t('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed"/></dd></div>
-        {/* A position operation is one Position Manager (or Whirlpools) request that spends no token: structurally no permission and one wallet
-            request, whatever the refreshed figures; every amount is marked for the refreshed Review. */}
-        <div><dt>{t('Token permission')}</dt><dd>{position ? t('None — this operation needs no token permission') : <RefreshBadge text="Depends on the updated review"/>}</dd></div>
-        {position ? <div><dt>{t('Wallet requests')}</dt><dd>1</dd></div>
-          : typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
-      </dl>
-      {technical}
+      {/* BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference, expired review): one white card — the operations as configured, the fee and
+          permission marked for the refreshed Review, the wallet requests only when counted, and the collapsed technical details. */}
+      <div className="review-expired-card">
+        <OperationSummary workflow={canvas} context={context}/>
+        <dl className="review-panel-rows">
+          <div><dt>{t('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed" hint="The network fee is calculated again when you refresh the review."/></dd></div>
+          {/* A position operation is one Position Manager (or Whirlpools) request that spends no token: structurally no permission and one wallet
+              request, whatever the refreshed figures; every amount is marked for the refreshed Review. */}
+          <div><dt>{t('Token permission')}</dt><dd>{position ? t('None — this operation needs no token permission') : <RefreshBadge text="Depends on the updated review" hint="The token permission is confirmed again by the refreshed review."/>}</dd></div>
+          {position ? <div><dt>{t('Wallet requests')}</dt><dd>1</dd></div>
+            : typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
+        </dl>
+        {technical ?? disclosure(<WorkflowTechnicalFacts workflow={canvas} context={context}
+          expiredAt={review.expiresAt !== null ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null}/>)}
+      </div>
     </section>;
     if (!ready) return <section className="review-panel-approved review-panel-execute" aria-label={t('Simulation')} data-review-state={busy ? 'busy' : 'pending'} data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
@@ -180,13 +186,17 @@ export function SimulationExplainer() {
 /** C2: the Review expired — said first, in its own surface, with what to do. */
 export function ExpiredReviewAlert() {
   const { t } = useLocale();
-  return <div className="review-expired-alert" role="alert"><span className="review-expired-mark" aria-hidden="true">!</span>
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a soft-orange notice with a discreet warning triangle — an expiry is not a loss of funds (never alarm red).
+  return <div className="review-expired-alert" role="alert"><span className="review-expired-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2.8c.7 0 1.3.4 1.7 1l8.6 15c.7 1.2-.2 2.7-1.6 2.7H3.3c-1.4 0-2.3-1.5-1.6-2.7l8.6-15c.4-.6 1-1 1.7-1Z"/><path d="M12 8.6v5.6M12 17.2v.1" stroke="var(--surface)" strokeWidth="2.2" strokeLinecap="round"/></svg></span>
     <div><strong>{t('Your review expired')}</strong><p>{t('Refresh the simulation and check the new values before authorizing.')}</p></div></div>;
 }
-/** C2: a value that only a refreshed Review can state (never a stale figure). */
-export function RefreshBadge({ text }: { text: string }) {
+/** C2: a value that only a refreshed Review can state (never a stale figure); `hint` says why, on hover and to assistive technology. */
+export function RefreshBadge({ text, hint = null }: { text: string; hint?: string | null }) {
   const { t } = useLocale();
-  return <span className="review-refresh-badge">{t(text)}</span>;
+  return <span className="review-refresh-badge" title={hint ? t(hint) : undefined}>{t(text)}{hint && <>
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1" strokeLinecap="round"/></svg>
+    <span className="sr-only">{t(hint)}</span></>}</span>;
 }
 
 /** Board 07: what blocks the simulation, the server's own numbers when it has them, and the one next action (the footer keeps "Simulate again"). */

@@ -382,7 +382,8 @@ it('projects cross-chain output references and Solana assets without guessed amo
 describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
   const overview = (state: EditorOverview['state'], networks: readonly string[] = ['Base Sepolia']): EditorOverview =>
     ({ count: 1, steps: [], networks, state, attention: [], drafts: 0, invalid: false });
-  const labels = (html: string) => [...html.slice(html.indexOf('class="canvas-primary-tools"'), html.indexOf('class="canvas-rail-toggle"'))
+  const labels = (html: string) => [...html.slice(html.indexOf('class="canvas-primary-tools"'), html.indexOf('class="canvas-rail-toggle"') >= 0
+    ? html.indexOf('class="canvas-rail-toggle"') : html.indexOf('</div></div>', html.indexOf('class="canvas-primary-tools"')))
     .matchAll(/aria-label="(Add [^"]+|Stocks)"|canvas-rail-separator/g)].map(match => match[1] ?? '|');
 
   it('header: the name, its network chip, the step count and the state once; Undo, Redo and ··· (Save, Automate)', () => {
@@ -414,14 +415,18 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     expect(html).toContain('<span>1 step · 1 step needs attention</span>');
   });
 
-  it('rail: icon-only by default, in the approved groups, without Privacy, with the expand chevron (aria-expanded)', () => {
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (intentional change; approved reference "Criar"): the tools' default home is the docked row of named tools
+  // under the Editor header, in the same approved groups; the icon rail (with its expand chevron, covered by e2e/canvas-ux.spec.ts) is a ··· choice.
+  it('tools: the docked row of named tools by default, in the approved groups, without Privacy', () => {
     setActiveNetworkScope('PUBLIC_MAINNET');
     try {
       setWorkflow();
       const html = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() }));
       expect(labels(html)).toEqual(['Add swap', 'Add bridge', 'Add send', '|', 'Add pool', 'Add supply', 'Add withdraw', '|', 'Add borrow', 'Add repay', '|', 'Stocks']);
-      expect(html).toMatch(/<div class="floating-toolbox" id="([^"]+)" data-rail-expanded="false">[\s\S]*<button type="button" class="canvas-rail-toggle" aria-label="Show action names" aria-expanded="false" aria-controls="\1">/);
-      // The name is the tooltip and the expanded label; the accessible name stays "Add {action}".
+      expect(html).toMatch(/<section class="canvas panel [^"]*"[^>]*data-toolbox="top"/);
+      expect(html).toMatch(/<div class="canvas-toolbar-row"><div class="canvas-toolbox" role="toolbar" aria-label="Canvas tools">/);
+      expect(html).not.toContain('class="floating-toolbox"');
+      // Each tool shows its name; the accessible name stays "Add {action}".
       expect(html).toContain('aria-label="Add swap"'); expect(html).toContain('<span class="canvas-rail-label">Swap</span>');
       expect(html).not.toMatch(/Privacy|title="Add swap"/);
     } finally { setActiveNetworkScope(null); }

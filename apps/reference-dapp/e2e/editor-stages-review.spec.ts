@@ -123,6 +123,13 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(page.locator('.canvas-head .canvas-head-stages').getByRole('navigation', { name: /^(Editor steps|Etapas do editor)$/ })).toBeVisible();
   // Create, empty: the future stages are closed and say why.
   await expect(editorSectionAction(page, 'Simulate')).toHaveAccessibleName(W.simulateClosed);
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference "Criar"): the creation tools are ONE docked row of named tools under the Editor
+  // header (Create only), and the workflow's state is a discreet dot and words beside the step count (no pill).
+  const tools = page.locator('.build-canvas-head .canvas-toolbar-row').getByRole('toolbar', { name: /^(Canvas tools|Ferramentas do Canvas)$/ });
+  await expect(tools).toBeVisible();
+  await expect(tools.locator('.canvas-rail-label').first()).toBeVisible();
+  await expect(page.locator('.build-flow-surface .floating-toolbox')).toHaveCount(0);
+  expect(await page.locator('.build-canvas-head .editor-state-pill').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
   // Pressing a closed stage says why (no hover needed) and opens nothing; Escape dismisses it (forced past Playwright's aria-disabled check).
   await editorSectionAction(page, 'Simulate').click({ force: true });
   await expect(editorSteps(page).getByRole('status')).toHaveText(W.simulateClosed);
@@ -152,6 +159,15 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(page.locator('main, .summary-bar').getByRole('button', { name: W.simulate, exact: true })).toHaveCount(1);
   await expect(footer(page).getByRole('button', { name: W.review, exact: true })).toBeDisabled();
   await expect(page.locator('main')).not.toContainText(W.authorizing);
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference "Simular"): networks read as names (no chain number), the technical details are one
+  // collapsed row (the chain identifiers live there), and Simulate has no creation tools.
+  for (const chip of await simulation.locator('.operation-summary-chip').allInnerTexts()) expect(chip).not.toMatch(/\(\d+\)/);
+  const simulateTechnical = simulation.locator('details.review-panel-technical');
+  await expect(simulateTechnical).toHaveCount(1); await expect(simulateTechnical).not.toHaveAttribute('open', '');
+  await expect(page.getByRole('toolbar', { name: /^(Canvas tools|Ferramentas do Canvas)$/ })).toHaveCount(0);
+  await simulateTechnical.locator('> summary').click();
+  await expect(simulateTechnical).toContainText('eip155:8453');
+  await simulateTechnical.locator('> summary').click();
   await evidence(page, 'simulate-awaiting');
   await editorStep(page, 'Build').click();
   await expectEditorSection(page, 'Build');
@@ -196,6 +212,21 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(footer(page)).toContainText(W.reviewExpired);
   await expect(page.locator('.copilot-stage-note')).toContainText(W.assistant);
   await expect(page.locator('.simulation-workflow-canvas .composer-card')).toHaveCount(3);
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference "Executar — revisão expirada"): the notice, then ONE card with the numbered summary as
+  // configured, the fee and permission marked for the refreshed Review (each with why), and collapsed technical details that state no stale figure.
+  const expiredCard = runPanel(page).locator('.review-expired-card');
+  await expect(expiredCard.locator('.operation-summary[data-variant="numbered"] li')).toHaveCount(3);
+  await expect(expiredCard.locator('.operation-summary-sentence').first()).toContainText(PT ? 'na rede Base' : 'on Base');
+  await expect(expiredCard.locator('.review-refresh-badge')).toHaveCount(2);
+  for (const badge of await expiredCard.locator('.review-refresh-badge').all()) await expect(badge).toHaveAttribute('title', /./);
+  const expiredTechnical = expiredCard.locator('details.review-panel-technical');
+  await expect(expiredTechnical).not.toHaveAttribute('open', '');
+  await expiredTechnical.locator('> summary').click();
+  await expect(expiredTechnical).toContainText('eip155:8453');
+  await expect(expiredTechnical).toContainText(PT ? 'não estão mais atualizados' : 'no longer current');
+  await expiredTechnical.locator('> summary').click();
+  // "Refresh review" is the one primary action on screen.
+  await expect(page.locator('main, .summary-bar').locator('button.primary:visible')).toHaveCount(1);
   await evidence(page, 'execute-expired');
   if (EVIDENCE) {
     await page.setViewportSize({ width: 390, height: 844 });

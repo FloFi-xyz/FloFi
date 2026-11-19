@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { useLocale } from '../i18n/locale';
 import type { Workflow } from '../domain/initial-workflow';
 import { EditorWorkflowRunPanel, workflowRunErrorText, type EditorWorkflowRunState } from './editor-workflow-run';
-import { OperationSummary } from './operation-summary';
+import { OperationSummary, WorkflowTechnicalFacts } from './operation-summary';
 import { SimulationExplainer, SimulationPanelHead } from './review-summary-panel';
 
 /**
@@ -18,6 +18,8 @@ import { SimulationExplainer, SimulationPanelHead } from './review-summary-panel
 export function GroupedSimulationPanel({ state, canvasWorkflow, context, action }: { state: EditorWorkflowRunState; canvasWorkflow: Workflow; context: ReviewContext;
   action: ReactNode }) {
   const { t, language } = useLocale();
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the collapsed "Technical details" keep the owner's open/closed choice across this panel's views.
+  const [technicalOpen, setTechnicalOpen] = useState(false);
   const review = state.review;
   const now = Date.now();
   const expired = Boolean(review?.validUntil && Date.parse(review.validUntil) <= now);
@@ -39,5 +41,8 @@ export function GroupedSimulationPanel({ state, canvasWorkflow, context, action 
     {(view === 'pending' || view === 'expired') && state.error && <p className="review-block-alert" role="alert">{t(workflowRunErrorText(state.error), state.error)}</p>}
     {view === 'pending' && <SimulationExplainer/>}
     {view !== 'ready' && view !== 'started' && <div className="simulation-panel-action">{action}</div>}
+    {/* Before a result (and once it expired or was refused) the configured workflow's secondary facts, collapsed; a valid result carries its own. */}
+    {(view === 'pending' || view === 'busy' || view === 'expired') && <details className="review-panel-technical" open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)}>
+      <summary>{t('Technical details')}</summary><WorkflowTechnicalFacts workflow={canvasWorkflow} context={context}/></details>}
   </section>;
 }

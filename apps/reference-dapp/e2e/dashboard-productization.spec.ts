@@ -62,7 +62,7 @@ test('current execution and saved cards retain status, evidence and distinct rev
   await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
   await expect(page.locator('.ux-record-current')).toHaveCount(1);
   await current.getByRole('link').focus(); await current.getByRole('link').press('Enter');
-  await expect(page.locator('.dashboard-result-summary')).toContainText('Unresolved');
+  await expect(page.locator('.execution-receipt')).toContainText('Unresolved');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => window.flofiDashboardAcceptance.counts().executed)).toBe(0);
@@ -83,7 +83,7 @@ test('current execution and saved cards retain status, evidence and distinct rev
   // The completed run is the one executed record (its row's Open names the workflow).
   await filterRecords(page, 'Executed');
   await page.getByRole('list', { name: 'Executed', exact: true }).getByRole('link', { name: 'Open record: Swap', exact: true }).click();
-  await expect(page.locator('.dashboard-result-summary')).toContainText('Completed');
+  await expect(page.locator('.execution-receipt')).toContainText('Completed');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
 });
@@ -171,9 +171,9 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} Dashboard cards, 
   await page.setViewportSize({ width: 320, height: 1000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('.dashboard-current').getByRole('link').click();
-  await expect(page.locator('.dashboard-result-summary')).toContainText('Unresolved');
+  await expect(page.locator('.execution-receipt')).toContainText('Unresolved');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByText('View technical details', { exact: true }).click();
+  await page.locator('.execution-receipt-technical > summary').click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: `.tmp/ux006b-run-detail-${theme}-320.png`, fullPage: true });
 });

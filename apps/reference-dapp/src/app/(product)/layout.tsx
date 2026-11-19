@@ -30,6 +30,8 @@ import '../approved-ux-editor.css';
 import '../approved-ux-pages.css';
 // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the global product areas, the Editor's own header (stage indicator), the Simulate panel and Execute review states.
 import '../editor-workspace.css';
+// BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the approved Criar / Simular / Executar refinement and the simplified execution receipt (last).
+import '../ux-refinement.css';
 
 /**
  * One persistent workspace for /app, its deep links, /approve and /connections.

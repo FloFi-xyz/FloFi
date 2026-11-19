@@ -177,25 +177,26 @@ test('toolbox mode is presentation-only and persists across Build navigation', a
   const graph = page.getByRole('region', { name: 'Workflow graph' });
   const original = await graph.locator('.react-flow__node').count();
   const revisionBeforeSwitch = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
-  // BUILD-FLOFI-BUILDER-UX-002 (owner-approved brief): the vertical rail is the default; docking is the owner's remembered choice. P0 approved UX
-  // (board 04): the choice is the ··· (More options) menu's "Dock toolbar" / "Undock toolbar" item.
-  await expect(graph.locator('.floating-toolbox')).toBeVisible();
-  await expect(graph.locator('.floating-toolbox').getByRole('button', { name: 'Add swap' })).toBeVisible();
-  await openWorkflowMenu(page);
-  await expect(workflowMenuItem(page, 'Dock toolbar')).toBeVisible();
-  await workflowMenuItem(page, 'Dock toolbar').click();
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (intentional change; approved reference "Criar"): the docked row of named tools is the default; the
+  // vertical rail is the owner's remembered choice. P0 approved UX (board 04): the choice is the ··· menu's "Undock toolbar" / "Dock toolbar" item.
   await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
   await expect(page.locator('.canvas-head').getByRole('button', { name: 'Add swap' })).toBeVisible();
+  await openWorkflowMenu(page);
+  await expect(workflowMenuItem(page, 'Undock toolbar')).toBeVisible();
+  await workflowMenuItem(page, 'Undock toolbar').click();
+  await expect(graph.locator('.floating-toolbox')).toBeVisible();
+  await expect(graph.locator('.floating-toolbox').getByRole('button', { name: 'Add swap' })).toBeVisible();
   await expect(graph.locator('.react-flow__node')).toHaveCount(original);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revisionBeforeSwitch!);
   await addFromToolbox(page, 'swap');
   await openEditorSection(page, 'Simulate');
   await openEditorSection(page, 'Build');
-  await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
-  await openWorkflowMenu(page);
-  await expect(workflowMenuItem(page, 'Undock toolbar')).toBeVisible();
-  await workflowMenuItem(page, 'Undock toolbar').click();
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
+  await openWorkflowMenu(page);
+  await expect(workflowMenuItem(page, 'Dock toolbar')).toBeVisible();
+  await workflowMenuItem(page, 'Dock toolbar').click();
+  await expect(graph.locator('.floating-toolbox')).toHaveCount(0);
+  await expect(page.locator('.canvas-head').getByRole('button', { name: 'Add swap' })).toBeVisible();
   // Board 04: Undo and Redo sit in the Canvas header in either layout.
   await expect(page.locator('.build-canvas-head').getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
   await expect(page.getByText('Technical workflow details')).toHaveCount(0);
@@ -316,7 +317,7 @@ test('drag keeps node mounted and cyclic connections leave semantic edges unchan
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
   const connectedIr = await readWorkflowIr(page);
   await connect(page, 'node-003', 'node-002');
-  await chooseWorkflowMenuItem(page, 'Dock toolbar');
+  await chooseWorkflowMenuItem(page, 'Undock toolbar');
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   expect(await readWorkflowIr(page)).toBe(connectedIr);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
@@ -371,14 +372,14 @@ test('the first toolbar action waits for initialization and survives preference 
   await continueToBuilder(page);
   await expect(page.getByLabel('Describe your flow')).toBeEnabled();
   await expect(undock).toBeVisible();
-  // The rail is the default; the owner's docked choice is restored after a reload.
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the docked row is the default; the owner's rail choice is restored after a reload.
+  await expect(page.locator('.floating-toolbox')).toHaveCount(0);
+  await chooseWorkflowMenuItem(page, 'Undock toolbar');
   await expect(page.locator('.floating-toolbox')).toBeVisible();
-  await chooseWorkflowMenuItem(page, 'Dock toolbar');
-  await expect(page.locator('.floating-toolbox')).toHaveCount(0);
   await reloadBuilder(page);
-  await expect(page.locator('.floating-toolbox')).toHaveCount(0);
+  await expect(page.locator('.floating-toolbox')).toBeVisible();
   await openWorkflowMenu(page);
-  await expect(workflowMenuItem(page, 'Undock toolbar')).toBeVisible();
+  await expect(workflowMenuItem(page, 'Dock toolbar')).toBeVisible();
   await closeWorkflowMenu(page);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await expect(page.locator('.react-flow__node')).toHaveCount(0);

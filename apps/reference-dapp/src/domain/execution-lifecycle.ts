@@ -29,6 +29,13 @@ import type { useCow } from '../state/cow-store';
 import type { useUniversalRouter } from '../state/universal-router-store';
 import { gaslessLifecycleState } from './gas-payment';
 import { quoteDecimals } from './public-testnet-swap';
+import { transferDetails } from './robinhood-transfer-authoring';
+
+/** A send step's configured recipient, when the node states one (display only; never a destination FloFi chose). */
+function configuredRecipient(node: Workflow['nodes'][number]): { recipient?: string } {
+  try { const recipient = transferDetails(node as Parameters<typeof transferDetails>[0])?.recipient; return recipient ? { recipient } : {}; }
+  catch { return {}; }
+}
 
 type ReadonlyStore<T> = Omit<T, { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never }[keyof T]>;
 export type ExecutionLifecycleSource =
@@ -109,7 +116,9 @@ export type LifecycleOperation = { id: string; nodeId: string; title: string; st
   /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY: why a request was not submitted (the attempt's closed refusal code), for the owner's sentence. */
   reason?: string };
 export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[];
-  labelArgs?: readonly string[] };
+  labelArgs?: readonly string[];
+  /** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a send step's configured recipient (display only; the execution receipt names where it went). */
+  recipient?: string };
 export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean;
   /** BUILD-P0-MAINNET-EXECUTION-RELIABILITY (Incident F): the run belongs to another workflow identity than an explicitly created new Canvas. */
   detached?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
@@ -379,7 +388,8 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       provider: source.kind === 'universal' ? simulationProvider(source.state.record?.review.route.provider ?? '') ?? card.provider ?? null
         : source.kind === 'router' ? simulationProvider(source.state.record?.review.route.routingProvider ?? '') ?? card.provider ?? null : source.kind === 'cow' ? 'CoW Protocol' : card.provider === 'Provider not specified' ? null : card.provider ?? null,
       tokens: [...new Set(`${card.amount} ${card.detail ?? ''} ${card.bridgePair ?? ''}`.match(/\b(?:devUSDC|USDC|WETH|ETH|WSOL|SOL|USDT)\b/g) ?? [])],
-      state: status, label: intent && completed ? 'Settled' : live?.label ?? labels[status], ...live?.labelArgs ? { labelArgs: live.labelArgs } : {}, operations: own };
+      state: status, label: intent && completed ? 'Settled' : live?.label ?? labels[status], ...live?.labelArgs ? { labelArgs: live.labelArgs } : {}, operations: own,
+      ...configuredRecipient(node) };
   });
   if (positionStep) for (const step of steps) if (step.id === positionStep.nodeId) { step.action = positionStep.action; step.input = positionStep.input; step.provider = 'Uniswap V3'; }
   // These legacy records retain requests, but no original workflow. Display their

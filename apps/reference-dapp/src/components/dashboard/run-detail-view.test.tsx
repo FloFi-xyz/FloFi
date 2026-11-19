@@ -9,11 +9,18 @@ function render(mode: RunDetailCase = 'completed', props: Partial<Parameters<typ
   return renderToStaticMarkup(<RunDetailView {...runDetailFixture(mode)} connection="CONNECTED" loading={false} back={noop} build={noop} execute={noop} refresh={noop} {...props}/>);
 }
 describe('Run Details reuses the UX-005 execution and evidence truth', () => {
-  it('gives a completed saved run a summary, timeline, visible evidence and one closed technical disclosure', () => {
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (intentional change, workstream B): the record opens on its receipt; the timeline, evidence, archive
+  // integrity and identifiers it showed as separate sections are all kept, under ONE closed "Technical details" after the receipt.
+  it('opens a completed saved run on its receipt and keeps the timeline, evidence and identifiers under one closed technical disclosure', () => {
     const html = render();
-    expect(html).toContain('SAVED EXECUTION'); expect(html).toContain('Execution completed'); expect(html).toContain('SAVED RUN RESULT');
-    expect(html).toContain('Run summary'); expect(html).toContain('RECORDED EXECUTION PROOF'); expect(html).toContain('Archive integrity verified');
-    expect(html.match(/<details/g)).toHaveLength(1); expect(html).not.toContain('<details open');
+    expect(html).toContain('id="execution-receipt-title"'); expect(html).toMatch(/<span class="execution-receipt-title" title="Swap">Swap<\/span>/);
+    expect(html).toContain('— Completed</span>'); expect(html).toContain('You sent'); expect(html).toContain('100 USDC');
+    expect(html).toContain('You received'); expect(html).toContain('0.0243 WETH'); expect(html).toContain('Steps completed'); expect(html).toContain('1 of 1');
+    expect(html).toContain(`href="https://sepolia.basescan.org/tx/${detailHash}"`);
+    expect(html.indexOf('execution-receipt-title')).toBeLessThan(html.indexOf('<details'));
+    expect(html).toContain('Saved execution · read-only'); expect(html).toContain('Execution completed'); expect(html).toContain('SAVED RUN RESULT');
+    expect(html).toContain('RECORDED EXECUTION PROOF'); expect(html).toContain('Archive integrity verified');
+    expect(html.match(/<details/g)).toHaveLength(1); expect(html).not.toMatch(/<details[^>]* open/);
     expect(html).toContain('Saved execution record'); expect(html).not.toContain('Current execution record');
     expect(html).not.toContain('current execution record'); expect(html).not.toContain('Back to the Canvas');
   });

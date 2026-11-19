@@ -114,7 +114,8 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(text(html)).toContain('Remove 25% of liquidity');
     expect(text(html)).toContain(`Uniswap v3 position #${record.review.position.tokenId}`);
     const shown = rows(html);
-    expect(shown['Network fee']).toBe('Needs to be refreshed');
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the badge is followed by why it needs refreshing (its tooltip, also read by assistive technology).
+    expect(shown['Network fee']).toBe('Needs to be refreshed The network fee is calculated again when you refresh the review.');
     expect(shown['Token permission']).toBe('None — this operation needs no token permission');
     expect(shown['Wallet requests']).toBe('1');
     // Nothing of the expired Review is presented as current.

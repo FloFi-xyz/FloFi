@@ -985,7 +985,7 @@ export function EditorWorkflowSimulateAction({ state, disabled = false, reason =
   </div>;
 }
 
-export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 'execute', summary = null }: { state: EditorWorkflowRunState;
+export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 'execute', summary = null, facts = null }: { state: EditorWorkflowRunState;
   /** The chat-first Editor hosts the Review's primary action in its footer (`EditorWorkflowRunPrimaryAction`); the panel shows none before a run. */
   actionsOutside?: boolean;
   /**
@@ -996,7 +996,12 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
    */
   stage?: 'simulate' | 'execute';
   /** C2: the workflow's operations as configured on the Canvas (`OperationSummary`), shown in place of the expired Review's figures. */
-  summary?: ReactNode }) {
+  summary?: ReactNode;
+  /**
+   * BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference, expired review): the configured workflow's secondary facts (`WorkflowTechnicalFacts`)
+   * under C2's collapsed "Technical details" — never the expired Review's figures.
+   */
+  facts?: ReactNode }) {
   const { t: tr, language } = useLocale();
   const { review, run, phase, error } = state;
   const [now, setNow] = useState(() => Date.now());
@@ -1233,12 +1238,18 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
           marked as needing a refreshed Review; the footer's one action refreshes it ("Refresh review"), and nothing can be authorized meanwhile. */}
       <ExpiredReviewAlert/>
       {(refusal || errorText) && <p className="review-block-alert" role="alert">{[refusal, errorText !== refusal ? errorText : null].filter(Boolean).join(' ')}</p>}
-      {summary}
-      <dl className="review-panel-rows review-block-rows">
-        <div><dt>{tr('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed"/></dd></div>
-        <div><dt>{tr('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review"/></dd></div>
-        {block && <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>}
-      </dl>
+      {/* BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: one white card under the notice; the wallet requests only as counted by the Review (no count, no row). */}
+      <div className="review-expired-card">
+        {summary}
+        <dl className="review-panel-rows review-block-rows">
+          <div><dt>{tr('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed" hint="The network fee is calculated again when you refresh the review."/></dd></div>
+          <div><dt>{tr('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review" hint="The token permission is confirmed again by the refreshed review."/></dd></div>
+          {block && <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>}
+        </dl>
+        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>
+          {review.validUntil && <p className="workflow-technical-expired">{tr('The previous review expired at {0}; its values are no longer current and are not shown.', fmtTime(review.validUntil, language))}</p>}
+          {facts}</details>
+      </div>
     </>}
     {fresh && !feeBlocked && stage === 'simulate' && review && block && !expired && <>
       {/* B2: the simulated result of the whole workflow — what each step spends and is expected to deliver, the minimum and the network fee. */}
