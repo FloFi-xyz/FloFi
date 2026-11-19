@@ -2615,6 +2615,44 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Remove some of my liquidity"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "DECREASE",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Quero tirar um pouco da minha liquidez"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "POSITION",
+      "operation": "DECREASE",
+      "protocol": null,
+      "network": null,
+      "percent": null,
+      "select": null
+     }
+    }
+   }
   }
  ]
 }

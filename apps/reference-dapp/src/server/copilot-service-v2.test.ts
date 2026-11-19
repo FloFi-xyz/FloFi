@@ -184,7 +184,9 @@ describe('V2 replay', () => {
     for (const [user, expected] of [['Show my liquidity positions', 'LIST'], ['Quais são as minhas pools?', 'LIST'], ['Which of my pools are in range?', 'LIST'],
       ['How much can I collect from my Uniswap position?', 'INSPECT'], ['Collect my fees on Base', 'COLLECT'], ['Coleta minhas taxas da Uniswap', 'COLLECT'],
       ['Só os rendimentos', 'COLLECT'], ['Remove 50% of my liquidity', 'DECREASE'], ['Retira metade da minha liquidez', 'DECREASE'],
-      ['Withdraw everything from my WETH/USDC position', 'EXIT'], ['Quero sair completamente dessa pool', 'EXIT'], ['Close my Orca position', 'CLOSE']] as const)
+      ['Withdraw everything from my WETH/USDC position', 'EXIT'], ['Quero sair completamente dessa pool', 'EXIT'], ['Close my Orca position', 'CLOSE'],
+      // The browser chat journey's open removal requests (e2e/chat-liquidity-positions.spec.ts): no portion, so FloFi asks which position and how much.
+      ['Remove some of my liquidity', 'DECREASE'], ['Quero tirar um pouco da minha liquidez', 'DECREASE']] as const)
       expect(operation(user), user).toBe(expected);
     for (const [, intent] of positions) expect(JSON.stringify(intent)).not.toMatch(/positionId|tokenId|mint|0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}/);
   });
