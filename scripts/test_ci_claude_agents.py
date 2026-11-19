@@ -1,4 +1,4 @@
-"""Claude Code hook contracts: Read-only reviewer guard and non-sensitive lifecycle ledger.
+"""Claude Code hook contracts and offline verification probe wiring.
 
 Runs in every existing governance job; uses a disposable Git repository and never
 starts Claude Code, a model, the network or a financial operation.
@@ -14,6 +14,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+import verify_claude_agents as probe
 
 HOOK = Path(__file__).resolve().parents[1] / ".claude/hooks/flofi_agent_hooks.py"
 SPEC = importlib.util.spec_from_file_location("flofi_agent_hooks", HOOK)
@@ -439,6 +442,70 @@ class ProjectWiring(unittest.TestCase):
                                                     "guard" if event == "PreToolUse" else "record"])
         guard = settings["hooks"]["PreToolUse"][0]
         self.assertEqual((guard["matcher"], guard["hooks"][0]["onFailure"]), ("*", "block"))
+
+
+class OfflineProbe(unittest.TestCase):
+    def setUp(self):
+        scratch = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.object(probe, "ROOT", Path(scratch)))
+        server = self.enterContext(patch.object(probe.http.server, "ThreadingHTTPServer"))
+        server.return_value.__enter__.return_value.server_port = 4321
+        self.enterContext(patch.object(probe.threading, "Thread"))
+        self.version = self.enterContext(patch.object(probe.subprocess, "check_output", return_value="2.1.327"))
+        self.claude = self.enterContext(patch.object(probe.subprocess, "run"))
+
+    def test_only_auto_mode_handback_subprocess_receives_compatibility_flags(self):
+        def init_result(argv, **_kwargs):
+            session_id = argv[argv.index("--session-id") + 1]
+            init = {"type": "system", "subtype": "init", "session_id": session_id}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(init), "")
+
+        self.claude.side_effect = init_result
+        parent = {"CLAUDE_CODE_AUTO_MODE_SERVER": "1", "CLAUDE_CODE_SENDMESSAGE_HANDBACK": "parent"}
+        with patch.dict(os.environ, parent), patch.object(probe, "DOMAINS", ()):
+            probe.read_only_phase()
+            probe.handback_phase()
+            self.assertEqual({key: os.environ[key] for key in parent}, parent)
+
+        default, handback = self.claude.call_args_list
+        self.assertNotIn("--permission-mode", default.args[0])
+        self.assertEqual(handback.args[0][-3:-1], ["--permission-mode", "auto"])
+        for call in (default, *self.version.call_args_list):
+            for key in parent:
+                self.assertNotIn(key, call.kwargs["env"])
+        self.assertEqual(handback.kwargs["env"]["CLAUDE_CODE_AUTO_MODE_SERVER"], "0")
+        self.assertEqual(handback.kwargs["env"]["CLAUDE_CODE_SENDMESSAGE_HANDBACK"], "1")
+        self.assertEqual(handback.kwargs["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4321")
+
+    def test_empty_stderr_reports_only_allowlisted_structured_error_details(self):
+        event = {"type": "result", "subtype": "error_during_execution", "is_error": True,
+                 "errors": ["Auto mode could not check permission. private-message", "aborted_tools"],
+                 "result": "private-result", "session_id": "private-session"}
+        stdout = "\n".join(["private-banner", '{"private-malformed"', json.dumps(event)])
+        self.claude.return_value = subprocess.CompletedProcess([], 1, stdout, "  ")
+        with self.assertRaises(RuntimeError) as failure:
+            probe.run_claude(None, SESSION)
+        self.assertEqual(str(failure.exception), "Claude Code probe run failed (exit 1): structured result "
+                         "error_during_execution, error count 2, Auto Mode permission check failed, aborted_tools, "
+                         "malformed stream JSON")
+
+    def test_stderr_remains_preferred_and_unknown_stdout_fields_are_omitted(self):
+        event = {"type": "result", "subtype": "private-subtype", "is_error": True,
+                 "errors": ["private-message"], "stop_reason": "private-reason"}
+        stdout = json.dumps(event)
+        self.claude.return_value = subprocess.CompletedProcess([], 1, stdout, "CLI error\n")
+        with self.assertRaisesRegex(RuntimeError, r"\(exit 1\): CLI error$"):
+            probe.run_claude(None, SESSION)
+        self.claude.return_value = subprocess.CompletedProcess([], 1, stdout, "")
+        with self.assertRaisesRegex(RuntimeError, r"\(exit 1\): structured result unknown error subtype, error count 1$"):
+            probe.run_claude(None, SESSION)
+
+    def test_malformed_stream_fails_even_with_successful_exit_and_init(self):
+        init = {"type": "system", "subtype": "init", "session_id": SESSION}
+        stdout = json.dumps(init) + '\n{"private-malformed"'
+        self.claude.return_value = subprocess.CompletedProcess([], 0, stdout, "")
+        with self.assertRaisesRegex(RuntimeError, r"\(exit 0\): no structured error in stdout, malformed stream JSON$"):
+            probe.run_claude(None, SESSION)
 
 
 if __name__ == "__main__":

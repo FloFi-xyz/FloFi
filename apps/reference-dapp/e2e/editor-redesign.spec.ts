@@ -14,7 +14,8 @@ import { chooseLanguage } from './app-origin';
 test('the stepper opens the Editor sections in order, marks only where the owner is, and keeps the global navigation', async ({ page }) => {
   await openBuilder(page);
   const steps = editorSteps(page);
-  await expect(steps.getByRole('button')).toHaveText(['1Create', '2Simulate', '3Execute']);
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): a future stage is closed until it is eligible, and says why.
+  await expect(steps.getByRole('button')).toHaveText(['1Create', '2Simulate: Add an action to your workflow first', '3Execute: Simulate the workflow first']);
   await expect(steps.getByRole('button', { name: 'Create', exact: true })).toHaveAttribute('aria-current', 'step');
   // The global navigation is the drawer's: New workflow (Chat), Editor (current) and Dashboard come first.
   await openNavigation(page);
@@ -29,8 +30,11 @@ test('the stepper opens the Editor sections in order, marks only where the owner
   await expectEditorSection(page, 'Simulate');
   await expect(steps.getByRole('button', { name: 'Simulate', exact: true })).toHaveAttribute('aria-current', 'step');
   await expect(steps.locator('[aria-current="step"]')).toHaveCount(1);
-  await steps.getByRole('button', { name: 'Execute', exact: true }).click();
-  await expectEditorSection(page, 'Execute');
+  // Nothing was simulated: Execute stays closed; pressing it says why and opens nothing (forced past Playwright's aria-disabled check).
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await editorSectionAction(page, 'Execute').click({ force: true });
+  await expect(steps.getByRole('status')).toHaveText('Simulate the workflow first');
+  await expectEditorSection(page, 'Simulate');
   await steps.getByRole('button', { name: 'Create', exact: true }).click();
   await expectEditorSection(page, 'Build');
   // An unapplied Canvas amount closes Simulate and Execute, and says why, exactly as the former footer buttons did.
@@ -102,7 +106,8 @@ test('Portuguese and phone widths: the same truthful labels, no horizontal overf
     await page.setViewportSize({ width, height: 844 });
     await openBuilder(page);
     await expect(editorSteps(page).getByRole('button', { name: 'Criar', exact: true })).toHaveAttribute('aria-current', 'step');
-    await expect(editorSteps(page).getByRole('button', { name: 'Simular', exact: true })).toBeVisible();
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001: closed (and saying why) until the workflow has an action.
+    await expect(editorSteps(page).getByRole('button', { name: /^Simular ?: Adicione uma ação ao seu fluxo primeiro$/ })).toBeVisible();
     await page.getByLabel('Descreva o seu fluxo').fill('Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
     await page.getByRole('button', { name: 'Enviar mensagem', exact: true }).click();
     // Board 04: the configured state is the header's (translated), not repeated on the card; one step has no Plan to summarise.
@@ -115,6 +120,7 @@ test('Portuguese and phone widths: the same truthful labels, no horizontal overf
     const box = (await pool.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
     await expect(page.locator('footer.summary-bar').getByRole('button', { name: 'Simular fluxo', exact: true })).toBeVisible();
+    await expect(editorSteps(page).getByRole('button', { name: 'Simular', exact: true })).not.toHaveAttribute('aria-disabled', 'true');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
 });

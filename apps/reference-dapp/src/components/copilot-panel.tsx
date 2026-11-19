@@ -20,7 +20,11 @@ import { FloFiAvatar, UserAvatar } from './flofi-avatar';
  * this panel can render beside any stage without losing it. Suggested answers appear only on FloFi's latest message: an older button can never
  * answer a newer question.
  */
-export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+export function CopilotPanel({ conversation, interactive = true, owner = null, proof, overview, reviewInPanel = false, placeholder = 'Ask or request a change', stageNote = null }: { conversation: FlofiConversation; interactive?: boolean; owner?: WorkflowOwner | null;
+  /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (section 10): the composer's hint for the Editor stage (Create, Simulate or Execute). */
+  placeholder?: string | undefined;
+  /** A local hint for the stage (e.g. C2: the Review expired): shown beside the conversation, never sent, stored or added to it. */
+  stageNote?: string | null;
   proof?: ReturnType<typeof useWalletProof>;
   /**
    * Board 06: the Editor shows the whole-workflow Review beside the cards with its one primary action (Authorize) in the footer. The chat then
@@ -84,9 +88,10 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
       {conversation.manage && <CopilotAutomationManager operation={conversation.manage.operation} request={conversation.manage.request} owner={owner} {...(proof ? { proof } : {})}
         dismiss={conversation.dismissManage}/>}
     </div>
+    {stageNote && <div className="chat-row chat-row-flofi copilot-stage-note" role="note"><FloFiAvatar/><div className="message system flofi"><p>{tr(stageNote)}</p></div></div>}
     {/* P0 approved UX (board 04): the label stays for assistive technology (visually hidden); Send is an icon inside the field, neutral until
         there is text, and shows a spinner while FloFi is answering. Submitting is unchanged. */}
-    <form className="chat-form" onSubmit={submit}><label htmlFor="mock-prompt" className="sr-only">{tr("Describe your flow")}</label><div className="chat-input"><input id="mock-prompt" disabled={!interactive} value={input} onChange={event => setInput(event.target.value)} placeholder={tr('Ask or request a change')} maxLength={1024} autoComplete="off" enterKeyHint="send"/>
+    <form className="chat-form" onSubmit={submit}><label htmlFor="mock-prompt" className="sr-only">{tr("Describe your flow")}</label><div className="chat-input"><input id="mock-prompt" disabled={!interactive} value={input} onChange={event => setInput(event.target.value)} placeholder={tr(placeholder)} maxLength={1024} autoComplete="off" enterKeyHint="send"/>
       <button type="submit" className="chat-send" aria-label={tr('Send message')} title={tr('Send message')} data-ready={Boolean(input.trim()) && !busy || undefined} aria-busy={busy || undefined} disabled={!interactive || busy || !input.trim()}>
         {busy ? <span className="chat-send-spinner" aria-hidden="true"/> : <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>}
       </button></div></form>

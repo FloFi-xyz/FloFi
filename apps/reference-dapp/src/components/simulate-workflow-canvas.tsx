@@ -11,6 +11,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useEstimateOwners } from '../state/estimate-owners';
 import { ComposerCard, type ComposerCardData } from './composer-card';
 import { DarkSpotlight } from './dark-spotlight';
+import { useEditorStepper } from './editor-chrome';
 import { CANVAS_GESTURES, CANVAS_PRO_OPTIONS, CanvasNavigator } from './canvas-navigator';
 import { CANVAS_EDGE_LABEL, edgeAccessibleLabel, edgeLabel } from './canvas-edge-style';
 import { CANVAS_VISUAL_LABEL, canvasExecutionFor, edgeExecution, type CanvasEdgeVisual, type CanvasExecution } from '../domain/canvas-execution';
@@ -97,6 +98,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   /** The frame's caption line ("Execution plan · Configured on the Canvas"); off where the docked Review already says what runs (board 06). */ foot?: boolean;
   /** The docked panel's landmark name; null when the docked content already names itself (e.g. Execute's status panel). */ dockLabel?: string | null }) {
   const { t: tr } = useLocale();
+  const stepper = useEditorStepper();
   const { state, context, canvasLayout, reviewError, actionSetup, rememberCanvasViewport, forgetCanvasViewport } = useWorkflow();
   const workflow = state.workflow;
   const actions = composerActions(workflow);
@@ -163,7 +165,10 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
   return <section ref={frame} className={`canvas simulate-canvas simulation-workflow-canvas panel ${lending ? 'simulation-lending-canvas' : ''}`} aria-label={tr(stage === 'execute' ? 'Execution plan' : 'Workflow simulation')}
     data-docked={dock ? '' : undefined} data-steps={nodes.length} data-narrow={narrow ? '' : undefined} data-execution={execution ? execution.settled ? 'settled' : 'live' : undefined}
     style={{ '--canvas-steps': nodes.length } as CSSProperties}>
-    <div className="canvas-head"><div><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2></div><span className="revision">{tr(actions.length === 1 ? '1 step' : '{0} steps', actions.length)}</span></div>
+    {/* BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2/C2): the same Editor header as Create — name, step count and the stage indicator — on every stage. */}
+    <div className={`canvas-head${stepper ? ' editor-frame-head' : ''}`}><div className="canvas-head-main"><h2>{workflowName === 'Your Workflow' ? tr('Your Workflow') : workflowName}</h2>
+      <span className="revision">{tr(actions.length === 1 ? '1 step' : '{0} steps', actions.length)}</span></div>
+      {stepper && <div className="canvas-head-stages">{stepper}</div>}</div>
     <div className="simulate-canvas-body">
     <div ref={surface} className="flow-surface simulate-flow-surface" style={surfaceStyle} role="region" aria-label={tr(stage === 'execute' ? 'Execution workflow graph' : 'Simulation workflow graph')} data-viewport={viewport}>
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.35} maxZoom={1.4}

@@ -1705,6 +1705,42 @@
     "app.domain.liquidity-positions": {
       "path": "apps/reference-dapp/src/domain/liquidity-positions.test.ts",
       "stage": "unit"
+    },
+    "app.domain.editor-stages": {
+      "path": "apps/reference-dapp/src/domain/editor-stages.test.ts",
+      "stage": "unit"
+    },
+    "app.components.admin.finops-views": {
+      "path": "apps/reference-dapp/src/components/admin/finops-views.test.tsx",
+      "stage": "unit"
+    },
+    "app.domain.product-areas": {
+      "path": "apps/reference-dapp/src/domain/product-areas.test.ts",
+      "stage": "unit"
+    },
+    "app.state.uniswap-position-store": {
+      "path": "apps/reference-dapp/src/state/uniswap-position-store.test.tsx",
+      "stage": "unit"
+    },
+    "app.wallet.uniswap-position-eip1193": {
+      "path": "apps/reference-dapp/src/wallet/uniswap-position-eip1193.test.ts",
+      "stage": "unit"
+    },
+    "cloud-runtime.certificate-0031.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0031.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.uniswap-position-purge.pg": {
+      "path": "apps/reference-dapp/backend/uniswap-position-purge.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.components.app-shell-position-simulation": {
+      "path": "apps/reference-dapp/src/components/app-shell-position-simulation.test.tsx",
+      "stage": "unit"
+    },
+    "app.domain.liquidity-position-presentation": {
+      "path": "apps/reference-dapp/src/domain/liquidity-position-presentation.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -1853,6 +1889,9 @@
     "app.admin.finops-sync-infra",
     "app.admin.finops-sync-ai",
     "app.admin.finops-sync-circleci",
+    "app.components.admin.finops-views",
+    "app.domain.editor-stages",
+    "app.domain.product-areas",
     "app.server.universal-router.incident-replay",
     "app.platform.settlement-regression-matrix",
     "reference-compiler.uniswap-position-management",
@@ -1860,7 +1899,11 @@
     "app.server.liquidity-lifecycle-telemetry",
     "app.backend.uniswap-position-flow",
     "app.server.uniswap-position-networks",
-    "app.domain.liquidity-positions"
+    "app.domain.liquidity-positions",
+    "app.state.uniswap-position-store",
+    "app.wallet.uniswap-position-eip1193",
+    "app.components.app-shell-position-simulation",
+    "app.domain.liquidity-position-presentation"
   ],
   "modules": [
     {
@@ -2375,7 +2418,8 @@
         "app.admin.finops-sync-circleci",
         "app.admin.finops-sync.pg",
         "app.e2e.admin-console",
-        "app.backend.plain-node-closure"
+        "app.backend.plain-node-closure",
+        "app.backend.uniswap-position-purge.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
@@ -2712,7 +2756,8 @@
         "apps/reference-dapp/src/app/developers/page.tsx",
         "apps/reference-dapp/src/app/faq/page.tsx",
         "apps/reference-dapp/src/app/editor.css",
-        "apps/reference-dapp/src/app/terms/page.tsx"
+        "apps/reference-dapp/src/app/terms/page.tsx",
+        "apps/reference-dapp/src/app/editor-workspace.css"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -3408,7 +3453,8 @@
         "packages/cloud-runtime/migrations/0026_flight_early_list.sql",
         "packages/cloud-runtime/migrations/0028_saved_recipients.sql",
         "packages/cloud-runtime/src/owner-history.ts",
-        "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql"
+        "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql",
+        "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql"
       ],
       "suites": [
         "app.learning.automatic",
@@ -3425,7 +3471,9 @@
         "cloud-runtime.user-funded-groups-migration.pg",
         "cloud-runtime.flight-gate-migration.pg",
         "app.admin.support-privacy.pg",
-        "app.backend.nonce-conflict-cloud.pg"
+        "app.backend.nonce-conflict-cloud.pg",
+        "cloud-runtime.certificate-0031.pg",
+        "app.backend.uniswap-position-purge.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -3506,7 +3554,8 @@
         "reference-executor.composition.fork",
         "reference-linter.composition",
         "reference-reconciler.evidence",
-        "workflow-contracts.revision-state"
+        "workflow-contracts.revision-state",
+        "cloud-runtime.certificate-0031.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -3546,7 +3595,8 @@
         "app.admin.session",
         "app.admin.settings.pg",
         "app.e2e.admin-login-layout",
-        "app.e2e.admin-console"
+        "app.e2e.admin-console",
+        "app.components.admin.finops-views"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -3809,7 +3859,10 @@
         "apps/reference-dapp/src/components/canvas-execution-badge.tsx",
         "apps/reference-dapp/src/components/wallet-activity.tsx",
         "apps/reference-dapp/src/components/dashboard/defi-positions.module.css",
-        "apps/reference-dapp/src/components/dashboard/defi-positions.tsx"
+        "apps/reference-dapp/src/components/dashboard/defi-positions.tsx",
+        "apps/reference-dapp/src/components/editor-chrome.tsx",
+        "apps/reference-dapp/src/components/operation-summary.tsx",
+        "apps/reference-dapp/src/components/simulation-context-panel.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -3837,7 +3890,8 @@
         "app.components.execute-details-choice",
         "app.server.wallet-activity",
         "app.components.wallet-activity",
-        "app.components.defi-positions"
+        "app.components.defi-positions",
+        "app.components.app-shell-position-simulation"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4553,7 +4607,8 @@
         "app.server.uniswap-position-service",
         "app.server.defi-positions",
         "app.server.uniswap-position-networks",
-        "app.domain.liquidity-positions"
+        "app.domain.liquidity-positions",
+        "app.domain.liquidity-position-presentation"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -4787,7 +4842,9 @@
         "apps/reference-dapp/src/domain/settlement-sync.ts",
         "apps/reference-dapp/src/domain/canvas-execution.ts",
         "apps/reference-dapp/src/domain/wallet-activity.ts",
-        "apps/reference-dapp/src/domain/defi-positions.ts"
+        "apps/reference-dapp/src/domain/defi-positions.ts",
+        "apps/reference-dapp/src/domain/editor-stages.ts",
+        "apps/reference-dapp/src/domain/product-areas.ts"
       ],
       "suites": [
         "action-registry.engineering-regression",
@@ -4811,7 +4868,10 @@
         "app.state.settlement-sync",
         "app.domain.execution-ux-reliability",
         "app.domain.canvas-execution",
-        "app.server.wallet-activity"
+        "app.server.wallet-activity",
+        "app.domain.editor-stages",
+        "app.domain.product-areas",
+        "app.domain.liquidity-position-presentation"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5106,7 +5166,8 @@
         "apps/reference-dapp/src/i18n/pt-identity-recovery.ts",
         "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts",
         "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts",
-        "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts"
+        "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts",
+        "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -7176,7 +7237,8 @@
         "app.server.uniswap-position-service",
         "app.server.liquidity-lifecycle-telemetry",
         "app.backend.uniswap-position-flow",
-        "app.server.uniswap-position-networks"
+        "app.server.uniswap-position-networks",
+        "app.backend.uniswap-position-purge.pg"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7791,7 +7853,8 @@
       "sources": [
         "apps/reference-dapp/src/state/liquidity-store.tsx",
         "apps/reference-dapp/src/state/solana-liquidity-store.tsx",
-        "apps/reference-dapp/src/state/uniswap-liquidity-store.tsx"
+        "apps/reference-dapp/src/state/uniswap-liquidity-store.tsx",
+        "apps/reference-dapp/src/state/uniswap-position-store.tsx"
       ],
       "suites": [
         "reference-compiler.liquidity",
@@ -7802,7 +7865,9 @@
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
         "app.e2e.uniswap-liquidity-continuation",
-        "app.state.uniswap-liquidity-store"
+        "app.state.uniswap-liquidity-store",
+        "app.state.uniswap-position-store",
+        "app.components.app-shell-position-simulation"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -8083,7 +8148,8 @@
         "apps/reference-dapp/src/wallet/wallet-errors.ts",
         "apps/reference-dapp/src/wallet/wallet-hint.ts",
         "apps/reference-dapp/src/wallet/wallet-registry.ts",
-        "apps/reference-dapp/src/wallet/zeroex-gasless-signing.ts"
+        "apps/reference-dapp/src/wallet/zeroex-gasless-signing.ts",
+        "apps/reference-dapp/src/wallet/uniswap-position-eip1193.ts"
       ],
       "suites": [
         "app.state.wallet-review-continuity",
@@ -8098,7 +8164,8 @@
         "app.wallet.flofi-solana-wallet-kora",
         "app.wallet.solana-wallet-kora",
         "app.wallet.zeroex-gasless-signing",
-        "app.server.managed-signing-circle"
+        "app.server.managed-signing-circle",
+        "app.wallet.uniswap-position-eip1193"
       ],
       "gaps": [
         "Injected test wallets do not certify browser extension hardware/user ceremonies or real signatures; production delegated signing is unavailable.",
@@ -8718,6 +8785,8 @@
     "app.backend.workflow-run-worker-startup.pg",
     "app.admin.finops.pg",
     "app.admin.finops-sync.pg",
-    "app.admin.support.historical-reconciliation.pg"
+    "app.admin.support.historical-reconciliation.pg",
+    "cloud-runtime.certificate-0031.pg",
+    "app.backend.uniswap-position-purge.pg"
   ]
 }

@@ -308,7 +308,8 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
     // Technical details.
     expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
     if (name === 'Simulate') {
-      const dock = page.getByRole('complementary', { name: 'Review', exact: true });
+      // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): Simulate's panel states the simulation result (the Review is authorized on Execute).
+      const dock = page.getByRole('complementary', { name: 'Simulation result', exact: true });
       await expect(dock).toHaveCount(1);
       await expect(page.locator('.simulation-workflow-canvas .canvas-review-dock')).toHaveCount(1);
     }

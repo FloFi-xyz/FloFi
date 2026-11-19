@@ -8,6 +8,8 @@
  * the Editor footer and the stepper's Create returns to the Canvas — so the canvas's bottom control group is the navigator alone, centred (Fit,
  * Zoom out, Zoom in; the slider and percentage are gone). The contract below is that shape: the navigator stays inside the graph and never covers a
  * card or a step note, each of its controls is the element under its own centre and keyboard reachable, and the footer's Simulate stays there.
+ * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate's "Simulate workflow" is its contextual panel's one action; the footer's one action is
+ * "Review operation" (closed until the simulation is valid). The canvas still carries no action, and the footer action stays inside the footer.
  */
 import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
@@ -69,7 +71,7 @@ async function measure(page: Page) {
       hits: { fit: hit(navigator?.querySelector('.canvas-navigator-fit') ?? null), zoomOut: hit(steps[0] ?? null), zoomIn: hit(steps[1] ?? null) } };
   });
 }
-/** The footer holds the one Simulate control, inside the footer and never covered by the canvas's navigator. */
+/** The footer holds the stage's one action ("Review operation" on Simulate), inside the footer and never covered by the canvas's navigator. */
 async function expectFooterAction(page: Page, context: string) {
   const action = footer(page).locator('.canvas-primary-action button[data-lifecycle-action]');
   await expect(action).toHaveCount(1);
@@ -89,7 +91,8 @@ for (const theme of ['Light', 'Dark'] as const) test(`${theme}: Back sits immedi
     await page.setViewportSize({ width, height: 900 });
     await expect(graph(page)).toHaveAttribute('data-viewport', 'fitted');
     await expect(graph(page).locator('.canvas-navigator')).toHaveAttribute('data-measured', 'true');
-    await expect(footer(page).locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
+    await expect(footer(page).locator('.canvas-primary-action').getByRole('button', { name: 'Review operation', exact: true })).toBeVisible();
+    await expect(page.locator('.simulation-panel-action').getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(1);
     const m = await measure(page); measurements[width] = m;
     const context = JSON.stringify({ width, theme, m });
     expectControls(m, context);
@@ -129,7 +132,7 @@ test('multi-step: the "Step 1 of 2" note takes its own line, Back stays beside S
       // Settings' one Language switch: the longer Portuguese labels must keep the same layout.
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('switch', { name: /^(Language|Idioma)$/ }).click(); await page.keyboard.press('Escape');
-      await expect(footer(page).locator('.canvas-primary-action button[data-lifecycle-action]')).not.toHaveText('Simulate workflow');
+      await expect(footer(page).locator('.canvas-primary-action button[data-lifecycle-action]')).toHaveText(/^Revisar operação/);
     }
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 900 });

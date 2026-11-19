@@ -11,7 +11,7 @@
  *   moving cards, card drags move only the card, and neither the page nor the chat scrolls because of the Canvas (nor the Canvas because of them).
  */
 import type { Locator, Page } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { test, expect, sendChatCommand } from './fixtures';
 import { chooseLanguage } from './app-origin';
 import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openNavigation, openProductSection, railToggle } from './build-entry-navigation';
 
@@ -130,11 +130,15 @@ test.describe('UX-01 collapsible navigation rail', () => {
   // every item and Log out in view and the current one marked. From 1360 px the expanded rail moves the workspace aside; below, it floats over
   // it (the workspace keeps the width it was designed for, giving up only the collapsed 64 px).
   for (const theme of ['light', 'dark'] as const) {
-    test(`${theme} desktop rail keeps Build, Simulate, Execute and the Dashboard usable at 1024, 1280 and 1440 px`, async ({ page, networkGuard }) => {
+    test(`${theme} desktop rail keeps Build, Simulate and the Dashboard usable (Execute closed until simulated) at 1024, 1280 and 1440 px`, async ({ page, networkGuard }) => {
       test.setTimeout(240_000);
       await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-      // An empty workflow: every section opens (an unconfigured card would rightly keep Simulate and Execute closed).
+      // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): a stage opens only once it is eligible. A configured swap opens
+      // Simulate; nothing can be simulated in this profile, so Execute stays closed, saying why (its chrome is Simulate's: header, rail, footer).
       await openBuilder(page);
+      await sendChatCommand(page, 'Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
+      await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
+      await expect(editorStep(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       for (const width of [1024, 1280, 1440]) {
         await page.setViewportSize({ width, height: 900 });
@@ -142,7 +146,7 @@ test.describe('UX-01 collapsible navigation rail', () => {
           if ((await rail(page).getAttribute('data-expanded')) !== String(expanded)) await railToggle(page).click();
           await expect(rail(page)).toHaveAttribute('data-expanded', String(expanded));
           // Every section with the default (collapsed) rail; the Editor's Canvas and the Dashboard with the names shown.
-          for (const section of expanded ? ['Build', 'Dashboard'] as const : ['Build', 'Simulate', 'Execute', 'Dashboard'] as const) {
+          for (const section of expanded ? ['Build', 'Dashboard'] as const : ['Build', 'Simulate', 'Dashboard'] as const) {
             const label = `${theme} ${width}px ${expanded ? 'expanded' : 'collapsed'} ${section}`;
             await openProductSection(page, section);
             await expectProductSection(page, section);
@@ -319,7 +323,8 @@ test.describe('UX-01 collapsible navigation rail', () => {
     await expect(tooltip).toHaveCount(0);
     // Tab leaves the rail (no trap): after Privacy comes the logo, then the workspace's own controls.
     for (let step = 0; step < 12 && await page.evaluate(() => Boolean(document.activeElement?.closest('.navigation-layer'))); step++) await page.keyboard.press('Tab');
-    await expect(page.getByRole('link', { name: 'FloFi — ir para o Painel', exact: true })).toBeFocused();
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (A2): the logo opens Operate.
+    await expect(page.getByRole('link', { name: 'FloFi — ir para Operar', exact: true })).toBeFocused();
     await expect(tooltip).toHaveCount(0);
     // Enter on the chevron expands (names visible, no tooltip).
     await railToggle(page).focus(); await page.keyboard.press('Enter');
@@ -372,39 +377,51 @@ test.describe('UX-01 collapsible navigation rail', () => {
   });
 });
 
-test.describe('UX-02 the logo opens the Dashboard', () => {
-  test('from the Editor and a secondary page, by mouse and keyboard, keeping the session, wallet and Canvas', async ({ page, networkGuard }) => {
+// BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, A2/B2/C2, intentional change): the logo opens Operate (/app) — the workspace with the open workflow —
+// and the global navigation beside it names the product areas (Operate | Dashboard | My Workflows). Both are client navigations inside the same
+// persistent workspace: the session, the wallet and the Canvas stay.
+test.describe('UX-02 the logo opens Operate', () => {
+  test('from the Dashboard and a secondary page, by mouse and keyboard, back to the same open workflow', async ({ page, networkGuard }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openBuilder(page);
     await addSwapCard(page);
     const before = { revision: await revision(page), cards: await cardPositions(page) };
-    const logo = page.getByRole('link', { name: 'FloFi — go to the Dashboard', exact: true });
-    await expect(logo).toHaveAttribute('href', '/app/dashboard');
+    const logo = page.getByRole('link', { name: 'FloFi — go to Operate', exact: true });
+    const areas = page.getByRole('navigation', { name: 'Product areas', exact: true });
+    await expect(logo).toHaveAttribute('href', '/app');
     await expect(logo.locator('.flofi-logo')).toBeVisible();
     // The logo keeps its look (same artwork and size as before).
     expect((await box(logo.locator('.flofi-logo-light .flofi-logo-symbol'))).height).toBe(29);
+    await expect(areas.getByRole('link')).toHaveText(['Operate', 'Dashboard', 'My Workflows']);
+    await expect(areas.getByRole('link', { name: 'Operate', exact: true })).toHaveAttribute('aria-current', 'page');
     const marker = await page.evaluate(() => { (window as unknown as { shellMarker: string }).shellMarker = 'same-document'; return 'same-document'; });
-    await logo.click();
+    await areas.getByRole('link', { name: 'Dashboard', exact: true }).click();
     await expect(page).toHaveURL('/app/dashboard');
     await expect(page.getByRole('main', { name: 'Dashboard', exact: true })).toBeVisible();
-    await expect(navigationLink(page, 'Dashboard')).toHaveAttribute('aria-current', 'page');
-    // A client navigation inside the same workspace: no reload, no public landing, no sign-out.
+    await expect(areas.getByRole('link', { name: 'Dashboard', exact: true })).toHaveAttribute('aria-current', 'page');
+    await logo.click();
+    await expect(page).toHaveURL('/app');
+    // A client navigation inside the same workspace: no reload, no public landing, no sign-out; the Editor shows the same workflow.
     expect(await page.evaluate(() => (window as unknown as { shellMarker?: string }).shellMarker)).toBe(marker);
     await expect(page.getByRole('button', { name: 'Connect Wallet', exact: true })).toBeVisible();
-    // Back in the Editor, the Canvas is exactly as it was.
-    await navigationLink(page, 'Editor').click();
     await expectEditorSection(page, 'Build');
     expect(await revision(page)).toBe(before.revision);
     expect(await cardPositions(page)).toEqual(before.cards);
-    // With the rail expanded too, and with the keyboard from a secondary page.
+    // My Workflows is the existing library page; with the rail expanded too, and with the keyboard from a secondary page.
+    await areas.getByRole('link', { name: 'My Workflows', exact: true }).click();
+    await expect(page).toHaveURL('/app/workflows');
+    await expect(areas.getByRole('link', { name: 'My Workflows', exact: true })).toHaveAttribute('aria-current', 'page');
     await railToggle(page).click();
     await navigationLink(page, 'Credentials').click();
     await expect(page).toHaveURL('/app/credentials');
+    await expect(areas.locator('[aria-current="page"]')).toHaveCount(0);
     await logo.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
     await expect(logo).toBeFocused();
     expect(await logo.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid');
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL('/app/dashboard');
+    await expect(page).toHaveURL('/app');
+    await expectEditorSection(page, 'Build');
+    expect(await revision(page)).toBe(before.revision);
     expect(await page.evaluate(() => (window as unknown as { shellMarker?: string }).shellMarker)).toBe(marker);
     networkGuard.assertClean();
   });
@@ -413,11 +430,17 @@ test.describe('UX-02 the logo opens the Dashboard', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await chooseLanguage(page.context(), 'PT');
     await open(page);
-    await page.getByRole('link', { name: 'FloFi — ir para o Painel', exact: true }).click();
+    const areas = page.getByRole('navigation', { name: 'Áreas do produto', exact: true });
+    await expect(areas.getByRole('link')).toHaveText(['Operar', 'Painel', 'Meus Workflows']);
+    await areas.getByRole('link', { name: 'Painel', exact: true }).click();
     await expect(page).toHaveURL('/app/dashboard');
     await expect(page.getByRole('main', { name: 'Painel', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'FloFi — ir para Operar', exact: true }).click();
+    await expect(page).toHaveURL('/app');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.goto('/approve');
     await expect(page.locator('.flofi-logo-link')).toHaveCount(0);
+    await expect(page.getByRole('navigation', { name: 'Áreas do produto', exact: true })).toHaveCount(0);
     networkGuard.assertClean();
   });
 });

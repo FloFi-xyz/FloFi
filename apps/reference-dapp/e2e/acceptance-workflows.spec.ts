@@ -10,7 +10,7 @@ import { createBackend, type FlowResult } from '../backend/app';
 import type { RouterBegin, RouterRecord } from '../src/server/router-service';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { installJourneyWallet, resetJourneyHarness, journeySends, switchAccount, walletRequests, setWalletChain } from './journey-fixtures';
-import { chooseWorkflowMenuItem, continueToBuilder, type EditorSection, openBuilder, openDashboard, openEditorSection, openNavigation, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
+import { chooseWorkflowMenuItem, continueToBuilder, type EditorSection, openBuilder, openDashboard, openEditorSection, openNavigation, openReviewTechnicalDetails, reloadBuilder, simulationReviewPanel } from './build-entry-navigation';
 
 const stage = (page: Page, name: EditorSection) => openEditorSection(page, name);
 async function author(page: Page) {
@@ -201,8 +201,9 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   const review = page.locator('.review-authorization-details');
   await review.locator('summary').click();
   await expect(review).toContainText(/Simulate.*again/);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate's one action is in its panel; nothing is authorized from Simulate.
+  await expect(simulationReviewPanel(page).getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
   await expect(review).not.toContainText('Review approved');
   // Changing locale is presentation only; wallet identity and canonical IR remain unchanged.
   await stage(page, 'Build');
