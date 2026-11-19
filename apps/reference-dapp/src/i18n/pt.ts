@@ -65,6 +65,7 @@ import { portugueseSavedRecipients } from './pt-saved-recipients';
 import { portugueseCopilotAssist } from './pt-copilot-assist';
 import { portugueseLiquidityExecution } from './pt-liquidity-execution';
 import { portugueseLiveCanvasActivity } from './pt-live-canvas-activity';
+import { portugueseUxEditorFinops } from './pt-ux-editor-finops';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
@@ -352,4 +353,6 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseExecutionUxReliability,
   // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: Live Canvas states, History wallet activity and loading states (new keys, last).
   ...portugueseLiveCanvasActivity,
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001: global product areas, the Editor's stage indicator, Simulate panel and Execute review states (new keys, last).
+  ...portugueseUxEditorFinops,
 };

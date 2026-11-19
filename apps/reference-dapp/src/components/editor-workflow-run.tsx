@@ -17,7 +17,7 @@
  *
  * Nothing here signs or sends: the wallet does, after the owner confirms it there. Every artifact is verified on the server.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
 import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
@@ -31,7 +31,7 @@ import type { ClaimedProposal } from '../platform/approvals';
 import type { RunView } from '../workflow-runs/service';
 import { circleSignatureView, walletRequestView } from '../domain/approved-ux';
 import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
-import { BlockerPanel } from './review-summary-panel';
+import { BlockerPanel, ExpiredReviewAlert, RefreshBadge } from './review-summary-panel';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import { batchHandout, batchSponsorshipOf, evmWalletKind, isCirclePaid, keepBatchHandout, sendWalletBatch, signCirclePaidGroup, signSolanaGroup, signUserOperation,
@@ -960,12 +960,41 @@ export function EditorWorkflowRunPrimaryAction({ state }: { state: EditorWorkflo
   if (review && state.grouped && !expired) return <button type="button" className="primary editor-run-authorize" disabled={busy} aria-busy={busy || undefined}
     onClick={() => void state.authorize()}>{tr(phase === 'authorizing' ? 'Preparing your wallet request…' : 'Authorize workflow')}</button>;
   return <button type="button" className="primary" disabled={busy} aria-busy={phase === 'reviewing' || undefined} onClick={() => void state.startReview()}>
-    {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : expired ? 'Simulate again' : review ? 'Review again' : 'Review whole workflow')}</button>;
+    {tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : expired ? 'Refresh review' : review ? 'Review again' : 'Review whole workflow')}</button>;
 }
 
-export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { state: EditorWorkflowRunState;
+/**
+ * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): the Simulate stage's ONE primary action for the whole-workflow path, inside the Simulate panel. The
+ * whole-workflow Review IS this workflow's simulation (read-only: every step together, nothing signed or sent), so it runs the same `startReview`
+ * the Execute footer ran, and the owner stays on Simulate to read the result; "Review operation" then opens Execute.
+ */
+export function EditorWorkflowSimulateAction({ state, disabled = false, reason = null }: { state: EditorWorkflowRunState; disabled?: boolean; reason?: string | null }) {
+  const { t: tr } = useLocale();
+  const { review, phase } = state;
+  const expired = Boolean(review?.validUntil && Date.parse(review.validUntil) <= Date.now());
+  const busy = ['reviewing', 'authorizing', 'proving', 'wallet', 'confirming'].includes(phase);
+  const closed = disabled || !state.canReview;
+  return <div className="canvas-lifecycle-control">
+    <button type="button" className="primary" data-lifecycle-action="workflow-simulate" disabled={closed || busy} aria-busy={phase === 'reviewing' || undefined}
+      onClick={() => void state.startReview()}>
+      {phase === 'reviewing' && <span className="canvas-cta-spinner" aria-hidden="true"/>}
+      {tr(phase === 'reviewing' ? 'Simulating workflow…' : review && (expired || review.refusal) ? 'Simulate again' : 'Simulate workflow')}</button>
+    {closed && reason && <p role="status">{tr(reason)}</p>}
+  </div>;
+}
+
+export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 'execute', summary = null }: { state: EditorWorkflowRunState;
   /** The chat-first Editor hosts the Review's primary action in its footer (`EditorWorkflowRunPrimaryAction`); the panel shows none before a run. */
-  actionsOutside?: boolean }) {
+  actionsOutside?: boolean;
+  /**
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1/C2): `simulate` presents the same whole-workflow Review as the Simulate stage's result — the steps,
+   * their expected amounts, the minimum and the network fee, with no authorization language (no "You are authorizing", permissions or wallet
+   * requests). `execute` (default) is the Review the owner authorizes: C1 while valid; C2 once expired (the summary, the fee and permissions marked
+   * as needing a refreshed Review, the authorization unavailable). Presentation only: the same Review, handlers and gates.
+   */
+  stage?: 'simulate' | 'execute';
+  /** C2: the workflow's operations as configured on the Canvas (`OperationSummary`), shown in place of the expired Review's figures. */
+  summary?: ReactNode }) {
   const { t: tr, language } = useLocale();
   const { review, run, phase, error } = state;
   const [now, setNow] = useState(() => Date.now());
@@ -1197,8 +1226,33 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     onClick={() => void state.startReview()}>{tr(phase === 'reviewing' ? 'Reviewing the whole workflow…' : 'Review again')}</button>;
   return <section className={`editor-workflow-run panel${fresh ? ' editor-review-block' : ''}`} aria-label={tr('Whole workflow')} data-run-phase={phase} data-run-state={run?.state ?? undefined}
     data-review-state={fresh ? feeBlocked ? 'blocked' : busy ? 'busy' : review ? alert ? 'attention' : 'ready' : 'pending' : undefined}>
-    {fresh && !feeBlocked && <>
+    {fresh && !feeBlocked && stage === 'execute' && expired && review && <>
+      {/* C2: the Review expired. Its own surface first, then the operations as configured (never the expired figures), the fee and permissions
+          marked as needing a refreshed Review; the footer's one action refreshes it ("Refresh review"), and nothing can be authorized meanwhile. */}
+      <ExpiredReviewAlert/>
+      {(refusal || errorText) && <p className="review-block-alert" role="alert">{[refusal, errorText !== refusal ? errorText : null].filter(Boolean).join(' ')}</p>}
+      {summary}
+      <dl className="review-panel-rows review-block-rows">
+        <div><dt>{tr('Network fee')}</dt><dd><RefreshBadge text="Needs to be refreshed"/></dd></div>
+        <div><dt>{tr('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review"/></dd></div>
+        {block && <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>}
+      </dl>
+      <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
+    </>}
+    {fresh && !feeBlocked && stage === 'simulate' && review && block && !expired && <>
+      {/* B2: the simulated result of the whole workflow — what each step spends and is expected to deliver, the minimum and the network fee. */}
+      {alert && <p className="review-block-alert" role="alert">{alert}</p>}
+      <ol className="review-block-steps" aria-label={tr('Steps')}>{block.steps.map((line, index) => <li key={index} title={line.full ?? undefined}>{rich(tr, line)}</li>)}</ol>
+      <dl className="review-panel-rows review-block-rows">
+        {block.minimum && <div><dt>{tr('Minimum you receive')}</dt><dd title={block.minimum.full ?? undefined}><span>{rich(tr, block.minimum)}</span></dd></div>}
+        {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span>{priced && <small className="review-block-qualifier">{tr('at today\'s prices; your wallet sets the final fee')}</small>}</dd></div>}
+      </dl>
+      {nativeLater}
+      <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
+    </>}
+    {fresh && !feeBlocked && stage === 'execute' && !expired && <>
       {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
+      {block && review?.validUntil && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>}
       <p className="eyebrow">{tr('REVIEW')}</p>
       <h3>{tr(expired ? 'Simulation expired' : block ? 'You are authorizing' : 'Workflow simulation')}</h3>
       {review?.mode === 'STEP_BY_STEP' && <p className="review-panel-note">{tr('This workflow needs a confirmation in your wallet for each step on its own.')}</p>}
@@ -1275,7 +1329,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false }: { stat
     </>}
     {refusal && !fresh && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
-    {feeBlocked && <BlockerPanel title={refusal ?? ''} message={refusal ?? ''} error={review!.refusal!.code} owner={review!.owner}
+    {feeBlocked && <BlockerPanel simulation={stage === 'simulate'} title={refusal ?? ''} message={refusal ?? ''} error={review!.refusal!.code} owner={review!.owner}
       feeShortfall={review!.refusal!.evidence!} technical={fresh ? <details className="review-panel-technical"><summary>{tr('Technical details, for support')}</summary>{technical}</details> : null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
       <p>{tr(!state.updated.every(u => u.reviewed) ? 'Confirm what your wallet will be asked:' : state.updated.some(u => u.kind === 'fee')

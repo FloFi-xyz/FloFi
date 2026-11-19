@@ -46,7 +46,9 @@ export function simulateFooterStatus(input: { readonly busy: boolean; readonly s
   if (input.expiresAt !== null) {
     const left = input.expiresAt - input.now;
     return left > 0 ? { tone: left < COUNTDOWN_ATTENTION_MS ? 'attention' : 'ready', text: review ? 'Review valid for {0}' : 'Simulation valid for {0}', parameters: [countdown(left)] }
-      : { tone: 'attention', text: review ? 'Review expired, review again' : 'Expired, simulate again' };
+      // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review is a blocker of authorization ("Review expired", red); the footer's one action
+      // refreshes it. An expired simulation keeps its amber line.
+      : review ? { tone: 'blocked', text: 'Review expired' } : { tone: 'attention', text: 'Expired, simulate again' };
   }
   return null;
 }

@@ -30,6 +30,7 @@ import { NavigationDrawer } from './navigation-drawer';
 import { useWalletConnection } from '../state/wallet-connection';
 import { WalletMark } from './wallet-selector';
 import { BUILD_ENTRY, type BuildEntrySection } from '../domain/build-entry';
+import { PRODUCT_AREAS, productArea } from '../domain/product-areas';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 
@@ -48,10 +49,12 @@ const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.sl
  * Mainnet/Testnet switch, because the proposal fixes its own network. `entry` (BUILD0-UX-001) offers Chat (the intent entry) before the Editor
  * in the public chat-first workspace only. */
 /**
- * P0 approved UX (board 03b): navigation lives only in the ☰ drawer (the Dashboard | Chat | Editor tabs repeated it); the center of the bar holds
- * the Editor's Create → Simulate → Execute stepper when the Editor is open (`center`), nothing on the Chat entry and the secondary pages; the right
- * side keeps the wallet identity and Settings. The passive "Workflow network" label is gone (the Canvas header chip shows it); its row keeps the
- * real jobs: the attention strip and switch button when the wallet is on another network, and provider errors.
+ * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio's approved UX): beside the logo, the global navigation names the product areas — Operate | Dashboard |
+ * My Workflows — with a discreet blue indication of the current one; the drawer keeps every other destination. The Editor's Create → Simulate →
+ * Execute indicator moved into the Editor's own header (`editor-chrome.tsx`), so it never appears here. `center` remains for a caller that
+ * still passes content (none does). The right side keeps the wallet identity and Settings. The passive "Workflow network" label is gone (the
+ * Canvas header chip shows it); its row keeps the real jobs: the attention strip and switch button when the wallet is on another network, and
+ * provider errors.
  */
 export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false, center, newWorkflow }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean;
   /**
@@ -112,13 +115,19 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   // The wallet is on another network than the workflow's: the one attention strip with the existing user-driven switch (never automatic).
   const networkAttention = Boolean(!solanaActive && build009.account && switchTarget && build009.chainId !== switchTarget.hex);
   const walletProviderError = Boolean(!solanaActive && !build009.account && build009.providerError);
+  const area = productArea(pathname, tab);
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
     <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Chat' : tab} onBuild={() => setTab('Build')} onChat={entry ? newWorkflow ?? (() => setTab(BUILD_ENTRY)) : undefined}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}
-      {/* BUILD UX POLISH 004 (UX-02): the symbol and name open the Dashboard — the drawer's own route, a client navigation inside this persistent
-          workspace (the Canvas, the chat and the session stay). The compact /approve signing header keeps the logo inert: it has no navigation. */}
-      {compact ? <FloFiLogo/> : <Link href="/app/dashboard" className="flofi-logo-link" aria-label={tr('FloFi — go to the Dashboard')}><FloFiLogo/></Link>}</div>
-    {!compact && <div className="top-bar-center">{center}</div>}
+      {/* BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, A2/B2/C2): the symbol and name open Operate (/app), a client navigation inside this persistent
+          workspace: the open workflow, its Canvas, the chat and the session stay. The compact /approve signing header keeps the logo inert. */}
+      {compact ? <FloFiLogo/> : <Link href="/app" className="flofi-logo-link" aria-label={tr('FloFi — go to Operate')}><FloFiLogo/></Link>}
+      {/* The global navigation names product areas (Operate | Dashboard | My Workflows); the Create → Simulate → Execute indicator lives only in the
+          Editor's own header. The selected area has a discreet blue indication. */}
+      {!compact && <nav className="product-areas" aria-label={tr('Product areas')}>
+        {PRODUCT_AREAS.map(item => <Link key={item.id} href={item.href} className="product-area" aria-current={area === item.id ? 'page' : undefined}>{tr(item.label)}</Link>)}
+      </nav>}</div>
+    {!compact && center ? <div className="top-bar-center">{center}</div> : null}
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}

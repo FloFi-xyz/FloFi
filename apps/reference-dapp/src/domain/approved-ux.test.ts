@@ -20,7 +20,8 @@ describe('approved UX footer (boards 06–07)', () => {
   it('board 06: on the whole-workflow Review the footer words the Review, never a simulation', () => {
     const review = { ...base, subject: 'review' as const };
     expect(simulateFooterStatus(review)).toEqual({ tone: 'ready', text: 'Review valid for {0}', parameters: ['1:00'] });
-    expect(simulateFooterStatus({ ...review, now: 100_000 })).toEqual({ tone: 'attention', text: 'Review expired, review again' });
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2, intentional change): "Review expired" (red); the footer's one action is "Refresh review".
+    expect(simulateFooterStatus({ ...review, now: 100_000 })).toEqual({ tone: 'blocked', text: 'Review expired' });
     expect(simulateFooterStatus({ ...review, busy: true })).toEqual({ tone: 'neutral', text: 'Reviewing the whole workflow…' });
   });
   it('names a blocker and says "Nothing was sent" only while no execution of this workflow started', () => {

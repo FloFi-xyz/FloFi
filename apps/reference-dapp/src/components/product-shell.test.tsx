@@ -66,13 +66,18 @@ describe('product shell rendering', () => {
 
   // BUILD UX POLISH 004 (intentional change): UX-01 — the navigation control (the rail's chevron on a desktop, ☰ on a phone) precedes the logo and
   // the server renders the collapsed desktop rail; UX-02 — the logo is a link to the Dashboard with a named destination.
-  it('places the navigation control before the approved FloFi logo, which links to the Dashboard', () => {
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, A2/B2/C2, intentional change): the logo opens Operate (/app), and the global navigation beside it names the
+  // product areas Operate | Dashboard | My Workflows (the drawer keeps its own Dashboard link).
+  it('places the navigation control before the approved FloFi logo, which links to Operate, then the product areas', () => {
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
     const logo = html.indexOf('class="flofi-logo"');
     expect(html.indexOf('class="navigation-trigger" aria-label="Expand navigation"')).toBeGreaterThan(-1);
     expect(html.indexOf('class="navigation-trigger" aria-label="Expand navigation"')).toBeLessThan(logo);
     expect(html).toContain('class="navigation-layer" data-open="false" data-expanded="false">');
-    expect(html).toMatch(/<a class="flofi-logo-link" aria-label="FloFi — go to the Dashboard" href="\/app\/dashboard"><span class="flofi-logo" role="img" aria-label="FloFi">/);
+    expect(html).toMatch(/<a class="flofi-logo-link" aria-label="FloFi — go to Operate" href="\/app"><span class="flofi-logo" role="img" aria-label="FloFi">/);
+    expect(html).toContain('<nav class="product-areas" aria-label="Product areas"><a class="product-area" aria-current="page" href="/app">Operate</a>'
+      + '<a class="product-area" href="/app/dashboard">Dashboard</a><a class="product-area" href="/app/workflows">My Workflows</a></nav>');
+    expect(html.indexOf('class="product-areas"')).toBeGreaterThan(logo);
     expect(html.match(/href="\/app\/dashboard"/g)).toHaveLength(2);
     expect(wallet.connect).not.toHaveBeenCalled();
     expect(wallet.switchTo).not.toHaveBeenCalled();
@@ -192,7 +197,10 @@ describe('product shell rendering', () => {
   it('keeps the brand and no navigation tabs on the Dashboard', () => {
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Dashboard', setTab: vi.fn() }));
     expect(html).not.toMatch(/<nav aria-label="Workflow stages"|>(Dashboard|Chat|Editor)<\/button>/);
-    expect(html).toContain('<div class="top-bar-center"></div>');
+    // The stage indicator never sits in the global bar (BUILD-FLOFI-UX-EDITOR-FINOPS-001); the Dashboard area is the one marked current.
+    expect(html).not.toContain('top-bar-center');
+    expect(html).not.toContain('Editor steps');
+    expect(html).toContain('<a class="product-area" aria-current="page" href="/app/dashboard">Dashboard</a>');
     expect(html).not.toContain('stage-number');
     expect(html).not.toContain('data-build-stage');
     expect(html).toContain('class="flofi-logo" role="img" aria-label="FloFi"');

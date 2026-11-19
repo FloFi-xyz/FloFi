@@ -14,6 +14,7 @@ import type { ExecutionLifecycle } from '../domain/execution-lifecycle';
 import { ExecutionTimeline } from './execution-timeline';
 import { NetworkBrandIcon } from './brand-icon';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
+import { EditorStageHead } from './editor-chrome';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { isFinalExecutionResult, refreshableAfterNothingSent } from '../domain/execution-result';
 import { REFRESH_AFTER_PRESEND_REFUSAL } from '../domain/canvas-lifecycle';
@@ -73,7 +74,26 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
    * receipts, evidence, errors) moves into a collapsible "Execution details" beneath it. Absent or not covering the run: the timeline is shown.
    */
   canvasExecution?: CanvasExecution | null;
+  /**
+   * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C1/C2): the Editor footer hosts the ONE lifecycle action (Authorize workflow, Refresh review, or the existing
+   * execution action) while Execute shows the Canvas, so the Canvas frame carries none (`executeActionPlacement` decides; same handlers).
+   */
+  actionInFooter?: boolean;
+  /** C1/C2: the Review the owner authorizes (valid) or must refresh (expired), at the top of the status panel, before anything is authorized. */
+  review?: ReactNode;
 };
+/**
+ * BUILD-FLOFI-UX-EDITOR-FINOPS-001: where Execute's one lifecycle action belongs. `footer` whenever the Canvas frame is the view (before an execution,
+ * or a live execution the Canvas follows); `inline` for a step continuing in place and for an execution shown on its own timeline, whose action
+ * stays beside what it describes. The same rule ExecuteWorkspace uses below to choose its view, so the action is rendered exactly once.
+ */
+export function executeActionPlacement(input: { readonly live: ExecutionControls['live']; readonly canvasExecution?: CanvasExecution | null;
+  readonly continuation?: SequenceContinuation | null }): 'footer' | 'inline' {
+  const { live } = input;
+  if (!live) return input.continuation ? 'inline' : 'footer';
+  const canvasRun = input.canvasExecution?.started ? input.canvasExecution : null;
+  return live.runKey && canvasRun?.runKeys.includes(live.runKey) ? 'footer' : 'inline';
+}
 export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const { t: tr } = useLocale();
   const { workflowName, wallet, authorization, execution, backToBuild, backToSimulate } = props;
@@ -183,9 +203,13 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
     {props.workflowRun}
     {(connectWallet || startNew) && <div className="execute-actions simulation-workspace-actions execution-status-actions">{stageActions}</div>}
   </div>;
+  // C1/C2: with the Review shown (before anything is authorized), it states the status itself (valid until / expired), so the generic status line
+  // and the authorization line would only repeat it.
+  const reviewShown = Boolean(props.review && !live && !continuation);
   const statusPanel = reviewBlock ? reviewPanel : <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
-    {!grouped && status}
-    {!live && !grouped && !continuation && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
+    {reviewShown && props.review}
+    {!grouped && !reviewShown && status}
+    {!live && !grouped && !continuation && !reviewShown && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
     {live && <p className="execution-status-progress">{progress ? tr(STEPS_COMPLETED, progress.completed, progress.total)
       : result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
       : tr('{0} of {1} steps confirmed', live.completed, live.steps.length)}</p>}
@@ -200,15 +224,18 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
     </div>
     {navigationNote}
   </section>;
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001: a view without the Canvas frame (a timeline, a step continuing in place) keeps the same Editor header.
+  const framed = Boolean(!live && continuation && canvasRun || live && canvasLive || !live && !continuation);
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
+    {!framed && <EditorStageHead workflowName={workflowName} steps={progress?.total ?? props.workflow.nodes.filter(node => !node.actionType.startsWith('mock-')).length}/>}
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
       {!live && continuation && canvasRun ? <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasRun} dockLabel={null}
           dock={<SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>}/>
         : !live && continuation ? <SequenceContinuationPanel continuation={continuation} progress={progress} action={props.primaryAction ?? <CanvasLifecycleAction {...props} controls={controls}/>}/>
         // The live Canvas is the same grid child as the plan before the run (same element, sizing rules and card state: nothing is remounted).
         : live && canvasLive ? <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasLive} dock={detailsOnly ? statusPanel : undefined} dockLabel={null}
-            primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>
-        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasRun} dock={detailsOnly ? statusPanel : undefined} dockLabel={null} foot={!reviewBlock} primaryAction={reviewBlock ? undefined : props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+            primaryAction={props.actionInFooter ? undefined : props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>
+        : live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" execution={canvasRun} dock={detailsOnly ? statusPanel : undefined} dockLabel={null} foot={!reviewBlock} primaryAction={reviewBlock || props.actionInFooter ? undefined : props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to the Canvas")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
       {live && canvasLive && <details className="shell-details execution-details-disclosure" open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) setDetailsChoice({ key: detailsKey, open }); }}>
         <summary>{tr('Execution details')}<span className="execution-details-hint">{tr('Transactions, receipts and recorded evidence')}</span></summary>
