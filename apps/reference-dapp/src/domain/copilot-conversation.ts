@@ -298,8 +298,10 @@ const REPEAT_CUE = /\b(?:same|again|repeat|once more|as before|like before|mesm[
 
 const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
 const segmentText = (state: CopilotConversation) => state.segment.join('\n');
-/** Flofi's own transcript entries never carry an address (a carried beneficiary, a connected wallet, EVM or Solana): the model needs none. */
-/** A Uniswap v3 position id ("#123456", "#1234…5678") resolves to its owner on chain (`ownerOf`): FloFi's own entries never carry one either. */
+/**
+ * Flofi's own transcript entries never carry an address (a carried beneficiary, a connected wallet, EVM or Solana): the model needs none. Nor a
+ * Uniswap v3 position id ("#123456", "#1234…5678"): with its chain it resolves to the owner (`ownerOf`).
+ */
 const redact = (text: string) => text.replace(/0x[0-9a-fA-F]{40}/g, '[address]').replace(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g, '[address]')
   .replace(POSITION_ID, '#[position]').slice(0, COPILOT_LIMITS.maxAssistantMessageLength);
 function bounded(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
@@ -1790,12 +1792,12 @@ function resolvePosition(intent: PositionIntent, state: CopilotConversation, env
     return resolveDevnetPosition({ ...intent, operation: intent.operation === 'DECREASE' ? 'DECREASE' : 'EXIT' }, state, env, extras);
   return resolveLiquidityPosition(intent, state, env, extras);
 }
-/** An Aave Withdraw the interpreter read from words about the user's liquidity ("retira metade da minha liquidez"): that request as a position request. */
 /** An Aave Withdraw whose asset and amount are the user's own words, with no percentage: never a liquidity-position removal. */
 function tokenAmountWithdrawal(action: CopilotAction, text: string): boolean {
   return action.type === 'WITHDRAW' && action.asset !== null && action.amount !== null && assetNamed(text, action.asset) && groundedAmount(text, action.amount)
     && statedPercent(text) === null;
 }
+/** An Aave Withdraw the interpreter read from words about the user's liquidity ("retira metade da minha liquidez"): that request as a position request. */
 function positionIntentOf(intent: Extract<CopilotIntentV2, { kind: 'ACTION' }>, text: string): PositionIntent {
   const network = 'network' in intent.action ? intent.action.network : null;
   const all = /(?<![\p{L}])(?:all|everything|tudo|toda|inteira|completamente|totalmente)(?![\p{L}])/iu.test(text);
