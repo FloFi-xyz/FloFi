@@ -65,7 +65,7 @@ describe('Dashboard liquidity position actions', () => {
 
   it('shows range and state, current price, liquidity status, principal, recorded owed tokens and fees, collectable now and last verified (EN and PT)', () => {
     const html = renderToStaticMarkup(<PositionResults scans={scans(uniswap())} prepare={prepare}/>);
-    for (const text of ['Range', '81000–121000 USDC per cbBTC', 'In range', 'Current price', '100000 USDC per cbBTC', 'Liquidity', 'Open', 'Principal', '12 USDC',
+    for (const text of ['Range', '81000–121000 USDC per cbBTC', 'In range', 'Current price', '100000 USDC per cbBTC', 'Liquidity', 'Open (has liquidity)', 'Principal', '12 USDC',
       'Owed tokens and fees (recorded)', 'Collectable now', 'Last verified']) expect(html, text).toContain(text);
     expect(html).not.toMatch(/\byield\b/i);
     const empty = renderToStaticMarkup(<PositionResults scans={scans(uniswap({ status: 'EMPTY', rangeState: 'BELOW_RANGE', collectable: null, currentPrice: null, operations: ['EXIT'] }))} prepare={prepare}/>);
@@ -74,6 +74,9 @@ describe('Dashboard liquidity position actions', () => {
     for (const text of ['Tokens devidos e taxas (registrados)', 'Coletável agora', 'Dentro da faixa', 'Coletar taxas', 'Remover liquidez', 'Fechar posição', 'Última verificação'])
       expect(pt, text).toContain(text);
     expect(pt).not.toMatch(/rendimento/i);
+    // The status is the adjective ("Aberta"), never the buttons' verb "Abrir"; the price unit reads "por", never an English "per".
+    for (const text of ['Aberta (com liquidez)', '81000–121000 USDC por cbBTC', '100000 USDC por cbBTC']) expect(pt, text).toContain(text);
+    expect(pt).not.toMatch(/Abrir|\bper\b/);
     expect(prepare).not.toHaveBeenCalled();
   });
 

@@ -16,11 +16,9 @@ import { NetworkBrandIcon } from './brand-icon';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { EditorStageHead } from './editor-chrome';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
-import { isFinalExecutionResult, refreshableAfterNothingSent } from '../domain/execution-result';
-import { REFRESH_AFTER_PRESEND_REFUSAL } from '../domain/canvas-lifecycle';
+import { isFinalExecutionResult } from '../domain/execution-result';
+import { refreshableRun } from '../domain/canvas-lifecycle';
 
-// EXEC-01: the same list as the Canvas action (bridges and Uniswap liquidity refresh the same run in place).
-const REFRESHABLE_SOURCES: readonly string[] = REFRESH_AFTER_PRESEND_REFUSAL;
 import { STEPS_COMPLETED, type WorkflowProgressView } from '../domain/workflow-progress';
 import { SequenceContinuationPanel, WorkflowProgressList, type SequenceContinuation } from './workflow-progress-panel';
 
@@ -130,7 +128,9 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const connectWallet = execution.connect && authorization.accepted && !wallet.changed && !execution.started;
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a bridge request refused before the wallet continues with the timeline's own Refresh & review (the Canvas
   // action, `canvas-lifecycle.ts`); starting a new workflow is then the secondary choice, never the only one.
-  const refreshable = Boolean(result && REFRESHABLE_SOURCES.includes(props.source.kind) && refreshableAfterNothingSent(live));
+  // EXEC-01 / BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the same rule as the Canvas action (bridges and Uniswap liquidity refresh the same run in place,
+  // a declined Uniswap position request included).
+  const refreshable = Boolean(result && refreshableRun(props.source, live));
   const startNew = Boolean(result && props.startNewWorkflow && isFinalExecutionResult(live));
   const stageActions = <>
     {connectWallet && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}

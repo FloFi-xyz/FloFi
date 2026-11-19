@@ -100,6 +100,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     const shown = rows(render(bound, 'simulate', 'EN', observedAt));
     expect(shown['Collect fees']).toBe(`#${record.review.position.tokenId}`);
     expect(shown.Liquidity).toBe(`${record.review.position.liquidity} (unchanged)`);
+    expect(rows(render(bound, 'simulate', 'PT', observedAt)).Liquidez).toBe(`${record.review.position.liquidity} (sem alteração)`);
     expect(shown['Collected, at least']).toMatch(/^≥ /);
     expect(shown['Minimum principal (enforced)']).toBeUndefined();
     expect(shown['Liquidity removed']).toBeUndefined();
@@ -127,7 +128,15 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(simulate).toContain('Resultado da simulação');
     for (const label of ['Liquidez removida', 'Liquidez restante', 'Capital devolvido esperado', 'Capital mínimo (garantido na rede)', 'Tokens devidos e taxas', 'NFT da posição'])
       expect(simulate, label).toContain(label);
+    // The rows' values read in Portuguese too: never "of", "per", "(unchanged)" or a garbled "desvio de <amounts>" minimum.
+    const shown = rows(render(bound, 'simulate', 'PT', observedAt));
+    expect(shown['Liquidez removida']).toMatch(/^\d+ de \d+ \(50%\)$/);
+    expect(shown['Capital mínimo (garantido na rede)']).toMatch(/^[\d.,]+ \S+ \+ [\d.,]+ \S+ · desvio de 1%$/);
     const valid = text(render(bound, 'execute', 'PT', observedAt));
+    const authorizing = rows(render(bound, 'execute', 'PT', observedAt));
+    expect(authorizing['Intervalo de preço']).toMatch(/^[\d.]+–[\d.]+ \S+ por \S+$/);
+    expect(authorizing['Tokens devolvidos']).toMatch(/^\S+ e \S+ para 0x[0-9a-f]{40}$/);
+    expect(Object.values(authorizing).join(' ')).not.toMatch(/\bof\b|\bper\b|\(unchanged\)|\band\b.*\bto\b/);
     expect(valid).toContain('Você está autorizando');
     expect(valid).toContain('Nenhuma — esta operação não precisa de permissão de token');
     expect(valid).toContain('Pedidos à carteira');

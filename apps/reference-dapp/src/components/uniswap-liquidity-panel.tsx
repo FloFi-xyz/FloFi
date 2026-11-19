@@ -270,7 +270,8 @@ function UniswapPositionPanel({ view }: { view: 'simulate' | 'execute' }) {
     {lines && <dl className="swap-summary" aria-label={tr('Position operation review')}>
       {lines.details.map(line => <div key={line.label}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}</dd></div>)}
       <dt>{tr('Maximum network fee')}</dt><dd>{tr(r!.fees.totalUpperBoundWei ?? r!.fees.executionFeeUpperBoundWei)} wei</dd>
-      <dt>{tr('Review freshness')}</dt><dd>{tr(fresh > 0 ? `Valid for ${fresh}s` : 'Expired — simulate again')}</dd>
+      {/* The catalog's own phrase with its parameter (a bare "Valid for 30s" is caught by the generic "{0}s" template and stays English). */}
+      <dt>{tr('Review freshness')}</dt><dd>{fresh > 0 ? tr('Valid for {0}s', fresh) : tr('Expired — simulate again')}</dd>
     </dl>}
     {lines && <ul aria-label={tr('Position operation notices')}>{lines.warnings.map(w => <li key={w.message}>{tr(w.message)}</li>)}</ul>}
     {view === 'execute' && record && <>
