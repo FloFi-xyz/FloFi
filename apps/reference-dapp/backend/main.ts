@@ -102,13 +102,13 @@ async function main(): Promise<void> {
   // The worker handles SIGTERM/SIGINT from before it reports `worker.starting`: a stop that arrives while it is still assembling its
   // queue is the same clean shutdown (exit 0), never a kill by the default signal action (seen on a loaded CI runner, where the stop
   // landed between this log line and the handler that used to be registered after the queue was built).
-  let workerLoop: { stop(): Promise<void> } | null = null, workerStopRequested = false;
+  let workerLoop: { stop(): Promise<void> } | null = null, financialSync: { stop(): Promise<void> } | null = null, workerStopRequested = false;
   if (command === 'worker') {
     const shutdown = () => {
       if (workerStopRequested) return;
       workerStopRequested = true;
       logger.info('worker.stopping');
-      (workerLoop ? workerLoop.stop() : Promise.resolve()).finally(() => db.close().finally(() => process.exit(0)));
+      Promise.allSettled([workerLoop?.stop(), financialSync?.stop()]).finally(() => db.close().finally(() => process.exit(0)));
       setTimeout(() => process.exit(1), 120_000).unref();
     };
     process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
@@ -222,6 +222,18 @@ async function main(): Promise<void> {
       if (failure) throw failure.error;
     } });
   workerLoop = worker;
+  // Billing uses a separate one-connection pool and single-item loop. Neither
+  // a provider call nor FinOps setup is awaited by execution reconciliation.
+  if (process.env.FLOFI_FINOPS_SYNC === 'enabled' && !workerStopRequested) {
+    void import('./finops-worker.ts')
+      .then(async ({ loadFinancialSync }) => {
+        if (workerStopRequested) return;
+        const loop = await loadFinancialSync(process.env, { databaseUrl: config.databaseUrl, tenantId: config.tenantId, logger });
+        if (loop && workerStopRequested) await loop.stop();
+        else financialSync = loop;
+      })
+      .catch((error: unknown) => logger.warn('finops.worker_disabled', disabledFields(loadFailed('FINOPS_WORKER_LOAD_FAILED')(error))));
+  }
   // A stop requested while the queue was being assembled is already closing the database: the loop never starts.
   if (!workerStopRequested) await worker.start();
 }

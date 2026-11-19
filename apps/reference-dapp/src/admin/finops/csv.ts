@@ -7,10 +7,8 @@ const REQUIRED_COLUMNS = COLUMNS.slice(0, 9);
 const MAX_ROWS = 101;
 const MAX_TEXT = 14_000;
 
-/** RFC 4180 cells, allowing LF input, CRLF files, BOM and doubled quotes. The import is validated before a transaction starts. */
-export function parseFinopsCsv(input: unknown): Entry[] {
-  const invalid = (field = 'csv'): never => { throw new FinopsValidationError(field); };
-  if (typeof input !== 'string' || input.length > MAX_TEXT) return invalid();
+/** RFC 4180 cell decoding shared by invoice import and bounded provider exports. */
+export function parseCsvRows(input: string, limits: { rows: number; columns: number }, invalid: () => never): string[][] {
   const csv = input.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const records: string[][] = [];
   let record: string[] = [], value = '', quoted = false, closed = false;
@@ -23,7 +21,7 @@ export function parseFinopsCsv(input: unknown): Entry[] {
     } else if (char === ',' || char === '\n') {
       record.push(value);
       if (char === '\n') { records.push(record); record = []; }
-      if (records.length > MAX_ROWS || record.length > COLUMNS.length) return invalid();
+      if (records.length > limits.rows || record.length > limits.columns) return invalid();
       value = ''; closed = false;
     } else if (char === '"' && value === '' && !closed) quoted = true;
     else if (closed || char === '"' || char === '\r') return invalid();
@@ -31,6 +29,14 @@ export function parseFinopsCsv(input: unknown): Entry[] {
   }
   if (quoted) return invalid();
   if (record.length || value || closed) records.push([...record, value]);
+  if (records.length > limits.rows || records.some(row => row.length > limits.columns)) return invalid();
+  return records;
+}
+
+export function parseFinopsCsv(input: unknown): Entry[] {
+  const invalid = (field = 'csv'): never => { throw new FinopsValidationError(field); };
+  if (typeof input !== 'string' || input.length > MAX_TEXT) return invalid();
+  const records = parseCsvRows(input, { rows: MAX_ROWS, columns: COLUMNS.length }, invalid);
   const [headers, ...rows] = records;
   if (!headers || !rows.length || records.length > MAX_ROWS || new Set(headers).size !== headers.length ||
       headers.some(column => !(COLUMNS as readonly string[]).includes(column)) || REQUIRED_COLUMNS.some(column => !headers.includes(column))) return invalid();

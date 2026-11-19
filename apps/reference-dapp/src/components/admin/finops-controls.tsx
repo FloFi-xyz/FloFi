@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { ENTRY_SOURCES, FINOPS_ENVIRONMENTS, FINOPS_SCOPES, scopeIds, type ScopeId } from '../../admin/finops/economics';
 import { modelScenario, parseScenario, SCENARIO_FIELDS, SCENARIO_PRESETS, scenarioKeys, type Scenario } from '../../admin/finops/scenario';
@@ -9,6 +9,8 @@ import { adminPost } from './admin-client';
 import { Kpi } from './admin-ui';
 import { useLocale } from '../../i18n/locale';
 import { finopsCopy } from './finops-copy';
+import type { FinopsReport } from '../../admin/finops/report';
+import { FINANCIAL_LIMITATION_LABELS, FINANCIAL_SYNC_ERROR_LABELS, MANUAL_ONLY_FINANCIAL_PROVIDERS } from '../../admin/finops/sync-labels';
 
 export type RelativeFilter = { range: string; from?: string; to?: string };
 const ERRORS: Readonly<Record<string, string>> = {
@@ -19,9 +21,75 @@ const ERRORS: Readonly<Record<string, string>> = {
   FINOPS_PROVIDER_RETRY_LATER: 'The billing provider requested a wait. Try again later.',
   FINOPS_SYNC_RATE_LIMITED: 'Too many synchronization requests. Wait a minute before trying again.',
   FINOPS_SYNC_SUPERSEDED: 'A newer synchronization for this period finished first. Refresh to view its records.',
+  ...FINANCIAL_SYNC_ERROR_LABELS,
   FINOPS_EXPORT_UNAVAILABLE: 'The report is temporarily unavailable.',
 };
 const message = (code: string) => ERRORS[code] ?? 'The request could not be completed. Your saved records are preserved.';
+
+export function FinopsIntegrations({ integrations, csrf }: { integrations: FinopsReport['integrations']; csrf?: string }) {
+  const { copy, money, time, count } = finopsCopy(useLocale().language), router = useRouter();
+  const [requested, setRequested] = useState(false);
+  const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false), requestInFlight = useRef(false);
+  const active = integrations.providers.some(provider => provider.active);
+  useEffect(() => {
+    if (!active && !requested) return;
+    // Refresh from durable storage while a job runs. Calls to external billing
+    // APIs are made exclusively by the worker.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') router.refresh();
+    }, 25_000);
+    const afterRequest = requested ? window.setTimeout(() => setRequested(false), 100_000) : undefined;
+    return () => { window.clearInterval(timer); window.clearTimeout(afterRequest); };
+  }, [active, requested, router]);
+  async function queue(provider: string) {
+    if (!csrf || requestInFlight.current) return;
+    requestInFlight.current = true; setBusy(true); setFeedback(null);
+    try {
+      const response = await adminPost<{ queued: string[]; deferred: string[] }>('/admin/api/finops/import', { action: 'queue-sync', provider }, csrf);
+      if (!response.ok) { setFeedback({ error: true, text: copy(message(response.code)) }); return; }
+      setFeedback({ error: false, text: copy('{0} queued, {1} already scheduled or in progress.', count(response.queued.length), count(response.deferred.length)) });
+      setRequested(response.queued.length > 0);
+      router.refresh();
+    } finally {
+      requestInFlight.current = false; setBusy(false);
+    }
+  }
+  if (!integrations.available) return <p role="status">{copy('Automatic synchronization is awaiting database activation.')}</p>;
+  return <>
+    {csrf && <div className="admin-actions"><button type="button" className="admin-button" disabled={busy || !integrations.providers.some(provider => provider.configured)}
+      onClick={() => void queue('all')}>{copy('Sync all')}</button></div>}
+    {feedback && <p className="admin-alert" role={feedback.error ? 'alert' : 'status'} data-tone={feedback.error ? 'bad' : 'ok'}>{feedback.text}</p>}
+    <p>{copy('Metered usage and estimates are shown separately from recorded costs.')}</p>
+    <div className="admin-table-wrap"><table className="admin-table" aria-label={copy('Financial integrations')}>
+      <thead><tr>{['Provider', 'Connection', 'Current-period cost', 'Last successful sync', 'Next scheduled sync', 'Data quality', 'Historical coverage', ...(csrf ? ['Actions'] : [])]
+        .map(label => <th key={label} scope="col">{copy(label)}</th>)}</tr></thead>
+      <tbody>{integrations.providers.map(provider => {
+        const recent = provider.coverage[0];
+        const stale = Boolean(provider.lastSuccess && provider.nextSync && Date.parse(provider.nextSync) < Date.now() && !provider.active);
+        const manual = MANUAL_ONLY_FINANCIAL_PROVIDERS.includes(provider.id);
+        const limitation = (code: string) => copy(FINANCIAL_LIMITATION_LABELS[code] ?? code);
+        const status = provider.active ? 'Synchronizing' : manual ? 'Manual records only' : !provider.configured ? 'Not configured' : provider.errorCode ? 'Needs attention'
+          : stale ? 'Stale' : provider.lastSuccess ? 'Connected' : 'Ready to synchronize';
+        return <tr key={provider.id}><th scope="row">{copy(provider.name)}</th>
+          <td>{copy(status)}{provider.errorCode && <p>{copy(message(provider.errorCode))}</p>}</td>
+          <td>{money(provider.cost.amount)}{provider.cost.amount !== null && <p>{copy(provider.cost.quality)}</p>}</td>
+          <td>{time(provider.lastSuccess)}</td><td>{time(provider.nextSync)}</td>
+          <td>{recent ? copy(recent.quality) : copy('Unavailable')}{recent?.limitations.length ? <details><summary>{copy('Coverage limitations')}</summary>
+            <ul>{recent.limitations.map(code => <li key={code}>{limitation(code)}</li>)}</ul></details> : null}</td>
+          <td>{provider.coverage.length > 0 ? <details><summary>{copy('{0} synchronized periods', count(provider.coverage.length))}</summary>
+            <ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>{coverage.period.from} – {coverage.period.to} · {copy(coverage.quality)}
+              {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>
+            {provider.meters.length > 0 && <ul>{provider.meters.slice(0, 100).map((meter, index) =>
+              <li key={index}>{meter.service} · {meter.metric} · {meter.amount} {meter.unit}{meter.basis ? ' · ' + meter.basis : ''}</li>)}</ul>}
+          </details> : copy('No synchronized period')}</td>
+          {csrf && <td><button type="button" className="admin-button" disabled={busy || provider.active || !provider.configured}
+            onClick={() => void queue(provider.id)}>{copy('Sync now')}</button></td>}
+        </tr>;
+      })}</tbody>
+    </table></div>
+  </>;
+}
 
 function EntryFields() {
   const { copy } = finopsCopy(useLocale().language);

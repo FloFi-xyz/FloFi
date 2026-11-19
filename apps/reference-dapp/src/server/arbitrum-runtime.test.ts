@@ -29,9 +29,10 @@ const swap = (input = 'USDC', output = 'WETH', amount = '10000000') => flow(crea
 const native = (amount = '10000000000000000', to = recipient) => flow(createNativeTransferNode('node-002', { chain: chainId, amount, recipient: to }));
 const token = (symbol = 'USDC', amount = '5000000', to = recipient) => flow(createTokenTransferNode('node-002', { chain: chainId, amount, recipient: to,
   token: { address: asset(symbol).address!, decimals: asset(symbol).decimals, officialId: null } }));
-function swapService(options: { enabled?: boolean; path?: string; load?: () => Promise<AssetCatalog> } = {}) {
+function swapService(options: { enabled?: boolean; path?: string; load?: () => Promise<AssetCatalog>; confirmations?: number } = {}) {
+  const runtime = mockCatalogRuntime(options.load ?? catalog, options.enabled ?? true);
   return createPublicTestnetService({ rpc: async () => { throw Error('NO_FALLBACK'); }, rpcs: { [chainId]: chain.rpc }, idPrefix: 'ars',
-    journalDir: options.path ?? dir(), now: () => new Date(now), catalog: mockCatalogRuntime(options.load ?? catalog, options.enabled ?? true) });
+    journalDir: options.path ?? dir(), now: () => new Date(now), catalog: options.confirmations ? { ...runtime, confirmations: { 42161: options.confirmations } } : runtime });
 }
 function transferService(options: { enabled?: boolean; path?: string; load?: () => Promise<AssetCatalog> } = {}) {
   return createRobinhoodTransferService({ rpcs: { [chainId]: chain.rpc }, idPrefix: 'art', journalDir: options.path ?? dir(), now: () => now,
@@ -628,6 +629,21 @@ describe('BUILD-FLOFI-WALLET-UX-EXECUTION-FIX-001 relayed MetaMask Smart Account
     expect((await s.observe(a)).attempts[0]?.state).toBe('CONFIRMED');
     expect(await s.observe(b)).toMatchObject({ divergence: 'RELAYED_TRANSACTION_ALREADY_CLAIMED', outcome: null });
     expect(JSON.parse(readFileSync(join(path, `claim-42161-${hash}.tx`), 'utf8'))).toEqual({ id: a, attemptId: approveA.attempt.attemptId });
+  });
+
+  it('claims a relayed transaction for its attempt while it waits for confirmation depth, so an identical run cannot adopt it', async () => {
+    const path = dir(), s = swapService({ path, confirmations: 2 }), a = (await s.prepare(swap(), owner)).quote.executionId;
+    const approveA = await step(s, a);
+    chain.apply({ from: owner, to: recipient, data: '0x', value: '0x1' });
+    const b = (await s.prepare(swap(), owner)).quote.executionId, approveB = await step(s, b);
+    const hash = chain.relay(approveA.tx, { relayer });
+    s.report(a, approveA.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    expect((await s.observe(a)).attempts[0]).toMatchObject({ state: 'HASH', txHash: hash });
+    expect(JSON.parse(readFileSync(join(path, `claim-42161-${hash}.tx`), 'utf8'))).toEqual({ id: a, attemptId: approveA.attempt.attemptId });
+    s.report(b, approveB.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    expect(await s.observe(b)).toMatchObject({ divergence: 'RELAYED_TRANSACTION_ALREADY_CLAIMED', outcome: null });
+    chain.mine();
+    expect((await s.observe(a)).attempts[0]?.state).toBe('CONFIRMED');
   });
 
   it('relayedNonceRelease accepts only the reserved transaction verified as relayed, reconciled, with no pending, direct or divergent attempt', async () => {

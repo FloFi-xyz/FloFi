@@ -239,9 +239,17 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE'
         : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
-      add('destination', nodeId, 'Destination delivery', r.review.route.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED');
-      if (destinationState === 'PENDING') phrase(operations.at(-1)!, r.destination ? 'DESTINATION_OBSERVED' : 'AWAITING_DESTINATION');
-      if (r.destination && r.verdict !== 'RECONCILED') { const op = operations.at(-1)!; op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality'; delete op.labelArgs; }
+      add('destination', nodeId, r.refund ? 'Refund' : 'Destination delivery', r.refund?.chainId ?? r.review.route.destinationChain, destinationState,
+        r.destination?.transactionHash ?? r.refund?.transactionHash ?? null, r.verdict === 'RECONCILED');
+      const op = operations.at(-1)!;
+      // Settled or divergent outcomes first; then, while pending, the most specific unverified claim; a recovery without one needs attention.
+      if (r.verdict === 'REFUNDED') op.label = 'Refunded';
+      else if (r.verdict === 'DIVERGENT') op.label = 'Manual attention required';
+      else if (r.verdict === 'PENDING' && r.lastHint?.status === 'REFUNDED') op.label = 'Refund pending verification';
+      else if (r.verdict === 'PENDING' && r.destination) op.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
+      else if (r.verdict === 'PENDING' && r.lastHint?.status === 'FILLED') op.label = 'Provider reports delivery · awaiting independent verification';
+      else if (r.phase === 'RECOVERY_REQUIRED') op.label = 'Manual attention required';
+      else if (destinationState === 'PENDING') phrase(op, 'AWAITING_DESTINATION');
       break;
     }
     case 'uniswap-pool': {
@@ -355,7 +363,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       provider: source.kind === 'universal' ? simulationProvider(source.state.record?.review.route.provider ?? '') ?? card.provider ?? null
         : source.kind === 'router' ? simulationProvider(source.state.record?.review.route.routingProvider ?? '') ?? card.provider ?? null : source.kind === 'cow' ? 'CoW Protocol' : card.provider === 'Provider not specified' ? null : card.provider ?? null,
       tokens: [...new Set(`${card.amount} ${card.detail ?? ''} ${card.bridgePair ?? ''}`.match(/\b(?:devUSDC|USDC|WETH|ETH|WSOL|SOL|USDT)\b/g) ?? [])],
-      state: status, label: intent && completed ? 'Settled' : live?.phase ? live.label : labels[status], ...live?.phase && live.labelArgs ? { labelArgs: live.labelArgs } : {}, operations: own };
+      state: status, label: intent && completed ? 'Settled' : live?.label ?? labels[status], ...live?.labelArgs ? { labelArgs: live.labelArgs } : {}, operations: own };
   });
   // These legacy records retain requests, but no original workflow. Display their
   // actual operations without borrowing amounts or actions from the current Build.

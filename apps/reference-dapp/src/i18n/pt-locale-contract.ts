@@ -148,6 +148,7 @@ export const portugueseLocaleContract: Readonly<Record<string, string>> = {
   'The transaction is pending on Base Sepolia.': 'A transação está pendente na Base Sepolia.',
   'The transaction needs manual review. The observed balances did not match the swap bounds.': 'A transação precisa de revisão manual. Os saldos observados não corresponderam aos limites da troca.',
   'The transaction reverted on chain; only the network fee was charged. Refresh and review before trying again.': 'A transação foi revertida na rede; só a taxa de rede foi cobrada. Atualize e revise antes de tentar novamente.',
+  "Included on chain. FloFi records it once the network's confirmation depth is reached; nothing will be sent again.": 'Incluída na rede. O FloFi registra a etapa quando a profundidade de confirmação da rede for atingida; nada será enviado novamente.',
   'The transfer request was declined in the wallet. Nothing was submitted.': 'O pedido de transferência foi recusado na carteira. Nada foi enviado.',
   'The wallet and the swap are on different Solana clusters. Nothing was signed.': 'A carteira e a troca estão em clusters Solana diferentes. Nada foi assinado.',
   'The wallet did not return a signed transaction. Nothing was sent.': 'A carteira não retornou uma transação assinada. Nada foi enviado.',

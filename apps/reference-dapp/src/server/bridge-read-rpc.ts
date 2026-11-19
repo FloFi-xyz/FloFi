@@ -20,13 +20,16 @@ export function bridgeRpcUrls(chainId: number, primary: string, env: Env): reado
   return urls;
 }
 
+const TRACE_METHODS = new Set(['trace_transaction', 'debug_traceTransaction']);
 export function failoverReadRpc(providers: readonly Rpc[], chainId: number): Rpc {
   if (!providers.length || providers.length > 4) throw Error('ROUTER_RPC_CONFIGURATION_INVALID');
   const clients = providers.map(rpc => chainBoundRpc(rpc, chainId));
   const bound = new Set<number>();
+  // Trace namespaces are optional node features: each keeps its own preferred path.
   let preferred = 0;
+  const preferredTrace = new Map<string, number>();
   return async (method, params, context) => {
-    const start = preferred;
+    const tracing = TRACE_METHODS.has(method), start = tracing ? preferredTrace.get(method) ?? 0 : preferred;
     for (let turn = 0; turn < clients.length; turn++) {
       const index = (start + turn) % clients.length, rpc = clients[index]!;
       try {
@@ -35,11 +38,18 @@ export function failoverReadRpc(providers: readonly Rpc[], chainId: number): Rpc
         const read = (m: string, p: readonly unknown[]) => context ? rpc(m, p, context) : rpc(m, p);
         if (method !== 'eth_chainId' && !bound.has(index)) { await read('eth_chainId', []); bound.add(index); }
         const result = await read(method, params);
+        if (tracing && (method === 'trace_transaction' ? !Array.isArray(result) || result.length === 0 : !result || typeof result !== 'object' || Array.isArray(result)))
+          throw Error('PUBLIC_RPC_RESPONSE_INVALID');
         if (method === 'eth_chainId') bound.add(index);
-        preferred = index;
+        if (tracing) preferredTrace.set(method, index);
+        else preferred = index;
         return result;
       } catch (cause) {
-        if (!(cause instanceof Error && ['PUBLIC_RPC_UNAVAILABLE', 'PUBLIC_RPC_HISTORY_UNAVAILABLE'].includes(cause.message)) || turn === clients.length - 1) throw cause;
+        // A node that declines a read-only trace can still be the best primary
+        // for ordinary reads. Never change normal revert or wrong-chain handling.
+        const unavailable = cause instanceof Error && (['PUBLIC_RPC_UNAVAILABLE', 'PUBLIC_RPC_HISTORY_UNAVAILABLE'].includes(cause.message)
+          || tracing && cause.message === 'PUBLIC_RPC_RESPONSE_INVALID');
+        if (!unavailable || turn === clients.length - 1) throw cause;
       }
     }
     throw Error('PUBLIC_RPC_UNAVAILABLE');

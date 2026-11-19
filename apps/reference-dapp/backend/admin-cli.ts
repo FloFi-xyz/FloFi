@@ -11,7 +11,9 @@
  *   end-sessions                                                          ends every open admin session (grants stay)
  *   audit         [--limit 50]                                            the latest admin audit events (closed codes and ids only)
  *   index         [--limit 2000]                                          fills the analytics facts cache from executed runs' records (read-only on runs)
- *   finops-migrate                                                       applies certified 0029 from a built checkout after certificate rollout
+ *   finops-migrate / finops-sync-migrate                                applies certified 0029 or 0030 after certificate rollout
+ *   reconcile-history [--flow crosschain-universal] [--code A,B] [--limit 100] [--apply --approval-ref REF --reason TEXT]
+ *                                                                         dry run by default; --apply queues read-only re-observation (no transaction)
  *
  * BUILD-FLOFI-RECONCILIATION-PRIVACY-UX-001 — privacy procedures (docs/deploy/ADMIN.md#privacy-and-retention). Nothing is deleted without an
  * approval reference; a wallet is read from standard input (`--wallet-stdin`), never from an argument.
@@ -62,12 +64,14 @@ async function main(): Promise<void> {
     wallet: { type: 'string' }, role: { type: 'string' }, label: { type: 'string' }, principal: { type: 'string' }, limit: { type: 'string' },
     policy: { type: 'string' }, days: { type: 'string' }, 'approval-ref': { type: 'string' }, scope: { type: 'string' }, value: { type: 'string' },
     'reason-code': { type: 'string' }, hold: { type: 'string' }, kind: { type: 'string' }, 'subject-kind': { type: 'string' }, request: { type: 'string' },
-    decision: { type: 'string' }, code: { type: 'string' }, 'include-text': { type: 'boolean' }, 'wallet-stdin': { type: 'boolean' } } });
-  const tenantId = tenantOf(values), databaseUrl = process.env.DATABASE_URL ?? '';
+    decision: { type: 'string' }, code: { type: 'string' }, 'include-text': { type: 'boolean' }, 'wallet-stdin': { type: 'boolean' },
+    flow: { type: 'string' }, reason: { type: 'string' }, apply: { type: 'boolean' } } });
+  const migration = command === 'finops-migrate' || command === 'finops-sync-migrate';
+  const tenantId = tenantOf(values), databaseUrl = (migration ? process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL : process.env.DATABASE_URL) ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });
   try {
-    if (command === 'finops-migrate' && (values['preview-branch'] || deploymentEnvironment(process.env) === 'preview')) {
+    if (migration && (values['preview-branch'] || deploymentEnvironment(process.env) === 'preview')) {
       await assertDedicatedPreviewDatabase(db);
     }
     await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);

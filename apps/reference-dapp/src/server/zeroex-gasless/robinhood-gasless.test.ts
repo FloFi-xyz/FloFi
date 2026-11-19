@@ -50,11 +50,12 @@ beforeEach(() => {
   chain.fundNative(owner.address, 0n);
   zx.script.permitTokens = new Set([usdg.address!]);
 });
-function service(options: { config?: ZeroExGaslessConfig; executionEnabled?: boolean; dir?: string | undefined; gasless?: boolean; rpc?: Rpc } = {}): PublicTestnetService {
+function service(options: { config?: ZeroExGaslessConfig; executionEnabled?: boolean; dir?: string | undefined; gasless?: boolean; rpc?: Rpc; confirmations?: number } = {}): PublicTestnetService {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), 'flofi-rh-gasless-'));
   if (!options.dir) dirs.push(dir);
   const runtime = { ...mockCatalogRuntime(catalog, options.executionEnabled ?? true),
-    ...options.gasless === false ? {} : { gasless: { config: options.config ?? ENABLED, client: createZeroExGaslessClient(zx.http, () => clock) } } };
+    ...options.gasless === false ? {} : { gasless: { config: options.config ?? ENABLED, client: createZeroExGaslessClient(zx.http, () => clock) } },
+    ...options.confirmations ? { confirmations: { 4663: options.confirmations } } : {} };
   return createPublicTestnetService({ rpc: async () => { throw new Error('PUBLIC_NETWORK_UNAVAILABLE'); }, rpcs: { 'eip155:4663': options.rpc ?? zx.rpc }, journalDir: dir,
     idPrefix: 'rhs', now: () => new Date(clock), catalog: runtime });
 }
@@ -187,6 +188,16 @@ describe('execution: typed data signed by the owner, relayed once, reconciled fr
     await expect(s.beginGasless(id, owner.address)).rejects.toThrow('ATTEMPT_ALREADY_ACTIVE');
     await expect(s.begin(id, owner.address)).rejects.toThrow(/ATTEMPT_ALREADY_ACTIVE|SWAP_ALREADY_ATTEMPTED|TOKEN_GAS_MECHANISM_MISMATCH/);
     expect(zx.calls.filter(c => c.method === 'POST')).toHaveLength(1);
+  });
+  it('reconciles a gasless settlement only at the network confirmation depth', async () => {
+    const s = service({ confirmations: 2 }), run = await reviewed(s), id = run.quote.executionId;
+    await execute(s, run);
+    const shallow = await s.observe(id);
+    expect(shallow.outcome).toBeNull();
+    expect(shallow.divergence).toBeUndefined();
+    expect(['SUBMITTED', 'PENDING']).toContain(shallow.gasless!.at(-1)!.state);
+    chain.mine();
+    expect((await s.observe(id)).outcome).toMatchObject({ inputSpent: '100000000', evidence: { outcome: 'RECONCILED' } });
   });
   it('feeds the reconciled output to the next workflow step exactly as a native swap does (USDG → TSLA → next step)', async () => {
     const s = service(), run = await reviewed(s), done = await (async () => { await execute(s, run); return s.observe(run.quote.executionId); })();

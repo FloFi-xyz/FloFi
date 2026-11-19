@@ -510,6 +510,35 @@ FloFi a payer. FloFi-paid sponsorship (ADR-0009, `FLOFI_GAS_SPONSORSHIP`, `FLOFI
 | `FLOFI_ZEROX_API_KEY` | 0x dashboard key with Gasless enabled (header `0x-api-key`, server-side only) | **yes** | same | — | test value | optional | optional | `ZEROX_API_KEY_NOT_CONFIGURED` |
 | `FLOFI_ZEROX_API_URL` | override of `https://api.0x.org`; only that host or the loopback harness | no | same | — | loopback only | — | — | `https://api.0x.org` |
 
+## 5p. FinOps automatic synchronization (BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002, Admin → FinOps → Financial integrations)
+
+Read only by the **Railway worker** (and, for Sync Now/Sync All, the Admin API only writes a schedule row). Every credential is a
+dedicated, least-privilege, server-side billing credential: never a deployment or runtime credential, never `NEXT_PUBLIC_*`, never
+logged, and never sent anywhere except the provider's fixed HTTPS endpoint. Requires schema 30 (`finops-sync-migrate`,
+[SCHEMA-COMPATIBILITY.md §22](SCHEMA-COMPATIBILITY.md#22-certificate-0030_finops_sync)); before activation the worker loop stays idle and
+Admin reports "awaiting database activation". The worker logs `finops.worker_enabled` (provider ids, cadence), `finops.worker_ineligible`
+(tenant mismatch) or `finops.worker_disabled` (load failure, closed code). Unset credentials leave that provider "Not configured"; Resend has
+no authoritative usage API and stays "Manual records only". Memory headroom: one provider read at a time holds at most about 50 MB of
+response data (CircleCI: up to six 8 MB CSV files), parsed on the worker's event loop.
+
+| Variable | Purpose / minimum permission | Secret | Where | Prod | Default / when missing |
+| --- | --- | --- | --- | --- | --- |
+| `FLOFI_FINOPS_SYNC` | `enabled` starts the single-item billing loop on the worker (own 1-connection pool, outside the execution queue) | no | worker | after schema 30 | off |
+| `FLOFI_FINOPS_BILLING_TENANT` | Must equal the worker's tenant (`default`); any other value disables collection. Never active on a Vercel Preview | no | worker, API | `default` | off |
+| `FLOFI_FINOPS_SYNC_HOURS` | Cadence, whole hours 6–168 | no | worker | optional | 24 |
+| `FLOFI_FINOPS_NEON_API_KEY` | Neon **organization** API key for `org-odd-block-82235574` (Consumption Metrics v2; Launch/Scale/Agent/Enterprise plans) | **yes** | worker | optional | Neon not configured |
+| `FLOFI_FINOPS_RAILWAY_API_TOKEN` | Railway account/workspace token able to read `usage` of project `e0ea4b67…` (GraphQL `Authorization: Bearer`) | **yes** | worker | optional | Railway not configured |
+| `FLOFI_FINOPS_VERCEL_BILLING_TOKEN` | Vercel token of a Billing (or Viewer-with-billing) member of team `team_absG3F…` (`GET /v1/billing/charges`, FOCUS v1.3) | **yes** | worker | optional | Vercel not configured |
+| `FLOFI_FINOPS_OPENAI_ADMIN_KEY`, `FLOFI_FINOPS_OPENAI_PROJECT_ID` | OpenAI **Admin** key (organization Costs + Usage read) and the FloFi `proj_…` id; existing PR #215 variables (Vercel reads them only for the legacy manual OpenAI sync shown before schema 30) | **yes** / no | worker (Vercel before schema 30) | optional | OpenAI not configured |
+| `FLOFI_FINOPS_ANTHROPIC_ADMIN_KEY`, `FLOFI_FINOPS_ANTHROPIC_WORKSPACE_ID` | Anthropic **Admin** key (or `read:analytics` key) for the Usage and Cost Analytics API; the FloFi `wrkspc_…` workspace. API products only | **yes** / no | worker | optional | Anthropic not configured |
+| `FLOFI_FINOPS_CIRCLECI_BILLING_TOKEN` | CircleCI personal token of an organization admin (Usage Export API; 10 exports per hour per org) | **yes** | worker | optional | CircleCI not configured |
+| `FLOFI_FINOPS_ALCHEMY_USAGE_KEY`, `FLOFI_FINOPS_ALCHEMY_APP_IDS`, `FLOFI_FINOPS_ALCHEMY_LOOKBACK_DAYS` | Alchemy Admin API access key with `ADMIN_USAGE_READ`, up to 10 FloFi app ids, plan lookback `1`/`7`/`90` | **yes** / no / no | worker | optional | Alchemy not configured / 7 |
+
+Settlement reads (P0, same build): Universal bridge native deliveries through a contract (RelayRouter) need a read path that serves
+`trace_transaction` or `debug_traceTransaction` (callTracer). The public Base/Arbitrum endpoints refuse both, so at least one of the
+existing `GRYLOO_ALCHEMY_API_KEY` or `GRYLOO_<NETWORK>_FALLBACK_RPC_URLS` paths must support tracing on each destination network; without
+one such deliveries stay pending (fail-closed) instead of being reconciled. No new variable is introduced for this.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

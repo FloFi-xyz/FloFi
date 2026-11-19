@@ -986,3 +986,20 @@ at the intended database using the existing server-only `DATABASE_URL` and run
 use the existing preview database and pass `--preview-branch <branch>` instead. The command verifies the certificate digest and uses
 the standard migration runner, lock and ledger; reruns are safe. Earlier builds without the certificate refuse schema 29, so any
 rollback after applying 0029 must retain the certificate. Leave the ledger in place.
+
+
+## 22. Certificate 0030_finops_sync
+
+| Base history | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0028 `saved_recipients` plus certified 0029 `finops_ledger` | 0030 `finops_sync` | `63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b` |
+
+0030 adds two empty, tenant-scoped tables for provider schedules, fenced leases, checkpoint state, and normalized billing period coverage and usage snapshots. The financial ledger remains append-only. No existing column, row, index, trigger function, or public execution path is altered. The new foreign key to `tenants` takes a short SHARE ROW EXCLUSIVE lock during activation. Writes to existing tenants and ordinary execution tables continue. A conflicting tenant write can delay activation by up to five seconds, at which point the migration transaction rolls back.
+
+The application still ships 0028 for the ordinary deployment migration. Its exact forward certificate accepts 0029, then 0030. On schema 29, existing ledger reports, imports and legacy billing sync continue, and automatic sync returns unavailable. The worker has an opt-in loop and one dedicated connection, outside the execution queue and its pool.
+
+1. On a dedicated disposable Neon branch (never a Preview database shared with other branches: until this certificate is on `main`, every other preview build refuses schema 30 with `MIGRATION_HISTORY_MISMATCH`), apply and verify the pinned 0029 and 0030 bytes. Test the admin and worker cold starts and restart the worker while a billing job has a nonempty checkpoint. Existing provider and telemetry data stays in place.
+2. Before activating 0030, verify that each database consumer and restart path runs the certificate-bearing release. Keep a build with this exact certificate available for rollback. Confirm the intended database and tenant out of band.
+3. From that reviewed checkout, with a direct `DATABASE_MIGRATION_URL` set in the operator environment, run `node apps/reference-dapp/backend/admin-cli.ts finops-sync-migrate --tenant default`. For an isolated preview, pass `--preview-branch <branch>` instead. The command requires exact existing schema 29, validates both SQL digests and the history, and applies only the missing certified migration. A successful repeat applies nothing. Do not edit the ledger or issue ad hoc DDL.
+4. Configure dedicated billing credentials and enable `FLOFI_FINOPS_SYNC=enabled` on the existing worker only after activation. Set the matching `FLOFI_FINOPS_BILLING_TENANT`. The default cadence is 24 hours and `FLOFI_FINOPS_SYNC_HOURS` accepts whole hours from 6 through 168. On the first activation, verify provider scope and currency using the Admin coverage and an independently obtained billing extract.
+5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.

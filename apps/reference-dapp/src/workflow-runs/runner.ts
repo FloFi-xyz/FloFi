@@ -29,6 +29,7 @@ import { evaluateGates, handoffFindings, type HandoffPolicy } from '../mcp/execu
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { observeOwnerStep } from './observe.ts';
 import type { BoundResolution, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
+import { OWNER_EXECUTION_CLAIMED } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
 import { userFundedPass } from './user-funded-pass.ts';
 import type { UserFundedDeps } from '../user-funded/groups.ts';
@@ -153,27 +154,51 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
       if (!wallet) return { ...settled(run, ADVANCE_RETRY_MS), code: 'WORKFLOW_RUN_WALLET_MISSING' };
       const verdict = await observeOwnerStep(deps.runtime, { flow: step.flow!, wallet, workflowHash: step.workflowHash!, claimedAt: step.claimedAt!,
         chain: NETWORK_CHAINS[network], now, ownerWallets: run.wallets });
+      if ((verdict.verdict === 'OPEN' || verdict.verdict === 'UNAVAILABLE') && step.code === OWNER_EXECUTION_CLAIMED)
+        return afterAttention(deps, run, OWNER_EXECUTION_CLAIMED);
       if (verdict.verdict === 'UNAVAILABLE') return { ...settled(run, ADVANCE_RETRY_MS), code: verdict.code };
       // Nothing submitted yet: the owner may still be reviewing or signing; look again a little later.
       if (verdict.verdict === 'OPEN') return settled(run, OPEN_RECHECK_MS);
       if (verdict.verdict === 'UNCERTAIN') {
-        if (step.state === 'AWAITING_OWNER') await deps.store.stepTransition(run.runId, k, ['AWAITING_OWNER'], 'UNCERTAIN', { code: verdict.code });
-        if (run.state === 'RUNNING') await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING'] }, 'ATTENTION', { code: verdict.code });
-        return { state: 'ATTENTION', code: verdict.code, retryMs: ADVANCE_RETRY_MS, progressed: false };
+        if (step.state !== 'UNCERTAIN' || step.code !== verdict.code) {
+          const observed = await deps.store.stepTransition(run.runId, k, [step.state], 'UNCERTAIN', { code: verdict.code });
+          if (!observed) return { ...settled(run), progressed: true };
+        }
+        return afterAttention(deps, run, verdict.code);
       }
       if (verdict.verdict === 'FAILED') {
-        await deps.store.stepTransition(run.runId, k, ['AWAITING_OWNER', 'UNCERTAIN'], 'FAILED', { outcome: verdict.outcome, code: verdict.code });
-        const partial = steps.some(s => s.stepIndex < k && s.state === 'RECONCILED');
-        const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code: verdict.code });
-        return moved ? settled(moved) : { ...settled(run), progressed: true };
+        const result = await deps.store.settleOwnerStep(run.runId, k, 'FAILED', verdict.outcome, verdict.code);
+        if (result === 'CLAIMED') return afterAttention(deps, run, OWNER_EXECUTION_CLAIMED);
+        return result === 'RECORDED' ? afterFailed(deps, run, steps, k, verdict.code) : { ...settled(run), progressed: true };
       }
-      const reconciled = await deps.store.stepTransition(run.runId, k, ['AWAITING_OWNER', 'UNCERTAIN'], 'RECONCILED', { outcome: verdict.outcome, code: null });
-      if (verdict.duplicates.length) deps.log('workflow_run.duplicate_owner_run', { run: run.runId, step: k, duplicates: verdict.duplicates.length });
-      return reconciled ? afterReconciled(deps, run, k) : { ...settled(run), progressed: true };
+      for (const outcome of verdict.outcomes) {
+        const result = await deps.store.settleOwnerStep(run.runId, k, 'RECONCILED', outcome, null);
+        if (result === 'CLAIMED') continue;
+        if (result === 'MOVED') return { ...settled(run), progressed: true };
+        if (verdict.outcomes.length > 1) deps.log('workflow_run.duplicate_owner_run', { run: run.runId, step: k, duplicates: verdict.outcomes.length - 1 });
+        return afterReconciled(deps, run, k);
+      }
+      return afterAttention(deps, run, OWNER_EXECUTION_CLAIMED);
     }
     case 'RECONCILED': return afterReconciled(deps, run, k);
+    case 'FAILED': return afterFailed(deps, run, steps, k, step.code ?? 'WORKFLOW_RUN_FAILED');
     default: return settled(run);
   }
+}
+
+async function afterAttention(deps: RunnerDeps, run: RunRecord, code: string): Promise<Pass> {
+  if (run.state !== 'ATTENTION' || run.code !== code) {
+    const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, 'ATTENTION', { code });
+    if (!moved) return { ...settled(run), progressed: true };
+  }
+  return { state: 'ATTENTION', code, retryMs: ADVANCE_RETRY_MS, progressed: false };
+}
+
+/** The failed step is already durable. Replay the parent transition after a restart or a lost compare-and-set. */
+async function afterFailed(deps: RunnerDeps, run: RunRecord, steps: readonly RunStepRecord[], k: number, code: string): Promise<Pass> {
+  const partial = steps.some(s => s.stepIndex < k && s.state === 'RECONCILED');
+  const moved = await deps.store.transition(run.runId, { version: run.version, from: ['RUNNING', 'ATTENTION'] }, partial ? 'HALTED' : 'FAILED', { code });
+  return moved ? settled(moved) : { ...settled(run), progressed: true };
 }
 
 /** Step `k` reconciled: the run moves to the next step, or completes (the completion fact is written once, with the transition). */

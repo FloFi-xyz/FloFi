@@ -40,7 +40,7 @@ function workflow(patch: Partial<RobinhoodLiquidityInput> = {}): SemanticWorkflo
   return structuredClone(result.workflow) as unknown as SemanticWorkflow;
 }
 type Setup = { chain: UniswapLiquidityChain; dir: string; service: ReturnType<typeof createUniswapLiquidityService> };
-async function setup(options: { stock?: CanonicalAsset; catalogFor?: (chain: string) => Promise<AssetCatalog>; fee?: number; pins?: boolean; dir?: string } = {}): Promise<Setup> {
+async function setup(options: { stock?: CanonicalAsset; catalogFor?: (chain: string) => Promise<AssetCatalog>; fee?: number; pins?: boolean; dir?: string; confirmations?: number } = {}): Promise<Setup> {
   const stock = options.stock ?? TSLA, profile = pool(USDG, stock, options.fee ?? 3000);
   const stockIs0 = profile.token0.address === stock.address;
   const chain = createUniswapLiquidityChain({ profile, tick: TICK, usdc: stockIs0 ? 10n ** 18n : 1_000_000_000n, weth: stockIs0 ? 1_000_000_000n : 10n ** 18n,
@@ -48,7 +48,7 @@ async function setup(options: { stock?: CanonicalAsset; catalogFor?: (chain: str
   const dir = options.dir ?? await mkdtemp(join(tmpdir(), 'flofi-rh-lp-'));
   const base: Rpc = async () => { throw new Error('BASE_CLIENT_MUST_NOT_BE_USED'); };
   const service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: base, rpcs: { 'eip155:4663': chain.rpc },
-    provenance: 'MOCKED', now: chain.clock, ...options.pins === false ? {} : { mockedCodePins: UNI_MOCK_CODE_PINS },
+    provenance: 'MOCKED', now: chain.clock, ...options.pins === false ? {} : { mockedCodePins: UNI_MOCK_CODE_PINS }, ...options.confirmations ? { confirmations: options.confirmations } : {},
     catalog: { catalogFor: options.catalogFor ?? (async () => catalog), ...options.pins === false ? {} : { codePins: chain.catalogPins } } });
   return { chain, dir, service };
 }
@@ -131,6 +131,18 @@ describe('BUILD-RH-002 Robinhood Chain liquidity service (MOCKED)', () => {
     expect(record.evidence!.transactions.every(t => t.explorer.startsWith('https://robinhoodchain.blockscout.com/tx/'))).toBe(true);
     expect(chain.counters.sends).toBe(3);
   });
+  it('records each step only at the network confirmation depth; a shallow receipt is re-read, never reconciled', async () => {
+    const { service, chain } = await setup({ confirmations: 2 }), w = workflow();
+    const run = await reviewed(service, w);
+    for (let index = 0; index < 3; index++) {
+      await execute(service, chain, run.id, w);
+      const shallow = await service.observe(run.id);
+      expect([index, shallow.attempts.at(-1)?.state === 'CONFIRMED', shallow.error, shallow.verdict]).toEqual([index, false, 'UNISWAP_AWAITING_CONFIRMATIONS', 'PENDING']);
+      chain.advance(2);
+      expect((await service.observe(run.id)).attempts.at(-1)?.state).toBe('CONFIRMED');
+    }
+    expect((await service.load(run.id))).toMatchObject({ verdict: 'RECONCILED', error: null, evidence: { bundle: { outcome: 'RECONCILED' } } });
+  });
   it('a non-featured Stock Token (PLTR) runs through the same service', async () => {
     const { service } = await setup({ stock: PLTR });
     const run = await service.simulate(workflow({ tokenB: 'PLTR', amountB: '1' }), UNI_OWNER);
@@ -200,6 +212,7 @@ describe('BUILD-RH-002 Robinhood Chain liquidity service (MOCKED)', () => {
     const catalogRuntime = { catalogFor: async () => catalog };
     expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_TESTNET', catalog: catalogRuntime })).toThrow('UNISWAP_PROVENANCE_INVALID');
     expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_MAINNET' })).toThrow('UNISWAP_PROVENANCE_INVALID');
+    expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_TESTNET', confirmations: 2 })).toThrow('UNISWAP_CONFIRMATIONS_MOCKED_ONLY');
     expect(() => createUniswapLiquidityService({ storage, rpc: chain.rpc, provenance: 'PUBLIC_MAINNET', catalog: { ...catalogRuntime, codePins: chain.catalogPins } }))
       .toThrow('UNISWAP_CODE_PINS_MOCKED_ONLY');
     expect(chain.counters.sends).toBe(0);

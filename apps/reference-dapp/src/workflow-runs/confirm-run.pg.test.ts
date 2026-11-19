@@ -167,9 +167,119 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
       // Nothing can move the run past an uncertain step: continuing offers no new step.
       expect((await continued(h, approval.approvalId)).command).toBeNull();
       h.flows.reconcile(pending);
+      const evidence = pending.evidence;
+      pending.evidence = null;
+      await h.drain(run.runId);
+      expect((await h.store.steps(run.runId))[0]).toMatchObject({ state: 'UNCERTAIN', code: 'STEP_RECONCILIATION_EVIDENCE_UNAVAILABLE' });
+      expect((await continued(h, approval.approvalId)).command).toBeNull();
+      pending.evidence = evidence;
       await h.drain(run.runId);
       expect(await runOf(h, approval.approvalId)).toMatchObject({ state: 'RUNNING', currentStep: 1 });
       expect((await h.store.steps(run.runId))[0]).toMatchObject({ state: 'RECONCILED', outcome: { executionId: pending.runId } });
+    } finally { await t.drop(); }
+  });
+
+  it('keeps a final native bridge pending until reconciled and shares both chain transactions and the actual delivery', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['arbitrum-swap', 'crosschain-universal'], delegation: false,
+        policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one,base' } });
+      const bridge = { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'ETH', outputAsset: 'ETH', amount: '0.0005' };
+      const strategy = { version: 2, steps: [{ ...BASE_SWAP, network: 'arbitrum-one', outputAsset: 'ETH', amount: '1' }, bridge],
+        bindings: [{ step: 1, amountFrom: 0 }] };
+      const { approval, claimed } = await started(h, strategy);
+      const run = await runOf(h, approval.approvalId);
+      h.flows.ownerExecutes('arbitrum-swap', h.evm.address, claimed.workflow, 'RECONCILED',
+        { received: [{ asset: 'eip155:42161/native:ETH', amount: '600000000000000' }] });
+      await h.drain(run.runId);
+      const second = await continued(h, approval.approvalId);
+      expect(second.view.workflowRun!.step).toMatchObject({ index: 1 });
+      const pending = h.flows.ownerExecutes('crosschain-universal', h.evm.address, second.workflow, 'PENDING');
+      const fill = '0x' + '76'.repeat(32), amount = '487592918967244';
+      pending.status = 'IN_FLIGHT';
+      pending.errorCode = 'UNIVERSAL_DESTINATION_PENDING';
+      pending.recordExtras = { verdict: 'PENDING', lastHint: { status: 'FILLED', destinationTxHashes: [fill] } };
+      await h.drain(run.runId);
+      expect((await progressOf(h, approval.approvalId)).workflowRun).toMatchObject({ state: 'ATTENTION', steps: [
+        { state: 'RECONCILED' }, { state: 'UNCERTAIN', code: 'UNIVERSAL_DESTINATION_PENDING', outcome: null }] });
+      pending.errorCode = 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE';
+      await h.drain(run.runId);
+      expect((await progressOf(h, approval.approvalId)).workflowRun).toMatchObject({ state: 'ATTENTION',
+        code: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE', steps: [
+          { state: 'RECONCILED' }, { state: 'UNCERTAIN', code: 'UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE', outcome: null }] });
+      expect((await continued(h, approval.approvalId)).command).toBeNull();
+
+      h.flows.reconcile(pending);
+      pending.errorCode = null;
+      pending.recordExtras = { verdict: 'RECONCILED', destination: { chainId: 'eip155:8453', transactionHash: fill, final: true },
+        receivedAmounts: [{ asset: 'eip155:8453/native:ETH', amount }] };
+      await h.drain(run.runId);
+      const status = (await workflowRunStatus(h.surface, approval.approvalId, [h.evm, h.sol])).view.workflowRun!.run;
+      expect(status).toMatchObject({ state: 'COMPLETED', steps: [{ state: 'RECONCILED' }, { state: 'RECONCILED', outcome: {
+        submissions: [{ chain: 'eip155:42161', hash: pending.attempts[0]!.transactionHash }, { chain: 'eip155:8453', hash: fill }],
+        received: [{ asset: 'eip155:8453/native:ETH', amount }], evidence: { outcome: 'RECONCILED' },
+      } }] });
+      expect((await progressOf(h, approval.approvalId)).workflowRun?.steps[1]?.outcome?.submissions).toEqual(status.steps[1]!.outcome!.submissions);
+      expect((await h.store.events(run.runId)).filter(e => e.kind === 'RUN_COMPLETED')).toHaveLength(1);
+    } finally { await t.drop(); }
+  });
+
+  it.each(['RECONCILED', 'REFUNDED'] as const)('a native bridge %s before a swap settles the run according to its delivery evidence', async verdict => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['base-swap', 'crosschain-universal'], delegation: false,
+        policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'arbitrum-one,base' } });
+      const sourceChain = 'eip155:42161', destinationChain = 'eip155:8453', amount = '487592918967244';
+      const bridge = { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'ETH', outputAsset: 'ETH', amount: '0.0005' };
+      const swap = { ...BASE_SWAP, network: 'base', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.0005' };
+      const { approval, claimed } = await started(h, { version: 2, steps: [bridge, swap], bindings: [{ step: 1, amountFrom: 0 }] });
+      const run = await runOf(h, approval.approvalId);
+      const execution = h.flows.ownerExecutes('crosschain-universal', h.evm.address, claimed.workflow, 'PENDING');
+      await h.drain(run.runId);
+      expect((await continued(h, approval.approvalId)).command).toBeNull();
+
+      const hash = '0x' + '54'.repeat(32);
+      if (verdict === 'REFUNDED') {
+        Object.assign(execution, { status: 'REFUNDED', needsObservation: false, recordExtras: { verdict, refund: { transactionHash: hash, chainId: sourceChain } } });
+        await h.drain(run.runId);
+        const view = (await progressOf(h, approval.approvalId)).workflowRun!;
+        expect(view).toMatchObject({ state: 'FAILED', code: 'BRIDGE_REFUNDED', steps: [{ state: 'FAILED', outcome: { received: [],
+          submissions: [{ chain: sourceChain, hash: execution.attempts[0]!.transactionHash }, { chain: sourceChain, hash }] } }, { state: 'PENDING' }] });
+        expect((await continued(h, approval.approvalId)).command).toBeNull();
+      } else {
+        h.flows.reconcile(execution);
+        execution.recordExtras = { verdict, received: amount, destination: { chainId: destinationChain, transactionHash: hash, final: true },
+          review: { workflow: claimed.workflow, recipient: h.evm.address, route: { sourceChain, destinationChain, inputAmount: '500000000000000',
+            inputToken: { chainId: sourceChain, kind: 'NATIVE', address: null }, outputToken: { chainId: destinationChain, kind: 'NATIVE', address: null } } } };
+        await h.drain(run.runId);
+        const next = await continued(h, approval.approvalId);
+        expect(next.view.workflowRun!.step).toMatchObject({ index: 1 });
+        expect((await h.store.steps(run.runId))[1]).toMatchObject({ bound: { used: amount }, strategy: { amount: '0.000487592918967244' } });
+        h.flows.ownerExecutes('base-swap', h.evm.address, next.workflow, 'RECONCILED');
+        await h.drain(run.runId);
+        expect((await progressOf(h, approval.approvalId)).workflowRun).toMatchObject({ state: 'COMPLETED', steps: [{ state: 'RECONCILED' }, { state: 'RECONCILED' }] });
+      }
+    } finally { await t.drop(); }
+  });
+
+  it('recovers a failed step already recorded before the worker stopped without re-observing a submission', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const { approval, claimed } = await started(h);
+      const run = await runOf(h, approval.approvalId);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, claimed.workflow, 'RECONCILED');
+      await h.drain(run.runId);
+      await continued(h, approval.approvalId);
+      // Model the durable checkpoint after the step write and before the parent's compare-and-set.
+      await h.store.stepTransition(run.runId, 1, ['AWAITING_OWNER'], 'FAILED', { code: 'SUBMISSION_REVERTED' });
+      expect(await runOf(h, approval.approvalId)).toMatchObject({ state: 'RUNNING', currentStep: 1 });
+      const runtime = { ...h.flows.runtime, runs: async () => { throw new Error('TERMINAL_STEP_MUST_NOT_BE_OBSERVED'); } };
+      const deps = { store: h.store, runtime, delegation: h.d.store, policyFor: () => null, now: h.d.now, log: () => undefined };
+      await Promise.all([advanceRun(deps, run.runId), advanceRun(deps, run.runId)]);
+      expect(await runOf(h, approval.approvalId)).toMatchObject({ state: 'HALTED', code: 'SUBMISSION_REVERTED' });
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['RECONCILED', 'FAILED']);
+      expect((await h.store.events(run.runId)).filter(e => e.kind === 'RUN_STATE' && e.detail?.state === 'HALTED')).toHaveLength(1);
     } finally { await t.drop(); }
   });
 

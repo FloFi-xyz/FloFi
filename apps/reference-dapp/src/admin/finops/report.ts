@@ -6,9 +6,13 @@ import { addDays, consolidate, decimal, difference, divide, endOfMonth, FINOPS_S
 import { ledgerMissing, readLedger, readSyncState } from './store.ts';
 import { writeFinopsCsv } from './csv.ts';
 import { modelScenario, SCENARIO_FIELDS, SCENARIO_PRESETS, scenarioKeys, type Scenario } from './scenario.ts';
+import { readFinancialMeters, readFinancialSync } from './sync-store.ts';
+
+const FINANCIAL_PROVIDER_NAMES = { neon: 'Neon', railway: 'Railway', vercel: 'Vercel', openai: 'OpenAI', anthropic: 'Anthropic',
+  circleci: 'CircleCI', alchemy: 'Alchemy', resend: 'Resend' } as const;
 
 export type WorkflowEconomics = {
-  created: number; completed: number; failed: number; abandoned: number; advanced: number; averageSteps: number | null; newest: string | null;
+  created: number; completed: number; failed: number; refunded: number; pending: number; abandoned: number; advanced: number; averageSteps: number | null; newest: string | null;
   dimensions: { action: string; network: string; protocol: string; count: number }[];
 };
 async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<WorkflowEconomics> {
@@ -16,13 +20,32 @@ async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<W
   return host.db.transaction(async tx => {
     await tx.query("SET LOCAL statement_timeout = '4000'");
     const params = [host.tenantId, period.from + 'T00:00:00Z', period.to + 'T00:00:00Z'];
-    const { rows: [data] } = await tx.query<{ created: number; completed: number; failed: number; abandoned: number;
+    const { rows: [data] } = await tx.query<{ created: number; completed: number; failed: number; refunded: number; pending: number; abandoned: number;
       advanced: number; average_steps: number | null; newest: Date | null }>(`SELECT
       count(*) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3)::integer AS created,
-      count(*) FILTER (WHERE r.completed_at >= $2 AND r.completed_at < $3 AND NOT EXISTS (
-        SELECT 1 FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id
-          AND s.outcome->'evidence'->>'environment' IN ('MOCKED','PUBLIC_TESTNET','PUBLIC_DEVNET','REPLAY','LOCAL_FORK')))::integer AS completed,
-      count(*) FILTER (WHERE r.state IN ('FAILED','HALTED') AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS failed,
+      count(*) FILTER (WHERE r.state = 'COMPLETED' AND r.completed_at >= $2 AND r.completed_at < $3
+        AND r.step_count = (
+        SELECT count(*) FROM workflow_run_steps s WHERE s.tenant_id = r.tenant_id AND s.run_id = r.run_id
+          AND s.state = 'RECONCILED' AND s.outcome->'evidence'->>'outcome' = 'RECONCILED'
+          AND CASE WHEN s.outcome->>'kind' = 'OWNER_RUN' THEN
+            s.outcome->'evidence'->>'environment' = 'MAINNET_EXECUTED'
+            AND COALESCE(s.outcome->'evidence'->>'bundleHash', '') <> ''
+            AND NOT EXISTS (SELECT 1 FROM workflow_run_steps prior
+              WHERE prior.tenant_id = s.tenant_id AND prior.state = 'RECONCILED'
+                AND prior.outcome->>'kind' = 'OWNER_RUN' AND prior.outcome->>'flow' = s.outcome->>'flow'
+                AND prior.outcome->>'executionId' = s.outcome->>'executionId'
+                AND (prior.outcome->>'observedAt', prior.run_id, prior.step_index) < (s.outcome->>'observedAt', s.run_id, s.step_index))
+          WHEN s.outcome->>'kind' = 'USER_FUNDED_GROUP' THEN s.outcome->'evidence'->>'environment' = 'PUBLIC_UNVERIFIED' AND EXISTS (
+            SELECT 1 FROM workflow_run_groups g WHERE g.tenant_id = s.tenant_id AND g.run_id = s.run_id AND g.state = 'RECONCILED'
+              AND s.step_index BETWEEN g.step_from AND g.step_to)
+          WHEN s.outcome->>'kind' = 'DELEGATED_STEP' THEN s.outcome->'evidence'->>'environment' = 'PUBLIC_UNVERIFIED' AND EXISTS (
+            SELECT 1 FROM delegated_executions d WHERE d.tenant_id = s.tenant_id AND d.workflow_run_id = s.run_id
+              AND d.execution_id = s.outcome->>'executionId' AND d.state = 'SETTLED')
+          ELSE false END)
+        )::integer AS completed,
+      count(*) FILTER (WHERE r.state IN ('FAILED','HALTED') AND r.code IS DISTINCT FROM 'BRIDGE_REFUNDED' AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS failed,
+      count(*) FILTER (WHERE r.state IN ('FAILED','HALTED') AND r.code = 'BRIDGE_REFUNDED' AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS refunded,
+      count(*) FILTER (WHERE r.state IN ('PENDING','RUNNING','ATTENTION') AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS pending,
       count(*) FILTER (WHERE r.state IN ('CANCELLED','EXPIRED') AND r.updated_at >= $2 AND r.updated_at < $3)::integer AS abandoned,
       count(*) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3 AND r.mode IS NOT NULL)::integer AS advanced,
       avg(r.step_count) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3)::float AS average_steps,
@@ -36,9 +59,29 @@ async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<W
       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(h.plan->'steps') = 'array' THEN h.plan->'steps' ELSE '[]'::jsonb END) step
       WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at >= $2 AND r.created_at < $3
       GROUP BY 1, 2, 3 ORDER BY 4 DESC, 1, 2, 3 LIMIT 100`, params);
-    return { created: data!.created, completed: data!.completed, failed: data!.failed, abandoned: data!.abandoned, advanced: data!.advanced,
+    return { created: data!.created, completed: data!.completed, failed: data!.failed, refunded: data!.refunded, pending: data!.pending,
+      abandoned: data!.abandoned, advanced: data!.advanced,
       averageSteps: data!.average_steps, newest: data!.newest?.toISOString() ?? null,
       dimensions: rows.filter(row => [row.action, row.network, row.protocol].every(value => typeof value === 'string' && /^[a-z0-9_-]{1,48}$/i.test(value))) };
+  });
+}
+
+async function readExecutionEconomics(host: AdminHost, period: Period) {
+  return host.db.transaction(async tx => {
+    await tx.query("SET LOCAL statement_timeout = '4000'");
+    const { rows: [record] } = await tx.query<{ submitted: number; sourceConfirmedBridges: number; reconciled: number; refunded: number; failed: number; pending: number }>(`SELECT
+      count(*) FILTER (WHERE EXISTS (SELECT 1 FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id
+        AND a.transaction_hash IS NOT NULL))::integer AS submitted,
+      count(*) FILTER (WHERE r.flow LIKE 'crosschain-%' AND r.needs_observation
+        AND r.status IN ('SOURCE_CONFIRMED','IN_FLIGHT','DESTINATION_OBSERVED','RECOVERY_REQUIRED'))::integer AS "sourceConfirmedBridges",
+      count(*) FILTER (WHERE r.has_evidence AND NOT r.needs_observation AND r.error_code IS NULL
+        AND r.status IN ('RECONCILED','COMPLETED','PAYMENT_SETTLED'))::integer AS reconciled,
+      count(*) FILTER (WHERE NOT r.needs_observation AND r.status = 'REFUNDED')::integer AS refunded,
+      count(*) FILTER (WHERE NOT r.needs_observation AND r.status IN ('FAILED','REVERTED','DIVERGENT','RECONCILIATION_REQUIRED'))::integer AS failed,
+      count(*) FILTER (WHERE r.needs_observation)::integer AS pending
+      FROM execution_runs r WHERE r.tenant_id = $1 AND r.provenance = 'PUBLIC_MAINNET' AND r.updated_at >= $2 AND r.updated_at < $3`,
+    [host.tenantId, period.from + 'T00:00:00Z', period.to + 'T00:00:00Z']);
+    return record!;
   });
 }
 
@@ -52,6 +95,7 @@ const allExpenses = (scope: (typeof FINOPS_SCOPES)[keyof typeof FINOPS_SCOPES]) 
 export const REPORT_LIMITATIONS = [
   'Reports use UTC periods with an inclusive first day and an exclusive end boundary. Indivisible billing records spanning a boundary are excluded.',
   'Higher-authority invoice records supersede overlapping provider reports and estimates for the same service and environment. No estimate is added to a bill.',
+  'An invoice or accounting record also supersedes overlapping provider-reported costs of the same service in any environment. Provider-reported costs are shown as PROVIDER_REPORTED until reconciled.',
   'Missing provider coverage or exchange rates are unavailable. A partial total is the sum of covered amounts. Currency conversion uses the entry’s documented USD per unit rate.',
   'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
   'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
@@ -61,10 +105,12 @@ export const REPORT_LIMITATIONS = [
 export async function readFinopsReport(host: AdminHost, period: Period, now: Date) {
   const current = finopsPeriod(now, {}).period, previous = finopsPeriod(now, { range: 'previous' }).period;
   const ledgerPromise = readCosts(host, period);
-  const [ledger, month, prior, ai, workflow, sync] = await Promise.all([
+  const [ledger, month, prior, ai, workflow, sync, integrations, executions] = await Promise.all([
     ledgerPromise, samePeriod(current, period) ? ledgerPromise : readCosts(host, current),
     samePeriod(previous, period) ? ledgerPromise : readCosts(host, previous), readAiEconomics(host, period, now).catch(() => null),
     readWorkflowEconomics(host, period).catch(() => null), readSyncState(host).catch(() => []),
+    readFinancialSync(host).catch(() => ({ available: false, providers: [] })),
+    readExecutionEconomics(host, period).catch(() => null),
   ]);
   const totals = totalsFor(ledger.records, period, ledger.complete);
   const billing = 'Net scoped provider costs and reconciled invoices, including applicable credits, discounts and taxes.';
@@ -73,8 +119,11 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
   const aiCost = consolidate(totals, scope => scope.category === 'ai', billing);
   const variable = consolidate(totals, scope => scope.variable, billing);
   const revenue = consolidate(totals, scope => scope.category === 'revenue', 'Administrator-reconciled platform fee accounting records.');
-  const contribution = difference(revenue, variable, 'Reconciled revenue less identified variable operating costs.');
-  const result = difference(revenue, overall, 'Reconciled revenue less identified variable, fixed and shared operating costs.');
+  const incompleteMargin = 'Complete cost and realized revenue coverage is required for margins.';
+  const contribution = revenue.quality === 'PARTIAL' || variable.quality === 'PARTIAL' ? unavailable(incompleteMargin)
+    : difference(revenue, variable, 'Reconciled revenue less identified variable operating costs.');
+  const result = revenue.quality === 'PARTIAL' || overall.quality === 'PARTIAL' ? unavailable(incompleteMargin)
+    : difference(revenue, overall, 'Reconciled revenue less identified variable, fixed and shared operating costs.');
   const closed = { from: current.from, to: isoDay(now) };
   const elapsed = periodDays(closed);
   const knownClosed = consolidate(totalsFor(month.records, closed, month.complete), allExpenses, billing);
@@ -94,16 +143,34 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
     : unavailable('Complete cost coverage is required to calculate an actual break-even revenue target.');
   const monthToDate = consolidate(totalsFor(month.records, current, month.complete), allExpenses, billing);
   const previousMonth = consolidate(totalsFor(prior.records, previous, prior.complete), allExpenses, billing);
-  const metrics = { monthToDate, previousMonth, projected, aiCost, variable, infrastructure, overall, costPerActive, costPerChat, costPerSimulated,
+  // Like for like: this month's closed days against the same number of days at the start of the previous month.
+  const priorSameDays = { from: previous.from, to: addDays(previous.from, Math.min(elapsed, periodDays(previous))) };
+  const previousToDate = consolidate(totalsFor(prior.records, priorSameDays, prior.complete), allExpenses, billing);
+  const monthlyChange = elapsed > 0 && knownClosed.quality !== 'PARTIAL' && previousToDate.quality !== 'PARTIAL'
+    ? difference(knownClosed, previousToDate, 'Closed days of this month less the same number of days of the previous month.')
+    : unavailable('Comparable periods with complete coverage are required for a monthly cost change.');
+  const metrics = { monthToDate, previousMonth, monthlyChange, projected, aiCost, variable, infrastructure, overall, costPerActive, costPerChat, costPerSimulated,
     costPerCompleted, directSimulated, directCompleted, revenue, contribution, result, breakEvenRevenue };
+  const currentTotals = totalsFor(month.records, current, month.complete);
+  const providerRows = await Promise.all(integrations.providers.map(async provider => {
+    // Alchemy reports compute units only; its cost cell is the whole RPC scope (any RPC invoice), labelled as such.
+    const name = provider.id === 'alchemy' ? 'Alchemy (RPC providers total)' : FINANCIAL_PROVIDER_NAMES[provider.id];
+    const cost = consolidate(currentTotals, scope => scope.provider === (provider.id === 'alchemy' ? 'RPC providers' : FINANCIAL_PROVIDER_NAMES[provider.id]), billing);
+    const overlapping = provider.coverage.filter(coverage => coverage.period.from < period.to && coverage.period.to > period.from).slice(0, 3);
+    const meters = (await Promise.all(overlapping.map(coverage => readFinancialMeters(host, provider.id, coverage.period.from).catch(() => [])))).flat();
+    // A selected period can intersect a provider's monthly aggregate without
+    // containing it. Include only meters whose whole period fits.
+    return { ...provider, name, cost, meters: meters.filter(meter => meter.period.from >= period.from && meter.period.to <= period.to) };
+  }));
   const selected = new Set((selectRecords(ledger.records)).map(record => record.id));
-  return { period, current, previous, metrics, ai, workflow, sync, totals, ledger: { status: ledger.status, complete: ledger.complete,
+  return { period, current, previous, metrics, ai, workflow, sync, integrations: { ...integrations, providers: providerRows }, executions, totals, ledger: { status: ledger.status, complete: ledger.complete,
     records: ledger.records.map(row => ({ ...row, selected: selected.has(row.id) })) } };
 }
 export type FinopsReport = Awaited<ReturnType<typeof readFinopsReport>>;
 export type MetricId = keyof FinopsReport['metrics'];
 export const METRIC_LABELS: Record<MetricId, string> = {
   monthToDate: 'Month-to-date infrastructure and operating costs', previousMonth: 'Previous month infrastructure and operating costs',
+  monthlyChange: 'Observed month-to-month cost difference (same days)',
   projected: 'Projected end-of-month costs', aiCost: 'Provider and ledger AI costs', variable: 'Variable operating costs',
   infrastructure: 'Fixed and shared expenses', overall: 'Infrastructure and operating costs', costPerActive: 'Cost per active user',
   costPerChat: 'Allocated cost per observed chat interaction', costPerSimulated: 'Allocated cost per simulated workflow',
@@ -162,9 +229,24 @@ export function investorCsv(report: FinopsReport, scenario: Scenario | null = nu
   }
   if (workflow) {
     for (const [label, amount] of [['Created', workflow.created], ['Completed and reconciled', workflow.completed], ['Failed or halted', workflow.failed],
+      ['Refunded workflows', workflow.refunded], ['Pending workflows', workflow.pending],
       ['Cancelled or expired', workflow.abandoned], ['Average steps', workflow.averageSteps]] as const) {
       rows.push(['workflows', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Canonical mainnet workflow runs', workflow.newest]);
     }
+  }
+  if (report.executions) for (const [label, amount] of Object.entries(report.executions))
+    rows.push(['executions', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Durable mainnet execution records, separate from workflows', null]);
+  for (const provider of report.integrations.providers) for (const coverage of provider.coverage) {
+    if (coverage.period.from >= period.to || coverage.period.to <= period.from) continue;
+    rows.push(['financial integrations', provider.id, coverage.period.from, coverage.period.to, coverage.meterCount, 'metrics',
+      coverage.quality, coverage.limitations.join(', '), coverage.collectedAt]);
+  }
+  for (const provider of report.integrations.providers) for (const meter of provider.meters) {
+    // Meters are detail, never additive: a USD meter repeats a provider cost row (or an estimate kept out of the totals).
+    const money = meter.unit === 'USD', estimate = meter.metric.includes('estimate');
+    rows.push(['financial meters', provider.id + ' / ' + meter.service + ' / ' + meter.metric, meter.period.from, meter.period.to, meter.amount,
+      meter.unit, estimate ? 'ESTIMATED' : money ? 'PROVIDER_REPORTED' : 'METERED',
+      (money ? 'Not additive: detail of provider costs. ' : '') + (meter.basis ?? 'Scoped provider usage API'), provider.lastSuccess]);
   }
   for (const limitation of REPORT_LIMITATIONS) rows.push(['methodology', limitation, period.from, period.to, null, null, null, null, null]);
   return writeFinopsCsv(rows);

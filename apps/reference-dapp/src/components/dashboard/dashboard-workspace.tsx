@@ -109,6 +109,8 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const visible = loaded?.key === key ? loaded : null;
   const loading = Boolean(account && (!isCurrent && !visible || ownedCurrent && currentDisposition === null));
   const snapshot = visible?.snapshot;
+  const loadedSnapshot = useRef(snapshot);
+  loadedSnapshot.current = snapshot;
   async function loadMore() {
     if (loadingMore || !account || !snapshot?.next) return;
     const owner = account, requestKey = key, cursor = snapshot.next;
@@ -129,6 +131,42 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const detail = visible?.response?.detail;
   // A stale session/result can never flash another account's records while the new read is pending.
   const ownedDetail = detail && sameOwner(detail.run.ownerAccount, account) && detail.run.runId === runId ? detail : null;
+  const observing = Boolean(ownedDetail?.run.needsObservation || snapshot?.runs.some(run => run.needsObservation));
+  useEffect(() => {
+    if (!observing || !account || isCurrent) return;
+    const abort = new AbortController();
+    let round = 0, timer: number | undefined;
+    async function poll() {
+      if (abort.signal.aborted) return;
+      try {
+        if (document.visibilityState === 'hidden') return;
+        if (runId) {
+          const response = await dashboardRunDetail(account!, runId, abort.signal);
+          if (!abort.signal.aborted && latestKey.current === key && response.connection !== 'UNAVAILABLE')
+            setLoaded({ key, response });
+          return;
+        }
+        // Re-read only a bounded slice of the visible pending rows. Keep the
+        // owner's existing pagination, even when an older row reconciles.
+        const pending = (loadedSnapshot.current?.runs ?? []).filter(run => run.needsObservation);
+        if (pending.length === 0) return;
+        const start = (round++ * 3) % pending.length;
+        const refreshed = await Promise.all(pending.slice(start, start + 3).map(run => dashboardRunDetail(account!, run.runId, abort.signal)));
+        const updates = new Map(refreshed.flatMap(result => result.detail && sameOwner(result.detail.run.ownerAccount, account)
+          ? [[result.detail.run.runId, result.detail.run] as const] : []));
+        if (!abort.signal.aborted && latestKey.current === key) setLoaded(prior => {
+          if (prior?.key !== key || !prior.snapshot) return prior;
+          return { ...prior, snapshot: { ...prior.snapshot, runs: prior.snapshot.runs.map(run => updates.get(run.runId) ?? run) } };
+        });
+      } catch {
+        // The existing record stays visible until an authoritative read returns.
+      } finally {
+        if (!abort.signal.aborted) timer = window.setTimeout(() => void poll(), 15_000);
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 15_000);
+    return () => { abort.abort(); window.clearTimeout(timer); };
+  }, [account, isCurrent, key, observing, runId]);
   // While the record is read, the summary this wallet's own listing already showed (never another wallet's, never once the read answered).
   const listed = !ownedDetail && runId && !visible && account && listedSummaries?.account === account ? listedSummaries.runs.get(runId) ?? null : null;
   const historical = ownedDetail ? projectDashboardRun(ownedDetail.run, projectDashboardRecord(ownedDetail, context))

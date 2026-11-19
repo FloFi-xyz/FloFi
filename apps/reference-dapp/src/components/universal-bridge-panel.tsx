@@ -96,6 +96,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   UNIVERSAL_DELIVERY_BELOW_MINIMUM: 'The delivery is below the reviewed minimum. The run needs your attention.',
   UNIVERSAL_DELIVERY_RECIPIENT_MISMATCH: 'The referenced delivery did not credit the reviewed recipient. The run needs your attention.',
   UNIVERSAL_DELIVERY_NOT_INDEPENDENTLY_VERIFIABLE: 'The delivery could not be verified independently yet. FloFi keeps observing.',
+  UNIVERSAL_DELIVERY_ORDER_NOT_BOUND: 'The reported transaction could not be linked to this order. FloFi keeps observing.',
   UNIVERSAL_DEPOSIT_REVERTED: 'The deposit reverted on the source network; nothing was bridged.',
   UNIVERSAL_TRANSACTION_EXPIRED_NOT_EXECUTED: 'The transaction expired without executing. Nothing was bridged. Get a fresh route to try again.',
   WALLET_SESSION_REQUIRED: 'Sign in with your wallet first. Signing in moves no funds and authorizes no transaction.',
@@ -286,6 +287,8 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
   const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';
   const net = (chain: string | undefined) => Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === chain)?.name ?? chain ?? '';
+  const refundAsset = record?.refund?.token === 'native' ? Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === record.refund?.chainId)?.native
+    : record?.refund?.chainId === route?.sourceChain ? route?.inputToken : route?.outputToken;
   const src = r?.source, nativeFee = r ? amountOf(r.feePolicy.networkFeeUpperBound, r.feePolicy.networkFeeDecimals, r.feePolicy.networkFeeSymbol) : '--';
   const explorer = (chain: string, hash: string) => (Object.values(UNIVERSAL_NETWORKS).find(n => n.chain === chain)?.explorer ?? '') + 'tx/' + hash;
   return <section className="panel" aria-label={tr('Universal cross-chain bridge')}>
@@ -315,7 +318,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr('Selection')}</dt><dd>{r.selection.considered.map(c => `${PROVIDER_LABEL[c.provider] ?? c.provider}: ${tr(c.outcome === 'SELECTED' ? 'selected' : c.outcome === 'AVAILABLE' ? 'available'
         : c.outcome === 'NOT_EXECUTABLE' ? 'not executable' : c.outcome === 'UNAVAILABLE' ? 'unavailable' : 'refused')}${c.code ? ` (${tr(REASONS[c.code] ?? c.code)})` : ''}`).join('; ')}</dd>
       <dt>{tr('You send')}</dt><dd>{inp(route.inputAmount)} {tr('on')} {net(route.sourceChain)}</dd>
-      <dt>{tr('Expected to receive')}</dt><dd>{outp(route.expectedOutput)} {tr('on')} {net(route.destinationChain)}</dd>
+      <dt>{tr(record?.evidence ? 'Actual received' : 'Expected to receive')}</dt><dd>{outp(record?.evidence?.received ?? route.expectedOutput)} {tr('on')} {net(route.destinationChain)}</dd>
       <dt>{tr('Guaranteed minimum')}</dt><dd>{outp(route.minimumOutput)} {tr('— fixed in the provider order; a smaller delivery is a mismatch')}</dd>
       <dt>{tr('Provider fees')}</dt><dd>{route.fees.length ? route.fees.map((f, i) => <span key={i}>{f.label}: {amountOf(f.amount, f.decimals, f.symbol)}{tr(f.included ? ' (included in the quote)' : ' (paid separately)')}. </span>) : tr('none listed')}</dd>
       <dt>{tr('FloFi fee')}</dt><dd>{tr('0.1% of the completed workflow input — obligation recorded at reconciliation; not charged at this time.')}</dd>
@@ -345,6 +348,9 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
         {' '}{tr(a.state.toLowerCase().replaceAll('_', ' '))}{a.transactionHash && <> · <a href={explorer(record.review.route.sourceChain, a.transactionHash)} target="_blank" rel="noreferrer">{tr('view transaction')}</a></>}
         {a.note ? ` · ${tr(message(a.note) ?? a.note)}` : ''}</li>)}</ol>}
       {record.source && <p>{tr('Deposit confirmed on')} {net(record.source.chainId)}{tr(record.source.final ? ' (final)' : '')}: {inp(record.source.ownerDebit)}.</p>}
+      {record.verdict === 'PENDING' && !record.destination && record.lastHint?.status === 'FILLED' &&
+        <p role="status">{tr('Provider reports delivery · awaiting independent verification')}</p>}
+      {record.verdict === 'PENDING' && record.lastHint?.status === 'REFUNDED' && <p role="status">{tr('Refund pending verification')}</p>}
       {record.destination && <p>{tr('Delivery observed on')} {net(record.destination.chainId)}{tr(record.destination.final ? ' (final)' : '')}: {outp(record.destination.amount)} {tr('to')} <code>{record.destination.recipient}</code> ·
         {' '}<a href={explorer(record.destination.chainId, record.destination.transactionHash)} target="_blank" rel="noreferrer">{tr('view transaction')}</a></p>}
       {record.evidence && <section aria-label={tr('Bridge result')} className="swap-result"><h3>{tr('Bridge reconciled')}</h3>
@@ -352,7 +358,8 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
         <p>{tr('Evidence:')} {record.evidence.evidenceClass} · {record.evidence.bundleHash}</p>
         <ul aria-label={tr('Evidence transactions')}>{record.evidence.transactions.map(t => <li key={t.transactionHash}>{t.step.toLowerCase()} · <a href={t.explorer} target="_blank" rel="noreferrer">{t.transactionHash}</a></li>)}</ul>
         <a download="flofi-crosschain-universal-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr('Download Evidence Bundle')}</a></section>}
-      {record.refund && <p role="status">{tr('Refunded')} {record.refund.amount} {tr('to')} <code>{record.refund.recipient}</code> {tr('on')} {net(record.refund.chainId)}.</p>}
+      {record.refund && <p role="status">{tr('Refunded')} {refundAsset && amountOf(record.refund.amount, refundAsset.decimals, refundAsset.symbol)} {tr('on')} {net(record.refund.chainId)} ·
+        {' '}<a href={explorer(record.refund.chainId, record.refund.transactionHash)} target="_blank" rel="noreferrer">{tr('view transaction')}</a></p>}
     </>}
     {view === 'execute' && router.runs.length > 0 && <section aria-label={tr('Your runs')}><h3>{tr('Your universal bridge runs')}</h3><ul>{router.runs.map(run => <li key={run.runId}>
       <button type="button" className="quiet" disabled={router.busy} onClick={() => void router.open(run.runId)}>{run.runId}</button> · {tr(run.status.toLowerCase().replaceAll('_', ' '))}</li>)}</ul></section>}

@@ -37,6 +37,8 @@ export type StepOutcome = {
   readonly gasPaid?: { readonly payer: string; readonly amount: string; readonly unit: 'wei' | 'lamports'; readonly source: string; readonly group: number;
     /** ADR-0010: the payer fronted the native fee and the OWNER paid it back in a token (proven from the same receipt). */
     readonly paidInToken?: TokenFeePaid } };
+export type OwnerStepOutcome = StepOutcome & { readonly kind: 'OWNER_RUN'; readonly flow: string };
+export const OWNER_EXECUTION_CLAIMED = 'WORKFLOW_STEP_EXECUTION_ALREADY_CLAIMED';
 /** BUILD-FLOFI-UNIVERSAL-WORKFLOW-002: one execution group of a USER_FUNDED run (migration 0023). */
 export const GROUP_STATES = ['PLANNED', 'PREPARED', 'AUTHORIZED', 'SUBMITTED', 'RECONCILED', 'FAILED', 'UNCERTAIN', 'BLOCKED', 'SKIPPED', 'EXPIRED'] as const;
 export type GroupState = (typeof GROUP_STATES)[number];
@@ -100,8 +102,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     return row ? runOf(row) : null;
   };
   /** One step's compare-and-set inside a transaction that already holds the run lock. */
-  const stepUpdate = async (tx: Queryable, runId: string, stepIndex: number, from: readonly StepState[], to: StepState, patch: StepPatch, kind: string)
+  const stepUpdate = async (tx: Queryable, runId: string, stepIndex: number, from: readonly StepState[], to: StepState, patch: StepPatch, kind: string, claimHeld = false)
     : Promise<RunStepRecord | null> => {
+    if (patch.outcome?.kind === 'OWNER_RUN' && !claimHeld) refuse('WORKFLOW_STEP_OWNER_OUTCOME_REQUIRES_CLAIM');
     const row = (await tx.query(`UPDATE workflow_run_steps SET state = $5, version = version + 1, flow = COALESCE($6, flow), strategy = COALESCE($7::jsonb, strategy),
         workflow_hash = COALESCE($8, workflow_hash), bound = COALESCE($9::jsonb, bound), claimed_at = COALESCE($10, claimed_at), outcome = COALESCE($11::jsonb, outcome),
         code = CASE WHEN $12::boolean THEN $13 ELSE code END
@@ -194,6 +197,31 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         const run = await lockRun(tx, runId);
         if (!run || run.state === 'CANCELLED') return null;
         return stepUpdate(tx, runId, stepIndex, from, to, patch, kind);
+      });
+    },
+    /** One wallet execution can settle one workflow step. Its immutable outcome is also the durable claim, including older records. */
+    async settleOwnerStep(runId: string, stepIndex: number, to: 'RECONCILED' | 'FAILED', outcome: OwnerStepOutcome,
+      code: string | null): Promise<'RECORDED' | 'CLAIMED' | 'MOVED'> {
+      return db.transaction(async tx => {
+        // The lookup after the advisory lock must see the other transaction's committed step, even with a different session default.
+        await tx.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        const run = await lockRun(tx, runId);
+        if (!run || !['RUNNING', 'ATTENTION'].includes(run.state) || run.currentStep !== stepIndex) return 'MOVED';
+        const { rows: [step] } = await tx.query<{ state: 'AWAITING_OWNER' | 'UNCERTAIN'; code: string | null }>(`SELECT state, code FROM workflow_run_steps
+          WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3 AND flow = $4 AND state IN ('AWAITING_OWNER', 'UNCERTAIN')`, [tenantId, runId, stepIndex, outcome.flow]);
+        if (!step) return 'MOVED';
+        const key = JSON.stringify(['flofi.workflow-owner-execution', tenantId, outcome.flow, outcome.executionId]);
+        await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
+        const { rows: [claim] } = await tx.query(`SELECT 1 FROM workflow_run_steps
+          WHERE tenant_id = $1 AND state IN ('RECONCILED', 'FAILED') AND outcome->>'kind' = 'OWNER_RUN'
+            AND COALESCE(outcome->>'flow', flow) = $2 AND outcome->>'executionId' = $3 LIMIT 1`, [tenantId, outcome.flow, outcome.executionId]);
+        if (claim) {
+          // Persist the contest even if the candidate later drops out of the bounded scan. No subsequent status read can reopen signing.
+          if (step.state !== 'UNCERTAIN' || step.code !== OWNER_EXECUTION_CLAIMED)
+            await stepUpdate(tx, runId, stepIndex, [step.state], 'UNCERTAIN', { code: OWNER_EXECUTION_CLAIMED }, 'STEP_STATE');
+          return 'CLAIMED';
+        }
+        return await stepUpdate(tx, runId, stepIndex, [step.state], to, { outcome, code }, 'STEP_STATE', true) ? 'RECORDED' : 'MOVED';
       });
     },
     /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */

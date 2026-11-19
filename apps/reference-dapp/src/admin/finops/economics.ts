@@ -7,7 +7,7 @@ export const FINOPS_ENVIRONMENTS = ['production', 'shared', 'preview', 'developm
 export const FINOPS_PERIODS = ['current', 'previous', '7d', '30d', 'custom'] as const;
 export type Period = { from: string; to: string };
 export type PeriodFilter = { preset: (typeof FINOPS_PERIODS)[number]; period: Period; valid: boolean };
-export type Quality = 'VERIFIED' | 'METERED' | 'ESTIMATED' | 'PARTIAL' | 'UNAVAILABLE';
+export type Quality = 'VERIFIED' | 'PROVIDER_REPORTED' | 'METERED' | 'ESTIMATED' | 'PARTIAL' | 'UNAVAILABLE';
 
 type Category = 'infrastructure' | 'ai' | 'external' | 'sponsorship' | 'relayer' | 'operating' | 'revenue';
 type Scope = { readonly provider: string; readonly name: string; readonly category: Category; readonly variable: boolean; readonly required: boolean };
@@ -43,7 +43,8 @@ export type EntrySource = (typeof ENTRY_SOURCES)[number];
 type LedgerSource = EntrySource | 'PROVIDER_COST';
 const priority: Record<LedgerSource, number> = { INVOICE: 4, ACCOUNTING: 4, PROVIDER_COST: 3, USAGE: 2, ASSUMPTION: 1 };
 const qualityFor: Record<LedgerSource, Quality> = {
-  INVOICE: 'VERIFIED', ACCOUNTING: 'VERIFIED', PROVIDER_COST: 'VERIFIED', USAGE: 'METERED', ASSUMPTION: 'ESTIMATED',
+  // BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002: a provider's own cost API is not an invoice; it is reported as such until reconciled.
+  INVOICE: 'VERIFIED', ACCOUNTING: 'VERIFIED', PROVIDER_COST: 'PROVIDER_REPORTED', USAGE: 'METERED', ASSUMPTION: 'ESTIMATED',
 };
 export type Entry = {
   scope: ScopeId;
@@ -114,7 +115,9 @@ export function divide(numerator: bigint, denominator: bigint): bigint {
 }
 
 export class FinopsValidationError extends Error {
-  constructor(readonly field: string) { super('FINOPS_ENTRY_INVALID'); }
+  // Explicit fields: the worker and admin CLI load this module on plain Node (type stripping refuses parameter properties).
+  readonly field: string;
+  constructor(field: string) { super('FINOPS_ENTRY_INVALID'); this.field = field; }
 }
 function amount(input: unknown, field: string, required = false): string | null {
   if (!required && [undefined, null, ''].includes(input as undefined)) return null;
@@ -168,7 +171,10 @@ export function selectRecords(records: readonly LedgerRecord[]): LedgerRecord[] 
     byScope.set(key, group);
     selected.push(row);
   }
-  return selected;
+  // An invoice or accounting record is the bill for its scope: a provider-reported cost it overlaps is superseded in every environment
+  // (automatic sync may label a project's charges `shared` while the operator imports the invoice as `production`).
+  const billed = selected.filter(row => priority[row.source] === 4);
+  return selected.filter(row => row.source !== 'PROVIDER_COST' || !billed.some(bill => bill.scope === row.scope && intersects(bill.period, row.period)));
 }
 
 function covers(period: Period, entries: readonly LedgerRecord[]): boolean {
@@ -183,6 +189,7 @@ function qualityOf(qualities: readonly Quality[]): Quality {
   if (qualities.includes('PARTIAL') || qualities.includes('UNAVAILABLE')) return 'PARTIAL';
   if (qualities.includes('ESTIMATED')) return 'ESTIMATED';
   if (qualities.includes('METERED')) return 'METERED';
+  if (qualities.includes('PROVIDER_REPORTED')) return 'PROVIDER_REPORTED';
   return 'VERIFIED';
 }
 
@@ -211,6 +218,7 @@ export function consolidate(totals: readonly ScopeTotal[], predicate: (scope: Sc
     quality: amounts.length ? qualityOf(included.map(item => item.quality)) : 'UNAVAILABLE', source };
 }
 
+const COMPLETE_QUALITIES: readonly Quality[] = ['VERIFIED', 'PROVIDER_REPORTED', 'METERED', 'ESTIMATED'];
 export const unavailable = (source: string): Indicator => ({ amount: null, quality: 'UNAVAILABLE', source });
 export function perUnit(total: Indicator, count: number, source: string, completeDenominator: boolean): Indicator {
   return total.amount === null || !Number.isSafeInteger(count) || count <= 0 ? unavailable(source)
@@ -219,6 +227,6 @@ export function perUnit(total: Indicator, count: number, source: string, complet
 export function difference(revenue: Indicator, costs: Indicator, source: string): Indicator {
   // A margin on incomplete expenses would bias the result, so require both sides.
   if (revenue.amount === null || costs.amount === null ||
-    !['VERIFIED', 'METERED', 'ESTIMATED'].includes(revenue.quality) || !['VERIFIED', 'METERED', 'ESTIMATED'].includes(costs.quality)) return unavailable(source);
+    !COMPLETE_QUALITIES.includes(revenue.quality) || !COMPLETE_QUALITIES.includes(costs.quality)) return unavailable(source);
   return { amount: decimal(units(revenue.amount) - units(costs.amount)), quality: qualityOf([revenue.quality, costs.quality]), source };
 }

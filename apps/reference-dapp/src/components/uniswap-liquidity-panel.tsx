@@ -125,6 +125,9 @@ const messages: Record<string, string> = {
   UNISWAP_REJECTED: 'You declined the request in your wallet. Nothing was sent.',
   UNISWAP_TRANSACTION_PENDING: 'The transaction is pending on Base Sepolia.', UNISWAP_TRANSACTION_NOT_OBSERVED: 'No transaction is visible yet. Observe again; nothing will be resent.',
   UNISWAP_TRANSACTION_REVERTED: 'The transaction reverted on chain; only the network fee was charged. Refresh and review before trying again.',
+  // BUILD-FLOFI-FINOPS-AUTOMATED-SYNC-002: a healthy wait for finality is not a problem the owner must act on.
+  UNISWAP_AWAITING_CONFIRMATIONS: "Included on chain. FloFi records it once the network's confirmation depth is reached; nothing will be sent again.",
+  UNISWAP_RECEIPT_NOT_CANONICAL: "Included on chain. FloFi records it once the network's confirmation depth is reached; nothing will be sent again.",
   UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED: 'The request was not executed and can no longer execute. Refresh and review to try again.',
   UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION: 'Your wallet sent a different transaction instead (for example a cancellation). Refresh and review to try again.',
   UNISWAP_POSITION_MAY_EXIST_OBSERVE: 'A position may already exist from an earlier attempt. Inspect your wallet before creating another.',
