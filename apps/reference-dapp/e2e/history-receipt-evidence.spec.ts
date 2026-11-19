@@ -38,7 +38,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/__ux006c-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
   await page.route('**/__ux006c-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html class="${fontClasses ?? ''}" data-theme="light"><head><meta charset="utf-8">${styles}</head><body><div class="app-shell"><main class="main"><div id="acceptance-root"></div></main></div><script src="/__ux006c-acceptance.js"></script></body></html>` }));
   await page.goto('/__ux006c-acceptance');
-  await page.evaluate(language => (window as unknown as { FloFiRunDetailAcceptance: { mount(element: HTMLElement, language: 'EN' | 'PT'): void } }).FloFiRunDetailAcceptance.mount(document.getElementById('acceptance-root')!, language), process.env.FLOFI_UX_EVIDENCE_LANG === 'PT' ? 'PT' : 'EN');
+  await page.evaluate(language => (window as unknown as { FloFiRunDetailAcceptance: { mount(element: HTMLElement, language: 'EN' | 'PT'): void } }).FloFiRunDetailAcceptance.mount(document.getElementById('acceptance-root')!, language), (process.env.FLOFI_UX_EVIDENCE_LANG === 'PT' ? 'PT' : 'EN') as 'EN' | 'PT');
   await expect(page.locator('.dashboard-run-detail')).toBeVisible();
 });
 
