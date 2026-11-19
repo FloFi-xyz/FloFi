@@ -40,6 +40,18 @@ reconcile with the reviewed ticks, minimums and maxima. Its Evidence Bundle reco
 Current evidence is `MOCKED` plus `PUBLIC_READ_ONLY` (docs/builds/BUILD-UNISWAP-LIQUIDITY-PUBLIC-READONLY.json). The
 historical BUILD-006 `FORK_REPRODUCED` (chain 31337) and BUILD-007 Mode B results are unchanged and separate.
 
+## BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position-management evidence boundary
+
+Position-management runs (collect, partial withdrawal, exit, close) are classified `MOCKED` (in-process and loopback chains, browser harnesses)
+or `MAINNET_EXECUTED`. `MAINNET_EXECUTED` is valid only for an owner-initiated run at the network's confirmation depth (PR #218) whose single
+transaction is the reviewed request from the verified owner and whose receipt events reconcile: for Uniswap v3, DecreaseLiquidity and the pool
+Burn of exactly the reviewed liquidity at or above the minimums, one Collect (manager and pool) to the owner with pool → owner transfers and
+nothing leaving the owner, and the remaining position read back (or the burn proven); for Orca, the finalized message, the fee checkpoint and
+collect outflows, the position authority and the owner/vault/position balance deltas. Withdrawn principal is always kept apart from collected
+owed tokens and fees, which are never called yield. A same-block change by another transaction is reconciled from the run's own receipt with
+`reconciliationScope: TRANSACTION`. **Current evidence is `MOCKED` only** (unit, disposable PostgreSQL and browser harnesses); no public
+position-management transaction was signed, sent or observed by this build, so no row is live-certified and nothing is financially certified.
+
 ## BUILD-DEMO-001 Solana Devnet evidence boundary
 
 Solana Devnet swap runs (Orca Whirlpools, valueless test tokens) are classified `MOCKED` (loopback harness and fixtures), `PUBLIC_READ_ONLY` (real Devnet pool reads and exact-message simulation without owner execution) or `DEVNET_EXECUTED`. `DEVNET_EXECUTED` is valid only for an owner-initiated Devnet transaction whose finalized bytes equal the owner-signed reviewed message and whose balance deltas and Orca `Traded` event reconcile. The frozen v1 Evidence Bundle enum has no Devnet member, so such a bundle records `environment: TESTNET_EXECUTED`, while its `publicExecution.environment` and evidence class are `DEVNET_EXECUTED`. Devnet evidence is never `MAINNET_EXECUTED` and never real funds. BUILD-DEMO-001 reached `DEVNET_EXECUTED` with owner-signed transaction `5Aoo6QX3b7rh3wAX5fxY8ybx7R7k1VgrT95QhuAf5HNF2zNiaCVAoTZtus3HbdwtZthSY9BiMKWiJRVQc67dLCbB` (slot 506,389,990). Its archived bundle (hash `0x621c869a0dbee6e0d827ed536d32230c1ef14e0281a84c92d2d0619e9716e6c9`) records `environment: TESTNET_EXECUTED` under the frozen schema. That is Devnet evidence with valueless tokens, not mainnet or real-funds evidence.

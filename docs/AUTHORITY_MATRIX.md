@@ -26,6 +26,19 @@ The backend builds, simulates and records; workers only observe and reconcile th
 submission method. No server-held key, executor identity, delegation or batching is introduced. Mode B (BUILD-004/007
 Safe + Roles with a disposable executor key) remains local-fork only and is not a public authority model.
 
+## BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position-management authority
+
+Managing an existing concentrated-liquidity position (collect fees, partial withdrawal, exit, close) on Uniswap v3 (Base, Arbitrum One,
+Ethereum, Robinhood Chain) and Orca Whirlpools (Solana mainnet) is Mode A only, exactly as minting. The connected wallet must be the position's
+owner verified on chain at Review, begin and hand-off (never an approved operator); it is the sole signer and sender of ONE request per operation
+(Uniswap: one NonfungiblePositionManager call or its own atomic `multicall`; Orca: one transaction). No token approval is requested. Tokens are paid
+only to the owner; the Uniswap NFT is burned only when the owner explicitly asked to close and only after a full decrease and collect in the same
+request (an Orca exit always closes, as reviewed). The operation is part of the canonical workflow (its management marker), so an authorization
+can only ever apply to the operation shown in the current Review. Chat, Canvas and Dashboard only prepare; the Dashboard never executes. MCP,
+Telegram, WhatsApp and the Developer API have no position-management authority. Workers only observe and reconcile; nothing is resent. The
+owner-history purge of an unstarted position simulation (migration 0031) is prepared and certified but not applied: applying it to any
+production database is a separate owner decision ([RELEASE-POSITION-PURGE-0031.md](deploy/RELEASE-POSITION-PURGE-0031.md)).
+
 ## Current BUILD-011D-1 capability authority
 
 DEC-0054 approves the [BUILD-011D-1 plan](builds/BUILD-011D-1-PLAN.md) for a typed capability registry, environment selection and Execute gating. Registry rows report separately demonstrated support and evidence; they do not grant signature or transaction authority. The existing Base Uniswap local-fork paths have `FORK_REPRODUCED` ceilings on chain 31337. CoW, LI.FI, Across and composed financial paths remain `MOCKED`; LI.FI live reads are data only. Supply, Lending and Borrow remain authoring templates. Public Testnet and Mainnet are disabled. One unmerged PR is authorized; owner merge is separate.
