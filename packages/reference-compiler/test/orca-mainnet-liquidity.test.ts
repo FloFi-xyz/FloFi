@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { createConcentratedLiquidityNode, type ConcentratedLiquidityFields, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_LIQUIDITY_OPERATIONS, ORCA_LIQUIDITY_PROFILES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as devnet, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as mainnet, assertOrcaLiquidityReview,
-  associatedTokenAddress, base58Encode, compileMessageV0, createMockedSolanaDevnetOrca, createMockedSolanaWallet, encodeOrcaUpdateFeesAndRewards, fromBase64, orcaLiquidityAccounts,
+  associatedTokenAddress, base58Encode, compileMessageV0, createMockedSolanaDevnetOrca, createMockedSolanaWallet, decodeSplTokenAccount, decodeToken2022Account,
+  encodeOrcaUpdateFeesAndRewards, fromBase64, inspectOrcaPosition, orcaLiquidityAccounts,
   orcaLiquidityInstructions, orcaLiquidityProfile, orcaPositionAddress, orcaPositionTokenAccount, parseTransaction, readOrcaLiquidityPrice, requireOrcaLiquidityProfile,
   serializeMessageV0, serializeSignedTransaction, simulateOrcaLiquidity, solanaSwapHash, summarizeOrcaLiquidityInstructions, toBase64, verifySignedOrcaLiquidityTransaction,
   type OrcaLiquidityPlan, type OrcaLiquidityProfile, type OrcaLiquidityReview } from '../src/index.js';
@@ -299,5 +300,58 @@ describe('Orca position lifecycle on Solana mainnet-beta: partial removal, colle
     expect(() => orcaLiquidityInstructions(accounts, { ...bare, operation: 'DECREASE_PARTIAL', liquidityDelta: '1', decrease: true, refreshFees: true }, 200_000, mainnet))
       .toThrow('ORCA_LIQUIDITY_PLAN_MISMATCH');
     expect(() => orcaLiquidityInstructions(accounts, { ...bare, liquidityDelta: '1', decrease: true }, 200_000, mainnet)).toThrow('ORCA_LIQUIDITY_PLAN_MISMATCH');
+  });
+});
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the MOCKED mainnet loopback as the Dashboard's position scan and the browser suite use it — a position opened
+ * outside FloFi (`seedPosition`) and the owner's token accounts listed per token program (`getTokenAccountsByOwner`), encoded exactly as
+ * getMultipleAccounts encodes them. Nothing here is public or mainnet evidence.
+ */
+describe('MOCKED mainnet loopback: positions opened outside FloFi and the owner\'s token accounts', () => {
+  const list = async (s: ReturnType<typeof setup>, owner: string, programId: string) =>
+    await s.env.rpc('getTokenAccountsByOwner', [owner, { programId }, { encoding: 'base64', commitment: 'confirmed' }]) as
+      { context: { slot: number }; value: { pubkey: string; account: { owner: string; data: [string, string] } }[] };
+  it('seeds a Token-2022 position the engine inspects as the owner\'s own (amount 1, no delegate), with its recorded fees', async () => {
+    const s = setup(mainnet), owner = s.wallet.owner;
+    const mint = s.env.seedPosition({ owner, liquidity: 40_000_000n, tickLower: -39104, tickUpper: -36992, feeOwedA: 1_234n, feeOwedB: 56n });
+    const inspected = await inspectOrcaPosition(s.env.rpc, owner, mint, mainnet);
+    expect(inspected).toMatchObject({ exists: true, position: { address: orcaPositionAddress(mint), whirlpool: mainnet.pool.address, positionMint: mint, liquidity: '40000000',
+      tickLowerIndex: -39104, tickUpperIndex: -36992, feeOwedA: '1234', feeOwedB: '56' }, tokenAccount: { address: orcaPositionTokenAccount(owner, mint), owner, amount: '1', delegate: null } });
+    const token2022 = await list(s, owner, mainnet.programs.token2022);
+    expect(token2022.context.slot).toBe(s.env.state.slot);
+    expect(token2022.value.map(item => item.pubkey)).toEqual([orcaPositionTokenAccount(owner, mint)]);
+    const data = fromBase64(token2022.value[0]!.account.data[0], 1_000);
+    expect(token2022.value[0]!.account.owner).toBe(mainnet.programs.token2022);
+    expect(decodeSplTokenAccount(data, true)).toMatchObject({ mint, owner, amount: 1n, state: 1, extensions: [] });
+    // The listing and getMultipleAccounts encode the same account identically.
+    const read = await s.env.rpc('getMultipleAccounts', [[orcaPositionTokenAccount(owner, mint)], { encoding: 'base64' }]) as { value: { data: [string, string] }[] };
+    expect(read.value[0]!.data).toEqual(token2022.value[0]!.account.data);
+    // The classic SPL Token program lists the owner's USDC account; another owner holds nothing.
+    expect((await list(s, owner, mainnet.programs.token)).value.map(item => item.pubkey)).toEqual([associatedTokenAddress(owner, mainnet.token1.mint, mainnet.programs.token,
+      mainnet.programs.associatedToken)]);
+    expect((await list(s, createMockedSolanaWallet().owner, mainnet.programs.token2022)).value).toEqual([]);
+  });
+  it('seeds a delegated position token, which the engine refuses to manage', async () => {
+    const s = setup(mainnet), owner = s.wallet.owner, delegate = createMockedSolanaWallet().owner;
+    const mint = s.env.seedPosition({ owner, liquidity: 1_000n, tickLower: -39104, tickUpper: -36992, delegate });
+    const data = fromBase64((await list(s, owner, mainnet.programs.token2022)).value[0]!.account.data[0], 1_000);
+    expect(decodeToken2022Account(data)).toMatchObject({ mint, owner, amount: 1n, delegate });
+    await expect(inspectOrcaPosition(s.env.rpc, owner, mint, mainnet)).rejects.toThrow('ORCA_POSITION_AUTHORITY_MISMATCH');
+  });
+  it('refuses an unknown token program, a mint filter, a parsed encoding and an invalid or duplicate seed', async () => {
+    const s = setup(mainnet), owner = s.wallet.owner;
+    for (const params of [[owner, { programId: mainnet.programs.whirlpool }, { encoding: 'base64' }], [owner, { mint: mainnet.token1.mint }, { encoding: 'base64' }],
+      [owner, { programId: mainnet.programs.token, mint: mainnet.token1.mint }], [owner, { programId: mainnet.programs.token }, { encoding: 'jsonParsed' }], [owner]])
+      await expect(s.env.rpc('getTokenAccountsByOwner', params)).rejects.toMatchObject({ rpc: -32602 });
+    const valid = { owner, liquidity: 1n, tickLower: -39104, tickUpper: -36992 };
+    for (const invalid of [{ ...valid, tickLower: -39100 }, { ...valid, tickUpper: -39104 }, { ...valid, liquidity: -1n }, { ...valid, liquidity: 1n << 128n },
+      { ...valid, feeOwedA: 1n << 64n }, { ...valid, rewardOwed: [1n, 1n, 1n, 1n] }])
+      expect(() => s.env.seedPosition(invalid)).toThrow('MOCK_POSITION_INVALID');
+    expect(() => s.env.seedPosition({ ...valid, owner: 'not-a-key' })).toThrow('SOLANA_ADDRESS_INVALID');
+    const mint = s.env.seedPosition(valid);
+    expect(() => s.env.seedPosition({ ...valid, mint })).toThrow('MOCK_POSITION_EXISTS');
+    // Each seed is a distinct position at its own mint.
+    expect(s.env.seedPosition(valid)).not.toBe(mint);
   });
 });

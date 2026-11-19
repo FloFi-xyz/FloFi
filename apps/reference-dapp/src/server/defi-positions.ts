@@ -14,6 +14,7 @@ import { aavePositions, POSITION_EVM_METHODS, uniswapPositions, UNISWAP_POSITION
 import { orcaPositions } from './defi-positions-solana';
 import { cloudFlowMode } from './flow-runtime';
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc';
+import { ORCA_MAINNET_HARNESS_RPC } from './orca-mainnet-harness';
 import { recordLiquidityOutcome } from './liquidity-lifecycle-telemetry';
 import { CANONICAL_STABLECOINS, defaultMode, EVM_NETWORKS } from './wallet-portfolio';
 
@@ -118,18 +119,29 @@ function evmScans(owner: string, now: Date, signal: AbortSignal): readonly Promi
     ];
   });
 }
+type Env = Readonly<Record<string, string | undefined>>;
+/**
+ * Where the Dashboard reads Orca positions on Solana mainnet-beta (`cloud`: the deployment's `orca-liquidity-mainnet` mode, null in local mode):
+ * the configured (or public) mainnet RPC when that flow is live. BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a local server running the MOCKED Orca
+ * mainnet harness (`GRYLOO_ORCA_MAINNET_HARNESS=MOCKED_LOOPBACK_ONLY`, the same switch as the app's Orca mainnet runtime) reads only the loopback
+ * copy of the pool, as MOCKED, never a public endpoint; a hosted deployment never reads the harness. Null: no position read here.
+ */
+export function solanaPositionSource(env: Env, cloud: string | null): { readonly endpoint: string; readonly loopback: boolean; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED' } | null {
+  const harness = env.GRYLOO_ORCA_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY';
+  if (cloud === null && harness) return isHostedDeployment(env) ? null : { endpoint: ORCA_MAINNET_HARNESS_RPC, loopback: true, provenance: 'MOCKED' };
+  if ((cloud ?? (env.GRYLOO_ORCA_MAINNET === 'live' ? 'live' : 'off')) !== 'live') return null;
+  return { endpoint: solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'POSITION_SOLANA_RPC_CONFIGURATION_INVALID') ?? ORCA.rpc, loopback: false, provenance: 'PUBLIC_MAINNET' };
+}
 async function solanaScan(owner: string, now: Date, signal: AbortSignal): Promise<PositionScan> {
-  const localEnabled = process.env.GRYLOO_ORCA_MAINNET === 'live' && process.env.GRYLOO_ORCA_MAINNET_HARNESS !== 'MOCKED_LOOPBACK_ONLY';
-  const mode = (await cloudFlowMode('orca-liquidity-mainnet')) ?? (localEnabled ? 'live' : 'off');
-  if (mode !== 'live') return snapshotState(SOLANA_SETUP, 'NETWORK_UNAVAILABLE');
-  const endpoint = solanaRpcOverride(process.env.GRYLOO_SOLANA_RPC_URL, 'POSITION_SOLANA_RPC_CONFIGURATION_INVALID') ?? ORCA.rpc;
-  const transport = createSolanaRpc(endpoint, false);
+  const source = solanaPositionSource(process.env, await cloudFlowMode('orca-liquidity-mainnet'));
+  if (!source) return snapshotState(SOLANA_SETUP, 'NETWORK_UNAVAILABLE');
+  const transport = createSolanaRpc(source.endpoint, source.loopback);
   const rpc = rpcBeforeDeadline((method, params) => {
     if (method !== 'getGenesisHash' && method !== 'getTokenAccountsByOwner' && method !== 'getMultipleAccounts')
       return Promise.reject(new Error('POSITION_SOLANA_METHOD_DENIED'));
     return transport(method, params);
   }, signal);
-  return { ...SOLANA_SETUP, ...await orcaPositions(rpc, owner, now, unvalued), provenance: 'PUBLIC_MAINNET' };
+  return { ...SOLANA_SETUP, ...await orcaPositions(rpc, owner, now, unvalued), provenance: source.provenance };
 }
 
 /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: content-free discovery outcomes per liquidity network (bucketed counts; no address or position id). */

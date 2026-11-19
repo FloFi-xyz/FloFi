@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA, type AssetCatalog } from '@defi-workflow-engine/action-registry';
-import { base58Encode, encodeMockedWhirlpool, encodeUniswapCollect, orcaPositionAddress, orcaPositionTokenAccount, publicKeyBytes, supplyCall, supplyWord,
+import { base58Encode, createMockedSolanaDevnetOrca, createMockedSolanaWallet, encodeMockedWhirlpool, encodeUniswapCollect, orcaPositionAddress, orcaPositionTokenAccount, publicKeyBytes, supplyCall, supplyWord,
   UNISWAP_MAX_UINT128, UNISWAP_Q96, type AaveMarketCatalog, type AaveReserveStatus, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { liquidityPositionKey, liquidityPositionRefValid } from '../domain/liquidity-positions';
 import type { PriceObservation } from '../automations/price-source';
-import { valuePositionAmounts } from './defi-positions';
+import { readWalletPositions, solanaPositionSource, valuePositionAmounts } from './defi-positions';
+import { ORCA_MAINNET_HARNESS_RPC } from './orca-mainnet-harness';
 import { aavePositions, uniswapPositions, UNISWAP_POSITION_DEPLOYMENTS, type ValuePositionAsset } from './defi-positions-evm';
 import { orcaPositions } from './defi-positions-solana';
 import type { Rpc } from './public-testnet-service';
@@ -217,5 +218,64 @@ describe('Orca direct standalone position discovery', () => {
     expect(await scan(orcaFixture({ transferred: true }))).toMatchObject({ status: 'PARTIAL', positions: [] });
     await expect(scan(orcaFixture({ fail: 'all' }))).rejects.toThrow('POSITION_SOLANA_RPC_INVALID');
     await expect(scan(orcaFixture({ oldSlot: true }))).rejects.toThrow('POSITION_SOLANA_RPC_INVALID');
+  });
+});
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Dashboard's Orca scan on the MOCKED loopback copy of the mainnet-beta pool (the browser suite's harness,
+ * `e2e/solana-devnet-harness.mjs` `/mainnet-rpc`): positions opened outside FloFi, read as MOCKED and never from a public endpoint.
+ */
+describe('Orca positions on the MOCKED mainnet loopback harness', () => {
+  const seeded = () => {
+    const env = createMockedSolanaDevnetOrca({ liquidityProfile: ORCA }), owner = createMockedSolanaWallet().owner;
+    env.fund(owner, 3_000_000_000n, 50_000_000n);
+    const managed = env.seedPosition({ owner, liquidity: 40_000_000n, tickLower: -39104, tickUpper: -36992, feeOwedA: 1_234n, feeOwedB: 56n });
+    const delegated = env.seedPosition({ owner, liquidity: 10_000_000n, tickLower: -39104, tickUpper: -36992, delegate: createMockedSolanaWallet().owner });
+    return { env, owner, managed, delegated };
+  };
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  it('reads only the loopback harness, as MOCKED, on a local server running it; never on a hosted deployment or without the switch', () => {
+    const harness = { endpoint: ORCA_MAINNET_HARNESS_RPC, loopback: true, provenance: 'MOCKED' };
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, null)).toEqual(harness);
+    // The harness wins over a local live switch (the app's Orca mainnet runtime does the same), so a MOCKED server never reads a public endpoint.
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ORCA_MAINNET: 'live', GRYLOO_SOLANA_RPC_URL: 'https://rpc.example/key' }, null)).toEqual(harness);
+    for (const hosted of [{ VERCEL: '1' }, { FLOFI_DEPLOYMENT: 'hosted' }, { RAILWAY_PROJECT_ID: 'p' }])
+      expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', ...hosted }, null)).toBeNull();
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED' }, null)).toBeNull();
+    expect(solanaPositionSource({}, null)).toBeNull();
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live' }, null)).toEqual({ endpoint: ORCA.rpc, loopback: false, provenance: 'PUBLIC_MAINNET' });
+    expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live', GRYLOO_SOLANA_RPC_URL: 'https://rpc.example/key' }, null)).toMatchObject({ endpoint: 'https://rpc.example/key' });
+    expect(() => solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live', GRYLOO_SOLANA_RPC_URL: 'http://rpc.example' }, null)).toThrow('POSITION_SOLANA_RPC_CONFIGURATION_INVALID');
+    // A deployment's own flow mode decides there; only its live mode reads positions.
+    expect(solanaPositionSource({}, 'live')).toEqual({ endpoint: ORCA.rpc, loopback: false, provenance: 'PUBLIC_MAINNET' });
+    for (const mode of ['off', 'harness']) expect(solanaPositionSource({ GRYLOO_ORCA_MAINNET: 'live' }, mode)).toBeNull();
+  });
+  it('lists positions opened outside FloFi: a manageable one with its recorded fees (collectable unavailable, never 0), a delegated one with its reason', async () => {
+    const { env, owner, managed, delegated } = seeded();
+    const result = await orcaPositions(env.rpc, owner, NOW, unvalued);
+    expect(result.status).toBe('COMPLETE');
+    const views = new Map(result.positions.map(position => [position.id, position.liquidity!]));
+    expect(views.get(managed)).toMatchObject({ ref: { protocol: 'ORCA', positionId: managed, owner, pool: ORCA.pool.address }, manageable: { ok: true }, status: 'OPEN',
+      rangeState: 'IN_RANGE', liquidity: '40000000', recordedOwed: ['1234', '56'], collectable: null, operations: ['COLLECT', 'DECREASE', 'EXIT'], observedAtHeight: env.state.slot });
+    expect(views.get(managed)!.principal.every(units => units !== null && BigInt(units) > 0n)).toBe(true);
+    expect(views.get(delegated)).toMatchObject({ manageable: { ok: false, reason: 'DELEGATED_POSITION_TOKEN' }, operations: [], recordedOwed: ['0', '0'] });
+  });
+  it('the Dashboard reads a proven Solana wallet\'s positions from the loopback harness only, as MOCKED test data', async () => {
+    const { env, owner, managed, delegated } = seeded();
+    for (const key of ['API_BASE_URL', 'FLOFI_RUNTIME', 'DATABASE_URL', 'VERCEL', 'RAILWAY_PROJECT_ID', 'RAILWAY_ENVIRONMENT_ID', 'FLOFI_DEPLOYMENT', 'GRYLOO_ORCA_MAINNET',
+      'GRYLOO_SOLANA_RPC_URL']) vi.stubEnv(key, undefined);
+    vi.stubEnv('GRYLOO_ORCA_MAINNET_HARNESS', 'MOCKED_LOOPBACK_ONLY');
+    const urls = new Set<string>();
+    vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+      urls.add(String(url));
+      const call = JSON.parse(init.body) as { id: number; method: string; params: unknown[] };
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: call.id, result: await env.rpc(call.method, call.params) }, (_, v) => typeof v === 'bigint' ? v.toString() : v));
+    });
+    const scans = await readWalletPositions({ namespace: 'solana', address: owner });
+    expect(scans).toMatchObject([{ protocol: 'Orca Whirlpools', network: 'Solana', provenance: 'MOCKED', status: 'COMPLETE' }]);
+    expect(scans[0]!.positions.map(position => position.id).sort()).toEqual([managed, delegated].sort());
+    // Test data is never valued with a price feed.
+    expect(scans[0]!.positions.flatMap(position => position.assets).every(asset => asset.valuation === null)).toBe(true);
+    expect([...urls]).toEqual([ORCA_MAINNET_HARNESS_RPC]);
   });
 });

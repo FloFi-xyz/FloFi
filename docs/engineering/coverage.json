@@ -1777,6 +1777,10 @@
     "app.e2e.chat-liquidity-positions": {
       "path": "apps/reference-dapp/e2e/chat-liquidity-positions.spec.ts",
       "stage": "browser"
+    },
+    "app.e2e.orca-position-management": {
+      "path": "apps/reference-dapp/e2e/orca-position-management.spec.ts",
+      "stage": "browser"
     }
   },
   "requiredUnitSuites": [
@@ -2879,7 +2883,8 @@
         "app.server.base-position-harness",
         "app.e2e.liquidity-position-management",
         "app.server.defi-positions-cache",
-        "app.e2e.chat-liquidity-positions"
+        "app.e2e.chat-liquidity-positions",
+        "app.e2e.orca-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -3944,7 +3949,8 @@
         "app.components.review-summary-panel-position",
         "app.e2e.liquidity-position-management",
         "app.domain.liquidity-position-declined",
-        "app.e2e.chat-liquidity-positions"
+        "app.e2e.chat-liquidity-positions",
+        "app.e2e.orca-position-management"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -7284,7 +7290,8 @@
         "apps/reference-dapp/src/server/uniswap-liquidity-mock.ts",
         "apps/reference-dapp/src/server/uniswap-liquidity-service.ts",
         "apps/reference-dapp/src/server/defi-positions-solana.ts",
-        "apps/reference-dapp/src/server/uniswap-position-service.ts"
+        "apps/reference-dapp/src/server/uniswap-position-service.ts",
+        "apps/reference-dapp/src/server/orca-mainnet-harness.ts"
       ],
       "suites": [
         "app.server.copilot-pool-integration",
@@ -7307,7 +7314,8 @@
         "app.server.base-position-harness",
         "app.e2e.liquidity-position-management",
         "app.server.defi-positions-cache",
-        "app.e2e.chat-liquidity-positions"
+        "app.e2e.chat-liquidity-positions",
+        "app.e2e.orca-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
@@ -7393,7 +7401,8 @@
         "app.server.defi-positions",
         "app.server.base-position-harness",
         "app.e2e.liquidity-position-management",
-        "app.server.defi-positions-cache"
+        "app.server.defi-positions-cache",
+        "app.e2e.orca-position-management"
       ],
       "gaps": [
         "Catalog/discovery and offline provider responses do not certify provider uptime or real execution.",
@@ -7942,7 +7951,8 @@
         "app.components.app-shell-position-simulation",
         "app.e2e.liquidity-position-management",
         "app.domain.liquidity-position-declined",
-        "app.e2e.chat-liquidity-positions"
+        "app.e2e.chat-liquidity-positions",
+        "app.e2e.orca-position-management"
       ],
       "gaps": [
         "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
