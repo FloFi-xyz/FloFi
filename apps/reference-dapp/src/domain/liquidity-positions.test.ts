@@ -4,8 +4,8 @@ import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA } from '@defi-workflow-engine
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { readConcentratedLiquidity, readConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import { editorReducer, initialEditor } from './editor';
-import { liquidityPositionChoiceValid, liquidityPositionOperations, orcaPositionRequestOf, uniswapPositionRequestOf, type LiquidityPositionChoice,
-  type LiquidityPositionRef } from './liquidity-positions';
+import { liquidityPositionChoiceValid, liquidityPositionOperations, orcaPositionRequestOf, uniswapPositionRequestOf, workflowMixesPositionManagement,
+  type LiquidityPositionChoice, type LiquidityPositionRef } from './liquidity-positions';
 
 const context = createBaseSepoliaReviewContext();
 const OWNER = 'C'.repeat(32), MINT = 'D'.repeat(32);
@@ -67,5 +67,28 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 liquidity position choices', () =>
     const blocked = editorReducer(withSwap, { type: 'MANAGE_LIQUIDITY_POSITION', choice: choice(orca, 'EXIT', null, true), pool, source: 'CHAT',
       baseRevision: withSwap.workflow.revision }, context);
     expect(blocked.error).toBe('POSITION_WORKFLOW_HAS_OTHER_STEPS');
+  });
+  it('the one-step rule applies only to a marked position operation: swap, bridge and deposit compositions keep working exactly as before', () => {
+    // A swap followed by an ordinary (unmarked) deposit, in both orders, and a Solana swap → Orca deposit composition still compose.
+    const swap = editorReducer(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: { network: 'Solana', from: 'SOL', to: 'USDC', amount: '0.1', slippage: '50' },
+      source: 'CANVAS', baseRevision: 0 }, context);
+    expect(swap.error).toBeNull();
+    const deposit = editorReducer(swap, { type: 'ADD_SOLANA_LIQUIDITY', input: { network: 'Solana', maxSol: '0.1', maxDevUsdc: '5', rangeUnit: 'TICK', lower: '-39104',
+      upper: '-36992', slippage: '100' }, source: 'CANVAS', baseRevision: swap.workflow.revision }, context);
+    expect(deposit.error).toBeNull();
+    expect(deposit.workflow.nodes.filter(n => !n.actionType.startsWith('mock-'))).toHaveLength(2);
+    expect(workflowMixesPositionManagement(deposit.workflow as never)).toBe(false);
+    const more = editorReducer(deposit, { type: 'ADD_SOLANA_SWAP', input: { network: 'Solana', from: 'USDC', to: 'SOL', amount: '1', slippage: '50' },
+      source: 'CHAT', baseRevision: deposit.workflow.revision }, context);
+    expect(more.error).toBeNull();
+    // Only a workflow whose node manages an existing position refuses another step.
+    const pool = { token0: { symbol: 'SOL', address: ORCA.token0.mint, decimals: 9 }, token1: { symbol: 'USDC', address: ORCA.token1.mint, decimals: 6 }, feeTier: ORCA.feeTier,
+      tickLower: -39_104, tickUpper: -36_992, amount0: '123000000', amount1: '4500000', slippageBps: 100 };
+    const managed = editorReducer(initialEditor(), { type: 'MANAGE_LIQUIDITY_POSITION', choice: choice(orca, 'COLLECT', null, false), pool, source: 'CHAT', baseRevision: 0 }, context);
+    expect(managed.error).toBeNull();
+    const mixed = editorReducer(managed, { type: 'ADD_SOLANA_SWAP', input: { network: 'Solana', from: 'SOL', to: 'USDC', amount: '0.1', slippage: '50' },
+      source: 'CANVAS', baseRevision: managed.workflow.revision }, context);
+    expect(mixed.error).toBe('POSITION_WORKFLOW_HAS_OTHER_STEPS');
+    expect(mixed.workflow).toBe(managed.workflow);
   });
 });
