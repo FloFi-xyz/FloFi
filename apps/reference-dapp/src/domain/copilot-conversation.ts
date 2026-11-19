@@ -57,8 +57,8 @@ import { contextCard, contextKey, operationalState, type CopilotContextCard } fr
 import { groundedProse } from './intelligence/grounding';
 import { liquidityPositionChoiceValid, liquidityPositionKey, type LiquidityPositionChoice, type LiquidityPositionOperation, type LiquidityPositionView } from './liquidity-positions';
 import { assetNamed, closeNamed, describePosition, halfNamed, liquidityRemovalNamed, ordinalNamed, pairMatches, pairName, positionDetails, positionKey, positionLine,
-  positionNetworksText, positionOptionLabel, positionSlippageBps, POSITION_FACT_LIMITS, protocolName, rangeFilterNamed, readPositionAnswer, shortPositionId, statedPercent,
-  type CopilotLiquidityFacts } from './copilot-positions';
+  positionNetworksText, positionOptionLabel, positionSlippageBps, positionStepWallet, POSITION_FACT_LIMITS, protocolName, rangeFilterNamed, readPositionAnswer, shortPositionId,
+  statedPercent, type CopilotLiquidityFacts } from './copilot-positions';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
   NO_ADAPTATION, proposalReadings, type Adaptation, type AdaptationEvent, type LearningObservation, type ProposalReading, type ReadingField,
   type ReadingFields } from './copilot-adaptation';
@@ -107,7 +107,12 @@ type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: Swap
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the step an edit or repeat already resolved (a later answer never asks "which step?" again). */ readonly target?: Resolved;
   /** BUILD-FLOFI-UNIFIED-COPILOT-001: the saved recipient (id) the user picked from FloFi's "which one?" buttons. */ readonly savedRecipient?: string;
   /** BUILD-P1: the bare number the user gave to FloFi's own percentage question (see `Grounding.answeredPercent`). */ readonly answeredPercent?: string;
-  /** BUILD-P1: FloFi asked this request for its range (see `Grounding.rangeAsked`). */ readonly rangeAsked?: boolean };
+  /** BUILD-P1: FloFi asked this request for its range (see `Grounding.rangeAsked`). */ readonly rangeAsked?: boolean;
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the owner's own close words from the Uniswap choice a short answer changes ("Arbitrum" after "exit and close
+   * my Base position"). Only FloFi sets it, from a choice it prepared on those words; a model's CLOSE never burns an NFT.
+   */
+  readonly close?: true };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -1223,7 +1228,9 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   }
   const draft = state.draft, picked = answered ? answered.pick : text;
   if (draft) {
-    if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failedWith(closeSegment(state), m, m.draftStale, 'COPILOT_CONTEXT_CHANGED') };
+    const changed = contextChange(draft.snapshot, snapshotOf(env));
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: an open position choice says which change ended it (another wallet's positions are read again on request).
+    if (changed) return { kind: 'LOCAL', ...failedWith(closeSegment(state), m, draft.intent.kind === 'POSITION' ? m.lifecycle.stale(changed) : m.draftStale, 'COPILOT_CONTEXT_CHANGED') };
     const positioned = positionTurn(state, draft, picked, env);
     if (positioned) return positioned;
     const ranged = rangeTurn(state, draft, picked, env, m);
@@ -1262,10 +1269,11 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
   }
-  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: "yes, close it" right after a Uniswap exit FloFi prepared (local, re-read from the verified facts).
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: "50%", "all of it", "only the fees", "yes, close it", "Arbitrum" right after FloFi prepared a position
+  // operation change that choice (local, re-read from the verified facts, a new proposal every time).
   if (!state.draft) {
-    const closing = closeFollowUp(state, text, env);
-    if (closing) return closing;
+    const followed = positionFollowUp(state, text, env);
+    if (followed) return followed;
   }
   let next = withUser(state, text);
   // BUILD-FLOFI-INTELLIGENCE-001: FloFi's sanitized context card travels with the request; the model reads it only through a read-only tool.
@@ -1820,7 +1828,9 @@ function resolveLiquidityPosition(intent: PositionIntent, state: CopilotConversa
   if (!wallets.length) return refused(state, m, p.walletRequired(family));
   const readable = wallets.filter(wallet => wallet.status === 'COMPLETE' || wallet.status === 'PARTIAL');
   if (!readable.length) return wallets.every(wallet => wallet.status === 'UNVERIFIED') ? refused(state, m, p.unverified) : failedWith(state, m, p.unavailable, 'COPILOT_POSITIONS_UNAVAILABLE');
-  const notes = wallets.length !== readable.length || readable.some(wallet => wallet.status === 'PARTIAL') ? [p.partial] : [];
+  const notes = [...wallets.length !== readable.length || readable.some(wallet => wallet.status === 'PARTIAL') ? [p.partial] : [],
+    // Positions read from MOCKED test data (a loopback harness) are said to be test data, as the Dashboard labels them; never presented as a public read.
+    ...readable.some(wallet => wallet.mocked) ? [p.mockedNote] : []];
   const owners = new Set(readable.map(wallet => wallet.namespace === 'eip155' ? wallet.address.toLowerCase() : wallet.address));
   const all = facts.positions.filter(view => owners.has(view.ref.owner));
   const candidates = all.filter(view => (!filter.protocol || view.ref.protocol === filter.protocol) && (!filter.chain || view.ref.chain === filter.chain) && pairMatches(view, filter.assets));
@@ -1863,7 +1873,7 @@ function resolveLiquidityPosition(intent: PositionIntent, state: CopilotConversa
   const eligible = candidates.filter(view => view.operations.includes(needed));
   // The structured reference kept across turns is re-read from the verified facts every turn: a position that is no longer there ends the request.
   const pinned = extras.position ? all.find(view => positionKey(view) === extras.position) ?? null : null;
-  if (extras.position && !pinned) return failedWith(closeSegment(state), m, m.draftStale, 'COPILOT_CONTEXT_CHANGED');
+  if (extras.position && !pinned) return failedWith(closeSegment(state), m, p.positionGone, 'COPILOT_CONTEXT_CHANGED');
   let chosen: LiquidityPositionView | null = pinned && candidates.includes(pinned) ? pinned : null;
   if (chosen && !chosen.operations.includes(needed)) return refused(state, m, p.cannot(describePosition(chosen, language), p.reason[positionRefusal(chosen, needed)]));
   if (!eligible.length) {
@@ -1900,8 +1910,9 @@ function resolveLiquidityPosition(intent: PositionIntent, state: CopilotConversa
   // Only an operation the verified position offers now; a collection never becomes a removal.
   if (!chosen.operations.includes(operation)) return refused(state, m, p.cannot(describePosition(chosen, language), p.reason[positionRefusal(chosen, operation)]));
   const orca = chosen.ref.protocol === 'ORCA';
-  // Orca's verified exit always closes the position; a Uniswap NFT is burned only when the user's own words ask to close it.
-  const close = operation === 'EXIT' && (orca || closeNamed(text));
+  // Orca's verified exit always closes the position; a Uniswap NFT is burned only when the user's own words ask to close it (in this request, or
+  // in the choice a short answer changes: `extras.close`).
+  const close = operation === 'EXIT' && (orca || closeNamed(text) || extras.close === true);
   const slippageBps = positionSlippageBps(chosen.ref);
   if (slippageBps === null) return refused(state, m, p.networkUnsupported(positionNetworksText(language)));
   const { protocol, chain, network, manager, pool, positionId, owner } = chosen.ref;
@@ -1918,7 +1929,9 @@ function resolveLiquidityPosition(intent: PositionIntent, state: CopilotConversa
   const proposalNotes = [p.selectedNote, ...notes, ...operation === 'COLLECT' ? [p.collectNote] : [],
     ...operation !== 'COLLECT' && chosen.status === 'OPEN' ? [p.slippageNote(slippageBps)] : [],
     ...operation === 'EXIT' ? orca ? [p.orcaCloseNote] : close ? [p.burnNote] : [p.keepNftNote] : [],
-    ...operation !== 'COLLECT' && chosen.principal.some(units => units === null) ? [p.partialPrincipalNote] : []];
+    ...operation !== 'COLLECT' && chosen.principal.some(units => units === null) ? [p.partialPrincipalNote] : [],
+    // The one wallet request and its confirmation depth (the runtime's own policy), then PR #219's flow: Simulate's result, Execute's authorization.
+    positionStepWallet(chosen.ref, language), p.flowNote];
   return propose(state, env, command, positionSentence(chosen, operation, partBps, close), `${what} ${p.apply}`, proposalNotes, position);
 }
 /**
@@ -1931,7 +1944,8 @@ function positionTurn(state: CopilotConversation, draft: Draft, picked: string, 
   if (draft.options.some(option => normalize(option.label) === normalize(picked))) return null;
   const answer = readPositionAnswer(picked);
   if (!answer) return null;
-  const intent = draft.intent, extras = draft.extras ?? {};
+  const intent = draft.intent;
+  let extras = draft.extras ?? {}, other = false;
   const positionOf = (option: Draft['options'][number]) => option.fill.kind === 'EXTRAS' ? option.fill.extras.position ?? null : null;
   const views = env.verified?.liquidity?.positions ?? [];
   let patch: Extras | null = null, patched: PositionIntent = intent;
@@ -1957,22 +1971,71 @@ function positionTurn(state: CopilotConversation, draft: Draft, picked: string, 
     else if (answer.kind === 'ALL') patch = { ...extras, portion: 'EXIT' };
     else if (answer.kind === 'FEES') patch = { ...extras, portion: 'COLLECT' };
     else if (answer.kind === 'CLOSE') patch = { ...extras, portion: 'CLOSE' };
-    else return null;
+    else if (answer.kind === 'NETWORK' || answer.kind === 'PROTOCOL' || answer.kind === 'PAIR') {
+      // Another network, protocol or pair than the position FloFi asked about is another position: the earlier choice no longer applies (said), and
+      // the request is resolved again for the one named (FloFi asks which when several match). The same position named again settles nothing.
+      const current = views.find(view => positionKey(view) === position);
+      const same = !!current && (answer.kind === 'NETWORK' ? current.ref.chain === networkOfCopilot(answer.network).chain
+        : answer.kind === 'PROTOCOL' ? current.ref.protocol === answer.protocol : pairMatches(current, answer.assets));
+      if (same) return null;
+      patched = answer.kind === 'NETWORK' ? { ...intent, network: answer.network } : answer.kind === 'PROTOCOL' ? { ...intent, protocol: answer.protocol }
+        : { ...intent, select: { ordinal: null, assets: [...answer.assets] } };
+      extras = Object.fromEntries(Object.entries(extras).filter(([key]) => key !== 'position')) as Extras;
+      patch = {}; other = true;
+    } else return null;
   }
   const next = { ...withUser(state, picked), clarifications: 0 };
-  return { kind: 'LOCAL', ...withLearning(tallied(resolveIntent(patched, next, env, null, { ...extras, ...patch ?? {} }), env), env, ['CLARIFICATION_ANSWERED']) };
+  const result = resolveIntent(patched, next, env, null, { ...extras, ...patch ?? {} });
+  const said = other ? { ...result, reply: { ...result.reply, notes: [copilotCopy(intent.language).lifecycle.otherPositionNote, ...result.reply.notes] } } : result;
+  return { kind: 'LOCAL', ...withLearning(tallied(said, env), env, ['CLARIFICATION_ANSWERED']) };
 }
 /**
- * "Yes, close it" / "sim, fecha" right after FloFi prepared a Uniswap exit that keeps the NFT: the same verified position, now closed (its NFT burned).
- * Read locally; the position is re-read from the verified facts, and nothing is closed until the owner reviews, confirms and signs.
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a short answer right after FloFi prepared a position operation changes that choice, read locally:
+ *  - "50%", "metade", "all of it", "tudo", "only the fees", "só os rendimentos", "yes, close it", "sim, fecha": the SAME verified position with another
+ *    portion or operation (an exit keeps the Uniswap NFT unless the user's own words close it; "close it" after a close changes nothing);
+ *  - "Base", "the Arbitrum one", "the Orca one", "WETH/USDC": the same operation on ANOTHER position (asked which when several match).
+ * Every change is a new MANAGE_LIQUIDITY_POSITION proposal resolved again from the verified facts (never conversation state alone), and says that it
+ * replaces the earlier choice. A position that is gone, or a wallet that changed, ends the choice and says so. Ordinals and anything else take the
+ * usual path. Nothing is staged, simulated or signed by the answer itself.
  */
-function closeFollowUp(state: CopilotConversation, text: string, env: CopilotEnvironment): TurnStart | null {
+function positionFollowUp(state: CopilotConversation, text: string, env: CopilotEnvironment): TurnStart | null {
   const last = state.referents[0]?.command;
-  if (!last || last.type !== 'MANAGE_LIQUIDITY_POSITION' || last.choice.position.protocol !== 'UNISWAP_V3' || last.choice.operation !== 'EXIT' || last.choice.close) return null;
-  if (readPositionAnswer(text)?.kind !== 'CLOSE') return null;
-  const language = preferredLanguage(state, env) ?? messageLanguage(text) ?? state.language;
-  const intent: PositionIntent = { version: '2', language, kind: 'POSITION', operation: 'CLOSE', protocol: null, network: null, percent: null };
-  return { kind: 'LOCAL', ...tallied(resolveIntent(intent, { ...withUser(state, text), language }, env, null, { position: liquidityPositionKey(last.choice.position) }), env) };
+  if (!last || last.type !== 'MANAGE_LIQUIDITY_POSITION' || (env.surface ?? 'WEB') !== 'WEB') return null;
+  const answer = readPositionAnswer(text);
+  if (!answer || answer.kind === 'ORDINAL') return null;
+  const { choice } = last, ref = choice.position, uniswap = ref.protocol === 'UNISWAP_V3';
+  if (answer.kind === 'CLOSE' && (!uniswap || choice.close)) return null;
+  // The same position named again is not a change.
+  if ((answer.kind === 'NETWORK' && networkOfCopilot(answer.network).chain === ref.chain) || (answer.kind === 'PROTOCOL' && answer.protocol === ref.protocol)
+    || (answer.kind === 'PAIR' && pairMatches(last.pool, answer.assets))) return null;
+  const language = preferredLanguage(state, env) ?? messageLanguage(text) ?? state.language, p = copilotCopy(language).lifecycle;
+  const next = { ...withUser(state, text), language };
+  const facts = env.verified?.liquidity;
+  // Another wallet is connected now: the earlier choice belongs to the previous wallet's position (said, never carried over).
+  if (facts && !facts.wallets.some(wallet => (wallet.namespace === 'eip155' ? wallet.address.toLowerCase() : wallet.address) === ref.owner))
+    return { kind: 'LOCAL', ...tallied(failedWith(closeSegment(next), copilotCopy(language), p.walletChanged, 'COPILOT_CONTEXT_CHANGED'), env) };
+  const base = { version: '2', language, kind: 'POSITION', protocol: null, network: null, percent: null } as const;
+  const same: Extras = { position: liquidityPositionKey(ref) };
+  const earlierPortion = choice.operation === 'DECREASE' ? String(choice.partBps! / 100) : choice.operation === 'EXIT' ? 'EXIT' : null;
+  let intent: PositionIntent, extras: Extras;
+  switch (answer.kind) {
+    case 'PERCENT': intent = answer.percent === '100' ? { ...base, operation: 'EXIT' } : { ...base, operation: 'DECREASE', percent: answer.percent };
+      extras = { ...same, portion: answer.percent === '100' ? 'EXIT' : answer.percent }; break;
+    case 'ALL': intent = { ...base, operation: 'EXIT' }; extras = { ...same, portion: 'EXIT' }; break;
+    case 'FEES': intent = { ...base, operation: 'COLLECT' }; extras = same; break;
+    case 'CLOSE': intent = { ...base, operation: 'CLOSE' }; extras = same; break;
+    default: {
+      // The same operation and portion on the position the user named now; the owner's own close words carry over (an Orca exit's implied close does not).
+      const operation = choice.operation;
+      intent = answer.kind === 'NETWORK' ? { ...base, operation, network: answer.network } : answer.kind === 'PROTOCOL' ? { ...base, operation, protocol: answer.protocol }
+        : { ...base, operation, select: { ordinal: null, assets: [...answer.assets] } };
+      if (operation === 'DECREASE') intent = { ...intent, percent: earlierPortion };
+      extras = { ...earlierPortion ? { portion: earlierPortion } : {}, ...uniswap && choice.close ? { close: true as const } : {} };
+    }
+  }
+  const result = resolveIntent(intent, next, env, null, extras);
+  const said = result.reply.command ? { ...result, reply: { ...result.reply, notes: [p.replacedNote, ...result.reply.notes] } } : result;
+  return { kind: 'LOCAL', ...tallied(said, env) };
 }
 /** Engineering certification only: "Remove 50% of my liquidity", "exit my position" on a FloFi-registered Orca position of the connected Solana Devnet wallet. */
 function resolveDevnetPosition(intent: PositionIntent & { readonly operation: 'DECREASE' | 'EXIT' }, state: CopilotConversation, env: CopilotEnvironment, extras: Extras): Result {

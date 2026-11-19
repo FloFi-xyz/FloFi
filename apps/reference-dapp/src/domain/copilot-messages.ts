@@ -3,6 +3,7 @@ import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { capabilityText, catalogNetworkNames, compositionOnlyText, lendingOnlyText, routeLabels } from './authoring-capabilities';
 import { activeNetworkScope } from './network-scope';
 import { formatSlippage } from './slippage-policy';
+import { positionNetworksText } from './copilot-positions';
 
 /**
  * BUILD-COPILOT-002: every reply the Copilot writes itself, in English and Portuguese. English is byte-identical to
@@ -78,7 +79,17 @@ const LIFECYCLE_EN = {
     : `Remove all liquidity from your ${position}, collect everything owed and close the position: its NFT is burned.`,
   orcaExit: (position: string) => `Remove all liquidity from your ${position}, collect its fees and close the position.`,
   apply: 'Apply the proposal, then Simulate, Review and sign in your wallet.',
-  selectedNote: 'Selected from your connected wallet’s positions, read and verified on chain by FloFi. Simulate and Review read the position again.',
+  selectedNote: 'Selected from your connected wallet’s positions, read and verified on chain by FloFi.',
+  // PR #219's flow: Simulate states its result; Execute holds the Review the owner authorizes. The chat never authorizes or signs.
+  flowNote: 'Next, Simulate reads the position again and shows its Simulation result (what is removed or collected, with the minimum amounts); then you authorize it on Execute. FloFi never authorizes or signs for you.',
+  mockedNote: 'Test data (MOCKED): these positions were not read from a public network.',
+  replacedNote: 'This replaces the position choice FloFi prepared before; only this one applies.',
+  otherPositionNote: 'That is another position than the one FloFi asked about, so the earlier choice no longer applies.',
+  stale: (change: 'WORKFLOW' | 'PROPOSAL' | 'WALLET'): string => change === 'WALLET'
+    ? 'The connected wallet changed after FloFi asked, so this position choice no longer applies: FloFi reads the positions of the wallet connected now when you ask again. Nothing changed.'
+    : 'The workflow changed after FloFi asked, so this position choice no longer applies. Ask again. Nothing changed.',
+  positionGone: 'That position is no longer among the verified positions of your connected wallets (it changed, was closed or belongs to another wallet), so the earlier choice no longer applies. Nothing changed.',
+  walletChanged: 'The connected wallet changed since FloFi prepared that position operation, so that choice no longer applies: ask again and FloFi reads the positions of the wallet connected now. Nothing changed.',
   collectNote: 'Collecting never removes liquidity. If nothing is due, Simulate says so and nothing is sent.',
   keepNftNote: 'The position NFT stays in your wallet. To also close it (burn the NFT), say “close it”.',
   burnNote: 'Closing burns the position NFT, so the position cannot be reopened or added to.',
@@ -94,7 +105,7 @@ const LIFECYCLE_PT: LifecycleCopy = {
   unverified: 'O FloFi só lê posições de uma carteira verificada ou vinculada à sua sessão do FloFi. Verifique ou vincule a carteira conectada e pergunte de novo. Nada mudou.',
   unavailable: 'O FloFi não conseguiu ler suas posições agora, então não consegue selecionar uma. Tente de novo em instantes. Nada mudou.',
   partial: 'Algumas redes não puderam ser lidas agora: as posições delas não aparecem, e o FloFi não supõe que não existam.',
-  channel: 'Gerenciar uma posição de liquidez precisa da sua carteira conectada, então é feito no app web do FloFi (Dashboard → Minhas posições DeFi, ou o chat de lá), não neste canal. Nada mudou.',
+  channel: 'Gerenciar uma posição de liquidez precisa da sua carteira conectada, então é feito no app web do FloFi (Painel → Minhas posições DeFi, ou o chat de lá), não neste canal. Nada mudou.',
   networkUnsupported: supported => `O FloFi gerencia posições de liquidez só na ${supported}. Nada mudou.`,
   none: filters => `O FloFi não encontrou nenhuma posição de liquidez${filters ? ` com ${filters}` : ''} nas suas carteiras conectadas. Nada mudou.`,
   listNone: filters => `O FloFi não encontrou nenhuma posição de liquidez${filters ? ` com ${filters}` : ''} nas suas carteiras conectadas.`,
@@ -129,7 +140,16 @@ const LIFECYCLE_PT: LifecycleCopy = {
     : `Remover toda a liquidez da sua ${position}, coletar tudo o que é devido e fechar a posição: o NFT dela é queimado.`,
   orcaExit: position => `Remover toda a liquidez da sua ${position}, coletar as taxas e fechar a posição.`,
   apply: 'Aplique a proposta e depois simule, revise e assine na sua carteira.',
-  selectedNote: 'Selecionada entre as posições da sua carteira conectada, lidas e verificadas na rede pelo FloFi. O Simulate e a revisão leem a posição de novo.',
+  selectedNote: 'Selecionada entre as posições da sua carteira conectada, lidas e verificadas na rede pelo FloFi.',
+  flowNote: 'Depois, o Simular lê a posição de novo e mostra o Resultado da simulação (o que é removido ou coletado, com os valores mínimos); em seguida, você autoriza em Executar. O FloFi nunca autoriza nem assina por você.',
+  mockedNote: 'Dados de teste (MOCKED): estas posições não foram lidas de uma rede pública.',
+  replacedNote: 'Isto substitui a escolha de posição que o FloFi preparou antes; só esta vale.',
+  otherPositionNote: 'Essa é outra posição, diferente da que o FloFi perguntou, então a escolha anterior não vale mais.',
+  stale: change => change === 'WALLET'
+    ? 'A carteira conectada mudou depois da pergunta do FloFi, então esta escolha de posição não vale mais: o FloFi lê as posições da carteira conectada agora quando você pedir de novo. Nada mudou.'
+    : 'O fluxo mudou depois da pergunta do FloFi, então esta escolha de posição não vale mais. Peça de novo. Nada mudou.',
+  positionGone: 'Essa posição não está mais entre as posições verificadas das suas carteiras conectadas (ela mudou, foi fechada ou é de outra carteira), então a escolha anterior não vale mais. Nada mudou.',
+  walletChanged: 'A carteira conectada mudou desde que o FloFi preparou essa operação de posição, então essa escolha não vale mais: peça de novo e o FloFi lê as posições da carteira conectada agora. Nada mudou.',
   collectNote: 'Coletar nunca remove liquidez. Se nada for devido, o Simulate avisa e nada é enviado.',
   keepNftNote: 'O NFT da posição continua na sua carteira. Para também fechá-la (queimar o NFT), diga “fecha”.',
   burnNote: 'Fechar queima o NFT da posição, então a posição não pode ser reaberta nem receber mais liquidez.',
@@ -715,7 +735,7 @@ const EN_MAINNET: Partial<CopilotCopy> = {
   positionWalletRequired: LIFECYCLE_EN.walletRequired(null),
   positionsUnavailable: LIFECYCLE_EN.unavailable,
   positionNone: LIFECYCLE_EN.none(null),
-  positionOnlyOrca: LIFECYCLE_EN.networkUnsupported('Base, Arbitrum One, Ethereum and Robinhood Chain (Uniswap v3) and Solana (Orca SOL/USDC)'),
+  get positionOnlyOrca() { return LIFECYCLE_EN.networkUnsupported(positionNetworksText('EN')); },
   positionOtherSteps: LIFECYCLE_EN.otherSteps,
   positionPercentInvalid: LIFECYCLE_EN.percentInvalid,
 };
@@ -735,7 +755,7 @@ const PT_MAINNET: Partial<CopilotCopy> = {
   positionWalletRequired: LIFECYCLE_PT.walletRequired(null),
   positionsUnavailable: LIFECYCLE_PT.unavailable,
   positionNone: LIFECYCLE_PT.none(null),
-  positionOnlyOrca: LIFECYCLE_PT.networkUnsupported('Base, Arbitrum One, Ethereum e Robinhood Chain (Uniswap v3) e Solana (Orca SOL/USDC)'),
+  get positionOnlyOrca() { return LIFECYCLE_PT.networkUnsupported(positionNetworksText('PT')); },
   positionOtherSteps: LIFECYCLE_PT.otherSteps,
   positionPercentInvalid: LIFECYCLE_PT.percentInvalid,
 };

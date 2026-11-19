@@ -9,7 +9,9 @@
  * collected until the owner reviews, confirms and signs in their own wallet. FloFi is not a position manager: it never rebalances, chooses or
  * acts on a position by itself.
  */
-import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA, UNISWAP_CATALOG_DEPLOYMENTS, uniswapCatalogDeployment } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE_TRANSFER, BASE_MAINNET_TRANSFER, ETHEREUM_MAINNET_TRANSFER, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA, ROBINHOOD_MAINNET_TRANSFER,
+  UNISWAP_CATALOG_DEPLOYMENTS, uniswapCatalogDeployment } from '@defi-workflow-engine/action-registry';
+import type { ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import { LIQUIDITY_POSITION_OPERATIONS, liquidityPositionKey, liquidityPositionRefValid, type LiquidityPositionManageability, type LiquidityPositionOperation,
   type LiquidityPositionRef, type LiquidityPositionView } from './liquidity-positions';
 import { formatTokenAmount } from './jupiter-authoring';
@@ -22,7 +24,9 @@ import type { CopilotLanguage } from './copilot-messages';
 export type CopilotPositionWallet = { readonly namespace: 'eip155' | 'solana'; readonly address: string;
   /** COMPLETE: every position network answered. PARTIAL: some networks could not be read now. UNAVAILABLE: the read failed. UNVERIFIED: the wallet is
    * not linked or proven in this session, so FloFi may not read it. */
-  readonly status: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE' | 'UNVERIFIED' };
+  readonly status: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE' | 'UNVERIFIED';
+  /** Some of this wallet's positions came from MOCKED test data (a local loopback harness), not a public network read: said as such, as on the Dashboard. */
+  readonly mocked?: true };
 /** The connected wallets' verified liquidity positions, as the surface read them for the current owners. */
 export type CopilotLiquidityFacts = { readonly wallets: readonly CopilotPositionWallet[]; readonly positions: readonly LiquidityPositionView[] };
 export const POSITION_FACT_LIMITS = Object.freeze({ maxWallets: 4, maxPositions: 60, timeoutMs: 15_000, freshMs: 20_000, maxListed: 8, maxInspected: 3, maxOptions: 4 });
@@ -59,17 +63,21 @@ export function positionScanFacts(wallet: { readonly namespace: 'eip155' | 'sola
   { readonly wallet: CopilotPositionWallet; readonly positions: readonly LiquidityPositionView[] } {
   if (!Array.isArray(scans)) return { wallet: { ...wallet, status: 'UNAVAILABLE' }, positions: [] };
   const owner = ownerKey(wallet.namespace, wallet.address), positions: LiquidityPositionView[] = [];
-  let partial = false;
-  for (const scan of scans as { protocol?: unknown; status?: unknown; positions?: unknown }[]) {
+  let partial = false, mocked = false;
+  for (const scan of scans as { protocol?: unknown; status?: unknown; positions?: unknown; provenance?: unknown }[]) {
     if (!scan || typeof scan !== 'object' || !LIQUIDITY_PROTOCOLS.has(scan.protocol as string)) continue;
     if (scan.status === 'PARTIAL' || scan.status === 'UNAVAILABLE' || scan.status === 'NETWORK_UNAVAILABLE') partial = true;
     if (!Array.isArray(scan.positions)) continue;
     for (const item of scan.positions as { liquidity?: unknown }[]) {
       const view = item?.liquidity;
-      if (liquidityViewValid(view) && view.ref.owner === owner && positions.length < POSITION_FACT_LIMITS.maxPositions) positions.push(view);
+      if (liquidityViewValid(view) && view.ref.owner === owner && positions.length < POSITION_FACT_LIMITS.maxPositions) {
+        positions.push(view);
+        // Anything but a public mainnet read is test data (the Dashboard labels the same scan "Test data (MOCKED)").
+        if (scan.provenance !== 'PUBLIC_MAINNET') mocked = true;
+      }
     }
   }
-  return { wallet: { namespace: wallet.namespace, address: owner, status: partial ? 'PARTIAL' : 'COMPLETE' }, positions };
+  return { wallet: { namespace: wallet.namespace, address: owner, status: partial ? 'PARTIAL' : 'COMPLETE', ...mocked ? { mocked: true as const } : {} }, positions };
 }
 /** Several wallets' facts as one, each position once (by its network-and-manager key). */
 export function mergeLiquidityFacts(parts: readonly { readonly wallet: CopilotPositionWallet; readonly positions: readonly LiquidityPositionView[] }[]): CopilotLiquidityFacts {
@@ -278,4 +286,68 @@ export function positionNetworksText(language: CopilotLanguage): string {
 export function positionSlippageBps(ref: Pick<LiquidityPositionRef, 'protocol' | 'chain'>): number | null {
   if (ref.protocol === 'ORCA') return Number(SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE);
   return uniswapCatalogDeployment(ref.chain)?.defaultSlippageBps ?? null;
+}
+
+// ── A staged position operation in words (from the canonical marker; never "add liquidity") ───────────────────────────────────────────────
+/** A workflow's position-management step as `workflow-steps` reads it: protocol, chain and network, the pool's pair and fee tier, and the marker. */
+export type PositionManagementStep = { readonly protocol: LiquidityPositionRef['protocol']; readonly chain: string; readonly network: string; readonly tokenA: string;
+  readonly tokenB: string; readonly fee: number; readonly management: ConcentratedLiquidityManagement };
+/** CAIP-2 chain → the confirmations the Uniswap position runtime waits for before it records a mainnet result (each network's transfer profile depth). */
+const EVM_CONFIRMATIONS: Readonly<Record<string, number>> = Object.freeze(Object.fromEntries([BASE_MAINNET_TRANSFER, ARBITRUM_ONE_TRANSFER, ETHEREUM_MAINNET_TRANSFER,
+  ROBINHOOD_MAINNET_TRANSFER].map(profile => [profile.chain, profile.minimumConfirmations])));
+/** How deep a position operation's one transaction must be before FloFi records its result: EVM confirmations, or Solana finality (the Orca reconciler). */
+export function positionConfirmations(ref: Pick<LiquidityPositionRef, 'protocol' | 'chain'>): number | 'FINALIZED' | null {
+  return ref.protocol === 'ORCA' ? 'FINALIZED' : EVM_CONFIRMATIONS[ref.chain] ?? null;
+}
+type StepCopy = {
+  readonly position: (protocol: string, id: string, pair: string, network: string) => string; readonly collect: (what: string) => string;
+  readonly decrease: (what: string, percent: string) => string; readonly exit: (what: string) => string; readonly exitClose: (what: string) => string;
+  readonly orcaExit: (what: string) => string; readonly nothingDeposited: string; readonly collectShort: string; readonly decreaseShort: (percent: string) => string;
+  readonly exitShort: string; readonly closeShort: string; readonly evmWallet: (network: string, confirmations: number | null) => string; readonly orcaWallet: string;
+};
+const STEP_COPY: Readonly<Record<CopilotLanguage, StepCopy>> = {
+  EN: { position: (protocol, id, pair, network) => `${protocol} position ${id} (${pair}) on ${network}`,
+    collect: what => `Collects the fees and owed tokens of your ${what}; its liquidity stays in the position.`,
+    decrease: (what, percent) => `Removes ${percent}% of the liquidity of your ${what} and collects the released tokens with its fees.`,
+    exit: what => `Removes all liquidity from your ${what} and collects everything owed; the position NFT stays in your wallet.`,
+    exitClose: what => `Removes all liquidity from your ${what}, collects everything owed and closes the position: its NFT is burned.`,
+    orcaExit: what => `Removes all liquidity from your ${what}, collects its fees and closes the position: the rent of its accounts is refunded to your wallet.`,
+    nothingDeposited: 'Nothing is deposited. Real funds.', collectShort: 'Collect fees', decreaseShort: percent => `Remove ${percent}%`, exitShort: 'Remove all (NFT kept)',
+    closeShort: 'Remove all and close',
+    evmWallet: (network, confirmations) => `Position operation: no token approval; your wallet is asked for one request, a single transaction to the Uniswap v3 position ` +
+      `manager on ${network}${confirmations ? `, and FloFi records the result after ${confirmations} confirmations` : ''}.`,
+    orcaWallet: 'Position operation on Solana: no token approval; your wallet is asked for one request, a single transaction, and FloFi records the result once Solana finalizes it.' },
+  PT: { position: (protocol, id, pair, network) => `posição ${protocol} ${id} (${pair}) na ${network}`,
+    collect: what => `Coleta as taxas e os tokens devidos da sua ${what}; a liquidez continua na posição.`,
+    decrease: (what, percent) => `Remove ${percent}% da liquidez da sua ${what} e coleta os tokens liberados com as taxas.`,
+    exit: what => `Remove toda a liquidez da sua ${what} e coleta tudo o que é devido; o NFT da posição continua na sua carteira.`,
+    exitClose: what => `Remove toda a liquidez da sua ${what}, coleta tudo o que é devido e fecha a posição: o NFT dela é queimado.`,
+    orcaExit: what => `Remove toda a liquidez da sua ${what}, coleta as taxas e fecha a posição: o aluguel (rent) das contas dela volta para a sua carteira.`,
+    nothingDeposited: 'Nada é depositado. Fundos reais.', collectShort: 'Coletar taxas', decreaseShort: percent => `Remover ${percent}%`, exitShort: 'Remover tudo (NFT mantido)',
+    closeShort: 'Remover tudo e fechar',
+    evmWallet: (network, confirmations) => `Operação de posição: sem approval de token; sua carteira recebe um único pedido, uma transação para o gerenciador de posições ` +
+      `da Uniswap v3 na ${network}${confirmations ? `, e o FloFi registra o resultado depois de ${confirmations} confirmações` : ''}.`,
+    orcaWallet: 'Operação de posição na Solana: sem approval de token; sua carteira recebe um único pedido, uma transação, e o FloFi registra o resultado quando a Solana a finaliza.' },
+};
+const percentOfBps = (partBps: number | null) => String((partBps ?? 0) / 100);
+const stepId = (step: PositionManagementStep) => shortPositionId({ protocol: step.protocol, positionId: step.management.positionId });
+/** "Remove 50% · Uniswap v3 #123456 WETH/USDC · Base": one short line for lists and step buttons. */
+export function positionStepSummary(step: PositionManagementStep, language: CopilotLanguage): string {
+  const c = STEP_COPY[language], m = step.management;
+  const what = m.operation === 'COLLECT' ? c.collectShort : m.operation === 'DECREASE' ? c.decreaseShort(percentOfBps(m.partBps))
+    : m.close || step.protocol === 'ORCA' ? c.closeShort : c.exitShort;
+  return `${what} · ${protocolName(step.protocol)} ${stepId(step)} ${step.tokenA}/${step.tokenB} · ${step.network}`;
+}
+/** What the staged operation does: collect, remove a share, exit (the Uniswap NFT kept), exit and close; an Orca exit always closes. */
+export function positionStepSentence(step: PositionManagementStep, language: CopilotLanguage): string {
+  const c = STEP_COPY[language], m = step.management;
+  const what = c.position(protocolName(step.protocol), stepId(step), `${step.tokenA}/${step.tokenB} ${feePercent(step.fee)}%`, step.network);
+  const sentence = m.operation === 'COLLECT' ? c.collect(what) : m.operation === 'DECREASE' ? c.decrease(what, percentOfBps(m.partBps))
+    : step.protocol === 'ORCA' ? c.orcaExit(what) : m.close ? c.exitClose(what) : c.exit(what);
+  return `${sentence} ${c.nothingDeposited}`;
+}
+/** The one wallet request a position operation asks for, and how deep it must be before FloFi records it (the runtimes' own policy). */
+export function positionStepWallet(step: Pick<PositionManagementStep, 'protocol' | 'chain' | 'network'>, language: CopilotLanguage): string {
+  const depth = positionConfirmations(step);
+  return step.protocol === 'ORCA' ? STEP_COPY[language].orcaWallet : STEP_COPY[language].evmWallet(step.network, typeof depth === 'number' ? depth : null);
 }

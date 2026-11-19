@@ -35,10 +35,12 @@ type Concept = { readonly aliases: readonly string[]; readonly related: readonly
 
 const SWAPS = ['EVM_SWAP', 'SOLANA_SWAP', 'CATALOG_SWAP'] as const, BRIDGES = ['ROUTER', 'UNIVERSAL_BRIDGE'] as const;
 const LENDING = ['AAVE', 'AAVE_WITHDRAW', 'LENDING_COMPOSITION'] as const, POSITIONS = ['UNISWAP_LIQUIDITY', 'CATALOG_LIQUIDITY', 'ORCA_LIQUIDITY'] as const;
+/** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: positions, and an existing position's management step (it needs no token approval, so not for TOKEN_APPROVAL). */
+const HELD = [...POSITIONS, 'LIQUIDITY_POSITION'] as const;
 
 const CONCEPTS: Readonly<Record<ConceptId, Concept>> = {
   LIQUIDITY_POOL: { aliases: ['liquidity pool', 'liquidity pools', 'pool de liquidez', 'pools de liquidez', 'pool', 'pools', 'piscina de liquidez', 'amm', 'liquidez', 'liquidity provider', 'provedor de liquidez', 'lp'],
-    related: ['CONCENTRATED_LIQUIDITY', 'IMPERMANENT_LOSS', 'SLIPPAGE'], steps: [...POSITIONS, ...SWAPS],
+    related: ['CONCENTRATED_LIQUIDITY', 'IMPERMANENT_LOSS', 'SLIPPAGE'], steps: [...HELD, ...SWAPS],
     EN: { name: 'liquidity pool',
       standard: 'A liquidity pool is a smart contract that holds two tokens so people can swap between them without an order book. Liquidity providers deposit both tokens; traders swap against the pool and pay a fee that goes to the providers. The pool\'s price moves as its balance of the two tokens changes.',
       simple: 'Think of a pool as a shared box with two kinds of tokens. You can put one kind in and take the other kind out. People who filled the box earn a small fee every time someone trades.',
@@ -221,7 +223,7 @@ const CONCEPTS: Readonly<Record<ConceptId, Concept>> = {
       protocols: { AAVE: 'Na Aave V3, as taxas de supply e de borrow são variáveis e costumam aparecer como APY; elas mudam com a utilização do pool.' } } },
 
   SLIPPAGE: { aliases: ['slippage', 'slipage', 'slippagem', 'deslizamento', 'derrapagem', 'tolerancia de slippage', 'slippage tolerance', 'price impact', 'impacto de preco'],
-    related: ['LIQUIDITY_POOL', 'GAS_FEES'], steps: [...SWAPS, ...BRIDGES, ...POSITIONS],
+    related: ['LIQUIDITY_POOL', 'GAS_FEES'], steps: [...SWAPS, ...BRIDGES, ...HELD],
     EN: { name: 'slippage',
       standard: 'Slippage is the difference between the price you expect when you prepare a trade and the price you actually get when it executes. Prices can move between quote and execution, and a large trade moves the pool price itself. A slippage limit sets the worst price you accept: if the trade would be worse, it fails instead of executing.',
       simple: 'Slippage is how much the price may change between when you ask for a trade and when it happens. Your limit says: "if it gets worse than this, cancel the trade".',
@@ -239,7 +241,7 @@ const CONCEPTS: Readonly<Record<ConceptId, Concept>> = {
       protocols: { UNISWAP: 'Na Uniswap, o slippage é aplicado como um valor mínimo de saída na própria transação do swap.', JUPITER: 'Na Jupiter, a cotação da rota inclui um mínimo de saída derivado do seu slippage; a transação Solana falha se ele não for atingido.',
         ACROSS: 'Numa rota de bridge como a Across, a ordem do provedor fixa o mínimo que você recebe na rede de destino.' } } },
 
-  IMPERMANENT_LOSS: { aliases: ['impermanent loss', 'perda impermanente', 'divergence loss', 'il'], related: ['LIQUIDITY_POOL', 'CONCENTRATED_LIQUIDITY'], steps: POSITIONS,
+  IMPERMANENT_LOSS: { aliases: ['impermanent loss', 'perda impermanente', 'divergence loss', 'il'], related: ['LIQUIDITY_POOL', 'CONCENTRATED_LIQUIDITY'], steps: HELD,
     EN: { name: 'impermanent loss',
       standard: 'Impermanent loss is the difference between keeping two tokens in your wallet and depositing them in a liquidity pool, when their relative price changes. The pool rebalances as people trade, so you end up with more of the token that fell and less of the one that rose. Fees can offset it, but not always.',
       simple: 'When you provide liquidity and prices move, the pool swaps part of your tokens automatically. Compared with just holding them, you can end up with less value. That gap is impermanent loss.',
@@ -256,7 +258,7 @@ const CONCEPTS: Readonly<Record<ConceptId, Concept>> = {
       protocols: { UNISWAP: 'Na Uniswap v3, uma faixa mais estreita ganha mais taxas por unidade de liquidez, mas também concentra a perda impermanente.', ORCA: 'Nos Whirlpools da Orca vale o mesmo: uma faixa estreita é mais sensível a variações de preço.' } } },
 
   CONCENTRATED_LIQUIDITY: { aliases: ['concentrated liquidity', 'liquidez concentrada', 'price range', 'faixa de preco', 'range de preco', 'range', 'faixa', 'intervalo de preco', 'ticks', 'tick', 'full range', 'faixa completa'],
-    related: ['LIQUIDITY_POOL', 'IMPERMANENT_LOSS', 'UNISWAP'], steps: POSITIONS,
+    related: ['LIQUIDITY_POOL', 'IMPERMANENT_LOSS', 'UNISWAP'], steps: HELD,
     EN: { name: 'concentrated liquidity (price range)',
       standard: 'With concentrated liquidity you choose a price range for your deposit. Your liquidity only works, and only earns fees, while the market price is inside that range. A narrower range earns more per unit of capital but stops earning more often; a full range always earns but less.',
       simple: 'You tell the pool: "use my tokens only when the price is between A and B". Inside that window you earn fees; outside it your money sits idle.',
@@ -274,7 +276,7 @@ const CONCEPTS: Readonly<Record<ConceptId, Concept>> = {
 
   GAS_FEES: { aliases: ['gas', 'gas fee', 'gas fees', 'taxa de rede', 'taxas de rede', 'taxa de gas', 'taxa de transacao', 'custo de rede', 'network fee', 'network fees', 'transaction fee',
     'transaction fees', 'gwei', 'priority fee'],
-    related: ['SLIPPAGE', 'BRIDGE'], steps: [...SWAPS, ...BRIDGES, ...LENDING, ...POSITIONS, 'TRANSFER'],
+    related: ['SLIPPAGE', 'BRIDGE'], steps: [...SWAPS, ...BRIDGES, ...LENDING, ...HELD, 'TRANSFER'],
     EN: { name: 'gas and transaction fees',
       standard: 'Gas is the fee you pay a blockchain to process your transaction, paid in the network\'s native coin (ETH on Ethereum, Base and Arbitrum; SOL on Solana). It is separate from protocol fees, such as a pool\'s swap fee or a bridge provider\'s fee. Gas varies with network demand.',
       simple: 'Gas is the "postage" for a blockchain transaction. You pay it in the network\'s own coin, even if the transaction fails.',

@@ -12,8 +12,10 @@ import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { FIXTURE, OTHER_ADDRESS, TEST_WALLET } from './copilot-test-fixtures';
 import { finishTurn, startTurn, type CopilotReply, type CopilotVerified } from './copilot-conversation';
 import { liquidityPositionOperations, type LiquidityPositionView } from './liquidity-positions';
-import { mergeLiquidityFacts, positionScanFacts, readPositionAnswer, type CopilotLiquidityFacts } from './copilot-positions';
+import { mergeLiquidityFacts, positionNetworksText, positionScanFacts, readPositionAnswer, type CopilotLiquidityFacts } from './copilot-positions';
 import { glossaryEntries, type LexiconEntry } from './copilot-lexicon';
+import { copilotCopy } from './copilot-messages';
+import { platformAnswer } from './intelligence/platform-guide';
 import { setActiveNetworkScope } from './network-scope';
 
 beforeEach(() => setActiveNetworkScope('PUBLIC_MAINNET'));
@@ -24,11 +26,14 @@ const BASE_WETH = { symbol: 'WETH', address: '0x42000000000000000000000000000000
 const BASE_USDC = { symbol: 'USDC', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6 };
 const ARB_WETH = { symbol: 'WETH', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 };
 const ARB_USDC = { symbol: 'USDC', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 };
+const ETH_WETH = { symbol: 'WETH', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', decimals: 18 };
+const ETH_USDC = { symbol: 'USDC', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 };
 type ViewPatch = Partial<Omit<LiquidityPositionView, 'operations'>>;
+const UNISWAP_NETWORKS = { 'eip155:8453': ['Base', BASE_WETH, BASE_USDC], 'eip155:42161': ['Arbitrum One', ARB_WETH, ARB_USDC], 'eip155:1': ['Ethereum', ETH_WETH, ETH_USDC] } as const;
 /** A verified Uniswap v3 view as discovery builds it: the CREATE2 pool of the pinned factory, the pinned position manager, the owner's own NFT. */
-function uniswap(chain: 'eip155:8453' | 'eip155:42161', positionId: string, patch: ViewPatch = {}): LiquidityPositionView {
-  const [a, b] = chain === 'eip155:8453' ? [BASE_WETH, BASE_USDC] : [ARB_WETH, ARB_USDC], profile = catalogPoolOn(chain, a, b, 500);
-  const view = { ref: { protocol: 'UNISWAP_V3' as const, chain, network: chain === 'eip155:8453' ? 'Base' : 'Arbitrum One', manager: profile.positionManager, pool: profile.pool,
+function uniswap(chain: keyof typeof UNISWAP_NETWORKS, positionId: string, patch: ViewPatch = {}): LiquidityPositionView {
+  const [network, a, b] = UNISWAP_NETWORKS[chain], profile = catalogPoolOn(chain, a, b, 500);
+  const view = { ref: { protocol: 'UNISWAP_V3' as const, chain, network, manager: profile.positionManager, pool: profile.pool,
       positionId, owner: TEST_WALLET }, token0: { symbol: profile.token0.symbol, address: profile.token0.address, decimals: profile.token0.decimals },
     token1: { symbol: profile.token1.symbol, address: profile.token1.address, decimals: profile.token1.decimals }, feeTier: 500, tickLower: -200_000, tickUpper: -190_000,
     price: { base: 'USDC', quote: 'WETH' }, lowerPrice: '0.000207', upperPrice: '0.000560', currentPrice: '0.000333', rangeState: 'IN_RANGE' as const,
@@ -332,16 +337,226 @@ describe('the structured reference is re-read every turn', () => {
   });
 });
 
+const BASE_2 = uniswap('eip155:8453', '654321', { rangeState: 'ABOVE_RANGE' });
+const ETH = uniswap('eip155:1', '777777');
+const WALLET_BASE = 'Position operation: no token approval; your wallet is asked for one request, a single transaction to the Uniswap v3 position manager on Base, ' +
+  'and FloFi records the result after 2 confirmations.';
+const FLOW = 'Next, Simulate reads the position again and shows its Simulation result (what is removed or collected, with the minimum amounts); then you authorize it ' +
+  'on Execute. FloFi never authorizes or signs for you.';
+const REPLACED = 'This replaces the position choice FloFi prepared before; only this one applies.';
+/** Owed tokens are never "yield", and nothing here invents a return, a PnL, an APY or an authority. */
+const NEVER = /\byield\b|rendimento|\bAPY\b|\bAPR\b|\bPnL\b|lucro|profit|I (?:signed|authorized|executed)|eu assinei/i;
+
+describe('the staged workflow, PR #219’s Simulate → Execute flow and the one wallet request', () => {
+  it('states the one wallet request, its confirmation depth on each network and the Simulate → Execute flow (the assistant never authorizes or signs)', () => {
+    const base = session().say('Collect my fees on Base', position('COLLECT', { network: 'BASE' }))!;
+    expect(base.notes).toEqual(expect.arrayContaining([WALLET_BASE, FLOW]));
+    const eth = session([ETH]).say('Remove 25% of my liquidity on Ethereum', position('DECREASE', { percent: '25', network: 'ETHEREUM' }))!;
+    expect(choiceOf(eth).choice).toMatchObject({ operation: 'DECREASE', partBps: 2500, position: { chain: 'eip155:1', network: 'Ethereum' } });
+    expect(eth.notes).toContain('Position operation: no token approval; your wallet is asked for one request, a single transaction to the Uniswap v3 position manager on ' +
+      'Ethereum, and FloFi records the result after 3 confirmations.');
+    const orcaReply = session([ORCA_POSITION]).say('Collect my Orca fees', position('COLLECT', { protocol: 'ORCA' }))!;
+    expect(orcaReply.notes).toContain('Position operation on Solana: no token approval; your wallet is asked for one request, a single transaction, and FloFi records the result ' +
+      'once Solana finalizes it.');
+    const pt = session([BASE], 'PT').say('Coleta minhas taxas', position('COLLECT', {}, 'PT'))!;
+    expect(pt.notes).toEqual(expect.arrayContaining(['Operação de posição: sem approval de token; sua carteira recebe um único pedido, uma transação para o gerenciador de ' +
+      'posições da Uniswap v3 na Base, e o FloFi registra o resultado depois de 2 confirmações.',
+      'Depois, o Simular lê a posição de novo e mostra o Resultado da simulação (o que é removido ou coletado, com os valores mínimos); em seguida, você autoriza em Executar. ' +
+      'O FloFi nunca autoriza nem assina por você.']));
+    for (const reply of [base, eth, orcaReply, pt]) expect(textOf(reply)).not.toMatch(NEVER);
+  });
+  it('describes the staged workflow from its canonical marker — collect / remove N% / exit [and close] — never as adding liquidity (EN and PT)', () => {
+    const s = session();
+    s.say('Remove 50% of my liquidity on Base', position('DECREASE', { percent: '50', network: 'BASE' }));
+    s.apply();
+    const overview = s.say('What does my workflow do?', intent.question('WORKFLOW_OVERVIEW'))!;
+    expect(textOf(overview)).toContain('Removes 50% of the liquidity of your Uniswap v3 position #123456 (WETH/USDC 0.05%) on Base and collects the released tokens with its fees. ' +
+      'Nothing is deposited. Real funds.');
+    expect(textOf(overview)).not.toMatch(/Adds concentrated liquidity|up to 0\.5 WETH/);
+    const approvals = s.say('Which approvals will I sign?', intent.question('APPROVALS'))!;
+    expect(textOf(approvals)).toContain(WALLET_BASE);
+    expect(textOf(approvals)).not.toContain('exact approvals for each token');
+    // Exit keeping the NFT, then the owner's own "yes, close it": each is a new revision whose description follows the new marker.
+    const t = session([BASE], 'PT');
+    t.say('Quero sair completamente dessa pool', position('EXIT', {}, 'PT'));
+    t.apply();
+    expect(textOf(t.say('O que meu fluxo faz?', intent.question('WORKFLOW_OVERVIEW', null, 'PT')))).toContain('Remove toda a liquidez da sua posição Uniswap v3 #123456 ' +
+      '(WETH/USDC 0.05%) na Base e coleta tudo o que é devido; o NFT da posição continua na sua carteira.');
+    const revision = t.workflow.revision;
+    t.say('sim, fecha');
+    t.apply();
+    expect(t.workflow.revision).toBe(revision + 1);
+    expect(textOf(t.say('O que meu fluxo faz?', intent.question('WORKFLOW_OVERVIEW', null, 'PT')))).toContain('coleta tudo o que é devido e fecha a posição: o NFT dela é queimado.');
+    // An Orca exit always closes: said with the rent refund, on Solana with USDC (never Devnet copy).
+    const o = session([ORCA_POSITION]);
+    o.say('Close my Orca position', position('CLOSE', { protocol: 'ORCA' }));
+    o.apply();
+    const orcaOverview = textOf(o.say('What does my workflow do?', intent.question('WORKFLOW_OVERVIEW'))!);
+    expect(orcaOverview).toContain('Removes all liquidity from your Orca position 7xKX…gAsU (SOL/USDC 0.3%) on Solana, collects its fees and closes the position');
+    expect(orcaOverview).not.toMatch(/Devnet|devUSDC|Adds concentrated liquidity/);
+  });
+});
+
+describe('every confirmed choice — and every change of it — is a new MANAGE_LIQUIDITY_POSITION proposal', () => {
+  it('“75%”, “only the fees”, “all of it” and “yes, close it” after a proposal change the same position’s operation (local, new command each time)', () => {
+    const s = session();
+    const first = choiceOf(s.say('Remove 50% of my liquidity on Base', position('DECREASE', { percent: '50', network: 'BASE' })));
+    expect(first.choice).toMatchObject({ operation: 'DECREASE', partBps: 5000, position: BASE.ref });
+    const steps: readonly [string, Record<string, unknown>][] = [['75%', { operation: 'DECREASE', partBps: 7500, close: false }],
+      ['only the fees', { operation: 'COLLECT', partBps: null, close: false }], ['all of it', { operation: 'EXIT', partBps: null, close: false }],
+      ['yes, close it', { operation: 'EXIT', partBps: null, close: true }]];
+    let previous = first;
+    for (const [answer, expected] of steps) {
+      const reply = local(s, answer), command = choiceOf(reply);
+      expect(command.choice, answer).toMatchObject({ ...expected, position: BASE.ref });
+      expect(command, answer).not.toBe(previous);
+      expect(reply.notes, answer).toContain(REPLACED);
+      previous = command;
+    }
+    // "Close it" after a close changes nothing locally (the model decides what else was meant).
+    expect(() => s.say('close it')).toThrow('unexpected model call');
+  });
+  it('“metade”, “tudo”, “só os rendimentos” and “sim, fecha” after a proposal (PT)', () => {
+    const s = session([BASE, ORCA_POSITION], 'PT');
+    choiceOf(s.say('Coleta minhas taxas da Uniswap', position('COLLECT', { protocol: 'UNISWAP_V3' }, 'PT')));
+    expect(choiceOf(local(s, 'metade')).choice).toMatchObject({ operation: 'DECREASE', partBps: 5000, position: BASE.ref });
+    expect(choiceOf(local(s, 'tudo')).choice).toMatchObject({ operation: 'EXIT', close: false });
+    expect(choiceOf(local(s, 'só os rendimentos')).choice).toMatchObject({ operation: 'COLLECT' });
+    const closed = local(s, 'sim, fecha');
+    expect(choiceOf(closed).choice).toMatchObject({ operation: 'EXIT', close: true, position: BASE.ref });
+    expect(closed.notes).toContain('Isto substitui a escolha de posição que o FloFi preparou antes; só esta vale.');
+    expect(textOf(closed)).not.toMatch(NEVER);
+  });
+  it('“Arbitrum” / “the Orca one” after a proposal is the same operation on another position; the owner’s own close words carry over, an Orca close does not', () => {
+    const s = session();
+    choiceOf(s.say('Withdraw everything from my Base position and close it', position('CLOSE', { network: 'BASE' })));
+    const moved = local(s, 'Arbitrum');
+    expect(choiceOf(moved).choice).toEqual({ position: ARB.ref, operation: 'EXIT', partBps: null, close: true });
+    expect(moved.notes).toContain(REPLACED);
+    const orcaMove = local(s, 'the Orca one');
+    expect(choiceOf(orcaMove).choice).toEqual({ position: ORCA_POSITION.ref, operation: 'EXIT', partBps: null, close: true });
+    // Orca → Uniswap: two Uniswap positions match, so FloFi asks which (never auto-selects), and an Orca exit's implied close does not burn a Uniswap NFT.
+    const which = local(s, 'the Uniswap one');
+    expect(which).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POSITION_WHICH' });
+    expect(which.options).toHaveLength(2);
+    expect(choiceOf(local(s, 'Base')).choice).toEqual({ position: BASE.ref, operation: 'EXIT', partBps: null, close: false });
+    // A partial removal moves with its portion.
+    const t = session();
+    t.say('Remove 30% of my liquidity on Arbitrum', position('DECREASE', { percent: '30', network: 'ARBITRUM' }));
+    expect(choiceOf(local(t, 'Base')).choice).toMatchObject({ operation: 'DECREASE', partBps: 3000, position: BASE.ref });
+  });
+  it('a changed portion question: naming another network says the earlier choice no longer applies and asks again for the position named', () => {
+    const s = session();
+    s.say('Remove some of my liquidity', position('DECREASE'));
+    expect(local(s, 'the first one')).toMatchObject({ code: 'COPILOT_POSITION_PORTION' });
+    const other = local(s, 'Arbitrum');
+    expect(other).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POSITION_PORTION' });
+    expect(other.text).toContain('position #123456 on Arbitrum One');
+    expect(other.notes).toContain('That is another position than the one FloFi asked about, so the earlier choice no longer applies.');
+    expect(choiceOf(local(s, '50%')).choice).toMatchObject({ operation: 'DECREASE', partBps: 5000, position: ARB.ref });
+  });
+  it('two positions on Base: “Base” narrows but never picks; FloFi asks which, and “the second one” settles it', () => {
+    const s = session([BASE, BASE_2, ARB]);
+    expect(s.say('Collect my fees', position('COLLECT'))).toMatchObject({ code: 'COPILOT_POSITION_WHICH' });
+    const again = local(s, 'Base');
+    expect(again).toMatchObject({ kind: 'CLARIFICATION', code: 'COPILOT_POSITION_WHICH', text: 'Which position do you mean?' });
+    expect(again.options).toEqual([expect.stringContaining('#123456'), expect.stringContaining('#654321')]);
+    expect(again.command).toBeUndefined();
+    expect(choiceOf(local(s, 'the second one')).choice).toMatchObject({ operation: 'COLLECT', position: BASE_2.ref });
+    // The same on a fresh request naming Base: still two, still a question.
+    expect(session([BASE, BASE_2]).say('Collect my fees on Base', position('COLLECT', { network: 'BASE' }))).toMatchObject({ code: 'COPILOT_POSITION_WHICH' });
+  });
+  it('a wallet change, a vanished position or a workflow change ends the pending choice and says so', () => {
+    const s = session();
+    s.say('Remove 50% of my liquidity', position('DECREASE', { percent: '50' }));
+    s.wallet = OTHER_ADDRESS;
+    expect(local(s, 'the first one')).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED', text: 'The connected wallet changed after FloFi asked, so this position ' +
+      'choice no longer applies: FloFi reads the positions of the wallet connected now when you ask again. Nothing changed.' });
+    const w = session();
+    w.say('Remove some of my liquidity', position('DECREASE'));
+    w.canvas(workflow => ({ ...workflow, revision: workflow.revision + 1 }));
+    expect(local(w, 'the first one')).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED',
+      text: 'The workflow changed after FloFi asked, so this position choice no longer applies. Ask again. Nothing changed.' });
+    // After a proposal: the wallet now connected is another one.
+    const after = session();
+    after.say('Collect my fees on Base', position('COLLECT', { network: 'BASE' }));
+    after.verified = facts([uniswap('eip155:8453', '9', { ref: { ...BASE.ref, positionId: '9', owner: OTHER_ADDRESS } })],
+      [{ namespace: 'eip155', address: OTHER_ADDRESS, status: 'COMPLETE' }]);
+    expect(local(after, '50%')).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED', text: 'The connected wallet changed since FloFi prepared that position ' +
+      'operation, so that choice no longer applies: ask again and FloFi reads the positions of the wallet connected now. Nothing changed.' });
+    // After a proposal: the same wallet, but the position is gone (closed elsewhere).
+    const gone = session();
+    gone.say('Collect my fees on Base', position('COLLECT', { network: 'BASE' }));
+    gone.verified = facts([ARB, ORCA_POSITION]);
+    const ended = local(gone, '50%');
+    expect(ended).toMatchObject({ kind: 'FAILED', code: 'COPILOT_CONTEXT_CHANGED' });
+    expect(ended.text).toContain('That position is no longer among the verified positions of your connected wallets');
+    expect(ended.command).toBeUndefined();
+  });
+});
+
+describe('surfaces that cannot manage positions, test data, and Orca on mainnet', () => {
+  it('says plainly that Telegram, WhatsApp, MCP and the Developer API cannot manage liquidity positions (web chat, channels and MCP)', () => {
+    const plain = 'Telegram, WhatsApp, MCP and the Developer API cannot manage liquidity positions in this build.';
+    for (const question of ['Can I collect my fees from Telegram?', 'Can I manage my liquidity positions through MCP?', 'Can I close my position with the Developer API?',
+      'how do I manage my liquidity positions?']) {
+      const reply = local(session(), question);
+      expect(reply, question).toMatchObject({ kind: 'ANSWER', topic: 'PLATFORM' });
+      expect(reply.text, question).toContain(plain);
+      expect(reply.text, question).toContain('Base, Arbitrum One, Ethereum and Robinhood Chain (Uniswap v3) and Solana (Orca SOL/USDC)');
+    }
+    const pt = local(session(undefined, 'PT'), 'Posso gerenciar minhas posições de liquidez pelo WhatsApp?');
+    expect(pt.text).toContain('Telegram, WhatsApp, MCP e a API para desenvolvedores não gerenciam posições de liquidez nesta versão.');
+    expect(pt.text).toContain('Painel → Minhas posições DeFi');
+    for (const surface of ['TELEGRAM', 'WHATSAPP', 'MCP'] as const) expect(platformAnswer('LIQUIDITY_POSITIONS', 'EN', surface).text).toContain(plain);
+    // On a channel, a position request itself is refused with where it is done (no wallet there), never prepared.
+    const channel = session();
+    const start = startTurn(channel.state, 'Coleta minhas taxas', { ...channel.env(), surface: 'WHATSAPP' });
+    if (start.kind !== 'REMOTE') throw new Error('expected a model turn');
+    const done = finishTurn(start.turn, { ok: true, intent: position('COLLECT', {}, 'PT') }, { ...channel.env(), surface: 'WHATSAPP' });
+    expect(done.reply).toMatchObject({ kind: 'UNSUPPORTED' });
+    expect(done.reply.text).toContain('Painel → Minhas posições DeFi');
+    expect(done.reply.command).toBeUndefined();
+  });
+  it('labels positions read from MOCKED test data as such in lists and proposals (never a public read)', () => {
+    const s = session();
+    s.verified = facts([BASE], [{ ...WALLETS[0]!, mocked: true }]);
+    const mockedNote = 'Test data (MOCKED): these positions were not read from a public network.';
+    expect(s.say('Show my pools', position('LIST'))!.notes).toContain(mockedNote);
+    expect(s.say('Collect my fees', position('COLLECT'))!.notes).toContain(mockedNote);
+    expect(session().say('Show my pools', position('LIST'))!.notes).not.toContain(mockedNote);
+  });
+  it('lists one network’s positions only, and never says Orca mainnet is unavailable or uses Devnet copy in the public product', () => {
+    const s = session();
+    const arbitrum = s.say('Show my positions on Arbitrum', position('LIST', { network: 'ARBITRUM' }))!;
+    expect(arbitrum.text).toBe('You have 1 liquidity position in your connected wallets:');
+    expect(textOf(arbitrum)).toContain('on Arbitrum One');
+    expect(textOf(arbitrum)).not.toMatch(/on Base|on Solana/);
+    const m = copilotCopy('EN');
+    for (const text of [m.positionOnlyOrca, m.positionWalletRequired, m.positionNone, m.lifecycle.networkUnsupported(positionNetworksText('EN'))])
+      expect(text).not.toMatch(/Devnet|devUSDC|not available on mainnets/);
+    expect(m.positionOnlyOrca).toContain('Solana (Orca SOL/USDC)');
+    const pt = copilotCopy('PT');
+    expect(pt.positionOnlyOrca).toContain('Solana (Orca SOL/USDC)');
+    expect(pt.positionOnlyOrca).not.toMatch(/Devnet|ainda não está disponível/);
+  });
+});
+
 describe('reading verified facts and short answers', () => {
   it('turns a discovery answer into facts of that owner only; an unread network makes the wallet PARTIAL', () => {
     const scans = [{ protocol: 'Aave V3', status: 'COMPLETE', positions: [{ id: 'x' }] },
-      { protocol: 'Uniswap V3', network: 'Base', status: 'COMPLETE', positions: [{ id: '123456', liquidity: BASE }, { id: '5', liquidity: { ...BASE, ref: { ...BASE.ref, owner: OTHER_ADDRESS } } },
-        { id: '6', liquidity: { ...BASE, feeTier: 'x' } }] },
-      { protocol: 'Uniswap V3', network: 'Arbitrum One', status: 'NETWORK_UNAVAILABLE', positions: [] }];
+      { protocol: 'Uniswap V3', network: 'Base', status: 'COMPLETE', provenance: 'PUBLIC_MAINNET', positions: [{ id: '123456', liquidity: BASE },
+        { id: '5', liquidity: { ...BASE, ref: { ...BASE.ref, owner: OTHER_ADDRESS } } }, { id: '6', liquidity: { ...BASE, feeTier: 'x' } }] },
+      { protocol: 'Uniswap V3', network: 'Arbitrum One', status: 'NETWORK_UNAVAILABLE', provenance: null, positions: [] }];
     const read = positionScanFacts({ namespace: 'eip155', address: TEST_WALLET.toUpperCase().replace('0X', '0x') }, scans);
     expect(read).toEqual({ wallet: { namespace: 'eip155', address: TEST_WALLET, status: 'PARTIAL' }, positions: [BASE] });
     expect(positionScanFacts({ namespace: 'solana', address: SOL_OWNER }, null).wallet.status).toBe('UNAVAILABLE');
     expect(mergeLiquidityFacts([read, read]).positions).toEqual([BASE]);
+    // A position read from MOCKED test data (a loopback harness), or with no public provenance, is test data: the wallet says so (as the Dashboard does).
+    for (const provenance of ['MOCKED', undefined]) {
+      const mocked = positionScanFacts({ namespace: 'eip155', address: TEST_WALLET }, [{ protocol: 'Uniswap V3', status: 'COMPLETE', provenance, positions: [{ liquidity: BASE }] }]);
+      expect(mocked.wallet).toEqual({ namespace: 'eip155', address: TEST_WALLET, status: 'COMPLETE', mocked: true });
+    }
   });
   it('reads the short answers of a position dialogue (EN/PT) and nothing else', () => {
     const cases: readonly [string, unknown][] = [['the first one', { kind: 'ORDINAL', ordinal: 'FIRST' }], ['the second', { kind: 'ORDINAL', ordinal: 'SECOND' }],
