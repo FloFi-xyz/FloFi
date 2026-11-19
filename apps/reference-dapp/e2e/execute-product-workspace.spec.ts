@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
-import { editorSteps, expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
+import { editorSectionAction, editorSteps, expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
 
 // Mount Execute with a real read-only canvas to verify native clicks, expiry and wallet updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
@@ -249,41 +249,35 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await openReviewTechnicalDetails(page);
   await expect(page.locator('#simulation-review')).toBeVisible();
   await expect(editorSteps(page).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
-  await openEditorSection(page, 'Execute');
-  await expect(page.locator('.execute-heading')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
-  // BUILD0-UX-001: no "Execution details" / "View technical details" disclosures; the status panel stays visible under the canvas.
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): with nothing simulated Execute is not yet eligible; its step stays
+  // in the Editor header, closed, saying why — so no idle execution surface is reachable and nothing can be authorized. The read-only idle
+  // checks (layout at every width, both themes, no financial action, no wallet request) run on the stage that is open: Simulate.
+  await expect(editorSectionAction(page, 'Execute')).toHaveAttribute('aria-disabled', 'true');
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await expect(page.locator('.execute-workspace, .execute-heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toHaveCount(0);
   await expect(page.locator('details.execution-details, details.execute-technical')).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Execution status', exact: true })).toBeVisible();
-  const graph = page.getByRole('region', { name: 'Execution workflow graph', exact: true });
+  const graph = page.getByRole('region', { name: 'Simulation workflow graph', exact: true });
   await expect(graph).toHaveAttribute('data-viewport', 'fitted');
   await expect(graph.locator('.composer-amount')).toHaveText('2.5 USDC');
   await expect(graph.locator('.composer-card input,.composer-card select')).toHaveCount(0);
   // The wallet, network and environment lines live in the Dashboard. P0 approved UX (board 03b): the header's passive "Workflow network" label is
-  // gone (its row stays empty while the wallet is on the workflow's network); the execution graph's card and the Canvas header chip name it.
+  // gone (its row stays empty while the wallet is on the workflow's network); the simulation graph's card and the Canvas header chip name it.
   await expect(page.locator('.shell-network-row')).toHaveAttribute('data-empty', 'true');
   await expect(graph).toContainText('Base Sepolia');
   await assertNoFinancialCanvasAction(page);
-  await expect(page.locator('#simulation-review')).toHaveCount(0);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await expectEditorSection(page, 'Execute'); await expect(editorSteps(page).locator('[data-step-look="current"]')).toHaveCount(1);
+    await expectEditorSection(page, 'Simulate'); await expect(editorSteps(page).locator('[data-step-look="current"]')).toHaveCount(1);
     for (const width of [1440, 1024, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const spacing = await page.locator('.execute-workspace').evaluate(element => {
-        const main = element.closest('main')!;
-        return { top: element.querySelector('.execute-workspace-grid')!.getBoundingClientRect().top, contentTop: main.getBoundingClientRect().top + parseFloat(getComputedStyle(main).paddingTop) };
-      });
-      expect(spacing.top).toBe(spacing.contentTop);
       await expectStageNavigationFits(page);
       await assertNoFinancialCanvasAction(page);
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(await page.evaluate(() => (window as unknown as { executeWorkspaceRequests: string[] }).executeWorkspaceRequests.filter(method => /send|sign/i.test(method)))).toEqual([]);
-  await page.getByRole('button', { name: 'Back to simulation', exact: true }).click();
   await openReviewTechnicalDetails(page); await expect(page.locator('#simulation-review')).toBeVisible();
   await page.setViewportSize({ width: 320, height: 900 }); await expectStageNavigationFits(page);
   // P0 approved UX (board 06): the chat-first Simulate section has no "Back to the Canvas" of its own; the stepper's Create returns to it.

@@ -103,14 +103,19 @@ export async function reloadBuilder(page: Page): Promise<void> {
 }
 
 /**
- * The Editor's sections (the Canvas, the simulation and Review, the execution) are named by their `main` landmark. P0 approved UX (board 03b):
- * the Create → Simulate → Execute stepper ("Editor steps") sits in the top bar while the Editor is open — its presence is what marks the Editor
- * as the current place (the former Dashboard | Chat | Editor tabs are gone). Each step's name is its label; a closed step adds ": <reason>".
+ * The Editor's sections (the Canvas, the simulation and Review, the execution) are named by their `main` landmark. BUILD-FLOFI-UX-EDITOR-FINOPS-001
+ * (Caio, A2/B2/C2): the Create → Simulate → Execute stage indicator ("Editor steps") sits in the Editor's own header, beside the workflow name —
+ * its presence is what marks the Editor as the current place; the global header names the product areas instead. Each step's name is its label;
+ * a closed (not yet eligible) step adds ": <reason>".
  */
 export const EDITOR_SECTION_WORKSPACES = { Build: 'Workflow workspace', Simulate: 'Simulation workspace', Execute: 'Execution workspace' } as const;
+/** The same landmarks in Portuguese (`pt.ts`), so a spec that walks the Editor in PT finds them too. */
+const EDITOR_SECTION_WORKSPACES_PT: Readonly<Record<EditorSection, string>> = { Build: 'Área do fluxo', Simulate: 'Área de simulação', Execute: 'Área de execução' };
 export type EditorSection = keyof typeof EDITOR_SECTION_WORKSPACES;
 const EDITOR_SECTION_STEPS = { Build: /^(Create|Criar)( ?:|$)/, Simulate: /^(Simulate|Simular)( ?:|$)/, Execute: /^(Execute|Executar)( ?:|$)/ } as const;
-export const editorSectionWorkspace = (page: Page, section: EditorSection) => page.getByRole('main', { name: EDITOR_SECTION_WORKSPACES[section], exact: true });
+const exactly = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const editorSectionWorkspace = (page: Page, section: EditorSection) => page.getByRole('main', {
+  name: new RegExp(`^(${exactly(EDITOR_SECTION_WORKSPACES[section])}|${exactly(EDITOR_SECTION_WORKSPACES_PT[section])})$`) });
 export const editorSteps = (page: Page) => page.getByRole('navigation', { name: /^(Editor steps|Etapas do editor)$/ });
 /** The Editor stepper's control for a section (Create, Simulate or Execute). */
 export const editorStep = (page: Page, section: EditorSection) => editorSteps(page).getByRole('button', { name: EDITOR_SECTION_STEPS[section] });

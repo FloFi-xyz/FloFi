@@ -90,7 +90,7 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
         }
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await readable(page.locator('.canvas-foot, .simulation-summary-heading p, .execution-summary h2, .dashboard-empty p, .top-bar .editor-stepper li[data-step-look="current"] button'));
+      await readable(page.locator('.canvas-foot, .simulation-summary-heading p, .execution-summary h2, .dashboard-empty p, .canvas-head-stages .editor-stepper li[data-step-look="current"] button'));
       if (width === 1440 || width === 320) await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux007-team3-${stage.toLowerCase()}-dark-${width}.png`, fullPage: true });
     }
     const settings = page.getByRole('button', { name: 'Settings', exact: true });

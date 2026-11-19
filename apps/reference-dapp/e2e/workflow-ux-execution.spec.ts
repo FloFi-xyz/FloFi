@@ -4,11 +4,11 @@
  * with the synthetic loopback RPC and explicit scripted owner confirmations of the execution-continuity harness. MOCKED; no public broadcast.
  */
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, AUTHORIZE_IN_WALLET, readWorkflowIr, openFirstActionSettings } from './fixtures';
+import { test, expect, AUTHORIZE_REVIEW, SIMULATE_AGAIN, expectSimulationValid, lifecycleAction, openReview, readWorkflowIr, openFirstActionSettings } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
-import { expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
+import { editorSectionAction, expectEditorSection, openBuilder, openEditorSection, openReviewTechnicalDetails, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
@@ -19,12 +19,16 @@ const createNew = (page: Page) => page.locator('.execution-status-panel').getByR
 async function openDetails(page: Page) {
   await openReviewTechnicalDetails(page);
 }
-const cta = (page: Page) => page.locator('.canvas-primary-action');
+// BUILD-FLOFI-UX-EDITOR-FINOPS-001: the stage's one lifecycle action (the footer, an execution's timeline, or the Simulate panel before a result).
+const cta = (page: Page) => lifecycleAction(page);
 const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="processing"]');
-/** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request). */
-const authorize = (page: Page) => cta(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
-/** One explicit click accepts the fresh Review and makes exactly the next wallet request; nothing is requested before it. */
+/** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request); on the public Editor's
+ * Execute it reads "Authorize workflow" (BUILD-FLOFI-UX-EDITOR-FINOPS-001, C1). */
+const authorize = (page: Page) => cta(page).getByRole('button', { name: AUTHORIZE_REVIEW });
+/** One explicit click accepts the fresh Review and makes exactly the next wallet request; nothing is requested before it. "Review operation"
+ * (Simulate → Execute) only navigates. */
 async function authorizeInWallet(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
+  await openReview(page, { timeout: 30_000 });
   await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
   await expect(authorize(page)).toHaveAttribute('data-lifecycle-action', 'approve');
   expect(owner.requested()).toBe(count - 1);
@@ -101,7 +105,7 @@ async function durableAttempts(id: string) {
 }
 /** A fresh simulation, then the one explicit Authorize (Review acceptance + wallet request): the next wallet request is a new, separate one. */
 async function simulateReviewExecute(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
-  const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
+  const simulate = cta(page).getByRole('button', { name: SIMULATE_AGAIN });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
   await authorizeInWallet(page, owner, count);
   await expect(summary(page)).not.toContainText(/Transaction not submitted|Execution already started/);
@@ -155,13 +159,13 @@ async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<type
   await expect(owner.wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   expect(owner.requested()).toBe(before.requested); expect(await owner.sends()).toEqual(before.sends);
-  // No stale simulation, Review or execution result belongs to the new workflow.
-  await openEditorSection(page, 'Simulate');
-  await expect(page.getByRole('button', { name: /Approve|Execute workflow|Authorize in wallet/ })).toHaveCount(0);
-  await openEditorSection(page, 'Execute');
-  await expect(summary(page)).not.toContainText(/Execution completed|Transaction not submitted|Result Summary/);
+  // No stale simulation, Review or execution result belongs to the new workflow. BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03): with nothing
+  // on the Canvas, Simulate and Execute are not yet eligible, so neither can show an earlier workflow's simulation, Review or result.
+  await expect(editorSectionAction(page, 'Simulate')).toHaveAccessibleName(/^Simulate ?: Add an action to your workflow first$/);
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await expect(page.getByRole('button', { name: /Approve|Execute workflow|Authorize in wallet|Authorize workflow/ })).toHaveCount(0);
+  await expect(summary(page)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Create new workflow', exact: true })).toHaveCount(0);
-  await openEditorSection(page, 'Build');
 }
 
 test('UX-003/UX-004: completed run — locked CTAs, Return to the Canvas keeps the workflow, Create new workflow starts clean', async ({ page, request, networkGuard }) => {
@@ -257,7 +261,7 @@ test('BUILD-FIX-UX-001: declined request → Create new workflow → same swap �
   expect(declined).toMatch(/^pub-[0-9a-f]{24}$/);
   // A definitively declined request is a concluded attempt, never a recovery: no "Recover execution", and starting over is offered.
   await expect(cta(page)).not.toContainText(/Recover execution|Execution needs attention/);
-  await expect(cta(page).getByRole('button', { name: 'Simulate again', exact: true })).toBeEnabled();
+  await expect(cta(page).getByRole('button', { name: SIMULATE_AGAIN })).toBeEnabled();
   await createNew(page).click();
   await expectCleanNewWorkflow(page, owner, { workflowId: first.workflowId, requested: 1, sends: 0 });
   await buildSwap(page);
@@ -265,8 +269,9 @@ test('BUILD-FIX-UX-001: declined request → Create new workflow → same swap �
   expect(fresh.workflowId).not.toBe(first.workflowId); expect(fresh.revision).toBe(1);
   // No stale execution state belongs to the new workflow, on any stage.
   await expect(cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ })).toBeEnabled({ timeout: 30_000 });
-  await openEditorSection(page, 'Execute');
-  await expect(summary(page)).not.toContainText(/Transaction not submitted|Execution already started|Result Summary|wallet request was cancelled/);
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03): the new workflow has not been simulated, so Execute is closed (no earlier run is shown).
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await expect(summary(page)).toHaveCount(0);
   await openEditorSection(page, 'Simulate');
   // Nothing was sent while starting over; the next request is a new, explicitly confirmed one with the same connected wallet.
   expect(owner.requested()).toBe(1); expect(await owner.sends()).toBe(0);
@@ -294,7 +299,7 @@ test('BUILD-FIX-UX-001: a declined request restored after reload offers Simulate
   await expect(owner.wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   // The recorded run is restored into the untouched draft as a result, with no recovery and no request.
-  await expect(cta(page).getByRole('button', { name: 'Simulate again', exact: true })).toBeEnabled({ timeout: 30_000 });
+  await expect(cta(page).getByRole('button', { name: SIMULATE_AGAIN })).toBeEnabled({ timeout: 30_000 });
   await expect(cta(page)).not.toContainText('Recover execution');
   expect((JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId).toBe(authored.workflowId);
   await openEditorSection(page, 'Execute');
@@ -319,7 +324,8 @@ async function simulateAndReadLimits(page: Page) {
   await openEditorSection(page, 'Simulate');
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
-  await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): the valid result is read on Simulate; "Review operation" (to Execute) is offered, nothing is accepted.
+  await expectSimulationValid(page, { timeout: 30_000 });
   await openDetails(page);
   const text = await page.locator('main').innerText();
   // The Review & Authorization disclosure lists the Strategy Manifest's execution limits.

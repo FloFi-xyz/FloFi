@@ -144,10 +144,14 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   await expect(page.locator('.build-flow-surface .composer-card').nth(1)).toContainText(/Funded by step 1/);
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(3);
 
-  // Review: read-only. The wallet is asked what it can do (no prompt) and nothing else.
-  await openEditorSection(page, 'Execute');
+  // Review: read-only. The wallet is asked what it can do (no prompt) and nothing else. BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional
+  // change): the whole-workflow Review is this workflow's simulation and runs from Simulate (its panel's one action); "Review operation" opens
+  // Execute, where it is authorized. Execute stays closed until then.
+  await openEditorSection(page, 'Simulate');
+  await page.locator('.simulation-panel-action').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
+  await expect(page.locator('.simulation-context-panel')).toHaveAttribute('data-review-state', 'ready', { timeout: 60_000 });
+  await footerAction(page).getByRole('button', { name: 'Review operation', exact: true }).click();
   await expect(panel(page).getByRole('button')).toHaveCount(0);
-  await footerAction(page).getByRole('button', { name: 'Review whole workflow', exact: true }).click();
   // Board 06: what is being authorized in plain words; the group breakdown and the rest wait under the collapsed "Technical details".
   await expect(panel(page).getByRole('heading', { name: 'You are authorizing', exact: true })).toBeVisible({ timeout: 60_000 });
   await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText('Swap 3 USDC → WETH · Base', { timeout: 60_000 });

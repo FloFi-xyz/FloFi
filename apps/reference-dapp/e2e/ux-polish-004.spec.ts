@@ -372,39 +372,51 @@ test.describe('UX-01 collapsible navigation rail', () => {
   });
 });
 
-test.describe('UX-02 the logo opens the Dashboard', () => {
-  test('from the Editor and a secondary page, by mouse and keyboard, keeping the session, wallet and Canvas', async ({ page, networkGuard }) => {
+// BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, A2/B2/C2, intentional change): the logo opens Operate (/app) — the workspace with the open workflow —
+// and the global navigation beside it names the product areas (Operate | Dashboard | My Workflows). Both are client navigations inside the same
+// persistent workspace: the session, the wallet and the Canvas stay.
+test.describe('UX-02 the logo opens Operate', () => {
+  test('from the Dashboard and a secondary page, by mouse and keyboard, back to the same open workflow', async ({ page, networkGuard }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openBuilder(page);
     await addSwapCard(page);
     const before = { revision: await revision(page), cards: await cardPositions(page) };
-    const logo = page.getByRole('link', { name: 'FloFi — go to the Dashboard', exact: true });
-    await expect(logo).toHaveAttribute('href', '/app/dashboard');
+    const logo = page.getByRole('link', { name: 'FloFi — go to Operate', exact: true });
+    const areas = page.getByRole('navigation', { name: 'Product areas', exact: true });
+    await expect(logo).toHaveAttribute('href', '/app');
     await expect(logo.locator('.flofi-logo')).toBeVisible();
     // The logo keeps its look (same artwork and size as before).
     expect((await box(logo.locator('.flofi-logo-light .flofi-logo-symbol'))).height).toBe(29);
+    await expect(areas.getByRole('link')).toHaveText(['Operate', 'Dashboard', 'My Workflows']);
+    await expect(areas.getByRole('link', { name: 'Operate', exact: true })).toHaveAttribute('aria-current', 'page');
     const marker = await page.evaluate(() => { (window as unknown as { shellMarker: string }).shellMarker = 'same-document'; return 'same-document'; });
-    await logo.click();
+    await areas.getByRole('link', { name: 'Dashboard', exact: true }).click();
     await expect(page).toHaveURL('/app/dashboard');
     await expect(page.getByRole('main', { name: 'Dashboard', exact: true })).toBeVisible();
-    await expect(navigationLink(page, 'Dashboard')).toHaveAttribute('aria-current', 'page');
-    // A client navigation inside the same workspace: no reload, no public landing, no sign-out.
+    await expect(areas.getByRole('link', { name: 'Dashboard', exact: true })).toHaveAttribute('aria-current', 'page');
+    await logo.click();
+    await expect(page).toHaveURL('/app');
+    // A client navigation inside the same workspace: no reload, no public landing, no sign-out; the Editor shows the same workflow.
     expect(await page.evaluate(() => (window as unknown as { shellMarker?: string }).shellMarker)).toBe(marker);
     await expect(page.getByRole('button', { name: 'Connect Wallet', exact: true })).toBeVisible();
-    // Back in the Editor, the Canvas is exactly as it was.
-    await navigationLink(page, 'Editor').click();
     await expectEditorSection(page, 'Build');
     expect(await revision(page)).toBe(before.revision);
     expect(await cardPositions(page)).toEqual(before.cards);
-    // With the rail expanded too, and with the keyboard from a secondary page.
+    // My Workflows is the existing library page; with the rail expanded too, and with the keyboard from a secondary page.
+    await areas.getByRole('link', { name: 'My Workflows', exact: true }).click();
+    await expect(page).toHaveURL('/app/workflows');
+    await expect(areas.getByRole('link', { name: 'My Workflows', exact: true })).toHaveAttribute('aria-current', 'page');
     await railToggle(page).click();
     await navigationLink(page, 'Credentials').click();
     await expect(page).toHaveURL('/app/credentials');
+    await expect(areas.locator('[aria-current="page"]')).toHaveCount(0);
     await logo.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
     await expect(logo).toBeFocused();
     expect(await logo.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid');
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL('/app/dashboard');
+    await expect(page).toHaveURL('/app');
+    await expectEditorSection(page, 'Build');
+    expect(await revision(page)).toBe(before.revision);
     expect(await page.evaluate(() => (window as unknown as { shellMarker?: string }).shellMarker)).toBe(marker);
     networkGuard.assertClean();
   });
@@ -413,11 +425,17 @@ test.describe('UX-02 the logo opens the Dashboard', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await chooseLanguage(page.context(), 'PT');
     await open(page);
-    await page.getByRole('link', { name: 'FloFi — ir para o Painel', exact: true }).click();
+    const areas = page.getByRole('navigation', { name: 'Áreas do produto', exact: true });
+    await expect(areas.getByRole('link')).toHaveText(['Operar', 'Painel', 'Meus Workflows']);
+    await areas.getByRole('link', { name: 'Painel', exact: true }).click();
     await expect(page).toHaveURL('/app/dashboard');
     await expect(page.getByRole('main', { name: 'Painel', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'FloFi — ir para Operar', exact: true }).click();
+    await expect(page).toHaveURL('/app');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.goto('/approve');
     await expect(page.locator('.flofi-logo-link')).toHaveCount(0);
+    await expect(page.getByRole('navigation', { name: 'Áreas do produto', exact: true })).toHaveCount(0);
     networkGuard.assertClean();
   });
 });

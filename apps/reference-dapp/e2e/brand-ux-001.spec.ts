@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
-import { editorSteps, navigationTrigger, openBuilder, openEditorSection } from './build-entry-navigation';
+import { editorSectionAction, editorSteps, navigationTrigger, openBuilder, openEditorSection } from './build-entry-navigation';
 
 const widths = [320, 375, 390, 430, 768, 1024, 1440];
 async function noOverflow(page: import('@playwright/test').Page) {
@@ -135,10 +135,18 @@ for (const width of [320, 375, 390, 430]) {
     // Technical details).
     await expect(page.locator('.review-panel-approved')).toBeFocused();
     await noOverflow(page);
-    await openEditorSection(page, 'Execute');
-    await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).toBeVisible();
-    await page.getByRole('navigation', { name: 'Execution workspace navigation', exact: true }).getByRole('button', { name: 'Execution Summary', exact: true }).click();
-    await expect(page.locator('.execution-summary')).toBeFocused();
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03): nothing was simulated, so Execute is not yet eligible. A touch owner has no hover
+    // tooltip: tapping the closed step shows why, inside the phone viewport, and opens nothing (aria-disabled: the tap is forced past
+    // Playwright's enabled check, as a finger is).
+    const execute = editorSectionAction(page, 'Execute');
+    await expect(execute).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+    await execute.tap({ force: true });
+    const notice = editorSteps(page).getByRole('status');
+    await expect(notice).toHaveText('Simulate the workflow first');
+    const noticeBox = (await notice.boundingBox())!;
+    expect(noticeBox.x).toBeGreaterThanOrEqual(0); expect(noticeBox.x + noticeBox.width).toBeLessThanOrEqual(width);
+    await expect(page.getByRole('main', { name: 'Simulation workspace', exact: true })).toBeVisible();
+    await expect(page.getByRole('main', { name: 'Execution workspace', exact: true })).toHaveCount(0);
     await assertNoFinancialCanvasAction(page);
     await noOverflow(page);
   });

@@ -2,7 +2,7 @@
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { returningVisitor, E2E_APP_ORIGIN as APP_ORIGIN, E2E_CARD_ORIGIN } from './app-origin';
 import type { Language } from '../src/i18n/language';
-import { openEditorSection } from './build-entry-navigation';
+import { editorSectionWorkspace, openEditorSection } from './build-entry-navigation';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
 
@@ -138,13 +138,45 @@ export const FINANCIAL_CANVAS_ACTIONS = ['approve', 'execute', 'continue'].map(k
  * then shows Execute.
  */
 export async function acceptProductReview(page: Page): Promise<void> {
-  const authorize = page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional change): in the public Editor a valid simulation offers "Review operation" (Simulate →
+  // Execute), where the same Review is accepted with "Authorize workflow"; the /approve Canvas and the engineering workspace keep "Authorize in
+  // wallet" on the simulation. Either way it is the same `approve` lifecycle action, its gates and its first wallet request.
+  const authorize = await openReview(page);
   await expect(authorize).toBeEnabled();
   await expect(authorize).toHaveAttribute('data-lifecycle-action', 'approve');
   await authorize.click();
   await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="approve"]')).toHaveCount(0);
   // BUILD-FLOFI-CHAT-EDITOR-UX-001: Execute is the Editor's execution section (a no-op when the authorization already opened it).
   await openEditorSection(page, 'Execute');
+}
+
+/**
+ * BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional change): where the ONE lifecycle action of the current stage is. Create and Execute:
+ * the footer (or an execution's own timeline); Simulate, before a valid result: its contextual panel ("Simulate workflow", its "Simulating
+ * workflow…" state, a wallet or network prerequisite). After a valid result the Simulate footer's "Review operation" opens Execute.
+ */
+export const lifecycleAction = (page: Page) => page.locator('.canvas-primary-action, .simulation-panel-action');
+/** The Review acceptance: "Authorize workflow" where the Review covers the whole workflow (C1), "Authorize in wallet" otherwise. */
+export const AUTHORIZE_REVIEW = /^(Authorize in wallet|Authorize workflow)$/;
+/** The simulation's own lifecycle action, by stage: Create/Simulate say "Simulate…"; Execute words the same action "Refresh review" (C2). */
+export const SIMULATE_AGAIN = /^(Simulate (workflow|again)|Refresh review)$/;
+const enabledReviewOperation = (page: Page) => page.locator('footer.summary-bar button[data-lifecycle-action="review-operation"]:enabled');
+const reviewAcceptance = (page: Page) => page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_REVIEW });
+/** A valid simulation's next step is offered: "Review operation" in the public Editor, the simulation's own Authorize elsewhere. Read-only. */
+export async function expectSimulationValid(page: Page, options: { timeout?: number } = {}): Promise<void> {
+  await expect(enabledReviewOperation(page).or(reviewAcceptance(page).and(page.locator(':enabled'))).first()).toBeVisible(options);
+}
+/**
+ * Follows a valid simulation to the Review the owner accepts (navigation only: nothing is accepted or requested) and returns its Authorize
+ * control. In the public Editor this is "Review operation" → Execute (C1); elsewhere, or already on Execute, the control is returned as is.
+ */
+export async function openReview(page: Page, options: { timeout?: number } = {}): Promise<Locator> {
+  await expectSimulationValid(page, options);
+  if (await enabledReviewOperation(page).count()) {
+    await enabledReviewOperation(page).click();
+    await expect(editorSectionWorkspace(page, 'Execute')).toBeVisible();
+  }
+  return reviewAcceptance(page);
 }
 
 /** BUILD-SOLANA-TRANSFER-UX-001: the minimal signing surface `/approve` opens on (chat-first; the Canvas is optional, "View in FloFi"). */
@@ -175,7 +207,8 @@ export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
   const primary = page.locator('.canvas-primary-action');
   await expect(primary).toHaveCount(1);
   await expect(primary.locator(FINANCIAL_CANVAS_ACTIONS)).toHaveCount(0);
-  await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true }).and(page.locator(':enabled'))).toHaveCount(0);
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the public Editor's Execute names the same Review acceptance "Authorize workflow" (C1); neither is enabled.
+  await expect(page.getByRole('button', { name: new RegExp(`^(${AUTHORIZE_IN_WALLET}|Authorize workflow)$`) }).and(page.locator(':enabled'))).toHaveCount(0);
   await expect(page.locator('.execution-summary button.primary')).toHaveCount(0);
 }
 

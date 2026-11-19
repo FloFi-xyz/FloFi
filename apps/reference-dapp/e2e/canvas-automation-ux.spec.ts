@@ -2,7 +2,7 @@
 import { test, expect, readWorkflowIr, applyPendingProposal } from './fixtures';
 import { installSupplyWallet, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
-import { openBuilder, openEditorSection, openReviewTechnicalDetails } from './build-entry-navigation';
+import { openBuilder, openEditorSection, openReviewTechnicalDetails, simulationReviewPanel } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
@@ -54,10 +54,14 @@ test('normal Simulate has concise safety details and no engineering or duplicate
   await expect(details.locator('button.primary')).toHaveCount(0);
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    // P0 approved UX (board 06): the one lifecycle control lives in the Editor footer on Simulate too; the simulated canvas carries no action.
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate's ONE primary action (Simulate workflow) is in its contextual panel; the footer's one
+    // action is "Review operation", closed until the simulation is valid; the simulated canvas carries no action.
     const graph = page.locator('.simulate-flow-surface'), footer = page.locator('footer.summary-bar'), action = footer.locator('.canvas-primary-action');
     await expect(graph.locator('.canvas-primary-action')).toHaveCount(0);
-    await expect(action.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
+    await expect(simulationReviewPanel(page).getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(1);
+    await expect(action.getByRole('button', { name: 'Review operation', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
     const surface = (await footer.boundingBox())!, button = (await action.boundingBox())!;
     expect(button.x).toBeGreaterThanOrEqual(surface.x); expect(button.x + button.width).toBeLessThanOrEqual(surface.x + surface.width);
     expect(button.y + button.height).toBeLessThanOrEqual(surface.y + surface.height);

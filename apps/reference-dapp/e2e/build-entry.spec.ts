@@ -11,8 +11,8 @@
  * POLISH 004, the small "Build it manually" link under the suggestions).
  */
 import type { Page } from '@playwright/test';
-import { test, expect, readWorkflowIr } from './fixtures';
-import { continueToBuilder, editorSteps, expectChatSection, expectEditorSection, navigationDrawer, navigationLink, navigationTrigger, openChat, openEditorSection, openNavigation } from './build-entry-navigation';
+import { test, expect, readWorkflowIr, sendChatCommand } from './fixtures';
+import { continueToBuilder, editorSectionAction, editorSteps, expectChatSection, expectEditorSection, navigationDrawer, navigationLink, navigationTrigger, openChat, openEditorSection, openNavigation } from './build-entry-navigation';
 import { chooseLanguage } from './app-origin';
 
 /** The drawer's first three items: New workflow (Chat), Editor, Dashboard. */
@@ -237,10 +237,14 @@ test('Build manually opens Build 1 directly, and the stages keep working from th
   await expect(navigationDrawer(page).getByRole('link', { name: /^(Build|Simulate|Execute)$/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(editorSteps(page)).toBeVisible();
+  // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, section 03, intentional change): with nothing on the Canvas the future stages are closed and say why;
+  // an action opens Simulate, and Execute waits for a simulation.
+  await expect(editorSectionAction(page, 'Simulate')).toHaveAccessibleName(/^Simulate ?: Add an action to your workflow first$/);
+  await expect(editorSectionAction(page, 'Execute')).toHaveAccessibleName(/^Execute ?: Simulate the workflow first$/);
+  await sendChatCommand(page, 'Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
   await openEditorSection(page, 'Simulate');
   await expectEditorSection(page, 'Simulate');
-  await openEditorSection(page, 'Execute');
-  await expectEditorSection(page, 'Execute');
+  await expect(editorSectionAction(page, 'Execute')).toHaveAttribute('aria-disabled', 'true');
   // A stage visit never sends the owner back to the entry.
   await openEditorSection(page, 'Build');
   await expect(page.locator('.build-flow-surface')).toBeVisible();
