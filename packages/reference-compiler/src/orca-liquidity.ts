@@ -2,7 +2,7 @@
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, orcaLiquidityProfile, type OrcaLiquidityOperation, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 export { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, ORCA_LIQUIDITY_OPERATIONS, ORCA_LIQUIDITY_PROFILES, orcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 export type { OrcaLiquidityOperation, OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
-import { CONCENTRATED_LIQUIDITY_ACTION, readConcentratedLiquidity, type SemanticWorkflow, type ArtifactSet, type SimulationBundle,
+import { CONCENTRATED_LIQUIDITY_ACTION, readConcentratedLiquidity, readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement, type SemanticWorkflow, type ArtifactSet, type SimulationBundle,
   type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 import { associatedTokenAddress, base58Encode, compileMessageV0, decompileMessageV0, findProgramAddress, fromBase64, parseMessageV0, parseTransaction,
   publicKeyBytes, readU64, serializeMessageV0, serializeSignedTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
@@ -344,11 +344,14 @@ export function orcaLiquidityIntent(workflow: SemanticWorkflow, owner: string): 
 export function orcaLiquidityIntentProfile(workflow: SemanticWorkflow, owner: string): { intent: OrcaLiquidityIntent; profile: OrcaLiquidityProfile } {
   return liquidityIntent(workflow, owner);
 }
-function liquidityIntent(workflow: SemanticWorkflow, owner: string): { intent: OrcaLiquidityIntent; profile: OrcaLiquidityProfile } {
+function liquidityIntent(workflow: SemanticWorkflow, owner: string): { intent: OrcaLiquidityIntent; profile: OrcaLiquidityProfile; management: ConcentratedLiquidityManagement | null } {
   const nodes = workflow.nodes.filter(n => n.actionType === CONCENTRATED_LIQUIDITY_ACTION);
   if (nodes.length !== 1 || workflow.nodes.some(n => n !== nodes[0] && !n.actionType.startsWith('mock-'))) fail('SOLANA_LIQUIDITY_ISOLATED_ONLY');
-  let f: ReturnType<typeof readConcentratedLiquidity>;
-  try { f = readConcentratedLiquidity(nodes[0]!); } catch { return fail('SOLANA_LIQUIDITY_DECLARATION_INVALID'); }
+  let f: ReturnType<typeof readConcentratedLiquidity>, management: ConcentratedLiquidityManagement | null;
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management node is the position's own node plus its management marker. The marker stays out of
+  // the intent (whose bytes earlier Reviews bind); it is bound through the semantic workflow hash and checked against the request below.
+  try { const read = readConcentratedLiquidityManagement(nodes[0]!); management = read.management; f = readConcentratedLiquidity(read.node); }
+  catch { return fail('SOLANA_LIQUIDITY_DECLARATION_INVALID'); }
   const profile = requireOrcaLiquidityProfile(f.chain), POOL = profile.pool;
   if (f.token0.address !== profile.token0.mint || f.token1.address !== profile.token1.mint || f.token0.decimals !== profile.token0.decimals ||
       f.token1.decimals !== profile.token1.decimals) fail('SOLANA_MINT_UNSUPPORTED');
@@ -358,7 +361,7 @@ function liquidityIntent(workflow: SemanticWorkflow, owner: string): { intent: O
   if (f.slippageBps === null || f.slippageBps < 1 || f.slippageBps > profile.maximumSlippageBps) fail('SOLANA_SLIPPAGE_OUT_OF_RANGE');
   if (BigInt(f.amount0Max) > BigInt(profile.token0.maximumAmount) || BigInt(f.amount1Max) > BigInt(profile.token1.maximumAmount)) fail('AMOUNT_OUT_OF_RANGE');
   if (f.recipient !== null) fail('SOLANA_LIQUIDITY_DECLARATION_INVALID');
-  return { profile, intent: { nodeId: nodes[0]!.nodeId, owner: solanaAddress(owner), amount0Max: f.amount0Max, amount1Max: f.amount1Max, amount0Min: f.amount0Min,
+  return { profile, management, intent: { nodeId: nodes[0]!.nodeId, owner: solanaAddress(owner), amount0Max: f.amount0Max, amount1Max: f.amount1Max, amount0Min: f.amount0Min,
     amount1Min: f.amount1Min, tickLower: f.tickLower, tickUpper: f.tickUpper, slippageBps: f.slippageBps!, feeTier: f.feeTier } };
 }
 export type OrcaLiquidityPool = OrcaPool & { rewardMints: string[] };
@@ -494,8 +497,15 @@ const min = (a: bigint, b: bigint) => a < b ? a : b;
  */
 export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInput: string, request: OrcaLiquidityRequest, rpc: SolanaRpc,
   now = Date.now()): Promise<OrcaLiquidityReview> {
-  const { intent, profile } = liquidityIntent(workflow, ownerInput), owner = intent.owner, operation = request.operation, POOL = profile.pool;
+  const { intent, profile, management } = liquidityIntent(workflow, ownerInput), owner = intent.owner, operation = request.operation, POOL = profile.pool;
   if (!['OPEN', 'DECREASE_PARTIAL', 'EXIT', 'COLLECT'].includes(operation)) fail('ORCA_LIQUIDITY_OPERATION_INVALID');
+  // A workflow that manages a position is never an OPEN, and its request is exactly the operation its canonical node names (EXIT always closes).
+  if (management) {
+    if (operation === 'OPEN') fail('ORCA_LIQUIDITY_WORKFLOW_MANAGES_POSITION');
+    const named = management.operation === 'COLLECT' ? 'COLLECT' : management.operation === 'DECREASE' ? 'DECREASE_PARTIAL' : management.close ? 'EXIT' : null;
+    if (named !== operation || management.positionId !== request.positionMint || (operation === 'DECREASE_PARTIAL' && management.partBps !== request.partBps))
+      fail('ORCA_POSITION_REQUEST_MISMATCH');
+  }
   const positionMint = solanaAddress(request.positionMint);
   if (positionMint === owner || ([P.whirlpool, P.system, POOL.address, POOL.tokenMintA, POOL.tokenMintB] as string[]).includes(positionMint)) fail('ORCA_POSITION_MINT_INVALID');
   const partBps = operation === 'DECREASE_PARTIAL' ? request.partBps ?? fail('ORCA_LIQUIDITY_PART_INVALID') : null;

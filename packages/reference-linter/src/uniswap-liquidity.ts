@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type ConcentratedLiquidityFields,
-  type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquidityManagement, type ConcentratedLiquidityFields,
+  type ConcentratedLiquidityManagement, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { catalogPoolOn, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, uniswapCatalogDeployment, uniswapLiquidityProfile,
   type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 
@@ -34,7 +34,10 @@ export function validateUniswapLiquidityNode(node: SemanticWorkflow['nodes'][num
   const fixed = node.actionType === CONCENTRATED_LIQUIDITY_ACTION ? uniswapLiquidityProfile(node.chainId) : null;
   if (!fixed && !(node.actionType === CONCENTRATED_LIQUIDITY_ACTION && uniswapCatalogDeployment(node.chainId) !== null)) return fail('UNISWAP_LIQUIDITY_ACTION_INVALID');
   let fields: ConcentratedLiquidityFields;
-  try { fields = readConcentratedLiquidity(node); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position-management node is the position's own node plus a valid management marker; the node itself is
+  // validated without it (the workflow validator reports the management, and every deposit runtime refuses a marked node).
+  let unmarked: SemanticWorkflow['nodes'][number];
+  try { unmarked = readConcentratedLiquidityManagement(node).node; fields = readConcentratedLiquidity(unmarked); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
   const profile: UniswapPoolProfile = fixed ?? catalogPoolOf(node.chainId, fields);
   const t0 = profile.token0, t1 = profile.token1, usable = MAX_TICK - MAX_TICK % profile.tickSpacing;
   if (fields.token0.address === t1.address && fields.token1.address === t0.address) fail('UNISWAP_TOKEN_ORDER_INVALID');
@@ -51,7 +54,7 @@ export function validateUniswapLiquidityNode(node: SemanticWorkflow['nodes'][num
   // Closed declaration: the node must be byte-equivalent to the canonical construction (Mode A, ABORT, no edges).
   let canonical: SemanticWorkflow['nodes'][number];
   try { canonical = createConcentratedLiquidityNode(node.nodeId, fields); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
-  if (sorted(node) !== sorted(canonical)) fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID');
+  if (sorted(unmarked) !== sorted(canonical)) fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID');
   return fields;
 }
 /** The catalog-network pool a node names (Robinhood Chain, Base): its two tokens on that chain, in pool order, at a standard fee tier. */
@@ -63,11 +66,11 @@ function catalogPoolOf(chain: string, fields: ConcentratedLiquidityFields): Unis
   catch (cause) { return fail(cause instanceof Error && /^UNISWAP_[A-Z_]+$/.test(cause.message) ? cause.message : 'UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
 }
 /** One isolated position node; authoring templates may coexist but never connect to it. */
-export function validateUniswapLiquidityWorkflow(workflow: SemanticWorkflow): ConcentratedLiquidityFields & { nodeId: string } {
+export function validateUniswapLiquidityWorkflow(workflow: SemanticWorkflow): ConcentratedLiquidityFields & { nodeId: string; management: ConcentratedLiquidityManagement | null } {
   const nodes = workflow.nodes.filter(n => n.actionType === CONCENTRATED_LIQUIDITY_ACTION);
   const id = nodes[0]?.nodeId ?? '';
   if (nodes.length !== 1 || workflow.nodes.some(n => n.nodeId !== id && !n.actionType.startsWith('mock-')) ||
       workflow.resourceEdges.some(e => e.fromNodeId === id || e.toNodeId === id) ||
       workflow.nodes.some(n => n.dependencies.includes(id))) fail('UNISWAP_LIQUIDITY_ISOLATED_ONLY');
-  return { ...validateUniswapLiquidityNode(nodes[0]!), nodeId: id };
+  return { ...validateUniswapLiquidityNode(nodes[0]!), nodeId: id, management: readConcentratedLiquidityManagement(nodes[0]!).management };
 }

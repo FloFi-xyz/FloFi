@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
 import { bindConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, createExactInputSwapNode, hashArtifactBytes,
-  readConcentratedLiquidity, readConcentratedLiquiditySource, type ConcentratedLiquidityFields, type ConcentratedLiquidityNode } from '../src/index.js';
+  markConcentratedLiquidityManagement, readConcentratedLiquidity, readConcentratedLiquidityManagement, readConcentratedLiquiditySource, type ConcentratedLiquidityFields,
+  type ConcentratedLiquidityNode } from '../src/index.js';
 
 const devnet = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', base = 'eip155:8453';
 const orca: ConcentratedLiquidityFields = { chain: devnet, token0: { chainId: devnet, address: 'So11111111111111111111111111111111111111112', decimals: 9 },
@@ -101,5 +102,44 @@ describe('bound concentrated-liquidity maximum (swap output → position)', () =
     expect(() => readConcentratedLiquiditySource({ ...bound, dependencies: ['node-002', 'node-001'] })).toThrow('LIQUIDITY_SOURCE_INVALID');
     const twice = { ...bound, inputs: [...bound.inputs, { name: 'amount0-source', kind: 'OUTPUT_REFERENCE' as const, value: { nodeId: 'node-002', outputId: 'amount-out' } }] };
     expect(() => readConcentratedLiquiditySource(twice)).toThrow('LIQUIDITY_SOURCE_INVALID');
+  });
+});
+
+describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position-management marker', () => {
+  const node = () => createConcentratedLiquidityNode('node-001', orca);
+  const MINT = 'D'.repeat(32);
+  it('names exactly one operation on one position, round-trips, and changes the workflow hash with every choice', () => {
+    const choices = [{ positionId: '42', operation: 'COLLECT', partBps: null, close: false }, { positionId: '42', operation: 'DECREASE', partBps: 5_000, close: false },
+      { positionId: '42', operation: 'DECREASE', partBps: 2_500, close: false }, { positionId: '42', operation: 'EXIT', partBps: null, close: false },
+      { positionId: '42', operation: 'EXIT', partBps: null, close: true }, { positionId: '43', operation: 'EXIT', partBps: null, close: true },
+      { positionId: MINT, operation: 'EXIT', partBps: null, close: true }] as const;
+    const hashes = new Set<string>();
+    for (const choice of choices) {
+      const marked = markConcentratedLiquidityManagement(node(), choice);
+      const read = readConcentratedLiquidityManagement(marked);
+      expect(read.management).toEqual(choice);
+      expect(read.node).toEqual(node());
+      hashes.add(hash(marked));
+    }
+    expect(hashes.size).toBe(choices.length);
+    expect(hashes.has(hash(node()))).toBe(false);
+    expect(readConcentratedLiquidityManagement(node())).toEqual({ node: node(), management: null });
+  });
+  it('is never a deposit: the strict reader refuses a marked node; malformed, duplicated or bound markers fail closed', () => {
+    const marked = markConcentratedLiquidityManagement(node(), { positionId: '42', operation: 'EXIT', partBps: null, close: true });
+    expect(() => readConcentratedLiquidity(marked)).toThrow('LIQUIDITY_PORTS_INVALID');
+    for (const bad of [{ positionId: '42', operation: 'COLLECT', partBps: 1, close: false }, { positionId: '42', operation: 'DECREASE', partBps: 10_000, close: false },
+      { positionId: '42', operation: 'DECREASE', partBps: 0, close: false }, { positionId: '42', operation: 'DECREASE', partBps: 5_000, close: true },
+      { positionId: '042', operation: 'EXIT', partBps: null, close: false }, { positionId: '42', operation: 'BURN', partBps: null, close: true },
+      { positionId: '0x2a', operation: 'EXIT', partBps: null, close: false }, { positionId: '42', operation: 'EXIT', partBps: 10_000, close: false }])
+      expect(() => markConcentratedLiquidityManagement(node(), bad as never), JSON.stringify(bad)).toThrow('LIQUIDITY_MANAGEMENT_INVALID');
+    expect(() => markConcentratedLiquidityManagement(marked, { positionId: '42', operation: 'COLLECT', partBps: null, close: false })).toThrow('LIQUIDITY_MANAGEMENT_INVALID');
+    const mark = marked.inputs.at(-1)!;
+    for (const tampered of [{ ...marked, inputs: [...marked.inputs, mark] }, { ...marked, inputs: [...node().inputs, { ...mark, value: 'EXIT:42:maybe' }] },
+      { ...marked, inputs: [...node().inputs, { ...mark, value: 'OPEN:42' }] }, { ...marked, inputs: [...node().inputs, { name: mark.name, kind: 'INTEGER', value: 42 }] },
+      { ...marked, dependencies: ['node-000'] }])
+      expect(() => readConcentratedLiquidityManagement(tampered as never), JSON.stringify(tampered.inputs.at(-1))).toThrow('LIQUIDITY_MANAGEMENT_INVALID');
+    const bound = bindConcentratedLiquidityNode(node(), { token: 0, nodeId: 'node-000', outputId: 'amount-out' });
+    expect(() => markConcentratedLiquidityManagement(bound, { positionId: '42', operation: 'COLLECT', partBps: null, close: false })).toThrow('LIQUIDITY_MANAGEMENT_INVALID');
   });
 });

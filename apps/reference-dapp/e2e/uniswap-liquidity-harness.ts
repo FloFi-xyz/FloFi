@@ -8,12 +8,24 @@
  * beacon proxy code, beacon slot, uid and multiplier reads) and `catalogPins` are the synthetic pins of its USDG/WETH/Stock Token code.
  */
 import { ARBITRUM_ONE, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
+import { markConcentratedLiquidityManagement, readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement,
+  type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { uniMockCode, uniMockCodePin, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, UNISWAP_POSITION_SELECTORS as PSEL, UNISWAP_POSITION_TOPICS as PTOPIC, decodeUniswapApprove,
   decodeUniswapBurn, decodeUniswapCollect, decodeUniswapDecreaseLiquidity, decodeUniswapMint, decodeUniswapMulticall, sqrtRatioAtTick, uniswapAmountsForLiquidity,
   uniswapComposition } from '@defi-workflow-engine/reference-compiler';
 
 export const UNI_OWNER = '0x5555555555555555555555555555555555555555';
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the workflow of one operation on a position — the position's pool node marked with exactly that request,
+ * as MANAGE_LIQUIDITY_POSITION authors it (any earlier marker is replaced).
+ */
+export function managedPositionWorkflow<W extends SemanticWorkflow>(workflow: W, request: { tokenId: string; operation: ConcentratedLiquidityManagement['operation'];
+  partBps: number | null; close: boolean }): W {
+  return { ...workflow, nodes: workflow.nodes.map(node => node.actionType !== 'asset.liquidity.concentrated' ? node
+    : markConcentratedLiquidityManagement(readConcentratedLiquidityManagement(node).node,
+      { positionId: request.tokenId, operation: request.operation, partBps: request.partBps, close: request.close })) };
+}
 export { UNI_MOCK_CODE_PINS };
 
 type Snapshot = { balances: Record<string, Record<string, bigint>>; allowances: Record<string, bigint>; native: Record<string, bigint>; nonces: Record<string, bigint>;

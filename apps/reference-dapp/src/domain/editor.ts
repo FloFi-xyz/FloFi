@@ -21,7 +21,7 @@ import { ownDeclaration } from './node-declaration';
 import { createAuthoredTransfer } from './robinhood-transfer-authoring';
 import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
-import { createConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION } from '@defi-workflow-engine/workflow-contracts';
+import { createConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION, markConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, uniswapCatalogDeployment } from '@defi-workflow-engine/action-registry';
 import { uniswapPositionAsset } from '@defi-workflow-engine/reference-linter';
 import { formatTokenAmount } from './jupiter-authoring';
@@ -183,7 +183,7 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
     const financial = current.nodes.filter(node => !node.actionType.startsWith('mock-'));
     if (financial.some(node => node.actionType !== CONCENTRATED_LIQUIDITY_ACTION)) return reject('POSITION_WORKFLOW_HAS_OTHER_STEPS');
     try {
-      const { choice: { position: ref }, pool } = command;
+      const { choice, pool } = command, ref = choice.position;
       const keep = financial[0];
       const id = keep?.nodeId ?? `node-${String(current.revision + 2).padStart(3, '0')}`;
       let position: SemanticWorkflow['nodes'][number];
@@ -205,6 +205,9 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
         position = createSolanaLiquidityNode(id, { network: 'Solana', maxSol: formatTokenAmount(sol, orca.token0.decimals), maxDevUsdc: formatTokenAmount(usdc, orca.token1.decimals),
           rangeUnit: 'TICK', lower: String(pool.tickLower), upper: String(pool.tickUpper), slippage: String(pool.slippageBps) });
       }
+      // The operation is part of the canonical node: a new operation, portion, close or position is a new workflow revision and hash, and the
+      // strict deposit reader refuses the marked node, so it can never be simulated or executed as a deposit.
+      position = markConcentratedLiquidityManagement(position, { positionId: ref.positionId, operation: choice.operation, partBps: choice.partBps, close: choice.close });
       const removed = new Set(financial.map(node => node.nodeId).filter(nodeId => nodeId !== id));
       const nodes = [...current.nodes.filter(node => !removed.has(node.nodeId) && node.nodeId !== id).map(node => ({ ...node, dependencies: node.dependencies.filter(dep => !removed.has(dep)) })), position];
       const resourceEdges = current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId) && edge.toNodeId !== id && edge.fromNodeId !== id);

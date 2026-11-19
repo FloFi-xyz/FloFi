@@ -30,7 +30,7 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUnis
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
   encodeUniswapApprove, encodeUniswapMint, uniswapComposition, uniswapMinimum, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick, uniswapRangeState,
   type UniswapRangeState } from '@defi-workflow-engine/reference-compiler';
-import { hashArtifactBytes, readConcentratedLiquidity, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { hashArtifactBytes, readConcentratedLiquidity, readConcentratedLiquidityManagement, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { catalogTokenPolicy, verifyCatalogToken, verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
@@ -454,6 +454,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   /** Fresh state, exact approvals, two-pass simulation (expected amounts → minimums → exact reviewed mint), fees, commitment. */
   async function buildReview(workflow: SemanticWorkflow, owner: string, assets: PoolAssets | null): Promise<UniswapLiquidityReview> {
     const f = intentOf(workflow);
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a workflow that manages an existing position is never reviewed (or executed) as a deposit.
+    if (f.management) fail('UNISWAP_LIQUIDITY_WORKFLOW_MANAGES_POSITION');
     if (f.token0.address !== t0.address || f.token1.address !== t1.address || f.feeTier !== profile.feeTier) fail('UNISWAP_POOL_MISMATCH');
     // Depositing a Stock Token into a pool disposes of it: the registry must allow that for this token.
     for (const [asset, amount] of [[assets?.token0, f.amount0Max], [assets?.token1, f.amount1Max]] as const)
@@ -730,7 +732,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     if (!input.catalog) return { runtime: runtimeOf(uniswapLiquidityProfile(node?.chainId) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')), assets: null };
     if (node?.chainId !== servedChain) fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED');
     let fields: ReturnType<typeof readConcentratedLiquidity>;
-    try { fields = readConcentratedLiquidity(node); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
+    // The pool runtime is resolved from the position's own node (without a management marker, which the workflow validator checks).
+    try { fields = readConcentratedLiquidity(readConcentratedLiquidityManagement(node!).node); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
     const assets = await catalogAssets(fields.token0, fields.token1);
     let profile: UniswapPoolProfile;
     try { profile = catalogPoolOn(servedChain, assets.token0 as { symbol: string; address: string; decimals: number }, assets.token1 as { symbol: string; address: string; decimals: number }, fields.feeTier); }

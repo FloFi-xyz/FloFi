@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement,
+  type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { catalogPoolOn, formatAssetAmount, parseAssetAmount, uniswapCatalogDeployment, uniswapLiquidityProfile, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD,
   UNISWAP_CATALOG_DEPLOYMENTS, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-linter';
@@ -80,7 +81,9 @@ export type RobinhoodLiquidityDetails = { readonly network: CatalogLiquidityNetw
   readonly amountA: string; readonly amountB: string; readonly fee: number; readonly tickLower: number; readonly tickUpper: number; readonly fullRange: boolean;
   /** token0 per token1 at the range edges (the LOWER price comes from tickUpper), and the pair that price is quoted in. */
   readonly lowerPrice: string; readonly upperPrice: string; readonly priceUnit: string;
-  readonly slippage: string; readonly provider: 'Uniswap v3'; readonly pool: string };
+  readonly slippage: string; readonly provider: 'Uniswap v3'; readonly pool: string;
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: set when the node manages an existing position (collect, withdraw, exit): never a deposit to edit. */
+  readonly management?: ConcentratedLiquidityManagement | null };
 /** The side shown first: a base asset (USDG, then USDC, then WETH) against any other token, otherwise pool order. */
 const BASE_FIRST = ['USDG', 'USDC', 'WETH'];
 /** Presentation only. A token the current catalog no longer resolves (or resolves with other decimals) keeps a neutral label rather than a guess. */
@@ -88,7 +91,9 @@ export function robinhoodLiquidityDetails(node: Node | { readonly actionType: st
   const network = (Object.keys(CATALOG_LIQUIDITY_NETWORKS) as CatalogLiquidityNetwork[]).find(name => CATALOG_LIQUIDITY_NETWORKS[name] === node.chainId);
   if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || !network) return null;
   try {
-    const f = readConcentratedLiquidity(node as Node), chain = node.chainId;
+    // A position-management node displays as its position's pool; the management is reported apart (the runtime readers stay strict).
+    const { node: unmarked, management } = readConcentratedLiquidityManagement(node as Node);
+    const f = readConcentratedLiquidity(unmarked), chain = node.chainId;
     const symbolOf = (token: { address: string; decimals: number }) => { const asset = resolveNetworkAsset(chain, { address: token.address });
       return asset && asset.decimals === token.decimals ? asset.symbol : 'Token'; };
     const s0 = symbolOf(f.token0), s1 = symbolOf(f.token1);
@@ -99,7 +104,7 @@ export function robinhoodLiquidityDetails(node: Node | { readonly actionType: st
     return { network, tokenA: zeroFirst ? s0 : s1, tokenB: zeroFirst ? s1 : s0, amountA: zeroFirst ? a0 : a1, amountB: zeroFirst ? a1 : a0,
       fee: f.feeTier, tickLower: f.tickLower, tickUpper: f.tickUpper, fullRange: f.tickLower === full.tickLower && f.tickUpper === full.tickUpper,
       lowerPrice: uniswapQuotePriceAtTick(f.tickUpper, f.token0.decimals, f.token1.decimals, 8), upperPrice: uniswapQuotePriceAtTick(f.tickLower, f.token0.decimals, f.token1.decimals, 8),
-      priceUnit: `${s0} per ${s1}`, slippage: String(f.slippageBps ?? ''), provider: 'Uniswap v3', pool: pool.pool };
+      priceUnit: `${s0} per ${s1}`, slippage: String(f.slippageBps ?? ''), provider: 'Uniswap v3', pool: pool.pool, ...management ? { management } : {} };
   } catch { return null; }
 }
 /** BUILD-BASE-001: the network-neutral name of the same reader. */

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ownDeclaration } from './node-declaration';
-import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquiditySource, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquidityManagement, readConcentratedLiquiditySource,
+  type ConcentratedLiquidityManagement, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, orcaLiquidityProfile, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { orcaAlignPriceRange, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { formatTokenAmount, parseTokenAmount, type SolanaSwapInput } from './jupiter-authoring';
@@ -46,7 +47,9 @@ export type SolanaLiquidityDetails = { network: SolanaLiquidityNetwork;
   /** The pool's token B symbol: devUSDC (Devnet) or USDC (mainnet-beta). */ tokenB: string; maxSol: string; maxDevUsdc: string; tickLower: number; tickUpper: number; lowerPrice: string;
   upperPrice: string; slippage: string; provider: string;
   /** Set when the position is bound to a swap's output: that token's maximum is the cap on the actual reconciled swap output. */
-  source: { nodeId: string; token: 0 | 1; fullOutput: boolean } | null };
+  source: { nodeId: string; token: 0 | 1; fullOutput: boolean } | null;
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: set when the node manages an existing position (collect, withdraw, exit): never a deposit to edit. */
+  management?: ConcentratedLiquidityManagement | null };
 /** The bound token's cap that means "100% of the swap output": the Devnet token maximum (the swap output is the real limit). */
 export const fullOutputCap = (token: 0 | 1) => formatTokenAmount(token === 0 ? profile.token0.maximumAmount : profile.token1.maximumAmount, token === 0 ? profile.token0.decimals : profile.token1.decimals);
 export function solanaLiquidityDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): SolanaLiquidityDetails | null {
@@ -56,13 +59,15 @@ export function solanaLiquidityDetails(node: SemanticWorkflow['nodes'][number] |
   try {
     // Display reads a bound position too (the runtime readers stay strict and reject it outside its composition).
     const { node: isolated, source } = readConcentratedLiquiditySource(node as SemanticWorkflow['nodes'][number]);
-    const f = readConcentratedLiquidity(isolated);
+    const { node: unmarked, management } = readConcentratedLiquidityManagement(isolated);
+    const f = readConcentratedLiquidity(unmarked);
     if (f.token0.address !== runtime.token0.mint || f.token1.address !== runtime.token1.mint || f.protocols.join() !== runtime.protocol) return null;
     const price = (tick: number) => orcaPriceFromSqrtPrice(orcaSqrtPriceAtTick(tick), runtime.token0.decimals, runtime.token1.decimals);
     return { network: runtime.network, tokenB: runtime.token1.symbol, maxSol: formatTokenAmount(f.amount0Max, runtime.token0.decimals), maxDevUsdc: formatTokenAmount(f.amount1Max, runtime.token1.decimals),
       tickLower: f.tickLower, tickUpper: f.tickUpper, lowerPrice: price(f.tickLower), upperPrice: price(f.tickUpper), slippage: String(f.slippageBps ?? ''),
       provider: runtime.providerLabel, source: source ? { nodeId: source.nodeId, token: source.token,
-        fullOutput: (source.token === 0 ? f.amount0Max : f.amount1Max) === (source.token === 0 ? runtime.token0.maximumAmount : runtime.token1.maximumAmount) } : null };
+        fullOutput: (source.token === 0 ? f.amount0Max : f.amount1Max) === (source.token === 0 ? runtime.token0.maximumAmount : runtime.token1.maximumAmount) } : null,
+      ...management ? { management } : {} };
   } catch { return null; }
 }
 /** Editing input that reproduces the node exactly (ticks are already aligned). */

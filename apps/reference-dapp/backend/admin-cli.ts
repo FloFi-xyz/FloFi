@@ -12,6 +12,7 @@
  *   audit         [--limit 50]                                            the latest admin audit events (closed codes and ids only)
  *   index         [--limit 2000]                                          fills the analytics facts cache from executed runs' records (read-only on runs)
  *   finops-migrate / finops-sync-migrate                                applies certified 0029 or 0030 after certificate rollout
+ *   position-purge-migrate                                                applies certified 0031 on exact schema 30 (never 0029/0030)
  *   reconcile-history [--flow crosschain-universal] [--code A,B] [--limit 100] [--apply --approval-ref REF --reason TEXT]
  *                                                                         dry run by default; --apply queues read-only re-observation (no transaction)
  *
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
     'reason-code': { type: 'string' }, hold: { type: 'string' }, kind: { type: 'string' }, 'subject-kind': { type: 'string' }, request: { type: 'string' },
     decision: { type: 'string' }, code: { type: 'string' }, 'include-text': { type: 'boolean' }, 'wallet-stdin': { type: 'boolean' },
     flow: { type: 'string' }, reason: { type: 'string' }, apply: { type: 'boolean' } } });
-  const migration = command === 'finops-migrate' || command === 'finops-sync-migrate';
+  const migration = command === 'finops-migrate' || command === 'finops-sync-migrate' || command === 'position-purge-migrate';
   const tenantId = tenantOf(values), databaseUrl = (migration ? process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_URL : process.env.DATABASE_URL) ?? '';
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });

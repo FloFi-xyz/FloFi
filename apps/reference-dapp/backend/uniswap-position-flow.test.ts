@@ -14,7 +14,7 @@ import { catalogPoolOn, type CanonicalAsset } from '@defi-workflow-engine/action
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { editorReducer, initialEditor } from '../src/domain/editor.ts';
 import { registerNetworkCatalog, resetNetworkCatalogs } from '../src/domain/asset-catalogs.ts';
-import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER } from '../e2e/uniswap-liquidity-harness.ts';
+import { createUniswapLiquidityChain, managedPositionWorkflow, UNI_MOCK_CODE_PINS, UNI_OWNER } from '../e2e/uniswap-liquidity-harness.ts';
 import { baseAsset, baseCatalog } from '../src/server/base-mainnet.test-harness.ts';
 import { createUniswapLiquidityService } from '../src/server/uniswap-liquidity-service.ts';
 import { FLOWS } from './flows.ts';
@@ -54,7 +54,8 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 position runs on the liquidity clo
     const dir = await mkdtemp(join(tmpdir(), 'flofi-pm-flow-')), storage = createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY');
     const service = createUniswapLiquidityService({ storage, rpc: async () => { throw new Error('UNUSED'); }, rpcs: { 'eip155:8453': chain.rpc }, provenance: 'MOCKED',
       now: chain.clock, mockedCodePins: UNI_MOCK_CODE_PINS, catalog: { chain: 'eip155:8453', catalogFor: async () => catalog, codePins: chain.catalogPins } });
-    const w = positionWorkflow(), tokenId = chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const tokenId = chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    const w = managedPositionWorkflow(positionWorkflow(), { ...REQUEST, operation: 'EXIT' as const, tokenId });
     const run = await service.positionSimulate(w, UNI_OWNER, { ...REQUEST, tokenId });
     const flow = FLOWS['base-liquidity'];
     const project = async () => flow.projector(`${run.id}.jsonl`, (await storage.log.read(`${run.id}.jsonl`))!)!;

@@ -11,11 +11,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { decodeUniswapCollect, decodeUniswapDecreaseLiquidity, decodeUniswapPositionRequest, UNISWAP_MAX_UINT128 } from '@defi-workflow-engine/reference-compiler';
-import { readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { readConcentratedLiquidity, readConcentratedLiquidityManagement, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { catalogPoolOn, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { editorReducer, initialEditor } from '../domain/editor';
 import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
-import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
+import { createUniswapLiquidityChain, managedPositionWorkflow, UNI_MOCK_CODE_PINS, UNI_OWNER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import { createUniswapLiquidityService, uniswapRunNeedsObservation, type UniswapLiquidityService } from './uniswap-liquidity-service';
 import { parseUniswapPositionRequest, type UniswapPositionRequest } from './uniswap-position-service';
@@ -42,7 +42,21 @@ function positionWorkflow(lower = LOWER, upper = UPPER): SemanticWorkflow {
   if (fields.tickLower !== lower || fields.tickUpper !== upper) throw new Error('TEST_RANGE_NOT_AUTHORED');
   return workflow;
 }
-type Setup = { chain: UniswapLiquidityChain; service: UniswapLiquidityService };
+const managed = (w: SemanticWorkflow, r: UniswapPositionRequest) => managedPositionWorkflow(w, r);
+/**
+ * The suites below drive one run per position; this wrapper hands each position method the workflow marked with that run's own request (as the
+ * editor does), so a test passes the position's pool workflow once. The binding itself is proven against the raw service.
+ */
+function marking(service: UniswapLiquidityService): UniswapLiquidityService {
+  const workflows = new Map<string, SemanticWorkflow>();
+  const of = (id: string, w: SemanticWorkflow) => readConcentratedLiquidityManagement(w.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')!).management ? w : workflows.get(id) ?? w;
+  return { ...service,
+    positionSimulate: async (w, owner, r) => { const run = await service.positionSimulate(managed(w, r as UniswapPositionRequest), owner, r); workflows.set(run.id, run.workflow); return run; },
+    positionReview: (id, commitment, w) => service.positionReview(id, commitment, of(id, w)),
+    positionBegin: (id, owner, w) => service.positionBegin(id, owner, of(id, w)),
+  } as UniswapLiquidityService;
+}
+type Setup = { chain: UniswapLiquidityChain; service: UniswapLiquidityService; raw: UniswapLiquidityService };
 async function setup(options: { confirmations?: number; executionEnabled?: boolean } = {}): Promise<Setup> {
   const chain = createUniswapLiquidityChain({ profile: PROFILE, tick: TICK, usdc: USDC_IS_0 ? 1_000_000_000n : 10_000_000n, weth: USDC_IS_0 ? 10_000_000n : 1_000_000_000n });
   const dir = await mkdtemp(join(tmpdir(), 'flofi-base-pm-'));
@@ -51,7 +65,7 @@ async function setup(options: { confirmations?: number; executionEnabled?: boole
     provenance: 'MOCKED', now: chain.clock, mockedCodePins: UNI_MOCK_CODE_PINS, executionEnabled: options.executionEnabled ?? true,
     ...options.confirmations !== undefined ? { confirmations: options.confirmations } : {},
     catalog: { chain: 'eip155:8453', catalogFor: async () => catalog, codePins: chain.catalogPins } });
-  return { chain, service };
+  return { chain, service: marking(service), raw: service };
 }
 const request = (patch: Partial<UniswapPositionRequest> & { tokenId: string }): UniswapPositionRequest =>
   ({ operation: 'COLLECT', partBps: null, close: false, ...patch });
@@ -283,6 +297,28 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 Uniswap v3 position management (MO
     s.chain.advance(4);
     const settled = await s.service.positionObserve(run.id);
     expect(settled).toMatchObject({ verdict: 'RECONCILED', result: { burned: true } });
+  });
+
+  it('binds the operation to the canonical workflow: the request must be the one its node names, and a managed position is never a deposit', async () => {
+    const s = await setup(), w = positionWorkflow();
+    const tokenId = s.chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 2_000_000_000n });
+    s.chain.accrueFees(tokenId, 1_000n, 2_000n);
+    const half = request({ tokenId, operation: 'DECREASE', partBps: 5_000 });
+    // An unmarked (deposit) workflow, or a node naming another position, operation, portion or close, is refused before any read is trusted.
+    await expect(s.raw.positionSimulate(w, UNI_OWNER, half)).rejects.toThrow('UNISWAP_POSITION_REQUEST_MISMATCH');
+    for (const other of [request({ tokenId, operation: 'DECREASE', partBps: 2_500 }), request({ tokenId, operation: 'EXIT' }), request({ tokenId, operation: 'EXIT', close: true }),
+      request({ tokenId }), request({ tokenId: String(BigInt(tokenId) + 1n), operation: 'DECREASE', partBps: 5_000 })])
+      await expect(s.raw.positionSimulate(managed(w, other), UNI_OWNER, half), JSON.stringify(other)).rejects.toThrow('UNISWAP_POSITION_REQUEST_MISMATCH');
+    // The deposit path never reviews a workflow that manages a position (a lost staged choice can never become a mint).
+    await expect(s.raw.simulate(managed(w, half), UNI_OWNER)).rejects.toThrow(/UNISWAP_LIQUIDITY_WORKFLOW_MANAGES_POSITION|UNISWAP_LIQUIDITY_DECLARATION_INVALID/);
+    // A changed choice is a changed workflow: the earlier run's Review can no longer be authorized with it, and the new choice gets its own run.
+    const first = await s.raw.positionSimulate(managed(w, half), UNI_OWNER, half);
+    const quarter = request({ tokenId, operation: 'DECREASE', partBps: 2_500 });
+    await expect(s.raw.positionReview(first.id, first.review.commitment, managed(w, quarter))).rejects.toThrow('UNISWAP_SEMANTIC_REVISION_CHANGED');
+    await expect(s.raw.positionBegin(first.id, UNI_OWNER, managed(w, quarter))).rejects.toThrow();
+    const second = await s.raw.positionSimulate(managed(w, quarter), UNI_OWNER, quarter);
+    expect(second.review).toMatchObject({ operation: 'DECREASE', partBps: 2_500 });
+    expect(second.review.workflowHash).not.toBe(first.review.workflowHash);
   });
 
   it('shares the owner nonce namespace with minting, and keeps the two run kinds apart', async () => {

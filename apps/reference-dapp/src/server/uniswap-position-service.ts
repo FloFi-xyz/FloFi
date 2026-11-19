@@ -21,7 +21,7 @@ import { decodeUniswapAmounts, decodeUniswapCollect, decodeUniswapDecreaseLiquid
   decodeUniswapPositionRequest, uniswapAmountsForLiquidity, uniswapMinimum, uniswapPositionPlan, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick,
   uniswapRangeState, UNISWAP_POSITION_TOPICS as PTOPIC, UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, type UniswapPositionInnerKind,
   type UniswapPositionOperation, type UniswapRangeState } from '@defi-workflow-engine/reference-compiler';
-import { hashArtifactBytes, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { hashArtifactBytes, type ConcentratedLiquidityManagement, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { sameEvmIntent } from './evm-submission-discovery.ts';
@@ -174,7 +174,9 @@ export type UniswapPositionDeps = {
   readonly runtimeOfReview: (review: UniswapPositionReview) => Promise<{ runtime: UniswapPositionPoolRuntime; assets: unknown }>;
   /** The node fields of an isolated, capability-checked Uniswap liquidity workflow. */
   readonly intentOf: (workflow: SemanticWorkflow, runtime: UniswapPositionPoolRuntime) => { readonly nodeId: string; readonly tickLower: number; readonly tickUpper: number;
-    readonly feeTier: number; readonly slippageBps: number; readonly token0: { readonly address: string }; readonly token1: { readonly address: string } };
+    readonly feeTier: number; readonly slippageBps: number; readonly token0: { readonly address: string }; readonly token1: { readonly address: string };
+    /** The canonical node's management marker (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001): which position and operation the workflow authorizes. */
+    readonly management: ConcentratedLiquidityManagement | null };
   readonly explorerTx: (hash: string, profile: UniswapPoolProfile) => string;
 };
 
@@ -317,6 +319,11 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
   async function buildReview(workflow: SemanticWorkflow, owner: string, request: UniswapPositionRequest): Promise<UniswapPositionReview> {
     const { runtime: R, assets } = await deps.runtimeOfWorkflow(workflow), profile = R.profile;
     const f = deps.intentOf(workflow, R);
+    // The operation is part of the canonical workflow: the request must be exactly the one its node names, so a Review (bound to the workflow
+    // hash) always authorizes the operation the owner chose last; a deposit workflow is never a position operation.
+    const m = f.management;
+    if (!m || m.positionId !== request.tokenId || m.operation !== request.operation || m.partBps !== request.partBps || m.close !== request.close)
+      fail('UNISWAP_POSITION_REQUEST_MISMATCH');
     if (f.token0.address !== profile.token0.address || f.token1.address !== profile.token1.address || f.feeTier !== profile.feeTier) fail('UNISWAP_POSITION_POOL_MISMATCH');
     const tokenId = BigInt(request.tokenId);
     const state = await R.readState(owner, assets), at = tag(state.block.number);

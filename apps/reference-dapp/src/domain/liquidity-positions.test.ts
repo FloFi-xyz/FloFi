@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { readConcentratedLiquidity } from '@defi-workflow-engine/workflow-contracts';
+import { readConcentratedLiquidity, readConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 import { editorReducer, initialEditor } from './editor';
 import { liquidityPositionChoiceValid, liquidityPositionOperations, orcaPositionRequestOf, uniswapPositionRequestOf, type LiquidityPositionChoice,
   type LiquidityPositionRef } from './liquidity-positions';
@@ -50,7 +50,14 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 liquidity position choices', () =>
     expect(next.error).toBeNull();
     const node = next.workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')!;
     expect(node.chainId).toBe(ORCA.chain);
-    expect(readConcentratedLiquidity(node as never)).toMatchObject({ tickLower: -39_104, tickUpper: -36_992, feeTier: ORCA.feeTier, slippageBps: 100 });
+    // The operation is in the canonical node (so a new choice is a new workflow), and the strict deposit reader refuses the marked node.
+    const { node: unmarked, management } = readConcentratedLiquidityManagement(node as never);
+    expect(management).toEqual({ positionId: MINT, operation: 'DECREASE', partBps: 5_000, close: false });
+    expect(() => readConcentratedLiquidity(node as never)).toThrow('LIQUIDITY_PORTS_INVALID');
+    expect(readConcentratedLiquidity(unmarked)).toMatchObject({ tickLower: -39_104, tickUpper: -36_992, feeTier: ORCA.feeTier, slippageBps: 100 });
+    const quarter = editorReducer(next, { type: 'MANAGE_LIQUIDITY_POSITION', choice: choice(orca, 'DECREASE', 2_500, false), pool, source: 'CHAT', baseRevision: next.workflow.revision }, context);
+    expect(quarter.error).toBeNull();
+    expect(quarter.workflow.revision).toBe(next.workflow.revision + 1);
     const wrongPool = editorReducer(initialEditor(), { type: 'MANAGE_LIQUIDITY_POSITION', choice: choice({ ...orca, pool: 'E'.repeat(32) }, 'EXIT', null, true), pool,
       source: 'CHAT', baseRevision: 0 }, context);
     expect(wrongPool.error).toBe('ORCA_POSITION_POOL_MISMATCH');
