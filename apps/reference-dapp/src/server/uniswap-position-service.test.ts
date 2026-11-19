@@ -51,7 +51,7 @@ function marking(service: UniswapLiquidityService): UniswapLiquidityService {
   const workflows = new Map<string, SemanticWorkflow>();
   const of = (id: string, w: SemanticWorkflow) => readConcentratedLiquidityManagement(w.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')!).management ? w : workflows.get(id) ?? w;
   return { ...service,
-    positionSimulate: async (w, owner, r) => { const run = await service.positionSimulate(managed(w, r as UniswapPositionRequest), owner, r); workflows.set(run.id, run.workflow); return run; },
+    positionSimulate: async (w, owner, r) => { const run = await service.positionSimulate(managed(w as SemanticWorkflow, r as UniswapPositionRequest), owner, r); workflows.set(run.id, run.workflow); return run; },
     positionReview: (id, commitment, w) => service.positionReview(id, commitment, of(id, w)),
     positionBegin: (id, owner, w) => service.positionBegin(id, owner, of(id, w)),
   } as UniswapLiquidityService;

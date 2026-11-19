@@ -8,6 +8,7 @@ import { useWorkflow, type StagedPosition } from './workflow-store';
 import { activeNetworkScope } from '../domain/network-scope';
 import { useJupiter } from './jupiter-store';
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
+import { orcaPositionRequestOfMarker, workflowPositionManagement } from '../domain/liquidity-positions';
 import { createPositionMintSigner, signOrcaLiquidityTransaction, type PositionMintSigner } from '../wallet/position-mint-signer';
 import { solanaLiquidityBegin, solanaLiquidityInfo, solanaLiquidityInvalidate, solanaLiquidityObserve, solanaLiquidityPositions, solanaLiquidityPrice,
   solanaLiquidityReview, solanaLiquiditySimulate, solanaLiquidityStatus, solanaLiquiditySubmit, solanaLiquidityWalletFailure } from '../app/solana-liquidity-action';
@@ -86,7 +87,11 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   const latest = useRef(workflow); latest.current = workflow;
   const authoredNetwork = workflow.nodes.map(node => solanaLiquidityDetails(node)?.network).find(Boolean) ?? null;
   const authored = authoredNetwork !== null;
-  const network: SolanaLiquidityNetwork = solanaLiquidityNetworkOf({ authored: authoredNetwork, stagedMainnet: Boolean(stagedChoice), record: record ? networkOfRecord(record) : null,
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (F1): with no staged choice, the canonical node's management marker binds the operation and position.
+  const marked = workflowPositionManagement(workflow), markerRequest = !stagedChoice && marked?.protocol === 'ORCA' ? orcaPositionRequestOfMarker(marked.management) : null;
+  const bound = stagedChoice ? { positionId: stagedChoice.positionId, operation: stagedChoice.operation, partBps: stagedChoice.partBps }
+    : markerRequest ? { positionId: markerRequest.positionMint, operation: markerRequest.operation, partBps: markerRequest.partBps } : null;
+  const network: SolanaLiquidityNetwork = solanaLiquidityNetworkOf({ authored: authoredNetwork, stagedMainnet: Boolean(stagedChoice || markerRequest), record: record ? networkOfRecord(record) : null,
     sessionChain: jupiter.session?.chain ?? null, publicMainnet: activeNetworkScope() === 'PUBLIC_MAINNET' });
   const runtime = runtimes[network];
   // Only a session on this position's cluster is its owner; a session on the other cluster signs nothing here.
@@ -94,7 +99,7 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   const owner = session?.account.address ?? null;
   const pristineRecovery = recovered && workflow.revision === 0;
   const retired = Boolean(record && (JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery
-    || stagedChoice && !orcaRunMatchesChoice(record, stagedChoice)));
+    || bound && !orcaRunMatchesChoice(record, bound)));
   function accept(value: OrcaLiquidityRecord) { setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id, network: networkOfRecord(value) })); } catch { /* the server journal is authoritative */ } }
   useEffect(() => {
     let mounted = true;
@@ -142,7 +147,7 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
     // server-side and stays listed in Dashboard.
     if (!owner) throw new Error('ORCA_LIQUIDITY_SOLANA_WALLET_SELECTION_REQUIRED');
     // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a staged mainnet choice is simulated as exactly its operation on exactly its position — never as OPEN.
-    if (stagedChoice && (op !== stagedChoice.operation || positionMint !== stagedChoice.positionId || (partBps ?? null) !== stagedChoice.partBps))
+    if (bound && (op !== bound.operation || positionMint !== bound.positionId || (partBps ?? null) !== bound.partBps))
       throw new Error('ORCA_POSITION_CHOICE_CHANGED');
     if (stagedChoice && stagedChoice.choice!.position.owner !== owner) throw new Error('ORCA_LIQUIDITY_WRONG_OWNER');
     const snapshot = latest.current;

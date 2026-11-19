@@ -61,7 +61,7 @@ it('deletes only a never-authorized position simulation after the certified 0031
   const feeBearing = seed(); chain.accrueFees(feeBearing, 1_234n, 5_678n);
   const collect = { operation: 'COLLECT' as const, tokenId: feeBearing, partBps: null, close: false };
   const unstarted = await service.positionSimulate(managedPositionWorkflow(w, collect), UNI_OWNER, collect);
-  await service.positionRefresh(unstarted.id, w);
+  await service.positionRefresh(unstarted.id);
   // 2. Authorized, then invalidated by the owner: an earlier snapshot carries the authorization.
   const half = { operation: 'DECREASE' as const, tokenId: seed(), partBps: 5_000, close: false }, wHalf = managedPositionWorkflow(w, half);
   const invalidated = await service.positionSimulate(wHalf, UNI_OWNER, half);

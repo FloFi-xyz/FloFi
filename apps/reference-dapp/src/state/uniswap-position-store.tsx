@@ -29,7 +29,7 @@ import type { UniswapWalletDiagnostic } from '../server/uniswap-liquidity-servic
 import type { UniswapPositionRecord, UniswapPositionRequest } from '../server/uniswap-position-service';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 import { UNISWAP_POSITION_REFRESH_IN_PLACE, uniswapPositionRunResumable } from '../domain/uniswap-liquidity-continuation';
-import { uniswapPositionRequestOf } from '../domain/liquidity-positions';
+import { uniswapPositionRequestOf, uniswapPositionRequestOfMarker, workflowPositionManagement } from '../domain/liquidity-positions';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from '../domain/execution-lifecycle';
 import { projectExecutionRecovery, type ExecutionRecovery } from '../domain/execution-recovery';
 import { projectExecutionStepEvidence } from '../domain/execution-step-evidence';
@@ -67,15 +67,18 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
   const workflow = state.workflow as unknown as SemanticWorkflow;
   // The workflow store keeps a staged choice only while the workflow is exactly the one it prepared (and clears it on any other command).
   const staged = stagedPosition?.choice?.position.protocol === 'UNISWAP_V3' ? stagedPosition.choice : null;
-  const stagedRequest = staged ? uniswapPositionRequestOf(staged) : null;
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (F1): the canonical node names the operation; with no staged choice (a reload, a restored or shared workflow)
+  // the marker alone engages this store, so a position workflow is never served by the deposit store.
+  const marked = workflowPositionManagement(workflow), marker = !staged && marked?.protocol === 'UNISWAP_V3' ? marked : null;
+  const stagedRequest = staged ? uniswapPositionRequestOf(staged) : marker ? uniswapPositionRequestOfMarker(marker.management) : null;
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const busyRef = useRef(false), operationEpoch = useRef(0);
   const attaches = Boolean(record && JSON.stringify(record.workflow) === JSON.stringify(workflow));
   // A run of another workflow, of another staged operation or of another owner never stands for the current choice.
   const retired = Boolean(record && (!attaches || stagedRequest && !sameRequest(stagedRequest, record.request) || staged && staged.position.owner !== record.owner));
-  const engaged = Boolean(staged) || attaches;
-  const chain = staged?.position.chain ?? (record ? `eip155:${record.review.chainId}` : null);
+  const engaged = Boolean(staged) || attaches || Boolean(marker);
+  const chain = staged?.position.chain ?? (record ? `eip155:${record.review.chainId}` : marker?.chain ?? null);
   const { available, executionEnabled } = (chain ? networks[chain] : undefined) ?? { available: false, executionEnabled: false };
   function accept(value: UniswapPositionRecord) {
     setRecord(value);

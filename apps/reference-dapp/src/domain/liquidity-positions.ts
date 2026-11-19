@@ -10,6 +10,7 @@
  * Amounts a source could not verify are null ("unavailable"), never zero. Owed tokens a Uniswap position carries may include principal withdrawn
  * earlier without collecting, so they are never labelled as yield.
  */
+import { readConcentratedLiquidityManagement, type ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
 export type LiquidityPositionProtocol = 'UNISWAP_V3' | 'ORCA';
 /** COLLECT: owed tokens and fees only (liquidity unchanged). DECREASE: a share of the position's liquidity. EXIT: all of it (Orca also closes the position). */
 export type LiquidityPositionOperation = 'COLLECT' | 'DECREASE' | 'EXIT';
@@ -104,4 +105,30 @@ export function orcaPositionRequestOf(choice: LiquidityPositionChoice): { operat
   if (choice.position.protocol !== 'ORCA' || !liquidityPositionChoiceValid(choice)) throw new Error('LIQUIDITY_POSITION_CHOICE_INVALID');
   return choice.operation === 'DECREASE' ? { operation: 'DECREASE_PARTIAL', positionMint: choice.position.positionId, partBps: choice.partBps! }
     : { operation: choice.operation, positionMint: choice.position.positionId };
+}
+
+/**
+ * The position operation a workflow's canonical node names (its management marker), or null for any other workflow. This — not client state —
+ * decides that a workflow takes the position path: a reloaded, restored or chat-authored position workflow is never simulated as a deposit.
+ * A malformed marker reads as null here (display); every runtime refuses it.
+ */
+export type WorkflowPositionManagement = { readonly protocol: LiquidityPositionProtocol; readonly chain: string; readonly management: ConcentratedLiquidityManagement };
+export function workflowPositionManagement(workflow: { readonly nodes: readonly unknown[] } | null | undefined): WorkflowPositionManagement | null {
+  const nodes = (workflow?.nodes ?? []).filter(node => (node as { actionType?: unknown })?.actionType === 'asset.liquidity.concentrated');
+  if (nodes.length !== 1) return null;
+  const node = nodes[0] as Parameters<typeof readConcentratedLiquidityManagement>[0];
+  try {
+    const { management } = readConcentratedLiquidityManagement(node);
+    const protocol = node.adapterConstraints.protocols.join();
+    return management && (protocol === 'uniswap-v3' || protocol === 'orca-whirlpools')
+      ? { protocol: protocol === 'uniswap-v3' ? 'UNISWAP_V3' : 'ORCA', chain: node.chainId, management } : null;
+  } catch { return null; }
+}
+/** The Uniswap position runtime's request a marked workflow names. */
+export const uniswapPositionRequestOfMarker = (m: ConcentratedLiquidityManagement) => ({ operation: m.operation, tokenId: m.positionId, partBps: m.partBps, close: m.close });
+/** The Orca runtime's request a marked workflow names (EXIT always closes; an EXIT that keeps the position is not an Orca operation). */
+export function orcaPositionRequestOfMarker(m: ConcentratedLiquidityManagement): { operation: 'COLLECT' | 'DECREASE_PARTIAL' | 'EXIT'; positionMint: string; partBps: number | null } | null {
+  return m.operation === 'COLLECT' ? { operation: 'COLLECT', positionMint: m.positionId, partBps: null }
+    : m.operation === 'DECREASE' ? { operation: 'DECREASE_PARTIAL', positionMint: m.positionId, partBps: m.partBps }
+      : m.close ? { operation: 'EXIT', positionMint: m.positionId, partBps: null } : null;
 }

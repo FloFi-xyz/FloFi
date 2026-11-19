@@ -46,6 +46,8 @@ import { DEFAULT_SLIPPAGE, bpsToPercent, priceDifferenceLabel } from '../domain/
 import { priceDifferenceBps } from './price-difference-input';
 import { plainFinding } from '../domain/editor-overview';
 import { withoutChainId } from '../domain/approved-ux';
+import { workflowPositionManagement } from '../domain/liquidity-positions';
+import { liquidityPositionOperationPhrase } from '../domain/simulation-presentation';
 
 
 const emptyCrossChain: CrossChainLiquidityInput = { amount: '100', bridgeSlippageBps: '50', swapSlippageBps: '50', tickLower: '-200100', tickUpper: '-199900', recipient: '0x1111111111111111111111111111111111111111', provider: 'lifi.rest', noSwap: false };
@@ -250,6 +252,8 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   const lendingDraft = node && !lending && ['supply', 'borrow', 'repay', 'withdraw'].includes(node.actionType) ? cryptoSelections[node.nodeId] : undefined;
   const solana = node ? solanaSwapDetails(node) : null;
   const orcaPosition = node ? solanaLiquidityDetails(node) : null;
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a node that manages an existing position is never edited as a deposit here.
+  const managed = node ? workflowPositionManagement({ nodes: [node] }) : null;
   const uniPosition = node ? uniswapLiquidityDetails(node) : null;
   const routed = node ? routerDetails(node) : null, universalBridge = node ? universalBridgeDetails(node) : null;
   const label = node?.actionType === 'borrow' && !lending ? 'Borrow' : node?.actionType === 'repay' ? 'Repay' : node?.actionType === 'withdraw' ? 'Withdraw' : node?.actionType === 'asset.transfer' ? 'Send' : lending ? (node?.nodeId==='lending-supply'?'Aave Supply':node?.nodeId==='lending-borrow'?'Aave Borrow':'Uniswap Swap') : supply ? 'Supply' : solana ? 'Swap' : orcaPosition || uniPosition ? 'Liquidity position' : routed || universalBridge ? 'Bridge' : cross && node ? 'Cross-chain liquidity' : swap ? 'Swap' : bridge ? 'Bridge' : liquidity ? 'Pool' : template && node ? node.actionType.slice(5).replace(/^./, letter => letter.toUpperCase()) : 'Action';
@@ -305,7 +309,8 @@ function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
       {universalBridge && <UniversalBridgeForm options key={node!.nodeId + ':' + state.workflow.revision} nodeId={node!.nodeId}/>}
       {routed && <RouterForm options key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/>}
       {uniPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(uniPosition.network)}{tr(" USDC / WETH via ")}{tr(uniPosition.provider)}{tr(" · fee 0.05% · test tokens · simulate against the live pool. Changes require review.")}</p><UniswapLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
-      {orcaPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(orcaPosition.network === 'Solana Devnet' ? " SOL / devUSDC via " : " SOL / USDC via ")}{tr(orcaPosition.provider)}{tr(orcaPosition.network === 'Solana Devnet' ? " · valueless test tokens · simulate against the live pool. Changes require review." : " · real funds · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
+      {managed && <p className="muted">{tr(liquidityPositionOperationPhrase(managed.protocol, managed.management.operation, managed.management.close))}{managed.management.partBps !== null ? ` · ${managed.management.partBps / 100}%` : ''}{tr(" · prepared from your position. Change it from the Dashboard or in chat; Simulate shows the exact Review.")}</p>}
+      {orcaPosition && !managed && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(orcaPosition.network === 'Solana Devnet' ? " SOL / devUSDC via " : " SOL / USDC via ")}{tr(orcaPosition.provider)}{tr(orcaPosition.network === 'Solana Devnet' ? " · valueless test tokens · simulate against the live pool. Changes require review." : " · real funds · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {cross && <p className="muted">{tr("Base USDC → Arbitrum USDC → ")}{tr(cross.noSwap ? 'one-sided' : 'calculated partial swap →')}{tr(" Uniswap v3 position. Each boundary requires fresh review and reconciliation.")}</p>}
       {template && <p className="muted">{tr("Template only. No provider quote or financial execution is available for this action.")}</p>}
       {swap && !cryptoSwap && <p className="muted">{tr(node.chainId === 'eip155:84532' ? 'Base Sepolia' : node.chainId === 'eip155:11155111' ? 'Ethereum Sepolia' : 'Base')} {tr(swap.from)} → {tr(swap.to)}{tr(" · simulate for a quote. Changes require review.")}</p>}

@@ -3,7 +3,7 @@
 import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { uniswapPositionRunResumable, uniswapRefreshInPlace } from '../domain/uniswap-liquidity-continuation';
-import { orcaPositionRequestOf, type LiquidityPositionChoice } from '../domain/liquidity-positions';
+import { orcaPositionRequestOf, orcaPositionRequestOfMarker, workflowPositionManagement, type LiquidityPositionChoice } from '../domain/liquidity-positions';
 import type { LiquidityPositionPoolInput } from '../domain/commands';
 import { flightWalletAccess } from '../app/flight-wallet-action';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
@@ -151,11 +151,19 @@ export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider>
  * operation on its own position (`orcaPositionRequestOf`), the Devnet engineering command its staged operation; without a staged choice the
  * previous Review's operation is simulated again (OPEN when there is none). A staged withdrawal or collection is never simulated as OPEN.
  */
-export function solanaPoolSimulation(staged: StagedPosition | null, previous: { operation: string; positionMint: string; partBps: number | null } | null | undefined):
+export function solanaPoolSimulation(staged: StagedPosition | null, previous: { operation: string; positionMint: string; partBps: number | null } | null | undefined,
+  workflow?: { readonly nodes: readonly unknown[] } | null):
   { operation: 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT'; positionMint: string | undefined; partBps: number | undefined } {
   const orca = staged && (!staged.choice || staged.choice.position.protocol === 'ORCA') ? staged : null;
   if (orca?.choice) { const request = orcaPositionRequestOf(orca.choice); return { operation: request.operation, positionMint: request.positionMint, partBps: request.partBps }; }
   if (orca) return { operation: orca.operation, positionMint: orca.positionId, partBps: orca.partBps ?? undefined };
+  // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 (F1): with no staged choice, the canonical node's management marker decides: never OPEN for a position workflow.
+  const marked = workflowPositionManagement(workflow);
+  if (marked?.protocol === 'ORCA') {
+    const request = orcaPositionRequestOfMarker(marked.management);
+    if (!request) throw new Error('ORCA_POSITION_REQUEST_MISMATCH');
+    return { operation: request.operation, positionMint: request.positionMint, partBps: request.partBps ?? undefined };
+  }
   const operation = (previous?.operation ?? 'OPEN') as 'OPEN' | 'DECREASE_PARTIAL' | 'EXIT' | 'COLLECT';
   return { operation, positionMint: operation === 'OPEN' ? undefined : previous?.positionMint, partBps: previous?.partBps ?? undefined };
 }
@@ -464,7 +472,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : simulationSource.kind === 'uniswap-pool' ? () => uniswapRefreshInPlace(uniswapLiquidity.record, uniswapLiquidity.retired) ? uniswapLiquidity.refresh() : uniswapLiquidity.simulate()
     : simulationSource.kind === 'solana-composition' ? solanaComposition.simulate
     : simulationSource.kind === 'solana-pool' ? () => {
-      const next = solanaPoolSimulation(stagedPosition, solanaReview ? { operation: solanaReview.operation, positionMint: solanaReview.accounts.positionMint, partBps: solanaReview.partBps } : null);
+      const next = solanaPoolSimulation(stagedPosition, solanaReview ? { operation: solanaReview.operation, positionMint: solanaReview.accounts.positionMint, partBps: solanaReview.partBps } : null,
+        runtimeWorkflow);
       return solanaLiquidity.simulate(next.operation, next.positionMint, next.partBps);
     }
     : simulationSource.kind === 'solana-swap' ? jupiter.simulate

@@ -246,9 +246,23 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Uniswap position store (MOCKE
     expect(store.request).toMatchObject({ operation: 'EXIT' });
     await act(() => store.review());
     expect(store.error).toBe('UNISWAP_SIMULATION_REQUIRED');
-    // Another workflow without a staged choice: the mint store keeps serving it.
-    f.staged = null; f.workflow = { ...(workflow as object), revision: 99 }; read(); await settle();
+    // A deposit workflow (no management marker) without a staged choice: the mint store keeps serving it.
+    void workflow;
+    f.staged = null; f.workflow = structuredClone(initialEditor().workflow) as unknown as SemanticWorkflow; read(); await settle();
     expect(store.engaged).toBe(false);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('after a reload (no staged choice) the canonical node alone engages the position path with its own request; it is never a deposit (F1)', async () => {
+    const tokenId = chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 9_000_000_001n });
+    stage(choiceOf(tokenId, { operation: 'DECREASE', partBps: 2_500 })); f.staged = null; read(); await settle();
+    expect(store.engaged).toBe(true);
+    expect(store.request).toEqual({ operation: 'DECREASE', tokenId, partBps: 2_500, close: false });
+    await act(() => store.simulate());
+    expect(store.error).toBeNull();
+    expect(store.record?.review).toMatchObject({ operation: 'DECREASE', partBps: 2_500, liquidityToRemove: '2250000000' });
+    // The deposit runtime refuses the same workflow outright.
+    await expect((f.service as UniswapLiquidityService).simulate(f.workflow as SemanticWorkflow, UNI_OWNER)).rejects.toThrow(/UNISWAP_LIQUIDITY_WORKFLOW_MANAGES_POSITION|UNISWAP_LIQUIDITY_DECLARATION_INVALID/);
     expect(sent).toHaveLength(0);
   });
 });

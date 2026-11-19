@@ -18,6 +18,8 @@ export const portugueseLiquidityExecution: Readonly<Record<string, string>> = {
     'Um pedido anterior à carteira não foi enviado e a revisão foi atualizada. Confira a revisão atualizada e autorize-a de novo.',
   'The Review expired before the wallet request': 'A revisão expirou antes do pedido à carteira',
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing an existing position (collect, remove, close) — Review, panels, Dashboard and refusals.
+  ' · prepared from your position. Change it from the Dashboard or in chat; Simulate shows the exact Review.':
+    ' · preparado a partir da sua posição. Altere pelo Painel ou no chat; a simulação mostra a revisão exata.',
   'Liquidity remaining': 'Liquidez restante',
   'Minimum principal (enforced)': 'Capital mínimo (garantido na rede)',
   'Minimum principal': 'Capital mínimo',

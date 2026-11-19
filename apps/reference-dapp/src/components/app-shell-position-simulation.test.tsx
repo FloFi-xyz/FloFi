@@ -102,6 +102,23 @@ describe('Simulate of a staged position operation (Orca)', () => {
     await store.simulate(next.operation, next.positionMint, next.partBps); await settle();
     expect(f.mainnet[0]).toEqual([f.workflow, OWNER, { operation: 'COLLECT', positionMint: MINT }]);
   });
+  it('after a reload (no staged choice) the canonical node alone decides: a marked workflow is simulated as its operation and never as OPEN (F1)', async () => {
+    stage(orcaChoice('DECREASE', 2_500)); f.staged = null; read(); await settle();
+    const workflow = f.workflow as SemanticWorkflow;
+    expect(solanaPoolSimulation(null, { operation: 'OPEN', positionMint: '9'.repeat(43), partBps: null }, workflow))
+      .toEqual({ operation: 'DECREASE_PARTIAL', positionMint: MINT, partBps: 2_500 });
+    expect(store.network).toBe('Solana');
+    const next = solanaPoolSimulation(null, null, workflow);
+    await store.simulate(next.operation, next.positionMint, next.partBps); await settle();
+    expect(f.mainnet).toEqual([[workflow, OWNER, { operation: 'DECREASE_PARTIAL', positionMint: MINT, partBps: 2_500 }]]);
+    for (const [op, mint, part] of [['OPEN', undefined, undefined], ['EXIT', MINT, undefined], ['DECREASE_PARTIAL', MINT, 5_000]] as const) {
+      await store.simulate(op, mint, part); await settle();
+      expect(store.error, `${op}`).toBe('ORCA_POSITION_CHOICE_CHANGED');
+    }
+    expect(f.mainnet).toHaveLength(1);
+    // An unmarked workflow keeps the deposit default.
+    expect(solanaPoolSimulation(null, null, initialEditor().workflow as unknown as SemanticWorkflow)).toEqual({ operation: 'OPEN', positionMint: undefined, partBps: undefined });
+  });
   it('Solana mainnet scoping: with no authored position the product and a mainnet session use Solana mainnet; only the engineering scope defaults to Devnet', () => {
     expect(solanaLiquidityNetworkOf({ authored: null, stagedMainnet: false, record: null, sessionChain: 'solana:mainnet', publicMainnet: false })).toBe('Solana');
     expect(solanaLiquidityNetworkOf({ authored: null, stagedMainnet: false, record: null, sessionChain: null, publicMainnet: true })).toBe('Solana');
