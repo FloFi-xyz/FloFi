@@ -34,14 +34,17 @@ export function FinopsPeriodForm({ action, preset, from, to, options }: { action
   options: readonly { readonly value: string; readonly label: string }[] }) {
   const { copy } = finopsCopy(useLocale().language);
   const [range, setRange] = useState(preset);
+  const select = useRef<HTMLSelectElement>(null);
+  // A browser may restore the select's value on Back: the dates follow what the select really shows.
+  useEffect(() => { if (select.current && select.current.value !== preset) setRange(select.current.value); }, [preset]);
   const custom = range === 'custom';
   return <form className="admin-filters admin-finops-period-form" action={action} method="get" aria-label={copy("Financial reporting period")}>
-    <label>{copy("Period")}<select name="range" aria-label={copy("Period")} defaultValue={preset} onChange={event => setRange(event.target.value)}>
+    <label>{copy("Period")}<select ref={select} name="range" aria-label={copy("Period")} defaultValue={preset} onChange={event => setRange(event.target.value)}>
       {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
     <fieldset className="admin-finops-custom-dates" hidden={!custom} disabled={!custom}>
       <legend className="admin-sr">{copy('Custom dates')}</legend>
-      <label>{copy("Custom start (UTC)")}<input type="date" name="from" defaultValue={from}/></label>
-      <label>{copy("Custom last day (UTC)")}<input type="date" name="to" defaultValue={to}/></label>
+      <label>{copy("Custom start (UTC)")}<input type="date" name="from" defaultValue={from} required={custom}/></label>
+      <label>{copy("Custom last day (UTC)")}<input type="date" name="to" defaultValue={to} required={custom}/></label>
     </fieldset>
     <button className="admin-button" type="submit">{copy("Apply period")}</button>
   </form>;
@@ -98,6 +101,11 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
         // BUILD-FLOFI-UX-EDITOR-FINOPS-001: provider, connection, data available, recorded cost and the action first; the sync times, data quality,
         // historical coverage and the provider's own message one click away (a problem is still said by the connection state itself).
         return <tr key={provider.id} data-status={status}><th scope="row">{copy(provider.name)}
+</th>
+
+          <td><Status tone={STATUS_TONE[status] ?? 'neutral'}>{copy(status)}</Status>{provider.errorCode && <p className="admin-diff">{copy(message(provider.errorCode))}</p>}</td>
+          <td>{provider.coverage.length > 0 ? copy('{0} synchronized periods', count(provider.coverage.length)) : copy('No synchronized period')}
+            {recent?.limitations.length ? <p className="admin-diff">{copy('Coverage limitations')}: {recent.limitations.map(limitation).join(' · ')}</p> : null}
           <details className="admin-finops-row-details"><summary>{copy('Sync details')}</summary><dl>
             <div><dt>{copy('Last successful sync')}</dt><dd>{time(provider.lastSuccess)}</dd></div>
             <div><dt>{copy('Next scheduled sync')}</dt><dd>{time(provider.nextSync)}</dd></div>
@@ -106,10 +114,7 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
                 {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>
               {provider.meters.length > 0 && <ul>{provider.meters.slice(0, 100).map((meter, index) =>
                 <li key={index}>{meter.service} · {meter.metric} · {meter.amount} {meter.unit}{meter.basis ? ' · ' + meter.basis : ''}</li>)}</ul>}</> : copy('No synchronized period')}</dd></div>
-          </dl></details></th>
-          <td><Status tone={STATUS_TONE[status] ?? 'neutral'}>{copy(status)}</Status>{provider.errorCode && <p className="admin-diff">{copy(message(provider.errorCode))}</p>}</td>
-          <td>{provider.coverage.length > 0 ? copy('{0} synchronized periods', count(provider.coverage.length)) : copy('No synchronized period')}
-            {recent?.limitations.length ? <p className="admin-diff">{copy('Coverage limitations')}: {recent.limitations.map(limitation).join(' · ')}</p> : null}</td>
+          </dl></details></td>
           <td className="admin-num">{(() => { const shown = display(provider.cost.amount);
             return <span className="admin-amount" title={shown.text === shown.exact ? undefined : copy('Recorded value: {0}', shown.exact)}>{shown.text}
               {shown.text === shown.exact ? null : <span className="admin-sr"> ({copy('Recorded value: {0}', shown.exact)})</span>}</span>; })()}

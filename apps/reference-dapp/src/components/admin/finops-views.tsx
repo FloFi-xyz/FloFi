@@ -24,8 +24,7 @@ const openIn = (mode: FinopsMode) => mode === 'report' ? { open: true } : {};
 const QUALITY_ORDER: readonly Quality[] = ['VERIFIED', 'PROVIDER_REPORTED', 'METERED', 'ESTIMATED', 'PARTIAL', 'UNAVAILABLE'];
 const SURFACE = { WEB: 'Web', TELEGRAM: 'Telegram', WHATSAPP: 'WhatsApp', CHANNEL: 'Channel Core' } as const;
 /** Indicators with a fixed calendar period of their own; every other one covers the selected reporting period. */
-const FIXED_PERIOD: Partial<Record<MetricId, string>> = { monthToDate: 'Month to date', previousMonth: 'Previous month', projected: 'End-of-month projection',
-  monthlyChange: 'Month to date vs previous month' };
+const FIXED_PERIOD: Partial<Record<MetricId, string>> = { monthToDate: 'Month to date', previousMonth: 'Previous month', projected: 'End-of-month projection' };
 
 /** The selected period, the custom UTC dates only when they apply, and the period every "selected period" indicator below covers. */
 export function FinopsFilters({ filter, action, language }: { filter: PeriodFilter; action: string; language: Language }) {
@@ -65,7 +64,7 @@ function Indicator({ report, id, language, mode, headline = false }: { report: F
     <strong className="admin-finops-metric-value"><Amount value={metric.amount} language={language} mode={mode}/></strong>
     <span className="admin-finops-metric-meta"><QualityBadge quality={metric.quality} title={copy(metric.source)}/>
       <span className="admin-finops-scope" data-scope={FIXED_PERIOD[id] ? 'fixed' : 'selected'}>{periodNote(report, id, language)}</span></span>
-    {metric.quality === 'PARTIAL' ? <small className="admin-finops-partial">{copy('Partial: only the recorded sources are included.')}</small>
+    {metric.quality === 'PARTIAL' ? <small className="admin-finops-partial">{copy('Partial: calculated from a known subset of the required inputs.')}</small>
       : metric.quality === 'UNAVAILABLE' ? <small className="admin-finops-reason">{copy(metric.source)}</small> : null}
   </div>;
 }
@@ -81,24 +80,32 @@ function Basis({ report, keys, language, mode }: { report: FinopsReport; keys: r
 }
 
 const HEADLINE: readonly MetricId[] = ['monthToDate', 'projected', 'costPerCompleted', 'revenue'];
-const OVERVIEW_SECONDARY: readonly MetricId[] = ['overall', 'previousMonth', 'monthlyChange', 'costPerChat', 'costPerSimulated', 'costPerActive'];
+// The indicators the overview showed before this build, minus those now in their own sections (AI, variable, margins, break-even): no addition.
+const OVERVIEW_SECONDARY: readonly MetricId[] = ['overall', 'previousMonth', 'costPerChat', 'costPerSimulated', 'costPerActive'];
 
 /** The cost sources the totals are made of, by quality: how much of FloFi's cost the figures actually cover. Counts only — no score. */
 function CoverageSummary({ report, language }: { report: FinopsReport; language: Language }) {
   const { copy, count } = finopsCopy(language);
+  // The same expense sources `consolidate` includes in the overall total (every non-revenue scope that is required or has a record).
   const sources = report.totals.filter(total => {
     const scope = FINOPS_SCOPES[total.id];
-    return total.id !== 'fee-revenue' && (scope.required || total.amount !== null || total.updatedAt !== null);
+    return scope.category !== 'revenue' && (scope.required || total.amount !== null || total.updatedAt !== null);
   });
   const counts = new Map<Quality, number>();
   for (const source of sources) counts.set(source.quality, (counts.get(source.quality) ?? 0) + 1);
-  const overall = report.metrics.overall.quality;
-  const tone = overall === 'PARTIAL' || overall === 'UNAVAILABLE' ? 'warn' : 'ok';
+  const overall = report.metrics.overall.quality, ledger = report.ledger.status;
+  const tone = overall === 'PARTIAL' || overall === 'UNAVAILABLE' || ledger !== 'available' ? 'warn' : overall === 'ESTIMATED' ? 'info' : 'ok';
+  const range = copy('{0} to {1} UTC', report.period.from, inclusiveEnd(report.period));
+  const [heading, detail] = ledger !== 'available' ? ['Cost coverage unavailable', ledger === 'missing'
+      ? 'The billing ledger is not provisioned yet, so expense totals are unavailable (see Infrastructure Costs).'
+      : 'The billing ledger cannot be read right now, so expense totals are unavailable (see Infrastructure Costs).']
+    : overall === 'UNAVAILABLE' ? ['No recorded cost amounts for the selected period', 'Expense totals are unavailable until financial records with a USD amount exist for this period.']
+    : overall === 'PARTIAL' ? ['Partial financial coverage for the selected period', 'Some cost sources have no complete record for the selected period. Totals add only the recorded amounts and are not the complete cost of operating FloFi.']
+    : ['Cost coverage complete for the selected period', overall === 'ESTIMATED' ? 'Every required cost source has a record for the selected period; some are estimates, not billed amounts.'
+      : 'Every required cost source has a complete record for the selected period.'];
   return <div className="admin-finops-coverage" data-tone={tone} role="status">
-    <div><strong>{copy(overall === 'UNAVAILABLE' ? 'No cost records for this period' : overall === 'PARTIAL' ? 'Partial financial coverage' : 'Cost coverage complete for this period')}</strong>
-      <p>{copy(overall === 'UNAVAILABLE' ? 'Expense totals are unavailable until financial records exist for the selected period.'
-        : overall === 'PARTIAL' ? 'Some cost sources have no complete record for the selected period. Totals add only the recorded amounts and are not the complete cost of operating FloFi.'
-        : 'Every required cost source has a complete record for the selected period.')}</p></div>
+    <div><strong>{copy(heading)}</strong> <span className="admin-finops-nowrap">({range})</span>
+      <p>{copy(detail)}</p></div>
     <ul className="admin-finops-quality-counts" aria-label={copy('Cost sources by data quality')}>
       {QUALITY_ORDER.filter(quality => counts.get(quality)).map(quality => <li key={quality}><QualityBadge quality={quality}/> {copy('{0} cost sources', count(counts.get(quality)!))}</li>)}
     </ul>
@@ -187,6 +194,10 @@ export function FinopsAi({ report, language, mode = 'dashboard' }: { report: Fin
   const amount = (value: string | number | null) => <Amount value={value} language={language} mode={mode}/>;
   return <Section id="finops-ai" title={copy("AI Economics")} description={periodLabel + ' · ' + copy('Server telemetry and scoped AI billing.')}>
     {ai ? <>
+      {/* Limits that qualify every AI figure below stay warnings, never a footnote. */}
+      {[ai.coverage.outsideRetention && copy('This range exceeds telemetry retention.'), ai.coverage.truncated && copy('The report reached its telemetry row limit.'),
+        !ai.coverage.ledgerAvailable && copy('Detailed AI telemetry is unavailable until the FinOps ledger migration is applied.')].filter(Boolean)
+        .map(text => <p key={String(text)} className="admin-alert" role="status" data-tone="warn">{text}</p>)}
       <div className="admin-finops-groups">
         <FigureGroup title={copy('Usage')} rows={[
           { label: copy("Recorded provider calls"), value: calls ? fmt(calls) : copy('Unavailable'), note: copy('PARTIAL · FinOps samples') },
@@ -201,12 +212,10 @@ export function FinopsAi({ report, language, mode = 'dashboard' }: { report: Fin
           copy('Last sample {0}. Input usage was reported for {1} of {2} captured calls ({3} missing). Output usage was reported for {4} ({5} missing).',
             time(ai.freshness), fmt(ai.calls.inputSamples), fmt(calls), fmt(calls - ai.calls.inputSamples), fmt(ai.calls.outputSamples), fmt(calls - ai.calls.outputSamples)),
           copy('Web counts are observed interpretations. Channel Core counts are observed server turns. MCP and Developer API have no model-call coverage here.'),
-          ai.coverage.outsideRetention && copy('This range exceeds telemetry retention.'),
-          ai.coverage.truncated && copy('The report reached its telemetry row limit.'),
-          !ai.coverage.ledgerAvailable && copy('Detailed AI telemetry is unavailable until the FinOps ledger migration is applied.'),
-        ].filter(Boolean).join(' ')}/>
+        ].join(' ')}/>
         <FigureGroup title={copy('Costs')} rows={[
-          { label: copy("Provider and ledger AI costs"), value: amount(metrics.aiCost.amount), note: <QualityBadge quality={metrics.aiCost.quality}/> },
+          { label: copy("Provider and ledger AI costs"), value: amount(metrics.aiCost.amount), note: <><QualityBadge quality={metrics.aiCost.quality} title={copy(metrics.aiCost.source)}/>
+            {metrics.aiCost.quality === 'PARTIAL' ? <span className="admin-finops-partial"> {copy('Partial: calculated from a known subset of the required inputs.')}</span> : null}</> },
           { label: copy("AI list-price estimate"), value: amount(estimate?.amount ?? null), note: (estimate?.quality ?? 'UNAVAILABLE') + ' · ' + copy('{0} priced calls', fmt(ai.calls.pricedRequests)) },
           { label: copy("Estimated cost per priced call"), value: amount(estimate?.amount && ai.calls.pricedRequests ? Number(estimate.amount) / ai.calls.pricedRequests : null),
             note: estimate?.amount ? copy('PARTIAL · Captured priced calls') : 'UNAVAILABLE' },
@@ -214,6 +223,7 @@ export function FinopsAi({ report, language, mode = 'dashboard' }: { report: Fin
       </div>
       <TechnicalDetails summary={copy('How AI costs are estimated')} {...openIn(mode)}>
         <p>{copy('Pricing uses the provider’s response model and versioned USD standard rates where token dimensions are complete. Reasoning is included in billed output. These estimates are reported separately from provider charges.')}</p>
+        <dl className="admin-finops-basis"><div><dt>{copy(METRIC_LABELS.aiCost)}</dt><dd>{copy(metrics.aiCost.source)}</dd></div></dl>
       </TechnicalDetails>
       {ai.models.length ? <div className="admin-table-wrap"><table className="admin-table admin-finops-compact" aria-label={copy('Measured AI usage by provider, model, and surface')}>
         <thead><tr><th>{copy("Provider and response model")}</th><th>{copy("Surface")}</th><th className="admin-num">{copy("Calls")}</th><th className="admin-num">{copy("Input")}</th><th className="admin-num">{copy("Output")}</th><th className="admin-num">{copy("Reasoning")}</th><th className="admin-num">{copy("Cached input")}</th><th className="admin-num">{copy("Estimated cost")}</th></tr></thead>

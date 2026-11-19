@@ -6,7 +6,10 @@ import type { FinopsReport } from '../../admin/finops/report';
 import { finopsCopy } from './finops-copy';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
-const { FinopsAi, FinopsCostBreakdown, FinopsFilters, FinopsOverview, FinopsRevenue, FinopsWorkflow } = await import('./finops-views');
+const { FinopsAi, FinopsCostBreakdown, FinopsCoverage, FinopsFilters, FinopsOverview, FinopsRevenue, FinopsWorkflow } = await import('./finops-views');
+const { FinopsScenario } = await import('./finops-controls');
+const { scenarioKeys } = await import('../../admin/finops/scenario');
+const { LocaleProvider } = await import('../../i18n/locale');
 
 const metric = (amount: string | null, quality: string, source = 'Recorded basis.') => ({ amount, quality, source });
 /** A FinOps report as `readFinopsReport` returns it (test fixture only): partial coverage, a micro-cost and unavailable indicators. */
@@ -58,7 +61,7 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     const headlines = page.slice(page.indexOf('aria-label="Headline indicators"'), page.indexOf('admin-finops-coverage'));
     expect([...headlines.matchAll(/admin-finops-metric-label">([^<]+)</g)].map(match => match[1])).toEqual(['Month-to-date infrastructure and operating costs',
       'Projected end-of-month costs', 'Fully allocated cost per completed workflow', 'Reconciled collected revenue']);
-    expect(page).toContain('Partial financial coverage');
+    expect(page).toContain('Partial financial coverage for the selected period');
     expect(page).toContain('are not the complete cost of operating FloFi');
     // The revenue that is not recorded is unavailable, never $0.00; its reason is said beside it.
     expect(headlines).toContain('Unavailable');
@@ -107,5 +110,23 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     const custom = html(createElement(FinopsFilters, { language: 'EN', action: '/admin/finops', filter: { preset: 'custom', period: { from: '2026-11-03', to: '2026-11-10' }, valid: true } }));
     expect(custom).toMatch(/<fieldset class="admin-finops-custom-dates">/);
     expect(custom).toContain('value="2026-11-09"');
+  });
+
+  it('says the ledger is unavailable (never "no records") when it cannot be read, and opens every disclosure in the investor report', () => {
+    const missing = { ...report(), ledger: { status: 'missing', complete: true, records: [] } } as unknown as FinopsReport;
+    const page = html(createElement(FinopsOverview, { report: missing, language: 'EN' }));
+    expect(page).toContain('Cost coverage unavailable');
+    expect(page).toContain('The billing ledger is not provisioned yet');
+    // The Infrastructure section keeps the exact sentence the admin console certifies; the summary never repeats it.
+    expect(page).not.toContain('Billing ledger unavailable.');
+    expect(html(createElement(FinopsCoverage, { language: 'EN', mode: 'report' }))).toContain('<details class="admin-details" open="">');
+    expect(html(createElement(FinopsCoverage, { language: 'EN' }))).not.toContain('open=""');
+  });
+
+  it('groups every Growth Simulator assumption exactly once and marks results as estimates', () => {
+    const page = html(createElement(LocaleProvider, { initialLanguage: 'EN', children: createElement(FinopsScenario) }));
+    expect(page.match(/<input type="number"/g)).toHaveLength(scenarioKeys.length);
+    expect([...page.matchAll(/<legend>([^<]+)<\/legend>/g)].map(match => match[1])).toEqual(['User and activity assumptions', 'Workflow and completion assumptions',
+      'Revenue assumptions', 'Variable costs', 'Gas sponsorship assumptions', 'Fixed infrastructure costs']);
   });
 });
