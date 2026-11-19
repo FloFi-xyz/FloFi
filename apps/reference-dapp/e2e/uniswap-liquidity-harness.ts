@@ -9,13 +9,21 @@
  */
 import { ARBITRUM_ONE, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { uniMockCode, uniMockCodePin, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
-import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, sqrtRatioAtTick, uniswapComposition } from '@defi-workflow-engine/reference-compiler';
+import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, UNISWAP_POSITION_SELECTORS as PSEL, UNISWAP_POSITION_TOPICS as PTOPIC, decodeUniswapApprove,
+  decodeUniswapBurn, decodeUniswapCollect, decodeUniswapDecreaseLiquidity, decodeUniswapMint, decodeUniswapMulticall, sqrtRatioAtTick, uniswapAmountsForLiquidity,
+  uniswapComposition } from '@defi-workflow-engine/reference-compiler';
 
 export const UNI_OWNER = '0x5555555555555555555555555555555555555555';
 export { UNI_MOCK_CODE_PINS };
 
 type Snapshot = { balances: Record<string, Record<string, bigint>>; allowances: Record<string, bigint>; native: Record<string, bigint>; nonces: Record<string, bigint>;
-  owners: Record<string, string>; positions: Record<string, { liquidity: bigint; tickLower: number; tickUpper: number }>; sqrtPriceX96: bigint; tick: number };
+  owners: Record<string, string>; positions: Record<string, MockPosition>; sqrtPriceX96: bigint; tick: number };
+/**
+ * A position as the NonfungiblePositionManager keeps it. `owed*` are the checkpointed tokensOwed `positions()` reports; `pending*` are fees the
+ * pool accrued since the last checkpoint (BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001): only a collect or decrease pokes them into `owed*`, exactly
+ * like the real manager, so a test can prove FloFi never treats a stale `tokensOwed` read as everything collectable.
+ */
+type MockPosition = { liquidity: bigint; tickLower: number; tickUpper: number; owed0: bigint; owed1: bigint; pending0: bigint; pending1: bigint };
 type Inner = { readonly to: string; readonly input: string };
 type WalletFees = { gas?: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
 type MinedTx = { hash: string; from: string; to: string; input: string; nonce: bigint; block: number; status: 0 | 1; logs: unknown[]; gasUsed: bigint; inner?: Inner; fees?: WalletFees };
@@ -113,7 +121,7 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
       }
       const tokenId = nextTokenId++;
       s.owners[tokenId.toString()] = p.recipient;
-      s.positions[tokenId.toString()] = { liquidity: c.liquidity, tickLower: p.tickLower, tickUpper: p.tickUpper };
+      s.positions[tokenId.toString()] = { liquidity: c.liquidity, tickLower: p.tickLower, tickUpper: p.tickUpper, owed0: 0n, owed1: 0n, pending0: 0n, pending1: 0n };
       logs.push(log(POOL, [TOPIC.poolMint, '0x' + aw(NPM), '0x' + w(BigInt(p.tickLower)), '0x' + w(BigInt(p.tickUpper))], aw(NPM) + w(c.liquidity) + w(c.amount0) + w(c.amount1)));
       if (c.amount0 > 0n) logs.push(log(t0, [TOPIC.transfer, '0x' + aw(from), '0x' + aw(POOL)], w(c.amount0)));
       if (c.amount1 > 0n) logs.push(log(t1, [TOPIC.transfer, '0x' + aw(from), '0x' + aw(POOL)], w(c.amount1)));
@@ -121,7 +129,79 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
       logs.push(log(NPM, [TOPIC.increaseLiquidity, '0x' + w(tokenId)], w(c.liquidity) + w(c.amount0) + w(c.amount1)));
       return { ok: true, ret: '0x' + w(tokenId) + w(c.liquidity) + w(c.amount0) + w(c.amount1), logs, gas: 480_000n };
     }
+    if (to === NPM && ([PSEL.decreaseLiquidity, PSEL.collect, PSEL.burn, PSEL.multicall] as readonly string[]).includes(sel)) {
+      // Position management runs on a copy and is applied only when every call succeeds (multicall is atomic).
+      const copy = clone(s), logs: unknown[] = [], results: string[] = [];
+      const calls = sel === PSEL.multicall ? (() => { try { return decodeUniswapMulticall(data); } catch { return null; } })() : [data];
+      if (!calls) return { ok: false, ret: '0x', logs: [], gas: 30_000n };
+      let gas = 21_000n;
+      for (const call of calls) {
+        const r = managePosition(copy, from, call, time, (address, topics, body) => logs.push(log(address, topics, body)));
+        if (!r) return { ok: false, ret: '0x', logs: [], gas: gas + 30_000n };
+        results.push(r.ret); gas += r.gas;
+      }
+      Object.assign(s, copy);
+      const ret = sel === PSEL.multicall ? '0x' + bytesArray(results) : results[0]!;
+      return { ok: true, ret, logs, gas };
+    }
     return { ok: false, ret: '0x', logs: [], gas: 21_000n };
+  }
+  /** decreaseLiquidity / collect / burn with the manager's rules: owner only, deadline, slippage minimums, poke before collect, "Not cleared" burn. */
+  function managePosition(s: Snapshot, from: string, data: string, time: number, emit: (address: string, topics: string[], body: string) => void):
+    { ret: string; gas: bigint } | null {
+    const sel = data.slice(0, 10), tw = (tick: number) => '0x' + w(BigInt(tick));
+    const poke = (id: string, p: MockPosition) => {
+      if (p.liquidity === 0n) return;
+      emit(POOL, [PTOPIC.poolBurn, '0x' + aw(NPM), tw(p.tickLower), tw(p.tickUpper)], w(0n) + w(0n) + w(0n));
+      p.owed0 += p.pending0; p.owed1 += p.pending1; p.pending0 = 0n; p.pending1 = 0n;
+      void id;
+    };
+    try {
+      if (sel === PSEL.decreaseLiquidity) {
+        const d = decodeUniswapDecreaseLiquidity(data), id = d.tokenId.toString(), p = s.positions[id];
+        if (!p || s.owners[id] !== from || BigInt(time) > d.deadline || d.liquidity > p.liquidity) return null;
+        const out = uniswapAmountsForLiquidity(s.sqrtPriceX96, p.tickLower, p.tickUpper, d.liquidity);
+        if (out.amount0 < d.amount0Min || out.amount1 < d.amount1Min) return null;
+        emit(POOL, [PTOPIC.poolBurn, '0x' + aw(NPM), tw(p.tickLower), tw(p.tickUpper)], w(d.liquidity) + w(out.amount0) + w(out.amount1));
+        p.owed0 += p.pending0 + out.amount0; p.owed1 += p.pending1 + out.amount1; p.pending0 = 0n; p.pending1 = 0n;
+        p.liquidity -= d.liquidity;
+        emit(NPM, [PTOPIC.decreaseLiquidity, '0x' + w(d.tokenId)], w(d.liquidity) + w(out.amount0) + w(out.amount1));
+        return { ret: '0x' + w(out.amount0) + w(out.amount1), gas: 160_000n };
+      }
+      if (sel === PSEL.collect) {
+        const c = decodeUniswapCollect(data), id = c.tokenId.toString(), p = s.positions[id];
+        if (!p || s.owners[id] !== from) return null;
+        poke(id, p);
+        const a0 = p.owed0 < c.amount0Max ? p.owed0 : c.amount0Max, a1 = p.owed1 < c.amount1Max ? p.owed1 : c.amount1Max;
+        for (const [token, amount] of [[t0, a0], [t1, a1]] as const) {
+          if (amount === 0n) continue;
+          if ((s.balances[token]![POOL] ?? 0n) < amount) return null;
+          s.balances[token]![POOL]! -= amount; s.balances[token]![c.recipient] = (s.balances[token]![c.recipient] ?? 0n) + amount;
+        }
+        emit(POOL, [PTOPIC.poolCollect, '0x' + aw(NPM), tw(p.tickLower), tw(p.tickUpper)], aw(c.recipient) + w(a0) + w(a1));
+        if (a0 > 0n) emit(t0, [TOPIC.transfer, '0x' + aw(POOL), '0x' + aw(c.recipient)], w(a0));
+        if (a1 > 0n) emit(t1, [TOPIC.transfer, '0x' + aw(POOL), '0x' + aw(c.recipient)], w(a1));
+        p.owed0 -= a0; p.owed1 -= a1;
+        emit(NPM, [PTOPIC.collect, '0x' + w(c.tokenId)], aw(c.recipient) + w(a0) + w(a1));
+        return { ret: '0x' + w(a0) + w(a1), gas: 130_000n };
+      }
+      if (sel === PSEL.burn) {
+        const tokenId = decodeUniswapBurn(data), id = tokenId.toString(), p = s.positions[id];
+        if (!p || s.owners[id] !== from || p.liquidity !== 0n || p.owed0 !== 0n || p.owed1 !== 0n) return null;
+        delete s.positions[id]; delete s.owners[id];
+        emit(NPM, [TOPIC.transfer, '0x' + aw(from), '0x' + w(0n), '0x' + w(tokenId)], '');
+        return { ret: '0x', gas: 50_000n };
+      }
+    } catch { return null; }
+    return null;
+  }
+  function bytesArray(items: readonly string[]): string {
+    let head = w(BigInt(items.length)), tail = '', offset = BigInt(items.length * 32);
+    for (const item of items) {
+      const body = item.slice(2), padded = body + '0'.repeat((64 - (body.length % 64)) % 64);
+      head += w(offset); tail += w(BigInt(body.length / 2)) + padded; offset += BigInt(32 + padded.length / 2);
+    }
+    return w(32n) + head + tail;
   }
   function read(s: Snapshot, to: string, data: string): string {
     const sel = data.slice(0, 10), arg = (i: number) => '0x' + data.slice(10 + i * 64 + 24, 10 + (i + 1) * 64);
@@ -150,7 +230,8 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     if (to === NPM && sel === SEL.positions) {
       const p = s.positions[BigInt('0x' + data.slice(10)).toString()];
       if (!p) throw new Error('MOCK_REVERT');
-      return '0x' + w(0n) + w(0n) + aw(t0) + aw(t1) + w(BigInt(profile.feeTier)) + w(BigInt(p.tickLower)) + w(BigInt(p.tickUpper)) + w(p.liquidity) + w(0n) + w(0n) + w(0n) + w(0n);
+      return '0x' + w(0n) + w(0n) + aw(t0) + aw(t1) + w(BigInt(profile.feeTier)) + w(BigInt(p.tickLower)) + w(BigInt(p.tickUpper)) + w(p.liquidity) + w(0n) + w(0n) +
+        w(p.owed0) + w(p.owed1);
     }
     if (profile.gasPriceOracle && to === profile.gasPriceOracle && sel === SEL.l1FeeUpperBound) return '0x' + w(3_000_000_000n);
     throw new Error('MOCK_UNEXPECTED_CALL_' + to + '_' + sel);
@@ -206,7 +287,15 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
         if (!result.ok) throw new Error('MOCK_ESTIMATE_REVERTED');
         return hx(result.gas + postingGas);
       }
-      case 'eth_call': { const r = params[0] as { to: string; data: string }; return read(at(params[1]), r.to.toLowerCase(), r.data.toLowerCase()); }
+      case 'eth_call': {
+        const r = params[0] as { to: string; data: string; from?: string };
+        if (r.to.toLowerCase() === NPM && ([PSEL.decreaseLiquidity, PSEL.collect, PSEL.burn, PSEL.multicall] as readonly string[]).includes(r.data.slice(0, 10).toLowerCase())) {
+          const result = execute(clone(at(params[1])), (r.from ?? '0x' + '0'.repeat(40)).toLowerCase(), NPM, r.data.toLowerCase(), timestamp + 2);
+          if (!result.ok) throw new Error('MOCK_REVERT');
+          return result.ret;
+        }
+        return read(at(params[1]), r.to.toLowerCase(), r.data.toLowerCase());
+      }
       case 'eth_simulateV1': {
         if (options.simulateV1 === false) throw new Error('MOCK_METHOD_NOT_FOUND');
         counters.simulate += 1;
@@ -270,6 +359,32 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     /** Another market participant moves the pool price (a swap): `ticks` up or down. */
     movePrice(ticks: number) { state.tick += ticks; state.sqrtPriceX96 = sqrtRatioAtTick(state.tick) + 1n; head += 1; timestamp += 2; history.set(head, clone(state)); },
     advance(seconds: number) { const blocksAhead = Math.max(1, Math.floor(seconds / 2)); head += blocksAhead; timestamp += seconds; history.set(head, clone(state)); },
+    /**
+     * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position that exists on chain without FloFi (opened in another interface), funded by the pool.
+     * Returns its token id.
+     */
+    seedPosition(input: { owner?: string; tickLower: number; tickUpper: number; liquidity: bigint; owed0?: bigint; owed1?: bigint }): string {
+      const tokenId = (nextTokenId++).toString();
+      state.owners[tokenId] = (input.owner ?? owner).toLowerCase();
+      state.positions[tokenId] = { liquidity: input.liquidity, tickLower: input.tickLower, tickUpper: input.tickUpper, owed0: input.owed0 ?? 0n, owed1: input.owed1 ?? 0n,
+        pending0: 0n, pending1: 0n };
+      // The pool holds the position's principal (at any price inside or around the range) and what it already owes.
+      const reserve = uniswapAmountsForLiquidity(sqrtRatioAtTick(input.tickLower), input.tickLower, input.tickUpper, input.liquidity).amount0;
+      const reserve1 = uniswapAmountsForLiquidity(sqrtRatioAtTick(input.tickUpper), input.tickLower, input.tickUpper, input.liquidity).amount1;
+      state.balances[t0]![POOL] = (state.balances[t0]![POOL] ?? 0n) + reserve + (input.owed0 ?? 0n);
+      state.balances[t1]![POOL] = (state.balances[t1]![POOL] ?? 0n) + reserve1 + (input.owed1 ?? 0n);
+      head += 1; timestamp += 2; history.set(head, clone(state));
+      return tokenId;
+    },
+    /** Swaps through the pool accrue fees to a position that `positions()` does not show until a poke (collect or decrease). */
+    accrueFees(tokenId: string, fee0: bigint, fee1: bigint) {
+      const p = state.positions[tokenId]!;
+      p.pending0 += fee0; p.pending1 += fee1;
+      state.balances[t0]![POOL] = (state.balances[t0]![POOL] ?? 0n) + fee0; state.balances[t1]![POOL] = (state.balances[t1]![POOL] ?? 0n) + fee1;
+      head += 1; timestamp += 2; history.set(head, clone(state));
+    },
+    /** The NFT moves to another wallet outside FloFi. */
+    transferPosition(tokenId: string, to: string) { state.owners[tokenId] = to.toLowerCase(); head += 1; timestamp += 2; history.set(head, clone(state)); },
     /** The owner approves outside Flofi. */
     externalAllowance(token: 'token0' | 'token1', amount: bigint) { state.allowances[allowanceKey(token === 'token0' ? t0 : t1, owner, NPM)] = amount; history.set(head, clone(state)); },
     get snapshot() { return state; } };

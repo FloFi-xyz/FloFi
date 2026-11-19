@@ -16,6 +16,7 @@ import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput, i
 import { parseSolanaTransferChat } from './solana-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
+import { liquidityPositionChoiceValid, type LiquidityPositionChoice, type LiquidityPositionToken } from './liquidity-positions';
 import { createSolanaLiquidityNode, parseSolanaCompositionChat, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
@@ -28,6 +29,13 @@ import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhoo
 import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, copilotNetworksMentioned, networkIdentity, networkOfCopilot } from './network-registry';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
+/**
+ * The verified position's pool as the canonical node describes it: the pool's own token order, fee tier and exact ticks, the principal the
+ * position held when it was read (raw units; the node's maxima are descriptive — a management operation never deposits) and the slippage
+ * bound for any decrease.
+ */
+export type LiquidityPositionPoolInput = { readonly token0: LiquidityPositionToken; readonly token1: LiquidityPositionToken; readonly feeTier: number;
+  readonly tickLower: number; readonly tickUpper: number; readonly amount0: string; readonly amount1: string; readonly slippageBps: number };
 const lendingChatNetworks = LENDING_NETWORKS.map(name => networkIdentity(name)?.chatName?.source ?? name).map(name => `(?:${name})`).join('|');
 const lendingNetwork = (text: string): SupplyInput['network'] => {
   const name = catalogNetworkOfChatName(text)?.name ?? text;
@@ -81,6 +89,12 @@ export type Command = Base & (
   /** Prepares one verified FloFi position for removal or exit: the workflow becomes that position's isolated step; the owner still simulates, reviews and signs. */
   | { readonly type: 'MANAGE_SOLANA_POSITION'; readonly input: SolanaLiquidityInput; readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT';
       readonly partBps: number | null }
+  /**
+   * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: prepares one verified mainnet position (Uniswap v3 on a catalog network, Orca on Solana) for a management
+   * operation. The workflow becomes that position's isolated pool step (its exact pair, tier and range); the operation travels with the staged
+   * choice into Simulate and Review. Nothing is removed until the owner reviews, confirms and signs in their wallet.
+   */
+  | { readonly type: 'MANAGE_LIQUIDITY_POSITION'; readonly choice: LiquidityPositionChoice; readonly pool: LiquidityPositionPoolInput }
   | { readonly type: 'ADD_UNISWAP_LIQUIDITY'; readonly input: UniswapLiquidityInput }
   | { readonly type: 'SET_UNISWAP_LIQUIDITY'; readonly nodeId: string; readonly input: UniswapLiquidityInput }
   | { readonly type: 'ADD_ROUTER_BRIDGE'; readonly input: RouterBridgeInput }
@@ -409,6 +423,15 @@ export function commandIsValid(input: unknown): input is Command {
     }
     case 'ADD_SOLANA_COMPOSITION':
       return (command.swap === null ? id(command.from) : command.from === null && solanaSwapInputValid(command.swap)) && solanaLiquidityInputValid(command.liquidity);
+    case 'MANAGE_LIQUIDITY_POSITION': {
+      const pool = command.pool as Partial<LiquidityPositionPoolInput> | undefined, units = /^(0|[1-9][0-9]{0,77})$/;
+      const token = (t: unknown) => !!t && typeof t === 'object' && typeof (t as LiquidityPositionToken).symbol === 'string' &&
+        typeof (t as LiquidityPositionToken).address === 'string' && Number.isSafeInteger((t as LiquidityPositionToken).decimals);
+      return liquidityPositionChoiceValid(command.choice) && !!pool && typeof pool === 'object' && token(pool.token0) && token(pool.token1) &&
+        Number.isSafeInteger(pool.feeTier) && Number.isSafeInteger(pool.tickLower) && Number.isSafeInteger(pool.tickUpper) && pool.tickLower! < pool.tickUpper! &&
+        typeof pool.amount0 === 'string' && units.test(pool.amount0) && typeof pool.amount1 === 'string' && units.test(pool.amount1) &&
+        Number.isSafeInteger(pool.slippageBps) && pool.slippageBps! >= 1 && pool.slippageBps! <= 10_000;
+    }
     case 'MANAGE_SOLANA_POSITION':
       return solanaLiquidityInputValid(command.input) && typeof command.positionMint === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(command.positionMint) &&
         (command.operation === 'EXIT' ? command.partBps === null

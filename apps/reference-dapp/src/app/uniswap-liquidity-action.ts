@@ -6,6 +6,7 @@ import { isAbsolute, join } from 'node:path';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createUniswapLiquidityService, type UniswapLiquidityService, type UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
+import type { UniswapPositionRequest } from '../server/uniswap-position-service';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, ethereumSepoliaSwapRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../server/public-testnet-rpc';
 import { UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../server/uniswap-liquidity-mock';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';
@@ -179,4 +180,40 @@ export async function uniswapLiquidityObserve(id: string) {
 export async function uniswapLiquidityStatus(id: string) {
   return withFlightOwner(async () => { return run('status', [id], s => s.load(id));
   });
+}
+
+/**
+ * BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing an existing Uniswap v3 position on a catalog mainnet (collect, partial withdrawal, exit, explicit close).
+ * The same flows and method names as minting (the run id's kind selects the operation), the same Flight gates, and the owner's wallet signs each
+ * request; FloFi never signs or sends. Simulate and Review are read-only.
+ */
+export async function uniswapPositionSimulate(workflow: SemanticWorkflow, owner: string, request: UniswapPositionRequest) {
+  return withFlightAccess(async () => run('simulate', [workflow, owner, request], s => s.positionSimulate(workflow, owner, request)));
+}
+export async function uniswapPositionRefresh(id: string) {
+  return withFlightAccess(async () => run('refresh', [id], s => s.positionRefresh(id)));
+}
+export async function uniswapPositionReview(id: string, commitment: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => run('review', [id, commitment, workflow], s => s.positionReview(id, commitment, workflow)));
+}
+export async function uniswapPositionInvalidate(id: string) {
+  return withFlightOwner(async () => run('invalidate', [id], s => s.positionInvalidate(id)));
+}
+export async function uniswapPositionBegin(id: string, owner: string, workflow: SemanticWorkflow) {
+  return withFlightAccess(async () => run('begin', [id, owner, workflow], s => s.positionBegin(id, owner, workflow)));
+}
+export async function uniswapPositionHandoff(id: string) {
+  return withFlightAccess(async () => run('handoff', [id], s => s.positionHandoff(id)));
+}
+export async function uniswapPositionReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
+  return withFlightOwner(async () => run('report', [id, result], s => s.positionReport(id, result)));
+}
+export async function uniswapPositionWalletFailure(id: string, diagnostic: UniswapWalletDiagnostic) {
+  return withFlightOwner(async () => run('walletFailure', [id, diagnostic], s => s.positionWalletFailure(id, diagnostic)));
+}
+export async function uniswapPositionObserve(id: string) {
+  return withFlightOwner(async () => run('observe', [id], s => s.positionObserve(id)));
+}
+export async function uniswapPositionStatus(id: string) {
+  return withFlightOwner(async () => run('status', [id], s => s.positionStatus(id)));
 }

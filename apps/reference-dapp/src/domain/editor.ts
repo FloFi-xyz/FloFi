@@ -21,6 +21,10 @@ import { ownDeclaration } from './node-declaration';
 import { createAuthoredTransfer } from './robinhood-transfer-authoring';
 import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
+import { createConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION } from '@defi-workflow-engine/workflow-contracts';
+import { catalogPoolOn, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, uniswapCatalogDeployment } from '@defi-workflow-engine/action-registry';
+import { uniswapPositionAsset } from '@defi-workflow-engine/reference-linter';
+import { formatTokenAmount } from './jupiter-authoring';
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createRouterNode, routerDetails } from './router-authoring';
 import { createUniversalBridgeFromInput, universalBridgeDetails } from './universal-bridge-authoring';
@@ -171,6 +175,43 @@ function reduceEditor(state: EditorState, command: Command, context?: ReviewCont
     if (next.error) return reject(next.error);
     if (!boundTo(next.workflow.nodes.find(node => node.nodeId === consumer)!, producer!)) return reject('COMPOSITION_UNSUPPORTED');
     return next;
+  }
+  if (command.type === 'MANAGE_LIQUIDITY_POSITION') {
+    // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a position operation runs on a workflow whose only financial step is that position's pool node. Existing
+    // liquidity steps are replaced (the first keeps its id); any other financial step blocks the proposal, so nothing the owner authored is dropped silently.
+    if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
+    const financial = current.nodes.filter(node => !node.actionType.startsWith('mock-'));
+    if (financial.some(node => node.actionType !== CONCENTRATED_LIQUIDITY_ACTION)) return reject('POSITION_WORKFLOW_HAS_OTHER_STEPS');
+    try {
+      const { choice: { position: ref }, pool } = command;
+      const keep = financial[0];
+      const id = keep?.nodeId ?? `node-${String(current.revision + 2).padStart(3, '0')}`;
+      let position: SemanticWorkflow['nodes'][number];
+      if (ref.protocol === 'UNISWAP_V3') {
+        if (!uniswapCatalogDeployment(ref.chain)) return reject('UNISWAP_POSITION_NETWORK_UNSUPPORTED');
+        const profile = catalogPoolOn(ref.chain, pool.token0, pool.token1, pool.feeTier);
+        // The node names exactly the verified pool and manager of the position, in the pool's own token order.
+        if (profile.pool !== ref.pool || profile.positionManager !== ref.manager || profile.token0.address !== pool.token0.address) return reject('UNISWAP_POSITION_POOL_MISMATCH');
+        const token = (t: typeof pool.token0) => ({ chainId: ref.chain, address: t.address, decimals: t.decimals });
+        const [amount0, amount1] = pool.amount0 === '0' && pool.amount1 === '0' ? ['1', '0'] : [pool.amount0, pool.amount1];
+        position = createConcentratedLiquidityNode(id, { chain: ref.chain, token0: token(pool.token0), token1: token(pool.token1), amount0Max: amount0, amount1Max: amount1,
+          amount0Min: '0', amount1Min: '0', tickLower: pool.tickLower, tickUpper: pool.tickUpper, feeTier: pool.feeTier, slippageBps: pool.slippageBps,
+          protocols: [profile.protocol], recipient: null, positionAsset: uniswapPositionAsset(profile) }) as SemanticWorkflow['nodes'][number];
+      } else {
+        const orca = ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY;
+        if (ref.chain !== orca.chain || ref.pool !== orca.pool.address || ref.manager !== orca.programs.whirlpool) return reject('ORCA_POSITION_POOL_MISMATCH');
+        const cap = (units: string, max: string) => BigInt(units) > BigInt(max) ? max : units;
+        const [sol, usdc] = pool.amount0 === '0' && pool.amount1 === '0' ? ['1', '0'] : [cap(pool.amount0, orca.token0.maximumAmount), cap(pool.amount1, orca.token1.maximumAmount)];
+        position = createSolanaLiquidityNode(id, { network: 'Solana', maxSol: formatTokenAmount(sol, orca.token0.decimals), maxDevUsdc: formatTokenAmount(usdc, orca.token1.decimals),
+          rangeUnit: 'TICK', lower: String(pool.tickLower), upper: String(pool.tickUpper), slippage: String(pool.slippageBps) });
+      }
+      const removed = new Set(financial.map(node => node.nodeId).filter(nodeId => nodeId !== id));
+      const nodes = [...current.nodes.filter(node => !removed.has(node.nodeId) && node.nodeId !== id).map(node => ({ ...node, dependencies: node.dependencies.filter(dep => !removed.has(dep)) })), position];
+      const resourceEdges = current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId) && edge.toNodeId !== id && edge.fromNodeId !== id);
+      if (JSON.stringify(nodes) === JSON.stringify(current.nodes) && JSON.stringify(resourceEdges) === JSON.stringify(current.resourceEdges)) return { workflow: current, error: null };
+      const workflow = { ...current, revision: current.revision + 1, nodes, resourceEdges };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
+    } catch (cause) { return reject(cause instanceof Error ? cause.message : 'LIQUIDITY_POSITION_INPUT_INVALID'); }
   }
   if (command.type === 'MANAGE_SOLANA_POSITION') {
     // The Orca runtime manages a position from a workflow whose only financial step is that position: the existing position step keeps its id and is

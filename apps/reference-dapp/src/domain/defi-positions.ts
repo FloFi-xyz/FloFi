@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { LiquidityPositionView } from './liquidity-positions';
 
 export type PositionWallet = { readonly namespace: 'eip155' | 'solana'; readonly address: string };
 export type PositionProtocol = 'Aave V3' | 'Uniswap V3' | 'Orca Whirlpools';
@@ -18,6 +19,8 @@ export type DefiPosition = {
   readonly type: 'SUPPLIED' | 'VARIABLE_DEBT' | 'LIQUIDITY';
   readonly assets: readonly PositionAsset[];
   readonly collateralEnabled?: boolean | null;
+  /** BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a concentrated-liquidity position's verified identity, range, owed and collectable amounts and the operations FloFi can prepare. */
+  readonly liquidity?: LiquidityPositionView;
 };
 
 export type PositionScan = {

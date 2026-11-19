@@ -103,8 +103,11 @@ function evmScans(owner: string, now: Date, signal: AbortSignal): readonly Promi
         const mode = await defaultMode(id, process.env);
         if (mode === 'off') return snapshotState(uniswap, 'NETWORK_UNAVAILABLE');
         const rpc = rpcBeforeDeadline(network.rpc(mode, process.env, POSITION_EVM_METHODS), signal);
-        return { ...uniswap, ...await uniswapPositions(rpc, UNISWAP_POSITION_DEPLOYMENTS[id], owner, now, registeredAssets[id], unvalued, mode === 'live'),
-          provenance: mode === 'live' ? 'PUBLIC_MAINNET' : 'MOCKED' };
+        // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the network's validated catalog decides which pools FloFi can manage; if it cannot be read in time,
+        // positions are still shown but no operation is offered.
+        const catalog = await budget(network.catalogFor(mode)(network.chain), signal).catch(() => null);
+        return { ...uniswap, ...await uniswapPositions(rpc, UNISWAP_POSITION_DEPLOYMENTS[id], owner, now, registeredAssets[id], unvalued, mode === 'live',
+          { network: network.name, catalog }), provenance: mode === 'live' ? 'PUBLIC_MAINNET' : 'MOCKED' };
       }),
     ];
   });
