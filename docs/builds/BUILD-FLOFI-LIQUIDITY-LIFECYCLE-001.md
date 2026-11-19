@@ -1,6 +1,7 @@
 # BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 — Mainnet liquidity position management
 
-Base: `origin/main` b1de6c16 (PR #218, incl. PRs #206–#217). Branch `feat/liquidity-lifecycle-001`. No production record, configuration,
+Started from `origin/main` b1de6c16 (PR #218, incl. PRs #206–#217); integrated by merge (no rebase) with `origin/main` 27c054f1, which adds PR #220
+(BUILD-FLOFI-AGENT-HARNESS-COMPATIBILITY-001) and PR #219 (BUILD-FLOFI-UX-EDITOR-FINOPS-001). Branch `feat/liquidity-lifecycle-001`. No production record, configuration,
 environment variable, gate, fee policy, migration or signing authority was changed; no transaction was signed, sent or broadcast.
 
 ## 1. Gaps found at b1de6c16 (re-verified) and root causes
@@ -57,4 +58,88 @@ outcomes are observed, never resent; reconciliation only at the network's confir
 Burn of exactly the reviewed liquidity at or above the minimums, one Collect to the owner with pool → owner transfers, nothing leaving the owner,
 read-back of the remaining position or proof of burn, owner balance deltas); divergent effects freeze the run (`RECONCILIATION_REQUIRED`).
 
-<!-- Sections 5–12 are completed at integration. -->
+## 5. Canonical workflow binding (reviewer finding F1)
+
+The operation is part of the canonical workflow, not only of client state: a position-management node is the position's own
+`asset.liquidity.concentrated` node plus one IDENTIFIER input `position-management` (`COLLECT:<id>`, `DECREASE:<id>:<bps>`, `EXIT:<id>:close|keep`;
+`packages/workflow-contracts/src/liquidity.ts`), the precedent of the bound-maximum input. Consequences: any change of operation, portion, close or
+position is a new revision and workflow hash, so a Review of another choice can never be authorized; the strict deposit reader refuses a marked node,
+so a reloaded or chat-authored position workflow is never simulated, compiled or executed as a deposit (`UNISWAP_LIQUIDITY_WORKFLOW_MANAGES_POSITION`,
+`ORCA_LIQUIDITY_WORKFLOW_MANAGES_POSITION`); the Uniswap position runtime requires request == marker (`UNISWAP_POSITION_REQUEST_MISMATCH`), Orca
+refuses OPEN and any mismatching request on a marked workflow. No schema change (the value fits the existing identifier pattern). A position
+operation stays its workflow's only financial step; that rule applies only to marked nodes — swap, bridge, deposit and composition workflows are
+unchanged (`liquidity-positions.test.ts`).
+
+## 6. Operations delivered, per protocol and network
+
+| Protocol / network | Collect fees | Partial withdrawal | Exit (keep) | Exit + close | Positions FloFi did not open |
+| --- | --- | --- | --- | --- | --- |
+| Uniswap v3 — Base, Arbitrum One, Ethereum, Robinhood Chain | yes (fresh owed + fees via the pool poke; uint128-max collect) | any 1–9999 bps of the position's liquidity, integer floor, fresh minimums | yes (NFT kept) | only on the owner's explicit request (burn last, same atomic multicall) | yes (owner verified on chain) |
+| Uniswap v3 — Base Sepolia, Ethereum Sepolia | no — refused (`UNISWAP_POSITION_NETWORK_UNSUPPORTED`); testnets keep mint only | no | no | no | — |
+| Orca Whirlpools — Solana mainnet, verified SOL/USDC pool | yes (`update_fees_and_rewards` checkpoint + `collect_fees_v2`) | yes (any share) | — (an Orca exit always closes) | yes (remove all, collect, close; rent refunded) | yes (Token-2022 own ATA, amount 1, no delegate) |
+
+Refused fail-closed: positions owing rewards or on an emitting reward slot (Orca), a partial withdrawal whose checkpoint would leave a reward owed,
+legacy or delegated position tokens, other pools, an operator who is not the owner, nothing to collect, an empty position for a decrease.
+Users choose their amounts; no cap was added.
+
+## 7. Discovery and inspection coverage
+
+| Source | FloFi scope | Not covered |
+| --- | --- | --- |
+| Uniswap v3 (4 catalog mainnets) | every position the wallet holds on the network's verified NonfungiblePositionManager (opened by FloFi or elsewhere), up to 20 per network (beyond: PARTIAL); identity, range/state, price, principal, recorded owed tokens, collectable now (static `collect` call from the owner; unavailable ≠ 0), manageability (catalog tokens and verified pool only) | positions on other managers/forks, staked or wrapped NFTs, pools outside the catalog (shown, not manageable) |
+| Orca Whirlpools (Solana mainnet) | position certificates the wallet holds (SPL Token and Token-2022) on the verified pool, up to 40 (beyond: PARTIAL); range/state, principal, fees owed; collectable shown as unavailable (no checkpoint read) | bundled positions, other pools, delegated/legacy tokens (shown as not manageable) |
+
+Both scans bind each view to network, protocol, manager, pool, position id and the owner verified at the observed block or slot, and never derive
+PnL or APY. Discovery outcomes are content-free telemetry only (§10 of the privacy policy).
+
+## 8. Engine changes after review (flofi-liquidity, flofi-workflow)
+
+- Position claim held under one lease across claim, owner-nonce reservation and the PREPARED save; an uncertain attempt whose nonce another transaction
+  consumed is never concluded as not executed but stops blocking the position once it cannot change liquidity (collect-only, or past its on-chain
+  deadline); re-observation appends nothing.
+- `ownerOf` transport failures (`PUBLIC_RPC_UNAVAILABLE`) are retried and never clear an authorization or count as a burn proof.
+- A later same-block transaction touching the position (manager `eth_getLogs`), or other owner transactions in the block, reconcile from the run's own
+  receipt with `reconciliationScope: TRANSACTION`; an unexplained difference stays DIVERGENT.
+- Run-log validator parity with the mint log (network binding, attempt chain, collect recipient = owner); exact first-key run-kind detection.
+- Orca: a registered position that stops verifying is listed UNMANAGEABLE with its reason and blocks nothing else; the reward rule now also covers a
+  partial withdrawal (simulation only; settled transactions are never re-judged).
+- Owner-history purge: migration 0031 prepared and certified, **not applied** ([§23](../deploy/SCHEMA-COMPATIBILITY.md#23-certificate-0031_position_history_purge),
+  [rollout](../deploy/RELEASE-POSITION-PURGE-0031.md)); 0016 unchanged.
+
+## 9. Surfaces
+
+| Surface | Position management | Notes |
+| --- | --- | --- |
+| Web Chat (EN/PT-BR) | yes — list, inspect, collect, partial withdrawal, exit, close; short answers; clarifying questions | authors MANAGE_LIQUIDITY_POSITION; never authorizes or signs |
+| Editor / Canvas (PR #219 stages) | yes — Create names the operation, Simulate presents position results, Execute C1/C2 position Review, one footer action | the engineering Uniswap position panel is read-only |
+| Dashboard | discovery + capability-driven actions that only prepare and open Operate | never executes |
+| `/approve` | no | not offered |
+| MCP, Telegram, WhatsApp, Developer API | **no** — not offered, answered honestly by the assistant; certification matrix rows `false` | no new tool, schema or route; the MCP `help` topic list gains an informational `LIQUIDITY_POSITIONS` entry (platform guide text only) |
+
+FinOps: content-free outcomes (positions discovered, inspection unavailable, collection/withdrawal/exit prepared, simulation rejected, wallet
+hand-off failed, reconciled, reconciliation required; `PARTIAL_COMPLETION` reserved because every operation is one atomic transaction), behind the
+existing default-off `FLOFI_JOURNEY_TELEMETRY`. No fee policy change: position operations carry no FloFi fee and collected proceeds are never
+revenue. The Admin FinOps presentation of PR #219 is unchanged.
+
+## 10. Evidence classes
+
+- **Implemented:** everything in §5–§9.
+- **Certified by local / MOCKED evidence:** unit suites (compiler, linter, contracts, services, stores, presentation, chat dialogue), disposable
+  PostgreSQL (0031 certificate, end-to-end purge, cloud flows), MOCKED browser profiles (see §12). Authorization in browser specs is performed
+  through the same runtime as the server actions, because the product never authorizes a MOCKED result (precedent:
+  `e2e/uniswap-liquidity-continuation.spec.ts`).
+- **Validated with live mainnet reads:** none in this build (no public RPC was used).
+- **Financially certified:** none. No position-management transaction was signed, sent or observed on any public network.
+
+## 11. Limitations and follow-ups (documented, not hidden)
+
+- Production activation of 0031 needs the owner's decision and, before it, FinOps 0029/0030 (their own procedure).
+- Orca "Refresh review" starts a new simulation of the same operation (the Orca service has no in-place refresh).
+- Embedded (Privy) wallets do not sign liquidity flows (existing limitation, unchanged).
+- Cloud-runtime (embedded PostgreSQL) browser coverage of the MOCKED Base position harness is not wired (`backend/flows.ts` passes no synthetic pins
+  in harness mode); the in-process action path is covered.
+- Model understanding is proven with the closed replay and deterministic resolution, not with a live model.
+- Uniswap NFTs held by an approved operator (not the owner) and staked/wrapped NFTs are out of scope; Orca bundled positions likewise.
+- `base-liquidity.test.ts` "16-attempt limit" can approach the default 5 s test timeout under heavy CPU contention (observed locally only).
+
+<!-- §12 (reviews, gates, tested SHA, CI, rollout order and the no-transaction confirmation) is completed at certification. -->
