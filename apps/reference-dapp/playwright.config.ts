@@ -68,6 +68,13 @@ if (devnetHarness) process.env.GRYLOO_SOLANA_DEVNET_JOURNAL = devnetJournal;
 // their own journal. Nothing reaches a public network; MOCKED evidence only.
 const orcaMainnetJournal = process.env.GRYLOO_ORCA_MAINNET_JOURNAL ?? join(tmpdir(), 'gryloo-orca-mainnet-' + Date.now() + '-' + process.pid);
 if (devnetHarness) process.env.GRYLOO_ORCA_MAINNET_JOURNAL = orcaMainnetJournal;
+// BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: managing Orca positions on the same MOCKED loopback copy of the mainnet-beta pool (8552 `/mainnet-rpc`,
+// `/mainnet-control`: positions opened outside FloFi, discovered on the Dashboard and managed by the in-process MOCKED Orca mainnet runtime); never
+// a public network or a broadcast. The spec authorizes as the owner through the very runtime the server actions run, so its workers share the
+// server's journal (GRYLOO_ORCA_MAINNET_JOURNAL, inherited above).
+const orcaPositionsHarness = process.env.FLOFI_ORCA_POSITIONS_E2E === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.FLOFI_ORCA_POSITIONS_E2E && !orcaPositionsHarness) throw new Error('Orca positions E2E permits only the MOCKED loopback harness');
+if (orcaPositionsHarness && !devnetHarness) throw new Error('Orca positions E2E runs on the MOCKED Solana loopback harness (GRYLOO_SOLANA_DEVNET_E2E=MOCKED_LOOPBACK_ONLY)');
 
 // RH-DEMO-001: Robinhood Testnet self-transfer browser tests use only the MOCKED loopback chain; never the public network or a broadcast.
 const robinhoodHarness = process.env.GRYLOO_ROBINHOOD_E2E === 'MOCKED_LOOPBACK_ONLY';
