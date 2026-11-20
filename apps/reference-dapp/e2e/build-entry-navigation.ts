@@ -204,8 +204,8 @@ export async function chooseWorkflowMenuItem(page: Page, name: string | RegExp):
 }
 
 /**
- * BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the vertical tool rail is the Canvas's default; an owner may dock the toolbar instead
- * (a remembered layout preference). P0 approved UX (board 04): the layout choice is the "Dock toolbar" / "Undock toolbar" item of the Canvas
+ * BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference "Criar"): the docked row of named tools is the Canvas's default; an owner may choose the
+ * vertical rail instead (a remembered layout preference; BUILD-FLOFI-BUILDER-UX-002 had the rail as the default). P0 approved UX (board 04): the layout choice is the "Dock toolbar" / "Undock toolbar" item of the Canvas
  * header's ··· (More options) menu. These put the Canvas in the named layout whatever was remembered (presentation only).
  */
 const buildCanvas = (page: Page) => page.locator('section.canvas').filter({ has: page.locator('.build-canvas-head') });

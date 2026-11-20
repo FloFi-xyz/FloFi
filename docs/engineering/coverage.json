@@ -1805,6 +1805,18 @@
     "app.e2e.orca-position-management": {
       "path": "apps/reference-dapp/e2e/orca-position-management.spec.ts",
       "stage": "browser"
+    },
+    "app.e2e.simulate-panel-disclosure": {
+      "path": "apps/reference-dapp/e2e/simulate-panel-disclosure.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.dashboard-run-details": {
+      "path": "apps/reference-dapp/e2e/dashboard-run-details.spec.ts",
+      "stage": "browser"
+    },
+    "app.domain.execution-receipt": {
+      "path": "apps/reference-dapp/src/domain/execution-receipt.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -3982,7 +3994,9 @@
         "app.e2e.liquidity-position-management",
         "app.domain.liquidity-position-declined",
         "app.e2e.chat-liquidity-positions",
-        "app.e2e.orca-position-management"
+        "app.e2e.orca-position-management",
+        "app.e2e.simulate-panel-disclosure",
+        "app.e2e.dashboard-run-details"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4978,7 +4992,8 @@
         "app.domain.liquidity-position-presentation",
         "app.domain.liquidity-position-summary",
         "app.domain.liquidity-position-execute",
-        "app.domain.liquidity-position-declined"
+        "app.domain.liquidity-position-declined",
+        "app.domain.execution-receipt"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",

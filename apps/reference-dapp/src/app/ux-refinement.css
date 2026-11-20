@@ -171,6 +171,7 @@
 @media(max-width:600px){
   .execution-receipt{padding:18px;gap:16px}
   .execution-receipt-heading h1{font-size:19px}
+  .execution-receipt-status{white-space:normal;overflow-wrap:anywhere}
   .execution-receipt-facts>div{flex-direction:column;gap:4px}
   .execution-receipt-facts dd{justify-content:flex-start;text-align:left}
   .execution-receipt-record dl>div{grid-template-columns:minmax(0,1fr)}
@@ -180,7 +181,8 @@
 /* ── Execute, expired review: the notice and the one card sit directly in the panel (no card around a card, reference page 21). ── */
 .editor-workflow-run.editor-review-block:has(>.review-expired-card){gap:14px;padding:0;border:0;border-radius:0;background:transparent}
 .canvas-review-dock .review-expired-card .review-panel-rows>div{align-items:center;padding:11px 0}
-.review-expired-card .review-panel-rows dt{white-space:nowrap}
+@media(min-width:601px){.review-expired-card .review-panel-rows dt{white-space:nowrap}}
+@media(max-width:600px){.review-expired-card .review-refresh-badge{white-space:normal}}
 .review-expired-card .review-refresh-badge{padding:3px 9px;font-size:12px}
 .review-expired-card .review-panel-technical>summary{min-height:44px}
 

@@ -85,7 +85,7 @@ export function OperationSummary({ workflow, context, heading = 'Operation summa
           <span className="operation-summary-line"><span className="operation-summary-amount">{t(step.amount)}</span>{step.detail && <span className="operation-summary-detail">{assetsAfter(step, t)}</span>}</span>
         </> : <span className="operation-summary-sentence"><StepSentence step={step}/></span>}
         {step.recipient && (step.recipient === OWN_WALLET ? <small className="operation-summary-recipient">{t('Recipient')}: {t('Your wallet')}</small>
-          : <small className="operation-summary-recipient" title={step.recipient} aria-label={`${t('Recipient')}: ${step.recipient}`}>{t('Recipient')}: <code>{shortRecipient(step.recipient)}</code></small>)}
+          : <small className="operation-summary-recipient" title={step.recipient}>{t('Recipient')}: <code aria-hidden="true">{shortRecipient(step.recipient)}</code><span className="sr-only">{step.recipient}</span></small>)}
       </div>
       {variant === 'icons' && <span className="operation-summary-chip">{t(networkName(step.network))}</span>}
     </li>)}</ol>
@@ -103,7 +103,7 @@ export function WorkflowTechnicalFacts({ workflow, context, expiredAt = null }: 
   if (!steps.length && !expiredAt) return null;
   return <div className="workflow-technical-facts">
     {expiredAt && <p className="workflow-technical-expired">{t('The previous review expired at {0}; its values are no longer current and are not shown.', expiredAt)}</p>}
-    {steps.map((step, index) => <dl key={step.id} aria-label={t('Step {0}: {1}', index + 1, t(step.action))}>
+    {steps.map((step, index) => <dl key={step.id} role="group" aria-label={t('Step {0}: {1}', index + 1, t(step.action))}>
       <div><dt>{t('Step')}</dt><dd>{index + 1}. {t(step.action)}</dd></div>
       <div><dt>{t('Network')}</dt><dd>{t(networkName(step.network))} <code>{step.chainId}</code></dd></div>
       {step.provider && <div><dt>{t('Provider')}</dt><dd>{t(step.provider)}</dd></div>}

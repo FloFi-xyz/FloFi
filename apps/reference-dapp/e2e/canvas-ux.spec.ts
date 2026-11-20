@@ -259,7 +259,8 @@ test('marquee follows the pointer, stays clipped, and selects exactly the inters
   const third = await graph.locator('.react-flow__node[data-id="node-004"]').boundingBox();
   if (!surface || !second || !third) throw new Error('Canvas geometry missing');
   // P0 approved UX (board 04): the action rail sits inside the graph's left edge, so the marquee starts on the empty canvas just right of it.
-  const rail = await graph.locator('.floating-toolbox').boundingBox();
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the docked tool row is the default, so the rail is measured only when it is shown.
+  const rail = await graph.locator('.floating-toolbox').count() ? await graph.locator('.floating-toolbox').boundingBox() : null;
   const start = { x: Math.max(surface.x + 5, rail ? rail.x + rail.width + 5 : 0), y: surface.y + 5 };
   const end = { x: Math.min(second.x + second.width + 5, third.x - 5), y: second.y + second.height + 5 };
   await page.mouse.move(start.x, start.y);
@@ -394,6 +395,11 @@ test('floating toolbox stays inside a narrow editor without page overflow', asyn
   // BUILD-FLOFI-BUILDER-UX-002 / P0 approved UX (board 04): the step actions fill the rail (with its show-names chevron); there is no utility
   // toolbar in the graph any more (Undo and Redo are in the header; Duplicate and Delete float above a selected card).
   await expect(graph.locator('.floating-toolbox .canvas-rail-toggle')).toHaveCount(1);
+  // The chevron's contract (formerly a unit assertion while the rail was the default): its name, state and the rail it controls.
+  const chevron = graph.locator('.floating-toolbox .canvas-rail-toggle');
+  await expect(chevron).toHaveAttribute('aria-label', 'Show action names');
+  await expect(chevron).toHaveAttribute('aria-expanded', 'false');
+  await expect(chevron).toHaveAttribute('aria-controls', (await graph.locator('.floating-toolbox').getAttribute('id'))!);
   await expect(graph.locator('.canvas-utility-dock')).toHaveCount(0);
   for (const box of [await graph.locator('.floating-toolbox').boundingBox()]) {
     const surface = (await graph.boundingBox())!;

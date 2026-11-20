@@ -2,7 +2,7 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
-import { expectEditorSection, openBuilder, openEditorSection, useDockedToolbar } from './build-entry-navigation';
+import { expectEditorSection, openBuilder, openEditorSection, useDockedToolbar, useToolbarRail } from './build-entry-navigation';
 
 // BUILD-FLOFI-BUILDER-UX-002 (owner-approved Editor brief): the Canvas takes the space, the FloFi panel is compact, and the Canvas lifecycle control
 // (Simulate) moved from the Canvas corner to the Editor footer, rendered once with its own handler; Simulate and Execute open from the stepper.
@@ -28,7 +28,8 @@ test('the Build CTA lives once in the Editor footer, beside the real notices, an
   await expect(steps.locator('.editor-stepper-number')).toHaveText(['1', '2', '3']);
   await expect(steps.locator('.editor-stepper-label')).toHaveText(['Create', 'Simulate', 'Execute']);
   for (const docked of [false, true]) {
-    if (docked) await useDockedToolbar(page);
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the docked row is now the default, so the rail pass selects the rail explicitly.
+    if (docked) await useDockedToolbar(page); else await useToolbarRail(page);
     for (const width of [1920, 1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(cta).toBeVisible();

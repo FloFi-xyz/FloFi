@@ -28,16 +28,17 @@ test.beforeAll(async () => {
 });
 test.beforeEach(async ({ page }) => {
   const found: string[] = []; errors.set(page, found); page.on('pageerror', error => found.push(error.message));
-  // The fixture's simulation is valid at its own time (client clock only).
-  await page.clock.install({ time: reviewNow + 10_000 });
   await page.goto('/app/dashboard');
   await expect(page.getByRole('heading', { name: 'Dashboard', level: 1, exact: true })).toBeVisible();
   const styles = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   const fontClasses = await page.locator('html').getAttribute('class');
   await page.route('**/__simulate-panel-acceptance.js', route => route.fulfill({ contentType: 'application/javascript', body: bundle }));
+  // The fixture's simulation is valid at its own time (client clock only), installed after the real shell loaded (never hydrated with it).
+  await page.clock.install({ time: reviewNow + 10_000 });
   await page.route('**/__simulate-panel-acceptance', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html class="${fontClasses ?? ''}" data-theme="light"><head><meta charset="utf-8">${styles}</head><body><div class="app-shell"><main class="main"><div id="acceptance-root" style="max-width:420px"></div></main></div><script src="/__simulate-panel-acceptance.js"></script></body></html>` }));
   await page.goto('/__simulate-panel-acceptance');
   await page.evaluate(() => (window as unknown as { FloFiSimulatePanelAcceptance: { mount(element: HTMLElement): void } }).FloFiSimulatePanelAcceptance.mount(document.getElementById('acceptance-root')!));
+  await page.waitForFunction(() => Boolean((window as unknown as { flofiSimulatePanelAcceptance?: unknown }).flofiSimulatePanelAcceptance));
   await expect(page.locator('.canvas-review-dock > section')).toBeVisible();
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });

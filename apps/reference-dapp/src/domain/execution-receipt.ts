@@ -24,6 +24,8 @@ export type ReceiptStep = {
 export type ExecutionReceipt = {
   /** The operation ("Swap") for one step; the workflow's name for several. */
   readonly title: string; readonly status: DashboardStatus; readonly tone: ReceiptTone;
+  /** The title is the operation (a catalog word, translated) rather than the owner's own workflow name (never translated). */
+  readonly titleIsAction: boolean;
   /** When the record last changed (its final state), ISO. */
   readonly at: string | null;
   /** One step: its sent / received / result rows. Several steps: empty (each step carries its own). */
@@ -139,7 +141,7 @@ export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceip
   const status = view.status;
   const clean = status === 'Completed' && !view.attention.length;
   return {
-    title: single ? single.action : view.title, status, tone: TONE[status],
+    title: single ? single.action : view.title, titleIsAction: Boolean(single), status, tone: TONE[status],
     at: view.run.updatedAt ?? view.run.createdAt,
     values: single ? stepValues(single, observed(single), status) : [],
     network: networks.length ? networks.join(' · ') : view.networks.length ? view.networks.map(networkName).join(' · ') : null,
@@ -178,7 +180,8 @@ export const shortAddress = (value: string) => value.length > 16 ? `${value.slic
  * Anything that is not "<number> <unit>" (a word, a position, "Not recorded…") is returned unchanged.
  */
 export function readableAmount(value: string, language: 'EN' | 'PT', digits = 12): { text: string; full: string; cut: boolean } {
-  const match = /^(-?)(\d+)(?:\.(\d+))?(\s.*)?$/.exec(value);
+  // Only "<number> <one unit>": a value with several amounts ("0.3 WETH + 1,008 USDC") is left exactly as recorded.
+  const match = /^(-?)(\d+)(?:\.(\d+))?(\s\S+)?$/.exec(value);
   if (!match) return { text: value, full: value, cut: false };
   const [, sign = '', whole = '0', fraction = '', rest = ''] = match;
   const group = language === 'PT' ? '.' : ',', decimal = language === 'PT' ? ',' : '.';

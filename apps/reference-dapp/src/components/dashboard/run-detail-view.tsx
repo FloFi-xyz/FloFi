@@ -7,7 +7,7 @@ import { ExecutionIdentifier } from '../execution-identifier';
 import { projectExecutionResult } from '../../domain/execution-result';
 import { transactionLifecycle } from '../../domain/execution-lifecycle';
 import type { DashboardDetailResponse, DashboardRunDetail, DashboardRunView } from '../../lib/dashboard/types';
-import { DashboardIcon } from './dashboard-view';
+import { DashboardIcon, dateLabel } from './dashboard-view';
 import { ExecutionReceipt } from './execution-receipt';
 import { RunEvidence } from './run-evidence';
 import { HistoryActions, type HistoryChange } from '../history-actions';
@@ -36,7 +36,7 @@ export function RunDetailView({ view, detail, connection, loading, restoring = f
   /** A record opened from Your workflows returns there. The fragment is unknown on the server. */ backLabel?: ' Back to Dashboard' | ' Back to Your workflows' | null;
   history?: { change: HistoryChange; changed(disposition: 'DELETED' | 'ARCHIVED'): void };
 }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   const result = projectExecutionResult(view?.progress);
   const unavailable = connection === 'UNAVAILABLE' || connection === null || connection === 'CONNECTED';
   const updated = view?.run.updatedAt ?? null, created = view?.run.createdAt ?? null;
@@ -67,8 +67,9 @@ export function RunDetailView({ view, detail, connection, loading, restoring = f
             {view.landed && <div><dt>{tr("Landed onchain")}</dt><dd>{tr(view.landed)}</dd></div>}
             {view.run.provenance && <div><dt>{tr("Recorded environment")}</dt><dd>{tr(view.run.provenance)}</dd></div>}
             {view.run.errorCode && <div><dt>{tr("Recorded issue")}</dt><dd><code>{tr(view.run.errorCode)}</code></dd></div>}
-            {created && <div><dt>{tr("Record created")}</dt><dd><time dateTime={created}>{created}</time></dd></div>}
-            {updated && <div><dt>{tr("Last updated")}</dt><dd><time dateTime={updated}>{updated}</time></dd></div>}
+            {/* The exact instant (ISO, UTC) beside the localized date. */}
+            {created && <div><dt>{tr("Record created")}</dt><dd><time dateTime={created}>{tr(dateLabel(created, language === 'PT' ? 'PT' : 'EN') ?? created)}</time> <code>{created}</code></dd></div>}
+            {updated && <div><dt>{tr("Last updated")}</dt><dd><time dateTime={updated}>{tr(dateLabel(updated, language === 'PT' ? 'PT' : 'EN') ?? updated)}</time> <code>{updated}</code></dd></div>}
             <div><dt>{tr("Recorded evidence")}</dt><dd>{tr(view.run.hasEvidence ? 'Recorded evidence available' : 'No final bundle recorded')}</dd></div>
           </dl>
           {view.progress?.local && <p className="dashboard-local-context">{tr("Local execution · no public-chain transactions")}</p>}

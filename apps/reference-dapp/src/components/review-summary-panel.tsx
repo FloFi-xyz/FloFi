@@ -190,14 +190,14 @@ export function ExpiredReviewAlert() {
   // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a soft-orange notice with a discreet warning triangle — an expiry is not a loss of funds (never alarm red).
   return <div className="review-expired-alert" role="alert"><span className="review-expired-mark" aria-hidden="true">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2.8c.7 0 1.3.4 1.7 1l8.6 15c.7 1.2-.2 2.7-1.6 2.7H3.3c-1.4 0-2.3-1.5-1.6-2.7l8.6-15c.4-.6 1-1 1.7-1Z"/><path d="M12 8.6v5.6M12 17.2v.1" stroke="var(--surface)" strokeWidth="2.2" strokeLinecap="round"/></svg></span>
-    <div><strong>{t('Your review expired')}</strong><p>{t('Refresh the simulation and check the new values before authorizing.')}</p></div></div>;
+    <div><strong>{t('Your review expired.')}</strong><p>{t('Refresh the simulation and check the new values before authorizing.')}</p></div></div>;
 }
 /** C2: a value that only a refreshed Review can state (never a stale figure); `hint` says why, on hover and to assistive technology. */
 export function RefreshBadge({ text, hint = null }: { text: string; hint?: string | null }) {
   const { t } = useLocale();
   return <span className="review-refresh-badge" title={hint ? t(hint) : undefined}>{t(text)}{hint && <>
     <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1" strokeLinecap="round"/></svg>
-    <span className="sr-only">{t(hint)}</span></>}</span>;
+    <span className="sr-only">. {t(hint)}</span></>}</span>;
 }
 
 /** Board 07: what blocks the simulation, the server's own numbers when it has them, and the one next action (the footer keeps "Simulate again"). */

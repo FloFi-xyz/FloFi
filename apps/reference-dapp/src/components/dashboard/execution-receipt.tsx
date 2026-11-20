@@ -19,14 +19,16 @@ const ICON: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>>
 };
 
 /** A value with every recorded digit one copy away (the visible text is readable; the full value is in its tooltip and copied as is). */
-function CopyValue({ value, shown, label }: { value: string; shown: string; label: string }) {
+function CopyValue({ value, shown, label, step = null }: { value: string; shown: string; label: string; step?: number | null }) {
   const { t } = useLocale();
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copy = async () => { try { await navigator.clipboard.writeText(value); setState('copied'); } catch { setState('failed'); } };
+  // A step's control names its step, so several "Copy Recipient" buttons stay distinct; the outcome is announced in the one persistent region.
+  const name = step === null ? t(label) : `${t(label)} · ${t('Step {0}: {1}', step, t(label))}`;
   return <span className="execution-receipt-copy"><span title={value}>{shown}</span>
-    <button type="button" className="execution-receipt-copy-button" aria-label={t('Copy {0}', t(label))} onClick={() => void copy()}>{t(state === 'copied' ? 'Copied' : 'Copy')}</button>
-    <span className="sr-only" role="status">{state === 'copied' ? t('{0} copied.', t(label)) : ''}</span>
-    {state === 'failed' && <span className="execution-receipt-copy-failed" role="status">{t('Copy unavailable.')} {value}</span>}</span>;
+    <button type="button" className="execution-receipt-copy-button" aria-label={t('Copy {0}', name)} onClick={() => void copy()}>{t(state === 'copied' ? 'Copied' : 'Copy')}</button>
+    <span className="sr-only" role="status">{state === 'copied' ? t('{0} copied.', t(label)) : state === 'failed' ? `${t('Copy unavailable.')} ${value}` : ''}</span>
+    {state === 'failed' && <span className="execution-receipt-copy-failed" aria-hidden="true">{t('Copy unavailable.')} {value}</span>}</span>;
 }
 
 function Amount({ row }: { row: ReceiptValue }) {
@@ -46,6 +48,8 @@ function TransactionLink({ link }: { link: ReceiptLink }) {
 export function ExecutionReceipt({ view, execute }: { view: DashboardRunView; execute(): void }) {
   const { t, language } = useLocale();
   const receipt = projectExecutionReceipt(view);
+  // An operation's name is a catalog word; a workflow's name is the owner's own and is never translated (flofi-frontend-ux review).
+  const title = receipt.titleIsAction ? t(receipt.title) : receipt.title;
   const when = receiptDate(receipt.at, language === 'PT' ? 'PT' : 'EN');
   const sent = receipt.values.filter(row => ['You sent', 'You supplied', 'Configured amount'].includes(row.label));
   const results = receipt.values.filter(row => !sent.includes(row));
@@ -53,7 +57,7 @@ export function ExecutionReceipt({ view, execute }: { view: DashboardRunView; ex
     <header className="execution-receipt-head">
       <span className="execution-receipt-icon" aria-hidden="true"><ActionIcon action={ICON[receipt.title] ?? 'action'}/></span>
       <div className="execution-receipt-heading">
-        <h1 id="execution-receipt-title"><span className="execution-receipt-title" title={t(receipt.title)}>{t(receipt.title)}</span>{' '}
+        <h1 id="execution-receipt-title"><span className="execution-receipt-title" title={title}>{title}</span>{' '}
           <span className="execution-receipt-status" data-tone={receipt.tone}>— {t(receipt.status)}</span></h1>
         {when && <p className="execution-receipt-date"><time dateTime={receipt.at!}>{when}</time></p>}
         {receipt.provenance && <p className="execution-receipt-provenance">{t(receipt.provenance)}</p>}
@@ -75,13 +79,13 @@ export function ExecutionReceipt({ view, execute }: { view: DashboardRunView; ex
           <span className="execution-receipt-step-status" data-tone={step.tone}>{t(step.status)}</span></p>
         {step.values.length > 0 && <dl className="execution-receipt-step-values">{step.values.map(row => <div key={`${row.label}:${row.value}`} data-observed={row.observed || undefined}>
           <dt>{t(row.label, ...row.args ?? [])}</dt><dd><Amount row={row}/></dd></div>)}</dl>}
-        {step.recipient && <p className="execution-receipt-step-recipient">{t('Recipient')}: <CopyValue value={step.recipient} shown={shortAddress(step.recipient)} label="Recipient"/></p>}
+        {step.recipient && <p className="execution-receipt-step-recipient">{t('Recipient')}: <CopyValue value={step.recipient} shown={shortAddress(step.recipient)} label="Recipient" step={step.number}/></p>}
         {step.transaction && <TransactionLink link={step.transaction}/>}
       </div>
     </li>)}</ol>}
     <dl className="execution-receipt-facts">
       {receipt.network && <div><dt>{t('Network')}</dt><dd className="execution-receipt-networks">{receipt.network.split(' · ').map(network => <span key={network}>
-        {network.split(' → ').map((part, index) => <span key={part} className="execution-receipt-network">{index > 0 && <span aria-hidden="true">→ </span>}<NetworkBrandIcon network={part}/>{t(part)}</span>)}</span>)}</dd></div>}
+        {network.split(' → ').map((part, index) => <span key={part} className="execution-receipt-network">{index > 0 && <><span aria-hidden="true">→ </span><span className="sr-only">{t('to')} </span></>}<NetworkBrandIcon network={part}/>{t(part)}</span>)}</span>)}</dd></div>}
       {receipt.protocol && <div><dt>{t('Protocol')}</dt><dd>{t(receipt.protocol)}</dd></div>}
       {receipt.recipient && <div><dt>{t('Recipient')}</dt><dd><CopyValue value={receipt.recipient} shown={shortAddress(receipt.recipient)} label="Recipient"/></dd></div>}
       {receipt.fees.length ? receipt.fees.map(fee => <div key={`${fee.label}:${fee.args?.join() ?? ''}`}><dt>{t(fee.label, ...fee.args ?? [])}</dt><dd><Amount row={fee}/></dd></div>)
