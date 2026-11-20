@@ -5,6 +5,7 @@
  * counts. Nothing here quotes, estimates, rounds a limit in the owner's disfavour or decides anything; an amount shown shorter than its full
  * value carries the full value for a tooltip.
  */
+import { shortTokenDecimal } from './token-amount-display';
 import type { EditorExecutionReview, ReviewAmount } from '../editor/workflow-execution';
 
 /** A catalog key and its parameters; `full` holds the untruncated amounts (tooltip). */
@@ -30,21 +31,14 @@ export type ReviewBlockView = {
   readonly signatures?: ReviewBlockText | null;
 };
 
-const SIGNIFICANT = 6;
 /**
  * A decimal amount with at most 6 significant digits. `down` (a minimum, what the owner receives) never overstates; `up` (what the owner spends
  * or pays at most) never understates. The full value is kept for the tooltip.
  */
 export function shortDecimal(units: string, decimals: number, mode: 'down' | 'up'): string {
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: the one global rule (`token-amount-display.ts`); same digits and directions as before.
   if (!/^[0-9]+$/.test(units)) return units;
-  const value = BigInt(units);
-  if (value === 0n) return '0';
-  const digits = value.toString().length, drop = Math.max(0, digits - SIGNIFICANT);
-  const step = 10n ** BigInt(drop);
-  const kept = mode === 'down' ? value / step * step : (value + step - 1n) / step * step;
-  const text = kept.toString().padStart(decimals + 1, '0');
-  const whole = decimals ? text.slice(0, -decimals) : text, fraction = decimals ? text.slice(-decimals).replace(/0+$/, '') : '';
-  return `${whole}${fraction ? `.${fraction}` : ''}`;
+  return shortTokenDecimal({ units, decimals }, mode) ?? units;
 }
 const amount = (a: ReviewAmount, mode: 'down' | 'up') => `${shortDecimal(a.units, a.decimals, mode)} ${a.symbol}`;
 /** The full value only when the short one differs from it. */
@@ -54,14 +48,8 @@ const fullOf = (values: readonly (ReviewAmount | null | undefined)[], mode: 'dow
 };
 const text = (key: string, parameters: readonly string[] = [], full: string | null = null): ReviewBlockText => ({ key, parameters, full });
 
-const ETH = 10n ** 18n;
-/** A native amount in wei, rounded UP to 6 decimals (a ceiling is never understated). */
-const ethUp = (wei: bigint) => {
-  const step = 10n ** 12n, shown = (wei + step - 1n) / step * step;
-  if (wei > 0n && shown === 0n) return '< 0.000001 ETH';
-  const fraction = (shown % ETH).toString().padStart(18, '0').slice(0, 6).replace(/0+$/, '');
-  return `${shown / ETH}${fraction ? `.${fraction}` : ''} ETH`;
-};
+/** A native amount in wei at six significant digits, rounded UP (a ceiling is never understated; a non-zero fee never reads 0). */
+const ethUp = (wei: bigint) => `${shortTokenDecimal({ units: wei, decimals: 18 }, 'up')} ETH`;
 /** Who a token approval lets spend: the protocol the step's call goes to (a batched bridge is always a direct Across deposit). */
 /** Catalog labels of the actions without a sentence of their own (translated where the line is shown). */
 const ACTION_LABEL: ReadonlyMap<string, string> = new Map([['add_liquidity', 'Add liquidity'], ['transfer', 'Transfer']]);

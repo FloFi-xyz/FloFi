@@ -87,7 +87,7 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(expanded).not.toContain('dashboard-portfolio-networks'); expect(expanded).not.toContain('Block 38123456'); expect(expanded).not.toContain('Not enabled on this deployment');
     expect(expanded).toMatch(/<table[^>]*>.*<th scope="col">Asset<\/th><th scope="col">Network<\/th>.*Balance.*Price.*Value/);
     expect(expanded).toContain('1.5</td>'); expect(expanded).toContain('$3,000.50'); expect(expanded).toContain('$4,500.75');
-    expect(expanded).toContain('1,234.56</td>'); expect(expanded).toMatch(/1,234\.56<\/td><td class="[^"]*">Unavailable<\/td><td class="[^"]*">Valuation unavailable<\/td>/);
+    expect(expanded).toContain('1234.56</td>'); expect(expanded).toMatch(/1234\.56<\/td><td class="[^"]*">Unavailable<\/td><td class="[^"]*">Valuation unavailable<\/td>/);
     expect(expanded).toMatch(/Prices: Chainlink USD feeds on Base, observed [^<]*2026[^<]*11:59[^<]* UTC\. Values are estimates, not quotes\./);
     expect(expanded).toContain('Only assets with a verified Chainlink USD feed on this deployment are priced.');
     expect(expanded).toContain('Your FloFi executions are in Your workflows.');
@@ -106,7 +106,8 @@ describe('Dashboard wallet portfolio widget', () => {
     click(props, disclosure);
     const expanded = view(props);
     expect(expanded).toContain('Ativos'); expect(expanded).toContain('Saldo'); expect(expanded).not.toContain('Rede principal'); expect(expanded).toContain('Carteira EVM');
-    expect(expanded).toContain('1.234,56</td>'); expect(expanded).toContain('1,5</td>'); expect(expanded).toContain('Recolher');
+    // Six significant digits; four-digit integers are not grouped (BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001).
+    expect(expanded).toContain('1234,56</td>'); expect(expanded).toContain('1,5</td>'); expect(expanded).toContain('Recolher');
     expect(expanded).not.toContain('Não habilitadas nesta implantação');
   });
   it('shows a balance by the token’s own rules with its raw amount kept apart, and an uninterpretable balance as unavailable, never a number', async () => {
@@ -149,7 +150,7 @@ describe('Dashboard wallet portfolio widget', () => {
       pricedTotalUsd: null, unpricedCount: 2, priceSource: null }) }) };
     view(props); await settle();
     const compact = view(props);
-    expect(compact).toContain('Holdings: 2'); expect(compact).toContain('1,234.56 USDC'); expect(compact).toContain('1.5 ETH'); expect(compact).toContain('USD values are unavailable on this deployment.');
+    expect(compact).toContain('Holdings: 2'); expect(compact).toContain('1234.56 USDC'); expect(compact).toContain('1.5 ETH'); expect(compact).toContain('USD values are unavailable on this deployment.');
     click(props, disclosure);
     const expanded = view(props);
     expect(expanded).not.toContain('$'); expect(expanded).not.toContain('Portfolio value (priced)');

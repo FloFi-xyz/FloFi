@@ -24,7 +24,8 @@ describe('blocker panel (board 07)', () => {
     const html = render(blocked('USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE'), { kind: 'NATIVE_FEE_SHORTFALL', chainId: 'eip155:8453', owner: wallet.account!, unit: 'wei',
       balance: '120000000000000', maxFee: '300000000000001', nativeSpend: '0', required: '300000000000001', shortfall: '180000000000001' });
     expect(html).toContain('Not enough ETH on Base for the network fee');
-    expect(html).toContain('0.00012 ETH'); expect(html).toContain('0.000301 ETH'); expect(html).toContain('0.000181 ETH');
+    // Six significant digits: the requirement and the shortfall rounded up (never understated), the balance down.
+    expect(html).toContain('0.00012 ETH'); expect(html).toContain('0.000300001 ETH'); expect(html).toContain('0.000180001 ETH');
     expect(html).toContain('Copy address'); expect(html).toContain('0x90f5…d303');
     const visible = html.replace(/<details[\s\S]*<\/details>/, '');
     expect(visible).not.toMatch(/USER_FUNDED_|BETA_|bps|eip155:/);

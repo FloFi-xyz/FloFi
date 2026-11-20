@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { displayTokenAmount } from '../domain/token-amount-display';
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
@@ -11,7 +12,10 @@ import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import type { BorrowObservation } from '@defi-workflow-engine/reference-reconciler';
 import { PendingExecutionNote } from './execution-concurrency-notes';
-function human(value:string,decimals:number):string {return (Number(value)/10**decimals).toLocaleString('en-US',{maximumFractionDigits:decimals});}
+// BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: exact BigInt arithmetic (a JavaScript Number lost digits of 18-decimal amounts), six
+// significant digits; `ceiling` rounds a budget up.
+function human(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{marker:false})?.text??value;}
+function ceiling(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{rounding:'up'})?.text??value;}
 function hf(value:string):string {return BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);}
 export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
@@ -75,7 +79,7 @@ export function BorrowPanel({view}:{view:'simulate'|'execute'}){
       <p>{tr("Health factor before: ")}{tr(hf(risk.healthFactor))}</p><p>{tr("Estimated health factor after: ")}{tr(hf(review!.borrow!.expectedPostHealthFactor))}</p>
       <p>{tr("Estimated debt after transaction: $")}{tr(human(review!.borrow!.debtAfterBase,8))}</p>
       <p>{tr("Liquidation threshold: ")}{tr(human(risk.liquidationThresholdBps,2))}{tr("%. Liquidation becomes possible below health factor 1. Flofi requires at least 2.0; prices and interest can change.")}</p>
-      <p>{tr("Estimated maximum network cost: ")}{tr(human(review!.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH.")}</p></>}
+      <p>{tr("Estimated maximum network cost: ")}{tr(ceiling(review!.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH.")}</p></>}
     {view==='simulate'?<><button type="button" disabled={run.busy} onClick={()=>void run.simulate()}>{tr("Simulate Borrow")}</button><PendingExecutionNote pending={Boolean(pending)}/></>:<>
       {review&&wallet.account&&wallet.chainId!==shown.chainHex&&<button type="button" disabled={run.busy||wallet.busy} onClick={()=>void run.switchNetwork()}>{tr("Switch wallet to ")}{tr(shown.network)}</button>}
       {review&&<p>{tr("Borrower / beneficiary: ")}{review.account}</p>}

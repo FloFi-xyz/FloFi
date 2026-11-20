@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { formatObservedAt, formatShare, portfolioAllocation, portfolioOnNetwork, formatAllocationShare, formatTokenAmount, formatUsdPrice, formatUsdValue, isSolanaAddressText, normalizeEvmAddress, portfolioSummary,
+import { formatObservedAt, formatShare, portfolioAllocation, portfolioOnNetwork, formatAllocationShare, exactTokenAmount, formatTokenAmount, formatUsdPrice, formatUsdValue, isSolanaAddressText, normalizeEvmAddress, portfolioSummary,
   priceObservedAt, shortAddress, sortHoldings, sumUsd, usdCents, type PortfolioHolding, type PortfolioNetwork, type WalletPortfolio } from './wallet-portfolio';
 
 const holding = (symbol: string, units: string, decimals: number, valueUsd: string | null, network: PortfolioHolding['networkId'] = 'base'): PortfolioHolding => ({
@@ -17,14 +17,19 @@ function portfolio(holdings: PortfolioHolding[], networks: PortfolioNetwork[] = 
 }
 
 describe('wallet portfolio presentation', () => {
-  it('formats exact token amounts by language, truncating and never rounding a balance up', () => {
-    expect(formatTokenAmount('1234567891234567891234', 18)).toBe('1,234.56');
-    expect(formatTokenAmount('1234567891234567891234', 18, 'PT')).toBe('1.234,56');
-    expect(formatTokenAmount('1999999999999999999', 18)).toBe('1.9999');
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits (not decimal places), rounded DOWN: a balance is never
+  // overstated and a positive balance never reads 0 or "< …"; the exact balance stays available (`exactTokenAmount`).
+  it('formats token amounts by language at six significant digits, truncating and never rounding a balance up', () => {
+    expect(formatTokenAmount('1234567891234567891234', 18)).toBe('1234.56');
+    expect(formatTokenAmount('1234567891234567891234', 18, 'PT')).toBe('1234,56');
+    expect(formatTokenAmount('12345678912345678912345', 18)).toBe('12,345.6');
+    expect(formatTokenAmount('12345678912345678912345', 18, 'PT')).toBe('12.345,6');
+    expect(exactTokenAmount('12345678912345678912345', 18, 'PT')).toBe('12.345,678912345678912345');
+    expect(formatTokenAmount('1999999999999999999', 18)).toBe('1.99999');
     expect(formatTokenAmount('123456789', 9, 'PT')).toBe('0,123456');
     expect(formatTokenAmount('100000000', 6)).toBe('100');
-    expect(formatTokenAmount('5', 18)).toBe('< 0.000001');
-    expect(formatTokenAmount('5', 18, 'PT')).toBe('< 0,000001');
+    expect(formatTokenAmount('5', 18)).toBe('0.000000000000000005');
+    expect(formatTokenAmount('5', 18, 'PT')).toBe('0,000000000000000005');
     expect(formatTokenAmount('1', 2)).toBe('0.01');
     expect(formatTokenAmount('42', 0)).toBe('42');
     expect(formatTokenAmount('0', 18)).toBe('0');

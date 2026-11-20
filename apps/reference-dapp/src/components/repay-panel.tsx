@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { displayTokenAmount } from '../domain/token-amount-display';
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
@@ -11,7 +12,11 @@ import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import type { RepayObservation } from '@defi-workflow-engine/reference-reconciler';
 import { PendingExecutionNote } from './execution-concurrency-notes';
-const human=(value:string,decimals:number)=>(Number(value)/10**decimals).toLocaleString('en-US',{maximumFractionDigits:decimals});
+// BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: exact BigInt arithmetic (a JavaScript Number lost digits of 18-decimal amounts), six
+// significant digits; `ceiling` rounds a budget up; `exact` is every digit, for the sentences that say "exactly".
+function human(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{marker:false})?.text??value;}
+function ceiling(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{rounding:'up'})?.text??value;}
+function exact(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals})?.exactText??value;}
 const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
 export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
@@ -65,7 +70,7 @@ export function RepayPanel({view}:{view:'simulate'|'execute'}){
       <p>{tr("Estimated variable debt after: ")}{tr(human(review.repay!.debtAfter,shown.decimals))} {tr(shown.asset)}</p><p>{tr("Health factor before: ")}{tr(hf(risk.healthFactor))}</p><p>{tr("Estimated health factor after: ")}{tr(hf(review.repay!.expectedPostHealthFactor))}</p>
       <p>{tr("Collateral: ")}{tr(human(review.state.position,shown.decimals))} {tr(shown.asset)}{tr(" supplied · ")}{tr((BigInt(risk.userConfiguration)&shown.collateralBit)!==0n?'enabled':'disabled')}{tr(" · value $")}{tr(human(risk.collateralBase,8))}{tr(". Repay preserves collateral.")}</p>
       <p>{tr("Estimated network cost: ")}{tr(human(review.gasLimits.reduce((total,gas)=>total+BigInt(gas)*BigInt(review.state.gasPrice),0n).toString(),18))}{tr(" ETH.")}</p>
-      <p>{tr("Maximum network budget: ")}{tr(human(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH, including fee margin.")}</p>
+      <p>{tr("Maximum network budget: ")}{tr(ceiling(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH, including fee margin.")}</p>
       <p>{tr("Owner / onBehalfOf: ")}{review.account}</p><p>{tr("Pool / approval spender: ")}{tr(review.pool)}</p><p>{tr("Asset: ")}{tr(review.asset)}</p><p>{tr("State block: ")}{tr(review.state.block)}{tr(" · Review expires: ")}{tr(review.expiresAt)}</p>
       <p>{tr("Debt estimates use the current index. Interest accrues until execution; final repayment is independently reconciled.")}</p></>}
     {view==='simulate'?<><button type="button" disabled={run.busy} onClick={()=>void run.simulate()}>{tr("Simulate Repay")}</button><PendingExecutionNote pending={Boolean(pending)}/></>:<>
@@ -77,7 +82,7 @@ export function RepayPanel({view}:{view:'simulate'|'execute'}){
       {record?.notSubmitted&&<p>{tr("The wallet request was not submitted. Prepare a fresh explicit owner review for the same intent.")}</p>}
       {(record?.notSubmitted||approval&&record?.attempts.length===1||record?.approvalProof)&&!run.retired&&<button type="button" disabled={run.busy} onClick={()=>void run.recoverReview()}>{tr("Prepare fresh review")}</button>}
       {record?.attempts.length&&!record.evidence?<a download="flofi-aave-repay-execution-record.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record,null,2))}>{tr("Download execution record")}</a>:null}
-      {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Repay independently reconciled. Wallet paid exactly ")}{tr(human(review!.amount,shown.decimals))} {tr(shown.asset)}{tr("; variable debt is ")}{tr(human(observation.postPosition.borrow.debt,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}{tr(". Collateral is unchanged.")}</p><a download="flofi-aave-repay-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
+      {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Repay independently reconciled. Wallet paid exactly ")}{tr(exact(review!.amount,shown.decimals))} {tr(shown.asset)}{tr("; variable debt is ")}{tr(human(observation.postPosition.borrow.debt,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}{tr(". Collateral is unchanged.")}</p><a download="flofi-aave-repay-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}
     {info&&<p role="status">{lendingCopy(messages[info]??'Repay needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,review,attempts:record?.attempts,observations:record?.observations,walletDiagnostic:record?.walletDiagnostic,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>

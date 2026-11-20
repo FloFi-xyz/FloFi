@@ -157,7 +157,7 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
     {/* BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence lists every canonical action in order; only the current step is simulated now. */}
     {sequence ? <ol className="conversation-review-steps" aria-label={t('Workflow actions')}>{sequence.steps.map(step => <li key={step.number} data-sequence-state={step.state}>
       {heading(step, step.network, step.state === 'CURRENT' ? simulated?.provider : null)}
-      {step.state === 'COMPLETED' ? <span className="conversation-review-state">{step.delivered ? t('Completed and reconciled · delivered {0}', step.delivered) : t('Completed and reconciled')}</span>
+      {step.state === 'COMPLETED' ? <span className="conversation-review-state">{step.delivered ? t('Completed and reconciled · delivered {0}', shortAmount(step.delivered, 'down')) : t('Completed and reconciled')}</span>
         : step.state === 'NEXT' ? <span className="conversation-review-state">{step.amount ? `${t(step.amount)} · ` : ''}{t('Reviewed after step {0}', step.number - 1)}</span> : null}
       {step.funding && <span className="conversation-review-funding">{step.funding.bound ? t('Funded by step {0}: spends {1} (what step {0} delivered, at most {2})', step.funding.from, step.funding.bound, step.funding.cap)
         : t('Funded by step {0}: spends the smaller of {1} and what step {0} actually delivers', step.funding.from, step.funding.cap)}</span>}

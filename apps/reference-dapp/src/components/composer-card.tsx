@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { displayTokenAmount } from '../domain/token-amount-display';
 import { useLocale } from '../i18n/locale';
 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -369,6 +370,9 @@ export const priceDifference = (formatted: string) => formatted.replace(/\s*\(\d
  * is returned unchanged.
  */
 export function significantAmount(value: string, digits = 6): string {
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: the global rule (an estimate, rounded to nearest) for the default six digits.
+  // A large amount reads compactly (1.23457M) rather than with invented digits; an exact value is returned exactly as written.
+  if (digits === 6 && /^\d+(?:\.\d+)?$/.test(value)) { const shown = displayTokenAmount(value, { marker: false }); return shown?.approximate ? shown.value : value; }
   const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
   if (!match || digits < 1) return value;
   const integer = match[1]!.replace(/^0+(?=\d)/, ''), fraction = match[2] ?? '';

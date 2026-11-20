@@ -7,6 +7,7 @@
  *   reasons   why the token-paid alternative (Circle) was not offered for a group whose owner lacks native gas, in plain words (the closed codes
  *             come from `user-funded/circle-gas.ts`; any other code reads as "not available here").
  */
+import { shortTokenDecimal } from './token-amount-display';
 
 /** A fee's amount as text: `unit` 'wei' | 'lamports' | 'token' (with `token`); anything else is shown raw with its unit, never as ETH. */
 export function feeAmountText(amount: string, unit: string, token?: { readonly symbol: string; readonly decimals: number } | null, round: 'up' | 'down' = 'up'): string {
@@ -14,11 +15,8 @@ export function feeAmountText(amount: string, unit: string, token?: { readonly s
   const known = unit === 'wei' ? { symbol: 'ETH', decimals: 18 } : unit === 'lamports' ? { symbol: 'SOL', decimals: 9 }
     : unit === 'token' && token && Number.isInteger(token.decimals) && token.decimals >= 0 && token.decimals <= 36 ? token : null;
   if (!known) return `${amount} ${unit}`;
-  const v = BigInt(amount), d = known.decimals, keep = Math.min(6, d), step = 10n ** BigInt(d - keep), scale = 10n ** BigInt(d);
-  const shown = round === 'up' ? (v + step - 1n) / step * step : v / step * step;
-  if (v > 0n && shown === 0n) return `< ${keep ? `0.${'0'.repeat(keep - 1)}1` : '1'} ${known.symbol}`;
-  const whole = shown / scale, fraction = d ? (shown % scale).toString().padStart(d, '0').slice(0, keep).replace(/0+$/, '') : '';
-  return `${whole}${fraction ? `.${fraction}` : ''} ${known.symbol}`;
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits (the global rule), rounded by purpose.
+  return `${shortTokenDecimal({ units: amount, decimals: known.decimals }, round)} ${known.symbol}`;
 }
 
 /** Plain words for why paying the fee in USDC through Circle is not available for a group (shown with the native-fee shortfall). */

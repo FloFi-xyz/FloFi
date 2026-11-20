@@ -36,14 +36,14 @@ describe('approved UX footer (boards 06–07)', () => {
 });
 
 describe('fee shortfall projection (board 07): the server numbers, never understated', () => {
-  it('rounds requirements and shortfalls UP and the balance DOWN, to at most 6 decimals', () => {
-    expect(nativeAmount('300000000000001')).toBe('0.000301'); expect(nativeBalance('120000000000999')).toBe('0.00012');
-    expect(nativeAmount('1')).toBe('< 0.000001'); expect(nativeBalance('1')).toBe('< 0.000001'); expect(nativeAmount('0')).toBe('0'); expect(nativeAmount('x')).toBe('—');
-    expect(feeShortfallView(evidence)).toEqual({ network: 'Base', symbol: 'ETH', owner: evidence.owner, balance: '0.00012', fee: '0.000301', sends: null, required: '0.000301', missing: '0.000181' });
+  it('rounds requirements and shortfalls UP and the balance DOWN, to six significant digits (never to zero)', () => {
+    expect(nativeAmount('300000000000001')).toBe('0.000300001'); expect(nativeBalance('120000000000999')).toBe('0.00012');
+    expect(nativeAmount('1')).toBe('0.000000000000000001'); expect(nativeBalance('1')).toBe('0.000000000000000001'); expect(nativeAmount('0')).toBe('0'); expect(nativeAmount('x')).toBe('—');
+    expect(feeShortfallView(evidence)).toEqual({ network: 'Base', symbol: 'ETH', owner: evidence.owner, balance: '0.00012', fee: '0.000300001', sends: null, required: '0.000300001', missing: '0.000180001' });
     // A request that also sends native ETH: the fee ceiling is shown on its own, never the fee plus the amount sent.
     const sending = { ...evidence, nativeSpend: '1000000000000000', required: '1300000000000001', shortfall: '1180000000000001' };
-    expect(feeShortfallView(sending)).toMatchObject({ fee: '0.000301', sends: '0.001', required: '0.001301', missing: '0.001181' });
-    expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: sending })?.parameters).toEqual(['Base', 'ETH', '0x90f5…d303', '0.00012', '0.000301', '0.001181', '0.001']);
+    expect(feeShortfallView(sending)).toMatchObject({ fee: '0.000300001', sends: '0.001', required: '0.00130001', missing: '0.00118001' });
+    expect(blockerExplanation({ title: 't', message: 'm', feeShortfall: sending })?.parameters).toEqual(['Base', 'ETH', '0x90f5…d303', '0.00012', '0.000300001', '0.00118001', '0.001']);
     expect(feeShortfallView({ ...evidence, chainId: 'eip155:999' })).toBeNull(); expect(feeShortfallView(null)).toBeNull();
   });
 });
@@ -58,7 +58,7 @@ describe('the assistant explains the active blocker (board 07)', () => {
   it('states the same three numbers and the next action, in the interface language', () => {
     const facts = blockerExplanation({ title: 'Insufficient balance', message: 'Add funds for the network fee, then simulate again.', feeShortfall: evidence })!;
     const en = translate('EN', facts.text, ...facts.parameters), pt = translate('PT', facts.text, ...facts.parameters);
-    for (const text of [en, pt]) { expect(text).toContain('0.00012'); expect(text).toContain('0.000301'); expect(text).toContain('0.000181'); expect(text).toContain('0x90f5…d303'); }
+    for (const text of [en, pt]) { expect(text).toContain('0.00012'); expect(text).toContain('0.000300001'); expect(text).toContain('0.000180001'); expect(text).toContain('0x90f5…d303'); }
     expect(en).toMatch(/Simulate again\. Nothing was sent\./); expect(pt).toMatch(/Simular novamente\. Nada foi enviado\./);
     expect(blockerExplanation({ title: 'Wallet not linked to your FloFi account', message: 'x' })).toBeNull();
   });

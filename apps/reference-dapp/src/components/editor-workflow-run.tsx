@@ -17,6 +17,7 @@
  *
  * Nothing here signs or sends: the wallet does, after the owner confirms it there. Every artifact is verified on the server.
  */
+import { TokenAmountText } from './token-amount-text';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
@@ -1351,10 +1352,10 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
           return <li key={step.index} data-step-state={step.state}>
             <strong>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</strong>
             <dl className="editor-run-amounts">
-              {planned?.spend && <div><dt>{tr('Spends')}</dt><dd>{planned.spend.text}</dd></div>}
-              {planned?.minimum && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd>{planned.minimum.text}</dd></div>}
+              {planned?.spend && <div><dt>{tr('Spends')}</dt><dd><TokenAmountText value={planned.spend.text} rounding="up" marker/></dd></div>}
+              {planned?.minimum && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd><TokenAmountText value={planned.minimum.text} rounding="down"/></dd></div>}
               {planned?.recipient && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned.recipient}</code></dd></div>}
-              {step.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, planned?.spend])}</dd></div>)}
+              {step.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd><TokenAmountText value={receivedText(r, [planned?.expected, planned?.spend])}/></dd></div>)}
             </dl>
             <span className="workflow-run-state">{stepWords(run, step)}</span>
             {step.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}

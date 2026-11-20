@@ -6,10 +6,11 @@
  * presentation only (`projectExecutionReceipt`); every engineering detail stays one click away under "Technical details" in the run view. It starts
  * nothing: the only action besides the explorer link is the existing "Open current execution" of a run that is still the current one.
  */
+import { TokenAmountText } from '../token-amount-text';
 import { useLocale } from '../../i18n/locale';
 import { CopyValue } from '../copy-value';
 import type { DashboardRunView } from '../../lib/dashboard/types';
-import { projectExecutionReceipt, readableAmount, receiptDate, shortAddress, type ReceiptLink, type ReceiptValue } from '../../domain/execution-receipt';
+import { projectExecutionReceipt, receiptDate, shortAddress, type ReceiptLink, type ReceiptValue } from '../../domain/execution-receipt';
 import { ActionIcon } from '../action-icon';
 import { NetworkBrandIcon } from '../brand-icon';
 
@@ -19,9 +20,8 @@ const ICON: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>>
 };
 
 function Amount({ row }: { row: ReceiptValue }) {
-  const { t, language } = useLocale();
-  const amount = readableAmount(t(row.value), language === 'PT' ? 'PT' : 'EN');
-  return <span className="execution-receipt-amount" title={amount.cut ? amount.full : undefined}>{amount.text}</span>;
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits; the exact recorded amount one tap away (and in Technical details).
+  return <TokenAmountText className="execution-receipt-amount" value={row.value}/>;
 }
 
 function TransactionLink({ link }: { link: ReceiptLink }) {

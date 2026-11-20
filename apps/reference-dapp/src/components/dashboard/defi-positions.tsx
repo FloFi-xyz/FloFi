@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
+import { TokenUnitsText } from '../token-amount-text';
 import { createContext, useContext, useEffect, useId, useState } from 'react';
 import { positionsWalletKey, type PositionScan, type PositionWallet } from '../../domain/defi-positions';
 import { liquidityPositionChoiceValid, type LiquidityPositionChoice, type LiquidityPositionView } from '../../domain/liquidity-positions';
@@ -154,7 +155,7 @@ export function PositionResults({ scans, prepare }: { scans: readonly PositionSc
           <ul>{position.assets.map(asset => {
             const valuation = asset.valuation && Date.parse(asset.valuation.expiresAt) > now ? asset.valuation : null;
             return <li key={asset.address}>
-              <span title={asset.address}>{asset.units === null ? t('{0}: amount unavailable', asset.symbol) : `${formatTokenAmount(asset.units, asset.decimals, language)} ${asset.symbol}`}</span>
+              <span title={asset.address}>{asset.units === null ? t('{0}: amount unavailable', asset.symbol) : <TokenUnitsText units={asset.units} decimals={asset.decimals} symbol={asset.symbol}/>}</span>
               {asset.units !== null && asset.units !== '0' && <small title={valuation ? t('Price observed {0}', formatObservedAt(valuation.observedAt, language) ?? '—') : undefined}>
                 {valuation ? t('≈ {0} (Chainlink)', formatUsdValue(valuation.usd, language)) : t('Valuation unavailable')}
               </small>}

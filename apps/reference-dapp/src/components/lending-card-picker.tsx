@@ -6,6 +6,7 @@
  * read, with a search over the whole catalog and a toggle that reveals the reserves outside the action's first group. Choosing a reserve only
  * edits the card's draft: Review and Apply author it, and a fresh Simulation and Review follow before any wallet signature.
  */
+import { displayTokenAmount } from '../domain/token-amount-display';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useLocale } from '../i18n/locale';
 import { TokenBrandIcon } from './brand-icon';
@@ -43,13 +44,9 @@ const REASON_CODES: Readonly<Record<string, string>> = Object.freeze({
   BASE_MAINNET_NOT_ENABLED: '{0} lending is not enabled on this deployment.', ARBITRUM_MAINNET_NOT_ENABLED: '{0} lending is not enabled on this deployment.',
   ETHEREUM_MAINNET_NOT_ENABLED: '{0} lending is not enabled on this deployment.', SUPPLY_RPC_RATE_LIMITED: 'The {0} network is busy. Try again in a moment.',
 });
-/** A base-unit amount for a compact row: at most six decimals, truncated (never rounded up); a positive dust amount reads "<0.000001". */
+/** A base-unit amount for a compact row: six significant digits (the global rule), rounded down (a balance or liquidity is never overstated). */
 export function compactLendingAmount(units: string, decimals: number): string {
-  const value = BigInt(units), scale = 10n ** BigInt(decimals), whole = value / scale;
-  const shown = decimals > 6 ? (value % scale) / 10n ** BigInt(decimals - 6) : value % scale, width = Math.min(decimals, 6);
-  if (value > 0n && whole === 0n && shown === 0n) return '<0.000001';
-  const fraction = width ? shown.toString().padStart(width, '0').replace(/0+$/, '') : '';
-  return `${whole.toLocaleString('en-US')}${fraction ? `.${fraction}` : ''}`;
+  return displayTokenAmount({ units, decimals }, { rounding: 'down' })?.value ?? '—';
 }
 function figures(entry: CardReserveEntry, kind: LendingKind, tr: (value: string, ...args: (string | number)[]) => string): string | null {
   const amount = (units: string | undefined) => units === undefined ? null : `${compactLendingAmount(units, entry.decimals)} ${entry.symbol}`;
