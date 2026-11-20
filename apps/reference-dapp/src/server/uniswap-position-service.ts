@@ -29,6 +29,7 @@ import { verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-
 import { readNotAnswered } from './public-testnet-rpc.ts';
 import { recordLiquidityOutcome, type LiquidityOutcome } from './liquidity-lifecycle-telemetry.ts';
 import type { UniswapAttemptState, UniswapReceipt, UniswapTokenView, UniswapTx, UniswapWalletDiagnostic } from './uniswap-liquidity-service.ts';
+import { overrunNote } from './uniswap-network-fee.ts';
 
 export type { UniswapPositionOperation };
 /** What the owner asked for. `partBps` is a share of the selected position's liquidity (DECREASE only); `close` burns the emptied NFT (EXIT only). */
@@ -638,15 +639,19 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
     const l1Bound = record.review.calls[0].l1FeeUpperBoundWei;
     if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > quantity(attempt.tx.gas) ||
         quantity(tx.maxFeePerGas ?? tx.gasPrice) > quantity(attempt.tx.maxFeePerGas) || quantity(tx.maxPriorityFeePerGas ?? '0x0') > quantity(attempt.tx.maxPriorityFeePerGas) ||
-        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null || verified.l1Fee > BigInt(l1Bound)))
+        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null))
       return save(replaceAttempt({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' },
         { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' }));
+    // The uncapped L1 part: a charged total above the authorized maximum is recorded on the confirmed attempt, never a frozen withdrawal.
+    const feeNote = overrunNote({ gasLimit: quantity(attempt.tx.gas), maxFeePerGas: quantity(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound ?? '0') },
+      verified.direct ? { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee } : null);
     if (verified.status === 0)
       return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_TRANSACTION_REVERTED' }, { ...attempt, state: 'REVERTED', receipt, note: 'UNISWAP_TRANSACTION_REVERTED' }));
     try {
       const result = await reconcile(record, R, attempt, raw, verified.blockNumber, hash);
-      const confirmed = replaceAttempt({ ...record, authorization: null, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true });
-      const evidence = await buildEvidence(confirmed, R, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }, result);
+      const done: UniswapPositionAttempt = { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note };
+      const confirmed = replaceAttempt({ ...record, authorization: null, error: null }, done);
+      const evidence = await buildEvidence(confirmed, R, done, result);
       return save({ ...confirmed, result, evidence, verdict: 'RECONCILED' });
     } catch (cause) {
       const code = cause instanceof Error && DIVERGENT.test(cause.message) ? cause.message : null;
@@ -754,7 +759,10 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
         const state = await assertStillReviewed(record, R, assets);
         await R.assertRequestFees(record.review, attempt.tx, tag(state.block.number));
       } catch (cause) {
-        if (cause instanceof Error && MATERIAL.test(cause.message)) await save({ ...record, authorization: null, error: cause.message });
+        // Provably unsent (the wallet is only called after SUBMITTING is durable): concluded with its reason, so the nonce and the position claim are
+        // free at once and the same run continues after a refreshed Review (flofi-wallet-execution review).
+        if (cause instanceof Error && MATERIAL.test(cause.message))
+          await save(replaceAttempt({ ...record, authorization: null, error: cause.message }, { ...attempt, state: 'CANCELLED', note: cause.message }));
         throw cause;
       }
       const [latest, pending] = await Promise.all([R.rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),

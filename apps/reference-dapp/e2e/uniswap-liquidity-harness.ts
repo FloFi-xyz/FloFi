@@ -224,6 +224,8 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     }
     return w(32n) + head + tail;
   }
+  /** OP Stack L1 data fee: the GasPriceOracle's current upper bound and what the sequencer charges at inclusion (both move every L1 block). */
+  const l1 = { estimate: 3_000_000_000n, charged: 1_000_000_000n };
   function read(s: Snapshot, to: string, data: string): string {
     const sel = data.slice(0, 10), arg = (i: number) => '0x' + data.slice(10 + i * 64 + 24, 10 + (i + 1) * 64);
     if (to === NPM && sel === SEL.factory) return '0x' + aw(profile.factory);
@@ -261,7 +263,7 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
       return '0x' + w(0n) + w(0n) + aw(t0) + aw(t1) + w(BigInt(profile.feeTier)) + w(BigInt(p.tickLower)) + w(BigInt(p.tickUpper)) + w(p.liquidity) + w(0n) + w(0n) +
         w(p.owed0) + w(p.owed1);
     }
-    if (profile.gasPriceOracle && to === profile.gasPriceOracle && sel === SEL.l1FeeUpperBound) return '0x' + w(3_000_000_000n);
+    if (profile.gasPriceOracle && to === profile.gasPriceOracle && sel === SEL.l1FeeUpperBound) return '0x' + w(l1.estimate);
     throw new Error('MOCK_UNEXPECTED_CALL_' + to + '_' + sel);
   }
   const blockOf = (n: number, full: boolean) => ({ number: hx(n), hash: '0x' + n.toString(16).padStart(64, 'b'), timestamp: hx(n === head ? timestamp : timestamp - (head - n) * 2),
@@ -339,7 +341,7 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
         if (tx && left > 0) preconfirmed.set(tx.hash, left - 1);
         return tx ? { transactionHash: tx.hash, status: hx(tx.status), blockNumber: hx(tx.block), blockHash: left > 0 ? '0x' + '0'.repeat(64) : blockOf(tx.block, false).hash,
           from: tx.from, to: tx.to, transactionIndex: hx(BigInt([...mined.values()].filter(other => other.block === tx.block).indexOf(tx))),
-          gasUsed: hx(tx.gasUsed), effectiveGasPrice: hx(gasPrice), ...profile.gasPriceOracle ? { l1Fee: hx(1_000_000_000n) } : {}, logs: tx.logs } : null;
+          gasUsed: hx(tx.gasUsed), effectiveGasPrice: hx(gasPrice), ...profile.gasPriceOracle ? { l1Fee: hx(l1.charged) } : {}, logs: tx.logs } : null;
       }
       case 'eth_getTransactionByHash': { const tx = mined.get(params[0] as string) ?? pendingTxs.find(p => p.hash === params[0]); return tx ? txView(tx) : null; }
     }
@@ -380,6 +382,8 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     },
   };
   return { rpc, wallet, owner, counters, mined, catalogPins,
+    /** The L1 base fee / blob base fee moved: the oracle's current bound and (optionally) the fee charged at inclusion change. */
+    setL1Fee(change: { estimate?: bigint; charged?: bigint }) { Object.assign(l1, change); },
     /** A Stock Token's issuer changes its multiplier state (a corporate action). */
     setStock(address: string, patch: Partial<{ uid: string; multiplierWad: bigint; scheduledWad: bigint; effectiveAt: number }>) { Object.assign(stocks.get(address)!, patch); },
     /** Wall clock aligned with the chain head (the service rejects stale or future heads). */

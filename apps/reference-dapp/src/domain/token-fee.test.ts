@@ -14,11 +14,15 @@ describe('fee amounts in their own unit', () => {
     expect(feeAmountText('210000', 'token', { symbol: 'USDC', decimals: 6 })).toBe('0.21 USDC');
     expect(feeAmountText('210001', 'token', { symbol: 'USDC', decimals: 6 })).toBe('0.210001 USDC');
     expect(feeAmountText('1', 'token', { symbol: 'USDC', decimals: 6 })).toBe('0.000001 USDC');
-    expect(feeAmountText('1234567', 'token', { symbol: 'USDC', decimals: 6 })).toBe('1.234567 USDC');
-    expect(feeAmountText('1000000000000001', 'wei')).toBe('0.001001 ETH');
+    expect(feeAmountText('1234567', 'token', { symbol: 'USDC', decimals: 6 })).toBe('1.23457 USDC');
+    // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits; a ceiling rounds up, so it is never below the fee.
+    expect(feeAmountText('1000000000000001', 'wei')).toBe('0.00100001 ETH');
     expect(feeAmountText('1000000000000001', 'wei', null, 'down')).toBe('0.001 ETH');
-    expect(feeAmountText('1', 'wei')).toBe('0.000001 ETH');
-    expect(feeAmountText('1', 'wei', null, 'down')).toBe('< 0.000001 ETH');
+    expect(feeAmountText('1', 'wei')).toBe('0.000000000000000001 ETH');
+    // A non-zero fee never reads 0, even rounded down: the significant digits are kept.
+    expect(feeAmountText('1', 'wei', null, 'down')).toBe('0.000000000000000001 ETH');
+    expect(feeAmountText('123456789', 'wei', null, 'down')).toBe('0.000000000123456 ETH');
+    expect(feeAmountText('123456789', 'wei')).toBe('0.000000000123457 ETH');
     expect(feeAmountText('5000', 'lamports')).toBe('0.000005 SOL');
     expect(feeAmountText('210000', 'token')).toBe('210000 token');
     expect(feeAmountText('210000', 'USDC')).toBe('210000 USDC');

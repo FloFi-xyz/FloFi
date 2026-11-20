@@ -4,6 +4,7 @@
  * Every value is read from the existing projections (`projectSimulation`, the run review, the server's fee evidence); nothing here quotes,
  * computes a fee, decides an action or claims an outcome the records do not state.
  */
+import { shortTokenDecimal } from './token-amount-display';
 import type { NativeFeeShortfall } from '../user-funded/groups';
 import { networkIdentity } from './network-registry';
 
@@ -53,23 +54,16 @@ export function simulateFooterStatus(input: { readonly busy: boolean; readonly s
   return null;
 }
 
-/** A wei amount as a decimal native amount, never rounded to zero (at most 6 decimals; a non-zero value below that reads "< 0.000001"). */
+/** A wei amount as a decimal native amount at six significant digits (the global rule), rounded up; a non-zero amount never reads 0. */
 export function nativeAmount(wei: string, decimals = 18): string {
   if (!/^(0|[1-9][0-9]{0,77})$/.test(wei)) return '—';
-  const value = BigInt(wei), scale = 10n ** BigInt(decimals), step = 10n ** BigInt(Math.max(0, decimals - 6));
-  if (value > 0n && value < step) return '< 0.000001';
-  // Rounded UP to the shown precision, so a requirement or a shortfall is never understated.
-  const shown = (value + step - 1n) / step * step, whole = shown / scale;
-  const fraction = (shown % scale).toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '');
-  return `${whole}${fraction ? `.${fraction}` : ''}`;
+  // Six significant digits (the global rule), rounded UP, so a requirement or a shortfall is never understated.
+  return shortTokenDecimal({ units: wei, decimals }, 'up')!;
 }
 /** The balance the owner HAS, rounded DOWN (never overstated). */
 export function nativeBalance(wei: string, decimals = 18): string {
   if (!/^(0|[1-9][0-9]{0,77})$/.test(wei)) return '—';
-  const value = BigInt(wei), scale = 10n ** BigInt(decimals), step = 10n ** BigInt(Math.max(0, decimals - 6));
-  const shown = value / step * step, whole = shown / scale;
-  const fraction = (shown % scale).toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '');
-  return value > 0n && shown === 0n ? '< 0.000001' : `${whole}${fraction ? `.${fraction}` : ''}`;
+  return shortTokenDecimal({ units: wei, decimals }, 'down')!;
 }
 /** `fee`: the network fee ceiling alone; `sends`: native value the request itself sends (null when none); `required` = fee + sends. */
 export type FeeShortfallView = { readonly network: string; readonly symbol: string; readonly owner: string; readonly balance: string; readonly fee: string;

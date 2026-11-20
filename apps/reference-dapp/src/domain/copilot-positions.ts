@@ -9,6 +9,7 @@
  * collected until the owner reviews, confirms and signs in their own wallet. FloFi is not a position manager: it never rebalances, chooses or
  * acts on a position by itself.
  */
+import { shortTokenDecimal } from './token-amount-display';
 import { ARBITRUM_ONE_TRANSFER, BASE_MAINNET_TRANSFER, ETHEREUM_MAINNET_TRANSFER, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY as ORCA, ROBINHOOD_MAINNET_TRANSFER,
   UNISWAP_CATALOG_DEPLOYMENTS, uniswapCatalogDeployment } from '@defi-workflow-engine/action-registry';
 import type { ConcentratedLiquidityManagement } from '@defi-workflow-engine/workflow-contracts';
@@ -108,12 +109,9 @@ export const shortPositionId = (ref: Pick<LiquidityPositionRef, 'protocol' | 'po
   ? `#${ref.positionId.length > 10 ? `${ref.positionId.slice(0, 4)}…${ref.positionId.slice(-4)}` : ref.positionId}` : `${ref.positionId.slice(0, 4)}…${ref.positionId.slice(-4)}`;
 /** An exact amount ("0.000123456789 WETH"), or null when it is unavailable. */
 const exact = (units: string | null, t: { readonly symbol: string; readonly decimals: number }) => units === null ? null : `${formatTokenAmount(units, t.decimals)} ${t.symbol}`;
-/** A compact amount for lists and buttons: at most 6 decimals, rounded down ("< 0.000001" for a positive dust amount). */
+/** A compact amount for lists and buttons: six significant digits (the global rule), rounded down; the exact form stays in `exact`. */
 function compactUnits(units: string, decimals: number): string {
-  const full = formatTokenAmount(units, decimals), [whole, fraction = ''] = full.split('.');
-  const kept = fraction.slice(0, 6).replace(/0+$/, '');
-  if (!kept && whole === '0' && /[1-9]/.test(fraction)) return '< 0.000001';
-  return kept ? `${whole}.${kept}` : whole!;
+  return shortTokenDecimal({ units, decimals }, 'down') ?? formatTokenAmount(units, decimals);
 }
 const compact = (units: string | null, t: { readonly symbol: string; readonly decimals: number }) => units === null ? null : `${compactUnits(units, t.decimals)} ${t.symbol}`;
 /** Every number FloFi may show about these facts (ids, fee tiers, amounts, prices, ticks, heights): what a reply's numbers must come from. */

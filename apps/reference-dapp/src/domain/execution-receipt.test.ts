@@ -127,11 +127,12 @@ describe('receipt formatting', () => {
     expect(receiptDate(null, 'EN')).toBeNull(); expect(receiptDate('not a date', 'EN')).toBeNull();
   });
   it('keeps a readable amount without ever rounding a non-zero amount to zero; every digit stays available', () => {
-    expect(readableAmount('0.000003724947756 ETH', 'PT')).toEqual({ text: '0,000003724947756 ETH', full: '0,000003724947756 ETH', cut: false });
-    expect(readableAmount('0.00055426 WETH', 'EN').text).toBe('0.00055426 WETH');
-    expect(readableAmount('1234567.5 USDC', 'PT').text).toBe('1.234.567,5 USDC');
+    // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits, marked "≈" when not exact; `full` keeps every recorded digit.
+    expect(readableAmount('0.000003724947756 ETH', 'PT')).toEqual({ text: '≈ 0,00000372495 ETH', full: '0,000003724947756 ETH', cut: true });
+    expect(readableAmount('0.00055426 WETH', 'EN')).toEqual({ text: '0.00055426 WETH', full: '0.00055426 WETH', cut: false });
+    expect(readableAmount('1234567.5 USDC', 'PT')).toEqual({ text: '≈ 1,23457 mi USDC', full: '1.234.567,5 USDC', cut: true });
     const long = readableAmount('0.123456789012345678 WETH', 'EN');
-    expect(long).toEqual({ text: '0.123456789012… WETH', full: '0.123456789012345678 WETH', cut: true });
+    expect(long).toEqual({ text: '≈ 0.123457 WETH', full: '0.123456789012345678 WETH', cut: true });
     const tiny = readableAmount('0.000000000000000000000000001 ETH', 'EN');
     expect(tiny.text).toBe('0.000000000000000000000000001 ETH'); expect(tiny.text).not.toBe('0 ETH');
     expect(readableAmount('Not recorded in this history', 'PT').text).toBe('Not recorded in this history');

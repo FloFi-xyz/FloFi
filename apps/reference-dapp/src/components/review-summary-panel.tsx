@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type Rea
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { useLocale } from '../i18n/locale';
 import { TechnicalBody } from './technical-body';
+import { TokenAmountText } from './token-amount-text';
 import type { Workflow } from '../domain/initial-workflow';
 import { projectSimulation, simulationStatusPresentation, type SimulationSource } from '../domain/simulation-presentation';
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../domain/review-presentation';
@@ -106,22 +107,22 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // The step the runtime simulates and reviews (a sequence's current step, or the whole one-step workflow) decides, never the rest of the Canvas.
   const position = positionWorkflowOf(workflow);
   const positionRows = (rowsFor: 'simulate' | 'execute') => step ? liquidityPositionResultRows(step, rowsFor).map(row =>
-    <div key={row.label} data-position-row={row.label}><dt>{t(row.label)}</dt><dd className="numeric">{t(row.value)}</dd></div>) : null;
+    <div key={row.label} data-position-row={row.label}><dt>{t(row.label)}</dt><dd className="numeric">{row.amount ? <TokenAmountText value={row.value} rounding={row.amount}/> : t(row.value)}</dd></div>) : null;
   // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.
   const resultRows = <>
     {position ? positionRows(stage) : <>
-      {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{t(s.input)}{s.result ? <>{' → '}<span className="numeric">{t(s.result)}</span></> : null}</dd></div>)}
-      {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric">{t(step.minimum)}</dd></div>}
+      {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{/* The amount the owner configured, exactly as set (never reformatted). */}{t(s.input)}{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</dd></div>)}
+      {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric"><TokenAmountText value={step.minimum} rounding="down"/></dd></div>}
     </>}
     {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {
       // ADR-0010 §4 review UX6: a fee paid in a token to Pimlico says so beside its amount (who is paid, in which token).
       const paidTo = paidToPimlicoNote(line);
       return <div key={`${line.label}:${line.value}`}><dt>{t(line.treatment === 'CEILING' ? 'Network fee, at most' : line.label)}</dt>{paidTo
-        ? <dd><span className="numeric">{t(line.value)}</span><small className="review-block-qualifier">{t(paidTo)}</small></dd>
-        : <dd className="numeric">{t(line.value)}</dd>}</div>;
+        ? <dd><TokenAmountText className="numeric" value={line.value} rounding="up"/><small className="review-block-qualifier">{t(paidTo)}</small></dd>
+        : <dd className="numeric"><TokenAmountText value={line.value} rounding={line.treatment === 'CEILING' ? 'up' : 'nearest'}/></dd>}</div>;
     })}
     {/* ADR-0010: a network fee 0x takes out of the swap is shown as such, in the swap's token (never "free", never added on top). */}
-    {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric">{t(line.value)}</dd></div>)}
+    {sim.fees.filter(isIncludedNetworkFee).map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd className="numeric"><TokenAmountText value={line.value} rounding="up"/></dd></div>)}
   </>;
   const warnings = sim.warnings.filter(warning => !warning.technical).map((warning, index) => <p className="review-panel-note review-panel-warning" key={index}>{t(warning.message)}</p>);
   if (stage === 'execute') {

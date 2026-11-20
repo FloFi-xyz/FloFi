@@ -13,7 +13,7 @@ import { catalogPoolOn, type CanonicalAsset } from '@defi-workflow-engine/action
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { editorReducer, initialEditor } from './editor';
 import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
-import { liquidityPositionOperationPhrase, projectSimulation, uniswapPositionReviewLines, type SimulationSource } from './simulation-presentation';
+import { liquidityPositionOperationPhrase, projectSimulation, simulationAmount, uniswapPositionReviewLines, type SimulationSource } from './simulation-presentation';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import { projectExecutionEvidence } from './execution-evidence';
 import { financialAttemptState } from './financial-run-status';
@@ -152,8 +152,34 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: Uniswap position operation presen
     expect(keep.warnings.map(w => w.message)).not.toContain('Closing burns the position NFT. This cannot be undone.');
     expect(close).toMatchObject({ action: 'Close position' });
     expect(close.details.find(line => line.label === 'Position NFT')?.value).toBe('Burned (closed)');
-    expect(close.warnings.map(w => w.message)).toEqual(expect.arrayContaining(['Remove all liquidity, collect and close the position (burns the NFT)',
-      'Closing burns the position NFT. This cannot be undone.']));
+    // B (BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001): the operation is the short Review's first row, never repeated as a banner; the
+    // irreversible close stays a visible (non-technical) warning.
+    expect(close.summary.find(line => line.label === 'Operation')?.value).toBe('Remove all liquidity, collect and close the position (burns the NFT)');
+    expect(close.summary.find(line => line.label === 'Position NFT')?.value).toBe('Burned (closed)');
+    expect(close.warnings.filter(w => !w.technical).map(w => w.message)).toEqual(expect.arrayContaining(['Closing burns the position NFT. This cannot be undone.']));
+    expect(close.warnings.map(w => w.message)).not.toContain('Remove all liquidity, collect and close the position (burns the NFT)');
+  });
+
+  it('B: the short Review keeps only decisions; every engineering figure stays exact in the details (Technical details)', async () => {
+    const { record } = await run({ operation: 'DECREASE', partBps: 2_500, close: false }), q = record.review;
+    const lines = uniswapPositionReviewLines(q), label = (rows: readonly { label: string }[]) => rows.map(row => row.label);
+    expect(label(lines.summary)).toEqual(['Operation', 'Pool', 'Position', 'You receive (estimated)', 'Minimum you receive', 'Slippage', 'Recipient', 'Position NFT',
+      'Wallet requests']);
+    // Amount rows are marked for display rounding: the estimate to nearest, the guaranteed minimum down; their values stay exact here.
+    expect(lines.summary.find(row => row.label === 'You receive (estimated)')).toMatchObject({ amount: 'nearest' });
+    expect(lines.summary.find(row => row.label === 'Minimum you receive')).toMatchObject({ amount: 'down' });
+    // The minimum is only the floor the chain enforces (the principal minimum), exactly as recorded; the estimate includes owed tokens and fees.
+    expect(lines.summary.find(row => row.label === 'Minimum you receive')!.value).toBe(
+      `${simulationAmount(q.minimums.amount0Min, q.token0.decimals, q.token0.symbol)} + ${simulationAmount(q.minimums.amount1Min, q.token1.decimals, q.token1.symbol)}`);
+    expect(lines.summary.find(row => row.label === 'You receive (estimated)')!.value).toBe(
+      `${simulationAmount(q.expected.collect0, q.token0.decimals, q.token0.symbol)} + ${simulationAmount(q.expected.collect1, q.token1.decimals, q.token1.symbol)}`);
+    for (const technical of ['Liquidity removed', 'Liquidity remaining', 'Price range', 'Range state', 'Current price', 'Deadline', 'Position Manager', 'Expected principal returned',
+      'Minimum principal (enforced)', 'Owed tokens and fees', 'Collected (expected)', 'Collected, at least', 'Tokens returned'])
+      expect(label(lines.details), technical).toContain(technical);
+    expect(lines.details.find(row => row.label === 'Liquidity removed')!.value).toContain(q.liquidityToRemove);
+    expect(lines.details.find(row => row.label === 'Position Manager')!.value).toBe(q.contracts.positionManager);
+    // How the figures are built moves under Technical details; nothing material is hidden.
+    expect(lines.warnings.filter(w => !w.technical).map(w => w.message)).toEqual(['This uses real funds. One wallet request to the Uniswap Position Manager; FloFi never signs or sends.']);
   });
 
   it('the product Review projects a position run as its operation — never as a deposit with token approvals — with the network fee bound', async () => {
@@ -205,5 +231,9 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: Uniswap position operation presen
     expect(uniswapPositionReviewAuthorizable({ ...record, verdict: 'PENDING', attempts: [{ ...unsent, reviewCommitment: '0xearlier' }] })).toBe(true);
     expect(financialAttemptState({ ...unsent, note: 'UNISWAP_POSITION_STATE_CHANGED_REVIEW_REQUIRED' })).toBe('NOT_SUBMITTED');
     expect(financialAttemptState({ ...unsent, note: 'UNISWAP_REJECTED' })).toBe('REJECTED');
+    // A hand-off refusal the server concluded itself (BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001) reads "not submitted", never "cancelled".
+    for (const note of ['UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED', 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED', 'CATALOG_ASSET_IDENTITY_CHANGED', 'UNISWAP_POSITION_NOT_FOUND',
+      'UNISWAP_SIMULATION_POSITION_REVERTED', 'UNISWAP_UNEXPECTED_CONTRACT'])
+      expect(financialAttemptState({ ...unsent, note }), note).toBe('NOT_SUBMITTED');
   });
 });

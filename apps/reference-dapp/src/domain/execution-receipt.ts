@@ -6,6 +6,7 @@
  * rounded to zero or assumed. "You received" (and every completed-result word) appears only for a value the record observed; a value it did not
  * observe is either the owner's configured amount, labelled as such, or said to be unrecorded — never a zero, never a guess.
  */
+import { displayAmountText } from './token-amount-display';
 import type { DashboardRunView, DashboardStatus } from '../lib/dashboard/types';
 import type { ExecutionLifecycle, LifecycleOperation, LifecycleStep } from './execution-lifecycle';
 import type { EvidenceValue } from './execution-evidence';
@@ -180,6 +181,11 @@ export const shortAddress = (value: string) => value.length > 16 ? `${value.slic
  * Anything that is not "<number> <unit>" (a word, a position, "Not recorded…") is returned unchanged.
  */
 export function readableAmount(value: string, language: 'EN' | 'PT', digits = 12): { text: string; full: string; cut: boolean } {
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a recorded "<number> <unit>" reads at six significant digits (the global rule), marked
+  // "≈" when it is not exact; `full` keeps every recorded digit (tooltip, disclosure, copy). `digits` (legacy cut) applies to nothing else.
+  // A token amount carries its unit; a bare number (a raw Uniswap liquidity figure) is not a token amount and keeps the legacy reading below.
+  const short = /\s\S/.test(value.trim()) ? displayAmountText(value, { language }) : null;
+  if (short) return { text: short.text, full: short.exactText, cut: short.approximate };
   // Only "<number> <one unit>": a value with several amounts ("0.3 WETH + 1,008 USDC") is left exactly as recorded.
   const match = /^(-?)(\d+)(?:\.(\d+))?(\s\S+)?$/.exec(value);
   if (!match) return { text: value, full: value, cut: false };

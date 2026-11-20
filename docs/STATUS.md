@@ -7,6 +7,18 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001 — Uniswap L1 fee refusals, short liquidity Review, six significant digits
+
+**Status: pull request for CircleCI certification of its exact head; merge and production deployment only with the owner's approval. Evidence is
+MOCKED and local; nothing was signed or sent; automated certification is not mainnet validation. Not accepted by product.**
+- Incident `balp-3e4b…` (Base removal refused repeatedly with `UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED`): the Uniswap runtime froze an
+  instantaneous L1 bound with no headroom; it now applies the shared network-fee rule (2× L1 headroom inside the authorized maximum, strict at the
+  signed cap, same-run refresh beyond it, recorded overrun at reconciliation).
+- Uniswap V3 / Orca position Reviews keep only the decisions (about half the height); engineering figures stay exact under Technical details.
+- One global rule shows token amounts at six significant digits with the exact value one tap away; the engine's values are untouched.
+
+See the [build record](builds/BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001.md).
+
 ## BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 — Simulate/Execute fidelity, structured Technical details, post-merge red of PR #225
 
 **Status: pull request for CircleCI certification of its exact head; the owner authorized merge and deployment once every mandatory gate is green.

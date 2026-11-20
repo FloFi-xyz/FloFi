@@ -13,6 +13,7 @@
  * define for people (a Robinhood Stock Token's underlying shares, a Token-2022 mint's scaled UI amount or accrued interest). Presentation and
  * USD values use `displayUnits`; a balance FloFi cannot interpret safely has none (`unavailableCode`) and is never shown as a raw number.
  */
+import { displayTokenAmount } from './token-amount-display';
 import { usdAmount } from './usd-estimate';
 
 export type PortfolioLanguage = 'EN' | 'PT';
@@ -114,16 +115,17 @@ export function sumUsd(values: readonly (string | null | undefined)[]): string |
   return total === null ? null : usdOfCents(total);
 }
 /**
- * A token balance for display, truncated (never rounded up) to a readable precision: 2 decimals from 1,000, 4 from 1, else 6.
- * A positive balance below the shown precision reads "< 0.000001". Language picks the separators (EN 1,234.5 · PT 1.234,5).
+ * A token balance for display: six significant digits (BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001, the global rule), rounded DOWN
+ * (a balance is never overstated, and a positive balance never reads 0). Language picks the separators (EN 12,345.6 · PT 12.345,6).
  */
 export function formatTokenAmount(units: string, decimals: number, language: PortfolioLanguage = 'EN'): string {
   if (!UNITS.test(units) || !Number.isInteger(decimals) || decimals < 0 || decimals > 36) return '—';
-  const value = BigInt(units), scale = 10n ** BigInt(decimals), whole = value / scale, separators = SEPARATORS[language];
-  const shown = Math.min(whole >= 1000n ? 2 : whole >= 1n ? 4 : 6, decimals);
-  const fraction = decimals ? (value % scale).toString().padStart(decimals, '0').slice(0, shown).replace(/0+$/, '') : '';
-  if (value > 0n && whole === 0n && !fraction) return `< 0${separators.decimal}${'0'.repeat(Math.max(shown - 1, 0))}1`;
-  return grouped(whole.toString(), separators.group) + (fraction ? separators.decimal + fraction : '');
+  return displayTokenAmount({ units, decimals }, { rounding: 'down', language })?.value ?? '—';
+}
+/** The exact balance (every recorded digit), localized: the tooltip, disclosure and copy of `formatTokenAmount`. */
+export function exactTokenAmount(units: string, decimals: number, language: PortfolioLanguage = 'EN'): string {
+  if (!UNITS.test(units) || !Number.isInteger(decimals) || decimals < 0 || decimals > 36) return '—';
+  return displayTokenAmount({ units, decimals }, { language })?.exactText ?? '—';
 }
 /** "1234.56" → "$1,234.56" (EN) / "US$ 1.234,56" (PT); a positive value below a cent reads "< $0.01". */
 export function formatUsdValue(value: string, language: PortfolioLanguage = 'EN'): string {

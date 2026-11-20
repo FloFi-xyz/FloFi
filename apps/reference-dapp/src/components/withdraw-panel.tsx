@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { displayTokenAmount } from '../domain/token-amount-display';
 import { useLocale } from '../i18n/locale';
 
 import { TokenAmountInput } from './token-amount-input';
@@ -11,8 +12,13 @@ import { useWorkflow } from '../state/workflow-store';
 import { useSupply } from '../state/supply-store';
 import type { WithdrawObservation } from '@defi-workflow-engine/reference-reconciler';
 import { PendingExecutionNote } from './execution-concurrency-notes';
-const human=(value:string,decimals:number)=>(Number(value)/10**decimals).toLocaleString('en-US',{maximumFractionDigits:decimals});
-const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
+// BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: exact BigInt arithmetic (a JavaScript Number lost digits of 18-decimal amounts), six
+// significant digits; `ceiling` rounds a budget up; `exact` is every digit, for the sentences that say "exactly".
+function human(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{marker:false})?.text??value;}
+function ceiling(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{rounding:'up'})?.text??value;}
+function exact(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals})?.exactText??value;}
+// A health factor is rounded DOWN (0.9999996 never reads 1: a liquidatable position never looks safe).
+const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':displayTokenAmount({units:value,decimals:18},{rounding:'down'})?.text??value;
 export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null;
@@ -49,14 +55,14 @@ export function WithdrawPanel({view}:{view:'simulate'|'execute'}){
   const node=state.workflow.nodes.find(n=>n.actionType==='withdraw'),fields=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled),info=run.error??record?.error,observation=record?.observations.at(-1) as WithdrawObservation|undefined;
   return <section className="panel" aria-label={tr("Aave Withdraw")}><h2>{tr(view==='simulate'?'Simulate Withdraw':record?.evidence?'Withdraw result':'Review Withdraw')}</h2>
-    <p>{tr("Withdraw ")}{tr(fields?.amount??(review?human(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" from Aave V3 on ")}{tr(shown.network)}.</p>
+    <p>{tr("Withdraw ")}{tr(fields?.amount??(review?exact(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" from Aave V3 on ")}{tr(shown.network)}.</p>
     {run.retired&&record&&<p role="alert">{tr("The workflow changed. Authorization is invalid. Observe any existing transaction before starting again.")}</p>}
     {risk&&review&&<><p>{tr("Supplied collateral before: ")}{tr(human(review.state.position,shown.decimals))} {tr(shown.asset)}</p><p>{tr("Withdraw amount: ")}{tr(human(review.amount,shown.decimals))} {tr(shown.asset)} ({tr(review.amount)}{tr(" raw)")}</p>
       <p>{tr("Estimated supplied collateral after: ")}{tr(human(review.withdraw!.collateralAfter,shown.decimals))} {tr(shown.asset)}</p><p>{tr("Outstanding variable debt: ")}{tr(human(risk.debt,shown.decimals))} {tr(shown.asset)}</p>
       <p>{tr("Health factor before: ")}{tr(hf(risk.healthFactor))}</p><p>{tr("Estimated health factor after: ")}{tr(hf(review.withdraw!.expectedPostHealthFactor))}</p>
       <p>{tr("Wallet ")}{tr(shown.asset)}{tr(" before: ")}{tr(human(review.state.balance,shown.decimals))} {tr(shown.asset)}</p><p>{tr("Estimated wallet ")}{tr(shown.asset)}{tr(" after: ")}{tr(human(review.withdraw!.walletAfter,shown.decimals))} {tr(shown.asset)}</p>
       <p>{tr("Estimated network cost: ")}{tr(human(review.gasLimits.reduce((total,gas)=>total+BigInt(gas)*BigInt(review.state.gasPrice),0n).toString(),18))}{tr(" ETH.")}</p>
-      <p>{tr("Maximum network budget: ")}{tr(human(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH, including fee margin.")}</p>
+      <p>{tr("Maximum network budget: ")}{tr(ceiling(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH, including fee margin.")}</p>
       <p>{tr("Owner / recipient: ")}{review.account}</p><p>{tr("Pool: ")}{tr(review.pool)}</p><p>{tr("Asset: ")}{tr(review.asset)}</p><p>{tr("Chain: ")}{tr(shown.network)} ({tr(Number(BigInt(shown.chainHex)))})</p>
       <p>{tr("Exact Pool call: withdraw(")}{tr(review.asset)}, {tr(review.amount)}, {tr(review.beneficiary)})</p><p>{tr("Exact calldata: ")}<code>{tr(review.transactions[0]?.data)}</code></p>
       <p>{tr("State block: ")}{tr(review.state.block)}{tr(" · Review expires: ")}{tr(review.expiresAt)}</p><p>{tr("Collateral estimates account for index rounding. Debt continues accruing normal interest.")}</p></>}
@@ -68,7 +74,7 @@ export function WithdrawPanel({view}:{view:'simulate'|'execute'}){
       {pending&&record?.verdict==='PENDING'&&<button type="button" disabled={run.busy} onClick={()=>void run.observe()}>{tr("Observe existing transaction")}</button>}
       {record?.notSubmitted&&!run.retired&&<><p>{tr("The wallet request was not submitted. Prepare a fresh explicit owner Review.")}</p><button type="button" disabled={run.busy} onClick={()=>void run.recoverReview()}>{tr("Prepare fresh review")}</button></>}
       {record?.attempts.length&&!record.evidence?<a download="flofi-aave-withdraw-execution-record.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record,null,2))}>{tr("Download execution record")}</a>:null}
-      {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Withdraw independently reconciled. Wallet received exactly ")}{tr(human(review!.amount,shown.decimals))} {tr(shown.asset)}{tr("; supplied collateral is ")}{tr(human(observation.postPosition.position,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}.</p><a download="flofi-aave-withdraw-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
+      {record?.evidence&&observation?.postPosition?.borrow&&<><p>{tr("Withdraw independently reconciled. Wallet received exactly ")}{tr(exact(review!.amount,shown.decimals))} {tr(shown.asset)}{tr("; supplied collateral is ")}{tr(human(observation.postPosition.position,shown.decimals))} {tr(shown.asset)}{tr("; health factor is ")}{tr(hf(observation.postPosition.borrow.healthFactor))}.</p><a download="flofi-aave-withdraw-evidence.json" href={'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(record.evidence,null,2))}>{tr("Download Evidence Bundle")}</a></>}
     </>}{info&&<p role="status">{lendingCopy(messages[info]??'Withdraw needs attention. Inspect technical details and observe any existing transaction.',shown,tr)}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({error:info,review,attempts:record?.attempts,observations:record?.observations,walletDiagnostic:record?.walletDiagnostic,environment:record?.evidence?.bundle.environment},null,2)}</pre></details>
   </section>;

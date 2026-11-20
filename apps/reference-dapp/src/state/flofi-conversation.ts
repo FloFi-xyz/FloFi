@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { displayAmountText } from '../domain/token-amount-display';
 import { useEffect, useRef, useState } from 'react';
 import type { AutomationInput } from '../automations/definition';
 import type { CopilotReply } from '../domain/copilot-conversation';
@@ -33,6 +34,8 @@ import { conversationCopy } from '../domain/conversation-copy';
 import type { ChatContent, ChatMessage, Rendering } from '../domain/chat-message';
 import { aboutNextRequest, answerLanguage, bindingIssue, classifyAnswer, continuationReason, conversationExecution, executionQuestion, executionStatusAnswer, reviewExpired, conversationPhase, conversationReview, describeChatChange, executionContinuation, lifecycleRequest, lostSteps,
   QUOTE_MOVED, reviewBinding, reviewChanges, type ConversationLanguage, type ConversationReview, type LifecycleView, type PendingQuestion, type ReviewBinding } from '../domain/conversation-lifecycle';
+/** BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a delivered amount in a chat message, at six significant digits (the record stays exact). */
+const shownAmount = (value: string, language: string) => displayAmountText(value, { language: language === 'PT' ? 'PT' : 'EN' })?.text ?? value;
 
 /**
  * BUILD-FLOFI-CONVERSATIONAL-001: the FloFi chat's state, owned by the workspace shell (above the stage switch) so navigating Build, Simulate and
@@ -431,7 +434,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   /** P0 hotfix: a finished step-by-step workflow is Completed with every step and what its reconciled record proves it delivered. */
   function completedSequenceText(language: ConversationLanguage, sequence: NonNullable<ConversationBridge['sequence']>): string {
     const c = conversationCopy(language);
-    const delivered = sequence.steps.filter(step => step.delivered).map(step => c.stepDelivered(step.number, translate(language, step.action), step.delivered!));
+    const delivered = sequence.steps.filter(step => step.delivered).map(step => c.stepDelivered(step.number, translate(language, step.action), shownAmount(step.delivered!, language)));
     return [c.workflowCompleted(sequence.total), ...delivered].join(' ');
   }
   /** A run of this workflow is open (not final), its wallet is being asked, or a step-by-step workflow is between its steps. */
@@ -904,7 +907,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     const done = sequence.steps[next.from - 1], from = next.from;
     if (sequence.current > next.from || sequence.finished) {
       handover.current = null;
-      say(next.scope, next.language, (_, c) => c.stepCompleted(from, sequence.total, done?.delivered ?? null));
+      say(next.scope, next.language, (_, c) => c.stepCompleted(from, sequence.total, done?.delivered ? shownAmount(done.delivered, next.language) : null));
       // P0 hotfix (execution continuity): the shell may already be simulating the next step (read-only, in Execute): its Review is presented
       // here once that simulation settles, never a second simulation and never "still working on the previous step".
       if (!sequence.finished && bridge.source.state.busy) {

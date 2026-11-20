@@ -44,7 +44,7 @@ test.setTimeout(240_000);
 
 /** The verified pool's range around the MOCKED price (about 22.36 USDC per SOL, tick −38,008; spacing 64). */
 const RANGE = { tickLower: -39_104, tickUpper: -36_992 } as const;
-/** In range: 3.3103 SOL + 79.7778 USDC of principal, 0.001234 SOL + 0.56 USDC of fees recorded; 0.0021 SOL + 0.65 USDC accrued since. */
+/** In range: 3.31031 SOL + 79.7778 USDC (six significant digits) of principal, 0.001234 SOL + 0.56 USDC of fees recorded; 0.0021 SOL + 0.65 USDC accrued since. */
 const MANAGED: SeededOrcaPosition = { ...RANGE, liquidity: '10000000000', feeOwedA: '1234000', feeOwedB: '560000' };
 const ACCRUED = { a: '2100000', b: '650000' } as const;
 /** Its position token carries an approved delegate: listed, never managed. */
@@ -208,7 +208,7 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(fact(page, managed, W.range)).toHaveText(`20.036403–24.747889 ${W.unit} · ${W.inRange}`);
     await expect(fact(page, managed, W.price)).toHaveText(`22.358560 ${W.unit}`);
     await expect(fact(page, managed, W.liquidity)).toHaveText(W.open);
-    await expect(fact(page, managed, W.principal)).toHaveText('3.3103 SOL + 79.7778 USDC');
+    await expect(fact(page, managed, W.principal)).toHaveText('3.31031 SOL + 79.7778 USDC');
     await expect(fact(page, managed, W.owed)).toHaveText('0.001234 SOL + 0.56 USDC');
     await expect(fact(page, managed, W.collectable)).toHaveText(W.unavailable);
     await expect(fact(page, managed, W.verified)).toHaveText(/\d{4}/);
@@ -220,7 +220,9 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(fact(page, held, W.principal)).toHaveText('0.662063 SOL + 15.9555 USDC');
     await expect(position(page, held)).toContainText(W.delegated);
     await expect(position(page, held).getByRole('group')).toHaveCount(0);
-    await expect(position(page, held).getByRole('button')).toHaveCount(0);
+    // A delegated position offers no action: its only control is the exact-value disclosure of a shortened amount (never an operation).
+    await expect(position(page, held).locator('button:not(.token-amount-short)')).toHaveCount(0);
+    await expect(position(page, held).getByRole('button', { name: /^(Collect|Remove|Close|Coletar|Remover|Fechar)/ })).toHaveCount(0);
 
     await actions(page, managed).getByRole('button', { name: W.remove, exact: true }).click();
     const share = position(page, managed).getByRole('group', { name: W.share, exact: true });
@@ -275,7 +277,7 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
 
     // The Dashboard reads the position again: half the liquidity, nothing recorded as owed; then the owner closes it.
     await openPositions(page);
-    await rescanUntil(page, () => expect(fact(page, managed, W.principal)).toHaveText('1.6551 SOL + 39.8889 USDC', { timeout: 2_000 }));
+    await rescanUntil(page, () => expect(fact(page, managed, W.principal)).toHaveText('1.65515 SOL + 39.8889 USDC', { timeout: 2_000 }));
     await expect(fact(page, managed, W.owed)).toHaveText('0 SOL + 0 USDC');
     await expect(fact(page, managed, W.collectable)).toHaveText(W.unavailable);
     // More trading since that checkpoint: the fees it earns are credited to the position only at its next checkpoint (the recorded owed fees
@@ -322,13 +324,15 @@ test('PT-BR: Coletar taxas — Simulate runs the fees-only collection; the owner
     const scan = await openPositions(page, 'PT');
     await expect(scan).toContainText(W.mocked);
     await expect(fact(page, managed, W.range)).toContainText(W.inRange);
-    await expect(fact(page, managed, W.principal)).toHaveText('3,3103 SOL + 79,7778 USDC');
+    await expect(fact(page, managed, W.principal)).toHaveText('3,31031 SOL + 79,7778 USDC');
     await expect(fact(page, managed, W.owed)).toHaveText('0,001234 SOL + 0,56 USDC');
     await expect(fact(page, managed, W.collectable)).toHaveText(W.unavailable);
     await expect(actions(page, managed, 'PT').getByRole('button')).toHaveText([W.collect, W.remove, W.close]);
     await expect(position(page, managed)).toContainText(W.note);
     await expect(position(page, held)).toContainText(W.delegated);
-    await expect(position(page, held).getByRole('button')).toHaveCount(0);
+    // A delegated position offers no action: its only control is the exact-value disclosure of a shortened amount (never an operation).
+    await expect(position(page, held).locator('button:not(.token-amount-short)')).toHaveCount(0);
+    await expect(position(page, held).getByRole('button', { name: /^(Collect|Remove|Close|Coletar|Remover|Fechar)/ })).toHaveCount(0);
 
     await actions(page, managed, 'PT').getByRole('button', { name: W.collect, exact: true }).click();
     await prepared(page, 'COLLECT', 'PT');
@@ -360,7 +364,7 @@ test('PT-BR: Coletar taxas — Simulate runs the fees-only collection; the owner
     // The Dashboard reads the position again: still open with the same principal; nothing recorded as owed (a read zero, not an unavailable one).
     await openPositions(page, 'PT');
     await rescanUntil(page, () => expect(fact(page, managed, W.owed)).toHaveText('0 SOL + 0 USDC', { timeout: 2_000 }), 'PT');
-    await expect(fact(page, managed, W.principal)).toHaveText('3,3103 SOL + 79,7778 USDC');
+    await expect(fact(page, managed, W.principal)).toHaveText('3,31031 SOL + 79,7778 USDC');
     await expect(fact(page, managed, W.collectable)).toHaveText(W.unavailable);
     await expectNothingAsked(page);
     networkGuard.assertClean();

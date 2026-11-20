@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { displayTokenAmount } from '../domain/token-amount-display';
 import { useLocale } from '../i18n/locale';
 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -363,12 +364,16 @@ const amountFit = (value: string): CSSProperties => ({ ['--amount-chars' as stri
 /** A configured slippage limit as a plain percentage (`1% (100 bps)` → `1%`): basis points are an internal unit (board 16 §9). */
 export const priceDifference = (formatted: string) => formatted.replace(/\s*\(\d+ bps\)$/, '');
 /**
- * P0 approved UX (board 04): a quoted amount is shown with at most six significant digits (`0.000486123456` → `0.000486123`; integer digits are
- * never dropped: `1234567.89` → `1234568`), rounded half up on the decimal text itself (no floating point). Display only: the full value stays
+ * P0 approved UX (board 04), BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a quoted amount is shown with at most six significant
+ * digits (`0.000486123456` → `0.000486123`; from seven integer digits a compact unit, `1234567.89` → `1.23457M`, PT `1,23457 mi`), rounded half
+ * up with exact decimal arithmetic (no floating point), in the interface language. Display only: the full value stays
  * in the title and the disclosure, and nothing here is ever sent to a quote, a simulation or a transaction. Anything that is not a plain decimal
  * is returned unchanged.
  */
-export function significantAmount(value: string, digits = 6): string {
+export function significantAmount(value: string, digits = 6, language: 'EN' | 'PT' = 'EN'): string {
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: the global rule (an estimate, rounded to nearest) for the default six digits.
+  // A large amount reads compactly (1.23457M) rather than with invented digits; an exact value is returned exactly as written.
+  if (digits === 6 && /^\d+(?:\.\d+)?$/.test(value)) { const shown = displayTokenAmount(value, { marker: false, group: false, language }); return shown?.approximate ? shown.value : value; }
   const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
   if (!match || digits < 1) return value;
   const integer = match[1]!.replace(/^0+(?=\d)/, ''), fraction = match[2] ?? '';
@@ -390,8 +395,8 @@ export function significantAmount(value: string, digits = 6): string {
  */
 function CardAmount({ value, fallback, token, loading, live = true, className = 'composer-amount-value', fit = true, round = false }: { value: string | undefined; fallback: string; token: string; loading: boolean; live?: boolean; className?: string; fit?: boolean;
   /** P0 approved UX (board 04): show at most six significant digits; the exact value stays in the title and the disclosure. */ round?: boolean }) {
-  const { t: tr } = useLocale();
-  const display = round && value ? significantAmount(value) : value;
+  const { t: tr, language } = useLocale();
+  const display = round && value ? significantAmount(value, 6, language === 'PT' ? 'PT' : 'EN') : value;
   const shownRef = useRef<HTMLSpanElement>(null), exactRef = useRef<HTMLSpanElement>(null), exactId = useId();
   const [clipped, setClipped] = useState(false), [openFor, setOpenFor] = useState<string | null>(null);
   const pending = loading && !value;

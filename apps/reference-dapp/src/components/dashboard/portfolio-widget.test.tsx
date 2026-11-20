@@ -109,6 +109,17 @@ describe('Dashboard wallet portfolio widget', () => {
     expect(expanded).toContain('1.234,56</td>'); expect(expanded).toContain('1,5</td>'); expect(expanded).toContain('Recolher');
     expect(expanded).not.toContain('Não habilitadas nesta implantação');
   });
+  it('shows a long balance at six significant digits, rounded down, with the exact balance one click away (BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001)', async () => {
+    const LONG: PortfolioHolding = { ...ETH, units: '570195181991000', displayUnits: '570195181991000', price: null, valueUsd: null };
+    const props: Props = { evm: OWNER, solana: null, load: loader({ ok: true, portfolio: snapshot({ holdings: [LONG], pricedTotalUsd: null, unpricedCount: 1 }) }) };
+    view(props); await settle();
+    click(props, disclosure);
+    const expanded = view(props);
+    // Never the 15 recorded digits in the cell, never rounded up; the exact value is the button's title and its disclosure, not a hover only.
+    expect(expanded).toMatch(/<button type="button" class="token-amount-short" title="0\.000570195181991" aria-label="0\.000570195, Show exact value" aria-expanded="false">0\.000570195<\/button>/);
+    expect(expanded).not.toMatch(/>0\.000570195181991</);
+  });
+
   it('shows a balance by the token’s own rules with its raw amount kept apart, and an uninterpretable balance as unavailable, never a number', async () => {
     const SCALED: PortfolioHolding = { ...USDC, networkId: 'solana', network: 'Solana', chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', symbol: 'xAAPL', name: 'Apple xStock',
       address: 'XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp', decimals: 8, units: '300000000', displayUnits: '450000000', displayBasis: 'SCALED_UI_AMOUNT' };

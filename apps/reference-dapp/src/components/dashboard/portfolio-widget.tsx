@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { TokenUnitsText } from '../token-amount-text';
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { walletPortfolio } from '../../app/portfolio-action';
-import { formatObservedAt, formatAllocationShare, portfolioAllocation, portfolioOnNetwork, formatTokenAmount, formatUsdPrice, formatUsdValue, holdingKey, portfolioSummary, priceObservedAt, shortAddress,
+import { formatObservedAt, formatAllocationShare, portfolioAllocation, portfolioOnNetwork, exactTokenAmount, formatTokenAmount, formatUsdPrice, formatUsdValue, holdingKey, portfolioSummary, priceObservedAt, shortAddress,
   type PortfolioHolding, type PortfolioNetwork, type PortfolioNetworkId, type WalletPortfolio, type WalletPortfolioResult } from '../../domain/wallet-portfolio';
 import { NetworkBrandIcon, TokenBrandIcon } from '../brand-icon';
 import { StatusTag } from './dashboard-status';
@@ -208,8 +209,8 @@ function BalanceCell({ holding }: { holding: PortfolioHolding }) {
     <span>{tr('Unavailable')}</span><small>{tr(UNAVAILABLE_REASON(holding.unavailableCode))}</small></td>;
   const note = BASIS_NOTE[holding.displayBasis];
   // The canonical raw amount stays available next to a balance shown by the token's own rules.
-  return <td className={`${styles.end} numeric`} title={note ? tr('On-chain amount: {0}', formatTokenAmount(holding.units, holding.decimals, language)) : undefined}>
-    {formatTokenAmount(holding.displayUnits, holding.decimals, language)}{note && <small className={styles.basis}>{tr(note)}</small>}</td>;
+  return <td className={`${styles.end} numeric`} title={note ? tr('On-chain amount: {0}', exactTokenAmount(holding.units, holding.decimals, language)) : undefined}>
+    <TokenUnitsText units={holding.displayUnits} decimals={holding.decimals}/>{note && <small className={styles.basis}>{tr(note)}</small>}</td>;
 }
 
 function PortfolioDetails({ portfolio, copied, copy, collapse }: { portfolio: WalletPortfolio; copied: string | null; copy(address: string): void; collapse(): void }) {

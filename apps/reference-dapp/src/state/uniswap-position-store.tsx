@@ -237,7 +237,10 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
       diagnostic.code = refused ? 'UNISWAP_REJECTED' : !diagnostic.invoked ? (cause instanceof Error && /^UNISWAP_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'UNISWAP_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'UNISWAP_SUBMISSION_UNKNOWN';
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await uniswapPositionWalletFailure(id, diagnostic);
+        // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a hand-off refusal is concluded by the server itself (its attempt is provably
+        // unsent), so the report is then refused; the run's current record (CANCELLED, authorization cleared) replaces the stale PREPARED one.
+        const reported = await uniswapPositionWalletFailure(id, diagnostic);
+        const failure = reported.ok ? reported : await uniswapPositionStatus(id).catch(() => reported);
         // A refusal that execute() refreshes in place hands its record over instead of showing it.
         if (!diagnostic.invoked && UNISWAP_POSITION_REFRESH_IN_PLACE.test(diagnostic.code)) throw Object.assign(new Error(diagnostic.code, { cause }), { interim: failure.ok ? failure.value : null });
         if (failure.ok) accept(failure.value);
