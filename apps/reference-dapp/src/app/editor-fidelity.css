@@ -1,0 +1,42 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (TEC-01, PDF of 20-11-2026 §6): an opened "Technical details" is a short list of labelled groups that scrolls
+   inside its own bounded area — it never stretches the page, pushes the Canvas out of view or moves the footer's action. Existing tokens only. */
+/* position:relative: a scroll area is its absolutely positioned descendants' containing block (an announcement's sr-only text never escapes it). */
+:is(.review-panel-approved,.editor-workflow-run) .review-panel-technical>.technical-body{position:relative;margin:8px 6px 10px 14px;padding:2px 8px 2px 0;max-height:clamp(200px,40vh,380px);
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable}
+.technical-body:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
+.technical-body>:first-child{margin-top:0}
+.technical-group{padding:10px 0;border-top:1px solid var(--line)}
+.technical-group:first-child{padding-top:2px;border-top:0}
+.technical-group>h4{margin:0 0 6px;font-family:var(--font-ibm-plex-mono),monospace;font-size:10.5px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.technical-group>p,.technical-group>ul{margin:4px 0;font-size:12.5px;line-height:1.45}
+.technical-group .editor-run-steps{display:grid;gap:8px;margin:8px 0 0;padding:0;list-style:none}
+.technical-group .editor-run-steps>li{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;font-size:13px;line-height:1.4}
+.technical-group .editor-run-steps>li>.muted{font-size:12.5px}
+.technical-recipient{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px 6px;flex-basis:100%;font-size:12.5px;color:var(--muted)}
+.technical-recipient .execution-receipt-copy>span[title]{font-family:var(--font-ibm-plex-mono),monospace;color:var(--ink)}
+dl.technical-rows{display:grid;margin:0}
+dl.technical-rows>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:10px;padding:5px 0;border-bottom:1px dashed var(--line)}
+dl.technical-rows>div:last-child{border-bottom:0}
+dl.technical-rows dt{font-size:12.5px;font-weight:400;color:var(--muted)}
+dl.technical-rows dd{margin:0;font-size:12.5px;text-align:right;overflow-wrap:anywhere}
+dl.technical-rows>div[data-emphasis="attention"] dd{color:var(--warning-text)}
+dl.technical-rows+dl.technical-rows{margin-top:6px;padding-top:4px;border-top:1px solid var(--line)}
+.review-block-technical .technical-group .editor-run-steps,.review-block-technical .technical-group .editor-run-facts{margin-top:0}
+.technical-group .editor-run-steps{margin-top:8px}
+@media(max-width:600px){
+  :is(.review-panel-approved,.editor-workflow-run) .review-panel-technical>.technical-body{max-height:55vh;margin-left:12px}
+  dl.technical-rows>div{grid-template-columns:minmax(0,1fr)}
+  dl.technical-rows dd{text-align:left}
+}
+
+/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (PDF §6, "Rolagem"): on a desktop Editor, the panel docked beside the Canvas scrolls inside the frame's own height
+   instead of stretching it. Opening "Technical details", or a Review with more steps than the references, never grows the page, never re-centres
+   the Canvas and never moves the footer's action. The dock does not size the row (height 0, at least the row's height), so the frame keeps the
+   Canvas/Assistant height; a stacked (narrow) frame keeps its natural flow. */
+@media(min-width:1281px){
+  @container flofi-canvas-frame (min-width:900px){
+    .main.workflow-workspace :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.canvas-review-dock{
+      position:relative;height:0;min-height:100%;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable}
+  }
+}

@@ -10,6 +10,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { useLocale } from '../i18n/locale';
+import { TechnicalBody } from './technical-body';
 import type { Workflow } from '../domain/initial-workflow';
 import { projectSimulation, simulationStatusPresentation, type SimulationSource } from '../domain/simulation-presentation';
 import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../domain/review-presentation';
@@ -90,7 +91,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // <details> was re-created closed on every switch, hiding what the owner had just opened.
   const [technicalOpen, setTechnicalOpen] = useState(false);
   const disclosure = (content: ReactNode, label = 'Technical details') => <details className="review-panel-technical" open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)}>
-    <summary>{t(label)}</summary>{content}</details>;
+    <summary>{t(label)}</summary><TechnicalBody label={label}>{content}</TechnicalBody></details>;
   const technical = props.technical ? disclosure(<>{blocked && source.state.error && <p className="review-panel-code"><code>{source.state.error}</code></p>}{props.technical}</>,
     blocked ? 'Technical details, for support' : 'Technical details') : null;
   const action = props.action ? <div className="simulation-panel-action">{props.action}</div> : null;
@@ -158,7 +159,8 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       {until && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{t('Review valid until {0}', until)}</p>}
       <p className="eyebrow">{t('REVIEW')}</p>
-      <h2>{t('You are authorizing')}</h2>
+      {/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (EXE-01): a valid Review before any wallet request is reviewed, not yet being authorized. */}
+      <h2>{t('Review before authorizing')}</h2>
       <dl className="review-panel-rows">
         {resultRows}
         {step?.details.filter(line => line.label === SIGNATURES_LABEL).map(line => <div key={line.label}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}

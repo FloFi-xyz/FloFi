@@ -61,7 +61,8 @@ describe('P0 hotfix E1: the Editor panel for Swap → Bridge', () => {
     expect(html).toContain('All 2 steps run as ONE wallet confirmation on Arbitrum One');
     expect(html).toContain('Then FloFi waits for the bridge delivery on Base and completes the workflow once it has verified it');
     expect(html).toContain('Spends (the minimum step 1 guarantees)');
-    expect(html).toContain('Arrives on Base</dt><dd>4.966223 USDC');
+    // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002: a step's amounts are labelled rows of "Amounts and limits" (the step named in the label).
+    expect(html).toContain('Step 2 · Arrives on Base</dt><dd class="numeric">4.966223 USDC');
     expect(html).toContain('FloFi waits for this delivery on Base and verifies it before the workflow completes.');
     expect(html).toContain('4 calls in the batch (2 token approvals)');
     expect(html).toContain('one wallet confirmation · 1 on-chain transaction · 4 calls batched · 1 signature');

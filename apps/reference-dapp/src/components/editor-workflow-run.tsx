@@ -32,6 +32,8 @@ import type { RunView } from '../workflow-runs/service';
 import { circleSignatureView, walletRequestView } from '../domain/approved-ux';
 import { reviewBlockView, type ReviewBlockText } from '../domain/review-block';
 import { BlockerPanel, ExpiredReviewAlert, RefreshBadge } from './review-summary-panel';
+import { CopyValue } from './copy-value';
+import { TechnicalBody, TechnicalGroup } from './technical-body';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, canEndWorkflow, haltedAs } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import { batchHandout, batchSponsorshipOf, evmWalletKind, isCirclePaid, keepBatchHandout, sendWalletBatch, signCirclePaidGroup, signSolanaGroup, signUserOperation,
@@ -1106,93 +1108,116 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
   const circleDetails = (payment: { readonly paymaster: string; readonly entryPoint: string; readonly permitCap: string } | null | undefined) => payment
     ? ` · ${tr('Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}', payment.paymaster, payment.entryPoint, usdcFee(payment.permitCap))}`
       + ` · ${tr('What is left of the permit cap stays approved to Circle\'s paymaster until your next USDC permit replaces it.')}` : '';
+  // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (TEC-01/TEC-02): the same facts as before, in short labelled groups (only the groups this Review has data
+  // for), each value said once and in its own row; long values are shortened on screen with the full value one copy away. Nothing is omitted,
+  // changed or added, and the material rows (steps, amounts, minimum, fee, permission, wallet requests, validity) stay visible above it.
+  const shortValue = (value: string) => value.length > 16 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+  const stepLabel = (index: number, label: string) => `${tr('Step {0}', String(index + 1))} · ${label}`;
+  const feeWords = (g: EditorExecutionReview['groups'][number]): string | null => g.gasPayment ? tr('Network fee, at most {0} — paid from your USDC through Circle', usdcFee(g.gasPayment.maxFee.amount))
+    : g.fee?.sponsorship === 'REQUIRED' ? tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')
+    : g.fee ? tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))
+    : run?.groups[g.index]?.maxFee?.unit === 'wei' ? tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))
+    : run?.groups[g.index]?.maxFee?.token ? tr(tokenFeeKey(run.groups[g.index]!.chain), groupFee(run.groups[g.index]!.maxFee!), run.groups[g.index]!.maxFee!.token!.symbol) : null;
+  const circleWords = (g: EditorExecutionReview['groups'][number]) => circleDetails(g.gasPayment ?? run?.groups[g.index]?.gasPayment ?? null).replace(/^ · /, '');
+  const expiredQuote = (g: EditorExecutionReview['groups'][number]) => run?.groups[g.index]?.state === 'PREPARED' && run.groups[g.index]!.validUntil && Date.parse(run.groups[g.index]!.validUntil!) <= now
+    ? tr(freshRequest ? 'its quote expired at {0}: reject the request in your wallet; FloFi prepares a fresh one'
+      : phase === 'wallet' ? 'its quote expired at {0}: reject the request in your wallet; FloFi does not prepare another one for this workflow'
+      : 'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow',
+    fmtTime(run.groups[g.index]!.validUntil!, language)) : null;
+  const amountRows = review ? review.steps.flatMap(step => {
+    const live = runStep(step.index), planned = plannedOf(step.index);
+    const spend = amountText(planned?.spend) ?? amountText(step.spend), expected = amountText(planned?.expected) ?? amountText(step.expected), minimum = amountText(planned?.minimum) ?? amountText(step.minimum);
+    const rows: { key: string; label: string; value: ReactNode }[] = [];
+    if (spend) rows.push({ key: 'spend', label: tr(step.basis === 'GUARANTEED_MINIMUM' ? 'Spends (the minimum step {0} guarantees)' : step.basis === 'RECONCILED_ACTUAL' ? 'Spends (what step {0} delivers, at most)' : 'Spends', String((step.boundTo ?? 0) + 1)), value: spend });
+    if (expected) rows.push({ key: 'expected', label: step.action === 'bridge' && step.destination ? tr('Arrives on {0}', tr(step.destination)) : tr(step.action === 'borrow' || step.action === 'withdraw' ? 'You receive' : 'Expected'), value: expected });
+    if (minimum && step.action !== 'bridge') rows.push({ key: 'minimum', label: tr('Minimum (your slippage limit)'), value: minimum });
+    if (step.action === 'bridge' && step.destination && review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH' && g.steps[0] <= step.index && step.index <= g.steps[1]))
+      rows.push({ key: 'delivery', label: tr('Delivery'), value: tr('FloFi waits for this delivery on {0} and verifies it before the workflow completes.', tr(step.destination)) });
+    if (!expected && step.action === 'swap' && !review.refusal && review.groups.find(g => g.steps[0] <= step.index && step.index <= g.steps[1])?.signing === 'WHEN_DUE')
+      rows.push({ key: 'due', label: tr('Expected'), value: tr('Quoted when this step becomes due') });
+    for (const r of live?.outcome?.received ?? []) rows.push({ key: `received:${r.asset}`, label: tr('Received (reconciled)'), value: receivedText(r, [planned?.expected, step.expected, planned?.spend, step.spend]) });
+    return rows.map(row => <div key={`${step.index}:${row.key}`}><dt>{stepLabel(step.index, row.label)}</dt><dd className="numeric">{row.value}</dd></div>);
+  }) : [];
+  const healthRows = review ? review.groups.map(g => {
+    // Each group's own health factor: the run's preparation of it when there is one (a later group is prepared when due), else the Review's.
+    const hf = run?.groups[g.index]?.planned?.healthFactorAfter ?? g.healthFactorAfter;
+    if (!hf) return null;
+    const floor = review.steps.some(s => s.index >= g.steps[0] && s.index <= g.steps[1] && (s.action === 'borrow' || s.action === 'withdraw'));
+    return <div key={`hf-${g.index}`}><dt>{review.groups.length > 1 ? tr('Aave health factor after group {0}', String(g.index + 1)) : tr('Aave health factor after the batch')}</dt>
+      <dd className="numeric">{floor ? tr('{0} (FloFi requires at least 2.00)', healthFactor(hf)) : healthFactor(hf)}</dd></div>;
+  }).filter(Boolean) : [];
+  const batchDeadline = review?.groups.some(g => g.strategy === 'EVM_WALLET_BATCH');
   const technical = review && <>
-      {/* Review round 2 (ADR-0009): who pays the one confirmation's network fee follows its sponsorship — FloFi offers to pay a REQUIRED one (the
-          wallet must take it, or nothing is sent); an OFFERED one is paid by the wallet only when it cannot take the sponsorship. */}
-      <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode !== 'STEP_BY_STEP' && review.groups.some(g => g.gasPayment)
-        ? review.groups.length === 1
-          ? 'All {0} steps run as ONE operation on {1} from your own account: two signatures in your wallet (a USDC permit for the network fee, then the operation), then FloFi relays it and Circle\'s paymaster takes the network fee from your USDC.'
-          : 'All {0} steps run in {2} wallet requests: a group whose network fee is paid from your USDC through Circle asks for two signatures (a USDC permit, then the operation); a later group is asked when it becomes due.'
-        : review.mode === 'ONE_WALLET_CONFIRMATION'
-        ? review.groups[0]?.fee?.sponsorship === 'REQUIRED'
-          ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee (your wallet must support sponsored fees on this network).'
-          : review.groups[0]?.fee?.sponsorship === 'OFFERED'
-          ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee, and your wallet pays it only if it does not support sponsored fees.'
-          : 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
-        : review.mode === 'GROUPED' ? 'All {0} steps run in {2} wallet confirmations, one per group; a later group is asked when it becomes due.'
-        : 'This workflow needs a confirmation in your wallet for each step on its own.', String(review.stepCount), review.groups[0]?.network ?? '', String(review.counts.walletPrompts))}
-        {bridgeTo && review.mode !== 'STEP_BY_STEP' ? <> {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</> : null}</p>
-      {bridgeTo && review.mode === 'STEP_BY_STEP' && <p className="muted">{tr('The bridge then runs through its own review: its token approval and its deposit may each ask your wallet once more.')}</p>}
-      {review.mode === 'STEP_BY_STEP' && review.reasons.length > 0 && <ul className="editor-run-reasons">{review.reasons.map(code => <li key={code}>{tr(EXECUTION_REASON[code.split(':')[0]!] ?? 'Not available for this step ({0}).', code)}</li>)}</ul>}
+    <TechnicalGroup title="Operations">
+        {/* Review round 2 (ADR-0009): who pays the one confirmation's network fee follows its sponsorship — FloFi offers to pay a REQUIRED one (the
+            wallet must take it, or nothing is sent); an OFFERED one is paid by the wallet only when it cannot take the sponsorship. */}
+        <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode !== 'STEP_BY_STEP' && review.groups.some(g => g.gasPayment)
+          ? review.groups.length === 1
+            ? 'All {0} steps run as ONE operation on {1} from your own account: two signatures in your wallet (a USDC permit for the network fee, then the operation), then FloFi relays it and Circle\'s paymaster takes the network fee from your USDC.'
+            : 'All {0} steps run in {2} wallet requests: a group whose network fee is paid from your USDC through Circle asks for two signatures (a USDC permit, then the operation); a later group is asked when it becomes due.'
+          : review.mode === 'ONE_WALLET_CONFIRMATION'
+          ? review.groups[0]?.fee?.sponsorship === 'REQUIRED'
+            ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee (your wallet must support sponsored fees on this network).'
+            : review.groups[0]?.fee?.sponsorship === 'OFFERED'
+            ? 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet; FloFi offers to pay its network fee, and your wallet pays it only if it does not support sponsored fees.'
+            : 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
+          : review.mode === 'GROUPED' ? 'All {0} steps run in {2} wallet confirmations, one per group; a later group is asked when it becomes due.'
+          : 'This workflow needs a confirmation in your wallet for each step on its own.', String(review.stepCount), review.groups[0]?.network ?? '', String(review.counts.walletPrompts))}
+          {bridgeTo && review.mode !== 'STEP_BY_STEP' ? <> {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</> : null}</p>
+        {bridgeTo && review.mode === 'STEP_BY_STEP' && <p className="muted">{tr('The bridge then runs through its own review: its token approval and its deposit may each ask your wallet once more.')}</p>}
+        {review.mode === 'STEP_BY_STEP' && review.reasons.length > 0 && <ul className="editor-run-reasons">{review.reasons.map(code => <li key={code}>{tr(EXECUTION_REASON[code.split(':')[0]!] ?? 'Not available for this step ({0}).', code)}</li>)}</ul>}
       <ol className="editor-run-steps" aria-label={tr('Steps')}>
         {review.steps.map(step => {
-          const live = runStep(step.index), planned = plannedOf(step.index);
-          const spend = amountText(planned?.spend) ?? amountText(step.spend), expected = amountText(planned?.expected) ?? amountText(step.expected), minimum = amountText(planned?.minimum) ?? amountText(step.minimum);
+          const live = runStep(step.index), planned = plannedOf(step.index), recipient = planned?.recipient ?? step.recipient;
           return <li key={step.index} data-step-state={live?.state ?? 'PLANNED'}>
             <strong>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</strong>
             <span className="muted"> · {tr(step.network)}{step.provider ? ` · ${step.provider}` : ''}</span>
-            <dl className="editor-run-amounts">
-              {spend && <div><dt>{tr(step.basis === 'GUARANTEED_MINIMUM' ? 'Spends (the minimum step {0} guarantees)' : step.basis === 'RECONCILED_ACTUAL' ? 'Spends (what step {0} delivers, at most)' : 'Spends', String((step.boundTo ?? 0) + 1))}</dt><dd>{spend}</dd></div>}
-              {expected && <div><dt>{step.action === 'bridge' && step.destination ? tr('Arrives on {0}', tr(step.destination))
-                : tr(step.action === 'borrow' || step.action === 'withdraw' ? 'You receive' : 'Expected')}</dt><dd>{expected}</dd></div>}
-              {minimum && step.action !== 'bridge' && <div><dt>{tr('Minimum (your slippage limit)')}</dt><dd>{minimum}</dd></div>}
-              {step.action === 'bridge' && step.destination && review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH' && g.steps[0] <= step.index && step.index <= g.steps[1])
-                && <div><dt>{tr('Delivery')}</dt><dd>{tr('FloFi waits for this delivery on {0} and verifies it before the workflow completes.', tr(step.destination))}</dd></div>}
-              {(planned?.recipient ?? step.recipient) && <div><dt>{tr('To')}</dt><dd><code className="editor-run-recipient">{planned?.recipient ?? step.recipient}</code>
-                {(planned?.recipient ?? step.recipient)!.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}</dd></div>}
-              {!expected && step.action === 'swap' && !review.refusal && review.groups.find(g => g.steps[0] <= step.index && step.index <= g.steps[1])?.signing === 'WHEN_DUE'
-                && <div><dt>{tr('Expected')}</dt><dd>{tr('Quoted when this step becomes due')}</dd></div>}
-              {live?.outcome?.received.map(r => <div key={r.asset}><dt>{tr('Received (reconciled)')}</dt><dd>{receivedText(r, [planned?.expected, step.expected, planned?.spend, step.spend])}</dd></div>)}
-            </dl>
+            {recipient && <span className="technical-recipient">{tr('To')}{' '}
+              <CopyValue value={recipient} shown={`${shortValue(recipient)}${recipient.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}`} label="Recipient" step={step.index + 1}/></span>}
             {live && run && <span className="workflow-run-state">{stepWords(run, live)}</span>}
-            {live?.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
+            {live?.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer" title={tx.hash}><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash} title={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
         })}
       </ol>
-      <dl className="editor-run-facts">
-        {review.groups.map(g => <div key={g.index}><dt>{review.groups.length > 1 ? tr('Group {0} · {1}', String(g.index + 1), g.network) : g.network}</dt>
-          <dd>{tr(g.gasPayment ? CIRCLE_HOW : HOW[g.strategy] ?? g.strategy)}{g.calls ? ` · ${tr(g.gasPayment ? '{0} calls in the operation ({1} token approvals)' : '{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}` : ''}
-            {g.gasPayment ? ` · ${tr('Network fee, at most {0} — paid from your USDC through Circle', usdcFee(g.gasPayment.maxFee.amount))}`
-              : g.fee?.sponsorship === 'REQUIRED' ? ` · ${tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')}`
-              : g.fee ? ` · ${tr('about {0} in network fees (up to {1} at today\'s prices; your wallet sets the final fee)', eth(g.fee.estimatedWei), eth(g.fee.maxWei))}`
-              : run?.groups[g.index]?.maxFee?.unit === 'wei' ? ` · ${tr('up to {0} in network fees at today\'s prices; your wallet sets the final fee', eth(run.groups[g.index]!.maxFee!.amount))}`
-              : run?.groups[g.index]?.maxFee?.token ? ` · ${tr(tokenFeeKey(run.groups[g.index]!.chain), groupFee(run.groups[g.index]!.maxFee!), run.groups[g.index]!.maxFee!.token!.symbol)}` : ''}
-            {g.fee?.sponsorship === 'OFFERED' ? ` · ${tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}` : ''}
-            {circleDetails(g.gasPayment ?? run?.groups[g.index]?.gasPayment ?? null)}
-            {run?.groups[g.index] ? ` · ${groupWords(run.groups[g.index]!)}` : ''}
-            {run?.groups[g.index]?.gasPaid ? ` · ${paidWords(run.groups[g.index]!.gasPaid!, run.groups[g.index]!.chain)}` : ''}
-            {/* While the wallet prompt is open, an expired request is always rejected there (its on-chain deadline would refuse it and the wallet
-                would still pay the fee); a fresh one is promised only when this page would send one. */}
-            {run?.groups[g.index]?.state === 'PREPARED' && run.groups[g.index]!.validUntil && Date.parse(run.groups[g.index]!.validUntil!) <= now
-              ? ` · ${tr(freshRequest ? 'its quote expired at {0}: reject the request in your wallet; FloFi prepares a fresh one'
-                : phase === 'wallet' ? 'its quote expired at {0}: reject the request in your wallet; FloFi does not prepare another one for this workflow'
-                : 'its quote expired at {0}: FloFi does not ask your wallet for it again; check your wallet\'s activity, then you can end the workflow',
-              fmtTime(run.groups[g.index]!.validUntil!, language))}` : ''}</dd></div>)}
-        {review.groups.map(g => {
-          // Each group's own health factor: the run's preparation of it when there is one (a later group is prepared when due), else the Review's.
-          const hf = run?.groups[g.index]?.planned?.healthFactorAfter ?? g.healthFactorAfter;
-          if (!hf) return null;
-          const floor = review.steps.some(s => s.index >= g.steps[0] && s.index <= g.steps[1] && (s.action === 'borrow' || s.action === 'withdraw'));
-          return <div key={`hf-${g.index}`}><dt>{review.groups.length > 1 ? tr('Aave health factor after group {0}', String(g.index + 1)) : tr('Aave health factor after the batch')}</dt>
-            <dd>{floor ? tr('{0} (FloFi requires at least 2.00)', healthFactor(hf)) : healthFactor(hf)}</dd></div>;
-        })}
-        {counts && <div><dt>{tr('What your wallet is asked')}</dt><dd>{tr(counts.atLeast ? 'at least {0} wallet confirmations' : counts.walletPrompts === 1 ? 'one wallet confirmation' : '{0} wallet confirmations', String(counts.walletPrompts))}
-          {' · '}{tr(counts.transactions === 1 ? '1 on-chain transaction' : '{0} on-chain transactions', String(counts.transactions))}{counts.batchedCalls ? ` · ${tr('{0} calls batched', String(counts.batchedCalls))}` : ''}
-          {' · '}{tr(counts.signatures === 1 ? '1 signature' : '{0} signatures', String(counts.signatures))}{counts.networkSwitches ? ` · ${tr('{0} network switches', String(counts.networkSwitches))}` : ''}
-          {counts.oneTimeSetup.includes('EVM_SMART_ACCOUNT_UPGRADE') ? ` · ${tr('your wallet may upgrade this account to its smart account inside the same confirmation (one time)')}` : ''}
-          <br/><span className="muted">{tr('Before it, your wallet may ask to switch to {0} if it is on another network and, once per session, to sign FloFi\'s sign-in message (no transaction).', review.groups[0]?.network ?? '')}</span></dd></div>}
-        {review.validUntil && !run && <div><dt>{tr('Prices')}</dt><dd>{expired ? tr('Expired at {0}: review again to refresh them before authorizing.', fmtTime(review.validUntil, language))
-          : tr('Quoted at {0}, valid until {1}', fmtTime(review.reviewedAt, language), fmtTime(review.validUntil, language))}</dd></div>}
-      </dl>
+    </TechnicalGroup>
+    {(amountRows.length > 0 || healthRows.length > 0) && <TechnicalGroup title="Amounts and limits">
+      <dl className="technical-rows editor-run-amounts">{amountRows}{healthRows}</dl>
+    </TechnicalGroup>}
+    <TechnicalGroup title="Fees and permissions">
+      {review.groups.map(g => {
+        const fee = feeWords(g), circle = circleWords(g), quote = expiredQuote(g), live = run?.groups[g.index];
+        return <dl key={g.index} className="technical-rows editor-run-facts">
+          <div><dt>{review.groups.length > 1 ? tr('Group {0} · {1}', String(g.index + 1), g.network) : g.network}</dt><dd>{tr(g.gasPayment ? CIRCLE_HOW : HOW[g.strategy] ?? g.strategy)}</dd></div>
+          {g.calls && <div><dt>{tr('Calls')}</dt><dd>{tr(g.gasPayment ? '{0} calls in the operation ({1} token approvals)' : '{0} calls in the batch ({1} token approvals)', String(g.calls.length), String(g.approvals ?? 0))}</dd></div>}
+          {fee && <div><dt>{tr('Network fee')}</dt><dd>{fee}</dd></div>}
+          {g.fee?.sponsorship === 'OFFERED' && <div><dt>{tr('Sponsorship')}</dt><dd>{tr('Sponsored network fee: FloFi offers to pay it when your wallet supports it; otherwise your wallet pays the estimate above')}</dd></div>}
+          {circle && <div><dt>Circle</dt><dd>{circle}</dd></div>}
+          {live && <div><dt>{tr('Status')}</dt><dd>{groupWords(live)}</dd></div>}
+          {live?.gasPaid && <div><dt>{tr('Paid')}</dt><dd>{paidWords(live.gasPaid, live.chain)}</dd></div>}
+          {quote && <div data-emphasis="attention"><dt>{tr('Quote')}</dt><dd>{quote}</dd></div>}
+        </dl>;
+      })}
       <p className="muted">{review.groups.some(g => g.fee?.sponsorship)
         ? tr('FloFi offers to sponsor the network fee marked "Sponsored network fee"; every other fee is paid by your wallet. FloFi never advances or reimburses gas, and never signs or sends for you.')
         : tr('Your wallet pays every network fee. FloFi never pays, advances or reimburses gas, and never signs or sends for you.')}</p>
+    </TechnicalGroup>
+    {(counts || batchDeadline) && <TechnicalGroup title="Requests to your wallet">
+      {counts && <dl className="technical-rows"><div><dt>{tr('What your wallet is asked')}</dt><dd>{tr(counts.atLeast ? 'at least {0} wallet confirmations' : counts.walletPrompts === 1 ? 'one wallet confirmation' : '{0} wallet confirmations', String(counts.walletPrompts))}
+        {' · '}{tr(counts.transactions === 1 ? '1 on-chain transaction' : '{0} on-chain transactions', String(counts.transactions))}{counts.batchedCalls ? ` · ${tr('{0} calls batched', String(counts.batchedCalls))}` : ''}
+        {' · '}{tr(counts.signatures === 1 ? '1 signature' : '{0} signatures', String(counts.signatures))}{counts.networkSwitches ? ` · ${tr('{0} network switches', String(counts.networkSwitches))}` : ''}
+        {counts.oneTimeSetup.includes('EVM_SMART_ACCOUNT_UPGRADE') ? ` · ${tr('your wallet may upgrade this account to its smart account inside the same confirmation (one time)')}` : ''}</dd></div></dl>}
+      {counts && <p className="muted">{tr('Before it, your wallet may ask to switch to {0} if it is on another network and, once per session, to sign FloFi\'s sign-in message (no transaction).', review.groups[0]?.network ?? '')}</p>}
       {/* Every wallet batch expires on chain at its preparation's validity: through each swap's own deadline, else a deadline guard as its first
           call (a transfer-only batch too). A batch FloFi cannot give one is refused (USER_FUNDED_DEADLINE_UNAVAILABLE), never sent without it. */}
-      {review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH') && <p className="muted">{tr(review.steps.some(step => step.action === 'swap'
+      {batchDeadline && <p className="muted">{tr(review.steps.some(step => step.action === 'swap'
         && review.groups.some(g => g.strategy === 'EVM_WALLET_BATCH' && g.steps[0] <= step.index && step.index <= g.steps[1]))
         ? 'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee). Each swap\'s minimum is fixed when FloFi prepares the request.'
         : 'Confirm the wallet request promptly: about 10 minutes after FloFi prepares it, an on-chain deadline refuses the whole batch (your wallet would still pay the network fee).')}</p>}
+    </TechnicalGroup>}
+    {review.validUntil && !run && <TechnicalGroup title="Identifiers and evidence">
+      <dl className="technical-rows"><div><dt>{tr('Prices')}</dt><dd>{expired ? tr('Expired at {0}: review again to refresh them before authorizing.', fmtTime(review.validUntil, language))
+        : tr('Quoted at {0}, valid until {1}', fmtTime(review.reviewedAt, language), fmtTime(review.validUntil, language))}</dd></div></dl>
+    </TechnicalGroup>}
   </>;
   const block = review ? reviewBlockView(review) : null;
   // Review B1/LQ1: a later step on a network that needs its native coin for its fee after an earlier token-paid one there — said visibly before
@@ -1246,9 +1271,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
           <div><dt>{tr('Token permission')}</dt><dd><RefreshBadge text="Depends on the updated review" hint="The token permission is confirmed again by the refreshed review."/></dd></div>
           {block && <div><dt>{tr('Wallet requests')}</dt><dd><span>{rich(tr, block.walletRequests)}</span></dd></div>}
         </dl>
-        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>
+        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary><TechnicalBody>
           {review.validUntil && <p className="workflow-technical-expired">{tr('The previous review expired at {0}; its values are no longer current and are not shown.', fmtTime(review.validUntil, language))}</p>}
-          {facts}</details>
+          {facts}</TechnicalBody></details>
       </div>
     </>}
     {fresh && !feeBlocked && stage === 'simulate' && review && block && !expired && <>
@@ -1260,13 +1285,15 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         {block.fee && <div><dt>{tr('Network fee, at most')}</dt><dd><span>{rich(tr, block.fee)}</span>{priced && <small className="review-block-qualifier">{tr('at today\'s prices; your wallet sets the final fee')}</small>}</dd></div>}
       </dl>
       {nativeLater}
-      <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{technical}</details>
+      <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary><TechnicalBody>{technical}</TechnicalBody></details>
     </>}
     {fresh && !feeBlocked && stage === 'execute' && !(expired && review && state.grouped) && <>
       {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
       {block && review?.validUntil && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>}
       <p className="eyebrow">{tr('REVIEW')}</p>
-      <h3>{tr(expired ? 'Simulation expired' : block ? 'You are authorizing' : 'Workflow simulation')}</h3>
+      {/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (EXE-01): before any wallet request the owner is reviewing, not yet authorizing; the wallet request has
+          its own block below ("Confirm in your wallet"), shown only while the wallet holds it. */}
+      <h3>{tr(expired ? 'Simulation expired' : block ? 'Review before authorizing' : 'Workflow simulation')}</h3>
       {review?.mode === 'STEP_BY_STEP' && <p className="review-panel-note">{tr('This workflow needs a confirmation in your wallet for each step on its own.')}</p>}
       {circleOnApproval}
       {expired ? <p className="review-panel-status" role="status">{tr('Simulate again to refresh network fees and token permissions before review.')}</p>
@@ -1282,7 +1309,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
         </dl>
         {nativeLater}
         <p className="review-panel-note">{feeNote}</p>
-        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary>{quietReview === 'details' && <p>{reviewAgain}</p>}{technical}</details>
+        <details className="review-panel-technical review-block-technical"><summary>{tr('Technical details')}</summary><TechnicalBody>{quietReview === 'details' && <p>{reviewAgain}</p>}{technical}</TechnicalBody></details>
       </>}
     </>}
     {!fresh && <h3>{tr(run ? 'Workflow progress' : 'Review the whole workflow')}</h3>}
@@ -1342,7 +1369,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     {refusal && !fresh && <p className="error-banner" role="alert">{refusal}</p>}
     {/* Board 07: a native-fee shortfall found while preparing this Review shows the server's own numbers (no run exists yet: nothing was sent). */}
     {feeBlocked && <BlockerPanel simulation={stage === 'simulate'} title={refusal ?? ''} message={refusal ?? ''} error={review!.refusal!.code} owner={review!.owner}
-      feeShortfall={review!.refusal!.evidence!} technical={fresh ? <details className="review-panel-technical"><summary>{tr('Technical details, for support')}</summary>{technical}</details> : null}/>}
+      feeShortfall={review!.refusal!.evidence!} technical={fresh ? <details className="review-panel-technical"><summary>{tr('Technical details, for support')}</summary><TechnicalBody label="Technical details, for support">{technical}</TechnicalBody></details> : null}/>}
     {state.updated.length > 0 && <div className="editor-run-update" role="alert">
       <p>{tr(!state.updated.every(u => u.reviewed) ? 'Confirm what your wallet will be asked:' : state.updated.some(u => u.kind === 'fee')
         ? 'Prices moved since your review. Confirm what your wallet will be asked:' : 'Prices moved since your review. Your wallet would be asked with these minimums:')}</p>

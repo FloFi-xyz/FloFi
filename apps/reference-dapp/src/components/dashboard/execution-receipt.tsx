@@ -6,8 +6,8 @@
  * presentation only (`projectExecutionReceipt`); every engineering detail stays one click away under "Technical details" in the run view. It starts
  * nothing: the only action besides the explorer link is the existing "Open current execution" of a run that is still the current one.
  */
-import { useState } from 'react';
 import { useLocale } from '../../i18n/locale';
+import { CopyValue } from '../copy-value';
 import type { DashboardRunView } from '../../lib/dashboard/types';
 import { projectExecutionReceipt, readableAmount, receiptDate, shortAddress, type ReceiptLink, type ReceiptValue } from '../../domain/execution-receipt';
 import { ActionIcon } from '../action-icon';
@@ -17,19 +17,6 @@ const ICON: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>>
   Swap: 'swap', Bridge: 'bridge', 'Pool / Liquidity': 'pool', 'Prepare liquidity': 'pool', Send: 'transfer', Supply: 'supply', Borrow: 'borrow',
   Repay: 'repay', Withdraw: 'withdraw', Stocks: 'stocks',
 };
-
-/** A value with every recorded digit one copy away (the visible text is readable; the full value is in its tooltip and copied as is). */
-function CopyValue({ value, shown, label, step = null }: { value: string; shown: string; label: string; step?: number | null }) {
-  const { t } = useLocale();
-  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const copy = async () => { try { await navigator.clipboard.writeText(value); setState('copied'); } catch { setState('failed'); } };
-  // A step's control names its step, so several "Copy Recipient" buttons stay distinct; the outcome is announced in the one persistent region.
-  const name = step === null ? t(label) : `${t(label)} · ${t('Step {0}: {1}', step, t(label))}`;
-  return <span className="execution-receipt-copy"><span title={value}>{shown}</span>
-    <button type="button" className="execution-receipt-copy-button" aria-label={t('Copy {0}', name)} onClick={() => void copy()}>{t(state === 'copied' ? 'Copied' : 'Copy')}</button>
-    <span className="sr-only" role="status">{state === 'copied' ? t('{0} copied.', t(label)) : state === 'failed' ? `${t('Copy unavailable.')} ${value}` : ''}</span>
-    {state === 'failed' && <span className="execution-receipt-copy-failed" aria-hidden="true">{t('Copy unavailable.')} {value}</span>}</span>;
-}
 
 function Amount({ row }: { row: ReceiptValue }) {
   const { t, language } = useLocale();

@@ -2845,7 +2845,8 @@
         "apps/reference-dapp/src/app/editor.css",
         "apps/reference-dapp/src/app/terms/page.tsx",
         "apps/reference-dapp/src/app/editor-workspace.css",
-        "apps/reference-dapp/src/app/ux-refinement.css"
+        "apps/reference-dapp/src/app/ux-refinement.css",
+        "apps/reference-dapp/src/app/editor-fidelity.css"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -3957,7 +3958,9 @@
         "apps/reference-dapp/src/components/dashboard/defi-positions.tsx",
         "apps/reference-dapp/src/components/editor-chrome.tsx",
         "apps/reference-dapp/src/components/operation-summary.tsx",
-        "apps/reference-dapp/src/components/simulation-context-panel.tsx"
+        "apps/reference-dapp/src/components/simulation-context-panel.tsx",
+        "apps/reference-dapp/src/components/copy-value.tsx",
+        "apps/reference-dapp/src/components/technical-body.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -5290,7 +5293,8 @@
         "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts",
         "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts",
         "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts",
-        "apps/reference-dapp/src/i18n/pt-ux-refinement.ts"
+        "apps/reference-dapp/src/i18n/pt-ux-refinement.ts",
+        "apps/reference-dapp/src/i18n/pt-editor-fidelity.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

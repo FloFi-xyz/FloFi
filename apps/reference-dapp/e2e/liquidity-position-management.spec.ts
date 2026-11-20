@@ -398,7 +398,7 @@ test('Create, Simulate and Execute name the position operation from its marker, 
   // MOCKED: no Review is presented, so neither its C1 rows nor an expired C2 Review (both are live-only); the footer's Authorize stays disabled.
   await expect(review).toHaveAttribute('data-review-state', 'pending');
   await expect(page.locator('[data-position-row]')).toHaveCount(0);
-  await expect(page.locator('#workspace')).not.toContainText(/You are authorizing|Your review expired/);
+  await expect(page.locator('#workspace')).not.toContainText(/You are authorizing|Review before authorizing|Your review expired/);
   await expectNothingAsked(page);
   networkGuard.assertClean();
 });

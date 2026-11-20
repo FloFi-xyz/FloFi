@@ -153,7 +153,7 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   await footerAction(page).getByRole('button', { name: 'Review operation', exact: true }).click();
   await expect(panel(page).getByRole('button')).toHaveCount(0);
   // Board 06: what is being authorized in plain words; the group breakdown and the rest wait under the collapsed "Technical details".
-  await expect(panel(page).getByRole('heading', { name: 'You are authorizing', exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect(panel(page).getByRole('heading', { name: 'Review before authorizing', exact: true })).toBeVisible({ timeout: 60_000 });
   await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText('Swap 3 USDC → WETH · Base', { timeout: 60_000 });
   await expect(panel(page).locator('.review-block-rows')).toContainText('Wallet requests1');
   await expect(panel(page).locator('.editor-run-mechanism')).toBeHidden();

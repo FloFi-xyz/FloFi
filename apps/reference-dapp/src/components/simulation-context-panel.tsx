@@ -6,6 +6,7 @@ import { useLocale } from '../i18n/locale';
 import type { Workflow } from '../domain/initial-workflow';
 import { EditorWorkflowRunPanel, workflowRunErrorText, type EditorWorkflowRunState } from './editor-workflow-run';
 import { OperationSummary, WorkflowTechnicalFacts } from './operation-summary';
+import { TechnicalBody } from './technical-body';
 import { SimulationExplainer, SimulationPanelHead } from './review-summary-panel';
 
 /**
@@ -43,6 +44,6 @@ export function GroupedSimulationPanel({ state, canvasWorkflow, context, action 
     {view !== 'ready' && view !== 'started' && <div className="simulation-panel-action">{action}</div>}
     {/* Before a result (and once it expired or was refused) the configured workflow's secondary facts, collapsed; a valid result carries its own. */}
     {(view === 'pending' || view === 'busy' || view === 'expired') && <details className="review-panel-technical" open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)}>
-      <summary>{t('Technical details')}</summary><WorkflowTechnicalFacts workflow={canvasWorkflow} context={context}/></details>}
+      <summary>{t('Technical details')}</summary><TechnicalBody><WorkflowTechnicalFacts workflow={canvasWorkflow} context={context}/></TechnicalBody></details>}
   </section>;
 }
