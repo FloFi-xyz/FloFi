@@ -19,6 +19,12 @@ function neonResource(project_id: string, period_plan: string, data: Record<stri
 }
 
 describe('Neon Consumption Metrics v2', () => {
+  it('classifies a missing organization membership as denied access', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => new Response('not a member of this organization', { status: 404 }));
+    await expect(get(neon, fetch)).rejects.toThrow('FINOPS_PROVIDER_ACCESS_DENIED');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('reads only the four FloFi projects, follows branch cursors, and converts monthly price inputs without adding branch allocations to project totals', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async (request, init) => {
       const url = new URL(String(request));
@@ -109,10 +115,15 @@ describe('Railway Public GraphQL usage', () => {
     if (result.kind === 'COMPLETE') expect(result.meters).toHaveLength(7);
   });
 
-  it('rejects duplicate metering dimensions instead of adding a second charge', async () => {
-    const row = item(api, 'CPU_USAGE', 15);
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ data: { usage: [row, row] } }));
-    await expect(get(railway, fetch)).rejects.toThrow('FINOPS_PROVIDER_RESPONSE_INVALID');
+  it('combines real response fragments into one scoped usage meter and no charge', async () => {
+    const usage = [2.563237333333334, 5.707312966666667, 8.1112141].map(value => item(worker, 'CPU_USAGE', value));
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ data: { usage } }));
+    await expect(get(railway, fetch)).resolves.toMatchObject({ entries: [], meters: [
+      expect.objectContaining({ scope: 'railway-worker', metric: 'CPU_USAGE', amount: '16.3817644' }),
+      expect.objectContaining({ scope: 'railway-worker', metric: 'list_price_estimate' }),
+    ] });
+    await expect(get(railway, async () => Response.json({ data: { usage: [...usage, item(worker, 'CPU_USAGE', -1)] } })))
+      .rejects.toThrow('FINOPS_PROVIDER_RESPONSE_INVALID');
   });
 
   it('exposes a fixed authentication error for a GraphQL permission failure', async () => {
@@ -120,6 +131,12 @@ describe('Railway Public GraphQL usage', () => {
       { message: 'Denied internal details', extensions: { code: 'FORBIDDEN' } },
     ] }));
     await expect(get(railway, fetch)).rejects.toThrow('FINOPS_PROVIDER_FORBIDDEN');
+  });
+
+  it('honors the GraphQL concurrency limit even when the response also contains usage', async () => {
+    const fetch = async () => Response.json({ data: { usage: [item(api, 'CPU_USAGE', 1)] },
+      errors: [{ message: 'Too many usage queries are running at once. Try again later.' }] });
+    await expect(get(railway, fetch)).rejects.toThrow('FINOPS_PROVIDER_RATE_LIMITED');
   });
 });
 
@@ -156,16 +173,40 @@ describe('Vercel team FOCUS charges', () => {
     expect(await get(vercel, fetch)).toMatchObject({ kind: 'COMPLETE', coverage: 'UNAVAILABLE', entries: [], meters: [] });
   });
 
+  it('aggregates FOCUS decimals at source precision then rounds the posted daily total once', async () => {
+    const tinyNumericCharge = JSON.stringify({ ...row, SkuId: 'cpu-b', BilledCost: 'replace-me' }).replace('"replace-me"', '4e-9');
+    const tinyStringCharge = JSON.stringify({ ...row, SkuId: 'cpu-a', BilledCost: '0.0000000040000000' });
+    const largeCharge = JSON.stringify({ ...row, SkuId: 'cpu-c', BilledCost: '9999999999.1234567890000000' });
+    const offset = JSON.stringify({ ...row, SkuId: 'cpu-d', BilledCost: '-9999999999.1234567890000000' });
+    const base = JSON.stringify({ ...row, SkuId: 'cpu-e', BilledCost: '0.000000004' });
+    const fetch = async () => new Response([tinyNumericCharge, tinyStringCharge, largeCharge, offset, base].join('\n'));
+    await expect(get(vercel, fetch)).resolves.toMatchObject({ entries: [{ net: '0.00000001' }],
+      meters: expect.arrayContaining([expect.objectContaining({ metric: 'billed_cost', amount: '0.00000001' })]) });
+  });
+
   it('refuses uncertain exact duplicate charge rows', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response(row, row));
     await expect(get(vercel, fetch)).rejects.toThrow('FINOPS_PROVIDER_RESPONSE_INVALID');
   });
 
-  it.each([[401, 'FORBIDDEN'], [403, 'FORBIDDEN'], [404, 'NO_COST_DATA'], [429, 'RATE_LIMITED'], [503, 'UNAVAILABLE']])(
+  it('refuses duplicate charges with equivalent decimal spellings', async () => {
+    const charge = JSON.stringify(row);
+    const fetch = async () => new Response([charge, charge.replace('"1.25"', '1.250')].join('\n'));
+    await expect(get(vercel, fetch)).rejects.toThrow('FINOPS_PROVIDER_RESPONSE_INVALID');
+  });
+
+  it.each([[401, 'FORBIDDEN'], [403, 'FORBIDDEN'], [404, 'RESPONSE_INVALID'], [429, 'RATE_LIMITED'], [503, 'UNAVAILABLE']])(
     'sanitizes HTTP %i without returning a monetary entry', async (status, reason) => {
       const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response('provider private details', { status }));
       await expect(get(vercel, fetch)).rejects.toThrow('FINOPS_PROVIDER_' + reason);
     });
+
+  it.each([
+    [{ code: 'not_found', message: 'Plan not found' }, 'FINOPS_PROVIDER_NOT_ENTITLED'],
+    [{ code: 'costs_not_found', message: 'provider-private detail' }, 'FINOPS_PROVIDER_NO_COST_DATA'],
+  ])('distinguishes FOCUS entitlement from missing cost records', async (error, expected) => {
+    await expect(get(vercel, async () => Response.json({ error }, { status: 404 }))).rejects.toThrow(expected);
+  });
 });
 
 describe('Alchemy scoped Usage Admin API', () => {
@@ -180,7 +221,7 @@ describe('Alchemy scoped Usage Admin API', () => {
       expect(init?.method).toBe('POST');
       const query = JSON.parse(String(init?.body));
       expect(query).toMatchObject({ startTime: '2026-11-02T00:00:00Z', endTime: '2026-11-02T23:59:59Z', granularity: 'day',
-        products: ['SUPERNODE_CU', 'SUPERNODE_ENHANCED_CU'], metrics: ['amount'], filters: { appIds: ['flofi_fixture_app'] }, groupBy: ['app'] });
+        products: ['SUPERNODE_CU'], metrics: ['amount'], filters: { appIds: ['flofi_fixture_app'] }, groupBy: ['app'] });
       if (!query.cursor) return Response.json({ data: { data: [item('12')], cursor: 'fixture_next' } });
       expect(query.cursor).toBe('fixture_next');
       return Response.json({ data: { data: [item('7.25')] } });
@@ -188,7 +229,7 @@ describe('Alchemy scoped Usage Admin API', () => {
     expect(await get(alchemy, fetch)).toEqual({ kind: 'COMPLETE', coverage: 'PARTIAL', entries: [], limitations: expect.arrayContaining([
       'ALCHEMY_UNALLOCATED_ACCOUNT_CHARGES_EXCLUDED', 'ALCHEMY_PLAN_RETENTION_PARTIAL',
     ]), meters: [{ scope: 'rpc', service: 'Alchemy RPC', environment: 'shared', project: 'flofi_fixture_app', metric: 'compute_units',
-      unit: 'CU', amount: '19.25', period: { from: '2026-11-02', to: '2026-11-03' } }] });
+      unit: 'CU', amount: '19.25', basis: 'SUPERNODE_CU', period: { from: '2026-11-02', to: '2026-11-03' } }] });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -203,6 +244,13 @@ describe('Alchemy scoped Usage Admin API', () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
     expect(await get(alchemy, fetch)).toMatchObject({ coverage: 'UNAVAILABLE', meters: [], entries: [],
       limitations: expect.arrayContaining(['ALCHEMY_PLAN_RETENTION_PARTIAL']) });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('leaves app-scoped usage unavailable on the Free plan without falling back to account-wide totals', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    await expect(alchemy.read({ env: { ...env, FLOFI_FINOPS_ALCHEMY_LOOKBACK_DAYS: '1' }, fetch, period, signal: AbortSignal.timeout(2_000),
+      checkpoint: null })).rejects.toThrow('FINOPS_PROVIDER_NOT_ENTITLED');
     expect(fetch).not.toHaveBeenCalled();
   });
 });

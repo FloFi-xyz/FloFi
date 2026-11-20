@@ -3,14 +3,15 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { ENTRY_SOURCES, FINOPS_ENVIRONMENTS, FINOPS_SCOPES, scopeIds, type ScopeId } from '../../admin/finops/economics';
+import { addDays, ENTRY_SOURCES, FINOPS_ENVIRONMENTS, FINOPS_SCOPES, scopeIds, type ScopeId } from '../../admin/finops/economics';
 import { modelScenario, parseScenario, SCENARIO_FIELDS, SCENARIO_PRESETS, scenarioKeys, type Scenario } from '../../admin/finops/scenario';
 import { adminPost } from './admin-client';
 import { Kpi, Status } from './admin-ui';
 import { useLocale } from '../../i18n/locale';
 import { finopsCopy } from './finops-copy';
 import type { FinopsReport } from '../../admin/finops/report';
-import { FINANCIAL_LIMITATION_LABELS, FINANCIAL_SYNC_ERROR_LABELS, MANUAL_ONLY_FINANCIAL_PROVIDERS } from '../../admin/finops/sync-labels';
+import { FINANCIAL_CONNECTION_GUIDANCE, FINANCIAL_CONNECTION_LABELS, FINANCIAL_LIMITATION_LABELS, FINANCIAL_SYNC_ERROR_LABELS,
+  type FinancialConnection } from '../../admin/finops/sync-labels';
 
 export type RelativeFilter = { range: string; from?: string; to?: string };
 const ERRORS: Readonly<Record<string, string>> = {
@@ -50,8 +51,10 @@ export function FinopsPeriodForm({ action, preset, from, to, options }: { action
   </form>;
 }
 
-const STATUS_TONE: Readonly<Record<string, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>> = { Synchronizing: 'info', 'Manual records only': 'neutral', 'Not configured': 'neutral',
-  'Needs attention': 'bad', Stale: 'warn', Connected: 'ok', 'Ready to synchronize': 'info' };
+const STATUS_TONE: Readonly<Record<FinancialConnection, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>> = {
+  SYNCHRONIZING: 'info', MANUAL_ONLY: 'neutral', UNCONFIGURED: 'neutral', NOT_ENTITLED: 'warn', ERROR: 'bad',
+  STALE: 'warn', SYNCHRONIZED: 'ok', USAGE_SYNCHRONIZED: 'ok', AWAITING_SYNC: 'info',
+};
 
 export function FinopsIntegrations({ integrations, csrf }: { integrations: FinopsReport['integrations']; csrf?: string }) {
   const { copy, time, count, display } = finopsCopy(useLocale().language), router = useRouter();
@@ -93,26 +96,33 @@ export function FinopsIntegrations({ integrations, csrf }: { integrations: Finop
         .map(label => <th key={label} scope="col" className={label === 'Current-period cost' ? 'admin-num' : undefined}>{copy(label)}</th>)}</tr></thead>
       <tbody>{integrations.providers.map(provider => {
         const recent = provider.coverage[0];
-        const stale = Boolean(provider.lastSuccess && provider.nextSync && Date.parse(provider.nextSync) < Date.now() && !provider.active);
-        const manual = MANUAL_ONLY_FINANCIAL_PROVIDERS.includes(provider.id);
-        const limitation = (code: string) => copy(FINANCIAL_LIMITATION_LABELS[code] ?? code);
-        const status = provider.active ? 'Synchronizing' : manual ? 'Manual records only' : !provider.configured ? 'Not configured' : provider.errorCode ? 'Needs attention'
-          : stale ? 'Stale' : provider.lastSuccess ? 'Connected' : 'Ready to synchronize';
+        // A confirmed-empty period is a coverage gap, not a synchronized period. It stays listed under the historical coverage.
+        const synchronized = provider.coverage.filter(coverage => coverage.quality !== 'UNAVAILABLE').length;
+        // A failed historical period records its closed error code as the gap's limitation.
+        const limitation = (code: string) => copy(FINANCIAL_LIMITATION_LABELS[code] ?? FINANCIAL_SYNC_ERROR_LABELS[code] ?? code);
+        const measurements = (value: number) => value === 1 ? copy('1 usage measurement') : copy('{0} usage measurements', count(value));
+        const status = provider.connection;
+        const error = provider.configured ? provider.errorCode : null;
+        const accessError = error === 'FINOPS_PROVIDER_FORBIDDEN' || error === 'FINOPS_PROVIDER_NOT_ENTITLED' || error === 'FINOPS_PROVIDER_ACCESS_DENIED';
+        const providerGuidance = FINANCIAL_CONNECTION_GUIDANCE[provider.id];
+        const guidance = error === 'FINOPS_PROVIDER_SCOPE_MISMATCH' ? 'Verify the provider scope on the worker before retrying.'
+          : accessError ? providerGuidance ?? 'Review billing access or record an invoice.'
+            : status === 'UNCONFIGURED' || status === 'MANUAL_ONLY' ? providerGuidance : null;
         // BUILD-FLOFI-UX-EDITOR-FINOPS-001: provider, connection, data available, recorded cost and the action first; the sync times, data quality,
         // historical coverage and the provider's own message one click away (a problem is still said by the connection state itself).
-        return <tr key={provider.id} data-status={status}><th scope="row">{copy(provider.name)}
-</th>
-
-          <td><Status tone={STATUS_TONE[status] ?? 'neutral'}>{copy(status)}</Status>{provider.errorCode && <p className="admin-diff">{copy(message(provider.errorCode))}</p>}</td>
-          <td>{provider.coverage.length > 0 ? copy('{0} synchronized periods', count(provider.coverage.length)) : copy('No synchronized period')}
+        return <tr key={provider.id} data-status={status}><th scope="row">{copy(provider.name)}</th>
+          <td><Status tone={STATUS_TONE[status]}>{copy(FINANCIAL_CONNECTION_LABELS[status])}</Status>
+            {(error || guidance) && <p className="admin-diff">{[error ? message(error) : null, guidance].filter(Boolean).map(line => copy(line!)).join(' ')}</p>}</td>
+          <td>{synchronized === 1 ? copy('1 synchronized period') : synchronized > 0 ? copy('{0} synchronized periods', count(synchronized)) : copy('No synchronized period')}
             {recent?.limitations.length ? <p className="admin-diff">{copy('Coverage limitations')}: {recent.limitations.map(limitation).join(' · ')}</p> : null}
           <details className="admin-finops-row-details"><summary>{copy('Sync details')}</summary><dl>
             <div><dt>{copy('Last successful sync')}</dt><dd>{time(provider.lastSuccess)}</dd></div>
             <div><dt>{copy('Next scheduled sync')}</dt><dd>{time(provider.nextSync)}</dd></div>
             {/* Its limitations are already stated under the financial data, never twice. */}
             <div><dt>{copy('Data quality')}</dt><dd>{recent ? copy(recent.quality) : copy('Unavailable')}</dd></div>
-            <div><dt>{copy('Historical coverage')}</dt><dd>{provider.coverage.length > 0 ? <><ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>{coverage.period.from} – {coverage.period.to} · {copy(coverage.quality)}
-                {' · '}{copy('{0} usage measurements', count(coverage.meterCount))}</li>)}</ul>
+            <div><dt>{copy('Historical coverage')}</dt><dd>{provider.coverage.length > 0 ? <><ul>{provider.coverage.map(coverage => <li key={coverage.period.from}>
+                {copy('{0} to {1} UTC', coverage.period.from, addDays(coverage.period.to, -1))} · {copy(coverage.quality)} · {measurements(coverage.meterCount)}
+                {coverage.quality === 'UNAVAILABLE' && coverage.limitations.length ? ' · ' + coverage.limitations.map(limitation).join(' · ') : null}</li>)}</ul>
               {provider.meters.length > 0 && <ul>{provider.meters.slice(0, 100).map((meter, index) =>
                 <li key={index}>{meter.service} · {meter.metric} · {meter.amount} {meter.unit}{meter.basis ? ' · ' + meter.basis : ''}</li>)}</ul>}</> : copy('No synchronized period')}</dd></div>
           </dl></details></td>

@@ -7,6 +7,19 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-FINOPS-INTEGRATIONS-UX-003 — Railway, CircleCI and Anthropic usage, Investor Reporting in USD and BRL, schema health
+
+**Status: pull request for CircleCI certification of its exact head; the owner authorized merge and deployment once every required check is
+green. No migration, certificate, credential or production configuration change. Provider and fixture evidence is local; production
+synchronization is an owner-release observation. Editable 0.1% pricing and fee collection are out of scope.**
+- Railway's additive usage fragments and CircleCI's multipart raw-gzip exports, which failed in production, are parsed and kept as meters,
+  never charges. Anthropic keeps product-specific meters. A failed historical period is a labelled coverage gap and never hides the current status.
+- Investor Reporting shows two-decimal USD (never a non-zero amount as zero), indicative BRL from PTAX, and exact values in the CSV.
+- Admin health classifies the schema (exact, certified ahead, behind, uncertified ahead, invalid history, unavailable) and separates failed
+  incident reads from empty ones. Platform Announcements was removed from this release by the owner; the public Beta banner is unchanged.
+
+See the [build record](builds/BUILD-FLOFI-FINOPS-INTEGRATIONS-UX-003.md).
+
 ## BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001 — Uniswap L1 fee refusals, short liquidity Review, six significant digits
 
 **Status: pull request for CircleCI certification of its exact head; merge and production deployment only with the owner's approval. Evidence is

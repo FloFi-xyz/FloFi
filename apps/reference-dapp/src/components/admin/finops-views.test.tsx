@@ -2,12 +2,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { FinopsReport } from '../../admin/finops/report';
+import { investorCsv, type FinopsReport } from '../../admin/finops/report';
 import { finopsCopy } from './finops-copy';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
-const { FinopsAi, FinopsCostBreakdown, FinopsCoverage, FinopsFilters, FinopsOverview, FinopsRevenue, FinopsWorkflow } = await import('./finops-views');
-const { FinopsScenario } = await import('./finops-controls');
+const { FinopsAi, FinopsCostBreakdown, FinopsCoverage, FinopsExchangeReference, FinopsFilters, FinopsInfrastructure, FinopsOverview, FinopsRevenue, FinopsWorkflow } = await import('./finops-views');
+const { FinopsIntegrations, FinopsScenario } = await import('./finops-controls');
 const { scenarioKeys } = await import('../../admin/finops/scenario');
 const { LocaleProvider } = await import('../../i18n/locale');
 
@@ -69,9 +69,17 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     // A micro-cost per chat shows four significant digits, its recorded value in the accessible text.
     expect(page).toContain('$0.0001235');
     expect(page).toContain('Recorded value: $0.00012345');
-    // Month-to-date and the projection are fixed calendar periods; the others cover the selected period.
+    // Fixed and selected periods are annotated beside each indicator.
     expect(page).toMatch(/data-scope="fixed">Month to date · 2026-11-01 to 2026-11-19 UTC/);
     expect(page).toContain('data-scope="selected">Selected period');
+  });
+
+  it('labels monthly comparisons by closed days even for a different selected period', () => {
+    const view = report();
+    const firstDay = { ...view, period: view.previous, current: { from: '2026-11-01', to: '2026-11-02' } };
+    const comparison = (value: FinopsReport) => html(createElement(FinopsOverview, { report: value, language: 'EN' }));
+    expect(comparison({ ...view, period: view.previous })).toContain('Closed days of the current month · 2026-11-01 to 2026-11-18 UTC');
+    expect(comparison(firstDay)).toContain('No closed UTC days in the current month');
   });
 
   it('keeps every existing quality classification and the cost sources by quality, as counts only', () => {
@@ -81,13 +89,121 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     expect(page).not.toMatch(/\d+%/);
   });
 
-  it('keeps every service row with its provider, value and quality, and the investor report keeps exact precision', () => {
+  it('keeps every service row and rounds ordinary investor amounts while preserving the exact export', () => {
     const dashboard = html(createElement(FinopsCostBreakdown, { report: report(), language: 'EN' }));
     expect(dashboard).toMatch(/Railway<\/span><br\/><small>flofi-api<\/small><\/th><td>infrastructure<\/td><td class="admin-num"><span class="admin-amount">Unavailable/);
     expect(dashboard).toContain('$0.1768');
     const investor = html(createElement(FinopsCostBreakdown, { report: report(), language: 'EN', mode: 'report' }));
-    expect(investor).toContain('$0.17676573');
+    expect(investor).toContain('$0.18');
     expect(investor).not.toContain('$0.1768<');
+    const portuguese = html(createElement(FinopsCostBreakdown, { report: report(), language: 'PT', mode: 'report' }));
+    expect(portuguese).toMatch(/US\$\s0,18/);
+    expect(investorCsv(report())).toContain('"0.17676573","USD","PROVIDER_REPORTED"');
+  });
+
+  it('renders both currencies and their FX reference while keeping unavailable BRL distinct from USD', () => {
+    const indicative = { asOf: '2026-11-19', policy: 'current-indicative', quote: { rate: '5.41234', publishedAt: '2026-11-19 13:00:00' } } as const;
+    const previous = { asOf: '2026-10-31', policy: 'historical-period-close', quote: null } as const;
+    const rates = { indicative, selected: indicative, previous };
+    const view = { ...report(), fx: rates };
+    const en = html(createElement(FinopsCostBreakdown, { report: view, language: 'EN', mode: 'report' }));
+    expect(en).toContain('$0.18');
+    expect(en).toMatch(/Approx\. R\$\s?0\.96/);
+    const pt = html(createElement(FinopsCostBreakdown, { report: view, language: 'PT', mode: 'report' }));
+    expect(pt).toMatch(/US\$\s0,18/);
+    expect(pt).toMatch(/Aprox\. R\$\s0,96/);
+    const reference = html(createElement(FinopsExchangeReference, { rates, language: 'PT' }));
+    expect(reference).toContain('Banco Central do Brasil · PTAX de venda');
+    expect(reference).toContain('5,41234 BRL por USD · 2026-11-19 13:00:00 (horário de São Paulo)');
+    expect(reference).toContain('Conversão para BRL indisponível');
+    const missing = html(createElement(FinopsCostBreakdown, {
+      report: { ...view, fx: { ...rates, selected: { ...indicative, quote: null } } }, language: 'EN', mode: 'report' }));
+    expect(missing).toContain('$0.18');
+    expect(missing).toContain('BRL conversion unavailable');
+  });
+
+  it('never shows a non-zero investor amount as zero next to its BRL conversion', () => {
+    const quote = { rate: '5.41234', publishedAt: '2026-11-19 13:00:00' };
+    const rate = { asOf: '2026-11-19', policy: 'current-indicative', quote } as const;
+    const tiny = { ...report(), fx: { indicative: rate, selected: rate, previous: rate },
+      totals: [{ id: 'openai', amount: '0.004', quality: 'PROVIDER_REPORTED', complete: true, updatedAt: '2026-11-19T00:00:00.000Z', sources: ['PROVIDER_COST'] }] } as unknown as FinopsReport;
+    const en = html(createElement(FinopsCostBreakdown, { report: tiny, language: 'EN', mode: 'report' }));
+    expect(en).toContain('$0.004<');
+    expect(en).not.toContain('$0.00<');
+    expect(en).toMatch(/Approx\. R\$\s?0\.02</);
+    const pt = html(createElement(FinopsCostBreakdown, { report: tiny, language: 'PT', mode: 'report' }));
+    expect(pt).toMatch(/US\$\s0,004</);
+  });
+
+  it('keeps the CSV integration status current: no old error for a removed credential, and an unavailable state said', () => {
+    const removed = { id: 'vercel', name: 'Vercel', configured: false, active: false, lastAttempt: '2026-11-18T10:00:00.000Z', lastSuccess: null,
+      nextSync: null, errorCode: 'FINOPS_PROVIDER_NOT_ENTITLED', coverage: [], meters: [], cost: { amount: null, quality: 'UNAVAILABLE' }, connection: 'UNCONFIGURED' };
+    const view = { ...report(), integrations: { available: true, providers: [removed] } } as unknown as FinopsReport;
+    const rows = investorCsv(view).split('\n').filter(line => line.startsWith('"integration status"'));
+    expect(rows).toEqual([expect.stringContaining('"vercel"')]);
+    expect(rows[0]).toContain('"UNCONFIGURED"');
+    expect(rows[0]).not.toContain('NOT_ENTITLED');
+    expect(html(createElement(FinopsCostBreakdown, { report: view, language: 'EN' }))).not.toContain('Latest sync failed');
+    const unavailable = investorCsv({ ...report(), integrations: { available: false, providers: [] } } as unknown as FinopsReport);
+    expect(unavailable).toContain('"integration status","all"');
+    expect(unavailable).toContain('"UNAVAILABLE","Automatic synchronization state unavailable"');
+  });
+
+  it('marks usage and estimate records as excluded from recorded expenses in the reconciliation table', () => {
+    const record = { id: 7, scope: 'openai', environment: 'production', period: { from: '2026-11-01', to: '2026-11-02' }, source: 'ASSUMPTION',
+      reference: 'Planning estimate', notes: null, currency: 'USD', net: '12.5', gross: null, credits: null, discounts: null, taxes: null,
+      fxUsd: null, fxSource: null, coverage: 'FULL', updatedAt: '2026-11-19T00:00:00.000Z', selected: true };
+    const view = { ...report(), ledger: { status: 'available', complete: true, records: [record] } } as unknown as FinopsReport;
+    const page = html(createElement(FinopsInfrastructure, { report: view, language: 'EN' }));
+    expect(page).toContain('Excluded from recorded expenses (usage or estimate)');
+    expect(page).not.toContain('Superseded in totals');
+    expect(page).toContain('$12.50');
+  });
+
+  it('uses the latest success and only indicates a failure newer than both sync paths', () => {
+    const view = report();
+    const legacy = { scope: 'openai', lastAttempt: '2026-11-19T19:00:00.000Z', lastSuccess: '2026-11-19T19:00:00.000Z', lastFailed: null };
+    const oldAttempt = '2026-11-19T18:00:00.000Z';
+    const automatic: FinopsReport['integrations']['providers'][number] = {
+      id: 'openai', name: 'OpenAI', configured: true, active: false, nextSync: null, coverage: [], meters: [],
+      lastAttempt: oldAttempt, lastSuccess: '2026-11-19T17:00:00.000Z', errorCode: 'FINOPS_PROVIDER_ACCESS_DENIED', cost: view.metrics.aiCost, connection: 'ERROR',
+    };
+    const page = (lastAttempt: string) => html(createElement(FinopsCostBreakdown, { language: 'EN',
+      report: { ...view, sync: [legacy], integrations: { available: true, providers: [{ ...automatic, lastAttempt }] } } }));
+    expect(page(oldAttempt)).toContain('2026-11-19 19:00 UTC');
+    expect(page(oldAttempt)).not.toContain('Latest sync failed');
+    expect(page('2026-11-19T20:00:00.000Z')).toContain('Latest sync failed 2026-11-19 20:00 UTC');
+  });
+
+  it('shows no English quality code in the Portuguese AI and workflow sections', () => {
+    for (const section of [FinopsAi, FinopsWorkflow]) {
+      const page = html(createElement(section, { report: report(), language: 'PT' }));
+      expect(page).not.toMatch(/\b(?:PARTIAL|UNAVAILABLE|VERIFIED|ESTIMATED)\b/);
+    }
+  });
+
+  it('keeps the recorded AI cost visible when AI telemetry cannot be read', () => {
+    const ai = html(createElement(FinopsAi, { report: { ...report(), ai: null }, language: 'EN' }));
+    expect(ai).toContain('AI telemetry is temporarily unavailable.');
+    expect([...ai.matchAll(/admin-finops-group-card" aria-label="([^"]+)"/g)].map(match => match[1])).toEqual(['Costs']);
+    expect(ai).toMatch(/Provider and ledger AI costs<\/dt><dd><span class="admin-finops-figure"><span class="admin-amount"[^>]*>\$0\.1768/);
+    expect(ai).not.toContain('AI list-price estimate');
+  });
+
+  it('counts only periods with synchronized data; a confirmed-empty period stays a listed coverage gap', () => {
+    const gap = { period: { from: '2026-09-01', to: '2026-10-01' }, collectedAt: '2026-11-19T10:00:00.000Z', quality: 'UNAVAILABLE',
+      limitations: ['FINOPS_PROVIDER_RESPONSE_INVALID'], meterCount: 0 };
+    const usage = { period: { from: '2026-10-01', to: '2026-11-01' }, collectedAt: '2026-11-19T10:00:00.000Z', quality: 'PARTIAL', limitations: [], meterCount: 4 };
+    const circleci = { id: 'circleci', name: 'CircleCI', configured: true, active: false, lastAttempt: null, lastSuccess: '2026-11-19T10:00:00.000Z',
+      nextSync: null, errorCode: null, meters: [], cost: { amount: null, quality: 'UNAVAILABLE' }, connection: 'USAGE_SYNCHRONIZED' };
+    const table = (coverage: readonly (typeof gap)[]) => html(createElement(FinopsIntegrations,
+      { integrations: { available: true, providers: [{ ...circleci, coverage }] } as unknown as FinopsReport['integrations'] }));
+    expect(table([gap])).toContain('No synchronized period');
+    expect(table([gap])).not.toContain('synchronized periods');
+    expect(table([usage, gap])).toContain('1 synchronized period<');
+    // Inclusive UTC days, the singular, and a failed period's labelled reason.
+    expect(table([usage, gap])).toContain('2026-09-01 to 2026-09-30 UTC · UNAVAILABLE · 0 usage measurements · The provider returned data FloFi could not verify.');
+    expect(table([{ ...usage, meterCount: 1 }])).toContain('2026-10-01 to 2026-10-31 UTC · PARTIAL · 1 usage measurement<');
   });
 
   it('separates AI usage, reliability and costs; lifecycle counts first; revenue, costs, margins and break-even apart', () => {

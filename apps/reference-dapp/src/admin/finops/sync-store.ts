@@ -36,6 +36,14 @@ export type FinancialProviderState = {
 const MAX_ATTEMPTS = 5, MAX_POLLS = 20;
 const SECOND = 1_000, MINUTE = 60 * SECOND, HOUR = 60 * MINUTE;
 const providerFailure = 'FINOPS_PROVIDER_UNAVAILABLE';
+/** Refusals of the credential itself, not of a period: they replace the provider's status even when a historical period met them, and any
+ * later answer from the provider (a historical result or an accepted export) clears them. */
+const ACCOUNT_CODES: ReadonlySet<string> = new Set(['FINOPS_PROVIDER_AUTH_REQUIRED', 'FINOPS_PROVIDER_ACCESS_DENIED', 'FINOPS_PROVIDER_FORBIDDEN',
+  'FINOPS_PROVIDER_NOT_ENTITLED', 'FINOPS_PROVIDER_SCOPE_MISMATCH', 'FINOPS_PROVIDER_NOT_CONFIGURED']);
+/** A coverage gap never replaces a snapshot that holds data. */
+const GAP_UPSERT = `INSERT INTO finops_sync_snapshots AS snapshot (tenant_id, provider, period_start, period_end, quality, limitations, meter_count, meters)`;
+const GAP_CONFLICT = `ON CONFLICT (tenant_id, provider, period_start) DO UPDATE SET period_end = EXCLUDED.period_end,
+  limitations = EXCLUDED.limitations, collected_at = EXCLUDED.collected_at WHERE snapshot.quality = 'UNAVAILABLE'`;
 const noSchema = () => new Error('FINOPS_SYNC_SCHEMA_REQUIRED');
 const iso = (date: Date | null) => date?.toISOString() ?? null;
 const month = (at: Date, offset: number) => isoDay(new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + offset, 1)));
@@ -69,7 +77,16 @@ export async function configureFinancialSync(host: AdminHost, enabled: readonly 
     await host.db.query(`INSERT INTO finops_sync_jobs AS current (tenant_id, provider, configured)
       SELECT $1, provider, provider = ANY($3::text[]) FROM unnest($2::text[]) AS provider ORDER BY provider
       ON CONFLICT (tenant_id, provider) DO UPDATE SET configured = EXCLUDED.configured,
-        next_run_at = CASE WHEN EXCLUDED.configured THEN clock_timestamp() ELSE current.next_run_at END
+        next_run_at = CASE WHEN EXCLUDED.configured THEN clock_timestamp() ELSE current.next_run_at END,
+        -- A removed credential ends its cycle: a later credential starts a fresh plan, never the old export or periods.
+        cycle_started_at = CASE WHEN EXCLUDED.configured THEN current.cycle_started_at END,
+        periods = CASE WHEN EXCLUDED.configured THEN current.periods ELSE '[]' END,
+        checkpoint = CASE WHEN EXCLUDED.configured THEN current.checkpoint END,
+        attempts = CASE WHEN EXCLUDED.configured THEN current.attempts ELSE 0 END,
+        polls = CASE WHEN EXCLUDED.configured THEN current.polls ELSE 0 END,
+        lease_token = CASE WHEN EXCLUDED.configured THEN current.lease_token END,
+        lease_expires_at = CASE WHEN EXCLUDED.configured THEN current.lease_expires_at END,
+        last_error = CASE WHEN EXCLUDED.configured THEN current.last_error END
       WHERE current.configured <> EXCLUDED.configured`, [host.tenantId, FINANCIAL_PROVIDER_IDS, enabled]);
     return true;
   } catch (error) {
@@ -106,9 +123,14 @@ export async function queueFinancialSync(host: AdminHost, actor: string, request
 export async function claimFinancialSync(host: AdminHost, enabled: readonly FinancialProviderId[], hours: number): Promise<FinancialSyncLease | null> {
   return host.db.transaction(async tx => {
     await tx.query("SET LOCAL lock_timeout = '750ms'");
+    // Abandoned leases end the cycle. A historical period records the failure as its coverage gap and keeps the current status.
+    await tx.query(`${GAP_UPSERT} SELECT tenant_id, provider, (periods #>> '{0,period,from}')::date, (periods #>> '{0,period,to}')::date,
+        'UNAVAILABLE', ARRAY[$3::text], 0, '[]'::jsonb FROM finops_sync_jobs
+      WHERE tenant_id = $1 AND provider = ANY($2::text[]) AND lease_expires_at <= clock_timestamp() AND attempts >= $4
+        AND periods #>> '{0,historical}' = 'true' ${GAP_CONFLICT}`, [host.tenantId, enabled, providerFailure, MAX_ATTEMPTS - 1]);
     await tx.query(`UPDATE finops_sync_jobs SET lease_token = NULL, lease_expires_at = NULL,
       next_run_at = clock_timestamp() + $3 * interval '1 hour', cycle_started_at = NULL, periods = '[]', checkpoint = NULL,
-      attempts = 0, polls = 0, last_error = $4
+      attempts = 0, polls = 0, last_error = CASE WHEN periods #>> '{0,historical}' = 'true' THEN last_error ELSE $4 END
       WHERE tenant_id = $1 AND provider = ANY($2::text[]) AND lease_expires_at <= clock_timestamp() AND attempts >= $5`,
     [host.tenantId, enabled, hours, providerFailure, MAX_ATTEMPTS - 1]);
     const { rows: [job] } = await tx.query<JobRow>(`SELECT provider, attempts, polls, checkpoint, periods, historical_review_at, cycle_started_at,
@@ -143,8 +165,10 @@ export async function waitFinancialSync(host: AdminHost, lease: FinancialSyncLea
   return host.db.transaction(async tx => {
     if (!await owned(tx, host, lease)) return false;
     await tx.query(`UPDATE finops_sync_jobs SET lease_token = NULL, lease_expires_at = NULL,
-      next_run_at = clock_timestamp() + $3 * interval '1 millisecond', checkpoint = $4, polls = polls + 1, last_error = NULL
-      WHERE tenant_id = $1 AND provider = $2`, [host.tenantId, lease.id, Math.max(10 * SECOND, Math.min(30 * MINUTE, retryAfterMs)), checkpoint]);
+      next_run_at = clock_timestamp() + $3 * interval '1 millisecond', checkpoint = $4, polls = polls + 1,
+      last_error = CASE WHEN NOT $5 OR last_error = ANY($6::text[]) THEN NULL ELSE last_error END
+      WHERE tenant_id = $1 AND provider = $2`, [host.tenantId, lease.id, Math.max(10 * SECOND, Math.min(30 * MINUTE, retryAfterMs)), checkpoint,
+      lease.plans[0]?.historical === true, [...ACCOUNT_CODES]]);
     return true;
   });
 }
@@ -152,14 +176,20 @@ export async function waitFinancialSync(host: AdminHost, lease: FinancialSyncLea
 export async function failFinancialSync(host: AdminHost, lease: FinancialSyncLease, code: string, hours: number, retryable: boolean) {
   const attempts = lease.attempts + 1, retry = retryable && attempts < MAX_ATTEMPTS;
   const delay = retry ? Math.min(30 * MINUTE, MINUTE * 2 ** (attempts - 1)) : hours * HOUR;
+  const [planned] = lease.plans, historical = planned?.historical === true;
   return host.db.transaction(async tx => {
     if (!await owned(tx, host, lease)) return false;
+    // A historical period's final failure is its coverage gap, with the code, so a failed read is never less visible than an empty one.
+    if (historical && !retry) {
+      await tx.query(`${GAP_UPSERT} VALUES ($1, $2, $3::date, $4::date, 'UNAVAILABLE', ARRAY[$5::text], 0, '[]'::jsonb) ${GAP_CONFLICT}`,
+        [host.tenantId, lease.id, planned.period.from, planned.period.to, code]);
+    }
     await tx.query(`UPDATE finops_sync_jobs SET lease_token = NULL, lease_expires_at = NULL,
-      next_run_at = clock_timestamp() + $3 * interval '1 millisecond', last_error = $4,
+      next_run_at = clock_timestamp() + $3 * interval '1 millisecond', last_error = CASE WHEN $6 THEN last_error ELSE $4 END,
       attempts = CASE WHEN $5 THEN attempts + 1 ELSE 0 END,
       polls = CASE WHEN $5 THEN polls ELSE 0 END, checkpoint = CASE WHEN $5 THEN checkpoint ELSE NULL END,
       periods = CASE WHEN $5 THEN periods ELSE '[]' END, cycle_started_at = CASE WHEN $5 THEN cycle_started_at ELSE NULL END
-      WHERE tenant_id = $1 AND provider = $2`, [host.tenantId, lease.id, delay, code, retry]);
+      WHERE tenant_id = $1 AND provider = $2`, [host.tenantId, lease.id, delay, code, retry, historical && !ACCOUNT_CODES.has(code)]);
     return true;
   });
 }
@@ -195,10 +225,12 @@ export async function finishFinancialSync(host: AdminHost, lease: FinancialSyncL
       cycle_started_at = CASE WHEN $5 THEN NULL ELSE cycle_started_at END,
       last_success_at = CASE WHEN $6 THEN clock_timestamp() ELSE last_success_at END,
       historical_review_at = CASE WHEN $7 THEN clock_timestamp() ELSE historical_review_at END,
-      last_error = CASE WHEN $6 THEN NULL WHEN NOT $8 THEN 'FINOPS_PROVIDER_NO_DATA' ELSE last_error END
+      last_error = CASE WHEN $6 THEN NULL WHEN NOT $8 AND NOT $9 THEN 'FINOPS_PROVIDER_NO_DATA'
+        WHEN last_error = ANY($10::text[]) THEN NULL ELSE last_error END
       WHERE tenant_id = $1 AND provider = $2`,
     [host.tenantId, lease.id, completedCycle ? hours : 0, JSON.stringify(remaining), completedCycle,
-      !planned.historical && result.coverage !== 'UNAVAILABLE', historicalComplete, result.coverage !== 'UNAVAILABLE']);
+      !planned.historical && result.coverage !== 'UNAVAILABLE', historicalComplete, result.coverage !== 'UNAVAILABLE', planned.historical,
+      [...ACCOUNT_CODES]]);
     return true;
   });
 }
@@ -210,7 +242,7 @@ export async function readFinancialSync(host: AdminHost): Promise<{ available: b
     limitations: string[]; meter_count: number };
   try {
     const { rows } = await host.db.query<State>(`SELECT provider, configured, last_attempt_at, last_success_at, next_run_at, last_error,
-      (cycle_started_at IS NOT NULL OR COALESCE(lease_expires_at > clock_timestamp(), FALSE)) AS active
+      (configured AND (cycle_started_at IS NOT NULL OR COALESCE(lease_expires_at > clock_timestamp(), FALSE))) AS active
       FROM finops_sync_jobs WHERE tenant_id = $1`, [host.tenantId]);
     const { rows: coverage } = await host.db.query<Coverage>(`SELECT j.provider, s.period_start::text AS "from", s.period_end::text AS "to",
       s.collected_at, s.quality, s.limitations, s.meter_count FROM finops_sync_jobs j CROSS JOIN LATERAL (

@@ -188,6 +188,14 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
 
 /** What a schema check established: the database's version, this build's, and the certified newer migrations in between. */
 export type SchemaCompatibility = { readonly version: number; readonly application: number; readonly forward: readonly MigrationIdentity[] };
+export type SchemaCompatibilityState = 'exact' | 'certified-ahead' | 'behind' | 'uncertified-ahead' | 'invalid-history' | 'unavailable';
+export class SchemaCompatibilityError extends Error {
+  readonly state: SchemaCompatibilityState;
+  constructor(message: string, state: SchemaCompatibilityState, cause: unknown) {
+    super(message, { cause });
+    this.state = state;
+  }
+}
 const FILE = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 const LOCK_ID = 7_340_032_001; // Constant advisory lock key for migration runners.
 
@@ -220,7 +228,8 @@ function verifyPrefix(applied: readonly Applied[], migrations: readonly Migratio
 
 const SHA256 = /^[0-9a-f]{64}$/, NAME = /^[a-z0-9_]+$/;
 const sameIdentity = (a: MigrationIdentity, b: MigrationIdentity) => a.version === b.version && a.name === b.name && a.sha256 === b.sha256;
-const wellFormed = (m: MigrationIdentity) => Number.isSafeInteger(m.version) && m.version >= 1 && NAME.test(m.name) && SHA256.test(m.sha256);
+const wellFormed = (m: MigrationIdentity) => Number.isSafeInteger(m.version) && m.version >= 1
+  && typeof m.name === 'string' && NAME.test(m.name) && typeof m.sha256 === 'string' && SHA256.test(m.sha256);
 /** The one certificate for the build whose newest shipped migration is `head`, if any. A malformed or ambiguous manifest fails closed. */
 function certificateFor(head: MigrationIdentity | undefined, certificates: readonly ForwardCompatibilityCertificate[]): ForwardCompatibilityCertificate | undefined {
   if (!head) return undefined;
@@ -248,6 +257,24 @@ export function schemaCompatibility(applied: readonly MigrationIdentity[], shipp
   return Object.freeze({ version: applied.length, application: shipped.length,
     forward: Object.freeze(newer.map(({ version, name, sha256 }) => Object.freeze({ version, name, sha256 }))) });
 }
+
+function schemaHistoryFailure(applied: readonly MigrationIdentity[], shipped: readonly MigrationIdentity[], code: string): SchemaCompatibilityState {
+  if (code === 'SCHEMA_NOT_MIGRATED') return 'behind';
+  if (code !== 'MIGRATION_HISTORY_MISMATCH' || applied.length <= shipped.length
+    || applied.some((row, index) => row.version !== index + 1 || !wellFormed(row))) return 'invalid-history';
+  return shipped.every((row, index) => sameIdentity(row, applied[index]!)) ? 'uncertified-ahead' : 'invalid-history';
+}
+
+export function schemaCompatibilityState(applied: readonly MigrationIdentity[], shipped = SHIPPED_MIGRATIONS,
+  certificates = CERTIFIED_FORWARD_MIGRATIONS): SchemaCompatibilityState {
+  try {
+    return schemaCompatibility(applied, shipped, certificates).forward.length ? 'certified-ahead' : 'exact';
+  } catch (error) {
+    return schemaHistoryFailure(applied, shipped, error instanceof Error ? error.message : '');
+  }
+}
+
+export const schemaLedgerMissing = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === '42P01';
 
 /**
  * Applies every pending migration. Safe to run concurrently and repeatedly; returns the versions applied now. A database ahead of
@@ -297,6 +324,10 @@ export async function assertSchemaCompatible(db: Queryable, migrations?: readonl
   const all = migrations ?? await loadMigrations();
   let applied: Applied[];
   try { applied = (await db.query<Applied>('SELECT version, name, sha256 FROM schema_migrations ORDER BY version')).rows; }
-  catch (cause) { throw new Error('SCHEMA_NOT_MIGRATED', { cause }); }
-  return schemaCompatibility(applied, all, certificates);
+  catch (cause) { throw new SchemaCompatibilityError('SCHEMA_NOT_MIGRATED', schemaLedgerMissing(cause) ? 'behind' : 'unavailable', cause); }
+  try { return schemaCompatibility(applied, all, certificates); }
+  catch (cause) {
+    if (!(cause instanceof Error)) throw cause;
+    throw new SchemaCompatibilityError(cause.message, schemaHistoryFailure(applied, all, cause.message), cause);
+  }
 }

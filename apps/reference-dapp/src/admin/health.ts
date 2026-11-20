@@ -5,15 +5,25 @@
  * Worker liveness is inferred from durable activity (completed work items, evaluations); the console has no other channel to the worker
  * and says so. No secret, token or address is read or returned.
  */
-import { SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
+import { schemaCompatibilityState, schemaLedgerMissing, SHIPPED_MIGRATIONS, type MigrationIdentity, type SchemaCompatibilityState } from '@defi-workflow-engine/cloud-runtime';
 import type { AdminHost } from './host.ts';
 import { loadExecutionAttention, type AttentionCounts, type ExecutionAttention } from './support/lifecycle.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Probe<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
+export const schemaHealthLabels: Record<SchemaCompatibilityState, string> = {
+  exact: 'Exact schema',
+  'certified-ahead': 'Certified compatible schema ahead',
+  behind: 'Database schema behind this build',
+  'uncertified-ahead': 'Uncertified schema ahead',
+  'invalid-history': 'Invalid migration history',
+  unavailable: 'Database unavailable',
+};
+export const schemaHealthy = (state: SchemaCompatibilityState) => state === 'exact' || state === 'certified-ahead';
 export type HealthReport = {
   readonly checkedAt: string;
-  readonly database: Probe<{ readonly latencyMs: number; readonly appliedMigrations: number; readonly shippedMigrations: number; readonly tenantId: string }>;
+  readonly database: Probe<{ readonly latencyMs: number; readonly appliedMigrations: number; readonly shippedMigrations: number; readonly tenantId: string;
+    readonly schema: SchemaCompatibilityState }>;
   readonly api: { readonly topology: 'remote' | 'embedded-or-local'; readonly readiness: Probe<{ readonly status: number; readonly latencyMs: number }> | null };
   readonly queue: Probe<{ readonly ready: number; readonly overdue: number; readonly oldestOverdueSeconds: number | null; readonly leased: number; readonly expiredLeases: number;
     readonly done24h: number; readonly dead24h: number; readonly lastCompletedAt: string | null; readonly byKind: readonly { readonly kind: string; readonly ready: number; readonly dead24h: number }[] }>;
@@ -26,6 +36,7 @@ export type HealthReport = {
     readonly truncated: boolean; readonly notesOk: boolean }>;
   readonly scheduler: Probe<{ readonly installed: boolean; readonly lastEvaluationAt: string | null; readonly overdueRules: number }>;
   readonly incidents: readonly { readonly kind: string; readonly code: string; readonly at: string; readonly run: string | null }[];
+  readonly incidentsAvailable: boolean;
 };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}/;
 const failed = (error: unknown): { ok: false; code: string } => ({ ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message.match(CODE)![0] : 'QUERY_FAILED' });
@@ -50,12 +61,18 @@ export async function apiReadiness(env: Env, fetchImpl: typeof fetch = fetch): P
 export async function healthReport(env: Env, host: AdminHost, now: Date, fetchImpl: typeof fetch = fetch,
   shared?: Promise<ExecutionAttention | null>): Promise<HealthReport> {
   const { db, tenantId } = host, day = new Date(now.getTime() - 86_400_000);
+  const api = apiReadiness(env, fetchImpl);
   const database = (async (): Promise<HealthReport['database']> => {
+    const started = performance.now();
     try {
-      const started = performance.now();
-      const { rows } = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM schema_migrations`);
-      return { ok: true, value: { latencyMs: Math.round(performance.now() - started), appliedMigrations: rows[0]?.n ?? 0, shippedMigrations: SHIPPED_MIGRATIONS.length, tenantId } };
-    } catch (error) { return failed(error); }
+      const { rows } = await db.query<MigrationIdentity>('SELECT version, name, sha256 FROM schema_migrations ORDER BY version');
+      return { ok: true, value: { latencyMs: Math.round(performance.now() - started), appliedMigrations: rows.length,
+        shippedMigrations: SHIPPED_MIGRATIONS.length, tenantId, schema: schemaCompatibilityState(rows) } };
+    } catch (error) {
+      if (schemaLedgerMissing(error))
+        return { ok: true, value: { latencyMs: Math.round(performance.now() - started), appliedMigrations: 0, shippedMigrations: SHIPPED_MIGRATIONS.length, tenantId, schema: 'behind' } };
+      return { ok: false, code: 'DATABASE_UNAVAILABLE' };
+    }
   })();
   const queue = (async (): Promise<HealthReport['queue']> => {
     try {
@@ -107,8 +124,9 @@ export async function healthReport(env: Env, host: AdminHost, now: Date, fetchIm
         FROM work_items WHERE tenant_id = $1 AND state = 'DEAD' ORDER BY completed_at DESC LIMIT 20`, [tenantId]);
       return rows.map(row => ({ kind: row.kind, code: row.last_error && CODE.test(row.last_error) ? row.last_error.match(CODE)![0] : 'UNCLASSIFIED_ERROR',
         at: row.completed_at.toISOString(), run: row.run_id ? row.run_id.slice(0, 18) : null }));
-    } catch { return []; }
+    } catch { return null; }
   })();
-  return { checkedAt: now.toISOString(), database: await database, api: await apiReadiness(env, fetchImpl), queue: await queue, runs: await runs,
-    scheduler: await scheduler, incidents: await incidents };
+  const history = await incidents;
+  return { checkedAt: now.toISOString(), database: await database, api: await api, queue: await queue, runs: await runs,
+    scheduler: await scheduler, incidents: history ?? [], incidentsAvailable: history !== null };
 }

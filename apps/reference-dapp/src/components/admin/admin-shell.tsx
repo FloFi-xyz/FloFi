@@ -79,7 +79,7 @@ export function AdminShell({ active, context, title, description, actions, child
 
 const UNAVAILABLE: Record<string, string> = {
   ADMIN_STORE_NOT_CONFIGURED: 'This deployment has no PostgreSQL platform state (DATABASE_URL), so the console cannot authenticate anyone.',
-  ADMIN_SCHEMA_NOT_CURRENT: 'The database schema does not match this build. Apply the shipped migrations (including 0012_admin_control_plane) first.',
+  ADMIN_SCHEMA_NOT_CURRENT: 'The database schema does not match this build. Check the deployment’s supported migration history.',
   ADMIN_STORE_UNAVAILABLE: 'The admin store is unreachable right now.',
 };
 export function AdminUnavailable({ code }: { code: string }) {

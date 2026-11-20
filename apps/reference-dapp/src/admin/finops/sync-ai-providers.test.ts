@@ -102,6 +102,32 @@ describe('Anthropic Usage and Cost Analytics', () => {
     expect(result.meters.find(meter => meter.metric === 'ephemeral_5m_input_tokens')).toMatchObject({ amount: '20', unit: 'tokens' });
   });
 
+  it('keeps product-specific meters for the same workspace, model, day and metric', async () => {
+    const products = ['messages_api', 'message_batches_api'];
+    const result = await read(anthropic, provider({
+      cost: products.map(product => costRow('2026-11-01', product, '1.123456')),
+      usage: products.map(product => usageRow('2026-11-01', product)),
+    }));
+    if (result.kind !== 'COMPLETE') throw Error('unexpected wait');
+    expect(result.entries.map(entry => entry.net)).toEqual(['0.02246912']);
+    expect(result.meters.filter(meter => meter.metric === 'provider_cost').map(meter => [meter.basis, meter.amount]))
+      .toEqual(products.map(product => [product + ':tokens', '0.01123456']));
+    expect(result.meters.filter(meter => meter.metric === 'requests').map(meter => meter.basis)).toEqual(products);
+    await expect(read(anthropic, provider({ cost: [], usage: Array.from({ length: 2 }, () => usageRow('2026-11-01', 'messages_api')) })))
+      .rejects.toThrow('FINOPS_PROVIDER_RESPONSE_INVALID');
+  });
+
+  it('labels a null cost type as unattributed and refuses a missing or malformed one', async () => {
+    const typed = (costType: unknown) => ({ ...costRow('2026-11-01', 'messages_api', '1'),
+      group: { ...costRow('2026-11-01', 'messages_api', '1').group, cost_type: costType } });
+    const result = await read(anthropic, provider({ cost: [typed(null)], usage: [] }));
+    if (result.kind !== 'COMPLETE') throw Error('unexpected wait');
+    expect(result.meters.find(meter => meter.metric === 'provider_cost')?.basis).toBe('messages_api:unattributed');
+    for (const costType of [undefined, 7, 'web search']) {
+      await expect(read(anthropic, provider({ cost: [typed(costType)], usage: [] }))).rejects.toThrow('FINOPS_PROVIDER_RESPONSE_INVALID');
+    }
+  });
+
   it('excludes days after the export watermark instead of recording a partial day as a complete cost', async () => {
     const result = await read(anthropic, provider({ cost: [costRow('2026-11-01', 'messages_api', '100'), costRow('2026-11-02', 'messages_api', '100')],
       usage: [usageRow('2026-11-02', 'messages_api')] }, '2026-11-02T08:00:00Z'));

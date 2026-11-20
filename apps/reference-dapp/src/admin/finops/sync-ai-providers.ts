@@ -7,7 +7,7 @@ import { financialInvalid, financialJson, financialObject, requestFinancial } fr
 
 const start = (day: string) => day + 'T00:00:00Z';
 const second = (day: string) => String(Date.parse(start(day)) / 1_000);
-const label = (value: unknown) => typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,100}$/.test(value);
+const label = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,100}$/.test(value);
 function dayBucket(from: number, to: number, period: Period): Period {
   if (!Number.isSafeInteger(from) || from % 86_400 !== 0 || to - from !== 86_400) throw financialInvalid();
   const day = isoDay(new Date(from * 1_000));
@@ -114,24 +114,26 @@ const anthropic: FinancialSyncAdapter = {
       for (const product of ANTHROPIC_API_PRODUCTS) url.searchParams.append('products[]', product);
       await pages(url, { headers }, fetcher, signal, raw => {
         if (!financialObject(raw) || !financialObject(raw.group) || typeof raw.starting_at !== 'string' || typeof raw.ending_at !== 'string') throw financialInvalid();
-        if (raw.group.workspace_id !== project) { limitations.push('ANTHROPIC_UNATTRIBUTED_WORKSPACE_EXCLUDED'); return; }
+        const { workspace_id, product, model, cost_type } = raw.group;
+        if (workspace_id !== project) { limitations.push('ANTHROPIC_UNATTRIBUTED_WORKSPACE_EXCLUDED'); return; }
         // Only the developer platform's API products are FloFi's operating cost. Seats, Chat, Claude Code, Console and other
         // surfaces are excluded even if the filter were ignored. A null product (code execution) belongs to the API request.
-        if (raw.group.product !== null && !(ANTHROPIC_API_PRODUCTS as readonly unknown[]).includes(raw.group.product)) {
+        if (product !== null && !(ANTHROPIC_API_PRODUCTS as readonly unknown[]).includes(product)) {
           limitations.push('ANTHROPIC_NON_API_PRODUCTS_EXCLUDED');
           return;
         }
         const bucket = dayBucket(Date.parse(raw.starting_at) / 1_000, Date.parse(raw.ending_at) / 1_000, period);
-        if (raw.group.model !== null && !label(raw.group.model)) throw financialInvalid();
-        const service = raw.group.model === null ? 'Unattributed model' : String(raw.group.model);
-        const dimensions = type === 'cost' ? String(raw.group.cost_type) : '';
-        if (dimensions && !label(dimensions)) throw financialInvalid();
-        const identity = JSON.stringify([type, bucket.from, raw.group.product, service, dimensions]);
+        if (model !== null && !label(model)) throw financialInvalid();
+        const service = model === null ? 'Unattributed model' : String(model);
+        // A null cost type is unattributed like a null product; a missing or non-label value is not a cost dimension.
+        const dimensions = type !== 'cost' ? '' : cost_type === null ? 'unattributed' : label(cost_type) ? cost_type : null;
+        if (dimensions === null) throw financialInvalid();
+        const identity = JSON.stringify([type, bucket.from, product, service, dimensions]);
         if (seen.has(identity)) throw financialInvalid();
         seen.add(identity);
         const add = (metric: string, unit: string, amount: string) =>
-          meters.push({ scope: 'anthropic', environment: 'production', project, service: dimensions ? service + ':' + dimensions : service,
-            metric, unit, amount, period: bucket });
+          meters.push({ scope: 'anthropic', environment: 'production', project, service,
+            metric, unit, amount, period: bucket, basis: [product ?? 'unattributed', dimensions].filter(Boolean).join(':') });
         if (type === 'cost') {
           const cost = raw.cost;
           if (!financialObject(cost) || cost.currency !== 'USD' || typeof cost.amount !== 'string' || !/^-?\d{1,12}(\.\d{1,6})?$/.test(cost.amount))

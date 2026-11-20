@@ -6,7 +6,10 @@ import { assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, createPostgresWor
 import { createTestDatabase, type TestDatabase } from '../../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { runAdminCommand } from '../cli-commands.ts';
 import { addDays, selectRecords, validateEntry, type Period } from './economics.ts';
+import { aiFinancialAdapters } from './sync-ai-providers.ts';
+import { circleCiFinancialAdapter } from './sync-circleci.ts';
 import { createFinancialSyncEngine, financialSyncEnabled, financialSyncHours, type FinancialProviderId, type FinancialSyncAdapter, type FinancialSyncResult } from './sync-engine.ts';
+import { infraFinancialAdapters, RAILWAY_FINANCIAL_PROJECT, RAILWAY_PRODUCTION_ENVIRONMENT } from './sync-infra-providers.ts';
 import {
   claimFinancialSync, configureFinancialSync, financialSyncPeriods, finishFinancialSync, queueFinancialSync, readFinancialMeters, readFinancialSync,
 } from './sync-store.ts';
@@ -40,6 +43,14 @@ async function due(tenant: string, id?: FinancialProviderId) {
   await database.db.query(`UPDATE finops_sync_jobs SET next_run_at = clock_timestamp() - interval '1 second'
     WHERE tenant_id = $1 AND ($2::text IS NULL OR provider = $2)`, [tenant, id ?? null]);
 }
+
+async function plan(tenant: Awaited<ReturnType<typeof host>>, id: FinancialProviderId, periods: readonly { period: Period; historical: boolean }[]) {
+  await configureFinancialSync(tenant, [id]);
+  await tenant.db.query(`UPDATE finops_sync_jobs SET next_run_at = clock_timestamp() - interval '1 second',
+    cycle_started_at = clock_timestamp(), periods = $3::jsonb WHERE tenant_id = $1 AND provider = $2`,
+  [tenant.tenantId, id, JSON.stringify(periods)]);
+}
+
 beforeAll(async () => { database = await createTestDatabase({ migrated: false }); await migrate(database.db); });
 afterAll(async () => { await database?.drop(); });
 
@@ -183,5 +194,228 @@ describe('autonomous Financial Sync on disposable PostgreSQL', () => {
     expect(openai.errorCode).toBe('FINOPS_PROVIDER_NO_DATA');
     expect(openai.coverage.every(snapshot => snapshot.quality === 'UNAVAILABLE' && snapshot.meterCount === 0)).toBe(true);
     expect(await h.db.query('SELECT 1 FROM finops_cost_records WHERE tenant_id = $1', [h.tenantId])).toMatchObject({ rowCount: 0 });
+  });
+
+  it('persists separate Anthropic product meters and a single exact provider-cost entry', async () => {
+    const h = await host();
+    const period = { from: '2026-11-01', to: '2026-11-02' };
+    const adapter = aiFinancialAdapters[1];
+    const fetcher = vi.fn<typeof fetch>(async request => {
+      const cost = new URL(String(request)).pathname.endsWith('/cost');
+      const data = ['messages_api', 'message_batches_api'].map(product => ({
+        starting_at: period.from + 'T00:00:00Z', ending_at: period.to + 'T00:00:00Z',
+        group: { workspace_id: 'wrkspc_fixture', model: 'claude-fixture', product, ...(cost ? { cost_type: 'tokens' } : {}) },
+        ...(cost ? { cost: { currency: 'USD', amount: '1.123456' } } : { usage: { requests: 2 } }),
+      }));
+      return Response.json({ data, data_refreshed_at: period.to + 'T00:00:00Z', has_more: false, next_page: null });
+    });
+    const worker = createFinancialSyncEngine({ host: h, env: { ...envOf(h.tenantId), FLOFI_FINOPS_ANTHROPIC_ADMIN_KEY: 'fixture-inert',
+      FLOFI_FINOPS_ANTHROPIC_WORKSPACE_ID: 'wrkspc_fixture' }, adapters: [adapter], fetcher });
+    for (let index = 0; index < 2; index++) {
+      await plan(h, 'anthropic', [{ period, historical: false }]);
+      expect(await worker.runOnce()).toBe(true);
+    }
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect((await readLedger(h, period)).records).toMatchObject([{ scope: 'anthropic', net: '0.02246912', source: 'PROVIDER_COST' }]);
+    expect((await readFinancialMeters(h, 'anthropic', period.from)).map(meter => [meter.metric, meter.basis])).toEqual([
+      ['provider_cost', 'messages_api:tokens'], ['provider_cost', 'message_batches_api:tokens'],
+      ['requests', 'messages_api'], ['requests', 'message_batches_api'],
+    ]);
+  });
+
+  it('preserves successful Railway usage across empty history and a rate-limited rerun', async () => {
+    const h = await host();
+    const period = { from: '2026-11-01', to: '2026-11-02' };
+    const historical = { from: '2026-10-01', to: '2026-11-01' };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockImplementationOnce(async () => Response.json({ data: { usage: [1.2, 3.4].map(value =>
+        ({ measurement: 'CPU_USAGE', value, tags: { serviceId: '5379d4b0-ea9d-4775-a369-34fa526968db',
+          projectId: RAILWAY_FINANCIAL_PROJECT, environmentId: RAILWAY_PRODUCTION_ENVIRONMENT } })) } }))
+      .mockImplementationOnce(async () => Response.json({ data: { usage: [] } }))
+      .mockImplementationOnce(async () => Response.json({ errors: [{ message: 'Too many usage queries are running at once. Retry later.' }] }));
+    const worker = createFinancialSyncEngine({ host: h, env: { ...envOf(h.tenantId), FLOFI_FINOPS_RAILWAY_API_TOKEN: 'fixture-inert' },
+      adapters: [infraFinancialAdapters[1]], fetcher });
+    const state = async () => (await readFinancialSync(h)).providers.find(row => row.id === 'railway');
+    await plan(h, 'railway', [{ period, historical: false }, { period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    const lastSuccess = (await state())?.lastSuccess;
+    expect(lastSuccess).not.toBeNull();
+    const meters = await readFinancialMeters(h, 'railway', period.from);
+    expect(meters).toMatchObject([{ scope: 'railway-worker', metric: 'CPU_USAGE', amount: '4.6' },
+      { scope: 'railway-worker', metric: 'list_price_estimate', unit: 'USD' }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: null, lastSuccess, coverage: [
+      { period, quality: 'PARTIAL', meterCount: 2 }, { period: historical, quality: 'UNAVAILABLE', meterCount: 0 },
+    ] });
+    await plan(h, 'railway', [{ period, historical: false }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_RATE_LIMITED', lastSuccess });
+    expect(await readFinancialMeters(h, 'railway', period.from)).toEqual(meters);
+    expect((await readLedger(h, period)).records).toEqual([]);
+  });
+
+  it('refuses an address-shaped meter basis without writing a snapshot', async () => {
+    const h = await host();
+    const period = { from: '2026-11-01', to: '2026-11-02' };
+    const worker = engine(h.tenantId, [target('circleci', async () => ({ ...metered(period),
+      meters: [{ ...meter(period), basis: 'tokens:0x' + 'ab'.repeat(20) }] }))]);
+    await plan(h, 'circleci', [{ period, historical: false }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect((await readFinancialSync(h)).providers.find(row => row.id === 'circleci'))
+      .toMatchObject({ errorCode: 'FINOPS_PROVIDER_RESPONSE_INVALID', coverage: [] });
+    expect(await readFinancialMeters(h, 'circleci', period.from)).toEqual([]);
+  });
+
+  it('keeps the current period status while a historical export polls and then fails', async () => {
+    const h = await host();
+    const current = { from: '2026-11-01', to: '2026-11-02' }, historical = { from: '2026-10-01', to: '2026-11-01' };
+    const read = vi.fn<FinancialSyncAdapter['read']>(async ({ period, checkpoint }) => {
+      if (period.from === current.from) throw new Error('FINOPS_PROVIDER_NO_COST_DATA');
+      if (!checkpoint) return { kind: 'WAIT', checkpoint: 'historical-export', retryAfterMs: 0 };
+      throw new Error('FINOPS_PROVIDER_EXPORT_FAILED');
+    });
+    const worker = engine(h.tenantId, [target('circleci', read)]);
+    const state = async () => (await readFinancialSync(h)).providers.find(row => row.id === 'circleci')!;
+    await plan(h, 'circleci', [{ period: current, historical: false }, { period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_NO_DATA', lastSuccess: null, active: true });
+    expect(await worker.runOnce()).toBe(true);
+    // Polling the historical export must not clear the current period's error.
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_NO_DATA', active: true });
+    await due(h.tenantId, 'circleci');
+    expect(await worker.runOnce()).toBe(true);
+    // Nor may its failure replace it: the historical period records the failure as its own coverage gap instead.
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_NO_DATA', lastSuccess: null, active: false, coverage: [
+      { period: current, quality: 'UNAVAILABLE', meterCount: 0 },
+      { period: historical, quality: 'UNAVAILABLE', meterCount: 0, limitations: ['FINOPS_PROVIDER_EXPORT_FAILED'] },
+    ] });
+    expect(read.mock.calls.map(([input]) => [input.period.from, input.checkpoint]))
+      .toEqual([[current.from, null], [historical.from, null], [historical.from, 'historical-export']]);
+  });
+
+  it('shows an account-wide refusal met by a historical-only cycle and keeps good historical data over a later failure', async () => {
+    const h = await host();
+    const historical = { from: '2026-10-01', to: '2026-11-01' };
+    let failure: string | null = null;
+    const worker = engine(h.tenantId, [target('circleci', async ({ period }) => {
+      if (failure) throw new Error(failure);
+      return metered(period);
+    })]);
+    const state = async () => (await readFinancialSync(h)).providers.find(row => row.id === 'circleci')!;
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    const good = await readFinancialMeters(h, 'circleci', historical.from);
+    expect(good).toHaveLength(1);
+    // A period-specific failure leaves the good snapshot and the provider status as they were.
+    failure = 'FINOPS_PROVIDER_RESPONSE_INVALID';
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: null, coverage: [{ period: historical, quality: 'PARTIAL', meterCount: 1 }] });
+    expect(await readFinancialMeters(h, 'circleci', historical.from)).toEqual(good);
+    // A refused credential is the provider's status even on the 1st of the month, when only historical periods are planned.
+    failure = 'FINOPS_PROVIDER_FORBIDDEN';
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_FORBIDDEN', active: false,
+      coverage: [{ period: historical, quality: 'PARTIAL', meterCount: 1 }] });
+    // Any later answer from the provider proves the credential again and clears the refusal: an accepted export...
+    failure = 'FINOPS_PROVIDER_FORBIDDEN';
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_FORBIDDEN' });
+    const accepted = engine(h.tenantId, [target('circleci', async () => ({ kind: 'WAIT', checkpoint: 'accepted-export', retryAfterMs: 0 }))]);
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await accepted.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: null, active: true });
+    // ...or a historical result, even an empty one.
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_FORBIDDEN' });
+    failure = 'FINOPS_PROVIDER_NO_COST_DATA';
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: null, coverage: [{ period: historical, quality: 'PARTIAL', meterCount: 1 }] });
+  });
+
+  it('records an abandoned historical lease as its gap without replacing the provider status', async () => {
+    const h = await host();
+    const current = { from: '2026-11-01', to: '2026-11-02' }, historical = { from: '2026-10-01', to: '2026-11-01' };
+    await configureFinancialSync(h, ['circleci']);
+    const abandon = (periods: unknown, error: string | null) => h.db.query(`UPDATE finops_sync_jobs SET attempts = 4,
+      lease_token = gen_random_uuid(), lease_expires_at = clock_timestamp() - interval '1 second', cycle_started_at = clock_timestamp(),
+      periods = $3::jsonb, checkpoint = 'stale-export', last_error = $4 WHERE tenant_id = $1 AND provider = $2`,
+    [h.tenantId, 'circleci', JSON.stringify(periods), error]);
+    const row = async () => (await h.db.query<{ periods: unknown; cycle_started_at: Date | null; checkpoint: string | null; last_error: string | null }>(
+      'SELECT periods, cycle_started_at, checkpoint, last_error FROM finops_sync_jobs WHERE tenant_id = $1 AND provider = $2', [h.tenantId, 'circleci'])).rows[0];
+    // The reset reads the leased plan from the row as it was before the same statement empties it.
+    await abandon([{ period: historical, historical: true }], 'FINOPS_PROVIDER_NO_DATA');
+    expect(await claimFinancialSync(h, ['circleci'], 24)).toBeNull();
+    expect(await row()).toEqual({ periods: [], cycle_started_at: null, checkpoint: null, last_error: 'FINOPS_PROVIDER_NO_DATA' });
+    expect((await readFinancialSync(h)).providers.find(provider => provider.id === 'circleci')!.coverage)
+      .toMatchObject([{ period: historical, quality: 'UNAVAILABLE', limitations: ['FINOPS_PROVIDER_UNAVAILABLE'] }]);
+    await abandon([{ period: current, historical: false }], null);
+    expect(await claimFinancialSync(h, ['circleci'], 24)).toBeNull();
+    expect(await row()).toMatchObject({ periods: [], last_error: 'FINOPS_PROVIDER_UNAVAILABLE' });
+  });
+
+  it('ends an active cycle when the credential is removed and starts a fresh plan when it returns', async () => {
+    const h = await host();
+    const period = { from: '2026-11-01', to: '2026-11-02' };
+    const read = vi.fn<FinancialSyncAdapter['read']>(async ({ checkpoint }) => checkpoint
+      ? metered(period) : { kind: 'WAIT', checkpoint: 'first-export', retryAfterMs: 0 });
+    const worker = engine(h.tenantId, [target('circleci', read)]);
+    const state = async () => (await readFinancialSync(h)).providers.find(row => row.id === 'circleci')!;
+    await plan(h, 'circleci', [{ period, historical: false }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ configured: true, active: true });
+    await h.db.query(`UPDATE finops_sync_jobs SET last_error = 'FINOPS_PROVIDER_FORBIDDEN' WHERE tenant_id = $1 AND provider = 'circleci'`, [h.tenantId]);
+    await configureFinancialSync(h, []);
+    // A removed credential's old refusal is not the provider's current state.
+    expect(await state()).toMatchObject({ configured: false, active: false, errorCode: null });
+    await configureFinancialSync(h, ['circleci']);
+    const { rows: [job] } = await h.db.query<{ periods: unknown; checkpoint: string | null; cycle_started_at: Date | null }>(
+      'SELECT periods, checkpoint, cycle_started_at FROM finops_sync_jobs WHERE tenant_id = $1 AND provider = $2', [h.tenantId, 'circleci']);
+    expect(job).toEqual({ periods: [], checkpoint: null, cycle_started_at: null });
+  });
+
+  it('retries an unavailable CircleCI download on the same export and preserves previous meters', async () => {
+    const h = await host();
+    const period = { from: '2026-11-01', to: '2026-11-02' };
+    const exportId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const signed = 'https://fixtures.s3.amazonaws.com/export.csv?X-Amz-Credential=fixture&X-Amz-Signature=fixture';
+    const csv = ['organization_id,project_id,job_id,job_run_date,job_name,workflow_id,workflow_name,job_run_seconds,resource_class,executor,total_credits,job_build_status',
+      '2b3602e4-47d3-420f-97fa-e034c55d919b,bdb424bd-4927-4f7f-a360-d9674a7a66b8,11111111-2222-4333-8444-555555555555,2026-11-01,unit,22222222-2222-4333-8444-555555555555,certification,120,large,docker,25,success'].join('\n');
+    let canDownload = true, exportRequests = 0;
+    const fetcher = vi.fn<typeof fetch>(async (request, init) => {
+      if (String(request) === signed) return canDownload ? new Response(csv) : new Response(null, { status: 404 });
+      if (init?.method === 'POST') {
+        exportRequests++;
+        return Response.json({ usage_export_job_id: exportId, state: 'created' });
+      }
+      expect(String(request)).toMatch(new RegExp('/' + exportId + '$'));
+      return Response.json({ usage_export_job_id: exportId, state: 'completed', download_urls: [signed] });
+    });
+    const worker = createFinancialSyncEngine({ host: h, env: { ...envOf(h.tenantId), FLOFI_FINOPS_CIRCLECI_BILLING_TOKEN: 'fixture-inert' },
+      adapters: [circleCiFinancialAdapter], fetcher });
+    await plan(h, 'circleci', [{ period, historical: false }]);
+    expect(await worker.runOnce()).toBe(true);
+    await due(h.tenantId, 'circleci');
+    expect(await worker.runOnce()).toBe(true);
+    const meters = await readFinancialMeters(h, 'circleci', period.from);
+    expect(meters).toContainEqual(expect.objectContaining({ metric: 'total_credits', amount: '25' }));
+    await plan(h, 'circleci', [{ period, historical: false }]);
+    expect(await worker.runOnce()).toBe(true);
+    canDownload = false;
+    await due(h.tenantId, 'circleci');
+    expect(await worker.runOnce()).toBe(true);
+    const sync = (await readFinancialSync(h)).providers.find(row => row.id === 'circleci');
+    expect(sync).toMatchObject({ errorCode: 'FINOPS_PROVIDER_RETRY_LATER', active: true });
+    expect(await readFinancialMeters(h, 'circleci', period.from)).toEqual(meters);
+    canDownload = true;
+    await due(h.tenantId, 'circleci');
+    expect(await worker.runOnce()).toBe(true);
+    expect(exportRequests).toBe(2);
+    expect(await readFinancialMeters(h, 'circleci', period.from)).toEqual(meters);
+    expect((await readLedger(h, period)).records).toEqual([]);
   });
 });
