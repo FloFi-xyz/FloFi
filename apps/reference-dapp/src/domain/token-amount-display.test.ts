@@ -10,7 +10,9 @@ describe('C — the global six-significant-digit token presentation', () => {
   it('meets the acceptance examples exactly', () => {
     expect(text('0.000570195181991')).toBe('≈ 0.000570195');
     expect(text('0.987251987654')).toBe('≈ 0.987252');
-    expect(text('1234.567891')).toBe('≈ 1234.57');
+    // The brief's "≈ 1234.57": the same six digits, with the locale's thousands separator (EN 1,234.57 · PT 1.234,57).
+    expect(text('1234.567891')).toBe('≈ 1,234.57');
+    expect(text('1234.567891', { language: 'PT' })).toBe('≈ 1.234,57');
     expect(text('0.00000000123456789')).toBe('≈ 0.00000000123457');
     expect(text('25.000000000')).toBe('25');
     expect(text('0')).toBe('0');
@@ -25,6 +27,7 @@ describe('C — the global six-significant-digit token presentation', () => {
       ['987251987654000000', 18, '0.987252'],
       ['1', 18, '0.000000000000000001'],            // one wei: never 0
       ['123456789', 2, '1.23457M'],
+      ['123456789', 4, '12,345.7'],
       ['42', 0, '42'],
       ['1000000000000000000000', 24, '0.001'],
     ];
@@ -64,7 +67,7 @@ describe('C — the global six-significant-digit token presentation', () => {
     expect(text('0.1234567', { rounding: 'up', marker: true })).toBe('≈ 0.123457');
   });
 
-  it('keeps large integers readable without inventing precision: grouping from five digits, a compact unit from seven', () => {
+  it('keeps large integers readable without inventing precision: thousands grouped, a compact unit from seven digits', () => {
     expect(text('12345.678')).toBe('≈ 12,345.7');
     expect(text('123456.78')).toBe('≈ 123,457');
     expect(text('1234567.89')).toBe('≈ 1.23457M');
@@ -85,8 +88,8 @@ describe('C — the global six-significant-digit token presentation', () => {
 
   it('handles negatives and never turns an unavailable value into 0', () => {
     expect(text('-0.000570195181991')).toBe('≈ -0.000570195');
-    expect(text('-1234.567891', { rounding: 'down' })).toBe('-1234.56');
-    expect(text('-1234.561', { rounding: 'up' })).toBe('-1234.57');
+    expect(text('-1234.567891', { rounding: 'down' })).toBe('-1,234.56');
+    expect(text('-1234.561', { rounding: 'up' })).toBe('-1,234.57');
     for (const missing of [null, undefined, '', 'abc', '1e-9', 'NaN', '1,5', '0x10'])
       expect(displayTokenAmount(missing as string | null)).toBeNull();
     expect(text(null)).toBe('—');
@@ -114,7 +117,7 @@ describe('C — the global six-significant-digit token presentation', () => {
 describe('C — amount fields composed of several tokens or bounds', () => {
   it('shortens each part, keeps bounds conservative and leaves any other text alone', () => {
     expect(displayAmountExpression('0.000570195181991 WETH + 1500.1234567 USDC')).toMatchObject({
-      text: '≈ 0.000570195 WETH + ≈ 1500.12 USDC', exact: '0.000570195181991 WETH + 1500.1234567 USDC', approximate: true });
+      text: '≈ 0.000570195 WETH + ≈ 1,500.12 USDC', exact: '0.000570195181991 WETH + 1500.1234567 USDC', approximate: true });
     // A lower bound is rounded down and an upper bound up; the bound sign replaces the "≈" marker.
     expect(displayAmountExpression('≥ 0.9872519 WETH + 1.0000009 USDC')!.text).toBe('≥ 0.987251 WETH + 1 USDC');
     expect(displayAmountExpression('≤ 0.9872511 ETH')!.text).toBe('≤ 0.987252 ETH');
@@ -124,3 +127,15 @@ describe('C — amount fields composed of several tokens or bounds', () => {
       expect(displayAmountExpression(other), other).toBeNull();
   });
 });
+
+describe('C — composed domain strings never look exact when rounded', () => {
+  it('shortTokenDecimal keeps every integer digit and drops only the fraction of a large amount', () => {
+    expect(shortTokenDecimal('12345678.9', 'down')).toBe('12345678');
+    expect(shortTokenDecimal('12345678.9', 'up')).toBe('12345679');
+    expect(shortTokenDecimal('12345678.4')).toBe('12345678');
+    expect(shortTokenDecimal({ units: '12345678900000', decimals: 6 }, 'down')).toBe('12345678');
+    expect(shortTokenDecimal('1234.567891')).toBe('1234.57');
+    expect(shortTokenDecimal('0.000570195181991')).toBe('0.000570195');
+  });
+});
+

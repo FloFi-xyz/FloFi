@@ -17,7 +17,8 @@ import { PendingExecutionNote } from './execution-concurrency-notes';
 function human(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{marker:false})?.text??value;}
 function ceiling(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{rounding:'up'})?.text??value;}
 function exact(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals})?.exactText??value;}
-const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
+// A health factor is rounded DOWN (0.9999996 never reads 1: a liquidatable position never looks safe).
+const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':displayTokenAmount({units:value,decimals:18},{rounding:'down'})?.text??value;
 export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),node=state.workflow.nodes.find(n=>n.nodeId===nodeId),existing=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null;
@@ -54,7 +55,7 @@ export function WithdrawPanel({view}:{view:'simulate'|'execute'}){
   const node=state.workflow.nodes.find(n=>n.actionType==='withdraw'),fields=node?withdrawDetails(node as Parameters<typeof withdrawDetails>[0]):null,shown=lendingView(review?.chain??node?.chainId,review?.asset??(node?lendingNodeAsset(node as Parameters<typeof lendingNodeAsset>[0]):null));
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled),info=run.error??record?.error,observation=record?.observations.at(-1) as WithdrawObservation|undefined;
   return <section className="panel" aria-label={tr("Aave Withdraw")}><h2>{tr(view==='simulate'?'Simulate Withdraw':record?.evidence?'Withdraw result':'Review Withdraw')}</h2>
-    <p>{tr("Withdraw ")}{tr(fields?.amount??(review?human(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" from Aave V3 on ")}{tr(shown.network)}.</p>
+    <p>{tr("Withdraw ")}{tr(fields?.amount??(review?exact(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" from Aave V3 on ")}{tr(shown.network)}.</p>
     {run.retired&&record&&<p role="alert">{tr("The workflow changed. Authorization is invalid. Observe any existing transaction before starting again.")}</p>}
     {risk&&review&&<><p>{tr("Supplied collateral before: ")}{tr(human(review.state.position,shown.decimals))} {tr(shown.asset)}</p><p>{tr("Withdraw amount: ")}{tr(human(review.amount,shown.decimals))} {tr(shown.asset)} ({tr(review.amount)}{tr(" raw)")}</p>
       <p>{tr("Estimated supplied collateral after: ")}{tr(human(review.withdraw!.collateralAfter,shown.decimals))} {tr(shown.asset)}</p><p>{tr("Outstanding variable debt: ")}{tr(human(risk.debt,shown.decimals))} {tr(shown.asset)}</p>

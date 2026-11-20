@@ -304,9 +304,10 @@ function liquiditySummary(s: { phrase: string; pool: string; position: string; e
 }
 const rangeStateLabel: Readonly<Record<string, string>> = { IN_RANGE: 'In range', BELOW_RANGE: 'Out of range (below)', ABOVE_RANGE: 'Out of range (above)' };
 /**
- * The Review of one Uniswap position operation: protocol, network, position, pool and fee tier, range and state, the operation in plain words,
- * liquidity removed and remaining, expected principal and the enforced minimums with the slippage, the collected amount as a LOWER BOUND, the owed
- * tokens and fees, tokens returned as the pool's own tokens, deadline, network fee bound, real funds and the one wallet request.
+ * The Review of one Uniswap position operation. `summary`: the short Review (operation, protocol · network · pool, position, estimate, the enforced
+ * minimum, slippage, recipient, NFT, wallet requests). `details` (Technical details): protocol, network, position, pool and fee tier, range and
+ * state, liquidity removed and remaining, expected principal and the enforced minimums with the slippage, the collected amount as a LOWER BOUND,
+ * the owed tokens and fees, tokens returned as the pool's own tokens, deadline and contract. Warnings: material ones visible, explanations technical.
  */
 export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: string; input: string; pair: string; result: string | null; resultLabel: string;
   minimum: string | null; details: SimulationLine[]; summary: SimulationLine[]; warnings: { severity: SimulationWarning['severity']; message: string; technical?: true }[] } {
@@ -353,8 +354,10 @@ export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: 
     ...q.position.state !== 'IN_RANGE' ? [{ severity: 'info' as const, message: 'The position is out of range: it earns no fees until the price returns to its range.' }] : [],
     { severity: 'attention', message: 'This uses real funds. One wallet request to the Uniswap Position Manager; FloFi never signs or sends.' },
   ];
-  const atLeast = removing ? pair((BigInt(q.minimums.amount0Min) + BigInt(q.expected.owedAndFees0)).toString(), (BigInt(q.minimums.amount1Min) + BigInt(q.expected.owedAndFees1)).toString())
-    : pair(q.expected.collect0, q.expected.collect1);
+  // The short Review's minimum is only what the chain enforces (the principal minimum of decreaseLiquidity, flofi-liquidity review): owed tokens and
+  // fees read now are expected on top but not enforced on chain, so they are in the estimate, never in the guaranteed floor. A collection has no
+  // on-chain floor: its row is "You receive, at least" the owed amount read now (checked again before the wallet is asked).
+  const atLeast = removing ? pair(q.minimums.amount0Min, q.minimums.amount1Min) : pair(q.expected.collect0, q.expected.collect1);
   const summary = liquiditySummary({ phrase: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close),
     pool: `Uniswap V3 · ${q.network} · ${q.token0.symbol}/${q.token1.symbol} · ${fee}`, position: `#${q.position.tokenId}${share ? ` · ${share}` : ''}`,
     expected: removing ? pair(q.expected.collect0, q.expected.collect1) : null, minimum: atLeast, slippageBps: removing ? q.slippageBps : null, recipient: q.recipient,
@@ -704,10 +707,19 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
           { label: 'Wallet requests', value: '1' });
         // B: the operation is the summary's first row; how the figures are built is a Technical detail; real funds stay visible.
         const fees = `${simulationAmount(sim.collectedFeesA, q.token0.decimals, sym0) ?? '—'} + ${simulationAmount(sim.collectedFeesB, q.token1.decimals, sym1) ?? '—'}`;
+        const units = (values: readonly string[]) => values.every(v => /^\d+$/.test(v)) ? values.reduce((total, v) => total + BigInt(v), 0n).toString() : null;
+        const sum = (a: readonly string[], b: readonly string[]) => {
+          const shownA = simulationAmount(units(a), q.token0.decimals, sym0), shownB = simulationAmount(units(b), q.token1.decimals, sym1);
+          return shownA && shownB ? `${shownA} + ${shownB}` : null;
+        };
         s.summary = liquiditySummary({ phrase: liquidityPositionOperationPhrase('ORCA', operation, operation === 'EXIT'),
           pool: `Orca Whirlpools · ${s.networks[0]!} · ${sym0}/${sym1} · ${q.pool.feeRate / 10_000}%`,
           position: `${mint.length > 12 ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : mint}${share ? ` · ${share}` : ''}`,
-          expected: collecting ? null : s.result, minimum: collecting ? fees : s.minimum, slippageBps: collecting ? null : q.intent.slippageBps, recipient: q.owner,
+          // Like Uniswap: the estimate is the principal plus the fees collected in the same transaction; the guaranteed floor is only the principal
+          // minimum the chain enforces (decrease_liquidity token minima).
+          expected: collecting ? null : sum([sim.withdrawnPrincipalA, sim.collectedFeesA], [sim.withdrawnPrincipalB, sim.collectedFeesB]),
+          minimum: collecting ? fees : s.minimum,
+          slippageBps: collecting ? null : q.intent.slippageBps, recipient: q.owner,
           nft: operation === 'EXIT' ? 'Closed (account rent refunded)' : 'Stays in your wallet' });
         warn('info', 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.', true);
         warn('info', 'Tokens are returned to your wallet as the pool\'s own tokens; wrapped SOL is closed back to SOL in the same transaction.', true);

@@ -168,9 +168,11 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: Uniswap position operation presen
     // Amount rows are marked for display rounding: the estimate to nearest, the guaranteed minimum down; their values stay exact here.
     expect(lines.summary.find(row => row.label === 'You receive (estimated)')).toMatchObject({ amount: 'nearest' });
     expect(lines.summary.find(row => row.label === 'Minimum you receive')).toMatchObject({ amount: 'down' });
-    // The minimum is the floor the chain enforces (principal minimum) plus the owed tokens read now, exactly as recorded.
-    const floor0 = BigInt(q.minimums.amount0Min) + BigInt(q.expected.owedAndFees0);
-    expect(lines.summary.find(row => row.label === 'Minimum you receive')!.value.startsWith(`${simulationAmount(floor0.toString(), q.token0.decimals, q.token0.symbol)} + `)).toBe(true);
+    // The minimum is only the floor the chain enforces (the principal minimum), exactly as recorded; the estimate includes owed tokens and fees.
+    expect(lines.summary.find(row => row.label === 'Minimum you receive')!.value).toBe(
+      `${simulationAmount(q.minimums.amount0Min, q.token0.decimals, q.token0.symbol)} + ${simulationAmount(q.minimums.amount1Min, q.token1.decimals, q.token1.symbol)}`);
+    expect(lines.summary.find(row => row.label === 'You receive (estimated)')!.value).toBe(
+      `${simulationAmount(q.expected.collect0, q.token0.decimals, q.token0.symbol)} + ${simulationAmount(q.expected.collect1, q.token1.decimals, q.token1.symbol)}`);
     for (const technical of ['Liquidity removed', 'Liquidity remaining', 'Price range', 'Range state', 'Current price', 'Deadline', 'Position Manager', 'Expected principal returned',
       'Minimum principal (enforced)', 'Owed tokens and fees', 'Collected (expected)', 'Collected, at least', 'Tokens returned'])
       expect(label(lines.details), technical).toContain(technical);

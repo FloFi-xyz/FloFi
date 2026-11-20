@@ -27,6 +27,7 @@ import { UNISWAP_POSITION_REFRESH_IN_PLACE, UNISWAP_REFRESH_IN_PLACE } from '../
 import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER } from '../../e2e/uniswap-liquidity-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import { createUniswapLiquidityService } from './uniswap-liquidity-service';
+import type { Rpc } from './public-testnet-service';
 
 const catalog = baseCatalog();
 const USDC = baseAsset(catalog, 'USDC'), WETH = baseAsset(catalog, 'WETH');
@@ -41,12 +42,19 @@ async function setup() {
   const profile = catalogPoolOn('eip155:8453', token(USDC), token(WETH), 500);
   const chain = createUniswapLiquidityChain({ profile, tick: TICK, usdc: 10n ** BigInt(profile.token0.decimals + 6), weth: 10n ** BigInt(profile.token1.decimals + 6) });
   const dir = await mkdtemp(join(tmpdir(), 'flofi-l1-fee-'));
+  // `oracleDown`: the public network does not answer the GasPriceOracle read (a transient outage, not a fee change).
+  const faults = { oracleDown: 0 };
+  const rpc: Rpc = async (method, params) => {
+    const call = method === 'eth_call' ? (params as [{ to?: string }])[0] : null;
+    if (faults.oracleDown > 0 && call?.to?.toLowerCase() === profile.gasPriceOracle?.toLowerCase()) { faults.oracleDown -= 1; throw new Error('PUBLIC_RPC_UNAVAILABLE'); }
+    return chain.rpc(method, params);
+  };
   const service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: async () => { throw new Error('NO_OTHER_CHAIN_CLIENT'); },
-    rpcs: { 'eip155:8453': chain.rpc }, provenance: 'MOCKED', now: chain.clock, mockedCodePins: UNI_MOCK_CODE_PINS,
+    rpcs: { 'eip155:8453': rpc }, provenance: 'MOCKED', now: chain.clock, mockedCodePins: UNI_MOCK_CODE_PINS,
     catalog: { chain: 'eip155:8453', catalogFor: async () => catalog, codePins: chain.catalogPins } });
   const s = profile.tickSpacing, lower = Math.floor((TICK - 40 * s) / s) * s, upper = Math.ceil((TICK + 40 * s) / s) * s;
   const tokenId = chain.seedPosition({ tickLower: lower, tickUpper: upper, liquidity: LIQUIDITY });
-  return { profile, chain, service, lower, upper, tokenId };
+  return { profile, chain, service, lower, upper, tokenId, faults };
 }
 /** The removal workflow Chat or Canvas authors (MANAGE_LIQUIDITY_POSITION). */
 function removal(profile: UniswapPoolProfile, tokenId: string, lower: number, upper: number, operation: LiquidityPositionChoice['operation'], partBps: number | null,
@@ -123,14 +131,31 @@ describe('A — L1 data fee changes on a Base liquidity removal (MOCKED)', () =>
     expect(chain.counters.sends).toBe(1);
   });
 
+  it('the ceiling holds at the signed cap: an L1 rise past its reviewed bound is refused even when today\'s gas price would leave room', async () => {
+    const { chain, service, run, w } = await reviewedRemoval();
+    // gas × current price + this L1 fits X, but gas × the signed max fee + this L1 would not: the owner could be charged more than X.
+    chain.setL1Fee({ estimate: ESTIMATE * L1_FEE_REVIEW_HEADROOM + 1n });
+    await expect(service.positionBegin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    expect((await service.positionStatus(run.id)).attempts).toEqual([]);
+    chain.setL1Fee({ estimate: ESTIMATE * L1_FEE_REVIEW_HEADROOM });
+    const refreshed = await service.positionRefresh(run.id);
+    await service.positionReview(run.id, refreshed.review.commitment, w);
+    expect((await service.positionBegin(run.id, UNI_OWNER, w)).attempt.state).toBe('PREPARED');
+    expect(chain.counters.sends).toBe(0);
+  });
+
   it('a refusal at hand-off concludes the provably unsent attempt; the same run continues on the same nonce, with no duplicate', async () => {
     const { chain, service, run, w } = await reviewedRemoval();
     const begun = await service.positionBegin(run.id, UNI_OWNER, w);
     chain.setL1Fee({ estimate: authorized(run.review) * 4n });
     await expect(service.positionHandoff(run.id)).rejects.toThrow('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
-    // The wallet was never called (the attempt never became SUBMITTING): observation concludes it as not submitted.
-    const observed = await service.positionObserve(run.id);
-    expect(observed.attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_WALLET_NOT_SUBMITTED', transactionHash: null });
+    // The wallet was never called (the attempt never became SUBMITTING): the refusal concludes it at once, with its reason, and clears authority.
+    const refused = await service.positionStatus(run.id);
+    expect(refused).toMatchObject({ authorization: null, error: 'UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED', verdict: 'PENDING' });
+    expect(refused.attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED', transactionHash: null });
+    await expect(service.positionHandoff(run.id)).rejects.toThrow('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
+    // Observation has nothing left to conclude and keeps the precise reason.
+    expect((await service.positionObserve(run.id)).attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED' });
     chain.setL1Fee({ estimate: ESTIMATE });
     const refreshed = await service.positionRefresh(run.id);
     await service.positionReview(run.id, refreshed.review.commitment, w);
@@ -153,7 +178,14 @@ describe('A — L1 data fee changes on a Base liquidity removal (MOCKED)', () =>
     await service.positionReport(run.id, { kind: 'UNKNOWN' });
     chain.setL1Fee({ estimate: authorized(run.review) * 4n });
     await expect(service.positionRefresh(run.id)).rejects.toThrow('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
-    await expect(service.positionBegin(run.id, UNI_OWNER, w)).rejects.toThrow(/UNISWAP_(ATTEMPT_ACTIVE_OBSERVE_EXISTING|REVIEW_REQUIRED)/);
+    await expect(service.positionBegin(run.id, UNI_OWNER, w)).rejects.toThrow(/^UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING$/);
+    await expect(service.positionHandoff(run.id)).rejects.toThrow('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
+    // Observed while it waits in the mempool: still uncertain and observation-only, never concluded as not sent.
+    const waiting = await service.positionObserve(run.id);
+    expect(waiting.attempts).toHaveLength(1);
+    expect(waiting.attempts[0]!.nonce).toBe(begun.attempt.nonce);
+    expect(['SUBMISSION_RESULT_UNKNOWN', 'PENDING']).toContain(waiting.attempts[0]!.state);
+    await expect(service.positionRefresh(run.id)).rejects.toThrow('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
     chain.wallet.release();
     const done = await service.positionObserve(run.id);
     expect(done).toMatchObject({ verdict: 'RECONCILED' });
@@ -161,7 +193,7 @@ describe('A — L1 data fee changes on a Base liquidity removal (MOCKED)', () =>
     expect(chain.counters.sends).toBe(1);
   });
 
-  it('reconciliation: a charged L1 fee above the estimate but within the authorized maximum reconciles; beyond it the run is frozen for attention', async () => {
+  it('reconciliation: a charged L1 fee up to the authorized maximum reconciles; beyond it the overrun is recorded on the confirmed request, never hidden', async () => {
     const within = await reviewedRemoval();
     within.chain.setL1Fee({ charged: ESTIMATE * 2n });
     const a = await within.service.positionBegin(within.run.id, UNI_OWNER, within.w);
@@ -171,13 +203,23 @@ describe('A — L1 data fee changes on a Base liquidity removal (MOCKED)', () =>
     expect(ok.verdict).toBe('RECONCILED');
     expect(ok.attempts[0]!.receipt!.l1FeeWei).toBe((ESTIMATE * 2n).toString());
 
-    const beyond = await reviewedRemoval();
-    beyond.chain.setL1Fee({ charged: authorized(beyond.run.review) + 1n });
-    const b = await beyond.service.positionBegin(beyond.run.id, UNI_OWNER, beyond.w);
-    await beyond.service.positionHandoff(beyond.run.id);
-    await beyond.service.positionReport(beyond.run.id, { kind: 'HASH', hash: beyond.chain.wallet.send(b.transaction) });
-    expect(await beyond.service.positionObserve(beyond.run.id)).toMatchObject({ verdict: 'DIVERGENT', error: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' });
-    expect(beyond.chain.counters.sends).toBe(1);
+    expect(ok.attempts[0]!.note).toBeNull();
+
+    // The charged total exactly at X, then one wei above it (the uncapped L1 part moved after inclusion was out of anyone's hands).
+    for (const extra of [0n, 1n]) {
+      const edge = await reviewedRemoval();
+      const begun = await edge.service.positionBegin(edge.run.id, UNI_OWNER, edge.w);
+      await edge.service.positionHandoff(edge.run.id);
+      const hash = edge.chain.wallet.send(begun.transaction);
+      const execution = BigInt((edge.chain.mined.get(hash) as { gasUsed: bigint }).gasUsed) * 1_000_000n;
+      edge.chain.setL1Fee({ charged: authorized(edge.run.review) - execution + extra });
+      await edge.service.positionReport(edge.run.id, { kind: 'HASH', hash });
+      const done = await edge.service.positionObserve(edge.run.id);
+      // The reviewed transaction did what was reviewed: reconciled either way; the overrun is recorded, with the charged and authorized totals.
+      expect(done.verdict, `X+${extra}`).toBe('RECONCILED');
+      expect(done.attempts[0]!.note, `X+${extra}`).toBe(extra ? `UNISWAP_NETWORK_FEE_ABOVE_AUTHORIZED:${authorized(edge.run.review) + 1n}:${authorized(edge.run.review)}` : null);
+      expect(edge.chain.counters.sends).toBe(1);
+    }
   });
 
   it('a 100% removal keeps the NFT with zero liquidity; closing burns it — the result says which', async () => {
@@ -197,7 +239,41 @@ describe('A — L1 data fee changes on a Base liquidity removal (MOCKED)', () =>
   });
 });
 
+describe('A — reads the network never answered are not fee changes (MOCKED)', () => {
+  it('a GasPriceOracle outage at begin is retried, never reported as a fee change, and the owner\'s authorization stays', async () => {
+    const { chain, service, run, w, faults } = await reviewedRemoval();
+    faults.oracleDown = 1;
+    await expect(service.positionBegin(run.id, UNI_OWNER, w)).rejects.toThrow('PUBLIC_RPC_UNAVAILABLE');
+    const after = await service.positionStatus(run.id);
+    expect(after).toMatchObject({ authorization: run.review.commitment, attempts: [] });
+    expect(after.error).not.toBe('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    // The next try, with the network answering, prepares the same reviewed request.
+    expect((await service.positionBegin(run.id, UNI_OWNER, w)).attempt.state).toBe('PREPARED');
+    expect(chain.counters.sends).toBe(0);
+  });
+});
+
 describe('A — the same rule on a Base liquidity deposit (mint path, MOCKED)', () => {
+  it('a hand-off refusal on the mint path is concluded at once; the refreshed Review reuses the same nonce for the same step', async () => {
+    const { chain, service } = await setup();
+    const result = editorReducer(initialEditor(), { type: 'ADD_CRYPTO_ACTION', source: 'CANVAS', baseRevision: 0, input: { selection: { action: 'pool', network: 'Base',
+      from: 'USDC', to: 'WETH' }, amount: '1', secondAmount: '0.001', slippage: '100', fee: 500 } }, createBaseSepoliaReviewContext());
+    if (result.error) throw new Error(result.error);
+    const w = structuredClone(result.workflow) as unknown as SemanticWorkflow;
+    const simulated = await service.simulate(w, UNI_OWNER);
+    await service.review(simulated.id, simulated.review.commitment, w);
+    const first = await service.begin(simulated.id, UNI_OWNER, w);
+    chain.setL1Fee({ estimate: BigInt(simulated.review.fees.totalUpperBoundWei!) });
+    await expect(service.handoff(simulated.id)).rejects.toThrow('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    expect((await service.load(simulated.id)).attempts.at(-1)).toMatchObject({ state: 'CANCELLED', note: 'UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED', transactionHash: null });
+    chain.setL1Fee({ estimate: ESTIMATE });
+    const refreshed = await service.refresh(simulated.id);
+    await service.review(simulated.id, refreshed.review.commitment, w);
+    const again = await service.begin(simulated.id, UNI_OWNER, w);
+    expect(again.attempt).toMatchObject({ step: first.attempt.step, nonce: first.attempt.nonce });
+    expect(chain.counters.sends).toBe(0);
+  });
+
   it('an L1 rise within the authorized maximum between the approval and the mint does not stop the deposit', async () => {
     const { chain, service } = await setup();
     const result = editorReducer(initialEditor(), { type: 'ADD_CRYPTO_ACTION', source: 'CANVAS', baseRevision: 0, input: { selection: { action: 'pool', network: 'Base',

@@ -54,7 +54,7 @@ export function simulateFooterStatus(input: { readonly busy: boolean; readonly s
   return null;
 }
 
-/** A wei amount as a decimal native amount, never rounded to zero (at most 6 decimals; a non-zero value below that reads "< 0.000001"). */
+/** A wei amount as a decimal native amount at six significant digits (the global rule), rounded up; a non-zero amount never reads 0. */
 export function nativeAmount(wei: string, decimals = 18): string {
   if (!/^(0|[1-9][0-9]{0,77})$/.test(wei)) return '—';
   // Six significant digits (the global rule), rounded UP, so a requirement or a shortfall is never understated.

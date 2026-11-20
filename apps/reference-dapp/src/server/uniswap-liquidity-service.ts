@@ -23,6 +23,8 @@
  * its own wallet request; a confirmed approval requires a fresh simulation and Review before the mint.
  */
 import { discoverEvmNonce, evmNonceUnusedAt, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
+import { readNotAnswered } from './public-testnet-rpc.ts';
+import { overrunNote } from './uniswap-network-fee.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { ARBITRUM_ONE, ARBITRUM_ONE_TRANSFER, BASE_MAINNET_TRANSFER, catalogAsset, ETHEREUM_MAINNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
   uniswapCatalogDeployment, uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
@@ -30,7 +32,7 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUnis
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
   encodeUniswapApprove, encodeUniswapMint, uniswapComposition, uniswapMinimum, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick, uniswapRangeState,
   type UniswapRangeState } from '@defi-workflow-engine/reference-compiler';
-import { chargedNetworkFeeWithinAuthorization, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization, readConcentratedLiquidity, readConcentratedLiquidityManagement,
+import { hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization, readConcentratedLiquidity, readConcentratedLiquidityManagement,
   type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -391,11 +393,16 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   async function l1FeeUpperBound(dataBytes: number, at: string): Promise<bigint | null> {
     // Ethereum L1 has no separate data fee; an OP Stack chain reads its GasPriceOracle upper bound.
     if (profile.gasPriceOracle === null) return 0n;
-    try { return wordAt(await ethCall(profile.gasPriceOracle, SEL.l1FeeUpperBound + word(BigInt(dataBytes + 120)), at), 0); } catch { return null; }
+    // A read the network never answered is retried by the caller, never reported as a fee change that clears the owner's authorization
+    // (flofi-wallet-execution review); only an oracle that answered and reverted yields "no bound".
+    try { return wordAt(await ethCall(profile.gasPriceOracle, SEL.l1FeeUpperBound + word(BigInt(dataBytes + 120)), at), 0); }
+    catch (cause) { if (readNotAnswered(cause)) throw cause; return null; }
   }
   /**
    * Exact executable step: the wallet-controlled fields (gas limit, max fee, priority fee) are the reviewed ones exactly, and the call's network fee
-   * at the current price and the current OP Stack L1 estimate must fit the one maximum the owner authorized for it (`networkFeeWithinAuthorization`).
+   * at its SIGNED cap (gas limit × max fee per gas, the most the transaction can be charged for execution) plus the current OP Stack L1 estimate must
+   * fit the one maximum the owner authorized for it (`networkFeeWithinAuthorization`). Deliberately stricter than the routers' current-price check
+   * (flofi-security review): "Network fee, at most X" stays true even if the gas price rises to the signed cap before inclusion.
    * BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001 (incident balp-3e4b…, 2026-11-20): this path compared the L1 part alone against the
    * instantaneous bound read at Review, so any L1 move refused the request within seconds (the bridge incident of 2026-11-13, fixed there by
    * BUILD-FLOFI-MAINNET-EXEC-002 and now applied here). A fee beyond the authorized maximum still needs a fresh Review.
@@ -415,7 +422,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     if (estimate <= 0n || estimate > quantity(tx.gas)) fail('UNISWAP_GAS_CHANGED_REVIEW_REQUIRED');
     const l1 = await l1FeeUpperBound((tx.data.length - 2) / 2, at), bound = call.l1FeeUpperBoundWei === undefined ? review.fees.l1FeeUpperBoundWei : call.l1FeeUpperBoundWei;
     if (l1 === null || bound === null ||
-        !networkFeeWithinAuthorization({ gasLimit: quantity(tx.gas), maxFeePerGas: quantity(tx.maxFeePerGas), l1FeeBound: BigInt(bound) }, { gasPrice: price, l1Fee: l1 }))
+        !networkFeeWithinAuthorization({ gasLimit: quantity(tx.gas), maxFeePerGas: quantity(tx.maxFeePerGas), l1FeeBound: BigInt(bound) },
+          { gasPrice: quantity(tx.maxFeePerGas), l1Fee: l1 }))
       fail('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
     if (quantity(await rpc('eth_getBalance', [tx.from, at])) < quantity(tx.gas) * quantity(tx.maxFeePerGas) + l1) fail('UNISWAP_INSUFFICIENT_GAS_ETH');
   }
@@ -676,26 +684,30 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       gasCostWei: (execution + verified.l1Fee).toString(), submissionKind: verified.delegated ? 'DELEGATED_SINGLE' : 'DIRECT', contentHash: digest(raw) };
     const reviewedCall = record.review.calls.find(c => c.to === attempt.tx.to && c.data === attempt.tx.data);
     const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? record.review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
+    // What the transaction itself fixes (nonce, gas limit, max fee, priority fee, hence its execution price) must be what was authorized:
+    // anything else is another transaction than the reviewed one (DIVERGENT, as before).
     if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > quantity(attempt.tx.gas) ||
         quantity(tx.maxFeePerGas ?? tx.gasPrice) > quantity(attempt.tx.maxFeePerGas) ||
         quantity(tx.maxPriorityFeePerGas ?? '0x0') > quantity(attempt.tx.maxPriorityFeePerGas) ||
-        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null ||
-        // The L1 data fee is charged at inclusion and no transaction can cap it: the charged total must be within the authorized network fee.
-        !chargedNetworkFeeWithinAuthorization({ gasLimit: quantity(attempt.tx.gas), maxFeePerGas: quantity(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound) },
-          { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee }))) {
+        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null)) {
       return save(replaceAttempt({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' },
         { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' }));
     }
+    // The L1 data fee is charged by the sequencer at inclusion and no transaction can cap it. A confirmed transaction whose charged total ended
+    // above the authorized maximum IS the reviewed one: the overrun is recorded on its attempt (honest evidence), as the routers do, never a reason
+    // to freeze a correct approval, deposit or withdrawal (flofi-liquidity review).
+    const feeNote = overrunNote({ gasLimit: quantity(attempt.tx.gas), maxFeePerGas: quantity(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound ?? '0') },
+      verified.direct ? { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee } : null);
     if (verified.status === 0) {
       return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_TRANSACTION_REVERTED' }, { ...attempt, state: 'REVERTED', receipt, note: 'UNISWAP_TRANSACTION_REVERTED' }));
     }
     try {
       if (attempt.step !== 'MINT') {
         await reconcileApproval(record, attempt, raw, verified.blockNumber);
-        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }));
+        return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note }));
       }
       const position = await reconcileMint(record, attempt, raw, verified.blockNumber, hash);
-      const confirmed = replaceAttempt({ ...record, authorization: null, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true });
+      const confirmed = replaceAttempt({ ...record, authorization: null, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true, note: feeNote ?? attempt.note });
       const evidence = await buildEvidence(confirmed, position);
       return save({ ...confirmed, position, evidence, verdict: 'RECONCILED' });
     } catch (cause) {
@@ -915,8 +927,10 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         R.assertMintBounds(record.review, state, await R.simulateCalls(record.owner, remaining, state.block.number));
         await R.assertRequestFees(record.review, attempt.tx, tag(state.block.number));
       } catch (cause) {
+        // The attempt is provably unsent (the wallet is only called after SUBMITTING is durable): it is concluded here with its reason, so its
+        // nonce is free at once and the run continues after a refreshed Review (flofi-wallet-execution review), as an expired Review is.
         if (cause instanceof Error && staleReviewError(cause.message)) {
-          await save({ ...record, authorization: null, error: cause.message });
+          await save(replaceAttempt({ ...record, authorization: null, error: cause.message }, { ...attempt, state: 'CANCELLED', note: cause.message }));
         }
         throw cause;
       }

@@ -13,10 +13,12 @@ import { useSupply } from '../state/supply-store';
 import type { BorrowObservation } from '@defi-workflow-engine/reference-reconciler';
 import { PendingExecutionNote } from './execution-concurrency-notes';
 // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: exact BigInt arithmetic (a JavaScript Number lost digits of 18-decimal amounts), six
-// significant digits; `ceiling` rounds a budget up.
+// significant digits; `ceiling` rounds a budget up; `exact` (every digit) for the amount authorized and the sentences that say "exactly".
 function human(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{marker:false})?.text??value;}
+function exact(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals})?.exactText??value;}
 function ceiling(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{rounding:'up'})?.text??value;}
-function hf(value:string):string {return BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);}
+// A health factor is rounded DOWN (0.9999996 never reads 1: a liquidatable position never looks safe).
+function hf(value:string):string {return BigInt(value)===(1n<<256n)-1n?'No debt (∞)':displayTokenAmount({units:value,decimals:18},{rounding:'down'})?.text??value;}
 export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
@@ -71,7 +73,7 @@ export function BorrowPanel({view}:{view:'simulate'|'execute'}){
   const pending=record?.notSubmitted?undefined:record?.attempts.find(a=>!a.reconciled),info=run.error??record?.error;
   const observation=record?.observations.at(-1) as BorrowObservation|undefined;
   return <section className="panel" aria-label={tr("Aave Borrow")}><h2>{tr(view==='simulate'?'Simulate Borrow':record?.evidence?'Borrow result':'Review Borrow')}</h2>
-    <p>{tr("Borrow ")}{tr(fields?.amount??(review?human(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" from Aave V3 on ")}{tr(shown.network)}.</p>
+    <p>{tr("Borrow ")}{tr(fields?.amount??(review?exact(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" from Aave V3 on ")}{tr(shown.network)}.</p>
     <p>{tr("Interest-rate mode: Variable (2). No ERC-20 approval required.")}</p>
     {run.retired&&record&&<p role="alert">{tr("The workflow changed. Authorization is invalid. Observe any existing Borrow before starting again.")}</p>}
     {risk&&<><p>{tr("Collateral value: $")}{tr(human(risk.collateralBase,8))}{tr(" · Current debt: $")}{tr(human(risk.debtBase,8))}</p>

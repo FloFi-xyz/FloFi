@@ -20,8 +20,8 @@ describe('wallet portfolio presentation', () => {
   // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits (not decimal places), rounded DOWN: a balance is never
   // overstated and a positive balance never reads 0 or "< …"; the exact balance stays available (`exactTokenAmount`).
   it('formats token amounts by language at six significant digits, truncating and never rounding a balance up', () => {
-    expect(formatTokenAmount('1234567891234567891234', 18)).toBe('1234.56');
-    expect(formatTokenAmount('1234567891234567891234', 18, 'PT')).toBe('1234,56');
+    expect(formatTokenAmount('1234567891234567891234', 18)).toBe('1,234.56');
+    expect(formatTokenAmount('1234567891234567891234', 18, 'PT')).toBe('1.234,56');
     expect(formatTokenAmount('12345678912345678912345', 18)).toBe('12,345.6');
     expect(formatTokenAmount('12345678912345678912345', 18, 'PT')).toBe('12.345,6');
     expect(exactTokenAmount('12345678912345678912345', 18, 'PT')).toBe('12.345,678912345678912345');

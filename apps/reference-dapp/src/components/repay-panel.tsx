@@ -17,7 +17,8 @@ import { PendingExecutionNote } from './execution-concurrency-notes';
 function human(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{marker:false})?.text??value;}
 function ceiling(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals},{rounding:'up'})?.text??value;}
 function exact(value:string,decimals:number):string {return displayTokenAmount({units:value,decimals})?.exactText??value;}
-const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
+// A health factor is rounded DOWN (0.9999996 never reads 1: a liquidatable position never looks safe).
+const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':displayTokenAmount({units:value,decimals:18},{rounding:'down'})?.text??value;
 export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount,commitCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
@@ -61,7 +62,7 @@ export function RepayPanel({view}:{view:'simulate'|'execute'}){
   const info=run.error??record?.error,observation=record?.observations.at(-1) as RepayObservation|undefined;
   const reobserveApproval=record?.verdict==='DIVERGENT'&&record.error==='SUPPLY_RPC_INVALID'&&record.attempts.length===1&&pending?.step==='APPROVAL'&&pending.state==='RECONCILIATION_REQUIRED'&&observation?.transaction?.blockHash===null;
   return <section className="panel" aria-label={tr("Aave Repay")}><h2>{tr(view==='simulate'?'Simulate Repay':record?.evidence?'Repay result':'Review Repay')}</h2>
-    <p>{tr("Repay ")}{tr(fields?.amount??(review?human(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" to Aave V3 on ")}{tr(shown.network)}.</p>
+    <p>{tr("Repay ")}{tr(fields?.amount??(review?exact(review.amount,shown.decimals):''))} {tr(shown.asset)}{tr(" to Aave V3 on ")}{tr(shown.network)}.</p>
     <p>{tr("Variable debt mode: 2. onBehalfOf is your owner wallet.")}</p>
     {run.retired&&record&&<p role="alert">{tr("The workflow changed. Authorization is invalid. Observe any existing transaction before starting again.")}</p>}
     {risk&&review&&<><p>{tr("Wallet ")}{tr(shown.asset)}{tr(" balance: ")}{tr(human(review.state.balance,shown.decimals))} {tr(shown.asset)}</p>

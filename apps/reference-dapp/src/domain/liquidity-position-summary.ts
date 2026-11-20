@@ -101,10 +101,11 @@ export function positionPreparationRefusal(workflow: Parameters<typeof positionP
 type PositionStep = { readonly summary?: readonly { readonly label: string; readonly value: string; readonly amount?: 'nearest' | 'down' | 'up' }[]; readonly action: string; readonly input: string; readonly result: string | null; readonly resultLabel: string; readonly minimum: string | null;
   readonly networks: readonly string[]; readonly details: readonly { readonly label: string; readonly value: string }[] };
 /**
- * The rows a position operation's simulated step states (its own projection's values, never recomputed). `simulate` (B2 "Simulation result"): the
- * operation, liquidity removed and remaining, the principal expected and its enforced minimum, the owed tokens and fees and the collected amount
- * as LOWER bounds, what happens to the position NFT and any rent refunded — no permission row. `execute` (C1 "You are authorizing") adds what the
- * owner authorizes it against: protocol, network, position, pool, range, prices, recipient, deadline, the contract and the one wallet request.
+ * The rows a position operation's simulated step states (its own projection's values, never recomputed). With the projection's short Review
+ * (`step.summary`, BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001): `simulate` states the operation, protocol · network · pool, the position,
+ * what comes back (estimated) and the enforced minimum (or a collection's lower bound), the position NFT and any rent refunded; `execute` adds the
+ * slippage, the recipient and the one wallet request. Range, prices, raw liquidity, deadline and contract stay in `details` (Technical details).
+ * Without a summary (an older projection), the previous full row set below.
  */
 export function liquidityPositionResultRows(step: PositionStep, stage: 'simulate' | 'execute'): { readonly label: string; readonly value: string;
   readonly amount?: 'nearest' | 'down' | 'up' }[] {

@@ -3,7 +3,7 @@
  * BUILD-FLOFI-GAS-ABSTRACTION-MULTICHAIN-003 (ADR-0010): how a network fee reads when the owner may pay it in a token — presentation only.
  *
  *   amounts   a native fee in wei reads as ETH, in lamports as SOL, a token fee in its own symbol and decimals — never a token amount as ETH.
- *             A fee (a ceiling, or what was paid) is rounded UP to at most 6 decimals, never shown below itself; a non-zero fee never reads 0.
+ *             A fee (a ceiling, or what was paid) is shown at six significant digits rounded UP, never below itself; a non-zero fee never reads 0.
  *   reasons   why the token-paid alternative (Circle) was not offered for a group whose owner lacks native gas, in plain words (the closed codes
  *             come from `user-funded/circle-gas.ts`; any other code reads as "not available here").
  */

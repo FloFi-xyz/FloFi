@@ -530,9 +530,9 @@ describe('P0 approved UX: the Editor Create screen (boards 04 and 05)', () => {
     expect(significantAmount('0.000486123456789')).toBe('0.000486123');
     expect(significantAmount('0.0004861235')).toBe('0.000486124');
     expect(significantAmount('1234.56789')).toBe('1234.57');
-    // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: beyond six integer digits a compact unit, never invented digits; grouping from five.
+    // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: beyond six integer digits a compact unit, never invented digits.
     expect(significantAmount('1234567.89')).toBe('1.23457M');
-    expect(significantAmount('12345.678')).toBe('12,345.7');
+    expect(significantAmount('12345.678')).toBe('12345.7');
     expect(significantAmount('0.99999999')).toBe('1');
     expect(significantAmount('999999.5')).toBe('1M');
     expect(significantAmount('12.5')).toBe('12.5');

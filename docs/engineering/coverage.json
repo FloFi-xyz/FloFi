@@ -7350,6 +7350,7 @@
         "apps/reference-dapp/src/server/uniswap-liquidity-service.ts",
         "apps/reference-dapp/src/server/defi-positions-solana.ts",
         "apps/reference-dapp/src/server/uniswap-position-service.ts",
+        "apps/reference-dapp/src/server/uniswap-network-fee.ts",
         "apps/reference-dapp/src/server/orca-mainnet-harness.ts"
       ],
       "suites": [

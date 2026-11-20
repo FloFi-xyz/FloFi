@@ -149,7 +149,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     // The rows' values read in Portuguese too: never "of", "per", "(unchanged)", "Your wallet", and PT decimal separators.
     const shown = rows(render(bound, 'simulate', 'PT', observedAt));
     expect(shown['Você recebe (estimado)']).toMatch(AMOUNTS);
-    expect(shown['Você recebe (estimado)']).not.toMatch(/\d\.\d/);
+    expect(shown['Você recebe (estimado)']).not.toMatch(/\.\d+ [A-Za-z]/);
     const valid = text(render(bound, 'execute', 'PT', observedAt));
     const authorizing = rows(render(bound, 'execute', 'PT', observedAt));
     expect(authorizing['Destinatário']).toMatch(/^Sua carteira · 0x[0-9a-f]{4}…[0-9a-f]{4}$/);

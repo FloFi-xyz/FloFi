@@ -14,7 +14,7 @@
  *    guaranteed (minimums); `up` (away from zero) for what may be spent or paid (maximums, fee caps). A rounded limit is a reading aid: the
  *    contractually authorized value is the exact one;
  *  - no scientific notation; from 1,000,000 a compact unit (1.23457M · 1,23457 mi), always with the exact value available;
- *  - EN/PT separators (EN 12,345.6 · PT 12.345,6); four-digit integers are not grouped (1234.57);
+ *  - EN/PT separators with thousands grouped (EN 1,234.57 · PT 1.234,57), as the product's other amounts; `group: false` for a compact card;
  *  - an unavailable value is never turned into 0: it is `null` (or the caller's placeholder).
  */
 export const DISPLAY_SIGNIFICANT_DIGITS = 6;
@@ -28,6 +28,8 @@ export type DisplayTokenAmountOptions = {
   readonly marker?: boolean;
   /** Appended after a space ("WETH"); a symbol is never parsed, rounded or translated. */
   readonly symbol?: string | null;
+  /** Group thousands (default true). */
+  readonly group?: boolean;
 };
 export type DisplayTokenAmount = {
   /** What a surface shows: marker, short localized number, symbol ("≈ 0.000570195 WETH"). */
@@ -86,10 +88,10 @@ function parts(value: Exact): { whole: string; fraction: string } {
   const text = value.magnitude.toString().padStart(value.scale + 1, '0');
   return { whole: text.slice(0, text.length - value.scale), fraction: text.slice(text.length - value.scale) };
 }
-/** Integers of five or more digits are grouped (12,345); 1234 stays as written. */
+/** Thousands grouped by the language's separator (1,234.5 · 1.234,5). */
 function localize(value: Exact, language: DisplayLanguage, group = true): string {
   const { whole, fraction } = parts(value), s = separators(language);
-  const grouped = group && whole.length > 4 ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, s.group) : whole;
+  const grouped = group && whole.length > 3 ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, s.group) : whole;
   return `${value.negative ? '-' : ''}${grouped}${fraction ? s.decimal + fraction : ''}`;
 }
 /** The exact value as a canonical decimal ("-0.5", "1234.567891", "25"). */
@@ -108,7 +110,7 @@ export function displayTokenAmount(source: TokenAmountSource | null | undefined,
   const shown = round(exact, rounding), approximate = shown.magnitude * 10n ** BigInt(Math.max(0, exact.scale - shown.scale)) !==
     exact.magnitude * 10n ** BigInt(Math.max(0, shown.scale - exact.scale));
   const unit = COMPACT.find(c => shown.magnitude >= 10n ** BigInt(c.power + shown.scale));
-  const value = unit ? localize(normalize({ ...shown, scale: shown.scale + unit.power }), language, false) + unit[language] : localize(shown, language);
+  const value = unit ? localize(normalize({ ...shown, scale: shown.scale + unit.power }), language, false) + unit[language] : localize(shown, language, options.group ?? true);
   const marker = approximate && (options.marker ?? rounding === 'nearest') ? '≈ ' : '';
   const symbol = options.symbol ? ` ${options.symbol}` : '';
   return { text: `${marker}${value}${symbol}`, value, exact: canonical(exact), exactText: `${localize(exact, language)}${symbol}`, approximate, rounding };
@@ -128,11 +130,15 @@ export function displayAmountText(text: string, options: Omit<DisplayTokenAmount
 }
 /**
  * The canonical (EN-separator, ungrouped, unmarked) six-significant-digit decimal, for domain presentation strings that are composed further
- * ("0.000570195 WETH"). Same rounding rules; `null` when unavailable.
+ * ("0.000570195 WETH"). Same rounding rules; `null` when unavailable. Unlike `displayTokenAmount` it has no compact unit and no marker, so it
+ * never zero-fills integer digits (flofi-security review): an amount with more than six integer digits keeps all of them and drops only its
+ * fraction (12345678.9 → 12345678 down, 12345679 up), so a plain-looking number is never a rounded one.
  */
 export function shortTokenDecimal(source: TokenAmountSource | null | undefined, rounding: DisplayRounding = 'nearest'): string | null {
   const exact = parse(source);
-  return exact ? canonical(round(exact, rounding)) : null;
+  if (!exact) return null;
+  const integerDigits = exact.magnitude.toString().length - exact.scale;
+  return canonical(round(exact, rounding, Math.max(DISPLAY_SIGNIFICANT_DIGITS, integerDigits)));
 }
 export type DisplayAmountExpression = {
   /** "≥ 0.5 WETH + 1500 USDC" shortened part by part. */
