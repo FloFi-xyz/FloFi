@@ -6,6 +6,7 @@ import type { Workflow } from '../domain/initial-workflow';
 import { composerActions, composerSummary } from '../domain/composer-presentation';
 import { transferDetails } from '../domain/robinhood-transfer-authoring';
 import { ActionIcon } from './action-icon';
+import { useWorkflowNetworkCatalogs } from '../state/asset-catalog-store';
 
 const ICON: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>> = {
   Swap: 'swap', Bridge: 'bridge', 'Pool / Liquidity': 'pool', 'Prepare liquidity': 'pool', Send: 'transfer', Supply: 'supply', Borrow: 'borrow',
@@ -72,6 +73,8 @@ export function OperationSummary({ workflow, context, heading = 'Operation summa
   /** `numbered` (C2: the Review's summary) or `icons` (B2: the Simulate panel's list with each step's action icon and network). */
   variant?: 'numbered' | 'icons' }) {
   const { t } = useLocale();
+  // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002: re-rendered once the steps' token catalogs register (a listed token never stays "Token").
+  useWorkflowNetworkCatalogs(workflow);
   const steps = operationSteps(workflow, context);
   if (!steps.length) return null;
   return <section className="operation-summary" data-variant={variant} aria-label={t(heading ?? 'Workflow actions')}>
