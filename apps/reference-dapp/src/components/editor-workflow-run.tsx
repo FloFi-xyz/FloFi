@@ -1109,9 +1109,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     ? ` · ${tr('Circle paymaster {0} · EntryPoint {1} · USDC permit cap {2}', payment.paymaster, payment.entryPoint, usdcFee(payment.permitCap))}`
       + ` · ${tr('What is left of the permit cap stays approved to Circle\'s paymaster until your next USDC permit replaces it.')}` : '';
   // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (TEC-01/TEC-02): the same facts as before, in short labelled groups (only the groups this Review has data
-  // for), each value said once and in its own row; long values are shortened on screen with the full value one copy away. Nothing is omitted,
+  // for), each value said once and in its own row; a recipient is shown in full with a copy control. Nothing is omitted,
   // changed or added, and the material rows (steps, amounts, minimum, fee, permission, wallet requests, validity) stay visible above it.
-  const shortValue = (value: string) => value.length > 16 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
   const stepLabel = (index: number, label: string) => `${tr('Step {0}', String(index + 1))} · ${label}`;
   const feeWords = (g: EditorExecutionReview['groups'][number]): string | null => g.gasPayment ? tr('Network fee, at most {0} — paid from your USDC through Circle', usdcFee(g.gasPayment.maxFee.amount))
     : g.fee?.sponsorship === 'REQUIRED' ? tr('Sponsored network fee: FloFi offers to pay it (your wallet must support sponsored fees on this network)')
@@ -1173,7 +1172,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
             <strong>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</strong>
             <span className="muted"> · {tr(step.network)}{step.provider ? ` · ${step.provider}` : ''}</span>
             {recipient && <span className="technical-recipient">{tr('To')}{' '}
-              <CopyValue value={recipient} shown={`${shortValue(recipient)}${recipient.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}`} label="Recipient" step={step.index + 1}/></span>}
+              {/* The recipient in full (a shortened address invites look-alike mistakes; review-block.ts), with its copy control. */}
+              <CopyValue value={recipient} shown={`${recipient}${recipient.toLowerCase() === review.owner.toLowerCase() ? ` ${tr('(your wallet)')}` : ''}`} label="Recipient" step={step.index + 1}/></span>}
             {live && run && <span className="workflow-run-state">{stepWords(run, live)}</span>}
             {live?.outcome?.submissions.map(tx => tx.explorerUrl ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer" title={tx.hash}><code>{tx.hash.slice(0, 10)}…</code></a> : <code key={tx.hash} title={tx.hash}>{tx.hash.slice(0, 10)}…</code>)}
           </li>;
@@ -1289,7 +1289,8 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     </>}
     {fresh && !feeBlocked && stage === 'execute' && !(expired && review && state.grouped) && <>
       {alert && <p className="review-block-alert" role="alert">{alert}{quietReview === 'alert' && <> {reviewAgain}</>}</p>}
-      {block && review?.validUntil && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>}
+      {/* An expired Review never states a validity as current (BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002, EXE-02). */}
+      {block && review?.validUntil && !expired && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{tr('Review valid until {0}', fmtTime(review.validUntil, language))}</p>}
       <p className="eyebrow">{tr('REVIEW')}</p>
       {/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (EXE-01): before any wallet request the owner is reviewing, not yet authorizing; the wallet request has
           its own block below ("Confirm in your wallet"), shown only while the wallet holds it. */}

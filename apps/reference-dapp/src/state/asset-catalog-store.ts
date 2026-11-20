@@ -4,7 +4,7 @@
  * BUILD-RH-002: loads a catalog network's official catalog once per page (on demand) and registers it for authoring — Robinhood Chain by
  * default, and (BUILD-BASE-001) Base. States per network: idle → loading → ready | unavailable (retry allowed). Nothing here authorizes anything.
  */
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { loadNetworkAssetCatalog } from '../app/asset-catalog-action';
 import { networkCatalogsVersion, registerNetworkCatalog, ROBINHOOD_CHAIN, subscribeNetworkCatalogs } from '../domain/asset-catalogs';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
@@ -54,7 +54,8 @@ export function workflowCatalogChains(workflow: { readonly nodes: readonly { rea
  */
 export function useWorkflowNetworkCatalogs(workflow: { readonly nodes: readonly { readonly chainId: string }[] }): string {
   const { version } = useNetworkCatalog();
-  const chains = workflowCatalogChains(workflow).join();
+  // Decoded once per change of the workflow's steps (a bridge's destination needs its node decoded), never on every render.
+  const chains = useMemo(() => workflowCatalogChains(workflow).join(), [workflow.nodes]);
   useEffect(() => { for (const chain of chains ? chains.split(',') : []) void ensureNetworkCatalog(false, chain); }, [chains]);
   return `${chains}|${version}`;
 }

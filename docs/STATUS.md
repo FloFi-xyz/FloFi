@@ -7,6 +7,18 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 — Simulate/Execute fidelity, structured Technical details, post-merge red of PR #225
+
+**Status: pull request for CircleCI certification of its exact head; the owner authorized merge and deployment once every mandatory gate is green.
+Presentation, test and CI-fix build: no financial engine, wallet, signing, execution, schema, API, infrastructure or dependency change. Evidence is
+local and MOCKED; nothing was signed or sent. Not accepted by product (the FloFi product team decides).**
+- Post-merge red on `main` `dc09621` (`brand-ux-001`, 320 px): the Simulate panel lost the focus the phone shortcut gave it when the availability
+  answer switched its layout; the panel now keeps it (regression fails on the baseline).
+- Technical details are labelled groups in a bounded area; on desktop the docked panel scrolls inside its frame, so the page no longer grows.
+- The valid Review reads "Revise antes de autorizar"; Simulate/Execute load the official token catalogs (a listed token is named, never "Token").
+
+See the [build record](builds/BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002.md).
+
 ## BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 — approved Editor refinement, execution receipt in history, post-merge red fixed
 
 **Status: pull request for CircleCI certification of its exact head; the owner authorized merge and deployment once every mandatory gate is

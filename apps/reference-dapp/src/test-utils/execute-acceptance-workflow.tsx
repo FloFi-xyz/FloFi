@@ -13,6 +13,7 @@ export function useExecutionEnvironment() { return { walletEnvironment: 'testnet
 export function useUniswapLiquidity() { return {}; }
 export function useSolanaLiquidity() { return {}; }
 // BUILD-RH-002: the official Robinhood Chain catalog store (it calls a Next server action) stays idle in this suite.
+export function useWorkflowNetworkCatalogs() { return ''; }
 export function useNetworkCatalog() { return { status: 'idle' as const, code: null, version: 'idle:0', ensure: async () => undefined, retry: async () => undefined }; }
 export async function ensureNetworkCatalog() { return undefined; }
 // BUILD AAVE-V3-CARD-CATALOG-FIX-001: the lending card's shared live Aave market read (it calls a Next server action) stays unread in this suite.

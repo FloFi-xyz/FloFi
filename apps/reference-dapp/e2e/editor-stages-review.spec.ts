@@ -219,8 +219,10 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   // (no server action, no wallet request). The material rows stay visible above it.
   const validTechnical = runPanel(page).locator('details.review-panel-technical');
   await expect(validTechnical).toHaveCount(1); await expect(validTechnical).not.toHaveAttribute('open', '');
+  // Before signing, the material rows are on screen inside the docked panel (it scrolls within its frame) — a three-step Review at 1440 × 900,
+  // with Technical details closed: never only reachable by scrolling the panel (flofi-security / flofi-frontend-ux review).
   for (const row of PT ? ['Taxa de rede, no máximo', 'Permissão de token', 'Pedidos à carteira'] : ['Network fee, at most', 'Token permission', 'Wallet requests'])
-    await expect(runPanel(page).locator('.review-block-rows')).toContainText(row);
+    await expect(runPanel(page).locator('.review-block-rows > div').filter({ has: page.getByText(row, { exact: true }) })).toBeInViewport();
   const actions: string[] = [];
   const recordAction = (request: Request) => { if (request.method() === 'POST' && request.headers()['next-action']) actions.push(request.url()); };
   page.on('request', recordAction);
@@ -229,7 +231,7 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   const technicalBody = validTechnical.locator('> .technical-body');
   for (const group of PT ? ['Operações', 'Valores e limites', 'Taxas e permissões', 'Solicitações à carteira', 'Identificadores e evidências']
     : ['Operations', 'Amounts and limits', 'Fees and permissions', 'Requests to your wallet', 'Identifiers and evidence'])
-    await expect(technicalBody.getByRole('region', { name: group, exact: true })).toHaveCount(1);
+    await expect(technicalBody.getByRole('group', { name: group, exact: true })).toHaveCount(1);
   expect(await technicalBody.evaluate(element => element.clientHeight)).toBeLessThanOrEqual(400);
   await fitsViewport(page);
   await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeInViewport();

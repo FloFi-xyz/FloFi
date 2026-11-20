@@ -123,7 +123,7 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
     const setup = actionSetup ? canvasLayout?.[actionSetup.id] : undefined;
     return shownCanvasPositions(composerActions(workflow), canvasLayout ?? {}, { lending: isLendingComposition(workflow), occupied: setup ? [setup] : [] });
   }, [workflow, canvasLayout, actionSetup, narrow]);
-  const nodes = useMemo<Node[]>(() => incomplete ? [] : composerActions(workflow).map((node, index) => {
+  const nodes = useMemo<Node[]>(() => { void catalogs; return incomplete ? [] : composerActions(workflow).map((node, index) => {
     const step = execution?.nodes[node.nodeId];
     const name = tr('Step {0}: {1}', index + 1, tr(composerSummary(workflow, node, context).action));
     return { id: node.nodeId, type: 'workflow', ariaLabel: step && step.visual !== 'waiting' ? `${name} · ${tr(CANVAS_VISUAL_LABEL[step.visual])}` : name,
@@ -137,8 +137,9 @@ export function SimulateWorkflowCanvas({ workflowName, primaryAction, stage = 's
       // one (`quoteFrozen`): the execution view adds no quote traffic. The Build Canvas keeps live estimates on steps still waiting.
       ...['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? { estimateWorkflow: workflow, estimateNodeId: node.nodeId,
         estimateOwner: node.chainId.startsWith('solana:') ? solanaAccount : evmAccount, estimateEvmOwner: evmAccount, estimateSolanaOwner: solanaAccount } : {} } };
-    // `catalogs`: a token catalog registered since the last render renames its token on the cards.
-  }), [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution, catalogs]);
+  }); }, [workflow, context, positions, incomplete, lending, narrow, evmAccount, solanaAccount, tr, execution,
+    // `catalogs` (read above): a token catalog registered since the last render renames its token on the cards.
+    catalogs]);
   // BUILD-FLOFI-BUILDER-UX-002: the same link labels as the Build Canvas, so a link reads the same between Create and Simulate.
   const edges = useMemo(() => incomplete ? [] : composerConnections(workflow).map(({ id, source, target, label }) => {
     // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the same connection, colored by its dependency's record (never by position or order).

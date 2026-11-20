@@ -3,7 +3,7 @@
    inside its own bounded area — it never stretches the page, pushes the Canvas out of view or moves the footer's action. Existing tokens only. */
 /* position:relative: a scroll area is its absolutely positioned descendants' containing block (an announcement's sr-only text never escapes it). */
 :is(.review-panel-approved,.editor-workflow-run) .review-panel-technical>.technical-body{position:relative;margin:8px 6px 10px 14px;padding:2px 8px 2px 0;max-height:clamp(200px,40vh,380px);
-  overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable}
+  overflow-y:auto;scrollbar-width:thin;scrollbar-gutter:stable}
 .technical-body:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
 .technical-body>:first-child{margin-top:0}
 .technical-group{padding:10px 0;border-top:1px solid var(--line)}
@@ -14,7 +14,7 @@
 .technical-group .editor-run-steps>li{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;font-size:13px;line-height:1.4}
 .technical-group .editor-run-steps>li>.muted{font-size:12.5px}
 .technical-recipient{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px 6px;flex-basis:100%;font-size:12.5px;color:var(--muted)}
-.technical-recipient .execution-receipt-copy>span[title]{font-family:var(--font-ibm-plex-mono),monospace;color:var(--ink)}
+.technical-recipient .execution-receipt-copy>span[title]{font-family:var(--font-ibm-plex-mono),monospace;color:var(--ink);overflow-wrap:anywhere}
 dl.technical-rows{display:grid;margin:0}
 dl.technical-rows>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:10px;padding:5px 0;border-bottom:1px dashed var(--line)}
 dl.technical-rows>div:last-child{border-bottom:0}
@@ -38,5 +38,13 @@ dl.technical-rows+dl.technical-rows{margin-top:6px;padding-top:4px;border-top:1p
   @container flofi-canvas-frame (min-width:900px){
     .main.workflow-workspace :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.canvas-review-dock{
       position:relative;height:0;min-height:100%;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable}
+  }
+}
+
+/* A quiet cue that the docked panel holds more below its fold (frontend-ux review): a short fade pinned to its bottom edge. */
+@media(min-width:1281px){
+  @container flofi-canvas-frame (min-width:900px){
+    .main.workflow-workspace :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.canvas-review-dock::after{
+      content:"";position:sticky;bottom:0;display:block;height:20px;margin-top:-20px;pointer-events:none;background:linear-gradient(to bottom,transparent,var(--surface))}
   }
 }
