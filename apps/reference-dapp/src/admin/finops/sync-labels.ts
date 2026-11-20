@@ -47,6 +47,8 @@ export const FINANCIAL_SYNC_ERROR_LABELS: Readonly<Record<string, string>> = Obj
   FINOPS_PROVIDER_NO_DATA: 'The provider returned no data for this period.',
   FINOPS_PROVIDER_POLL_LIMIT: 'The provider export did not finish in time. FloFi will start a new export at the next synchronization.',
   FINOPS_PROVIDER_EXPORT_FAILED: 'The provider export failed. FloFi will start a new export at the next synchronization.',
+  FINOPS_PROVIDER_AUTH_REQUIRED: 'The provider requires a valid billing credential on the worker.',
+  FINOPS_PROVIDER_PERIOD_UNAVAILABLE: 'The provider does not offer data for this period.',
   FINOPS_SYNC_SUPERSEDED: 'A newer synchronization for this period finished first. Refresh to view its records.',
   FINOPS_SYNC_STORE_UNAVAILABLE: 'The financial records could not be saved. FloFi will retry.',
   FINOPS_PERIOD_CONFLICT: 'A conflicting record overlaps this period. Review the manual records.',

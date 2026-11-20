@@ -6,7 +6,7 @@ import { investorCsv, type FinopsReport } from '../../admin/finops/report';
 import { finopsCopy } from './finops-copy';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => undefined, push: () => undefined }) }));
-const { FinopsAi, FinopsCostBreakdown, FinopsCoverage, FinopsExchangeReference, FinopsFilters, FinopsOverview, FinopsRevenue, FinopsWorkflow } = await import('./finops-views');
+const { FinopsAi, FinopsCostBreakdown, FinopsCoverage, FinopsExchangeReference, FinopsFilters, FinopsInfrastructure, FinopsOverview, FinopsRevenue, FinopsWorkflow } = await import('./finops-views');
 const { FinopsIntegrations, FinopsScenario } = await import('./finops-controls');
 const { scenarioKeys } = await import('../../admin/finops/scenario');
 const { LocaleProvider } = await import('../../i18n/locale');
@@ -133,6 +133,31 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     expect(en).toMatch(/Approx\. R\$\s?0\.02</);
     const pt = html(createElement(FinopsCostBreakdown, { report: tiny, language: 'PT', mode: 'report' }));
     expect(pt).toMatch(/US\$\s0,004</);
+  });
+
+  it('keeps the CSV integration status current: no old error for a removed credential, and an unavailable state said', () => {
+    const removed = { id: 'vercel', name: 'Vercel', configured: false, active: false, lastAttempt: '2026-11-18T10:00:00.000Z', lastSuccess: null,
+      nextSync: null, errorCode: 'FINOPS_PROVIDER_NOT_ENTITLED', coverage: [], meters: [], cost: { amount: null, quality: 'UNAVAILABLE' }, connection: 'UNCONFIGURED' };
+    const view = { ...report(), integrations: { available: true, providers: [removed] } } as unknown as FinopsReport;
+    const rows = investorCsv(view).split('\n').filter(line => line.startsWith('"integration status"'));
+    expect(rows).toEqual([expect.stringContaining('"vercel"')]);
+    expect(rows[0]).toContain('"UNCONFIGURED"');
+    expect(rows[0]).not.toContain('NOT_ENTITLED');
+    expect(html(createElement(FinopsCostBreakdown, { report: view, language: 'EN' }))).not.toContain('Latest sync failed');
+    const unavailable = investorCsv({ ...report(), integrations: { available: false, providers: [] } } as unknown as FinopsReport);
+    expect(unavailable).toContain('"integration status","all"');
+    expect(unavailable).toContain('"UNAVAILABLE","Automatic synchronization state unavailable"');
+  });
+
+  it('marks usage and estimate records as excluded from recorded expenses in the reconciliation table', () => {
+    const record = { id: 7, scope: 'openai', environment: 'production', period: { from: '2026-11-01', to: '2026-11-02' }, source: 'ASSUMPTION',
+      reference: 'Planning estimate', notes: null, currency: 'USD', net: '12.5', gross: null, credits: null, discounts: null, taxes: null,
+      fxUsd: null, fxSource: null, coverage: 'FULL', updatedAt: '2026-11-19T00:00:00.000Z', selected: true };
+    const view = { ...report(), ledger: { status: 'available', complete: true, records: [record] } } as unknown as FinopsReport;
+    const page = html(createElement(FinopsInfrastructure, { report: view, language: 'EN' }));
+    expect(page).toContain('Excluded from recorded expenses (usage or estimate)');
+    expect(page).not.toContain('Superseded in totals');
+    expect(page).toContain('$12.50');
   });
 
   it('uses the latest success and only indicates a failure newer than both sync paths', () => {

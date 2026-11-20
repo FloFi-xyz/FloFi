@@ -60,6 +60,16 @@ No provider plan, credential or production configuration was requested or change
 | Data / privacy | Address-shaped `basis`; `cost_type` coerced to `"undefined"` | Fixed with tests. Announcement findings closed by the scope removal. |
 | Frontend | Missing Portuguese copy; singular counts and inclusive UTC ranges; sub-cent amounts shown as zero next to BRL; English quality codes in the Portuguese AI and workflow sections; AI cost hidden without telemetry | Fixed with tests. Announcement findings closed by the scope removal. |
 | Infrastructure | Readiness probe started after the stopped-work query | Fixed (started first). |
+| Security (final, clean head) | None | Outsider-tenant export assertion strengthened on its suggestion. |
+| Billing and admin-analytics (final, clean head) | Usage and estimate ledger rows looked counted in the reconciliation table; a removed credential's old error appeared in the CSV and cost breakdown; an unreadable sync state left the CSV status section empty; two closed codes had no label | Fixed with tests: a per-record exclusion note, deconfiguration clears the stored error and both surfaces ignore it, an explicit `UNAVAILABLE` status row, labels in both languages. |
+
+**Owner notes (no change made).**
+- Recorded expenses now count only invoice, accounting and provider-cost records; usage and assumption ledger rows are shown but excluded.
+  Production held only 32 provider-cost records (OpenAI) on 20 November, so no reported figure changes at release. A zero-spend required
+  scope (gas sponsorship, relayer) is complete only with an invoice record, so margins and break-even stay unavailable until those exist.
+  The FinOps engineering skill states this rule.
+- BRL translation rows carry the quality of the USD amount they translate, with the source column marking them indicative. Labelling them
+  `ESTIMATED` instead is an owner presentation decision.
 
 ## 5. Validation
 

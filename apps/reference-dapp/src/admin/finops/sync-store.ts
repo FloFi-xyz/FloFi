@@ -85,7 +85,8 @@ export async function configureFinancialSync(host: AdminHost, enabled: readonly 
         attempts = CASE WHEN EXCLUDED.configured THEN current.attempts ELSE 0 END,
         polls = CASE WHEN EXCLUDED.configured THEN current.polls ELSE 0 END,
         lease_token = CASE WHEN EXCLUDED.configured THEN current.lease_token END,
-        lease_expires_at = CASE WHEN EXCLUDED.configured THEN current.lease_expires_at END
+        lease_expires_at = CASE WHEN EXCLUDED.configured THEN current.lease_expires_at END,
+        last_error = CASE WHEN EXCLUDED.configured THEN current.last_error END
       WHERE current.configured <> EXCLUDED.configured`, [host.tenantId, FINANCIAL_PROVIDER_IDS, enabled]);
     return true;
   } catch (error) {

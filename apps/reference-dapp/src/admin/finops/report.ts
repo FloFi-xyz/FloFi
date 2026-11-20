@@ -317,10 +317,13 @@ export function investorCsv(report: FinopsReport, scenario: Scenario | null = nu
     rows.push(['executions', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Durable mainnet execution records, separate from workflows', null]);
   if (report.gas) for (const [label, amount] of Object.entries(report.gas))
     rows.push(['gas payer evidence', label, period.from, period.to, amount, 'groups', 'PARTIAL', 'Recorded mainnet workflow groups, operational evidence only', null]);
+  // An unreadable or unactivated synchronization state is said, never an empty section. A removed credential's old error is not current.
+  if (!report.integrations.available)
+    rows.push(['integration status', 'all', period.from, period.to, null, null, 'UNAVAILABLE', 'Automatic synchronization state unavailable', null]);
   for (const provider of report.integrations.providers) {
     rows.push(['integration status', provider.id, period.from, period.to, null, null,
       provider.connection,
-      provider.errorCode, provider.lastSuccess]);
+      provider.configured ? provider.errorCode : null, provider.lastSuccess]);
     for (const coverage of provider.coverage) {
       if (coverage.period.from >= period.to || coverage.period.to <= period.from) continue;
       rows.push(['financial integrations', provider.id, coverage.period.from, coverage.period.to, coverage.meterCount, 'metrics',

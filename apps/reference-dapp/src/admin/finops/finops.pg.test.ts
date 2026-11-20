@@ -126,7 +126,11 @@ describe('FinOps ledger authorization and rollout on disposable PostgreSQL', () 
     expect((await write({ ...invoice, scope: 'neon-postgres', currency: 'BRL', net: '123.45678901', fxUsd: '0.2', fxSource: privateFxSource })).status).toBe(200);
     const other = await handleFinopsExport(request('export', filters, outsider), options('other-finops'));
     expect(other.status).toBe(200);
-    expect(await other.text()).not.toContain('"70","USD"');
+    const otherCsv = await other.text();
+    // Another tenant's export carries none of this tenant's ledger rows, originals or conversions.
+    expect(otherCsv).not.toContain('"70","USD"');
+    expect(otherCsv).not.toContain('123.45678901');
+    expect(otherCsv).not.toContain('"ledger originals"');
     const result = await handleFinopsExport(request('export', filters, viewer), options());
     expect(result.status).toBe(200);
     expect(result.headers.get('cache-control')).toBe('private, no-store');

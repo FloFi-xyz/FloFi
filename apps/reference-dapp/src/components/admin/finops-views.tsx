@@ -166,7 +166,7 @@ export function FinopsCostBreakdown({ report, language, mode = 'dashboard' }: { 
       const scope = FINOPS_SCOPES[total.id], sync = report.sync.find(row => row.scope === total.id);
       const providerSync = report.integrations.providers.find(item => item.name === scope.provider || item.id === 'alchemy' && total.id === 'rpc');
       const lastSuccess = [providerSync?.lastSuccess, sync?.lastSuccess].filter(value => value != null).sort().at(-1) ?? null;
-      const lastFailure = [providerSync?.errorCode ? providerSync.lastAttempt : null, sync?.lastFailed]
+      const lastFailure = [providerSync?.configured && providerSync.errorCode ? providerSync.lastAttempt : null, sync?.lastFailed]
         .filter(value => value != null).sort().at(-1) ?? null;
       return <tr key={total.id}><th scope="row"><span className="admin-finops-provider">{scope.provider}</span><br/><small>{scope.name}</small></th><td>{copy(scope.category)}</td>
         <td className="admin-num"><Amount value={total.amount} language={language} mode={mode}/>
@@ -202,7 +202,9 @@ export function FinopsInfrastructure({ report, language, records = null }: { rep
           return <tr key={record.id}><th scope="row">#{record.id} · {scope.provider} / {scope.name}</th>
             <td>{record.environment}<br/>{copy('{0} to {1} UTC', record.period.from, inclusiveEnd(record.period))}</td>
             <td>{record.source}<br/>{record.reference}{record.notes ? <p>{record.notes}</p> : null}
-              {!record.selected ? <p className="admin-diff">{copy("Superseded in totals")}</p> : null}</td>
+              {record.source === 'USAGE' || record.source === 'ASSUMPTION'
+                ? <p className="admin-diff">{copy('Excluded from recorded expenses (usage or estimate)')}</p>
+                : !record.selected ? <p className="admin-diff">{copy("Superseded in totals")}</p> : null}</td>
             <td>{exact(record.net, record.currency)}</td>
             <td>{[record.gross, record.credits, record.discounts, record.taxes].map(value => value === null ? '—' : exact(value, record.currency)).join(' / ')}</td>
             <td>{exact(converted === null ? null : decimal(converted))}{record.fxSource ? <small><br/>{record.fxUsd} · {record.fxSource}</small> : null}</td>

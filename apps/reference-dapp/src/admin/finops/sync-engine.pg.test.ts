@@ -368,8 +368,10 @@ describe('autonomous Financial Sync on disposable PostgreSQL', () => {
     await plan(h, 'circleci', [{ period, historical: false }]);
     expect(await worker.runOnce()).toBe(true);
     expect(await state()).toMatchObject({ configured: true, active: true });
+    await h.db.query(`UPDATE finops_sync_jobs SET last_error = 'FINOPS_PROVIDER_FORBIDDEN' WHERE tenant_id = $1 AND provider = 'circleci'`, [h.tenantId]);
     await configureFinancialSync(h, []);
-    expect(await state()).toMatchObject({ configured: false, active: false });
+    // A removed credential's old refusal is not the provider's current state.
+    expect(await state()).toMatchObject({ configured: false, active: false, errorCode: null });
     await configureFinancialSync(h, ['circleci']);
     const { rows: [job] } = await h.db.query<{ periods: unknown; checkpoint: string | null; cycle_started_at: Date | null }>(
       'SELECT periods, checkpoint, cycle_started_at FROM finops_sync_jobs WHERE tenant_id = $1 AND provider = $2', [h.tenantId, 'circleci']);
