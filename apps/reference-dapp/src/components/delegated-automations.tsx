@@ -70,16 +70,21 @@ export function useDelegationEnabled(): boolean | null {
   return enabled;
 }
 
-export function useDelegation(owner: WorkflowOwner | null, proven: boolean) {
-  const [overview, setOverview] = useState<DelegationOverviewView | null>(null);
-  const [code, setCode] = useState<string | null>(null);
+export function useDelegation(owner: WorkflowOwner | null, proven: boolean, session?: object) {
+  const scope = useMemo(() => ({ owner, proven, session }), [owner, proven, session]);
+  const current = useRef(scope), sequence = useRef(0);
+  current.current = scope;
+  const [snapshot, setSnapshot] = useState<{ scope: typeof scope; overview: DelegationOverviewView | null; code: string | null } | null>(null);
   const refresh = useCallback(async () => {
-    if (!owner || !proven) return;
+    if (current.current !== scope || !owner || !proven) return;
+    const request = ++sequence.current;
     const result = await delegationOverview(owner).catch(() => ({ ok: false as const, code: 'DELEGATION_UNAVAILABLE' }));
-    if (result.ok) { setOverview(result.value); setCode(null); } else { setOverview(null); setCode(result.code); }
-  }, [owner, proven]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  return { overview, code, refresh };
+    if (current.current !== scope || sequence.current !== request) return;
+    setSnapshot({ scope, overview: result.ok ? result.value : null, code: result.ok ? null : result.code });
+  }, [owner, proven, scope]);
+  useEffect(() => { void refresh(); return () => { sequence.current++; }; }, [refresh]);
+  const visible = snapshot?.scope === scope ? snapshot : null;
+  return { overview: visible?.overview ?? null, code: visible?.code ?? null, refresh };
 }
 
 function Limits({ m }: { m: ManifestView }) {

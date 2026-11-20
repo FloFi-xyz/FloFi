@@ -2,11 +2,10 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { catalogSwapAvailability, publicAvailability, publicBegin, publicBeginGasless, publicObserve, publicPrepare, publicRefresh, publicReport, publicReportGasless, publicReview,
-  publicStatus, publicSubmitGasless } from '../app/public-testnet-action';
+import { publicBegin, publicBeginGasless, publicObserve, publicPrepare, publicRefresh, publicReport, publicReportGasless, publicReview,
+  publicStatus, publicSubmitGasless, publicSwapAvailability } from '../app/public-testnet-action';
 import { gaslessRequestMatches, signGaslessTypedData } from '../wallet/zeroex-gasless-signing';
 import type { EvmProvider } from '../wallet/evm-discovery';
-import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import type { PublicRun } from '../server/public-testnet-service';
 import { swapWalletRequestMatches, ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
@@ -171,8 +170,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([publicAvailability(), ...CATALOG_NETWORK_IDENTITIES.map(network => catalogSwapAvailability(network.chain))]).then(([testnet, ...catalogs]) => {
-      if (!cancelled) setAvailability({ testnet, catalogs: Object.fromEntries(CATALOG_NETWORK_IDENTITIES.map((network, index) => [network.chain, catalogs[index] === true])), known: true });
+    publicSwapAvailability().then(result => {
+      if (!cancelled) setAvailability({ ...result, known: true });
     }).catch(() => { if (!cancelled) setAvailability(value => ({ ...value, known: true })); });
     const id = localStorage.getItem(KEY);
     if (id) publicStatus(id).then(async result => {
