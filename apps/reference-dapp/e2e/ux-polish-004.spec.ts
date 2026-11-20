@@ -14,7 +14,7 @@ import type { Locator, Page } from '@playwright/test';
 import { test, expect, sendChatCommand } from './fixtures';
 import { chooseLanguage, E2E_APP_ORIGIN } from './app-origin';
 import { WALLET_HINT_COOKIE } from '../src/wallet/wallet-hint';
-import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openEditorSection, openNavigation, openProductSection, railToggle } from './build-entry-navigation';
+import { closeNavigation, editorStep, expectChatSection, expectEditorSection, expectProductSection, navigationDrawer, navigationLink, navigationTrigger, openBuilder, openEditorSection, openNavigation, openProductSection, railToggle, useToolbarRail } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => {
   // Cards may ask for a display estimate; none is needed here (and none may reach a provider).
@@ -189,6 +189,8 @@ test.describe('UX-01 collapsible navigation rail', () => {
   test('below 1360 px the expanded rail floats over the Canvas and gets out of the way; from 1360 px it sits beside the workspace', async ({ page, networkGuard }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openBuilder(page);
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the docked tool row is now the default; this checks a tool of the Canvas rail under the navigation.
+    await useToolbarRail(page);
     const tool = await box(graph(page).locator('.floating-toolbox button').first());
     const toolCenter = { x: tool.x + tool.width / 2, y: tool.y + tool.height / 2 };
     const covered = () => page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.navigation-layer')), toolCenter);
@@ -763,6 +765,8 @@ test.describe('UXA-02 Canvas zoom, pan and independent scrolling', () => {
     // A short laptop window: the document is taller than the viewport.
     await page.setViewportSize({ width: 1280, height: 640 });
     await openBuilder(page);
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the rail is an owner's choice now (the docked row is the default); this checks the rail's own scrolling.
+    await useToolbarRail(page);
     await addSwapCard(page);
     await page.evaluate(() => window.scrollTo(0, 0));
     expect(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight)).toBe(true);
@@ -784,7 +788,7 @@ test.describe('UXA-02 Canvas zoom, pan and independent scrolling', () => {
     await page.mouse.move(controls.x + 4, controls.y + controls.height / 2); await page.mouse.wheel(0, 200); await pause(page);
     expect(await page.evaluate(() => scrollY)).toBe(scrolled);
     expect(await viewport(page)).toEqual(view);
-    // The Canvas's floating action rail (the default toolbox layout at this width) scrolls itself, then holds the wheel at its end.
+    // The Canvas's floating action rail (chosen above) scrolls itself, then holds the wheel at its end.
     const toolbox = graph(page).locator('.floating-toolbox');
     await expect(toolbox).toHaveCount(1);
     const railBox = await box(toolbox);
