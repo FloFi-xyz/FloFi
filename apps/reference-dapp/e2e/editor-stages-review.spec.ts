@@ -100,6 +100,12 @@ async function evidence(page: Page, name: string) {
   await page.screenshot({ path: `${EVIDENCE}/${PT ? 'pt' : 'en'}-${name}.png` });
 }
 const footer = (page: Page) => page.locator('footer.summary-bar');
+/** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved references): on a desktop viewport the Editor fits it; the Canvas and the Assistant end above
+ * the sticky footer and the page itself does not scroll. (A Simulate/Execute panel with more content than the references' two steps may still
+ * make its frame taller; that is recorded in the build record.) */
+async function fitsViewport(page: Page) {
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(0);
+}
 const runPanel = (page: Page) => page.locator('.editor-workflow-run.editor-review-block');
 
 test('Create → Simulate → Execute: simulated in Simulate, authorized only from Execute, an expired Review must be refreshed; the wallet is never asked', async ({ page, networkGuard }) => {
@@ -136,9 +142,17 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expectEditorSection(page, 'Build');
   await page.keyboard.press('Escape');
   await expect(editorSteps(page).getByRole('status')).toHaveCount(0);
+  await fitsViewport(page);
   await evidence(page, 'create-empty');
   await say(page, 'swap 3 USDC to WETH on Base slippage 50 bps', W.card[0]!);
   await say(page, 'supply 0.0013 WETH to Aave on Base', W.card[1]!);
+  // The approved references' size (two steps): Simulate before a result fits the desktop viewport too. Opening it simulates and requests nothing.
+  await editorStep(page, 'Simulate').click();
+  await expectEditorSection(page, 'Simulate');
+  await expect(page.locator('.simulation-context-panel')).toHaveAttribute('data-review-state', 'pending');
+  await fitsViewport(page);
+  await editorStep(page, 'Build').click();
+  await expectEditorSection(page, 'Build');
   await say(page, 'borrow 0.8 USDC on Base', W.card[2]!);
   await expect(editorSectionAction(page, 'Simulate')).not.toHaveAttribute('aria-disabled', 'true');
   // A reason is never left on screen for a stage that has since opened.
@@ -147,6 +161,7 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   // No authorization copy on Create; its one primary action is the footer's Simulate.
   await expect(page.locator('main')).not.toContainText(W.authorizing);
   await expect(footer(page).locator('.canvas-primary-action').getByRole('button', { name: W.simulate, exact: true })).toBeEnabled();
+  await fitsViewport(page);
   await evidence(page, 'create-populated');
 
   // Simulate before a simulation (B2): the stage indicator opens it; its panel lists the operations and holds the ONE primary action, and the
