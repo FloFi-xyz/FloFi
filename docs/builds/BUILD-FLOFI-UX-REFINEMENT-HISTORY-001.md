@@ -166,11 +166,20 @@ expirada" + "Atualizar revisão" only).
 | Gate | Result |
 | --- | --- |
 | Typecheck (`tsc --noEmit`, reference-dapp) · `pnpm lint` · `pnpm schemas:check` | Pass |
-| `pnpm test` (full unit + contract suites) | See PR (final run on the PR head) |
+| `pnpm test` (full unit + contract suites) | Pass: 751 files, 9,718 tests (2 environment-gated skips, none from this build) |
 | Governance: `test_governance_lite.py` (21), `test_ci_*.py` (332), `governance_lite.py` | Pass |
 | `agent_guard.py check` | Pass (new modules and suites mapped; COVERAGE.md regenerated) |
 | Guarded browser profiles run locally on the final build | **Pass**: swap-read-acceptance (the original red), review-execute-recovery-components (incl. the new regression), copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, solana-transfer-ux (the whole critical tier), editor-wallet-batch (lifecycle incl. new refinement assertions), canvas-automation-ux, canvas-workflow-ux, workflow-ux-authoring, approve-workflow-run, execution-continuity-1/2/3 (chat-first execution). |
 | default-product-1 / default-product-2 | All assertions pass except **screenshot baselines** changed by the intended layout (visual-shell ×3, swap-authoring, base-observation, mock-artifact-chain ×2, simulate-canvas-controls ×2: regenerated from CircleCI's own candidate renders, CI.md §5) and **build009** (needs the public LI.FI host; unreachable from this container, as recorded for earlier builds; passes on CircleCI). |
+
+**CircleCI certification on the PR** ([FloFi-xyz/FloFi#224](https://github.com/FloFi-xyz/FloFi/pull/224)). The PR head's certification is the authority; its final run and SHA are recorded on the PR.
+
+| Run | Head | Result |
+| --- | --- | --- |
+| `3a39b665` | `0b92b16` | Every job passed except two screenshot-only failures: default-product-1 (visual-shell ×3, swap-authoring ×2, base-observation ×2, mock-artifact-chain ×3) and default-product-2 (simulate-canvas-controls 1280 ×2). swap-read-acceptance, the original red, passed. The full-page captures also showed a 7 px page scroll at 1440×900, which was fixed (`28d43db`) rather than accepted into the baselines. |
+| `b44180b3` | `77a69bf` | Every job passed except default-product-1's ten screenshots, re-rendered with the fixed heights. default-product-2 passed with the CI-rendered controls baselines, and editor-wallet-batch passed with the new no-page-scroll assertions. The ten CI renders were reviewed (Editor: docked tools, Canvas and Assistant ending above the footer, 900 px pages; engineering pages: only the Assistant panel's height) and committed unchanged. |
+
+Baselines come only from CircleCI's own candidate renders (CI.md §5). Local renders differ from CircleCI's in top-bar glyph spacing, so they are never committed as baselines.
 
 Browser regressions added or updated: `simulate-panel-disclosure.spec.ts` (new); `editor-stages-review.spec.ts` (docked tools, discreet state,
 network names, collapsed technical details with chain ids, expired card, badges with reasons, one primary); `dashboard-run-details`,
@@ -192,5 +201,5 @@ reviewed by flofi-security and flofi-workflow, narrowed to "nothing recorded yet
 | --- | --- |
 | Implemented technically | A, B, C — yes (this branch). |
 | Validated visually | Criar, Simular, Executar (expired) against the approved references by the comparison sheets above, with the listed deviations; history against the CTO's example hierarchy. |
-| Validated functionally | Local gates above; CircleCI certification on the exact PR head (see PR). |
+| Validated functionally | Local gates above; CircleCI certification on the exact PR head ([FloFi-xyz/FloFi#224](https://github.com/FloFi-xyz/FloFi/pull/224)). |
 | Accepted by product | **Pending — the FloFi product team only.** |
