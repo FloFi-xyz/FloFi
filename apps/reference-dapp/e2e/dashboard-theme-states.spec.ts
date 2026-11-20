@@ -219,6 +219,9 @@ for (const value of ['light', 'dark'] as const) {
     await expect(detail.getByRole('heading', { name: 'Run not found', exact: true })).toHaveCount(0);
     await page.evaluate(() => window.flofiRunDetailAcceptance.show('legacy'));
     await expect(detail).toContainText('Original workflow details are unavailable');
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a legacy record's requests are under its collapsed Technical details, one click away.
+    const technical = detail.locator('details.execution-receipt-technical');
+    if (await technical.getAttribute('open') === null) await technical.locator('> summary').click();
     await expect(detail.locator('.dashboard-recorded-requests')).toBeVisible();
     await expect(detail.locator('.execution-timeline')).toHaveCount(0);
   });
