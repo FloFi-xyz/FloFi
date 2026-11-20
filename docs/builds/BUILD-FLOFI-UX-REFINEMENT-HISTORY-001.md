@@ -125,3 +125,72 @@ against the code before acting.
 | frontend-ux | Grouped vs single-step disclosure persistence differ after a result (low) | **Kept**: the grouped result is a different panel (the whole-workflow Review) with its own disclosure; documented. |
 | infrastructure-ci | First certification will fail on screenshots; fail-fast shards can hide later profiles (medium) | **Mitigated**: every affected profile run locally before the PR; non-screenshot failures fixed (`canvas-ux`, `canvas-cta`, theme spec); screenshot baselines regenerated from CircleCI's own candidate renders (CI.md §5). |
 | infrastructure-ci | New suites unregistered; rail ARIA assertion dropped; disclosure spec clock/harness timing; evidence env not cleared (low) | **Fixed** (`5072b4c`). |
+
+## 7. Visual certification (real browser captures, MOCKED loopback build)
+
+Captures by `e2e/ux-refinement-evidence.spec.ts` (Editor; the references' two-step **Swap → Send** workflow on the Base MOCKED harness, reference
+viewport **1815×866** and phone 390×844, PT and EN) and `e2e/history-receipt-evidence.spec.ts` (history; run-detail acceptance fixtures, 1440 px
+and 390 px, collapsed and expanded). "Before" history captures render the baseline `run-detail-view.tsx` (`0ea35d58`) in the same harness. Both
+specs are local evidence only (skipped unless `FLOFI_UX_EVIDENCE_DIR`; the guarded runner clears that switch).
+
+| Sheet | Contents |
+| --- | --- |
+| `compare-criar.png` | A p.16 · **B p.17** · C empty (matches B) · C Swap → Send |
+| `compare-simular.png` | A p.18 · **B p.19** · C before simulating (matches B) · C valid result |
+| `compare-executar-expirada.png` | A p.20 (valid review) · **B p.21 (expired review)** · C **expired review** · C valid review (its own state) |
+| `mobile-criar-simular-executar.png` | C on a phone: Criar, Simular, Executar (expired) |
+| `history-{completed,partial,failed}-before-after.png` | before · after · after with Technical details open (1440 px) |
+| `history-mobile-before-after.png` | the same, 390 px |
+
+**Visually validated against the references (by side-by-side comparison, not by tests):** Criar empty state (header, discreet state, docked named
+tools, mascot and copy, Assistant, disabled footer CTA); Simular before a result (title + round mark, one operations card with network names,
+explainer, one pill CTA with play mark, collapsed technical row, footer note + disabled "Revisar operação"); Executar expired (soft-orange notice
+with triangle and the approved copy, one card with numbered sentences, refresh badges, wallet requests, collapsed technical row, footer "● Revisão
+expirada" + "Atualizar revisão" only).
+
+**Remaining deviations (explained, not hidden):**
+
+| Deviation | Reason |
+| --- | --- |
+| Stepper markers are numbers (1 · 2 · 3), not the check/empty circles of p.17/p.19 | The three references disagree (p.21 uses numbers with arrows); numbers state the order and were the existing accessible contract. |
+| Simulate/Execute frame header keeps name + count left and the stepper right (p.21 centres the stepper and shows the count as a badge) | p.17/p.19 keep it beside the name; one header layout for all stages. |
+| The Simulate summary does not repeat the Canvas card's "≈ expected amount" | The live estimate has its own expiry on the card; repeating it in the panel could show it past its validity (PDF §06/§07: never present outdated estimates as valid). |
+| PT sentences read "na rede Base" (p.21: "na Arbitrum") | Gender-safe Portuguese for every network name. |
+| Amounts in Canvas cards and the Review stay in IBM Plex Mono; receipt amounts use Outfit with tabular figures | Cards/Review were not part of this refinement's references; the receipt follows the CTO's example. |
+| Canvas swap card shows "A cotação não corresponde a este swap" in the captures | Behaviour of the MOCKED Base harness quote for this amount (also in the baseline captures); unrelated to this build. |
+| At 1815×866 the Execute page still overflows by ~10 px | The sticky footer plus the Assistant's minimum height; no content is hidden. |
+| No FloFi fee line in the receipt | No execution record stores a charged FloFi fee (B2: never fabricate). |
+
+## 8. Functional validation (local)
+
+| Gate | Result |
+| --- | --- |
+| Typecheck (`tsc --noEmit`, reference-dapp) · `pnpm lint` · `pnpm schemas:check` | Pass |
+| `pnpm test` (full unit + contract suites) | See PR (final run on the PR head) |
+| Governance: `test_governance_lite.py` (21), `test_ci_*.py` (332), `governance_lite.py` | Pass |
+| `agent_guard.py check` | Pass (new modules and suites mapped; COVERAGE.md regenerated) |
+| Guarded browser profiles run locally on the final build | **Pass**: swap-read-acceptance (the original red), review-execute-recovery-components (incl. the new regression), copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, solana-transfer-ux (the whole critical tier), editor-wallet-batch (lifecycle incl. new refinement assertions), canvas-automation-ux, canvas-workflow-ux, workflow-ux-authoring, approve-workflow-run, execution-continuity-1/2/3 (chat-first execution). |
+| default-product-1 / default-product-2 | All assertions pass except **screenshot baselines** changed by the intended layout (visual-shell ×3, swap-authoring, base-observation, mock-artifact-chain ×2, simulate-canvas-controls ×2: regenerated from CircleCI's own candidate renders, CI.md §5) and **build009** (needs the public LI.FI host; unreachable from this container, as recorded for earlier builds; passes on CircleCI). |
+
+Browser regressions added or updated: `simulate-panel-disclosure.spec.ts` (new); `editor-stages-review.spec.ts` (docked tools, discreet state,
+network names, collapsed technical details with chain ids, expired card, badges with reasons, one primary); `dashboard-run-details`,
+`dashboard-theme-states`, `dashboard-productization`, `dashboard-final-acceptance` (receipt, statuses, observed-only "received", copy, explorer
+link, Technical details collapsed by default and one click away, legacy records); `canvas-ux`, `canvas-cta`, `canvas-workflow-ux`,
+`ux-polish-004` (rail is now an explicit choice; rail ARIA contract asserted).
+
+## 9. Financial and security preservation
+
+Unchanged: simulation and validation algorithms, balance and network-fee handling, slippage limits, token permissions, wallet connection and
+signatures, authorization boundaries (Authorize only from a valid Review; never from an expired one — asserted), execution, reconciliation,
+duplicate-execution prevention, persistence and evidence, mainnet-only policy, networks/protocols/capabilities, chat-first creation and execution
+(execution-continuity profiles pass), Admin/FinOps/release/fee configuration. The only gating-adjacent change (availability "checking") was
+reviewed by flofi-security and flofi-workflow, narrowed to "nothing recorded yet", and made non-approvable in `projectReview` (tests).
+
+## 10. Status (PDF §14)
+
+| | Status |
+| --- | --- |
+| Implemented technically | A, B, C — yes (this branch). |
+| Validated visually | Criar, Simular, Executar (expired) against the approved references by the comparison sheets above, with the listed deviations; history against the CTO's example hierarchy. |
+| Validated functionally | Local gates above; CircleCI certification on the exact PR head (see PR). |
+| Accepted by product | **Pending — the FloFi product team only.** |
