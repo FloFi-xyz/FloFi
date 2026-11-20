@@ -3960,7 +3960,8 @@
         "apps/reference-dapp/src/components/operation-summary.tsx",
         "apps/reference-dapp/src/components/simulation-context-panel.tsx",
         "apps/reference-dapp/src/components/copy-value.tsx",
-        "apps/reference-dapp/src/components/technical-body.tsx"
+        "apps/reference-dapp/src/components/technical-body.tsx",
+        "apps/reference-dapp/src/components/token-amount-text.tsx"
       ],
       "suites": [
         "app.components.canvas-panel-reveal",
@@ -4600,6 +4601,7 @@
         "apps/reference-dapp/src/domain/privacy-notice.ts",
         "apps/reference-dapp/src/domain/chat-message.ts",
         "apps/reference-dapp/src/domain/token-fee.ts",
+        "apps/reference-dapp/src/domain/token-amount-display.ts",
         "apps/reference-dapp/src/domain/chat-action-variant.ts",
         "apps/reference-dapp/src/domain/conversation-persistence.ts",
         "apps/reference-dapp/src/domain/amount-shortcuts.ts",
@@ -5294,7 +5296,8 @@
         "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts",
         "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts",
         "apps/reference-dapp/src/i18n/pt-ux-refinement.ts",
-        "apps/reference-dapp/src/i18n/pt-editor-fidelity.ts"
+        "apps/reference-dapp/src/i18n/pt-editor-fidelity.ts",
+        "apps/reference-dapp/src/i18n/pt-global-precision.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
