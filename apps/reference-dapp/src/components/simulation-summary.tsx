@@ -7,18 +7,19 @@ import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { Workflow } from '../domain/initial-workflow';
 import { projectSimulation, simulationStatusPresentation, type SimulationSource, type SimulationLine, type SimulationStep } from '../domain/simulation-presentation';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
+import { TokenAmountText } from './token-amount-text';
+import type { DisplayRounding } from '../domain/token-amount-display';
 
 function Lines({ lines }: { lines: SimulationLine[] }) {
   const { t: tr } = useLocale();
   return <dl className="simulation-summary-values">{lines.map((line, index) => <div key={`${line.label}-${index}`}>
-    <dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd>
+    <dt>{tr(line.label)}</dt><dd>{line.amount || line.treatment ? <TokenAmountText value={line.value} rounding={line.amount ?? (line.treatment === 'CEILING' ? 'up' : 'nearest')}/> : tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd>
   </div>)}</dl>;
 }
-function TokenAmount({ value }: { value: string }) {
-  const { t: tr } = useLocale();
-  // Reuse supported original-color assets; descriptive outcomes retain plain text.
+function TokenAmount({ value, rounding = 'nearest', marker }: { value: string; rounding?: DisplayRounding; marker?: boolean }) {
+  // Reuse supported original-color assets; descriptive outcomes retain plain text. Amounts: six significant digits, the exact value one tap away.
   const symbol = value.match(/ (USDC|devUSDC|WETH|ETH|SOL|WSOL|USDT)$/)?.[1];
-  return <span className="simulation-token-amount">{symbol && <TokenBrandIcon symbol={symbol}/>}<span>{tr(value)}</span></span>;
+  return <span className="simulation-token-amount">{symbol && <TokenBrandIcon symbol={symbol}/>}<TokenAmountText value={value} rounding={rounding} {...marker === undefined ? {} : { marker }}/></span>;
 }
 export function SimulationSummary({ workflow, context, source, invalidWorkflow = false, unavailableReason }: {
   workflow: Workflow; context: ReviewContext; source?: SimulationSource | undefined; invalidWorkflow?: boolean; unavailableReason?: string | null | undefined;
@@ -52,7 +53,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
       <h3>{tr("Expected result")}</h3>
       {details.steps.length ? <ol className="simulation-results">{details.steps.map(step => <li key={step.id}>
         <div className="simulation-step-title">{multiple && <span className="simulation-step-number">{tr(step.number)}</span>}<strong>{tr(step.action)}</strong></div>
-        <div className="simulation-input"><TokenAmount value={step.input}/></div>
+        <div className="simulation-input"><TokenAmount value={step.input} rounding="up" marker/></div>
         <SimulationOutcome step={step}/>
       </li>)}</ol> : <p className="simulation-empty-value">—</p>}
     </section>
@@ -96,7 +97,7 @@ export function SimulationOutcome({ step }: { step: SimulationStep }) {
   return <>
     <span className="simulation-result-label">{tr(step.resultLabel)}</span>
     <div className="simulation-result"><span aria-hidden="true">→</span><TokenAmount value={step.result ?? '—'}/></div>
-    {step.minimum && <p className="simulation-minimum">{tr('Minimum received · ')}{tr(step.minimum)}</p>}
+    {step.minimum && <p className="simulation-minimum">{tr('Minimum received · ')}<TokenAmountText value={step.minimum} rounding="down"/></p>}
     {step.details.length > 0 && <Lines lines={step.details}/>}
   </>;
 }

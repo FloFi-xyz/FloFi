@@ -32,7 +32,13 @@ function render(bound: Bound, stage: 'simulate' | 'execute', language: 'EN' | 'P
 }
 /** The visible text of a rendered panel (tags removed), and its definition rows as label → value. */
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#x27;/g, '\'').replace(/\s+/g, ' ');
-const rows = (html: string) => Object.fromEntries([...html.matchAll(/<dt>(.*?)<\/dt><dd[^>]*>(.*?)<\/dd>/g)].map(match => [text(match[1]!).trim(), text(match[2]!).trim()]));
+const rows = (html: string) => Object.fromEntries([...html.matchAll(/<dt>(.*?)<\/dt><dd[^>]*>(.*?)<\/dd>/g)].map(match => [text(match[1]!).trim(),
+  // A shortened amount's disclosure control names itself to assistive technology ("— Show exact value"); the row's value is the amount.
+  text(match[2]!).replace(/ — (?:Show|Hide) exact value| — (?:Mostrar|Ocultar) valor exato/g, '').trim()]));
+/** BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001 (B): engineering figures live under Technical details, never in the short Review's rows. */
+const TECHNICAL_ROWS = ['Liquidity removed', 'Liquidity remaining', 'Liquidity', 'Price range', 'Range state', 'Current price', 'Position Manager', 'Deadline',
+  'Owed tokens and fees', 'Collected (expected)', 'Expected principal returned', 'Minimum principal (enforced)', 'Tokens returned'];
+const AMOUNTS = /^(?:≈ )?[\d.,]+(?:M| mi)? \S+ \+ (?:≈ )?[\d.,]+(?:M| mi)? \S+$/;
 const NO_AUTHORIZE = /data-lifecycle-action|Authorize workflow|Authorize in wallet|Autorizar fluxo|<button[^>]*class="primary"/;
 const NO_YIELD = /\byield\b|rendimento/i;
 
@@ -62,13 +68,17 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(html).toContain('data-review-state="ready"');
     expect(text(html)).toContain('Simulation result');
     const shown = rows(html);
-    expect(shown['Remove liquidity']).toBe(`50% · #${record.review.position.tokenId}`);
-    expect(shown['Liquidity removed']).toBe(`${record.review.liquidityToRemove} of ${record.review.position.liquidity} (50%)`);
-    expect(shown['Liquidity remaining']).toBe(record.review.liquidityAfter);
-    for (const label of ['Expected principal returned', 'Minimum principal (enforced)', 'Owed tokens and fees', 'Collected, at least', 'Network fee, at most'])
-      expect(shown[label], label).toBeTruthy();
-    expect(shown['Owed tokens and fees']).toMatch(/^≥ /);
+    // B: the short Review — operation, protocol/network/pool, position, what comes back and its guaranteed minimum, the NFT, the fee.
+    expect(shown.Operation).toBe('Remove part of the position\'s liquidity and collect');
+    expect(shown.Pool).toMatch(/^Uniswap V3 · Base · \S+\/\S+ · [\d.]+%$/);
+    expect(shown.Position).toBe(`#${record.review.position.tokenId} · 50%`);
+    expect(shown['You receive (estimated)']).toMatch(AMOUNTS);
+    expect(shown['Minimum you receive']).toMatch(AMOUNTS);
     expect(shown['Position NFT']).toBe('Stays in your wallet');
+    expect(shown['Network fee, at most']).toBeTruthy();
+    for (const label of TECHNICAL_ROWS) expect(shown[label], label).toBeUndefined();
+    // Explanations of how the figures are built are Technical details, not amber banners.
+    expect(text(html)).not.toMatch(/Owed tokens and fees can include|returned to your wallet as the pool|reverts on chain if the principal/);
     // Simulate is not the authorization: no permission rows, no Review heading, no authorize control, no wallet-request row.
     expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission|Wallet requests|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
@@ -83,14 +93,19 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(text(html)).toMatch(/Review valid until/);
     const shown = rows(html);
     expect(shown.Operation).toBe('Remove all liquidity, collect and close the position (burns the NFT)');
-    expect(shown.Network).toBe('Base');
-    expect(shown.Position).toBe(`#${record.review.position.tokenId}`);
+    expect(shown.Pool).toMatch(/^Uniswap V3 · Base · /);
+    expect(shown.Position).toBe(`#${record.review.position.tokenId} · 100%`);
+    expect(shown['You receive (estimated)']).toMatch(AMOUNTS);
+    expect(shown['Minimum you receive']).toMatch(AMOUNTS);
+    expect(shown.Slippage).toBe('1%');
+    expect(shown.Recipient).toMatch(/^Your wallet · 0x[0-9a-f]{4}…[0-9a-f]{4}$/);
     expect(shown['Position NFT']).toBe('Burned (closed)');
-    expect(shown['Position Manager']).toBe(record.review.contracts.positionManager);
     expect(shown['Wallet requests']).toBe('1');
     expect(shown['Token permission']).toBe('None — this operation needs no token permission');
-    expect(shown['Liquidity remaining']).toBe('0');
+    for (const label of TECHNICAL_ROWS) expect(shown[label], label).toBeUndefined();
+    // Material: the irreversible close stays visible, once (the operation is not repeated as a banner).
     expect(text(html)).toContain('Closing burns the position NFT. This cannot be undone.');
+    expect(text(html).split('Remove all liquidity, collect and close the position').length).toBe(2);
     expect(html).not.toMatch(NO_AUTHORIZE);
     expect(text(html)).not.toMatch(NO_YIELD);
   });
@@ -98,12 +113,14 @@ describe('Uniswap v3 position operations in the Editor', () => {
   it('a collection: owed tokens and fees as a lower bound, liquidity unchanged, no principal minimum', async () => {
     const { bound, observedAt, record } = await uniswap('COLLECT');
     const shown = rows(render(bound, 'simulate', 'EN', observedAt));
-    expect(shown['Collect fees']).toBe(`#${record.review.position.tokenId}`);
-    expect(shown.Liquidity).toBe(`${record.review.position.liquidity} (unchanged)`);
-    expect(rows(render(bound, 'simulate', 'PT', observedAt)).Liquidez).toBe(`${record.review.position.liquidity} (sem alteração)`);
-    expect(shown['Collected, at least']).toMatch(/^≥ /);
-    expect(shown['Minimum principal (enforced)']).toBeUndefined();
-    expect(shown['Liquidity removed']).toBeUndefined();
+    expect(shown.Operation).toBe('Collect owed tokens and fees (liquidity unchanged)');
+    expect(shown.Position).toBe(`#${record.review.position.tokenId}`);
+    // A collection has only a lower bound: no estimate row, no slippage, no principal minimum.
+    expect(shown['You receive, at least']).toMatch(AMOUNTS);
+    expect(shown['You receive (estimated)']).toBeUndefined();
+    expect(shown['Minimum you receive']).toBeUndefined();
+    expect(rows(render(bound, 'simulate', 'PT', observedAt))['Você recebe, no mínimo']).toMatch(AMOUNTS);
+    for (const label of TECHNICAL_ROWS) expect(shown[label], label).toBeUndefined();
   });
 
   it('Execute C2 (expired): "Your review expired" first, the configured operation — never the expired figures — fee to refresh, no permission, one wallet request', async () => {
@@ -127,16 +144,16 @@ describe('Uniswap v3 position operations in the Editor', () => {
     const { bound, observedAt, expiresAt } = await uniswap('DECREASE', 5_000);
     const simulate = text(render(bound, 'simulate', 'PT', observedAt));
     expect(simulate).toContain('Resultado da simulação');
-    for (const label of ['Liquidez removida', 'Liquidez restante', 'Capital devolvido esperado', 'Capital mínimo (garantido na rede)', 'Tokens devidos e taxas', 'NFT da posição'])
+    for (const label of ['Operação', 'Posição', 'Você recebe (estimado)', 'Mínimo que você recebe', 'NFT da posição'])
       expect(simulate, label).toContain(label);
-    // The rows' values read in Portuguese too: never "of", "per", "(unchanged)" or a garbled "desvio de <amounts>" minimum.
+    // The rows' values read in Portuguese too: never "of", "per", "(unchanged)", "Your wallet", and PT decimal separators.
     const shown = rows(render(bound, 'simulate', 'PT', observedAt));
-    expect(shown['Liquidez removida']).toMatch(/^\d+ de \d+ \(50%\)$/);
-    expect(shown['Capital mínimo (garantido na rede)']).toMatch(/^[\d.,]+ \S+ \+ [\d.,]+ \S+ · desvio de 1%$/);
+    expect(shown['Você recebe (estimado)']).toMatch(AMOUNTS);
+    expect(shown['Você recebe (estimado)']).not.toMatch(/\d\.\d/);
     const valid = text(render(bound, 'execute', 'PT', observedAt));
     const authorizing = rows(render(bound, 'execute', 'PT', observedAt));
-    expect(authorizing['Intervalo de preço']).toMatch(/^[\d.]+–[\d.]+ \S+ por \S+$/);
-    expect(authorizing['Tokens devolvidos']).toMatch(/^\S+ \+ \S+ → 0x[0-9a-f]{40}$/);
+    expect(authorizing['Destinatário']).toMatch(/^Sua carteira · 0x[0-9a-f]{4}…[0-9a-f]{4}$/);
+    expect(authorizing.Desvio).toBe('1%');
     expect(Object.values(authorizing).join(' ')).not.toMatch(/\bof\b|\bper\b|\(unchanged\)|\band\b.*\bto\b/);
     expect(valid).toContain('Revise antes de autorizar');
     expect(valid).toContain('Nenhuma — esta operação não precisa de permissão de token');
@@ -171,13 +188,14 @@ describe('Orca position operations in the Editor', () => {
     const html = render(bound, 'simulate', 'EN', ORCA_CLOCK);
     expect(html).toContain('data-review-state="ready"');
     const shown = rows(html);
-    expect(shown['Remove liquidity']).toBe(`50% · ${mint}`);
-    expect(shown['Liquidity removed']).toBe('20000000');
-    expect(shown['Liquidity remaining']).toBe('20000000');
-    expect(shown['Expected principal returned']).toMatch(/SOL \+ .* USDC$/);
-    expect(shown['Minimum principal (enforced)']).toMatch(/SOL \+ .* USDC$/);
-    expect(shown['Fees collected, at least']).toBeTruthy();
+    const short = `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+    expect(shown.Operation).toBe('Remove part of the position\'s liquidity and collect fees');
+    expect(shown.Pool).toMatch(/^Orca Whirlpools · Solana · SOL\/USDC · [\d.]+%$/);
+    expect(shown.Position).toBe(`${short} · 50%`);
+    expect(shown['You receive (estimated)']).toMatch(/SOL \+ .* USDC$/);
+    expect(shown['Minimum you receive']).toMatch(/SOL \+ .* USDC$/);
     expect(shown['Position NFT']).toBe('Stays in your wallet');
+    for (const label of [...TECHNICAL_ROWS, 'Fees collected, at least']) expect(shown[label], label).toBeUndefined();
     expect(shown['Estimated network fee']).toBe('0.000005 SOL');
     expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
@@ -188,9 +206,10 @@ describe('Orca position operations in the Editor', () => {
     expect(text(html)).toContain('Review before authorizing');
     const shown = rows(html);
     expect(shown.Operation).toBe('Remove all liquidity, collect fees and close the position; the position NFT is closed and its account rent is refunded');
-    expect(shown.Network).toBe('Solana');
-    expect(shown.Position).toBe(mint);
-    expect(shown['Liquidity remaining']).toBe('0');
+    expect(shown.Pool).toMatch(/^Orca Whirlpools · Solana · /);
+    expect(shown.Position).toBe(`${mint.slice(0, 4)}…${mint.slice(-4)} · 100%`);
+    expect(shown.Recipient).toMatch(/^Your wallet · \S{6}…\S{4}$/);
+    for (const label of TECHNICAL_ROWS) expect(shown[label], label).toBeUndefined();
     expect(shown['Position NFT']).toBe('Closed (account rent refunded)');
     expect(shown['Account rent refunded']).toMatch(/SOL$/);
     expect(shown['Wallet requests']).toBe('1');
@@ -200,9 +219,9 @@ describe('Orca position operations in the Editor', () => {
   it('a collection and the expired Review (C2), in EN and PT-BR', async () => {
     const collect = await orca('COLLECT');
     const shown = rows(render(collect.bound, 'simulate', 'EN', ORCA_CLOCK));
-    expect(shown['Collect fees']).toBe(collect.mint);
-    expect(shown['Fees collected, at least']).toMatch(/^≥ /);
-    expect(shown['Minimum principal (enforced)']).toBeUndefined();
+    expect(shown.Position).toBe(`${collect.mint.slice(0, 4)}…${collect.mint.slice(-4)}`);
+    expect(shown['You receive, at least']).toMatch(/SOL \+ .* USDC$/);
+    expect(shown['Minimum you receive']).toBeUndefined();
     const exit = await orca('EXIT');
     const expired = render(exit.bound, 'execute', 'EN', exit.expiresAt + 1_000);
     expect(expired).toContain('data-review-state="expired"');
