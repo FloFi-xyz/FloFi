@@ -5,6 +5,8 @@ import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-
 import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
 import { payableCosts } from './conversation-lifecycle';
+import { projectReview } from './review-presentation';
+import { reviewFixture, reviewNow } from '../test-utils/review-fixture';
 import { projectSimulation, simulationStatusPresentation, simulationAmount, simulationPriceImpact, simulationError, SIMULATION_AVAILABILITY_CHECKING, type SimulationSource } from './simulation-presentation';
 const context = createBaseSepoliaReviewContext(), now = Date.parse('2026-10-06T12:00:00Z');
 const expiry = new Date(now + 120_000).toISOString();
@@ -341,5 +343,19 @@ describe('BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: runtime availability still bein
     expect(answered.message).toBe('Simulation is not available for this workflow on the current network.');
     // A refusal is never hidden behind "checking".
     expect(project(snapshot('public', { run: null, available: false, availabilityKnown: false, error: 'SIMULATION_FAILED' })).status).toBe('blocked');
+  });
+  it('never applies to a recorded run or record: its verdict, binding and expiry checks still decide (flofi-security/flofi-workflow review)', () => {
+    const recorded = project(snapshot('public', { ...publicSource().state, available: false, availabilityKnown: false }));
+    expect(recorded.status).toBe('blocked');
+    expect(recorded.message).not.toBe(SIMULATION_AVAILABILITY_CHECKING);
+  });
+  it('nothing is approvable while availability is being checked, even with a ready authorization', () => {
+    const fixture = reviewFixture();
+    const checking = { kind: 'public', state: { ...(fixture.source.state as object), run: null, available: false, availabilityKnown: false } } as unknown as SimulationSource;
+    const review = projectReview(fixture.workflow, fixture.context, checking, { ...fixture.authorization, accepted: true }, fixture.wallet, reviewNow);
+    expect(review.status).toBe('blocked'); expect(review.canApprove).toBe(false); expect(review.bindingValid).toBe(false);
+    const recorded = { kind: 'public', state: { ...(fixture.source.state as object), available: false, availabilityKnown: false } } as unknown as SimulationSource;
+    const withRun = projectReview(fixture.workflow, fixture.context, recorded, fixture.authorization, fixture.wallet, reviewNow);
+    expect(withRun.canApprove).toBe(false); expect(withRun.bindingValid).toBe(false);
   });
 });

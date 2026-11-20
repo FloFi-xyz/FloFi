@@ -9,6 +9,7 @@ export const portugueseUxRefinement: Readonly<Record<string, string>> = {
   'Send {0} on {1}.': 'Enviar {0} na rede {1}.',
   '{0} {1} from {2} to {3}.': '{0} {1} da rede {2} para a rede {3}.',
   '{0} {1} on {2}.': '{0} {1} na rede {2}.',
+  '{0}: {1} on {2}.': '{0}: {1} na rede {2}.',
   // Technical details of the configured workflow
   'The previous review expired at {0}; its values are no longer current and are not shown.': 'A revisão anterior expirou às {0}; seus valores não estão mais atualizados e não são exibidos.',
   'Step {0}: {1}': 'Etapa {0}: {1}',
@@ -17,7 +18,7 @@ export const portugueseUxRefinement: Readonly<Record<string, string>> = {
   'The token permission is confirmed again by the refreshed review.': 'A permissão de token é confirmada novamente pela revisão atualizada.',
   // Workflow history: the execution receipt
   'You sent': 'Você enviou', 'You supplied': 'Você depositou', 'You received': 'Você recebeu', 'You borrowed': 'Você pegou emprestado',
-  'Recipient received': 'O destinatário recebeu', 'Configured amount': 'Valor configurado', 'Received amount': 'Valor recebido',
+  'Recipient received': 'O destinatário recebeu', 'Delivered': 'Entregue', 'Configured amount': 'Valor configurado', 'Received amount': 'Valor recebido',
   'Not recorded in this history': 'Não registrado neste histórico', 'Network fee · {0}': 'Taxa de rede · {0}', 'Steps completed': 'Etapas concluídas',
   '{0} of {1}': '{0} de {1}', 'Copy {0}': 'Copiar {0}', 'opens in a new tab': 'abre em uma nova aba',
   'Execution record': 'Registro da execução', 'Current execution · read-only': 'Execução atual · somente leitura',

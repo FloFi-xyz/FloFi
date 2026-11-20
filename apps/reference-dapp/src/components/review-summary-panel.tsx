@@ -118,7 +118,8 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
           {position ? <div><dt>{t('Wallet requests')}</dt><dd>1</dd></div>
             : typeof props.walletRequests === 'number' && <div><dt>{t('Wallet requests')}</dt><dd>{props.walletRequests}</dd></div>}
         </dl>
-        {technical ?? disclosure(<WorkflowTechnicalFacts workflow={canvas} context={context}
+        {/* Only the configured workflow's facts: never the expired Review's manifest, limits or approvals (flofi-workflow review). */}
+        {disclosure(<WorkflowTechnicalFacts workflow={canvas} context={context}
           expiredAt={review.expiresAt !== null ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null}/>)}
       </div>
     </section>;

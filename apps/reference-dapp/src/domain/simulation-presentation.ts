@@ -365,7 +365,10 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
   // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (post-merge red on main 0ea35d5): until a runtime's availability has answered it is unknown, never "not
   // available" (the chat already waits for it, `runtimeChecking`). Presenting it as a blocker made the Simulate panel switch from its blocker layout
   // to its normal layout once the answer arrived; the Simulate control stays closed meanwhile (`simulationDisabled`), so nothing can run early.
-  if (steps.length && 'availabilityKnown' in source.state && source.state.availabilityKnown === false) {
+  // Only while nothing is recorded yet: a recovered run or record (a prepared Review) keeps the old stop, so its binding, verdict and expiry
+  // checks below can never be skipped while availability is still unknown (flofi-security review).
+  const recorded = ('record' in source.state && Boolean(source.state.record)) || ('run' in source.state && Boolean(source.state.run));
+  if (steps.length && !recorded && 'availabilityKnown' in source.state && source.state.availabilityKnown === false) {
     view.message = SIMULATION_AVAILABILITY_CHECKING; return view;
   }
   if (steps.length && (('available' in source.state && source.state.available === false) ||

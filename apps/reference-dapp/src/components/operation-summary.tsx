@@ -24,6 +24,8 @@ const shortRecipient = (address: string) => address.length > 14 ? `${address.sli
 export const networkName = (label: string) => label.split(' → ').map(part => part.replace(/\s*\(\d+\)$/, '')).join(' → ');
 /** The asset a swap step's pair ends in ("USDC → WETH" → "WETH"); null for anything that is not a plain pair. */
 const pairTarget = (detail: string | null) => { const parts = (detail ?? '').split(' → '); return parts.length === 2 && parts[1] && !/\s/.test(parts[1]) ? parts[1] : null; };
+/** A send to the connected owner's own wallet (`transferDetails` keeps it symbolic until the wallet is known). */
+const OWN_WALLET = 'CONNECTED_OWNER';
 const usable = (amount: string) => Boolean(amount) && amount !== '—' && amount !== 'Amount not available';
 
 export type OperationStep = { readonly id: string; readonly action: string; readonly amount: string; readonly detail: string | null; readonly network: string;
@@ -58,6 +60,8 @@ function StepSentence({ step }: { step: OperationStep }) {
   if (!usable(step.amount)) return <><strong>{t(step.action)}</strong>{step.detail && <span className="operation-summary-detail"> · {t(step.detail)}</span>}<span className="operation-summary-detail"> · {network}</span></>;
   if (step.action === 'Swap' && target) return <>{t('Swap {0} for {1} on {2}.', amount, target, network)}</>;
   if (step.action === 'Send') return <>{t('Send {0} on {1}.', amount, network)}</>;
+  // A position operation names its own action and its position (never a deposit's amounts).
+  if (step.positionOperation) return <>{t('{0}: {1} on {2}.', t(step.action), amount, network)}</>;
   const [from, to] = network.split(' → ');
   if (to) return <>{t('{0} {1} from {2} to {3}.', t(step.action), amount, from!, to)}</>;
   return <>{t('{0} {1} on {2}.', t(step.action), amount + (step.detail && !step.amount.includes(step.detail) ? ` · ${t(step.detail)}` : ''), network)}</>;
@@ -80,7 +84,8 @@ export function OperationSummary({ workflow, context, heading = 'Operation summa
           <strong>{t(step.action)}</strong>
           <span className="operation-summary-line"><span className="operation-summary-amount">{t(step.amount)}</span>{step.detail && <span className="operation-summary-detail">{assetsAfter(step, t)}</span>}</span>
         </> : <span className="operation-summary-sentence"><StepSentence step={step}/></span>}
-        {step.recipient && <small className="operation-summary-recipient" title={step.recipient} aria-label={`${t('Recipient')}: ${step.recipient}`}>{t('Recipient')}: <code>{shortRecipient(step.recipient)}</code></small>}
+        {step.recipient && (step.recipient === OWN_WALLET ? <small className="operation-summary-recipient">{t('Recipient')}: {t('Your wallet')}</small>
+          : <small className="operation-summary-recipient" title={step.recipient} aria-label={`${t('Recipient')}: ${step.recipient}`}>{t('Recipient')}: <code>{shortRecipient(step.recipient)}</code></small>)}
       </div>
       {variant === 'icons' && <span className="operation-summary-chip">{t(networkName(step.network))}</span>}
     </li>)}</ol>
@@ -102,7 +107,7 @@ export function WorkflowTechnicalFacts({ workflow, context, expiredAt = null }: 
       <div><dt>{t('Step')}</dt><dd>{index + 1}. {t(step.action)}</dd></div>
       <div><dt>{t('Network')}</dt><dd>{t(networkName(step.network))} <code>{step.chainId}</code></dd></div>
       {step.provider && <div><dt>{t('Provider')}</dt><dd>{t(step.provider)}</dd></div>}
-      {step.recipient && <div><dt>{t('Recipient')}</dt><dd><code className="workflow-technical-address">{step.recipient}</code></dd></div>}
+      {step.recipient && <div><dt>{t('Recipient')}</dt><dd>{step.recipient === OWN_WALLET ? t('Your wallet') : <code className="workflow-technical-address">{step.recipient}</code>}</dd></div>}
     </dl>)}
   </div>;
 }

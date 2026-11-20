@@ -83,9 +83,15 @@
 .build-workspace .build-canvas-head .canvas-toolbar-row{padding:2px 0 0}
 
 /* ── Simulate and Execute beside the Assistant: the Canvas frame is as tall as the Assistant, so both end on one line (A3/A5/A6). ── */
+/* One height for the Canvas frame and the Assistant on every stage, ending above the sticky Editor footer (A3: the Assistant keeps its size). */
 @media(min-width:1281px){
-  .stage-with-chat>.main :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas{min-height:clamp(460px,calc(100vh - 200px),760px)}
+  .stage-with-chat>.copilot{height:clamp(460px,calc(100vh - 220px),760px)}
+  .stage-with-chat>.main :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas{min-height:clamp(460px,calc(100vh - 220px),760px)}
   .stage-with-chat>.main :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas>.simulate-canvas-body{flex:1 1 auto}
+}
+@media(min-width:801px){
+  .main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-height:clamp(560px,calc(100svh - 210px),980px)}
+  .main.workflow-workspace.build-workspace:has(.lending-canvas){--workspace-height:820px}
 }
 
 /* ── Workflow history (B2–B5): the execution receipt first, everything technical collapsed below it. ── */

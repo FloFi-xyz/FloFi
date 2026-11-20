@@ -68,19 +68,31 @@ const link = (operation: LifecycleOperation | null): ReceiptLink | null => opera
 function stepTone(step: LifecycleStep): { status: string; tone: ReceiptTone } {
   if (step.state === 'confirmed') return { status: 'Completed', tone: 'success' };
   if (step.state === 'waiting') return { status: 'Not run', tone: 'neutral' };
-  if (['failed', 'cancelled', 'expired'].includes(step.state)) return { status: step.operations.some(op => op.hash) ? 'Failed' : 'Not submitted', tone: step.operations.some(op => op.hash) ? 'failed' : 'neutral' };
+  // A refund, an expiry and a cancellation keep their own word (never "Failed"); a failure is "Failed" only once something was sent.
+  if (step.operations.some(op => op.label === 'Refunded')) return { status: 'Refunded', tone: 'attention' };
+  if (step.state === 'expired') return { status: 'Expired', tone: 'neutral' };
+  if (step.state === 'cancelled') return { status: 'Cancelled', tone: 'neutral' };
+  if (step.state === 'failed') return { status: step.operations.some(op => op.hash) ? 'Failed' : 'Not submitted', tone: step.operations.some(op => op.hash) ? 'failed' : 'neutral' };
   if (step.state === 'not-submitted') return { status: 'Not submitted', tone: 'neutral' };
   if (['uncertain', 'partial'].includes(step.state)) return { status: 'Unresolved', tone: 'attention' };
   return { status: 'In progress', tone: 'progress' };
 }
 
+/** An observed value with the operation that recorded it. */
+type Observed = EvidenceValue & { readonly operation: string };
+/**
+ * The receipt's label for an observed value. A bridge's destination delivery goes to the reviewed recipient — not necessarily the owner — so it
+ * reads "Delivered" (flofi-workflow review); every other "Actual received" is the owner's own wallet's observed effect.
+ */
+const receiptLabel = (value: Observed) => value.label === 'Actual received' && value.operation === 'destination' ? 'Delivered' : RECEIPT_LABEL[value.label] ?? value.label;
+
 /** One step's rows: what was sent (observed, else the configured amount), what was received (observed only) and any other observed result. */
-function stepValues(step: LifecycleStep, observed: readonly EvidenceValue[], status: DashboardStatus): ReceiptValue[] {
+function stepValues(step: LifecycleStep, observed: readonly Observed[], status: DashboardStatus): ReceiptValue[] {
   const rows: ReceiptValue[] = [];
   const seen = new Set<string>();
   for (const value of observed) {
     if (SKIPPED.has(value.label) || FEE_LABELS.has(value.label)) continue;
-    const label = RECEIPT_LABEL[value.label] ?? value.label;
+    const label = receiptLabel(value);
     const key = `${label}:${value.value}`;
     if (seen.has(key)) continue;
     seen.add(key); rows.push({ label, value: value.value, observed: true });
@@ -90,16 +102,19 @@ function stepValues(step: LifecycleStep, observed: readonly EvidenceValue[], sta
   if (step.input && step.input !== '—' && !rows.some(row => SENT_FIRST.includes(row.label))) rows.unshift({ label: 'Configured amount', value: step.input, observed: false });
   // A completed swap-like step whose received amount the record did not observe says so (never a zero, never the quote).
   const receives = /→/.test(step.pair ?? '') || ['Swap', 'Stocks', 'Bridge'].includes(step.action);
-  if (receives && step.state === 'confirmed' && (status === 'Completed' || status === 'Completed with attention') && !rows.some(row => row.observed && /received|Refunded/i.test(row.label)))
+  if (receives && step.state === 'confirmed' && (status === 'Completed' || status === 'Completed with attention') && !rows.some(row => row.observed && /received|Refunded|Delivered/i.test(row.label)))
     rows.push({ label: 'Received amount', value: 'Not recorded in this history', observed: false });
   return rows;
 }
+
+/** A send authored to the connected owner's own wallet is recorded symbolically; the receipt names the wallet that executed it. */
+const ownRecipient = (recipient: string | null, wallet: string | null) => recipient === 'CONNECTED_OWNER' ? wallet : recipient;
 
 export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceipt {
   const progress: ExecutionLifecycle | null = view.progress;
   const steps = progress?.steps ?? [];
   const evidence = progress?.evidence;
-  const observed = (step: LifecycleStep) => step.operations.flatMap(op => evidence?.operations[op.id]?.values ?? []);
+  const observed = (step: LifecycleStep): Observed[] => step.operations.flatMap(op => (evidence?.operations[op.id]?.values ?? []).map(value => ({ ...value, operation: op.id })));
   const single = steps.length === 1 && !progress?.planUnavailable ? steps[0]! : null;
   const fees: ReceiptValue[] = (evidence?.knownCosts ?? []).map(cost => {
     const network = cost.label.replace(/^Known network cost · /, '');
@@ -118,13 +133,13 @@ export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceip
     values: single ? stepValues(single, observed(single), status) : [],
     network: networks.length ? networks.join(' · ') : view.networks.length ? view.networks.map(networkName).join(' · ') : null,
     protocol: protocols.length ? protocols.join(' · ') : null,
-    recipient: single?.recipient ?? null,
+    recipient: ownRecipient(single?.recipient ?? null, evidence?.wallet ?? view.run.ownerAccount ?? null),
     fees,
     wallet: evidence?.wallet ?? view.run.ownerAccount ?? null,
     completed: view.completed, total: view.total,
     transaction: single ? link(mainOperation(single.operations)) : null,
     steps: single ? [] : steps.map(step => ({ number: step.number, action: step.action, network: networkName(step.network), provider: step.provider,
-      ...stepTone(step), values: stepValues(step, observed(step), status), transaction: link(mainOperation(step.operations)), recipient: step.recipient ?? null })),
+      ...stepTone(step), values: stepValues(step, observed(step), status), transaction: link(mainOperation(step.operations)), recipient: ownRecipient(step.recipient ?? null, evidence?.wallet ?? view.run.ownerAccount ?? null) })),
     notice: clean ? null : { message: view.message, items: view.attention.filter(item => item !== view.message) },
   };
 }

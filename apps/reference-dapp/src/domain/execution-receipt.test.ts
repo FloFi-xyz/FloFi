@@ -52,8 +52,39 @@ describe('execution receipt', () => {
   it('a bridge names both networks and states the delivered amount only once reconciled', () => {
     const settled = receipt('bridge-completed'), pending = receipt('bridge-pending');
     expect(settled.network).toBe('Base Sepolia → Arbitrum Sepolia');
-    expect(settled.values).toEqual(expect.arrayContaining([{ label: 'You sent', value: '5 USDC', observed: true }, { label: 'You received', value: '4.89 USDC', observed: true }]));
-    expect(pending.values.some(row => row.label === 'You received')).toBe(false);
+    // The destination delivery goes to the reviewed recipient (not necessarily the owner): "Delivered", never "You received".
+    expect(settled.values).toEqual(expect.arrayContaining([{ label: 'You sent', value: '5 USDC', observed: true }, { label: 'Delivered', value: '4.89 USDC', observed: true }]));
+    expect(settled.values.some(row => row.label === 'You received')).toBe(false);
+    expect(pending.values.some(row => ['You received', 'Delivered'].includes(row.label))).toBe(false);
+  });
+  it('says a completed swap\'s received amount is not recorded when the record did not observe it (never zero, never the quote)', () => {
+    const { view } = runDetailFixture('completed');
+    const evidence = view.progress!.evidence!;
+    const operations = Object.fromEntries(Object.entries(evidence.operations).map(([id, op]) => [id, { ...op, values: op.values.filter(value => value.label !== 'Actual received') }]));
+    const value = projectExecutionReceipt({ ...view, progress: { ...view.progress!, evidence: { ...evidence, operations } } });
+    expect(value.values).toContainEqual({ label: 'Received amount', value: 'Not recorded in this history', observed: false });
+    expect(value.values.some(row => row.label === 'You received')).toBe(false);
+  });
+  it('keeps network costs per network and never sums them', () => {
+    const { view } = runDetailFixture('completed');
+    const evidence = { ...view.progress!.evidence!, knownCosts: [{ label: 'Known network cost · Base (8453)', value: '0.0001 ETH' }, { label: 'Known network cost · Arbitrum One', value: '0.0002 ETH' }] };
+    const value = projectExecutionReceipt({ ...view, progress: { ...view.progress!, evidence } });
+    expect(value.fees).toEqual([{ label: 'Network fee · {0}', args: ['Base'], value: '0.0001 ETH', observed: true },
+      { label: 'Network fee · {0}', args: ['Arbitrum One'], value: '0.0002 ETH', observed: true }]);
+    expect(portuguese['Network fee · {0}']).toBeTruthy();
+  });
+  it('names a step that expired, was cancelled or refunded as such, never "Failed"', () => {
+    const { view } = runDetailFixture('partial');
+    const steps = view.progress!.steps.map((step, index) => index === 1 ? { ...step, state: 'expired' as const } : index === 2 ? { ...step, state: 'cancelled' as const } : step);
+    const value = projectExecutionReceipt({ ...view, progress: { ...view.progress!, steps } });
+    expect(value.steps.map(step => step.status)).toEqual(['Completed', 'Expired', 'Cancelled']);
+    const refunded = view.progress!.steps.map((step, index) => index === 1 ? { ...step, state: 'cancelled' as const, operations: step.operations.map(op => ({ ...op, label: 'Refunded' })) } : step);
+    expect(projectExecutionReceipt({ ...view, progress: { ...view.progress!, steps: refunded } }).steps[1]!.status).toBe('Refunded');
+  });
+  it('names the owner\'s own wallet for a send authored to the connected owner', () => {
+    const { view } = runDetailFixture('completed');
+    const steps = view.progress!.steps.map(step => ({ ...step, recipient: 'CONNECTED_OWNER' }));
+    expect(projectExecutionReceipt({ ...view, progress: { ...view.progress!, steps } }).recipient).toMatch(/^0x1{40}$/);
   });
   it('every receipt label has a Portuguese translation', () => {
     const labels = new Set<string>();
@@ -62,6 +93,7 @@ describe('execution receipt', () => {
       for (const row of [...value.values, ...value.fees, ...value.steps.flatMap(step => step.values)]) labels.add(row.label);
       for (const step of value.steps) labels.add(step.status);
     }
+    for (const label of ['Delivered', 'Expired', 'Cancelled', 'Refunded', 'Received amount', 'Not recorded in this history']) labels.add(label);
     for (const label of labels) expect(portuguese[label], label).toBeTruthy();
   });
 });
