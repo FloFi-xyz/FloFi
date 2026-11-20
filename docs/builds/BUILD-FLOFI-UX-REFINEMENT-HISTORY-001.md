@@ -158,7 +158,7 @@ expirada" + "Atualizar revisão" only).
 | PT sentences read "na rede Base" (p.21: "na Arbitrum") | Gender-safe Portuguese for every network name. |
 | Amounts in Canvas cards and the Review stay in IBM Plex Mono; receipt amounts use Outfit with tabular figures | Cards/Review were not part of this refinement's references; the receipt follows the CTO's example. |
 | Canvas swap card shows "A cotação não corresponde a este swap" in the captures | Behaviour of the MOCKED Base harness quote for this amount (also in the baseline captures); unrelated to this build. |
-| At 1815×866 the Execute page still overflows by ~10 px | The sticky footer plus the Assistant's minimum height; no content is hidden. |
+| With **three or more steps**, Simulate/Execute may scroll the page by 5–55 px at 864–900 px tall (and more on viewports ≤ 768 px tall) | The panel's content is then taller than the frame, which grows with it rather than hiding content. The approved references' two-step workflow fits at 1440×900 and 1815×866 on Create, Simulate (before and after a result) and Execute (expired), in EN and PT (measured). Create fits at every desktop viewport and is asserted in certification (`editor-stages-review.spec.ts`, with two-step Simulate). An inner-scrolling panel would change every Simulate/Execute state and was not part of this refinement. |
 | No FloFi fee line in the receipt | No execution record stores a charged FloFi fee (B2: never fabricate). |
 
 ## 8. Functional validation (local)
