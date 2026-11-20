@@ -183,7 +183,8 @@ export const shortAddress = (value: string) => value.length > 16 ? `${value.slic
 export function readableAmount(value: string, language: 'EN' | 'PT', digits = 12): { text: string; full: string; cut: boolean } {
   // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a recorded "<number> <unit>" reads at six significant digits (the global rule), marked
   // "≈" when it is not exact; `full` keeps every recorded digit (tooltip, disclosure, copy). `digits` (legacy cut) applies to nothing else.
-  const short = displayAmountText(value, { language });
+  // A token amount carries its unit; a bare number (a raw Uniswap liquidity figure) is not a token amount and keeps the legacy reading below.
+  const short = /\s\S/.test(value.trim()) ? displayAmountText(value, { language }) : null;
   if (short) return { text: short.text, full: short.exactText, cut: short.approximate };
   // Only "<number> <one unit>": a value with several amounts ("0.3 WETH + 1,008 USDC") is left exactly as recorded.
   const match = /^(-?)(\d+)(?:\.(\d+))?(\s\S+)?$/.exec(value);

@@ -2097,6 +2097,9 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 /* BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: a token amount shown at six significant digits reads as text; its exact value is one
    tap, click or key away (dotted underline marks it), wraps inside its row and never widens a card. */
 .token-amount{display:inline;min-width:0;overflow-wrap:anywhere}
-.token-amount-short{all:unset;cursor:pointer;font:inherit;color:inherit;text-decoration:underline dotted;text-decoration-thickness:1px;text-underline-offset:3px;overflow-wrap:anywhere}
+.token-amount-short{all:unset;cursor:pointer;font:inherit;color:inherit;text-decoration:underline dotted;text-decoration-thickness:1px;text-underline-offset:3px;overflow-wrap:anywhere;
+  padding-block:4px;margin-block:-4px}
 .token-amount-short:focus-visible{outline:2px solid currentColor;outline-offset:2px;border-radius:2px}
-.token-amount-exact{display:block;margin-top:2px;font-size:.85em;overflow-wrap:anywhere;word-break:break-all}
+.token-amount-exact{display:block;margin-top:2px;font-size:.85em;overflow-wrap:anywhere}
+.token-amount-exact [title]{word-break:break-all}
+.token-amount-exact button{word-break:normal;white-space:nowrap}

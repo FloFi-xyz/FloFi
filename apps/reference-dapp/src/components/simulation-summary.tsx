@@ -16,10 +16,11 @@ function Lines({ lines }: { lines: SimulationLine[] }) {
     <dt>{tr(line.label)}</dt><dd>{line.amount || line.treatment ? <TokenAmountText value={line.value} rounding={line.amount ?? (line.treatment === 'CEILING' ? 'up' : 'nearest')}/> : tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd>
   </div>)}</dl>;
 }
-function TokenAmount({ value, rounding = 'nearest', marker }: { value: string; rounding?: DisplayRounding; marker?: boolean }) {
+function TokenAmount({ value, rounding = 'nearest', marker, configured = false }: { value: string; rounding?: DisplayRounding; marker?: boolean; configured?: boolean }) {
+  const { t: tr } = useLocale();
   // Reuse supported original-color assets; descriptive outcomes retain plain text. Amounts: six significant digits, the exact value one tap away.
   const symbol = value.match(/ (USDC|devUSDC|WETH|ETH|SOL|WSOL|USDT)$/)?.[1];
-  return <span className="simulation-token-amount">{symbol && <TokenBrandIcon symbol={symbol}/>}<TokenAmountText value={value} rounding={rounding} {...marker === undefined ? {} : { marker }}/></span>;
+  return <span className="simulation-token-amount">{symbol && <TokenBrandIcon symbol={symbol}/>}<span>{configured ? tr(value) : <TokenAmountText value={value} rounding={rounding} {...marker === undefined ? {} : { marker }}/>}</span></span>;
 }
 export function SimulationSummary({ workflow, context, source, invalidWorkflow = false, unavailableReason }: {
   workflow: Workflow; context: ReviewContext; source?: SimulationSource | undefined; invalidWorkflow?: boolean; unavailableReason?: string | null | undefined;
@@ -53,7 +54,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
       <h3>{tr("Expected result")}</h3>
       {details.steps.length ? <ol className="simulation-results">{details.steps.map(step => <li key={step.id}>
         <div className="simulation-step-title">{multiple && <span className="simulation-step-number">{tr(step.number)}</span>}<strong>{tr(step.action)}</strong></div>
-        <div className="simulation-input"><TokenAmount value={step.input} rounding="up" marker/></div>
+        <div className="simulation-input"><TokenAmount value={step.input} configured/></div>
         <SimulationOutcome step={step}/>
       </li>)}</ol> : <p className="simulation-empty-value">—</p>}
     </section>

@@ -31,12 +31,13 @@ function ShortAmount({ shown, className }: { shown: DisplayAmountExpression; cla
   const { t } = useLocale();
   // A disclosure (aria-expanded) whose exact value follows the button in reading order; no generated id, so server and client markup match.
   const [open, setOpen] = useState(false);
-  if (!shown.approximate) return className ? <span className={className}>{shown.text}</span> : <>{shown.text}</>;
+  // Exact and shown in full: plain text. Rounded, or exact but compact ("1M"): the exact value is one tap away.
+  if (!shown.approximate && shown.text === shown.exactText) return className ? <span className={className}>{shown.text}</span> : <>{shown.text}</>;
   return <span className={`token-amount${className ? ` ${className}` : ''}`} data-open={open || undefined}>
-    <button type="button" className="token-amount-short" title={shown.exactText} aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      {shown.text}<span className="sr-only"> — {t(open ? 'Hide exact value' : 'Show exact value')}</span>
-    </button>
+    {/* A stable name that starts with the visible amount (WCAG 2.5.3); the state is aria-expanded alone, announced once. */}
+    <button type="button" className="token-amount-short" title={shown.exactText} aria-label={`${shown.text}, ${t('Show exact value')}`} aria-expanded={open}
+      onClick={() => setOpen(v => !v)}>{shown.text}</button>
     {open && <span className="token-amount-exact" role="group" aria-label={t('Exact value')}>
-      <CopyValue value={shown.exact} shown={shown.exactText} label="Exact value"/></span>}
+      <CopyValue value={shown.exact} shown={shown.exactText} label="exact value"/></span>}
   </span>;
 }

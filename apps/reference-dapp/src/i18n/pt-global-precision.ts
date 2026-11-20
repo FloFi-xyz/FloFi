@@ -5,6 +5,6 @@ export const portugueseGlobalPrecision: Readonly<Record<string, string>> = {
   'You receive, at least': 'Você recebe, no mínimo',
   'Your wallet · {0}': 'Sua carteira · {0}',
   'Show exact value': 'Mostrar valor exato',
-  'Hide exact value': 'Ocultar valor exato',
   'Exact value': 'Valor exato',
+  'exact value': 'valor exato',
 };

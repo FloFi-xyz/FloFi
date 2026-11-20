@@ -231,5 +231,9 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: Uniswap position operation presen
     expect(uniswapPositionReviewAuthorizable({ ...record, verdict: 'PENDING', attempts: [{ ...unsent, reviewCommitment: '0xearlier' }] })).toBe(true);
     expect(financialAttemptState({ ...unsent, note: 'UNISWAP_POSITION_STATE_CHANGED_REVIEW_REQUIRED' })).toBe('NOT_SUBMITTED');
     expect(financialAttemptState({ ...unsent, note: 'UNISWAP_REJECTED' })).toBe('REJECTED');
+    // A hand-off refusal the server concluded itself (BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001) reads "not submitted", never "cancelled".
+    for (const note of ['UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED', 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED', 'CATALOG_ASSET_IDENTITY_CHANGED', 'UNISWAP_POSITION_NOT_FOUND',
+      'UNISWAP_SIMULATION_POSITION_REVERTED', 'UNISWAP_UNEXPECTED_CONTRACT'])
+      expect(financialAttemptState({ ...unsent, note }), note).toBe('NOT_SUBMITTED');
   });
 });

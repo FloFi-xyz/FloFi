@@ -12,6 +12,9 @@ export function financialAttemptState(attempt: Attempt | null | undefined): stri
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: a Uniswap request refused before the wallet was asked because its Review no longer stood (the position, pool
   // or fees moved) or the position changed hands: the attempt is concluded unsent (the service records CANCELLED for these only with no wallet invocation).
   if (attempt.state === 'CANCELLED' && /^UNISWAP_(?:[A-Z0-9_]+_REVIEW_REQUIRED|POSITION_OWNER_MISMATCH)$/.test(attempt.note ?? '')) return 'NOT_SUBMITTED';
+  // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: the Uniswap hand-off now concludes its own refusals (provably unsent), with the
+  // refusal's code: the stale-Review set of the liquidity and position runtimes, Stock Token and catalog identity changes included.
+  if (attempt.state === 'CANCELLED' && /^(?:UNISWAP_(?:UNEXPECTED_CONTRACT|DEPLOYMENT_MISMATCH|POOL_MISMATCH|TOKEN_MISMATCH|FEE_TIER_UNSUPPORTED|POSITION_(?:NOT_FOUND|POOL_MISMATCH|RANGE_MISMATCH)|SIMULATION_(?:MINT|APPROVAL|POSITION)_REVERTED)|STOCK_[A-Z_]+|CATALOG_ASSET_IDENTITY_CHANGED)$/.test(attempt.note ?? '')) return 'NOT_SUBMITTED';
   // BUILD-P0-MAINNET-EXECUTION-RELIABILITY: a refusal FloFi made before the wallet's send method was ever called (the server records CANCELLED for
   // these only from PREPARED with no wallet invocation): the wallet's nonce disagreed, FloFi's own nonce read moved at the hand-off, the wallet
   // provider or the visible run changed, or a read failed first. Nothing of it can have reached the network.

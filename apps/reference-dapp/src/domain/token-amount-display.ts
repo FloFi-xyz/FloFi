@@ -107,7 +107,9 @@ export function displayTokenAmount(source: TokenAmountSource | null | undefined,
   const exact = parse(source);
   if (!exact) return null;
   const rounding = options.rounding ?? 'nearest', language = options.language ?? 'EN';
-  const shown = round(exact, rounding), approximate = shown.magnitude * 10n ** BigInt(Math.max(0, exact.scale - shown.scale)) !==
+  // Beyond the largest compact unit (≥ 10^18), every integer digit of the mantissa is kept: digits are never zero-filled.
+  const integerDigits = exact.magnitude.toString().length - exact.scale;
+  const shown = round(exact, rounding, Math.max(DISPLAY_SIGNIFICANT_DIGITS, integerDigits - 12)), approximate = shown.magnitude * 10n ** BigInt(Math.max(0, exact.scale - shown.scale)) !==
     exact.magnitude * 10n ** BigInt(Math.max(0, shown.scale - exact.scale));
   const unit = COMPACT.find(c => shown.magnitude >= 10n ** BigInt(c.power + shown.scale));
   const value = unit ? localize(normalize({ ...shown, scale: shown.scale + unit.power }), language, false) + unit[language] : localize(shown, language, options.group ?? true);
@@ -159,9 +161,12 @@ export function displayAmountExpression(value: string, options: Omit<DisplayToke
   if (!match) return null;
   const sign = match[1] ?? '', rounding: DisplayRounding = sign === '≥' ? 'down' : sign === '≤' ? 'up' : options.rounding ?? 'nearest';
   const pieces = match[2]!.split(' + ');
-  const parts = pieces.map(piece => /^-?\d+(?:\.\d+)? [^\s\d][^\s]*$/.test(piece) ? displayAmountText(piece, { ...options, rounding, ...sign ? { marker: false } : {} }) : null);
+  // One marker for the whole field ("≈ 0.5 WETH + 1,500.12 USDC"), never one per part: a bound sign, or "≈" when any part is approximate.
+  const parts = pieces.map(piece => /^-?\d+(?:\.\d+)? [^\s\d][^\s]*$/.test(piece) ? displayAmountText(piece, { ...options, rounding, marker: false }) : null);
   if (!parts.length || parts.some(part => part === null)) return null;
-  const shown = parts as DisplayTokenAmount[], prefix = sign ? `${sign} ` : '';
-  return { text: prefix + shown.map(p => p.text).join(' + '), exactText: prefix + shown.map(p => p.exactText).join(' + '),
+  const shown = parts as DisplayTokenAmount[];
+  const marked = sign ? `${sign} ` : shown.some(p => p.approximate) && (options.marker ?? rounding === 'nearest') ? '≈ ' : '';
+  const prefix = sign ? `${sign} ` : '';
+  return { text: marked + shown.map(p => p.text).join(' + '), exactText: prefix + shown.map(p => p.exactText).join(' + '),
     exact: prefix + pieces.join(' + '), approximate: shown.some(p => p.approximate) };
 }

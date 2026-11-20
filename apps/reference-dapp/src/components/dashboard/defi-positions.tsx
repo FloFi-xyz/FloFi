@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
-import { TokenUnitsText } from '../token-amount-text';
+import { TokenAmountText, TokenUnitsText } from '../token-amount-text';
+import { displayTokenAmount } from '../../domain/token-amount-display';
 import { createContext, useContext, useEffect, useId, useState } from 'react';
 import { positionsWalletKey, type PositionScan, type PositionWallet } from '../../domain/defi-positions';
 import { liquidityPositionChoiceValid, type LiquidityPositionChoice, type LiquidityPositionView } from '../../domain/liquidity-positions';
@@ -159,7 +160,8 @@ export function PositionResults({ scans, prepare }: { scans: readonly PositionSc
               {asset.units !== null && asset.units !== '0' && <small title={valuation ? t('Price observed {0}', formatObservedAt(valuation.observedAt, language) ?? '—') : undefined}>
                 {valuation ? t('≈ {0} (Chainlink)', formatUsdValue(valuation.usd, language)) : t('Valuation unavailable')}
               </small>}
-              {asset.recordedOwedUnits && <small>{t('{0} {1} recorded unclaimed', formatTokenAmount(asset.recordedOwedUnits, asset.decimals, language), asset.symbol)}</small>}
+              {asset.recordedOwedUnits && <small title={displayTokenAmount({ units: asset.recordedOwedUnits, decimals: asset.decimals }, { language })?.exactText}>
+                {t('{0} {1} recorded unclaimed', formatTokenAmount(asset.recordedOwedUnits, asset.decimals, language), asset.symbol)}</small>}
             </li>;
           })}</ul>
           {position.type === 'LIQUIDITY' && position.liquidity && <LiquidityPositionFacts view={position.liquidity} prepare={prepareAction}/>}
@@ -216,8 +218,13 @@ function LiquidityPositionFacts({ view, prepare }: { view: LiquidityPositionView
   const { t, language } = useLocale();
   const [removing, setRemoving] = useState(false), [share, setShare] = useState(5_000);
   const [refusal, setRefusal] = useState<{ readonly code: string; readonly choice: LiquidityPositionChoice } | null>(null);
-  const pair = (units: readonly (string | null)[]) => units.every(unit => unit !== null)
-    ? `${formatTokenAmount(units[0]!, view.token0.decimals, language)} ${view.token0.symbol} + ${formatTokenAmount(units[1]!, view.token1.decimals, language)} ${view.token1.symbol}` : null;
+  // Six significant digits rounded down (what the owner holds is never overstated), the exact amounts one tap away (TokenAmountText).
+  const exact = (units: string, token: { decimals: number }) => displayTokenAmount({ units, decimals: token.decimals })?.exact ?? null;
+  const pair = (units: readonly (string | null)[]) => {
+    const parts = units[0] !== null && units[1] !== null ? [exact(units[0]!, view.token0), exact(units[1]!, view.token1)] : [null, null];
+    return parts[0] !== null && parts[1] !== null
+      ? <TokenAmountText value={`${parts[0]} ${view.token0.symbol} + ${parts[1]} ${view.token1.symbol}`} rounding="down"/> : null;
+  };
   // The price unit is the catalog's own phrase ("WETH per USDC" / "WETH por USDC"), never an English word inside a Portuguese line.
   const priced = (value: string) => t('{0} {1} per {2}', value, view.price.quote, view.price.base);
   const verified = formatObservedAt(view.observedAt, language);

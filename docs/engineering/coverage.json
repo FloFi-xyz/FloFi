@@ -1354,6 +1354,14 @@
       "path": "apps/reference-dapp/src/domain/token-fee.test.ts",
       "stage": "unit"
     },
+    "app.domain.token-amount-display": {
+      "path": "apps/reference-dapp/src/domain/token-amount-display.test.ts",
+      "stage": "unit"
+    },
+    "app.server.uniswap-l1-fee-reliability": {
+      "path": "apps/reference-dapp/src/server/uniswap-l1-fee-reliability.test.ts",
+      "stage": "unit"
+    },
     "app.editor.workflow-execution-circle": {
       "path": "apps/reference-dapp/src/editor/workflow-execution-circle.test.ts",
       "stage": "unit"
@@ -1907,6 +1915,8 @@
     "app.domain.gas-payment",
     "app.domain.kora-presentation",
     "app.domain.token-fee",
+    "app.domain.token-amount-display",
+    "app.server.uniswap-l1-fee-reliability",
     "app.editor.workflow-execution-circle",
     "app.gas-abstraction.kora-client",
     "app.server.jupiter-kora",
@@ -4635,6 +4645,7 @@
         "app.domain.approved-ux",
         "app.domain.kora-presentation",
         "app.domain.token-fee",
+        "app.domain.token-amount-display",
         "app.domain.chat-action-variant",
         "app.domain.conversation-persistence",
         "app.domain.execution-ux-reliability",
@@ -7362,6 +7373,8 @@
         "reference-executor.cross-chain-liquidity-recovery",
         "reference-reconciler.orca-mainnet-liquidity",
         "app.server.base-liquidity",
+        "app.server.uniswap-l1-fee-reliability",
+        "workflow-contracts.network-fee",
         "app.e2e.uniswap-liquidity-continuation",
         "app.state.uniswap-liquidity-store",
         "app.server.defi-positions",

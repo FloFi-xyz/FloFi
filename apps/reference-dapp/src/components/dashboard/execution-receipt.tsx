@@ -20,6 +20,9 @@ const ICON: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>>
 };
 
 function Amount({ row }: { row: ReceiptValue }) {
+  const { t } = useLocale();
+  // The amount the owner configured stays exactly as set; recorded amounts read at six significant digits with the exact value one tap away.
+  if (row.label === 'Configured amount') return <span className="execution-receipt-amount">{t(row.value)}</span>;
   // BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001: six significant digits; the exact recorded amount one tap away (and in Technical details).
   return <TokenAmountText className="execution-receipt-amount" value={row.value}/>;
 }

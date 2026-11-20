@@ -75,6 +75,9 @@ describe('C — the global six-significant-digit token presentation', () => {
     expect(text('999999.5')).toBe('≈ 1M');
     expect(text('2500000000')).toBe('2.5B');
     expect(text('1234567890123456')).toBe('≈ 1234.57T');
+    // Beyond the largest unit every integer digit of the mantissa is kept, never zero-filled.
+    expect(text('1234567890123456789')).toBe('≈ 1234568T');
+    expect(text('1234567890123456789', { rounding: 'down' })).toBe('1234567T');
     expect(text('1234567.89', { language: 'PT' })).toBe('≈ 1,23457 mi');
     expect(displayTokenAmount('1234567.89')!.exactText).toBe('1,234,567.89');
   });
@@ -117,7 +120,7 @@ describe('C — the global six-significant-digit token presentation', () => {
 describe('C — amount fields composed of several tokens or bounds', () => {
   it('shortens each part, keeps bounds conservative and leaves any other text alone', () => {
     expect(displayAmountExpression('0.000570195181991 WETH + 1500.1234567 USDC')).toMatchObject({
-      text: '≈ 0.000570195 WETH + ≈ 1,500.12 USDC', exact: '0.000570195181991 WETH + 1500.1234567 USDC', approximate: true });
+      text: '≈ 0.000570195 WETH + 1,500.12 USDC', exact: '0.000570195181991 WETH + 1500.1234567 USDC', approximate: true });
     // A lower bound is rounded down and an upper bound up; the bound sign replaces the "≈" marker.
     expect(displayAmountExpression('≥ 0.9872519 WETH + 1.0000009 USDC')!.text).toBe('≥ 0.987251 WETH + 1 USDC');
     expect(displayAmountExpression('≤ 0.9872511 ETH')!.text).toBe('≤ 0.987252 ETH');
@@ -139,3 +142,13 @@ describe('C — composed domain strings never look exact when rounded', () => {
   });
 });
 
+
+describe('C — one marker per field and exact access for compact values', () => {
+  it('marks a composed estimate once, and a compact exact value still differs from its full text (so it opens a disclosure)', () => {
+    expect(displayAmountExpression('0.5 WETH + 1500.1234567 USDC')!.text).toBe('≈ 0.5 WETH + 1,500.12 USDC');
+    expect(displayAmountExpression('0.5 WETH + 1500 USDC')).toMatchObject({ text: '0.5 WETH + 1,500 USDC', approximate: false });
+    const million = displayAmountExpression('1500000 USDC')!;
+    expect(million).toMatchObject({ text: '1.5M USDC', exactText: '1,500,000 USDC', approximate: false });
+    expect(million.text).not.toBe(million.exactText);
+  });
+});

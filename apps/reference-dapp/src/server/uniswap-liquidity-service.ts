@@ -394,7 +394,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     // Ethereum L1 has no separate data fee; an OP Stack chain reads its GasPriceOracle upper bound.
     if (profile.gasPriceOracle === null) return 0n;
     // A read the network never answered is retried by the caller, never reported as a fee change that clears the owner's authorization
-    // (flofi-wallet-execution review); only an oracle that answered and reverted yields "no bound".
+    // (flofi-wallet-execution review). Any other error yields "no bound", which fails closed (a fresh Review is required).
     try { return wordAt(await ethCall(profile.gasPriceOracle, SEL.l1FeeUpperBound + word(BigInt(dataBytes + 120)), at), 0); }
     catch (cause) { if (readNotAnswered(cause)) throw cause; return null; }
   }
@@ -930,7 +930,10 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         // The attempt is provably unsent (the wallet is only called after SUBMITTING is durable): it is concluded here with its reason, so its
         // nonce is free at once and the run continues after a refreshed Review (flofi-wallet-execution review), as an expired Review is.
         if (cause instanceof Error && staleReviewError(cause.message)) {
-          await save(replaceAttempt({ ...record, authorization: null, error: cause.message }, { ...attempt, state: 'CANCELLED', note: cause.message }));
+          // As at begin: a simulation that now reverts is a changed state, refreshed in place (never a raw revert code on the run).
+          const code = /^UNISWAP_SIMULATION_(?:MINT|APPROVAL)_REVERTED$/.test(cause.message) ? 'UNISWAP_STATE_CHANGED_REVIEW_REQUIRED' : cause.message;
+          await save(replaceAttempt({ ...record, authorization: null, error: code }, { ...attempt, state: 'CANCELLED', note: code }));
+          if (code !== cause.message) fail(code);
         }
         throw cause;
       }

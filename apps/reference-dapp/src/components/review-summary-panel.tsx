@@ -111,7 +111,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // The rows every valid result states: each step's spend and expected result, the minimum, and the network fee; the Review adds the permissions.
   const resultRows = <>
     {position ? positionRows(stage) : <>
-      {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd><TokenAmountText value={s.input} rounding="up" marker/>{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</dd></div>)}
+      {sim.steps.map(s => <div key={s.id}><dt>{t(s.action)}{s.provider && <small className="review-block-qualifier">{t(s.provider)}</small>}</dt><dd>{/* The amount the owner configured, exactly as set (never reformatted). */}{t(s.input)}{s.result ? <>{' → '}<TokenAmountText className="numeric" value={s.result}/></> : null}</dd></div>)}
       {step?.minimum && <div><dt>{t('Minimum you receive')}</dt><dd className="numeric"><TokenAmountText value={step.minimum} rounding="down"/></dd></div>}
     </>}
     {sim.fees.filter(line => line.treatment === 'CEILING' || line.treatment === 'ADDITIONAL').map(line => {

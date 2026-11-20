@@ -18,6 +18,7 @@ import type { Workflow } from '../domain/initial-workflow';
 import { asMainnet, ORCA_CLOCK, ORCA_OWNER_WALLET, orcaPositionRun, orcaSource, positionAuthorization, positionCatalog, positionContext as context, positionWallet,
   UNI_OWNER, uniswapPositionRun, uniswapSource } from '../domain/liquidity-position-editor.test-harness';
 import { ReviewSummaryPanel } from './review-summary-panel';
+import { displayTokenAmount } from '../domain/token-amount-display';
 
 beforeAll(() => registerNetworkCatalog(positionCatalog));
 afterAll(() => resetNetworkCatalogs());
@@ -75,7 +76,13 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(shown['You receive (estimated)']).toMatch(AMOUNTS);
     expect(shown['Minimum you receive']).toMatch(AMOUNTS);
     expect(shown['Position NFT']).toBe('Stays in your wallet');
-    expect(shown['Network fee, at most']).toBeTruthy();
+    // The one figure the owner authorizes, shown rounded UP (never below the authorized wei); the minimum rounded DOWN (never above the floor).
+    const fee = record.review.fees.totalUpperBoundWei!;
+    expect(shown['Network fee, at most']).toBe(displayTokenAmount({ units: fee, decimals: 18 }, { rounding: 'up', symbol: 'ETH' })!.text);
+    expect(BigInt(Math.round(Number(shown['Network fee, at most']!.split(' ')[0]) * 1e18))).toBeGreaterThanOrEqual(BigInt(fee));
+    const [min0, min1] = shown['Minimum you receive']!.split(' + ').map(part => Number(part.split(' ')[0]!.replace(/,/g, '')));
+    expect(min0).toBeLessThanOrEqual(Number(record.review.minimums.amount0Min) / 10 ** record.review.token0.decimals);
+    expect(min1).toBeLessThanOrEqual(Number(record.review.minimums.amount1Min) / 10 ** record.review.token1.decimals);
     for (const label of TECHNICAL_ROWS) expect(shown[label], label).toBeUndefined();
     // Explanations of how the figures are built are Technical details, not amber banners.
     expect(text(html)).not.toMatch(/Owed tokens and fees can include|returned to your wallet as the pool|reverts on chain if the principal/);

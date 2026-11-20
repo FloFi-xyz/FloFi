@@ -292,13 +292,15 @@ export { liquidityPositionActionLabel, liquidityPositionOperationPhrase } from '
  * an estimate is shown approximately, a guaranteed minimum rounded down. `expected` null: only a lower bound exists (a collection).
  */
 function liquiditySummary(s: { phrase: string; pool: string; position: string; expected: string | null; minimum: string | null; slippageBps: number | null;
-  recipient: string; nft: string }): SimulationLine[] {
+  recipient: string; owner: string; nft: string }): SimulationLine[] {
+  // "Your wallet" only when the reviewed recipient IS the owner; any other recipient is shown in full (frontend-ux review).
+  const own = s.recipient.toLowerCase() === s.owner.toLowerCase();
   return [
     { label: 'Operation', value: s.phrase }, { label: 'Pool', value: s.pool }, { label: 'Position', value: s.position },
     ...s.expected !== null ? [{ label: 'You receive (estimated)', value: s.expected, amount: 'nearest' as const }] : [],
     ...s.minimum !== null ? [{ label: s.expected !== null ? 'Minimum you receive' : 'You receive, at least', value: s.minimum, amount: 'down' as const }] : [],
     ...s.slippageBps !== null ? [{ label: 'Slippage', value: percentOfBps(s.slippageBps) }] : [],
-    { label: 'Recipient', value: `Your wallet · ${s.recipient.length > 16 ? `${s.recipient.slice(0, 6)}…${s.recipient.slice(-4)}` : s.recipient}` },
+    { label: 'Recipient', value: own ? `Your wallet · ${s.recipient.length > 16 ? `${s.recipient.slice(0, 6)}…${s.recipient.slice(-4)}` : s.recipient}` : s.recipient },
     { label: 'Position NFT', value: s.nft }, { label: 'Wallet requests', value: '1' },
   ];
 }
@@ -360,7 +362,7 @@ export function uniswapPositionReviewLines(q: UniswapPositionReview): { action: 
   const atLeast = removing ? pair(q.minimums.amount0Min, q.minimums.amount1Min) : pair(q.expected.collect0, q.expected.collect1);
   const summary = liquiditySummary({ phrase: liquidityPositionOperationPhrase('UNISWAP_V3', q.operation, q.close),
     pool: `Uniswap V3 · ${q.network} · ${q.token0.symbol}/${q.token1.symbol} · ${fee}`, position: `#${q.position.tokenId}${share ? ` · ${share}` : ''}`,
-    expected: removing ? pair(q.expected.collect0, q.expected.collect1) : null, minimum: atLeast, slippageBps: removing ? q.slippageBps : null, recipient: q.recipient,
+    expected: removing ? pair(q.expected.collect0, q.expected.collect1) : null, minimum: atLeast, slippageBps: removing ? q.slippageBps : null, recipient: q.recipient, owner: q.owner,
     nft: q.close ? 'Burned (closed)' : 'Stays in your wallet' });
   return { summary, action: liquidityPositionActionLabel(q.operation, q.close), input: share ? `${share} · #${q.position.tokenId}` : `#${q.position.tokenId}`,
     pair: `${q.token0.symbol}/${q.token1.symbol} · ${fee}`, result: removing ? pair(q.expected.principal0, q.expected.principal1) : `≥ ${pair(q.expected.collect0, q.expected.collect1)}`,
@@ -719,7 +721,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
           // minimum the chain enforces (decrease_liquidity token minima).
           expected: collecting ? null : sum([sim.withdrawnPrincipalA, sim.collectedFeesA], [sim.withdrawnPrincipalB, sim.collectedFeesB]),
           minimum: collecting ? fees : s.minimum,
-          slippageBps: collecting ? null : q.intent.slippageBps, recipient: q.owner,
+          slippageBps: collecting ? null : q.intent.slippageBps, recipient: q.owner, owner: q.owner,
           nft: operation === 'EXIT' ? 'Closed (account rent refunded)' : 'Stays in your wallet' });
         warn('info', 'The collected amount is a lower bound: you receive at least the amount shown; fees accrued until execution are also collected.', true);
         warn('info', 'Tokens are returned to your wallet as the pool\'s own tokens; wrapped SOL is closed back to SOL in the same transaction.', true);
