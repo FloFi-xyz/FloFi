@@ -55,7 +55,7 @@ export function ExecutionReceipt({ view, execute }: { view: DashboardRunView; ex
   const results = receipt.values.filter(row => !sent.includes(row));
   return <section className="panel execution-receipt" aria-labelledby="execution-receipt-title" data-tone={receipt.tone} data-steps={receipt.steps.length || 1}>
     <header className="execution-receipt-head">
-      <span className="execution-receipt-icon" aria-hidden="true"><ActionIcon action={ICON[receipt.title] ?? 'action'}/></span>
+      <span className="execution-receipt-icon" aria-hidden="true"><ActionIcon action={receipt.titleIsAction ? ICON[receipt.title] ?? 'action' : 'action'}/></span>
       <div className="execution-receipt-heading">
         <h1 id="execution-receipt-title"><span className="execution-receipt-title" title={title}>{title}</span>{' '}
           <span className="execution-receipt-status" data-tone={receipt.tone}>— {t(receipt.status)}</span></h1>
