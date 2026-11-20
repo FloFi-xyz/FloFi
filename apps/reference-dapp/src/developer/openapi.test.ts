@@ -8,17 +8,30 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { DOCS } from '../components/site/docs-content';
+import { DEVELOPER_ENDPOINTS } from '../components/site/site-copy';
 import { DEVELOPER_ROUTE_TABLE } from './http.ts';
 import { developerOpenApi } from './openapi.ts';
 
 const file = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../docs/developer/openapi.json');
+const distributed = resolve(dirname(fileURLToPath(import.meta.url)), '../../public/docs/api-reference.json');
 const generated = JSON.stringify(developerOpenApi(), null, 2) + '\n';
-if (process.env.UPDATE_DEVELOPER_OPENAPI === '1') writeFileSync(file, generated);
+if (process.env.UPDATE_DEVELOPER_OPENAPI === '1') for (const path of [file, distributed]) writeFileSync(path, generated);
 type Doc = { paths: Record<string, Record<string, { security?: unknown; parameters?: { name: string }[] }>>; components: { schemas: Record<string, unknown> } };
 
 describe('BUILD-DEVELOPER-001 OpenAPI document', () => {
   it('is committed exactly as generated from the server schemas', () => {
     expect(readFileSync(file, 'utf8')).toBe(generated);
+    expect(readFileSync(distributed, 'utf8')).toBe(generated);
+  });
+  it('keeps the public page and both localized endpoint tables aligned with the route table', () => {
+    const served = DEVELOPER_ROUTE_TABLE.map(r => `${r.method} ${r.template}`).sort();
+    for (const [method, path] of DEVELOPER_ENDPOINTS) expect(served).toContain(`${method} ${path}`);
+    for (const language of ['EN', 'PT'] as const) {
+      const api = DOCS[language].pages.find(page => page.slug === 'developer-api')!;
+      const endpoints = api.sections.find(section => section.id === 'endpoints')?.blocks.find(block => block.kind === 'table');
+      expect(endpoints?.rows.map(([method, path]) => `${method?.[0]} ${path?.[0]}`).sort()).toEqual(served);
+    }
   });
   it('describes exactly the served routes', () => {
     const doc = developerOpenApi() as Doc;

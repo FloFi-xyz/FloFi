@@ -2,10 +2,25 @@
 
 > **Developers build the experience. FloFi handles the DeFi workflow lifecycle.**
 
-The FloFi Developer API lets a third-party **server** application use FloFi's deterministic DeFi engine: discover what FloFi can do,
-store an immutable strategy, validate and simulate it, and hand it to an end user for approval. FloFi then runs the whole
-lifecycle with the user's own wallet — fresh simulation, Strategy Manifest Review, explicit signature, execution, recovery,
-reconciliation and evidence — and tells your app what happened.
+Use FloFi from a third-party server to discover deployment capabilities. In a local engineering sandbox, your server can also
+create, validate and preview a strategy, then give the user a link to review it in FloFi. The user proves ownership, runs FloFi's
+fresh simulation and reviews the Strategy Manifest. Any execution requires their wallet signature. Your app sees execution
+status and reconciled evidence only with the user's consent.
+
+| Surface | Availability |
+| --- | --- |
+| Developer guides and OpenAPI | Public on [FloFi](https://flofi.xyz/developers). |
+| Developer API discovery | Operator-enabled. Any active sandbox key for the deployment can call `GET /capabilities` within project limits. |
+| TypeScript SDK | Private workspace package. Use the repository source. No npm distribution. |
+| Strategy creation, validation, preview and handoff with test funds | Local engineering sandbox with enabled flows and the required API scopes. The MOCKED browser journey reaches Review with signing blocked. |
+| Approval status and signed webhooks | Operator-enabled API with the corresponding scopes. Dispatch depends on configured delivery, approval activity or the operator's scheduler. |
+| Shared execution status and evidence | Requires an eligible approval, the user's sharing consent and, for evidence, a reconciled run. |
+| MCP | Separate operator-configured gateway for AI clients, with its own authentication and policies. See [MCP integrations](https://flofi.xyz/docs/mcp-integrations). |
+| Mainnet strategies through the Developer API, hosted test networks and live keys | Blocked by current policy. |
+| Public SDK publishing, self-service keys and other deferred API features | See [v1 scope](API.md#not-in-v1-yet). |
+
+Request sandbox access [via FloFi on X](https://x.com/FloFi_xyz) or contact your deployment's operator. Keys are issued by the
+operator and belong in a server-side secret store.
 
 | Document | What it covers |
 | --- | --- |
@@ -18,7 +33,7 @@ reconciliation and evidence — and tells your app what happened.
 
 ## What your API key can and cannot do
 
-| Your server can | Only the end user can, in FloFi, with their own wallet |
+| Your server can in an eligible sandbox | Only the end user can, in FloFi, with their own wallet |
 | --- | --- |
 | discover capabilities per action and network | prove which wallet they are |
 | store immutable strategies (FloFi's StrategySpec) | load a proposal into their FloFi workflow |
@@ -40,7 +55,9 @@ TESTNET_EXECUTED, …) and never upgraded.
 
 ## Environments
 
-This release issues **sandbox** credentials only (`flofi_sk_test_…`): test-funds strategies, every mainnet off. A strategy that
-touches a mainnet is refused at creation (`MAINNET_DISABLED`). Production credentials (`flofi_sk_live_…`) are reserved and refused
-(`LIVE_MODE_DISABLED`). On a deployment whose flows run against MOCKED chains, capabilities and validations say so
-(`mockedHarness: true`) and evidence is `MOCKED`.
+The public FloFi product is mainnet-only. The Developer API accepts sandbox credentials only. It refuses a valid mainnet
+strategy with `403 MAINNET_DISABLED` and live credentials with `403 FORBIDDEN` (`LIVE_MODE_DISABLED`). Public deployments refuse
+test-network strategies with `400 INVALID_STRATEGY` (`TEST_NETWORK_NOT_AVAILABLE`). Those restrictions apply to hosted previews
+as well as production. Capability discovery and other authorized project operations remain available where the API, key and data permit them.
+
+The [Quickstart](QUICKSTART.md) uses non-hosted engineering mode and a local MOCKED bridge. Its preview is marked `MOCKED`.

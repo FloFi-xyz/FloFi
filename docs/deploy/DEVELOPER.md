@@ -15,8 +15,9 @@ PostgreSQL. It is **off unless enabled**, and it fails closed: every configurati
 - The current shipped schema, including `0006_approval_requesters` and `0007_developer_platform`, applied by the normal
   migration step. Platform-state startup checks the schema and never migrates it.
 - `FLOFI_PUBLIC_ORIGIN`: the exact public origin approval links point to (shared with MCP).
-- The testnet flows you want developers to hand off, enabled as usual (`GRYLOO_ROUTER_TESTNET=live`, `GRYLOO_SUPPLY_TESTNET=live`,
-  …). Capability discovery reports what is enabled; nothing else is.
+- For the local walkthrough, use the non-hosted engineering scope (`FLOFI_NETWORK_SCOPE=ENGINEERING_TESTNETS`) with the
+  repository's loopback MOCKED bridge fixture. Hosted production and Preview are mainnet-only and ignore that scope. Sandbox
+  keys can discover capabilities there, and the API policy blocks new mainnet strategies.
 
 ## 2. Enable it (server-side variables, never `NEXT_PUBLIC_*`)
 

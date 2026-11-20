@@ -36,6 +36,12 @@ unknown, revoked and disabled-project keys all answer `401 UNAUTHORIZED` with `W
 | `sandbox` | `flofi_sk_test_` | Issued. Test-funds strategies only; every mainnet is off. A strategy touching a mainnet is refused at creation (`403 MAINNET_DISABLED`, `SANDBOX_TEST_FUNDS_ONLY`). |
 | `production` | `flofi_sk_live_` | Reserved. Live keys cannot be issued and are refused (`403 FORBIDDEN`, `LIVE_MODE_DISABLED`). |
 
+Hosted FloFi (including Vercel Preview) is mainnet-only. Its public OpenAPI describes public inputs and does not grant
+operation eligibility. Any valid sandbox key can discover capabilities. A valid test-network strategy in that deployment
+returns `400 INVALID_STRATEGY` (`TEST_NETWORK_NOT_AVAILABLE`), while a valid mainnet strategy returns `403 MAINNET_DISABLED`
+(`SANDBOX_TEST_FUNDS_ONLY`). Webhook registration and scoped reads still follow their project permissions and resource checks.
+Use the local engineering sandbox for the test-network input examples in the [Quickstart](QUICKSTART.md).
+
 Responses carry `environment`. When a deployment runs a flow against MOCKED chains, capabilities and validations report
 `mockedHarness: true`, simulations `provenance: "MOCKED"`, and evidence `environment: "MOCKED"`.
 
@@ -69,7 +75,7 @@ can execute, sign, submit or approve a Review.
 
 ### `GET /capabilities`
 
-Optional filters `network` (a FloFi network id such as `base-sepolia`) and `action` (`bridge`, `swap`, `supply`, …). Each row:
+Optional filters `network` (a public network ID such as `base`, or `base-sepolia` on a local engineering deployment) and `action` (`bridge`, `swap`, `supply`, …). Each row:
 `action`, `network`, `destinationNetwork`, `fundsClass`, `networkEnvironment`, `executionPlan {kind, steps}`,
 `operations {compose, simulate, approve}` each `{available, reason}`, `operations.execute` always
 `{available: false, reason: "OWNER_WALLET_IN_FLOFI_ONLY"}`, `availability {supportedByCode, enabledByDeployment, enabledByPolicy,
@@ -121,7 +127,7 @@ fragment), `approvalUrlExpiresAt`, `expiresAt` (15 minutes), `networkEnvironment
 `executionsVisible`, `note`, `createdAt`.
 
 - FloFi never stores the link. `GET /approvals/{id}` returns `approvalUrl: null`. An idempotent replay returns a fresh 5-minute
-  session link for the same open approval.
+  session link for the same PENDING or CLAIMED approval. An APPLIED approval is returned without a link. Terminal approvals return `410 APPROVAL_EXPIRED`.
 - Approvals for the same strategy never supersede each other (many users may share one strategy).
 - At most 100 open (PENDING or CLAIMED) approvals per project and environment, and 60 created per hour.
 - The database binds each approval to its strategy and exact workflow hash; the owner's FloFi workflow must hash exactly to it
@@ -192,7 +198,7 @@ secrets.
 | --- | --- | --- |
 | 400 | `INVALID_REQUEST` | `SCHEMA_INVALID`, `MALFORMED_JSON`, `CONTENT_TYPE_NOT_JSON`, `QUERY_NOT_ALLOWED`, `BODY_NOT_ALLOWED`, `IDEMPOTENCY_KEY_INVALID`, `SIMULATION_SUBJECT_INVALID`, `WEBHOOK_URL_*` |
 | 413 | `INVALID_REQUEST` | `REQUEST_TOO_LARGE` |
-| 400 | `INVALID_STRATEGY` | `STRATEGY_SCHEMA_INVALID`, engine refusal codes |
+| 400 | `INVALID_STRATEGY` | `STRATEGY_SCHEMA_INVALID`, engine refusal codes, `TEST_NETWORK_NOT_AVAILABLE` on a public deployment |
 | 401 | `UNAUTHORIZED` | `API_KEY_REQUIRED`, `API_KEY_INVALID` |
 | 403 | `FORBIDDEN` | `BROWSER_ORIGIN_FORBIDDEN`, `INSUFFICIENT_SCOPE`, `LIVE_MODE_DISABLED`, `WEBHOOK_ENDPOINT_LIMIT` |
 | 403 | `MAINNET_DISABLED` | `SANDBOX_TEST_FUNDS_ONLY`, `MAINNET_HANDOFF_DISABLED_BY_POLICY` |
@@ -214,7 +220,7 @@ malformed id answers like an absent resource.
 
 ## Not in v1 yet
 
-Documented in the build plan and deferred: key introspection (`GET /me`), flat network and asset lists, strategy and approval
-retrieval and listing, approval revocation and fresh links, event browsing, webhook endpoint listing, in-place secret rotation,
+Documented in the build plan and deferred: key introspection (`GET /me`), flat network and asset lists, strategy retrieval, strategy and approval
+listing, approval revocation and standalone fresh-link endpoints, event browsing, webhook endpoint listing, in-place secret rotation,
 test events and delivery browsing, a usage API, production keys, OAuth client credentials and publishable keys. They will be
 additive to v1.

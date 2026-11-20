@@ -13,29 +13,41 @@ export function DevelopersPage({ language }: { language: SiteLanguage }) {
       <section className={styles.devHeroWrap} aria-labelledby="dev-title">
         <div className={styles.devHero}>
           <div>
-            <span className={styles.devBadge}>{t.badge}</span>
             <h1 id="dev-title">{t.heroTitle}</h1>
             <p>{t.heroBody}</p>
-            <div className={styles.devActions}><Link href="/docs" className={styles.pillWhite}>{t.readDocs}</Link>
-              <a href={SITE_LINKS.x} className={styles.pillOutlineDark} target="_blank" rel="noopener noreferrer">{t.talk}</a></div>
+            <div className={styles.devActions}><Link href="/docs/developer-api" className={styles.pillWhite}>{t.readDocs}</Link>
+              <a href="#entrar" className={styles.pillOutlineDark}>{t.talk}</a></div>
           </div>
-          <p className={styles.terminal}>{DEVELOPER_ENDPOINTS.map(([method, path]) => <span key={path}><b>{method}</b> {path}<br/></span>)}<i aria-hidden="true">→</i> {t.terminalLast}</p>
+          <div className={styles.terminal}>
+            <h2>{t.terminalTitle}</h2>
+            <code>/api/developer/v1</code>
+            <ul>{DEVELOPER_ENDPOINTS.map(([method, path]) => <li key={path}><code><b>{method}</b> {path}</code></li>)}</ul>
+          </div>
         </div>
       </section>
       <section className={styles.section} aria-labelledby="dev-get">
         <div className={`${styles.wrap} ${styles.stack}`}>
           <h2 id="dev-get" className={styles.h2s}>{t.getTitle}</h2>
-          <div className={styles.getGrid}>{t.get.map(([title, body]) => <div key={title}><strong>{title}</strong><span>{body}</span></div>)}</div>
+          <div className={styles.getGrid}>{t.get.map(([title, body, href]) => <div key={title}><h3><Link href={href}>{title}</Link></h3><p>{body}</p></div>)}</div>
         </div>
       </section>
       <section className={`${styles.section} ${styles.soft}`} aria-labelledby="dev-decide">
         <div className={`${styles.wrap} ${styles.split}`}>
-          <h2 id="dev-decide" className={styles.h2s}>{t.decideTitle}</h2>
-          <div className={styles.ruleList}>{t.decide.map(([title, body]) => <div key={title}><strong>{title}</strong><span>{body}</span></div>)}</div>
+          <h2 id="dev-decide" className={styles.h2s}>{t.availabilityTitle}</h2>
+          <p className={styles.devAvailability}>{t.availability}</p>
+        </div>
+      </section>
+      <section className={styles.section} aria-labelledby="dev-flow">
+        <div className={`${styles.wrap} ${styles.split}`}>
+          <h2 id="dev-flow" className={styles.h2s}>{t.flowTitle}</h2>
+          <div className={styles.devFlow}>
+            <ol>{t.flow.map(step => <li key={step}>{step}</li>)}</ol>
+            <p>{t.flowEvidence}</p>
+          </div>
         </div>
       </section>
       <section id="entrar" className={styles.section} aria-labelledby="dev-final">
-        <div className={styles.finalBlue}><h2 id="dev-final">{t.finalTitle}</h2><a href={SITE_LINKS.x} className={styles.pillWhite} target="_blank" rel="noopener noreferrer">{t.talk}</a></div>
+        <div className={`${styles.finalBlue} ${styles.devFinal}`}><h2 id="dev-final">{t.finalTitle}</h2><a href={SITE_LINKS.x} className={styles.pillWhite} target="_blank" rel="noopener noreferrer">{t.contact}</a></div>
       </section>
     </main>
   </SiteShell>;

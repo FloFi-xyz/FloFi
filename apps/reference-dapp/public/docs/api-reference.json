@@ -4,7 +4,7 @@
     "title": "FloFi Developer API",
     "version": "1.0.0",
     "summary": "Developers build the experience. FloFi handles the DeFi workflow lifecycle.",
-    "description": "Server-side API for third-party applications: discover capabilities, store immutable FloFi strategies, validate and simulate them, and hand them to the end user for approval in FloFi. The API key has zero financial authority: it never signs, submits or approves anything. Only the end user's own wallet, in FloFi, after a fresh simulation and the Strategy Manifest Review, can sign. Execution status and evidence are visible only for runs the end user chose to share (off by default). Sandbox credentials only in this release: test funds, every mainnet off.",
+    "description": "Server-side Developer API v1. Where the operator enables the API and issues sandbox keys, authenticated projects can discover capabilities. This document lists the public product’s mainnet inputs. Sandbox keys cannot create mainnet strategies, and live keys are refused. Creation, validation, previews and new handoffs can be tested with test-funds strategies in a local engineering deployment using the engineering schema. The key can request a handoff but only the end user in FloFi can prove wallet ownership, review the fresh simulation and manifest, and sign. Execution status and reconciled evidence require the user’s sharing consent.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -60,12 +60,10 @@
               "type": "string",
               "enum": [
                 "base",
-                "base-sepolia",
                 "arbitrum-one",
-                "arbitrum-sepolia",
-                "ethereum-sepolia",
+                "ethereum",
                 "solana",
-                "solana-devnet"
+                "robinhood"
               ]
             }
           },
@@ -83,7 +81,7 @@
                 "repay",
                 "withdraw",
                 "add_liquidity",
-                "lending_composition"
+                "transfer"
               ]
             }
           }
@@ -2224,14 +2222,14 @@
     "schemas": {
       "CreateStrategyRequest": {
         "additionalProperties": false,
-        "description": "A FloFi StrategySpec: a version 1 strategy or a version 2 step list.",
+        "description": "A FloFi StrategySpec on mainnets: a version 1 strategy or a version 2 step list.",
         "type": "object",
         "required": [
           "strategy"
         ],
         "properties": {
           "strategy": {
-            "description": "A FloFi strategy (version 1, one action) or workflow (version 2, ordered steps): structured intent only.",
+            "description": "A FloFi strategy (version 1, one action) or workflow (version 2, ordered steps) on mainnets (real funds): structured intent only.",
             "anyOf": [
               {
                 "additionalProperties": false,
@@ -2254,51 +2252,114 @@
                     "type": "string"
                   },
                   "sourceNetwork": {
-                    "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds).",
+                    "description": "Source mainnet. All 20 directed pairs are representable; provider eligibility is discovered separately.",
                     "anyOf": [
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
-                        "type": "string"
-                      }
-                    ]
-                  },
-                  "destinationNetwork": {
-                    "description": "Destination network.",
-                    "anyOf": [
-                      {
-                        "const": "arbitrum-sepolia",
                         "type": "string"
                       },
                       {
                         "const": "arbitrum-one",
                         "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
+                      },
+                      {
+                        "const": "solana",
+                        "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "destinationNetwork": {
+                    "description": "Destination mainnet, different from the source.",
+                    "anyOf": [
+                      {
+                        "const": "base",
+                        "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
+                      },
+                      {
+                        "const": "solana",
+                        "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "The Cross-chain Router moves USDC only.",
-                    "const": "USDC",
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                        "maxLength": 48,
+                        "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                        "type": "string"
+                      }
+                    ]
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                     "maxLength": 48,
-                    "description": "USDC amount as a decimal string, e.g. \"5\".",
+                    "description": "Source token amount as a decimal string, e.g. \"5\".",
                     "type": "string"
                   },
+                  "outputAsset": {
+                    "anyOf": [
+                      {
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                        "maxLength": 48,
+                        "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                        "type": "string"
+                      }
+                    ]
+                  },
                   "routing": {
-                    "description": "Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.",
+                    "description": "Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, mayan, across = only that provider (execution eligibility is checked separately). Default auto.",
                     "anyOf": [
                       {
                         "const": "auto",
                         "type": "string"
                       },
                       {
+                        "const": "best",
+                        "type": "string"
+                      },
+                      {
+                        "const": "relay",
+                        "type": "string"
+                      },
+                      {
                         "const": "lifi",
+                        "type": "string"
+                      },
+                      {
+                        "const": "mayan",
                         "type": "string"
                       },
                       {
@@ -2310,15 +2371,27 @@
                   "slippageBps": {
                     "minimum": 0,
                     "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                     "type": "integer"
                   },
                   "recipient": {
-                    "pattern": "^0x[0-9a-fA-F]{40}$",
-                    "minLength": 42,
-                    "maxLength": 42,
-                    "description": "Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).",
-                    "type": "string"
+                    "description": "Destination recipient in the destination network's address format. Omit to deliver to the signing wallet (same ecosystem) or to the wallet of the destination ecosystem connected in the FloFi app (Solana ⇄ EVM), bound at Review.",
+                    "anyOf": [
+                      {
+                        "pattern": "^0x[0-9a-fA-F]{40}$",
+                        "minLength": 42,
+                        "maxLength": 42,
+                        "description": "EVM destination recipient.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                        "minLength": 32,
+                        "maxLength": 44,
+                        "description": "Solana destination recipient wallet.",
+                        "type": "string"
+                      }
+                    ]
                   }
                 }
               },
@@ -2343,18 +2416,10 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca.",
+                    "description": "Swap network (real funds). Assets, protocols and runtime support are validated against the shared registries.",
                     "anyOf": [
                       {
                         "const": "base",
-                        "type": "string"
-                      },
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
                         "type": "string"
                       },
                       {
@@ -2362,65 +2427,85 @@
                         "type": "string"
                       },
                       {
-                        "const": "solana-devnet",
+                        "const": "robinhood",
+                        "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
                   },
                   "inputAsset": {
-                    "description": "Asset spent.",
                     "anyOf": [
                       {
-                        "const": "USDC",
-                        "type": "string"
+                        "description": "Asset spent.",
+                        "anyOf": [
+                          {
+                            "const": "USDC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WETH",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WBTC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "SOL",
+                            "type": "string"
+                          },
+                          {
+                            "const": "USDT",
+                            "type": "string"
+                          }
+                        ]
                       },
                       {
-                        "const": "WETH",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "SOL",
-                        "type": "string"
-                      },
-                      {
-                        "const": "USDT",
-                        "type": "string"
-                      },
-                      {
-                        "const": "devUSDC",
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                         "type": "string"
                       }
                     ]
                   },
                   "outputAsset": {
-                    "description": "Asset received.",
                     "anyOf": [
                       {
-                        "const": "USDC",
-                        "type": "string"
+                        "description": "Asset received.",
+                        "anyOf": [
+                          {
+                            "const": "USDC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WETH",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WBTC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "SOL",
+                            "type": "string"
+                          },
+                          {
+                            "const": "USDT",
+                            "type": "string"
+                          }
+                        ]
                       },
                       {
-                        "const": "WETH",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "SOL",
-                        "type": "string"
-                      },
-                      {
-                        "const": "USDT",
-                        "type": "string"
-                      },
-                      {
-                        "const": "devUSDC",
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                         "type": "string"
                       }
                     ]
@@ -2434,7 +2519,7 @@
                   "slippageBps": {
                     "minimum": 0,
                     "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                     "type": "integer"
                   }
                 }
@@ -2460,30 +2545,27 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                     "anyOf": [
                       {
-                        "const": "base-sepolia",
+                        "const": "base",
                         "type": "string"
                       },
                       {
-                        "const": "ethereum-sepolia",
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Must be the network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2521,30 +2603,27 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                     "anyOf": [
                       {
-                        "const": "base-sepolia",
+                        "const": "base",
                         "type": "string"
                       },
                       {
-                        "const": "ethereum-sepolia",
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Must be the network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2582,30 +2661,27 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                    "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                     "anyOf": [
                       {
-                        "const": "base-sepolia",
+                        "const": "base",
                         "type": "string"
                       },
                       {
-                        "const": "ethereum-sepolia",
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Must be the network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2642,30 +2718,27 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network.",
+                    "description": "Aave V3 network (real funds).",
                     "anyOf": [
                       {
-                        "const": "base-sepolia",
+                        "const": "base",
                         "type": "string"
                       },
                       {
-                        "const": "ethereum-sepolia",
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "The network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2695,93 +2768,121 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet.",
+                    "description": "Real funds. Orca SOL/USDC on solana; on the catalog networks (base, arbitrum-one, ethereum, robinhood), Uniswap v3 on two catalog ERC-20 assets at feeTier, only when the factory pool exists.",
                     "anyOf": [
                       {
-                        "const": "base-sepolia",
+                        "const": "solana",
                         "type": "string"
                       },
                       {
-                        "const": "ethereum-sepolia",
+                        "const": "robinhood",
                         "type": "string"
                       },
                       {
-                        "const": "solana-devnet",
+                        "const": "base",
+                        "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
                   },
                   "maxAmounts": {
-                    "additionalProperties": false,
                     "minProperties": 2,
                     "maxProperties": 2,
-                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the network's two assets.",
+                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: SOL and USDC on solana, or two official catalog symbols on a catalog network.",
                     "type": "object",
-                    "properties": {
-                      "USDC": {
+                    "patternProperties": {
+                      "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$": {
                         "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                         "maxLength": 48,
-                        "description": "Maximum USDC.",
-                        "type": "string"
-                      },
-                      "WETH": {
-                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "description": "Maximum WETH.",
-                        "type": "string"
-                      },
-                      "SOL": {
-                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "description": "Maximum SOL.",
-                        "type": "string"
-                      },
-                      "devUSDC": {
-                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "description": "Maximum devUSDC.",
+                        "description": "Maximum deposit of this asset.",
                         "type": "string"
                       }
                     }
                   },
                   "range": {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "required": [
-                      "unit",
-                      "lower",
-                      "upper"
-                    ],
-                    "properties": {
-                      "unit": {
-                        "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
-                        "anyOf": [
-                          {
-                            "const": "price",
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "unit",
+                          "lower",
+                          "upper"
+                        ],
+                        "properties": {
+                          "unit": {
+                            "description": "price: USDC per SOL (solana only); tick: aligned tick indexes.",
+                            "anyOf": [
+                              {
+                                "const": "price",
+                                "type": "string"
+                              },
+                              {
+                                "const": "tick",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "lower": {
+                            "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                            "maxLength": 48,
                             "type": "string"
                           },
-                          {
-                            "const": "tick",
+                          "upper": {
+                            "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                            "maxLength": 48,
                             "type": "string"
                           }
-                        ]
+                        }
                       },
-                      "lower": {
-                        "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "type": "string"
-                      },
-                      "upper": {
-                        "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "type": "string"
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "unit"
+                        ],
+                        "properties": {
+                          "unit": {
+                            "description": "Catalog networks: the widest usable range of the selected fee tier.",
+                            "const": "full",
+                            "type": "string"
+                          }
+                        }
                       }
-                    }
+                    ]
+                  },
+                  "feeTier": {
+                    "description": "Catalog networks: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000; a missing pool is refused.",
+                    "anyOf": [
+                      {
+                        "const": 100,
+                        "type": "number"
+                      },
+                      {
+                        "const": 500,
+                        "type": "number"
+                      },
+                      {
+                        "const": 3000,
+                        "type": "number"
+                      },
+                      {
+                        "const": 10000,
+                        "type": "number"
+                      }
+                    ]
                   },
                   "slippageBps": {
                     "minimum": 0,
                     "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                     "type": "integer"
                   }
                 }
@@ -2793,10 +2894,7 @@
                   "action",
                   "network",
                   "asset",
-                  "supplyAmount",
-                  "borrowAmount",
-                  "outputAsset",
-                  "owner"
+                  "amount"
                 ],
                 "properties": {
                   "version": {
@@ -2805,48 +2903,96 @@
                     "type": "number"
                   },
                   "action": {
-                    "const": "lending_composition",
+                    "const": "transfer",
                     "type": "string"
                   },
                   "network": {
-                    "description": "The composition runs on Base Sepolia only.",
-                    "const": "base-sepolia",
-                    "type": "string"
+                    "description": "The network of this same-chain transfer (real funds).",
+                    "anyOf": [
+                      {
+                        "const": "robinhood",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
+                        "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
+                      },
+                      {
+                        "const": "solana",
+                        "type": "string"
+                      }
+                    ]
                   },
                   "asset": {
-                    "description": "Supplied and borrowed asset (Aave V3 test USDC).",
-                    "const": "USDC",
-                    "type": "string"
+                    "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT, or an SPL token mint address together with decimals and tokenProgram.",
+                    "anyOf": [
+                      {
+                        "const": "ETH",
+                        "type": "string"
+                      },
+                      {
+                        "const": "SOL",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                        "type": "string"
+                      }
+                    ]
                   },
-                  "supplyAmount": {
+                  "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                     "maxLength": 48,
-                    "description": "USDC supplied to Aave.",
+                    "description": "Amount as a decimal string.",
                     "type": "string"
                   },
-                  "borrowAmount": {
-                    "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                    "maxLength": 48,
-                    "description": "USDC borrowed from Aave; exactly this amount is swapped.",
-                    "type": "string"
+                  "recipient": {
+                    "description": "Recipient. EVM: omit to transfer to the wallet that signs in the FloFi app (bound at Review). Solana: required — the destination wallet; FloFi never substitutes the signing wallet.",
+                    "anyOf": [
+                      {
+                        "pattern": "^0x[0-9a-fA-F]{40}$",
+                        "minLength": 42,
+                        "maxLength": 42,
+                        "description": "EVM recipient.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                        "minLength": 32,
+                        "maxLength": 44,
+                        "description": "Solana recipient wallet address.",
+                        "type": "string"
+                      }
+                    ]
                   },
-                  "outputAsset": {
-                    "description": "The borrowed USDC is swapped to WETH on Uniswap v3.",
-                    "const": "WETH",
-                    "type": "string"
-                  },
-                  "slippageBps": {
+                  "decimals": {
                     "minimum": 0,
-                    "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "maximum": 18,
+                    "description": "Solana SPL mint transfers only: the token's decimals (verified on chain).",
                     "type": "integer"
                   },
-                  "owner": {
-                    "pattern": "^0x[0-9a-fA-F]{40}$",
-                    "minLength": 42,
-                    "maxLength": 42,
-                    "description": "The wallet that supplies, borrows and receives WETH. Debt remains after the swap.",
-                    "type": "string"
+                  "tokenProgram": {
+                    "description": "Solana SPL mint transfers only: the token program (verified on chain).",
+                    "anyOf": [
+                      {
+                        "const": "spl-token",
+                        "type": "string"
+                      },
+                      {
+                        "const": "token-2022",
+                        "type": "string"
+                      }
+                    ]
                   }
                 }
               },
@@ -2866,7 +3012,7 @@
                   "steps": {
                     "minItems": 1,
                     "maxItems": 8,
-                    "description": "Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order, each with its own review and signature.",
+                    "description": "Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order; each step starts only after the previous one reconciled.",
                     "type": "array",
                     "items": {
                       "anyOf": [
@@ -2891,51 +3037,114 @@
                               "type": "string"
                             },
                             "sourceNetwork": {
-                              "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds).",
+                              "description": "Source mainnet. All 20 directed pairs are representable; provider eligibility is discovered separately.",
                               "anyOf": [
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
-                                  "type": "string"
-                                }
-                              ]
-                            },
-                            "destinationNetwork": {
-                              "description": "Destination network.",
-                              "anyOf": [
-                                {
-                                  "const": "arbitrum-sepolia",
                                   "type": "string"
                                 },
                                 {
                                   "const": "arbitrum-one",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "solana",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "destinationNetwork": {
+                              "description": "Destination mainnet, different from the source.",
+                              "anyOf": [
+                                {
+                                  "const": "base",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "solana",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "The Cross-chain Router moves USDC only.",
-                              "const": "USDC",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                                  "maxLength": 48,
+                                  "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                               "maxLength": 48,
-                              "description": "USDC amount as a decimal string, e.g. \"5\".",
+                              "description": "Source token amount as a decimal string, e.g. \"5\".",
                               "type": "string"
                             },
+                            "outputAsset": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                                  "maxLength": 48,
+                                  "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                                  "type": "string"
+                                }
+                              ]
+                            },
                             "routing": {
-                              "description": "Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.",
+                              "description": "Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, mayan, across = only that provider (execution eligibility is checked separately). Default auto.",
                               "anyOf": [
                                 {
                                   "const": "auto",
                                   "type": "string"
                                 },
                                 {
+                                  "const": "best",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "relay",
+                                  "type": "string"
+                                },
+                                {
                                   "const": "lifi",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mayan",
                                   "type": "string"
                                 },
                                 {
@@ -2947,15 +3156,27 @@
                             "slippageBps": {
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                               "type": "integer"
                             },
                             "recipient": {
-                              "pattern": "^0x[0-9a-fA-F]{40}$",
-                              "minLength": 42,
-                              "maxLength": 42,
-                              "description": "Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).",
-                              "type": "string"
+                              "description": "Destination recipient in the destination network's address format. Omit to deliver to the signing wallet (same ecosystem) or to the wallet of the destination ecosystem connected in the FloFi app (Solana ⇄ EVM), bound at Review.",
+                              "anyOf": [
+                                {
+                                  "pattern": "^0x[0-9a-fA-F]{40}$",
+                                  "minLength": 42,
+                                  "maxLength": 42,
+                                  "description": "EVM destination recipient.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                                  "minLength": 32,
+                                  "maxLength": 44,
+                                  "description": "Solana destination recipient wallet.",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         },
@@ -2980,18 +3201,10 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca.",
+                              "description": "Swap network (real funds). Assets, protocols and runtime support are validated against the shared registries.",
                               "anyOf": [
                                 {
                                   "const": "base",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
                                   "type": "string"
                                 },
                                 {
@@ -2999,65 +3212,85 @@
                                   "type": "string"
                                 },
                                 {
-                                  "const": "solana-devnet",
+                                  "const": "robinhood",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
                             },
                             "inputAsset": {
-                              "description": "Asset spent.",
                               "anyOf": [
                                 {
-                                  "const": "USDC",
-                                  "type": "string"
+                                  "description": "Asset spent.",
+                                  "anyOf": [
+                                    {
+                                      "const": "USDC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WETH",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WBTC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "SOL",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "USDT",
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 {
-                                  "const": "WETH",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "SOL",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "USDT",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "devUSDC",
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                                   "type": "string"
                                 }
                               ]
                             },
                             "outputAsset": {
-                              "description": "Asset received.",
                               "anyOf": [
                                 {
-                                  "const": "USDC",
-                                  "type": "string"
+                                  "description": "Asset received.",
+                                  "anyOf": [
+                                    {
+                                      "const": "USDC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WETH",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WBTC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "SOL",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "USDT",
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 {
-                                  "const": "WETH",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "SOL",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "USDT",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "devUSDC",
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                                   "type": "string"
                                 }
                               ]
@@ -3071,7 +3304,7 @@
                             "slippageBps": {
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                               "type": "integer"
                             }
                           }
@@ -3097,30 +3330,27 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                               "anyOf": [
                                 {
-                                  "const": "base-sepolia",
+                                  "const": "base",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "ethereum-sepolia",
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Must be the network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3158,30 +3388,27 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                               "anyOf": [
                                 {
-                                  "const": "base-sepolia",
+                                  "const": "base",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "ethereum-sepolia",
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Must be the network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3219,30 +3446,27 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                              "description": "Aave V3 network (real funds): every listed reserve of the Aave V3 Core market on base, arbitrum-one and ethereum (asset by its reserve symbol; availability checked on chain at Simulate).",
                               "anyOf": [
                                 {
-                                  "const": "base-sepolia",
+                                  "const": "base",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "ethereum-sepolia",
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Must be the network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3279,30 +3503,27 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network.",
+                              "description": "Aave V3 network (real funds).",
                               "anyOf": [
                                 {
-                                  "const": "base-sepolia",
+                                  "const": "base",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "ethereum-sepolia",
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "The network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3332,93 +3553,121 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet.",
+                              "description": "Real funds. Orca SOL/USDC on solana; on the catalog networks (base, arbitrum-one, ethereum, robinhood), Uniswap v3 on two catalog ERC-20 assets at feeTier, only when the factory pool exists.",
                               "anyOf": [
                                 {
-                                  "const": "base-sepolia",
+                                  "const": "solana",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "ethereum-sepolia",
+                                  "const": "robinhood",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "solana-devnet",
+                                  "const": "base",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
                             },
                             "maxAmounts": {
-                              "additionalProperties": false,
                               "minProperties": 2,
                               "maxProperties": 2,
-                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the network's two assets.",
+                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: SOL and USDC on solana, or two official catalog symbols on a catalog network.",
                               "type": "object",
-                              "properties": {
-                                "USDC": {
+                              "patternProperties": {
+                                "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$": {
                                   "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                                   "maxLength": 48,
-                                  "description": "Maximum USDC.",
-                                  "type": "string"
-                                },
-                                "WETH": {
-                                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "description": "Maximum WETH.",
-                                  "type": "string"
-                                },
-                                "SOL": {
-                                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "description": "Maximum SOL.",
-                                  "type": "string"
-                                },
-                                "devUSDC": {
-                                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "description": "Maximum devUSDC.",
+                                  "description": "Maximum deposit of this asset.",
                                   "type": "string"
                                 }
                               }
                             },
                             "range": {
-                              "additionalProperties": false,
-                              "type": "object",
-                              "required": [
-                                "unit",
-                                "lower",
-                                "upper"
-                              ],
-                              "properties": {
-                                "unit": {
-                                  "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
-                                  "anyOf": [
-                                    {
-                                      "const": "price",
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "unit",
+                                    "lower",
+                                    "upper"
+                                  ],
+                                  "properties": {
+                                    "unit": {
+                                      "description": "price: USDC per SOL (solana only); tick: aligned tick indexes.",
+                                      "anyOf": [
+                                        {
+                                          "const": "price",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "const": "tick",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "lower": {
+                                      "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                                      "maxLength": 48,
                                       "type": "string"
                                     },
-                                    {
-                                      "const": "tick",
+                                    "upper": {
+                                      "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                                      "maxLength": 48,
                                       "type": "string"
                                     }
-                                  ]
+                                  }
                                 },
-                                "lower": {
-                                  "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "type": "string"
-                                },
-                                "upper": {
-                                  "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "type": "string"
+                                {
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "unit"
+                                  ],
+                                  "properties": {
+                                    "unit": {
+                                      "description": "Catalog networks: the widest usable range of the selected fee tier.",
+                                      "const": "full",
+                                      "type": "string"
+                                    }
+                                  }
                                 }
-                              }
+                              ]
+                            },
+                            "feeTier": {
+                              "description": "Catalog networks: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000; a missing pool is refused.",
+                              "anyOf": [
+                                {
+                                  "const": 100,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 500,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 3000,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 10000,
+                                  "type": "number"
+                                }
+                              ]
                             },
                             "slippageBps": {
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                               "type": "integer"
                             }
                           }
@@ -3430,10 +3679,7 @@
                             "action",
                             "network",
                             "asset",
-                            "supplyAmount",
-                            "borrowAmount",
-                            "outputAsset",
-                            "owner"
+                            "amount"
                           ],
                           "properties": {
                             "version": {
@@ -3442,52 +3688,128 @@
                               "type": "number"
                             },
                             "action": {
-                              "const": "lending_composition",
+                              "const": "transfer",
                               "type": "string"
                             },
                             "network": {
-                              "description": "The composition runs on Base Sepolia only.",
-                              "const": "base-sepolia",
-                              "type": "string"
+                              "description": "The network of this same-chain transfer (real funds).",
+                              "anyOf": [
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "solana",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "asset": {
-                              "description": "Supplied and borrowed asset (Aave V3 test USDC).",
-                              "const": "USDC",
-                              "type": "string"
+                              "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT, or an SPL token mint address together with decimals and tokenProgram.",
+                              "anyOf": [
+                                {
+                                  "const": "ETH",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "SOL",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                  "type": "string"
+                                }
+                              ]
                             },
-                            "supplyAmount": {
+                            "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                               "maxLength": 48,
-                              "description": "USDC supplied to Aave.",
+                              "description": "Amount as a decimal string.",
                               "type": "string"
                             },
-                            "borrowAmount": {
-                              "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                              "maxLength": 48,
-                              "description": "USDC borrowed from Aave; exactly this amount is swapped.",
-                              "type": "string"
+                            "recipient": {
+                              "description": "Recipient. EVM: omit to transfer to the wallet that signs in the FloFi app (bound at Review). Solana: required — the destination wallet; FloFi never substitutes the signing wallet.",
+                              "anyOf": [
+                                {
+                                  "pattern": "^0x[0-9a-fA-F]{40}$",
+                                  "minLength": 42,
+                                  "maxLength": 42,
+                                  "description": "EVM recipient.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                                  "minLength": 32,
+                                  "maxLength": 44,
+                                  "description": "Solana recipient wallet address.",
+                                  "type": "string"
+                                }
+                              ]
                             },
-                            "outputAsset": {
-                              "description": "The borrowed USDC is swapped to WETH on Uniswap v3.",
-                              "const": "WETH",
-                              "type": "string"
-                            },
-                            "slippageBps": {
+                            "decimals": {
                               "minimum": 0,
-                              "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "maximum": 18,
+                              "description": "Solana SPL mint transfers only: the token's decimals (verified on chain).",
                               "type": "integer"
                             },
-                            "owner": {
-                              "pattern": "^0x[0-9a-fA-F]{40}$",
-                              "minLength": 42,
-                              "maxLength": 42,
-                              "description": "The wallet that supplies, borrows and receives WETH. Debt remains after the swap.",
-                              "type": "string"
+                            "tokenProgram": {
+                              "description": "Solana SPL mint transfers only: the token program (verified on chain).",
+                              "anyOf": [
+                                {
+                                  "const": "spl-token",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "token-2022",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         }
                       ]
+                    }
+                  },
+                  "bindings": {
+                    "minItems": 1,
+                    "maxItems": 14,
+                    "description": "Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step's output token. A liquidity step may bind each of its two distinct deposits.",
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "step",
+                        "amountFrom"
+                      ],
+                      "properties": {
+                        "step": {
+                          "minimum": 1,
+                          "maximum": 7,
+                          "description": "The dependent step (0-based index). Its amount is a cap.",
+                          "type": "integer"
+                        },
+                        "amountFrom": {
+                          "minimum": 0,
+                          "maximum": 6,
+                          "description": "An earlier step (0-based index) whose actual reconciled output of the dependent step's input asset funds it: min(cap, received). Never an estimate.",
+                          "type": "integer"
+                        }
+                      }
                     }
                   }
                 }

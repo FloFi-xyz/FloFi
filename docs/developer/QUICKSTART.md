@@ -1,30 +1,26 @@
 # FloFi for Developers — Quickstart
 
-This guide takes a **server** application from an API key to a reconciled, evidenced execution that the end user approved and
-signed in FloFi. It uses the TypeScript SDK ([`packages/developer-sdk`](../../packages/developer-sdk/README.md)); every call also
-has a plain HTTP form (shown with `curl`). The endpoint reference is [API.md](API.md), the notification guide
-[WEBHOOKS.md](WEBHOOKS.md).
+Start with capability discovery on an operator-enabled deployment. To run steps 2–10, use an **isolated local engineering
+deployment** with a sandbox key and the MOCKED Base Sepolia → Arbitrum Sepolia bridge fixture. The browser test reaches Review,
+where signing is blocked. The execution and evidence examples illustrate access when a user has shared an eligible run.
+[API reference](API.md) · [Webhooks](WEBHOOKS.md)
 
-> Your API key has **zero financial authority**. Your server composes, validates, simulates and asks for approval. Only the end
-> user, in FloFi, with their own wallet, can run the authoritative simulation, approve the Strategy Manifest and sign.
-
-```
-your server ── SDK ──► FloFi Developer API ──► approval link ──► end user in FloFi: wallet proof → fresh simulation
-     ▲                                                              → Strategy Manifest Review → wallet signature → reconciliation
-     └──────── signed webhooks · approval status · execution status · Evidence Bundle (only what the user shares) ◄────────┘
-```
+Hosted FloFi is mainnet-only. The Developer API refuses test-network strategies on hosted deployments and mainnet strategies
+with sandbox keys. The operator issues sandbox keys. Live keys are refused.
 
 ## 0. Before you start
 
-- A FloFi deployment with the Developer API enabled (its operator follows [deploy/DEVELOPER.md](../deploy/DEVELOPER.md)).
+- The deployment origin in `FLOFI_BASE_URL` (HTTPS or HTTP on local loopback) and the API enabled by its operator.
+  For the local examples, the operator enables the local engineering scope and the MOCKED bridge fixture. Follow the
+  [operator guide](../deploy/DEVELOPER.md).
 - A **sandbox** key (`flofi_sk_test_…`) from that operator. Store it in your server's secret store. Never put it in a web page, a
   mobile app or a URL: FloFi refuses any request that carries an `Origin` or `Sec-Fetch-Site` header (`BROWSER_ORIGIN_FORBIDDEN`).
-- Node.js 20 or later (or any runtime with `fetch` and Web Crypto).
+- Node.js 20 or later (or a server runtime with `fetch` and Web Crypto). For the local example, use a sandbox key with `strategies` and `approvals` scopes and a fixture wallet’s public address as `simulationSubject`. Steps 6 and 10 also require `webhooks` and `executions` scopes, respectively.
 
 ```ts
-import { FloFi, FloFiError, verifyWebhook } from '@defi-workflow-engine/developer-sdk';
+import { FloFi, verifyWebhook } from '@defi-workflow-engine/developer-sdk';
 
-const flofi = new FloFi({ apiKey: process.env.FLOFI_API_KEY!, baseUrl: 'https://<your FloFi deployment>' });
+const flofi = new FloFi({ apiKey: process.env.FLOFI_API_KEY!, baseUrl: process.env.FLOFI_BASE_URL! });
 ```
 
 The SDK is a private workspace package in this repository today (npm publication is not authorized yet). It has no runtime
@@ -36,14 +32,16 @@ Any call proves the key. A missing, malformed, unknown or revoked key — or a d
 these cases are deliberately indistinguishable.
 
 ```bash
-curl -s https://<deployment>/api/developer/v1/capabilities -H "Authorization: Bearer $FLOFI_API_KEY"
+curl --fail-with-body "$FLOFI_BASE_URL/api/developer/v1/capabilities" -H "Authorization: Bearer $FLOFI_API_KEY"
 ```
 
 ## 2. Discover what FloFi can do here
 
 ```ts
 const { data } = await flofi.capabilities.list({ network: 'base-sepolia', action: 'bridge' });
-const row = data.find(r => r.destinationNetwork === 'arbitrum-sepolia');
+const row = data.find(r => r.destinationNetwork === 'arbitrum-sepolia'
+  && r.operations.compose.available && r.operations.simulate.available && r.operations.approve.available);
+if (!row?.availability.mockedHarness) throw new Error('Local MOCKED bridge flow unavailable');
 // row.operations: { compose, simulate, approve: { available, reason }, execute: { available: false, reason: 'OWNER_WALLET_IN_FLOFI_ONLY' } }
 // row.availability: { supportedByCode, enabledByDeployment, enabledByPolicy, demonstratedEvidence, mockedHarness }
 // row.exampleStrategy: a valid strategy for this row
@@ -58,17 +56,16 @@ wallet. `mockedHarness: true` means this deployment runs the flow against MOCKED
 A strategy is FloFi's **StrategySpec**: a version 1 object for one action, or `{ version: 2, steps: [...] }`.
 
 ```ts
-const strategy = await flofi.strategies.create({ strategy: {
-  action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' } });
+const strategy = await flofi.strategies.create({ strategy: row.exampleStrategy });
 strategy.id;            // str_…
 strategy.workflowHash;  // 0x… — the same hash FloFi's app and MCP compute for this strategy
-strategy.executionPlan; // { kind: 'SINGLE_FLOW' | 'COMPOSITE_FLOW' | 'NOT_EXECUTABLE', reason, steps }
+strategy.executionPlan; // { kind: 'SINGLE_FLOW' | 'COMPOSITE_FLOW' | 'SEQUENTIAL' | 'NOT_EXECUTABLE', reason, steps }
 strategy.validation;    // { valid, summary, findings, blockers, preExecution }
 strategy.availability;  // { approvable, reason, … }
 ```
 
 ```bash
-curl -s https://<deployment>/api/developer/v1/strategies -H "Authorization: Bearer $FLOFI_API_KEY" \
+curl --fail-with-body "$FLOFI_BASE_URL/api/developer/v1/strategies" -H "Authorization: Bearer $FLOFI_API_KEY" \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
   -d '{"strategy":{"action":"bridge","sourceNetwork":"base-sepolia","destinationNetwork":"arbitrum-sepolia","asset":"USDC","amount":"5"}}'
 ```
@@ -96,7 +93,7 @@ longer reproduces the stored hash (for example after an engine upgrade): create 
 ## 5. Simulate (a preview, never an authorization)
 
 ```ts
-const preview = await flofi.strategies.simulate(strategy.id, { simulationSubject: userAddress });
+const preview = await flofi.strategies.simulate(strategy.id, { simulationSubject });
 // { kind, provenance, facts, evidenceLevel: 'MOCKED_SIMULATION_PREVIEW' | 'SIMULATION_PREVIEW_NOT_EXECUTION',
 //   preview: true, persisted: false, authorizable: false, authority: 'NONE' }
 ```
@@ -109,10 +106,10 @@ FloFi before they review and sign.
 
 ```ts
 const endpoint = await flofi.webhookEndpoints.create({ url: 'https://api.example.com/flofi/webhooks' });
-await secrets.put('FLOFI_WEBHOOK_SECRET', endpoint.secret!); // whsec_… — shown once
+// Store endpoint.secret in your secret store when present. Creation returns it once.
 ```
 
-The URL must be HTTPS on port 443 to a public host. A project has at most five active endpoints. See [WEBHOOKS.md](WEBHOOKS.md).
+Replace the example URL with your HTTPS receiver on port 443, or use a loopback receiver in a local deployment configured for loopback webhooks. A project has at most five active endpoints. See [WEBHOOKS.md](WEBHOOKS.md).
 
 ## 7. Create the approval and send the link to your user
 
@@ -123,9 +120,7 @@ const approval = await flofi.approvals.create({ strategy }); // or { strategyId,
 //   'Explicit wallet signature'] }
 ```
 
-Send `approvalUrl` to your user (in your app, by email, as a button…). The secret is in the URL **fragment**: it never reaches a
-server log. The link is open for 15 minutes. FloFi does not store it and never returns it again; an idempotent replay of the same
-request returns a fresh 5-minute session link for the same approval instead. A different `workflowHash` than the strategy's is
+Send `approvalUrl` to your user (in your app, by email, as a button…). The secret is in the URL **fragment**, which browsers omit from HTTP requests. Keep the complete URL out of logs and share it privately. The original approval expires in 15 minutes. An idempotent replay returns a fresh 5-minute session link for the same approval while PENDING or CLAIMED. A different `workflowHash` than the strategy's is
 `409 STRATEGY_CHANGED`; a review blocker is `422 REVIEW_BLOCKED`; more than 100 open approvals per project is `429 RATE_LIMITED`
 (`PENDING_APPROVALS`).
 
@@ -136,7 +131,7 @@ Many users may approve the same strategy: each `approvals.create` call is a sepa
 On the link the user sees your project's name ("Created by *Acme Wallet*, a third-party app registered with FloFi, not by
 FloFi"), proves their wallet (EIP-4361 or Sign-In With Solana) and loads the proposal into their own FloFi workflow. FloFi then
 runs its unchanged flow: a fresh simulation, the Strategy Manifest Review, the user's explicit approval and their wallet
-signature for each transaction, then recovery, reconciliation and the Evidence Bundle.
+signature for each authorizable transaction, then recovery and reconciliation. The MOCKED browser journey stops at Review, with signing disabled and no reconciled Evidence Bundle.
 
 A checkbox, **off by default**, asks whether to share this execution's status and evidence with your project. Without it you see
 the approval's states only (claimed, applied, ended) — never the wallet, runs or evidence. The user can change it later.
@@ -162,11 +157,12 @@ const progress = await flofi.approvals.get(approval.id);
 ## 10. Read the execution and its evidence
 
 ```ts
-const execution = await flofi.executions.get(progress.executions[0]!.id);
-// { status, provenance, reconciled, terminal, owner, attempts: [{ step, state, transactionHash, reconciled }],
-//   accessBasis: 'OWNER_SHARED_WITH_PROJECT' }
-const { evidence } = await flofi.executions.evidence(execution.id);
-// { environment: 'MOCKED' | 'TESTNET_EXECUTED' | …, outcome, bundleHash, canonical, bundle }
+const sharedRun = progress.executions[0];
+if (sharedRun) {
+  const execution = await flofi.executions.get(sharedRun.id);
+  const { evidence } = await flofi.executions.evidence(execution.id);
+  // evidence is null until the shared run has reconciled.
+}
 ```
 
 `evidence.environment` states exactly what was proven, copied from FloFi's Evidence Bundle and never upgraded: `MOCKED` is not a
@@ -177,5 +173,4 @@ testnet execution. An execution that was not shared with your project, never exi
 
 Every error is `{ "error": { code, reason, message, issues?, requestId } }`; the SDK throws `FloFiError` with the same fields
 plus `status` and `retryAfter`. The SDK retries only what is safe — GETs and POSTs that carry an `Idempotency-Key` (it adds one to
-every creating POST and reuses it across its own retries) — after network errors, `429`, `502`, `503` and `504`, honouring
-`Retry-After`. Quote `requestId` when you contact the deployment's operator. The full table is in [API.md](API.md#errors).
+every creating POST and reuses it across its own retries) — after network errors, `409 IDEMPOTENCY_IN_PROGRESS`, `429`, `502`, `503` and `504`, using `Retry-After` up to the configured delay ceiling. Quote `requestId` when you contact the deployment's operator. The full table is in [API.md](API.md#errors).

@@ -31,7 +31,6 @@ import { assertMcpHarness } from './mcp-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
 import { routerControl } from './router-fixtures';
 
-const STRATEGY = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '1' };
 const approval = (page: Page) => page.getByRole('region', { name: 'Proposal from Acme Wallet' });
 const bridge = (page: Page) => page.getByRole('region', { name: 'Cross-chain bridge' });
 
@@ -62,9 +61,12 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       await routerControl('MOCK_reset', [{ network: 'testnet', owner: owner.address, wallets: [] }]);
       // ── The third-party server ──
       const flofi = new FloFi({ apiKey: key, baseUrl: APP_ORIGIN });
-      const row = (await flofi.capabilities.list({ network: 'base-sepolia', action: 'bridge' })).data.find(r => r.destinationNetwork === 'arbitrum-sepolia')!;
-      expect(row.operations).toMatchObject({ compose: { available: true }, approve: { available: true }, execute: { available: false } });
-      const strategy = await flofi.strategies.create({ strategy: STRATEGY });
+      const { data } = await flofi.capabilities.list({ network: 'base-sepolia', action: 'bridge' });
+      const row = data.find(r => r.destinationNetwork === 'arbitrum-sepolia'
+        && r.operations.compose.available && r.operations.simulate.available && r.operations.approve.available);
+      if (!row?.availability.mockedHarness) throw new Error('Local MOCKED bridge flow unavailable');
+      expect(row.operations.execute).toMatchObject({ available: false });
+      const strategy = await flofi.strategies.create({ strategy: row.exampleStrategy });
       expect((await flofi.strategies.validate(strategy.id)).availability.approvable).toBe(true);
       expect(await flofi.strategies.simulate(strategy.id, { simulationSubject: owner.address })).toMatchObject({ provenance: 'MOCKED', authorizable: false });
       const endpoint = await flofi.webhookEndpoints.create({ url: `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/flofi` });

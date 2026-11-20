@@ -4,7 +4,7 @@
     "title": "FloFi Developer API",
     "version": "1.0.0",
     "summary": "Developers build the experience. FloFi handles the DeFi workflow lifecycle.",
-    "description": "Server-side API for third-party applications: discover capabilities, store immutable FloFi strategies, validate and simulate them, and hand them to the end user for approval in FloFi. The API key has zero financial authority: it never signs, submits or approves anything. Only the end user's own wallet, in FloFi, after a fresh simulation and the Strategy Manifest Review, can sign. Execution status and evidence are visible only for runs the end user chose to share (off by default). FloFi runs on mainnets only (real funds). Sandbox credentials only in this release, and a sandbox key has every mainnet off: it can discover capabilities, but strategies and approvals need production credentials, which this release does not issue.",
+    "description": "Server-side Developer API v1. Where the operator enables the API and issues sandbox keys, authenticated projects can discover capabilities. This document lists the public product’s mainnet inputs. Sandbox keys cannot create mainnet strategies, and live keys are refused. Creation, validation, previews and new handoffs can be tested with test-funds strategies in a local engineering deployment using the engineering schema. The key can request a handoff but only the end user in FloFi can prove wallet ownership, review the fresh simulation and manifest, and sign. Execution status and reconciled evidence require the user’s sharing consent.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
