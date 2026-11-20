@@ -101,8 +101,8 @@ async function evidence(page: Page, name: string) {
 }
 const footer = (page: Page) => page.locator('footer.summary-bar');
 /** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved references): on a desktop viewport the Editor fits it; the Canvas and the Assistant end above
- * the sticky footer and the page itself does not scroll. BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002: the docked panel scrolls inside its frame, so a
- * three-step Review and an opened "Technical details" fit too. */
+ * the sticky footer and the page itself does not scroll. (A Review with more content than the references' two steps may make its frame taller —
+ * one page scroll, the docked Review has no scroll area of its own: editor-layout-hotfix.spec.ts.) */
 async function fitsViewport(page: Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(0);
 }
@@ -183,7 +183,6 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await simulateTechnical.locator('> summary').click();
   await expect(simulateTechnical).toContainText('eip155:8453');
   await simulateTechnical.locator('> summary').click();
-  await fitsViewport(page);
   await evidence(page, 'simulate-awaiting');
   await editorStep(page, 'Build').click();
   await expectEditorSection(page, 'Build');
@@ -201,7 +200,6 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(page.getByRole('toolbar', { name: /^(Canvas tools|Ferramentas do Canvas)$/ })).toHaveCount(0);
   const reviewOperation = footer(page).getByRole('button', { name: W.review, exact: true });
   await expect(reviewOperation).toBeEnabled();
-  await fitsViewport(page);
   await evidence(page, 'simulate-result');
   expect(methods.filter(method => ASKING.test(method))).toEqual([]);
 
@@ -215,12 +213,12 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await evidence(page, 'execute-valid');
 
   // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (TEC-01, TEC-02): "Technical details" is collapsed by default; opened, it is a few labelled groups in a
-  // bounded area inside the panel — the page does not grow, the one primary action stays on screen, and opening or closing it requests nothing
+  // bounded area inside the panel — the one primary action stays on screen, and opening or closing it requests nothing
   // (no server action, no wallet request). The material rows stay visible above it.
   const validTechnical = runPanel(page).locator('details.review-panel-technical');
   await expect(validTechnical).toHaveCount(1); await expect(validTechnical).not.toHaveAttribute('open', '');
-  // Before signing, the material rows are on screen inside the docked panel (it scrolls within its frame) — a three-step Review at 1440 × 900,
-  // with Technical details closed: never only reachable by scrolling the panel (flofi-security / flofi-frontend-ux review).
+  // Before signing, the material rows are on screen — a three-step Review at 1440 × 900 with Technical details closed (flofi-security /
+  // flofi-frontend-ux review).
   for (const row of PT ? ['Taxa de rede, no máximo', 'Permissão de token', 'Pedidos à carteira'] : ['Network fee, at most', 'Token permission', 'Wallet requests'])
     await expect(runPanel(page).locator('.review-block-rows > div').filter({ has: page.getByText(row, { exact: true }) })).toBeInViewport();
   const actions: string[] = [];
@@ -232,8 +230,8 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   for (const group of PT ? ['Operações', 'Valores e limites', 'Taxas e permissões', 'Solicitações à carteira', 'Identificadores e evidências']
     : ['Operations', 'Amounts and limits', 'Fees and permissions', 'Requests to your wallet', 'Identifiers and evidence'])
     await expect(technicalBody.getByRole('group', { name: group, exact: true })).toHaveCount(1);
+  // Its content scrolls inside its own bounded area: opening it adds at most that bound to the page (never the whole list of facts).
   expect(await technicalBody.evaluate(element => element.clientHeight)).toBeLessThanOrEqual(400);
-  await fitsViewport(page);
   await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeInViewport();
   await expect(page.locator('main, .summary-bar').getByRole('button', { name: W.authorize, exact: true })).toHaveCount(1);
   await validTechnical.locator('> summary').click();
@@ -272,7 +270,6 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expiredTechnical.locator('> summary').click();
   // "Refresh review" is the one primary action on screen.
   await expect(page.locator('main, .summary-bar').locator('button.primary:visible')).toHaveCount(1);
-  await fitsViewport(page);
   await evidence(page, 'execute-expired');
   if (EVIDENCE) {
     await page.setViewportSize({ width: 390, height: 844 });

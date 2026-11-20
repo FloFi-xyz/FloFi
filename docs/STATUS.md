@@ -14,7 +14,7 @@ Presentation, test and CI-fix build: no financial engine, wallet, signing, execu
 local and MOCKED; nothing was signed or sent. Not accepted by product (the FloFi product team decides).**
 - Post-merge red on `main` `dc09621` (`brand-ux-001`, 320 px): the Simulate panel lost the focus the phone shortcut gave it when the availability
   answer switched its layout; the panel now keeps it (regression fails on the baseline).
-- Technical details are labelled groups in a bounded area; on desktop the docked panel scrolls inside its frame, so the page no longer grows.
+- Technical details are labelled groups in a bounded scroll area; opening them no longer pours the full text into the page.
 - The valid Review reads "Revise antes de autorizar"; Simulate/Execute load the official token catalogs (a listed token is named, never "Token").
 
 See the [build record](builds/BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002.md).

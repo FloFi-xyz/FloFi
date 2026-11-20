@@ -29,22 +29,3 @@ dl.technical-rows+dl.technical-rows{margin-top:6px;padding-top:4px;border-top:1p
   dl.technical-rows>div{grid-template-columns:minmax(0,1fr)}
   dl.technical-rows dd{text-align:left}
 }
-
-/* BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (PDF §6, "Rolagem"): on a desktop Editor, the panel docked beside the Canvas scrolls inside the frame's own height
-   instead of stretching it. Opening "Technical details", or a Review with more steps than the references, never grows the page, never re-centres
-   the Canvas and never moves the footer's action. The dock does not size the row (height 0, at least the row's height), so the frame keeps the
-   Canvas/Assistant height; a stacked (narrow) frame keeps its natural flow. */
-@media(min-width:1281px){
-  @container flofi-canvas-frame (min-width:900px){
-    .main.workflow-workspace :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.canvas-review-dock{
-      position:relative;height:0;min-height:100%;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-gutter:stable}
-  }
-}
-
-/* A quiet cue that the docked panel holds more below its fold (frontend-ux review): a short fade pinned to its bottom edge. */
-@media(min-width:1281px){
-  @container flofi-canvas-frame (min-width:900px){
-    .main.workflow-workspace :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas[data-docked]>.simulate-canvas-body>.canvas-review-dock::after{
-      content:"";position:sticky;bottom:0;display:block;height:20px;margin-top:-20px;pointer-events:none;background:linear-gradient(to bottom,transparent,var(--surface))}
-  }
-}

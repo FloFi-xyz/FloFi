@@ -6,7 +6,7 @@ import { useLocale } from '../i18n/locale';
 /**
  * BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (TEC-01): the content of an opened "Technical details" scrolls inside its own bounded area, so opening it
  * never stretches the page, pushes the workflow out of view or moves the footer's action. A focusable, named region (keyboard users can scroll it).
- * When the owner opens it, the panel it sits in scrolls just enough to show it (the page itself is never scrolled). Presentation only:
+ * When the owner opens it (only then), the view scrolls just enough to show it. Presentation only:
  * what it holds is unchanged, and opening, closing or scrolling it requests nothing.
  */
 export function TechnicalBody({ children, label = 'Technical details' }: { children: ReactNode; label?: string }) {
@@ -20,12 +20,8 @@ export function TechnicalBody({ children, label = 'Technical details' }: { child
     const reveal = () => window.requestAnimationFrame(() => {
       const body = ref.current;
       if (!details.open || !body) return;
-      // Scroll only the nearest scrolling panel (the docked Review on a desktop); the page itself is never scrolled.
-      let pane = body.parentElement;
-      while (pane && pane !== document.body && !/(auto|scroll)/.test(getComputedStyle(pane).overflowY)) pane = pane.parentElement;
-      if (!pane || pane === document.body) return;
-      const below = body.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom;
-      if (below > 0) pane.scrollTo({ top: pane.scrollTop + below + 8, behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      // Just enough to show what the owner opened (nearest edge); nothing moves when it is already in view.
+      body.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     });
     summary?.addEventListener('click', reveal);
     return () => summary?.removeEventListener('click', reveal);

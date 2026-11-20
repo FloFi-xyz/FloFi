@@ -73,21 +73,23 @@ one "Atualizar revisão"); disclosure state across layouts; execution receipts.
 - Grouped content: **Operações · Valores e limites · Taxas e permissões · Solicitações à carteira · Identificadores e evidências**, only when they hold
   data; one fact per row; same translation keys and conditions; recipient shortened with Copy (full value in tooltip).
 - Bounded, focusable scroll region per disclosure (`TechnicalBody`); revealed inside the panel when opened; collapsed by default.
-- Desktop Editor: the docked panel scrolls inside the frame. With details open the page stays exactly 1815×866, 1774×887 and 1440×900 (before:
-  ≈1,780 px); the Canvas never re-centres, the footer action never moves, and three-step Reviews fit too.
+- With details open, the page grows by at most the bounded body (≈380 px on desktop; 55vh on a phone) instead of by the whole list of facts
+  (before: ≈1,780 px at 1815×866; the evidence sheets show both). The footer's action stays fixed. The docked Review keeps no scroll area of its own
+  (one page scroll — the accepted contract asserted by `editor-layout-hotfix.spec.ts`); a candidate that scrolled the whole docked panel inside its
+  frame was tried and withdrawn because it broke that contract and could place material rows below the panel's fold (security/frontend reviews).
 
 ## 4. Product acceptance matrix (PDF §12)
 
 | ID | Baseline (dc09621) | Already implemented? | Changes / files | Tests | Screenshots | Remaining deviation · risk | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GLOBAL-01 / P1 | Header "Operar · Painel · Meus Workflows" | Yes (PR #219/#224) | None | `editor-stages-review` (areas, Operate current) | 01, 04, 05 | None · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
-| GLOBAL-02 / P1 | Internal stepper; Canvas consistent | Yes | Docked panel bounded on desktop (`editor-fidelity.css`) | no-page-scroll assertions (Create, Simulate 2/3 steps, Execute) | 01–08 | Stepper markers are numbers, not A1's check circles (A4 uses numbers) · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
+| GLOBAL-02 / P1 | Internal stepper; Canvas consistent | Yes | None to the layout | no-page-scroll assertions (Create; two-step Simulate) | 01–08 | Stepper markers are numbers, not A1's check circles (A4 uses numbers) · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
 | SIM-01 / P1 | Compact icon summary with networks | Yes | Token catalogs loaded on Simulate/Execute (`asset-catalog-store.ts`, `simulate-workflow-canvas.tsx`, `operation-summary.tsx`) | `workflow-catalog-chains.test.ts`; existing summary tests | 01 | Summary omits A1's "~expected" amount (an expired estimate must never read as current; PR #224 decision) · low | TECHNICALLY TESTED · VISUALLY REVIEWED (AAVE on Arbitrum not reproducible in the MOCKED Base harness — see §5) |
 | SIM-02 / P1 | One CTA per state | Yes | None | `editor-stages-review` (one Simulate, one primary) | 01, 02 | None · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
 | SIM-03 / P1 | Pre/valid/failed/expired distinct | Yes | Focus kept across layouts (Workstream C) | `simulate-panel-disclosure` (checking/unavailable/blocked/pending/ready) | 02 | None · low | TECHNICALLY TESTED |
 | EXE-01 / P1 | "Você está autorizando" before any wallet request | Partial | "Revise antes de autorizar" | unit + `editor-wallet-batch`, `editor-stages-review` | 05 | None · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
 | EXE-02 / P0 | Expired Review blocks authorization | Yes (PR #224) | None | `editor-stages-review` (no Authorize; one primary "Atualizar revisão") | 04 | None · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
-| TEC-01 / P1 | Long text column; page grows (A3/A6 reproduced) | No | `technical-body.tsx`, `editor-workflow-run.tsx`, `review-summary-panel.tsx`, `simulation-context-panel.tsx`, `editor-fidelity.css` | `editor-stages-review` (groups, bounded body, no action on toggle, page = viewport, CTA in view); unit | 03, 06, 07 | Nested scroll (panel + body) on desktop · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
+| TEC-01 / P1 | Long text column; page grows (A3/A6 reproduced) | No | `technical-body.tsx`, `editor-workflow-run.tsx`, `review-summary-panel.tsx`, `simulation-context-panel.tsx`, `editor-fidelity.css` | `editor-stages-review` (groups, bounded body, no action on toggle, primary action in view, material rows in view); unit | 03, 06, 07 | Opening details still lengthens the page by up to the body's bound · low | TECHNICALLY TESTED · VISUALLY REVIEWED |
 | TEC-02 / P0 | Material rows visible above details | Yes | Same facts/keys regrouped; nothing removed | unit (row values), `editor-stages-review` (fee, permission, wallet requests visible) | 05, 06 | None · low | TECHNICALLY TESTED |
 | QA-01 / P1 | — | — | Comparison sheets (this folder) | — | 01–08 | A2/A3/A5/A6 only at 1536 px in the PDF; references use Arbitrum/AAVE, captures the MOCKED Base harness (USDC/WETH) | VISUALLY REVIEWED |
 | QA-02 / P0 | — | — | §6 | §6 | — | §5 | TECHNICALLY TESTED (CircleCI on the PR head is the authority) |
@@ -100,7 +102,9 @@ No item is **ACCEPTED BY PRODUCT**; that decision belongs to the FloFi product t
 - The Simulate summary does not repeat the Canvas estimate "~0.000893108 AAVE" of A1: a live estimate can expire; it is shown in the result instead.
 - AAVE on Arbitrum cannot be reproduced in the MOCKED Base harness; the fix is covered by unit tests and by the existing resolution path; a live
   check on Arbitrum with the official catalog is recommended (owner, read-only).
-- Technical details on desktop scroll inside a panel that itself scrolls (nested), by design to keep the page and the footer action fixed.
+- Opening Technical details lengthens the page by up to the bounded body (≈380 px desktop); a fully fixed page would need the docked Review to
+  scroll on its own, which the accepted one-page-scroll contract excludes. A three-step Simulate/Execute can still scroll the page by 5–55 px
+  (unchanged from PR #224).
 
 ## 6. Specialist reviews (read-only `.claude/agents/flofi-*`, advisory) and dispositions
 
@@ -109,10 +113,10 @@ The reviewers could not read the git-ignored review packet and reviewed the curr
 | Reviewer | Finding (severity) | Disposition |
 | --- | --- | --- |
 | frontend-ux, wallet-execution | The recipient in the Review's Technical details (and inline in the run view) was shortened to 6+4 characters (major / low) | **Fixed**: the full address is shown (wrapping monospace) with its Copy control. |
-| frontend-ux, workflow, wallet-execution | The reveal-on-open used `scrollIntoView` (could scroll the page) on every `toggle`, including a controlled `<details>` re-created open (medium / low) | **Fixed**: only the owner's click on the summary reveals it, scrolling only the nearest scrolling panel; the page is never scrolled. |
+| frontend-ux, workflow, wallet-execution | The reveal-on-open ran on every `toggle`, including a controlled `<details>` re-created open (medium / low) | **Fixed**: only the owner's own click on the summary reveals the opened content (nearest edge); a re-created open disclosure never scrolls anything. |
 | wallet-execution | An expired, non-grouped Review still showed "Review valid until …" in green (low, pre-existing) | **Fixed**: no validity line on an expired Review. |
 | frontend-ux | Nested scroll areas with `overscroll-behavior: contain` could trap scrolling on phones (medium) | **Fixed**: the technical body no longer contains overscroll. |
-| frontend-ux | The bounded desktop dock can hold rows below its fold while Authorize stays visible (medium) | **Mitigated**: a bottom fade marks more content; before, the page scrolled the same rows below the fold while the sticky footer stayed visible (not a regression). |
+| frontend-ux, security | The bounded desktop dock can hold material rows below its fold while Authorize stays visible (medium / low) | **Resolved by withdrawal**: the docked Review is no longer bounded (one page scroll, as `editor-layout-hotfix.spec.ts` requires); only the technical body is bounded. `editor-stages-review` asserts the fee, permission and wallet-request rows are on screen for a three-step Review at 1440×900. |
 | frontend-ux | Each group was a landmark (low) | **Fixed**: groups are `role="group"` named by their heading. |
 | frontend-ux | The grouping also shapes the live run view (low) | **Kept, intended**: the same facts, grouped the same way while a run is in progress. |
 | workflow | `catalogs` memo dependency not read inside the memo (low) | **Fixed**: read explicitly. |
