@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { parameterOnlyKeys, portuguese } from './pt';
+import { portuguese } from './pt';
+import { portugueseUxRefinementParameterized } from './pt-ux-refinement';
 import type { Language } from './language';
+
+/** Messages only ever called with parameters: looked up exactly, never used as fallback patterns (BUILD-FLOFI-UX-REFINEMENT-HISTORY-001). */
+const parameterOnlyKeys: ReadonlySet<string> = new Set(Object.keys(portugueseUxRefinementParameterized));
 
 /**
  * The catalog lookup shared by the interface (`useLocale().t`), the chat's deterministic copy and domain presentation code. Kept free of

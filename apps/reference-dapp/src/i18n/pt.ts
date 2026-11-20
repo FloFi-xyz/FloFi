@@ -362,5 +362,3 @@ export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: position Review row values; last, so their templates never shadow another message.
   ...portugueseLiquidityPositionValues,
 };
-/** Messages only ever called with parameters: looked up exactly, never used as fallback patterns (`translate.ts`). */
-export const parameterOnlyKeys: ReadonlySet<string> = new Set(Object.keys(portugueseUxRefinementParameterized));

@@ -19,9 +19,9 @@ export const portugueseUxRefinement: Readonly<Record<string, string>> = {
 };
 
 /**
- * The same build's messages that are only ever called WITH parameters. They are looked up exactly and never used as the catalog's fallback
- * patterns: a broad key such as "{0} of {1}" must never rewrite an unrelated string (or an owner's workflow name) that has no key of its own
- * (flofi-frontend-ux review).
+ * This build's NEW messages that are only ever called WITH parameters (keys that already existed elsewhere keep their earlier behaviour).
+ * They are looked up exactly and never used as the catalog's fallback patterns: a broad key such as "{0} of {1}" must never rewrite an
+ * unrelated string (or an owner's workflow name) that has no key of its own (flofi-frontend-ux review).
  */
 export const portugueseUxRefinementParameterized: Readonly<Record<string, string>> = {
   'Swap {0} for {1} on {2}.': 'Trocar {0} por {1} na rede {2}.',
@@ -30,7 +30,6 @@ export const portugueseUxRefinementParameterized: Readonly<Record<string, string
   '{0} {1} on {2}.': '{0} {1} na rede {2}.',
   '{0}: {1} on {2}.': '{0}: {1} na rede {2}.',
   'The previous review expired at {0}; its values are no longer current and are not shown.': 'A revisão anterior expirou às {0}; seus valores não estão mais atualizados e não são exibidos.',
-  'Step {0}: {1}': 'Etapa {0}: {1}',
   'Network fee · {0}': 'Taxa de rede · {0}',
   '{0} of {1}': '{0} de {1}',
   'Copy {0}': 'Copiar {0}',
