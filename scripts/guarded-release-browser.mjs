@@ -34,7 +34,9 @@ const definitions = [
     'chat-message-wrapping.spec.ts',
     // BUILD-FLOFI-IDENTITY-RECOVERY-UX-001 (UX-02): 25% · 50% · 75% · Max under FloFi's amount question (real component, fixture balances).
     'amount-shortcuts.spec.ts'], {}],
-  ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts', 'chat-review-overflow.spec.ts'], {}],
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the Simulate panel's disclosure across its layouts (regression of the main 0ea35d5 post-merge red).
+  ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts', 'chat-review-overflow.spec.ts',
+    'simulate-panel-disclosure.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
@@ -298,7 +300,9 @@ for (const [index, name] of selection.entries()) {
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
     'FLOFI_FLIGHT_TEAM_E2E', 'FLOFI_FLIGHT_TEAM_CLOCK', 'FLOFI_FLIGHT_TEAM_ACCOUNTS', 'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS', 'FLOFI_E2E_NETWORK_SCOPE', 'FLOFI_NETWORK_SCOPE',
     'FLOFI_USER_FUNDED_E2E', 'FLOFI_CANDIDATE_BASELINES', 'FLOFI_LIQUIDITY_POSITIONS_E2E', 'GRYLOO_BASE_JOURNAL', 'FLOFI_ORCA_POSITIONS_E2E',
-    'GRYLOO_ORCA_MAINNET_JOURNAL']) delete env[key];
+    'GRYLOO_ORCA_MAINNET_JOURNAL',
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: local visual-evidence switches never reach a certifying profile.
+    'FLOFI_UX_EVIDENCE_DIR', 'FLOFI_UX_EVIDENCE_LANG', 'FLOFI_UX_EVIDENCE_PREFIX']) delete env[key];
   Object.assign(env, settings);
   // Each profile keeps its own artifacts (a later profile never wipes them) and its own JUnit file for the CI test report.
   const output = join(results, name), junit = join(results, 'junit', `${name}.xml`);

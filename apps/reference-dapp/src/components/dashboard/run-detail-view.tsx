@@ -8,9 +8,8 @@ import { projectExecutionResult } from '../../domain/execution-result';
 import { transactionLifecycle } from '../../domain/execution-lifecycle';
 import type { DashboardDetailResponse, DashboardRunDetail, DashboardRunView } from '../../lib/dashboard/types';
 import { DashboardIcon, dateLabel } from './dashboard-view';
-import { DashboardStatusBadge } from './dashboard-status';
+import { ExecutionReceipt } from './execution-receipt';
 import { RunEvidence } from './run-evidence';
-import { NetworkBrandIcon } from '../brand-icon';
 import { HistoryActions, type HistoryChange } from '../history-actions';
 
 function RecordedRequests({ detail }: { detail: DashboardRunDetail | null }) {
@@ -37,46 +36,52 @@ export function RunDetailView({ view, detail, connection, loading, restoring = f
   /** A record opened from Your workflows returns there. The fragment is unknown on the server. */ backLabel?: ' Back to Dashboard' | ' Back to Your workflows' | null;
   history?: { change: HistoryChange; changed(disposition: 'DELETED' | 'ARCHIVED'): void };
 }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   const result = projectExecutionResult(view?.progress);
   const unavailable = connection === 'UNAVAILABLE' || connection === null || connection === 'CONNECTED';
-  const updated = dateLabel(view?.run.updatedAt ?? null), created = dateLabel(view?.run.createdAt ?? null);
-  const hasContext = Boolean(view && (view.attention.length || view.recovered || view.reconciled || view.progress?.restored));
-  return <div className="dashboard-workspace dashboard-run-detail" aria-busy={loading || restoring || undefined}>
+  const updated = view?.run.updatedAt ?? null, created = view?.run.createdAt ?? null;
+  const hasContext = Boolean(view && (view.recovered || view.reconciled || view.progress?.restored));
+  return <div className="dashboard-workspace dashboard-run-detail execution-receipt-page" aria-busy={loading || restoring || undefined}>
     <button type="button" className="dashboard-back" disabled={!backLabel} style={backLabel ? undefined : { visibility: 'hidden' }} onClick={back}>
       <span aria-hidden="true">←</span>{tr(backLabel ?? ' Back to Dashboard')}
     </button>
     {!view ? <section className="panel dashboard-empty dashboard-detail-empty" role="status"><span className="dashboard-empty-icon"><DashboardIcon kind={connection === 'DISCONNECTED' || connection === 'SIGN_IN_REQUIRED' ? 'wallet' : 'history'}/></span><p className="eyebrow">{tr("EXECUTION RECORD")}</p><h1>{tr(restoring ? 'Restoring wallet…' : loading ? 'Loading execution…' : connection === 'DISCONNECTED' ? 'Connect the wallet used for this execution' : connection === 'NOT_FOUND' ? 'Run not found' : connection === 'SIGN_IN_REQUIRED' ? 'Verify your wallet to view this execution' : connection === 'NOT_CONFIGURED' ? 'Execution history unavailable in this environment' : 'Execution details temporarily unavailable')}</h1>{!restoring && <p>{tr(loading ? 'Checking the selected execution record.' : connection === 'SIGN_IN_REQUIRED' ? 'Verify the connected wallet from Dashboard to view its saved history.' : connection === 'NOT_FOUND' ? 'This execution is unavailable for the connected wallet.' : connection === 'DISCONNECTED' ? 'Use the wallet control in the FloFi header, then return to this run.' : connection === 'NOT_CONFIGURED' ? 'Saved execution records are not available from this environment.' : 'The history source could not be reached. This does not establish that the run is missing.')}</p>}{!restoring && !loading && unavailable && refresh && <button type="button" onClick={refresh}>{tr("Reload details")}</button>}</section> : <>
-      <div className="dashboard-detail-heading"><div><p className="eyebrow">{tr(view.current ? 'CURRENT EXECUTION' : 'SAVED EXECUTION')}{tr(" · READ-ONLY")}</p><h1 title={view.title}>{view.title}</h1>{!view.current && <p className="dashboard-title-context">{tr("Saved workflow · original title not recorded")}</p>}</div>{updated && <div className="dashboard-detail-updated"><span>{tr("Last updated")}</span><time dateTime={view.run.updatedAt!}>{tr(updated)}</time></div>}</div>
-      {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change} changed={history.changed}/>}
       {detail?.recordUnavailable && <section className="dashboard-notice dashboard-detail-source" role="status"><div><strong>{tr("Detailed execution records could not be loaded.")}</strong><p>{tr("The saved summary remains visible. Workflow details and actual values may be unavailable.")}</p></div>{refresh && <button type="button" onClick={refresh}>{tr("Reload details")}</button>}</section>}
-      <div className={`dashboard-detail-overview${hasContext ? ' dashboard-detail-has-context' : ''}`}><section className="panel dashboard-result-summary" aria-labelledby="run-summary-heading"><div className="dashboard-section-heading"><h2 id="run-summary-heading">{tr("Run summary")}</h2><DashboardStatusBadge status={view.status}/></div><h3 className="dashboard-final-result">{tr(result?.label ?? view.status)}</h3><p>{tr(view.current ? view.message : view.message.replaceAll('current execution record', 'saved execution record'))}</p><dl>
-        {view.landed && <div><dt>{tr("Landed onchain")}</dt><dd>{tr(view.landed)}</dd></div>}
-        {view.total !== null && <div><dt>{tr("Steps confirmed")}</dt><dd>{tr(view.completed)}{tr(" of ")}{tr(view.total)}</dd></div>}
-        <div><dt>{tr("Execution wallet")}</dt><dd><ExecutionIdentifier identifier={{ label: 'Execution wallet', value: view.run.ownerAccount, kind: 'reference' }}/></dd></div>
-        {view.networks.length > 0 && <div><dt>{tr("Networks")}</dt><dd className="dashboard-detail-networks">{view.networks.map(network => <span key={network}><NetworkBrandIcon network={network}/>{network}</span>)}</dd></div>}
-        <div><dt>{tr("Recorded evidence")}</dt><dd>{tr(view.run.hasEvidence ? 'Recorded evidence available' : 'No final bundle recorded')}</dd></div>
-        {created && <div><dt>{tr("Record created")}</dt><dd><time dateTime={view.run.createdAt!}>{tr(created)}</time></dd></div>}
-        {(view.progress?.evidence?.knownCosts ?? []).map(fee => <div key={fee.label}><dt>{tr(fee.label)}</dt><dd>{tr(fee.value)}</dd></div>)}
-      </dl>{view.progress?.local && <p className="dashboard-local-context">{tr("Local execution · no public-chain transactions")}</p>}
-      {view.current && <button type="button" className="dashboard-primary" onClick={execute}>{tr(view.status === 'Completed' || view.status === 'Completed with attention' ? 'View execution result' : 'Open current execution')}</button>}
-      </section>{hasContext && <aside className="dashboard-detail-context" aria-label={tr("Execution follow-up")}>
-        {view.attention.length > 0 && <section className="panel dashboard-detail-attention" aria-labelledby="run-attention-heading"><h2 id="run-attention-heading">{tr("Needs attention")}</h2><ul>{view.attention.map(message => <li key={message}>{tr(message)}</li>)}</ul>{!view.current && <p className="dashboard-evidence-note">{tr("This saved view does not retry or continue execution.")}</p>}</section>}
-        {(view.recovered || view.reconciled || view.progress?.restored) && <section className="panel dashboard-recovery-summary" aria-labelledby="run-recovery-heading"><h2 id="run-recovery-heading">{tr("Recovery and reconciliation")}</h2><div className="dashboard-recovery-tags">{view.recovered && <span className="dashboard-record-tag">{tr("Recovered")}</span>}{view.reconciled && <span className="dashboard-record-tag">{tr("Reconciled")}</span>}{view.progress?.restored && !view.recovered && <span className="dashboard-record-tag">{tr("Saved result restored")}</span>}</div>
+      {/* BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (workstream B): the receipt first — operation, outcome, date, amounts, network, cost, wallet and the
+          transaction — and every engineering detail of the record under ONE collapsed "Technical details" below it. Nothing is removed from the
+          record or the view: the timeline, evidence, archive integrity, identifiers and limitations are all still here, read-only. */}
+      <ExecutionReceipt view={view} execute={execute}/>
+      {history && <div className="execution-receipt-history"><HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change} changed={history.changed}/></div>}
+      {/* BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the listed summary is shown while the full record is read; its requests, timeline and
+          evidence follow, never guessed in the meantime. */}
+      {!view.progress && !detail && loading && <section className="panel dashboard-detail-loading" role="status"><p>{tr('Loading execution details…')}</p></section>}
+      <details className="review-panel-technical execution-receipt-technical"><summary>{tr("Technical details")}</summary>
+        <section className="execution-receipt-record" aria-label={tr('Execution record')}>
+          <p className="execution-receipt-record-context">{tr(view.current ? 'Current execution · read-only' : 'Saved execution · read-only')}{!view.current && <> · {tr("Saved workflow · original title not recorded")}</>}</p>
+          <dl>
+            <div><dt>{tr("Run ID")}</dt><dd><ExecutionIdentifier full identifier={{ label: 'Run ID', value: view.run.runId, kind: 'reference' }}/></dd></div>
+            {view.run.workflowId && <div><dt>{tr("Workflow reference")}</dt><dd><code>{view.run.workflowId}</code></dd></div>}
+            <div><dt>{tr("Execution wallet")}</dt><dd><ExecutionIdentifier full identifier={{ label: 'Execution wallet', value: view.run.ownerAccount, kind: 'reference' }}/></dd></div>
+            <div><dt>{tr("Recorded status")}</dt><dd>{tr(view.run.status)}</dd></div>
+            {result && <div><dt>{tr("Recorded result")}</dt><dd className="dashboard-final-result">{tr(result.label)}</dd></div>}
+            {view.landed && <div><dt>{tr("Landed onchain")}</dt><dd>{tr(view.landed)}</dd></div>}
+            {view.run.provenance && <div><dt>{tr("Recorded environment")}</dt><dd>{tr(view.run.provenance)}</dd></div>}
+            {view.run.errorCode && <div><dt>{tr("Recorded issue")}</dt><dd><code>{tr(view.run.errorCode)}</code></dd></div>}
+            {/* The exact instant (ISO, UTC) beside the localized date. */}
+            {created && <div><dt>{tr("Record created")}</dt><dd><time dateTime={created}>{tr(dateLabel(created, language === 'PT' ? 'PT' : 'EN') ?? created)}</time> <code>{created}</code></dd></div>}
+            {updated && <div><dt>{tr("Last updated")}</dt><dd><time dateTime={updated}>{tr(dateLabel(updated, language === 'PT' ? 'PT' : 'EN') ?? updated)}</time> <code>{updated}</code></dd></div>}
+            <div><dt>{tr("Recorded evidence")}</dt><dd>{tr(view.run.hasEvidence ? 'Recorded evidence available' : 'No final bundle recorded')}</dd></div>
+          </dl>
+          {view.progress?.local && <p className="dashboard-local-context">{tr("Local execution · no public-chain transactions")}</p>}
+        </section>
+        {hasContext && <section className="panel dashboard-recovery-summary" aria-labelledby="run-recovery-heading"><h2 id="run-recovery-heading">{tr("Recovery and reconciliation")}</h2><div className="dashboard-recovery-tags">{view.recovered && <span className="dashboard-record-tag">{tr("Recovered")}</span>}{view.reconciled && <span className="dashboard-record-tag">{tr("Reconciled")}</span>}{view.progress?.restored && !view.recovered && <span className="dashboard-record-tag">{tr("Saved result restored")}</span>}</div>
           {view.recovered && <p>{tr("A previously uncertain request was confirmed from its recorded execution. No action was repeated by this view.")}</p>}
           {view.reconciled && <p>{tr(view.progress ? 'Reconciliation is recorded for the steps marked Reconciled in the timeline.' : 'The saved run records a reconciled outcome.')}</p>}
           {view.progress?.restored && !view.recovered && <p>{tr("The saved result was restored for display. Restoration alone does not establish recovery or reconciliation.")}</p>}
         </section>}
-      </aside>}</div>
-      {/* BUILD-FLOFI-EXECUTION-UX-RELIABILITY-001 (PERF-01): the listed summary is shown while the full record is read; its requests, timeline and
-          evidence follow, never guessed in the meantime. */}
-      {!view.progress && !detail && loading ? <section className="panel dashboard-detail-loading" role="status"><p>{tr('Loading execution details…')}</p></section> : <>
-      {view.progress ? <ExecutionTimeline progress={view.progress} result={result} workflowName={view.title} runContext={view.current ? 'current' : 'saved'}/> : <RecordedRequests detail={detail}/>}
-      <RunEvidence view={view} detail={detail}/></>}
-      <details className="shell-details technical-workspace"><summary>{tr("View technical details")}</summary>
-        {view.progress ? <ExecutionEvidenceDetails progress={view.progress} runContext={view.current ? 'current' : 'saved'}/> : <ExecutionIdentifier full identifier={{ label: 'Run ID', value: view.run.runId, kind: 'reference' }}/>}
-        <dl><div><dt>{tr("Recorded status")}</dt><dd>{tr(view.run.status)}</dd></div>{view.run.provenance && <div><dt>{tr("Recorded environment")}</dt><dd>{tr(view.run.provenance)}</dd></div>}{view.run.workflowId && <div><dt>{tr("Workflow reference")}</dt><dd>{view.run.workflowId}</dd></div>}{view.run.errorCode && <div><dt>{tr("Recorded issue")}</dt><dd>{tr(view.run.errorCode)}</dd></div>}</dl>
-        {detail?.evidence.map(item => <section key={item.bundleHash}><h3>{tr("Archive reference")}</h3><ExecutionIdentifier full identifier={{ label: 'Evidence content hash', value: item.bundleHash, kind: 'reference' }}/></section>)}
+        {view.progress ? <ExecutionTimeline progress={view.progress} result={result} workflowName={view.title} runContext={view.current ? 'current' : 'saved'}/> : detail || !loading ? <RecordedRequests detail={detail}/> : null}
+        {(view.progress || detail || !loading) && <RunEvidence view={view} detail={detail}/>}
+        {view.progress && <ExecutionEvidenceDetails progress={view.progress} runContext={view.current ? 'current' : 'saved'}/>}
       </details>
     </>}
   </div>;

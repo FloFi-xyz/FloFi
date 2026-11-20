@@ -101,8 +101,11 @@ describe('board 06: the Review before authorization', () => {
     expect(expired).toMatch(/^<section[^>]*data-review-state="attention"><div class="review-expired-alert" role="alert">/);
     expect(expired).toContain('Your review expired');
     expect(expired).toContain('Refresh the simulation and check the new values before authorizing.');
-    expect(expired).toContain('<span class="review-refresh-badge">Needs to be refreshed</span>');
-    expect(expired).toContain('<span class="review-refresh-badge">Depends on the updated review</span>');
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: each badge also says why (tooltip and assistive text), inside the expired Review's one card.
+    expect(expired).toMatch(/<div class="review-expired-card">[\s\S]*<span class="review-refresh-badge" title="The network fee is calculated again when you refresh the review.">Needs to be refreshed/);
+    expect(expired).toMatch(/<span class="review-refresh-badge" title="The token permission is confirmed again by the refreshed review.">Depends on the updated review/);
+    expect(expired).toMatch(/<details class="review-panel-technical review-block-technical"><summary>Technical details<\/summary>/);
+    expect(expired).not.toMatch(/<details[^>]* open/);
     expect(expired).not.toMatch(/You are authorizing|Network fee, at most|Minimum you receive/);
     const refused = visible(render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) })));
     expect(refused.match(/review-block-alert/g)).toHaveLength(1);

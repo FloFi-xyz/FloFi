@@ -1805,6 +1805,18 @@
     "app.e2e.orca-position-management": {
       "path": "apps/reference-dapp/e2e/orca-position-management.spec.ts",
       "stage": "browser"
+    },
+    "app.e2e.simulate-panel-disclosure": {
+      "path": "apps/reference-dapp/e2e/simulate-panel-disclosure.spec.ts",
+      "stage": "browser"
+    },
+    "app.e2e.dashboard-run-details": {
+      "path": "apps/reference-dapp/e2e/dashboard-run-details.spec.ts",
+      "stage": "browser"
+    },
+    "app.domain.execution-receipt": {
+      "path": "apps/reference-dapp/src/domain/execution-receipt.test.ts",
+      "stage": "unit"
     }
   },
   "requiredUnitSuites": [
@@ -2832,7 +2844,8 @@
         "apps/reference-dapp/src/app/faq/page.tsx",
         "apps/reference-dapp/src/app/editor.css",
         "apps/reference-dapp/src/app/terms/page.tsx",
-        "apps/reference-dapp/src/app/editor-workspace.css"
+        "apps/reference-dapp/src/app/editor-workspace.css",
+        "apps/reference-dapp/src/app/ux-refinement.css"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",
@@ -3875,6 +3888,7 @@
         "apps/reference-dapp/src/components/dashboard/portfolio-widget.module.css",
         "apps/reference-dapp/src/components/dashboard/portfolio-widget.tsx",
         "apps/reference-dapp/src/components/dashboard/run-detail-view.tsx",
+        "apps/reference-dapp/src/components/dashboard/execution-receipt.tsx",
         "apps/reference-dapp/src/components/dashboard/run-evidence.tsx",
         "apps/reference-dapp/src/components/editor-overview-panel.tsx",
         "apps/reference-dapp/src/components/editor-run-action.tsx",
@@ -3980,7 +3994,9 @@
         "app.e2e.liquidity-position-management",
         "app.domain.liquidity-position-declined",
         "app.e2e.chat-liquidity-positions",
-        "app.e2e.orca-position-management"
+        "app.e2e.orca-position-management",
+        "app.e2e.simulate-panel-disclosure",
+        "app.e2e.dashboard-run-details"
       ],
       "gaps": [
         "Browser profiles cover selected journeys; full accessibility audit, device matrix and language completeness remain acceptance gaps."
@@ -4910,6 +4926,7 @@
         "apps/reference-dapp/src/domain/execution-presentation.ts",
         "apps/reference-dapp/src/domain/execution-recovery.ts",
         "apps/reference-dapp/src/domain/execution-result.ts",
+        "apps/reference-dapp/src/domain/execution-receipt.ts",
         "apps/reference-dapp/src/domain/execution-step-evidence.ts",
         "apps/reference-dapp/src/domain/financial-observation.ts",
         "apps/reference-dapp/src/domain/financial-run-status.ts",
@@ -4975,7 +4992,8 @@
         "app.domain.liquidity-position-presentation",
         "app.domain.liquidity-position-summary",
         "app.domain.liquidity-position-execute",
-        "app.domain.liquidity-position-declined"
+        "app.domain.liquidity-position-declined",
+        "app.domain.execution-receipt"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -5271,7 +5289,8 @@
         "apps/reference-dapp/src/i18n/pt-amount-shortcuts.ts",
         "apps/reference-dapp/src/i18n/pt-liquidity-execution.ts",
         "apps/reference-dapp/src/i18n/pt-live-canvas-activity.ts",
-        "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts"
+        "apps/reference-dapp/src/i18n/pt-ux-editor-finops.ts",
+        "apps/reference-dapp/src/i18n/pt-ux-refinement.ts"
       ],
       "suites": [
         "app.e2e.canvas-keyboard",

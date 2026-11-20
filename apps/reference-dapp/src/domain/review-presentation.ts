@@ -7,7 +7,7 @@ import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { decodeApprove } from '@defi-workflow-engine/reference-compiler';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
-import { projectSimulation, simulationAmount, simulationProvider, type SimulationLine, type SimulationSource } from './simulation-presentation';
+import { projectSimulation, simulationAmount, simulationProvider, type SimulationLine, type SimulationSource, SIMULATION_AVAILABILITY_CHECKING } from './simulation-presentation';
 import { shellChainLabel } from './product-shell';
 
 export type ReviewToken = { address: string; chain: string; symbol: string; decimals: number };
@@ -145,6 +145,8 @@ export function projectReview(workflow: Workflow, context: ReviewContext, source
   if (!authorization.key || !authorization.ready || !authorization.approve) { status = 'blocked'; label = 'Review blocked'; message = 'Run a valid simulation before approving this workflow.'; }
   if (source.kind === 'across') { status = 'blocked'; label = 'Review blocked'; message = 'This route provides a quote preview. Wallet authorization is not available for this route.'; }
   if (simulation.message === 'Run a simulation to see the expected result.' && authorization.key) { status = 'blocked'; label = 'Review blocked'; message = 'A simulation that can authorize this workflow is required before approval.'; }
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (defence in depth): while a runtime's availability is still being checked nothing is approvable.
+  if (simulation.message === SIMULATION_AVAILABILITY_CHECKING) { status = 'blocked'; label = 'Review blocked'; message = 'A simulation that can authorize this workflow is required before approval.'; }
   if (simulation.status === 'blocked' || invalidWorkflow || authorization.manifest && !manifest || policyMismatch) { status = 'blocked'; label = 'Review blocked'; message = invalidWorkflow ? 'Check this workflow on the Canvas, then simulate again.' : simulation.status === 'blocked' ? simulation.message : 'The authorization could not be verified. Simulate again before approving.'; }
   if (manifestMismatch || 'retired' in source.state && source.state.retired || /workflow.*changed/i.test(simulation.message)) { status = 'invalidated'; label = 'Review required again'; message = 'Workflow changed. Simulate again for a fresh review.'; }
   if (wallet.changed || walletMismatch) { status = 'invalidated'; label = 'Review required again'; message = 'Wallet changed. Simulate and review this workflow again with the connected wallet.'; }
@@ -155,7 +157,7 @@ export function projectReview(workflow: Workflow, context: ReviewContext, source
   for (const line of limits.filter(l => ['Max spend', 'Max slippage', 'Recipient', 'Recipients', 'Minimum health factor'].includes(l.label))) preview.push(`${line.label} · ${line.value}`);
   // Accepted authority remains bound to the same wallet, workflow and unexpired policy.
   // Consuming a request can close the Review CTA without invalidating this binding.
-  const bindingValid = Boolean(authorization.accepted && authorization.key && authorization.approve && wallet.account && !wallet.changed && !walletMismatch && !networkMismatch && !manifestMismatch && !policyMismatch && !(authorization.manifest && !manifest) && !invalidWorkflow && !('retired' in source.state && source.state.retired) && !/workflow.*changed|expired/i.test(simulation.message) && simulation.status !== 'blocked' && simulation.message !== 'Run a simulation to see the expected result.' && source.kind !== 'across' && (expiresAt === null || now < expiresAt));
+  const bindingValid = Boolean(authorization.accepted && authorization.key && authorization.approve && wallet.account && !wallet.changed && !walletMismatch && !networkMismatch && !manifestMismatch && !policyMismatch && !(authorization.manifest && !manifest) && !invalidWorkflow && !('retired' in source.state && source.state.retired) && !/workflow.*changed|expired/i.test(simulation.message) && simulation.status !== 'blocked' && simulation.message !== 'Run a simulation to see the expected result.' && simulation.message !== SIMULATION_AVAILABILITY_CHECKING && source.kind !== 'across' && (expiresAt === null || now < expiresAt));
   // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a Review blocked by its own simulation (a refused or re-quote result) is not approvable at all; the next
   // useful step is a fresh simulation, never a disabled approval that keeps presenting the dead Review.
   const simulationBlocked = status === 'blocked' && simulation.status === 'blocked';

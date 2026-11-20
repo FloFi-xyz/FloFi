@@ -154,7 +154,8 @@ describe('Dashboard foundation inside the canonical shell', () => {
     const html = renderToStaticMarkup(<RunDetailView view={view} detail={null} connection="CONNECTED" loading={false} back={noop} build={noop} execute={noop}/>);
     expect(html).toContain(status === 'UNKNOWN' ? 'Unresolved' : 'Partially completed');
     expect(html).not.toContain('Execution completed'); expect(html).not.toContain('Retry');
-    expect(html).toContain('<details'); expect(html).toContain('View technical details'); expect(html).not.toContain('<details open');
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the record's one secondary disclosure is "Technical details" (B5), closed by default.
+    expect(html).toContain('<details'); expect(html).toContain('<summary>Technical details</summary>'); expect(html).not.toMatch(/<details[^>]* open/);
     expect(html).not.toContain('Build another workflow');
   });
   it('resolves canonical paths including encoded IDs and handles malformed encoding without throwing', () => {

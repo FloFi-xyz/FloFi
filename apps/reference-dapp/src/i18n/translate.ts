@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { portuguese } from './pt';
+import { portugueseUxRefinementParameterized } from './pt-ux-refinement';
 import type { Language } from './language';
+
+/** Messages only ever called with parameters: looked up exactly, never used as fallback patterns (BUILD-FLOFI-UX-REFINEMENT-HISTORY-001). */
+const parameterOnlyKeys: ReadonlySet<string> = new Set(Object.keys(portugueseUxRefinementParameterized));
 
 /**
  * The catalog lookup shared by the interface (`useLocale().t`), the chat's deterministic copy and domain presentation code. Kept free of
  * `'use client'` (P0 hotfix, locale contract) so a domain or server module calls exactly the function the components call. Moved unchanged
  * from `locale.tsx`, which re-exports it.
  */
-const templates = Object.entries(portuguese).filter(([key]) => key.includes('{0}')).map(([key, value]) => ({
+const templates = Object.entries(portuguese).filter(([key]) => key.includes('{0}') && !parameterOnlyKeys.has(key)).map(([key, value]) => ({
   pattern: new RegExp('^' + key.split(/(\{\d+\})/).map(part => /^\{\d+\}$/.test(part) ? '(.+?)' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('') + '$'), value,
 }));
 /** Translate only catalog messages. Unlisted symbols, addresses, hashes, IDs and user names pass through unchanged. */

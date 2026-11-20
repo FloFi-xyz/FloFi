@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { LocaleProvider } from '../i18n/locale';
 import { RunDetailView } from '../components/dashboard/run-detail-view';
 import { DashboardView } from '../components/dashboard/dashboard-view';
 import { runDetailFixture, type RunDetailCase } from './run-detail-fixture';
@@ -25,4 +26,5 @@ function Harness() {
     : <RunDetailView view={missing ? null : { ...fixture.view, current, ...(long ? { title: 'OwnerDefinedWorkflowName'.repeat(18) } : {}) }} detail={missing ? null : fixture.detail} connection={connection} loading={mode === 'loading'}
       back={() => { count('back')(); setIndex(true); }} build={count('built')} execute={count('executeNavigation')} refresh={count('reloaded')}/>;
 }
-export function mount(element: HTMLElement) { createRoot(element).render(<Harness/>); }
+/** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: an optional interface language for local evidence (the acceptance specs keep English). */
+export function mount(element: HTMLElement, language: 'EN' | 'PT' = 'EN') { createRoot(element).render(<LocaleProvider initialLanguage={language}><Harness/></LocaleProvider>); }

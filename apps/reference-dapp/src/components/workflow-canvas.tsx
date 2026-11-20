@@ -113,7 +113,8 @@ function WorkflowCard({ data }: NodeProps) {
 }
 const nodeTypes = { workflow: WorkflowCard };
 export { CANVAS_EDGE_LABEL } from './canvas-edge-style';
-const COMPOSER_FIT_PADDING = { top: '32px', bottom: '90px', left: '32px', right: '32px' } as const;
+/** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: room above the fitted cards for a selected card's Duplicate / Delete toolbar (never clipped by the header). */
+const COMPOSER_FIT_PADDING = { top: '64px', bottom: '90px', left: '32px', right: '32px' } as const;
 /** BUILD-FLOFI-BUILDER-UX-002: with the vertical tool rail, fitted cards keep clear of it. */
 const RAIL_FIT_PADDING = { ...COMPOSER_FIT_PADDING, left: '76px' } as const;
 /** P0 approved UX (board 04): the expanded rail (icon + name, 188 px) keeps fitted cards clear of it too (presentation only). */
@@ -438,7 +439,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, settingsId
   const ignorePaneClick = useRef(false);
   const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
   const [feedback, setFeedback] = useState('');
-  const [toolboxMode, setToolboxMode] = useState<ToolboxMode>('floating');
+  const [toolboxMode, setToolboxMode] = useState<ToolboxMode>('top');
   const [toolboxReady, setToolboxReady] = useState(false);
   // P0 approved UX (board 04): the rail is icon-only until the viewer expands it; the choice is remembered in this browser (read after mount).
   const [railExpanded, setRailExpanded] = useState(false);

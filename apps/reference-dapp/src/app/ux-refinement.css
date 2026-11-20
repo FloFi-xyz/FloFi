@@ -1,0 +1,196 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 — the approved visual refinement of Criar / Simular / Executar (FloFi_Orientacao_Refinamento_Visual_UX_UI,
+   19-11-2026, references on pages 17, 19 and 21) and the simplified execution receipt of workflow history. Presentation only. Colors only through
+   the shared theme variables of globals.css (light and dark); loaded last, so it refines the earlier Editor styles in place. */
+
+/* ── Shared icons (masks, so they follow the text color of each theme) ── */
+:root{
+  --icon-code:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m8 7-5 5 5 5M16 7l5 5-5 5'/%3E%3C/svg%3E");
+  --icon-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --icon-play:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.4-7.2a.8.8 0 0 0 0-1.4L8.2 4.1a.8.8 0 0 0-1.2.7Z'/%3E%3C/svg%3E");
+}
+
+/* ── "Technical details": one quiet bordered row, collapsed by default, a code mark on the left and a chevron on the right (A5/A6, B5). ── */
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical{border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font-size:13.5px}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>summary{display:flex;align-items:center;gap:10px;min-height:48px;margin:0;padding:0 14px;list-style:none;color:var(--ink);font-size:14px;font-weight:600;cursor:pointer}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>summary::-webkit-details-marker{display:none}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>summary::before{content:"";flex:none;width:18px;height:18px;background:var(--muted);-webkit-mask:var(--icon-code) center/contain no-repeat;mask:var(--icon-code) center/contain no-repeat}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>summary::after{content:"";flex:none;width:16px;height:16px;margin-left:auto;background:var(--muted);-webkit-mask:var(--icon-chevron) center/contain no-repeat;mask:var(--icon-chevron) center/contain no-repeat}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical[open]>summary{border-bottom:1px solid var(--line)}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical[open]>summary::after{transform:rotate(180deg)}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>:not(summary){margin:12px 14px}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>summary:hover{background:var(--surface-raised);border-radius:12px}
+:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical[open]>summary:hover{border-radius:12px 12px 0 0}
+@media(prefers-reduced-motion:no-preference){:is(.review-panel-approved,.editor-workflow-run,.execution-receipt-page) .review-panel-technical>summary::after{transition:transform 140ms ease}}
+/* The configured workflow's facts inside it. */
+.workflow-technical-facts{display:flex;flex-direction:column;gap:12px}
+.workflow-technical-facts dl{display:grid;gap:4px;margin:0;padding:0 0 12px;border-bottom:1px solid var(--line)}
+.workflow-technical-facts dl:last-child{padding-bottom:0;border-bottom:0}
+.workflow-technical-facts dl>div{display:grid;grid-template-columns:minmax(88px,30%) minmax(0,1fr);gap:8px;align-items:baseline}
+.workflow-technical-facts dt{color:var(--muted);font-size:12.5px;font-weight:500}
+.workflow-technical-facts dd{margin:0;min-width:0;color:var(--ink);font-size:13px;overflow-wrap:anywhere}
+.workflow-technical-facts code{font-size:12px;color:var(--muted)}
+.workflow-technical-facts .workflow-technical-address{color:var(--ink)}
+.workflow-technical-expired{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+
+/* ── Simulate (A5, reference page 19): title with a soft round mark, one compact operations card, a quiet explainer, ONE pill CTA. ── */
+.simulation-context-panel{gap:16px}
+.simulation-panel-head{align-items:center;gap:14px}
+.simulation-panel-mark{width:48px;height:48px;border-radius:50%}
+.simulation-panel-head h2{margin:0 0 2px;font-size:19px;font-weight:600;letter-spacing:-.01em}
+.simulation-panel-head p{font-size:13.5px}
+.operation-summary[data-variant="icons"] ol{padding:2px 14px;border-radius:14px;background:var(--surface)}
+.operation-summary[data-variant="icons"] li{align-items:center;gap:12px;padding:12px 0}
+.operation-summary[data-variant="icons"] .operation-summary-icon{width:24px;height:24px;color:var(--ink)}
+.operation-summary[data-variant="icons"] .operation-summary-icon svg{width:22px;height:22px}
+.operation-summary[data-variant="icons"] .operation-summary-body strong{font-size:14.5px;font-weight:600}
+.operation-summary[data-variant="icons"] .operation-summary-line{color:var(--ink);font-size:13px;font-variant-numeric:tabular-nums}
+.operation-summary[data-variant="icons"] .operation-summary-detail{color:var(--ink);font-size:13px}
+.operation-summary-chip{padding:4px 12px;border:0;background:var(--surface-raised);color:var(--ink);font-size:12.5px;font-weight:600}
+.simulation-explainer{padding:14px 16px;border-color:transparent;border-radius:14px;background:var(--surface-raised)}
+.simulation-explainer>span{width:22px;height:22px;border-color:var(--ink);color:var(--ink)}
+.simulation-explainer strong{font-size:14px}
+.simulation-panel-action button.primary{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;border-radius:999px;font-size:15.5px}
+.simulation-panel-action button.primary:is([data-lifecycle-action="simulate"],[data-lifecycle-action="workflow-simulate"]):not([aria-busy="true"])::before{content:"";flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:var(--icon-play) center/contain no-repeat;mask:var(--icon-play) center/contain no-repeat}
+
+/* ── Execute, expired review (A6, reference page 21): a soft-orange notice, then ONE white card (summary, refresh badges, technical details). ── */
+.review-expired-alert{align-items:flex-start;gap:12px;padding:16px 18px;border:1px solid var(--warning-line);border-radius:14px;background:var(--warning-surface);color:var(--ink)}
+.review-expired-alert .review-expired-mark{display:block;width:auto;height:auto;margin-top:1px;border-radius:0;background:transparent;color:var(--warning-text)}
+.review-expired-alert strong{margin-bottom:4px;font-size:17px;font-weight:600;color:var(--warning-text)}
+.review-expired-alert p{color:var(--ink);font-size:14px;line-height:1.45}
+.review-expired-card{display:flex;flex-direction:column;gap:12px;padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}
+.review-expired-card .operation-summary h3{margin:0 0 4px;font-size:17px;font-weight:600}
+.review-expired-card .review-panel-rows{margin:0}
+.operation-summary[data-variant="numbered"] ol{padding-bottom:10px;border-bottom:1px solid var(--line)}
+.operation-summary[data-variant="numbered"] li{position:relative;align-items:flex-start;gap:14px;padding:8px 0;border-bottom:0}
+.operation-summary[data-variant="numbered"] li:not(:last-child)::before{content:"";position:absolute;left:14px;top:44px;bottom:-6px;width:1px;background:var(--line)}
+.operation-summary[data-variant="numbered"] .operation-summary-number{width:29px;height:29px;border:0;background:var(--blue-soft);color:var(--accent);font-size:13px}
+.operation-summary-sentence{padding-top:4px;color:var(--ink);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums}
+.operation-summary[data-variant="numbered"] .operation-summary-recipient{margin-top:2px;font-size:13px}
+.review-refresh-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;font-size:12.5px}
+.review-refresh-badge svg{flex:none}
+/* The Assistant's local stage note reads like its other messages (the notice above already carries the warning color). */
+.copilot-stage-note .message{background:var(--surface-raised);border-color:transparent;color:var(--ink)}
+
+/* ── Create (A4, reference page 17): a discreet state line (dot + words, no pill) beside the step count. ── */
+.build-canvas-head .editor-state-pill{display:inline-flex;align-items:center;gap:7px;height:auto;padding:0;border:0!important;background:transparent!important;color:var(--ink);font-size:13.5px;font-weight:500}
+.build-canvas-head .editor-state-pill::before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.build-canvas-head .editor-state-pill[data-editor-state="configured"]::before,.build-canvas-head .editor-state-pill[data-editor-state="executing"]::before{background:var(--accent)}
+.build-canvas-head .editor-state-pill[data-editor-state="attention"]{color:var(--warning-text)}
+.build-canvas-head .editor-state-pill[data-editor-state="attention"]::before{background:var(--warning-text)}
+.build-canvas-head .editor-state-pill[data-editor-state="draft"]::before{background:transparent;border:1.5px dashed var(--muted);width:8px;height:8px}
+/* The docked tool row (the default home of the tools on every width): one quiet line of icon + name under the header. */
+.build-workspace .build-canvas-head .canvas-toolbar-row{padding:2px 0 0}
+
+/* ── Simulate and Execute beside the Assistant: the Canvas frame is as tall as the Assistant, so both end on one line (A3/A5/A6). ── */
+/* One height for the Canvas frame and the Assistant on every stage, ending above the sticky Editor footer (A3: the Assistant keeps its size).
+   234px = the top bar, the beta notice and the frame's own spacing (163px) plus the sticky footer (71px): the page itself never scrolls on a
+   desktop viewport (editor-stages-review.spec.ts). */
+@media(min-width:1281px){
+  .stage-with-chat>.copilot{height:clamp(460px,calc(100vh - 234px),760px)}
+  .stage-with-chat>.main :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas{min-height:clamp(460px,calc(100vh - 234px),760px)}
+  .stage-with-chat>.main :is(.simulate-workspace,.execute-workspace) .simulation-workflow-canvas>.simulate-canvas-body{flex:1 1 auto}
+}
+/* Create: the same rule (Canvas + Assistant end above the sticky footer; the page never scrolls on a desktop viewport). */
+@media(min-width:801px){
+  .main.workflow-workspace.build-workspace,.main.workflow-workspace.build-workspace[data-workspace-toolbox]{--workspace-height:clamp(540px,calc(100svh - 220px),980px)}
+  .main.workflow-workspace.build-workspace:has(.lending-canvas){--workspace-height:820px}
+}
+
+/* ── Workflow history (B2–B5): the execution receipt first, everything technical collapsed below it. ── */
+.execution-receipt-page{display:flex;flex-direction:column;gap:16px;max-width:760px}
+.execution-receipt{display:flex;flex-direction:column;gap:18px;padding:24px;border-radius:18px}
+.execution-receipt-head{display:flex;align-items:center;gap:14px;min-width:0}
+.execution-receipt-icon{display:grid;place-items:center;flex:none;width:48px;height:48px;border-radius:50%;background:var(--blue-soft);color:var(--accent)}
+.execution-receipt-icon svg{width:22px;height:22px}
+.execution-receipt-heading{min-width:0}
+.execution-receipt-heading h1{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:6px;margin:0;font-size:22px;line-height:1.25;letter-spacing:-.01em}
+.execution-receipt-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;min-width:0;overflow:hidden;overflow-wrap:anywhere}
+.execution-receipt-status{font-weight:600;white-space:nowrap}
+.execution-receipt-status[data-tone="success"]{color:var(--success)}
+.execution-receipt-status[data-tone="attention"]{color:var(--warning-text)}
+.execution-receipt-status[data-tone="failed"]{color:var(--red)}
+.execution-receipt-status[data-tone="progress"]{color:var(--accent)}
+.execution-receipt-status[data-tone="neutral"]{color:var(--muted)}
+.execution-receipt-date{margin:4px 0 0;color:var(--muted);font-size:14px}
+.execution-receipt-provenance{display:inline-block;margin:6px 0 0;padding:2px 10px;border-radius:999px;background:var(--surface-raised);color:var(--ink);font-size:12.5px;font-weight:600}
+.execution-receipt-notice{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);color:var(--ink);font-size:14px;line-height:1.45}
+.execution-receipt-notice[data-tone="attention"]{border-color:var(--warning-line);background:var(--warning-surface)}
+.execution-receipt-notice[data-tone="failed"]{border-color:var(--danger-line);background:var(--danger-surface)}
+.execution-receipt-notice p{margin:0}
+.execution-receipt-notice ul{margin:6px 0 0;padding-left:18px}
+.execution-receipt-notice .execution-receipt-readonly{margin-top:6px;color:var(--muted);font-size:13px}
+.execution-receipt-amounts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:0}
+.execution-receipt-amounts>div{display:flex;flex-direction:column;gap:4px;min-width:0;padding:14px 16px;border-radius:14px;background:var(--surface-raised)}
+.execution-receipt-amounts dt{color:var(--muted);font-size:13px;font-weight:500}
+.execution-receipt-amounts dd{margin:0;min-width:0;color:var(--ink);font-size:20px;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.execution-receipt-amounts>div:not([data-observed]) dd{color:var(--muted);font-size:16px;font-weight:500}
+.execution-receipt-facts{display:flex;flex-direction:column;margin:0;border-top:1px solid var(--line)}
+.execution-receipt-facts>div{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line)}
+.execution-receipt-facts>div:last-child{border-bottom:0}
+.execution-receipt-facts dt{flex:none;color:var(--muted);font-size:14px;font-weight:500}
+.execution-receipt-facts dd{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;min-width:0;margin:0;color:var(--ink);font-size:14px;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.execution-receipt-unrecorded{color:var(--muted)!important}
+.execution-receipt-networks{gap:10px!important}
+.execution-receipt-network{display:inline-flex;align-items:center;gap:6px}
+.execution-receipt-network img{width:16px;height:16px}
+.execution-receipt-copy{display:inline-flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:8px;min-width:0}
+.execution-receipt-copy>span:first-child{font-family:var(--font-ibm-plex-mono),monospace;font-size:13px}
+.execution-receipt-copy-button{min-height:30px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12.5px;font-weight:600}
+.execution-receipt-copy-button:hover{background:var(--surface-raised)}
+.execution-receipt-copy-failed{flex-basis:100%;color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.execution-receipt-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.execution-receipt-link{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--accent);font-size:14px;font-weight:600;text-decoration:none}
+.execution-receipt-link:hover{background:var(--blue-soft)}
+.execution-receipt-steps{display:flex;flex-direction:column;gap:0;margin:0;padding:0;list-style:none}
+.execution-receipt-steps>li{position:relative;display:flex;gap:14px;padding:12px 0}
+.execution-receipt-steps>li:not(:last-child)::before{content:"";position:absolute;left:14px;top:46px;bottom:-4px;width:1px;background:var(--line)}
+.execution-receipt-step-number{display:grid;place-items:center;flex:none;width:29px;height:29px;border-radius:50%;background:var(--blue-soft);color:var(--accent);font-size:13px;font-weight:600}
+.execution-receipt-steps>li[data-tone="failed"] .execution-receipt-step-number{background:var(--danger-surface);color:var(--red)}
+.execution-receipt-steps>li[data-tone="attention"] .execution-receipt-step-number{background:var(--warning-surface);color:var(--warning-text)}
+.execution-receipt-step-body{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0}
+.execution-receipt-step-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:4px 0 0;font-size:15px}
+.execution-receipt-step-network{color:var(--muted)}
+.execution-receipt-step-status{margin-left:auto;padding:2px 10px;border-radius:999px;background:var(--surface-raised);color:var(--muted);font-size:12.5px;font-weight:600}
+.execution-receipt-step-status[data-tone="success"]{background:var(--success-surface);color:var(--success)}
+.execution-receipt-step-status[data-tone="attention"]{background:var(--warning-surface);color:var(--warning-text)}
+.execution-receipt-step-status[data-tone="failed"]{background:var(--danger-surface);color:var(--red)}
+.execution-receipt-step-values{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0}
+.execution-receipt-step-values>div{display:flex;gap:6px;align-items:baseline;min-width:0}
+.execution-receipt-step-values dt{color:var(--muted);font-size:13px}
+.execution-receipt-step-values dd{margin:0;color:var(--ink);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.execution-receipt-step-values>div:not([data-observed]) dd{color:var(--muted);font-weight:500}
+.execution-receipt-step-recipient{margin:0;color:var(--muted);font-size:13px}
+.execution-receipt-steps .execution-receipt-link{align-self:flex-start;min-height:34px;padding:0 10px;font-size:13px}
+.execution-receipt-history{display:flex;justify-content:flex-end}
+.execution-receipt-technical{background:var(--surface)}
+.execution-receipt-technical>:not(summary){margin:14px 16px}
+.execution-receipt-technical .panel{box-shadow:none}
+.execution-receipt-record-context{margin:0 0 8px;color:var(--muted);font-size:13px}
+.execution-receipt-record dl{display:grid;gap:0;margin:0}
+.execution-receipt-record dl>div{display:grid;grid-template-columns:minmax(120px,32%) minmax(0,1fr);gap:12px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line)}
+.execution-receipt-record dt{color:var(--muted);font-size:13px}
+.execution-receipt-record dd{margin:0;min-width:0;font-size:13px;overflow-wrap:anywhere}
+@media(max-width:600px){
+  .execution-receipt{padding:18px;gap:16px}
+  .execution-receipt-heading h1{font-size:19px}
+  .execution-receipt-status{white-space:normal;overflow-wrap:anywhere}
+  .execution-receipt-facts>div{flex-direction:column;gap:4px}
+  .execution-receipt-facts dd{justify-content:flex-start;text-align:left}
+  .execution-receipt-record dl>div{grid-template-columns:minmax(0,1fr)}
+  .execution-receipt-step-status{margin-left:0}
+}
+
+/* ── Execute, expired review: the notice and the one card sit directly in the panel (no card around a card, reference page 21). ── */
+.editor-workflow-run.editor-review-block:has(>.review-expired-card){gap:14px;padding:0;border:0;border-radius:0;background:transparent}
+.canvas-review-dock .review-expired-card .review-panel-rows>div{align-items:center;padding:11px 0}
+@media(min-width:601px){.review-expired-card .review-panel-rows dt{white-space:nowrap}}
+@media(max-width:600px){.review-expired-card .review-refresh-badge{white-space:normal}}
+.review-expired-card .review-refresh-badge{padding:3px 9px;font-size:12px}
+.review-expired-card .review-panel-technical>summary{min-height:44px}
+
+/* ── Simulate result and valid Review (A6: same visual language, own state): the steps as one numbered list card. ── */
+.editor-review-block .review-block-steps{counter-reset:review-step;padding:2px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.editor-review-block .review-block-steps li{counter-increment:review-step;position:relative;min-height:52px;padding:12px 0 12px 42px}
+.editor-review-block .review-block-steps li:last-child{border-bottom:0}
+.editor-review-block .review-block-steps li::before{content:counter(review-step);position:absolute;left:0;top:11px;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--blue-soft);color:var(--accent);font-size:13px;font-weight:600}

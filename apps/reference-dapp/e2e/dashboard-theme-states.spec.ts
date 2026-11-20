@@ -79,9 +79,10 @@ test('shared theme switching preserves runs, read state, navigation and the sing
   await filterRecords(page, 'Executed');
   const run = index.getByRole('link', { name: 'Open record: Swap', exact: true });
   await run.focus(); await run.press('Enter');
-  await expect(index.locator('.dashboard-final-result')).toHaveText('Completed');
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: the record opens on its receipt, whose title states the outcome.
+  await expect(index.locator('.execution-receipt-status')).toHaveText('— Completed');
   await theme(page, 'light');
-  await expect(index.locator('.dashboard-final-result')).toHaveText('Completed');
+  await expect(index.locator('.execution-receipt-status')).toHaveText('— Completed');
   await expect(index.getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
   await index.getByRole('button', { name: 'Back to Dashboard' }).click();
   await filterRecords(page, 'All');
@@ -175,8 +176,8 @@ for (const value of ['light', 'dark'] as const) {
     await fixture(page, 'Details');
     for (const [mode, status, tone] of [['completed', 'Completed', 'complete'], ['pending', 'In progress', 'progress'], ['partial', 'Partially completed', 'attention'], ['failed', 'Failed', 'failed'], ['unresolved', 'Unresolved', 'attention'], ['declined', 'Transaction not submitted', 'neutral']] as const) {
       await page.evaluate(mode => window.flofiRunDetailAcceptance.show(mode), mode);
-      await expect(workspace(page).locator('.dashboard-result-summary .dashboard-status')).toHaveText(status);
-      await expect(workspace(page).locator(`.dashboard-result-summary .dashboard-status-${tone}`)).toHaveCount(1);
+      await expect(workspace(page).locator('.execution-receipt-status')).toHaveText(`— ${status}`);
+      await expect(workspace(page).locator(`.execution-receipt-status[data-tone="${({ complete: 'success', progress: 'progress', attention: 'attention', failed: 'failed', neutral: 'neutral' } as const)[tone]}"]`)).toHaveCount(1);
       await expect(workspace(page).getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
     }
   });
@@ -186,7 +187,7 @@ for (const value of ['light', 'dark'] as const) {
     const detail = workspace(page);
     for (const mode of ['completed', 'bridge-completed'] as const) {
       await page.evaluate(value => window.flofiRunDetailAcceptance.show(value), mode);
-      await expect(detail.locator('.dashboard-detail-networks')).toContainText(mode === 'bridge-completed' ? 'Arbitrum Sepolia' : 'Base Sepolia');
+      await expect(detail.locator('.execution-receipt-networks')).toContainText(mode === 'bridge-completed' ? 'Arbitrum Sepolia' : 'Base Sepolia');
       const before = await detail.locator('img.brand-icon').evaluateAll(images => images.map(image => ({ src: (image as HTMLImageElement).src, filter: getComputedStyle(image).filter, opacity: getComputedStyle(image).opacity, blend: getComputedStyle(image).mixBlendMode })));
       expect(before.length).toBeGreaterThan(2);
       expect(before.every(image => image.filter === 'none' && image.opacity === '1' && image.blend === 'normal')).toBe(true);
@@ -198,7 +199,7 @@ for (const value of ['light', 'dark'] as const) {
     await expect(detail.locator('.execution-plan')).toContainText('Actual received');
     await expect(detail.locator('.execution-plan')).toContainText('0.0243 WETH');
     await expect(detail.locator('.dashboard-run-evidence')).toContainText('Archive integrity verified');
-    const disclosure = detail.getByText('View technical details', { exact: true });
+    const disclosure = detail.locator('.execution-receipt-technical > summary');
     await disclosure.focus(); await disclosure.press('Enter');
     await expect(detail.locator('details')).toHaveAttribute('open', '');
     await theme(page, value === 'light' ? 'dark' : 'light');
@@ -218,6 +219,9 @@ for (const value of ['light', 'dark'] as const) {
     await expect(detail.getByRole('heading', { name: 'Run not found', exact: true })).toHaveCount(0);
     await page.evaluate(() => window.flofiRunDetailAcceptance.show('legacy'));
     await expect(detail).toContainText('Original workflow details are unavailable');
+    // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: a legacy record's requests are under its collapsed Technical details, one click away.
+    const technical = detail.locator('details.execution-receipt-technical');
+    if (await technical.getAttribute('open') === null) await technical.locator('> summary').click();
     await expect(detail.locator('.dashboard-recorded-requests')).toBeVisible();
     await expect(detail.locator('.execution-timeline')).toHaveCount(0);
   });
@@ -243,7 +247,7 @@ for (const value of ['light', 'dark'] as const) {
       for (const width of [1440, 1024, 768, 375, 320]) { await page.setViewportSize({ width, height: 1000 }); await noOverflow(page); }
     }
     await page.evaluate(() => { window.flofiRunDetailAcceptance.show('partial'); window.flofiRunDetailAcceptance.longTitle(); });
-    await workspace(page).getByText('View technical details', { exact: true }).click(); await noOverflow(page);
+    await workspace(page).locator('.execution-receipt-technical > summary').click(); await noOverflow(page);
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-run-partial-${value}-320.png`, fullPage: true });
   });
 }

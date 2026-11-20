@@ -40,7 +40,7 @@ import { stockTradingRefusal } from './catalog-swap-authoring';
 /** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
 const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
 
-type Snapshot<T> = Pick<T, Extract<keyof T, 'record' | 'run' | 'prepared' | 'status' | 'info' | 'retired' | 'recoveryOnly' | 'busy' | 'error' | 'available' | 'verifyError' | 'verified' | 'quoteExpired'>>;
+type Snapshot<T> = Pick<T, Extract<keyof T, 'record' | 'run' | 'prepared' | 'status' | 'info' | 'retired' | 'recoveryOnly' | 'busy' | 'error' | 'available' | 'availabilityKnown' | 'verifyError' | 'verified' | 'quoteExpired'>>;
 export type SimulationSource =
   | { kind: 'supply'; state: Snapshot<ReturnType<typeof useSupply>> }
   | { kind: 'lending'; state: Snapshot<ReturnType<typeof useLending>> }
@@ -338,6 +338,8 @@ const decimals = (symbol: string) => symbol === 'USDC' ? 6 : 18;
 const solanaSymbol = (symbol: string, cluster: string) => cluster === 'devnet' && symbol === 'USDC' ? 'devUSDC' : symbol;
 const routeNetwork = (chain: string) => networkIdentity(chain)?.name ?? shellChainLabel(chain);
 
+/** The Simulate panel's line while a runtime's availability has not answered yet (unknown, not "not available"). */
+export const SIMULATION_AVAILABILITY_CHECKING = 'Checking whether simulation is available on this network…';
 export function projectSimulation(workflow: Workflow, context: ReviewContext, source?: SimulationSource, now = Date.now()): SimulationPresentation {
   const steps: SimulationStep[] = composerActions(workflow).map((node, index) => {
     const card = composerSummary(workflow, node, context);
@@ -360,6 +362,15 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
   if (requoted) warn('attention', requotedMessage(requoted.code));
   if ('retired' in source.state && source.state.retired) return stop('The workflow or wallet has changed. Simulate again before continuing.');
   if ('recoveryOnly' in source.state && source.state.recoveryOnly) return stop('A previous run needs attention before a new simulation can proceed.');
+  // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (post-merge red on main 0ea35d5): until a runtime's availability has answered it is unknown, never "not
+  // available" (the chat already waits for it, `runtimeChecking`). Presenting it as a blocker made the Simulate panel switch from its blocker layout
+  // to its normal layout once the answer arrived; the Simulate control stays closed meanwhile (`simulationDisabled`), so nothing can run early.
+  // Only while nothing is recorded yet: a recovered run or record (a prepared Review) keeps the old stop, so its binding, verdict and expiry
+  // checks below can never be skipped while availability is still unknown (flofi-security review).
+  const recorded = ('record' in source.state && Boolean(source.state.record)) || ('run' in source.state && Boolean(source.state.run));
+  if (steps.length && !recorded && 'availabilityKnown' in source.state && source.state.availabilityKnown === false) {
+    view.message = SIMULATION_AVAILABILITY_CHECKING; return view;
+  }
   if (steps.length && (('available' in source.state && source.state.available === false) ||
     ('info' in source.state && source.state.info?.available === false))) return stop('Simulation is not available for this workflow on the current network.');
   if ('record' in source.state && source.state.record) {

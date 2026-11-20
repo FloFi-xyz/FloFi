@@ -112,8 +112,11 @@ async function toolbarGeometry(page: Page, name: string) {
 // wraps instead of overflowing, in English and in Portuguese (it used to overflow in Portuguese). P0 approved UX (board 04): the rail is grouped
 // (Swap, Bridge, Send | Pool, Supply, Withdraw | Borrow, Repay, Lending | Stocks), Privacy is not offered until it exists, Undo / Redo / ··· sit in
 // the Canvas header and Duplicate / Delete float above the selected card (no separate utilities toolbar).
+// BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (intentional change): the docked row is now the default; the rail pass selects the rail explicitly (the same
+// geometry is checked in both layouts).
 for (const width of [1440, 1536, 1920]) test(`UX-008 every Canvas tool fits — rail by default, docked row in EN and PT — at ${width}px`, async ({ page, networkGuard }, testInfo) => {
   await page.setViewportSize({ width, height: 1080 }); await open(page);
+  await useToolbarRail(page);
   const actions = ['Swap','Bridge','Send','Pool / Liquidity','Supply','Withdraw','Borrow','Repay','Lending','Stocks'];
   const rail = await toolbarGeometry(page, 'Canvas tools');
   expect(rail.buttons.map(b => b.text)).toEqual(actions);

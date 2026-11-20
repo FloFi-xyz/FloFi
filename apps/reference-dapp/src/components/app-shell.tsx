@@ -65,7 +65,7 @@ import { EditorRunAction } from './editor-run-action';
 import { EditorWorkflowRunPanel, EditorWorkflowRunPrimaryAction, EditorWorkflowSimulateAction, useEditorWorkflowRun } from './editor-workflow-run';
 import { EditorChromeProvider, EditorStageHead } from './editor-chrome';
 import { GroupedSimulationPanel } from './simulation-context-panel';
-import { OperationSummary } from './operation-summary';
+import { OperationSummary, WorkflowTechnicalFacts } from './operation-summary';
 import type { FooterStatus } from '../domain/approved-ux';
 import type { CanvasAction } from '../domain/canvas-lifecycle';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
@@ -699,6 +699,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const unavailableReason = simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
+    availabilityChecking: 'availabilityKnown' in simulationSource.state && simulationSource.state.availabilityKnown === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null;
   const simulationReason = sequenceIssue ?? unavailableReason;
   /** The same reason in a given language (the chat's messages follow the interface language; `unavailableReason` is a catalog key). */
@@ -1035,7 +1036,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         primaryAction={groupedPrimary ? <button type="button" className="simulation-back" onClick={() => setTab('Build')}>{tr('Back to the Canvas')}</button> : executeAction}
         actionInFooter={chatFirst && !groupedPrimary && placement === 'footer'} review={executeReview}
         workflowProgress={workflowProgress} continuation={executeContinuationShown} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} openDashboard={() => setTab('Dashboard')}
-        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}/>
+        workflowRun={workflowRunHere.visible ? <EditorWorkflowRunPanel state={workflowRunHere} actionsOutside={reviewBlock && groupedPrimary} summary={<OperationSummary workflow={state.workflow} context={context}/>}
+          facts={<WorkflowTechnicalFacts workflow={state.workflow} context={context}/>}/>
           : editorRun.offered ? <EditorRunAction workflow={state.workflow} readiness={editorRun} steps={sequence?.steps.length ?? 0}/> : undefined}
         technicalDetails={engineering && (executionStart.started || executionProgress.started || recoveryPath || localCowIntent) ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={chatFirst ? undefined : () => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview}
