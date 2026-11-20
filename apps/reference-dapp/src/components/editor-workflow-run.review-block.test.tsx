@@ -37,10 +37,10 @@ const primary = (s: EditorWorkflowRunState, language: Language = 'EN') =>
 const visible = (html: string) => html.slice(0, html.indexOf('<details'));
 
 describe('board 06: the Review before authorization', () => {
-  it('shows only: REVIEW, "You are authorizing", one line per step, the four summary rows and the wallet line; the rest is collapsed', () => {
+  it('shows only: REVIEW, "Review before authorizing", one line per step, the four summary rows and the wallet line; the rest is collapsed', () => {
     const html = render(state({}));
     const shown = visible(html);
-    expect(shown).toContain('<p class="eyebrow">REVIEW</p><h3>You are authorizing</h3>');
+    expect(shown).toContain('<p class="eyebrow">REVIEW</p><h3>Review before authorizing</h3>');
     expect(shown).toContain('Swap <span class="numeric">2 USDC</span> → <span class="numeric">WETH</span> · <span class="numeric">Base</span>');
     expect(shown).toContain('title="0.000796123456789123 WETH">Bridge <span class="numeric">0.000796124 WETH</span> to <span class="numeric">Arbitrum One</span>');
     expect(shown).toContain('<dt>Minimum you receive</dt><dd title="0.000790555555555555 WETH"><span><span class="numeric">0.000790555 WETH</span></span></dd>');
@@ -61,7 +61,7 @@ describe('board 06: the Review before authorization', () => {
   });
   it('in Brazilian Portuguese', () => {
     const shown = visible(render(state({}), 'PT'));
-    expect(shown).toContain('<p class="eyebrow">REVISÃO</p><h3>Você está autorizando</h3>');
+    expect(shown).toContain('<p class="eyebrow">REVISÃO</p><h3>Revise antes de autorizar</h3>');
     expect(shown).toContain('Trocar <span class="numeric">2 USDC</span> → <span class="numeric">WETH</span> · <span class="numeric">Base</span>');
     expect(shown).toContain('Levar <span class="numeric">0.000796124 WETH</span> para <span class="numeric">Arbitrum One</span>');
     expect(shown).toContain('<dt>Mínimo que você recebe</dt>');
@@ -106,7 +106,7 @@ describe('board 06: the Review before authorization', () => {
     expect(expired).toMatch(/<span class="review-refresh-badge" title="The token permission is confirmed again by the refreshed review.">Depends on the updated review/);
     expect(expired).toMatch(/<details class="review-panel-technical review-block-technical"><summary>Technical details<\/summary>/);
     expect(expired).not.toMatch(/<details[^>]* open/);
-    expect(expired).not.toMatch(/You are authorizing|Network fee, at most|Minimum you receive/);
+    expect(expired).not.toMatch(/Review before authorizing|You are authorizing|Network fee, at most|Minimum you receive/);
     const refused = visible(render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'SIMULATION_REVERTED', step: 1 } }) })));
     expect(refused.match(/review-block-alert/g)).toHaveLength(1);
     expect(refused).toContain('step 2 would fail on chain now');
@@ -115,7 +115,7 @@ describe('board 06: the Review before authorization', () => {
     const blocked = render(state({ grouped: false, review: swapBridgeReview({ refusal: { code: 'USER_FUNDED_NATIVE_FEE_SHORTFALL', step: null, evidence } }) }));
     expect(blocked).toContain('data-review-state="blocked"');
     expect(blocked).toContain('BEFORE AUTHORIZING');
-    expect(blocked).not.toContain('You are authorizing');
+    expect(blocked).not.toContain('You are authorizing'); expect(blocked).not.toContain('Review before authorizing');
     expect(blocked).toContain('<summary>Technical details, for support</summary>');
   });
   it('a step-by-step Review says each step asks the wallet on its own; a smart-account upgrade and every network switch are said', () => {

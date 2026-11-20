@@ -52,7 +52,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(text(html)).toContain('Remove 50% of liquidity');
     expect(text(html)).toMatch(/Uniswap v3 position #\d+/);
     expect(text(html)).toContain('What does the simulation do?');
-    expect(html).not.toMatch(/Pool \/ Liquidity|You are authorizing|Token permission/);
+    expect(html).not.toMatch(/Pool \/ Liquidity|Review before authorizing|You are authorizing|Token permission/);
     expect(html).not.toMatch(NO_AUTHORIZE);
   });
 
@@ -70,16 +70,16 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(shown['Owed tokens and fees']).toMatch(/^≥ /);
     expect(shown['Position NFT']).toBe('Stays in your wallet');
     // Simulate is not the authorization: no permission rows, no Review heading, no authorize control, no wallet-request row.
-    expect(html).not.toMatch(/You are authorizing|Token permission|Wallet requests|Pool \/ Liquidity/);
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission|Wallet requests|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
     expect(text(html)).not.toMatch(NO_YIELD);
   });
 
-  it('Execute C1: "You are authorizing" the position Review lines — no token permission, one wallet request — and no authorize control in the panel', async () => {
+  it('Execute C1: "Review before authorizing" the position Review lines — no token permission, one wallet request — and no authorize control in the panel', async () => {
     const { bound, observedAt, record } = await uniswap('EXIT', null, true);
     const html = render(bound, 'execute', 'EN', observedAt);
     expect(html).toContain('data-review-state="ready"');
-    expect(text(html)).toContain('You are authorizing');
+    expect(text(html)).toContain('Review before authorizing');
     expect(text(html)).toMatch(/Review valid until/);
     const shown = rows(html);
     expect(shown.Operation).toBe('Remove all liquidity, collect and close the position (burns the NFT)');
@@ -119,7 +119,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(shown['Token permission']).toBe('None — this operation needs no token permission');
     expect(shown['Wallet requests']).toBe('1');
     // Nothing of the expired Review is presented as current.
-    expect(html).not.toMatch(/You are authorizing|Expected principal returned|Minimum principal|Network fee, at most|Pool \/ Liquidity/);
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Expected principal returned|Minimum principal|Network fee, at most|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
   });
 
@@ -138,7 +138,7 @@ describe('Uniswap v3 position operations in the Editor', () => {
     expect(authorizing['Intervalo de preço']).toMatch(/^[\d.]+–[\d.]+ \S+ por \S+$/);
     expect(authorizing['Tokens devolvidos']).toMatch(/^\S+ \+ \S+ → 0x[0-9a-f]{40}$/);
     expect(Object.values(authorizing).join(' ')).not.toMatch(/\bof\b|\bper\b|\(unchanged\)|\band\b.*\bto\b/);
-    expect(valid).toContain('Você está autorizando');
+    expect(valid).toContain('Revise antes de autorizar');
     expect(valid).toContain('Nenhuma — esta operação não precisa de permissão de token');
     expect(valid).toContain('Pedidos à carteira');
     const expired = text(render(bound, 'execute', 'PT', expiresAt + 1_000));
@@ -179,13 +179,13 @@ describe('Orca position operations in the Editor', () => {
     expect(shown['Fees collected, at least']).toBeTruthy();
     expect(shown['Position NFT']).toBe('Stays in your wallet');
     expect(shown['Estimated network fee']).toBe('0.000005 SOL');
-    expect(html).not.toMatch(/You are authorizing|Token permission|Pool \/ Liquidity/);
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission|Pool \/ Liquidity/);
     expect(html).not.toMatch(NO_AUTHORIZE);
   });
   it('Execute C1 of an exit: the position closes and its rent is refunded, no token permission, one wallet request', async () => {
     const { bound, mint } = await orca('EXIT');
     const html = render(bound, 'execute', 'EN', ORCA_CLOCK);
-    expect(text(html)).toContain('You are authorizing');
+    expect(text(html)).toContain('Review before authorizing');
     const shown = rows(html);
     expect(shown.Operation).toBe('Remove all liquidity, collect fees and close the position; the position NFT is closed and its account rent is refunded');
     expect(shown.Network).toBe('Solana');

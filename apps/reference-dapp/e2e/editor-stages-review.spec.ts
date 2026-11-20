@@ -4,7 +4,7 @@
  *
  *   Create (stage indicator in the Editor header, Execute closed until a simulation exists, no authorization copy) → "Simulate workflow" runs the
  *   read-only whole-workflow Review IN Simulate, whose panel states the result with no authorization copy and no Authorize control → the footer's
- *   "Review operation" opens Execute → the valid Review (C1: "You are authorizing", "Authorize workflow" in the footer, once) → its validity passes
+ *   "Review operation" opens Execute → the valid Review (C1: "Review before authorizing", "Authorize workflow" in the footer, once) → its validity passes
  *   (client clock only) → C2: "Your review expired", the fee and permission marked as needing a refreshed Review, no Authorize, "Refresh review"
  *   as the one action, the Assistant's local note → "Refresh review" prepares a fresh Review in place → Authorize is offered again.
  *
@@ -13,7 +13,7 @@
  *
  * Local evidence only: FLOFI_UX_EVIDENCE_DIR saves screenshots of each state and FLOFI_UX_EVIDENCE_LANG=PT runs it in Portuguese. Neither is set in CI.
  */
-import { request as apiRequest, type APIRequestContext, type Page } from '@playwright/test';
+import { request as apiRequest, type APIRequestContext, type Page, type Request } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
@@ -36,11 +36,11 @@ const BASE = '0x2105', BASE_HARNESS = 'http://127.0.0.1:8562', CHAIN_HARNESS = '
 const PT = process.env.FLOFI_UX_EVIDENCE_LANG === 'PT';
 const EVIDENCE = process.env.FLOFI_UX_EVIDENCE_DIR ?? null;
 /** The few visible words this proof reads, in the interface language it runs in. */
-const W = PT ? { simulate: 'Simular fluxo', review: 'Revisar operação', authorizing: 'Você está autorizando', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
+const W = PT ? { simulate: 'Simular fluxo', review: 'Revisar operação', authorizing: 'Revise antes de autorizar', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
   expired: 'Sua revisão expirou', refreshFee: 'Precisa ser atualizada', refreshPermission: 'Depende da revisão atualizada', reviewExpired: 'Revisão expirada',
   refresh: 'Atualizar revisão', executeClosed: /Simule o fluxo primeiro/, simulateClosed: /Adicione uma ação ao seu fluxo primeiro/, operate: 'Operar', areas: 'Áreas do produto',
   assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar 3 USDC → WETH · Base/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
-  : { simulate: 'Simulate workflow', review: 'Review operation', authorizing: 'You are authorizing', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
+  : { simulate: 'Simulate workflow', review: 'Review operation', authorizing: 'Review before authorizing', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
   expired: 'Your review expired', refreshFee: 'Needs to be refreshed', refreshPermission: 'Depends on the updated review', reviewExpired: 'Review expired',
   refresh: 'Refresh review', executeClosed: /Simulate the workflow first/, simulateClosed: /Add an action to your workflow first/, operate: 'Operate', areas: 'Product areas',
   assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap 3 USDC → WETH · Base/, card: ['Swap', 'Supply', 'Borrow'] };
@@ -101,8 +101,8 @@ async function evidence(page: Page, name: string) {
 }
 const footer = (page: Page) => page.locator('footer.summary-bar');
 /** BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved references): on a desktop viewport the Editor fits it; the Canvas and the Assistant end above
- * the sticky footer and the page itself does not scroll. (A Simulate/Execute panel with more content than the references' two steps may still
- * make its frame taller; that is recorded in the build record.) */
+ * the sticky footer and the page itself does not scroll. (A Review with more content than the references' two steps may make its frame taller —
+ * one page scroll, the docked Review has no scroll area of its own: editor-layout-hotfix.spec.ts.) */
 async function fitsViewport(page: Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(0);
 }
@@ -211,6 +211,34 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeEnabled();
   await expect(footer(page)).toContainText(W.validFor);
   await evidence(page, 'execute-valid');
+
+  // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (TEC-01, TEC-02): "Technical details" is collapsed by default; opened, it is a few labelled groups in a
+  // bounded area inside the panel — the one primary action stays on screen, and opening or closing it requests nothing
+  // (no server action, no wallet request). The material rows stay visible above it.
+  const validTechnical = runPanel(page).locator('details.review-panel-technical');
+  await expect(validTechnical).toHaveCount(1); await expect(validTechnical).not.toHaveAttribute('open', '');
+  // Before signing, the material rows are on screen — a three-step Review at 1440 × 900 with Technical details closed (flofi-security /
+  // flofi-frontend-ux review).
+  for (const row of PT ? ['Taxa de rede, no máximo', 'Permissão de token', 'Pedidos à carteira'] : ['Network fee, at most', 'Token permission', 'Wallet requests'])
+    await expect(runPanel(page).locator('.review-block-rows > div').filter({ has: page.getByText(row, { exact: true }) })).toBeInViewport();
+  const actions: string[] = [];
+  const recordAction = (request: Request) => { if (request.method() === 'POST' && request.headers()['next-action']) actions.push(request.url()); };
+  page.on('request', recordAction);
+  await validTechnical.locator('> summary').click();
+  await expect(validTechnical).toHaveAttribute('open', '');
+  const technicalBody = validTechnical.locator('> .technical-body');
+  for (const group of PT ? ['Operações', 'Valores e limites', 'Taxas e permissões', 'Solicitações à carteira', 'Identificadores e evidências']
+    : ['Operations', 'Amounts and limits', 'Fees and permissions', 'Requests to your wallet', 'Identifiers and evidence'])
+    await expect(technicalBody.getByRole('group', { name: group, exact: true })).toHaveCount(1);
+  // Its content scrolls inside its own bounded area: opening it adds at most that bound to the page (never the whole list of facts).
+  expect(await technicalBody.evaluate(element => element.clientHeight)).toBeLessThanOrEqual(400);
+  await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeInViewport();
+  await expect(page.locator('main, .summary-bar').getByRole('button', { name: W.authorize, exact: true })).toHaveCount(1);
+  await validTechnical.locator('> summary').click();
+  await expect(validTechnical).not.toHaveAttribute('open', '');
+  await page.waitForTimeout(300);
+  page.off('request', recordAction);
+  expect(actions).toEqual([]);
 
   // C2: the Review's validity passes (client clock only). The client clock is never rewound (the footer never reads an expired Review as valid
   // again), so real time first passes since the server dated this Review; the clock then moves just past its validity (the footer's countdown).

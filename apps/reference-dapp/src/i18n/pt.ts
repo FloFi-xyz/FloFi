@@ -67,6 +67,7 @@ import { portugueseLiquidityExecution, portugueseLiquidityPositionValues } from 
 import { portugueseLiveCanvasActivity } from './pt-live-canvas-activity';
 import { portugueseUxEditorFinops } from './pt-ux-editor-finops';
 import { portugueseUxRefinement, portugueseUxRefinementParameterized } from './pt-ux-refinement';
+import { portugueseEditorFidelity } from './pt-editor-fidelity';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UNIFIED-COPILOT-001: Saved recipients (new keys only), first so every existing translation of a shared word still wins.
@@ -357,6 +358,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001: global product areas, the Editor's stage indicator, Simulate panel and Execute review states (new keys, last).
   ...portugueseUxEditorFinops,
   // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001: approved Editor refinement and the simplified execution receipt (new keys, last).
+  ...portugueseEditorFidelity,
   ...portugueseUxRefinement,
   ...portugueseUxRefinementParameterized,
   // BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: position Review row values; last, so their templates never shadow another message.

@@ -12,7 +12,7 @@ import { SIMULATION_AVAILABILITY_CHECKING } from '../domain/simulation-presentat
 import type { SimulationSource } from '../domain/simulation-presentation';
 import { reviewFixture } from './review-fixture';
 
-type PanelState = 'checking' | 'blocked' | 'pending' | 'ready';
+type PanelState = 'checking' | 'blocked' | 'unavailable' | 'pending' | 'ready';
 declare global {
   interface Window { flofiSimulatePanelAcceptance: { show(value: PanelState): void } }
 }
@@ -21,7 +21,9 @@ function sourceFor(state: PanelState, fixture: ReturnType<typeof reviewFixture>)
   const base = { ...ready, run: null, error: null, busy: false, available: true, availabilityKnown: true };
   const value = state === 'ready' ? { ...ready, availabilityKnown: true }
     : state === 'checking' ? { ...base, available: false, availabilityKnown: false }
-    : state === 'blocked' ? { ...base, error: 'SIMULATION_FAILED' } : base;
+    : state === 'blocked' ? { ...base, error: 'SIMULATION_FAILED' }
+    // Availability answered: this network's simulation is not served here (main dc09621 post-merge red: the answer arriving after the focus).
+    : state === 'unavailable' ? { ...base, available: false } : base;
   return { kind: 'public', state: value } as unknown as SimulationSource;
 }
 function Harness() {

@@ -28,7 +28,7 @@ describe('blocker panel (board 07)', () => {
     expect(html).toContain('Copy address'); expect(html).toContain('0x90f5…d303');
     const visible = html.replace(/<details[\s\S]*<\/details>/, '');
     expect(visible).not.toMatch(/USER_FUNDED_|BETA_|bps|eip155:/);
-    expect(html).toMatch(/<details class="review-panel-technical"><summary>Technical details, for support<\/summary><p class="review-panel-code"><code>USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE<\/code>/);
+    expect(html).toMatch(/<details class="review-panel-technical"><summary>Technical details, for support<\/summary><div class="technical-body" role="region" aria-label="Technical details, for support" tabindex="0"><p class="review-panel-code"><code>USER_FUNDED_INSUFFICIENT_NATIVE_BALANCE<\/code>/);
     expect(html).not.toMatch(/Authorize in wallet|Approve &amp; Continue|data-lifecycle-action/);
   });
   it('names a Flight refusal and links to where it is fixed, never a failed simulation', () => {
@@ -53,8 +53,8 @@ describe('Review panel (board 06)', () => {
     expect(html).toContain('<section class="operation-summary" data-variant="icons" aria-label="Workflow actions">');
     expect(html).toContain('<strong>Swap</strong>');
     expect(html).toContain('What does the simulation do?');
-    expect(html).toContain('<details class="review-panel-technical"><summary>Technical details</summary><p>SUMMARY</p>');
-    expect(html).not.toMatch(/You are authorizing|<button[^>]*class="primary"|Authorize in wallet|Authorize workflow/);
+    expect(html).toContain('<details class="review-panel-technical"><summary>Technical details</summary><div class="technical-body" role="region" aria-label="Technical details" tabindex="0"><p>SUMMARY</p>');
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|<button[^>]*class="primary"|Authorize in wallet|Authorize workflow/);
     const hosted = renderToStaticMarkup(createElement(ReviewSummaryPanel, { workflow, context, source: { kind: 'unavailable', state: { error: null, busy: false } }, authorization, wallet,
       action: createElement('button', { type: 'button', className: 'primary' }, 'Simulate workflow') }));
     expect(hosted).toContain('<div class="simulation-panel-action"><button type="button" class="primary">Simulate workflow</button></div>');
@@ -63,7 +63,7 @@ describe('Review panel (board 06)', () => {
     const html = render(blocked('QUOTE_EXPIRED'));
     expect(html).toContain('Simulation expired');
     expect(html).toContain('Simulate again to refresh the expected result and costs. The previous values are no longer current.');
-    expect(html).not.toMatch(/You are authorizing|Token permission<|Network fee, at most/);
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Token permission<|Network fee, at most/);
   });
   // C2 (Execute, expired Review): the summary as configured, the fee and permission marked as needing a refreshed Review, never a stale figure.
   it('on Execute, an expired Review says so first and marks its fee and permissions as needing a refresh', () => {
@@ -72,7 +72,7 @@ describe('Review panel (board 06)', () => {
     expect(html.indexOf('Your review expired')).toBeLessThan(html.indexOf('Operation summary'));
     expect(html).toContain('Needs to be refreshed');
     expect(html).toContain('Depends on the updated review');
-    expect(html).not.toMatch(/You are authorizing|Network fee, at most/);
+    expect(html).not.toMatch(/Review before authorizing|You are authorizing|Network fee, at most/);
   });
 });
 

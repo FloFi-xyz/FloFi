@@ -43,7 +43,7 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
 
-const show = (page: Page, state: 'checking' | 'blocked' | 'pending' | 'ready') => page.evaluate(value => window.flofiSimulatePanelAcceptance.show(value), state);
+const show = (page: Page, state: 'checking' | 'blocked' | 'unavailable' | 'pending' | 'ready') => page.evaluate(value => window.flofiSimulatePanelAcceptance.show(value), state);
 
 test('availability still being checked is never shown as a blocker, and opened Technical details survive every panel layout', async ({ page }) => {
   const panel = page.locator('.canvas-review-dock > section');
@@ -72,4 +72,27 @@ test('availability still being checked is never shown as a blocker, and opened T
   await panel.locator('details.review-panel-technical > summary').click();
   await show(page, 'pending');
   await expect(panel.locator('details.review-panel-technical')).not.toHaveAttribute('open', '');
+});
+
+// BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (post-merge red on main dc09621, certification-browser-2, brand-ux-001 at 320 px): the phone's "Review" shortcut
+// focuses the Simulate panel; when the runtime's availability answer arrives afterwards and the panel switches from its waiting layout to its blocker
+// layout, the focus the owner was given stays on the panel (it never falls back to the page).
+test('the focus the phone shortcut gave the panel survives the availability answer and every layout switch', async ({ page }) => {
+  const panel = page.locator('.canvas-review-dock > section');
+  await expect(panel).toHaveAttribute('data-review-state', 'pending');
+  // Exactly what MobileBuildNavigation does for its "Review" shortcut.
+  await panel.evaluate(element => { element.tabIndex = -1; element.focus({ preventScroll: true }); });
+  await expect(page.locator('.review-panel-approved')).toBeFocused();
+  await show(page, 'unavailable');
+  await expect(page.locator('.review-panel-blocked')).toBeVisible();
+  await expect(page.locator('.review-panel-approved')).toBeFocused();
+  // And back: a refused simulation, the waiting layout and a result keep it too.
+  for (const state of ['blocked', 'pending', 'ready'] as const) {
+    await show(page, state);
+    await expect(page.locator('.review-panel-approved')).toBeFocused();
+  }
+  // Focus the owner moves elsewhere is never pulled back by a later switch.
+  await page.locator('body').evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await show(page, 'pending');
+  await expect(page.locator('.review-panel-approved')).not.toBeFocused();
 });

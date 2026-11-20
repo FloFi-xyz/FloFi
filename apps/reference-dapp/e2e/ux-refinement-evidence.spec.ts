@@ -29,11 +29,11 @@ test.setTimeout(240_000);
 const BASE = '0x2105', BASE_HARNESS = 'http://127.0.0.1:8562', CHAIN_HARNESS = 'https://127.0.0.1:8567';
 const PT = process.env.FLOFI_UX_EVIDENCE_LANG === 'PT';
 /** The few visible words this proof reads, in the interface language it runs in. */
-const W = PT ? { simulate: 'Simular fluxo', review: 'Revisar operação', authorizing: 'Você está autorizando', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
+const W = PT ? { simulate: 'Simular fluxo', review: 'Revisar operação', authorizing: 'Revise antes de autorizar', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
   expired: 'Sua revisão expirou', refreshFee: 'Precisa ser atualizada', refreshPermission: 'Depende da revisão atualizada', reviewExpired: 'Revisão expirada',
   refresh: 'Atualizar revisão', executeClosed: /Simule o fluxo primeiro/, simulateClosed: /Adicione uma ação ao seu fluxo primeiro/, operate: 'Operar', areas: 'Áreas do produto',
   assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar 3 USDC → WETH · Base/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
-  : { simulate: 'Simulate workflow', review: 'Review operation', authorizing: 'You are authorizing', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
+  : { simulate: 'Simulate workflow', review: 'Review operation', authorizing: 'Review before authorizing', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
   expired: 'Your review expired', refreshFee: 'Needs to be refreshed', refreshPermission: 'Depends on the updated review', reviewExpired: 'Review expired',
   refresh: 'Refresh review', executeClosed: /Simulate the workflow first/, simulateClosed: /Add an action to your workflow first/, operate: 'Operate', areas: 'Product areas',
   assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap 3 USDC → WETH · Base/, card: ['Swap', 'Supply', 'Borrow'] };
@@ -89,6 +89,23 @@ const footer = (page: Page) => page.locator('footer.summary-bar');
 
 
 const VIEW = { width: Number(process.env.CAP_W ?? 1815), height: Number(process.env.CAP_H ?? 866) };
+/** BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002: the visible Technical details opened (viewport and whole page, so a page that grows shows it), then closed. */
+async function snapDetails(page: Page, name: string) {
+  const details = page.locator('main details.review-panel-technical:visible').first();
+  await details.locator('> summary').click();
+  await expect(details).toHaveAttribute('open', '');
+  await page.waitForTimeout(500);
+  const dir = process.env.FLOFI_UX_EVIDENCE_DIR!; mkdirSync(dir, { recursive: true });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${dir}/${name}.png` });
+  await page.screenshot({ path: `${dir}/${name}-page.png`, fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(400);
+  await page.screenshot({ path: `${dir}/${name}-mobile.png`, fullPage: true });
+  await page.setViewportSize(VIEW); await page.waitForTimeout(300);
+  await details.locator('> summary').click();
+  await expect(details).not.toHaveAttribute('open', '');
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
 async function snap(page: Page, name: string) {
   const dir = process.env.FLOFI_UX_EVIDENCE_DIR!; mkdirSync(dir, { recursive: true });
   await page.waitForTimeout(400);
@@ -122,13 +139,16 @@ test('evidence: Create → Simulate → Execute (valid, expired) on the referenc
   await expect(simulation).toHaveAttribute('data-review-state', 'ready', { timeout: 60_000 });
   const reviewSeenAt = Date.now();
   await snap(page, 'simulate-result');
+  await snapDetails(page, 'simulate-result-details');
   await footer(page).getByRole('button', { name: W.review, exact: true }).click();
   await expectEditorSection(page, 'Execute');
   await expect(footer(page).getByRole('button', { name: W.authorize, exact: true })).toBeEnabled({ timeout: 60_000 });
   await snap(page, 'execute-valid');
+  await snapDetails(page, 'execute-valid-details');
   await page.waitForTimeout(Math.max(0, reviewSeenAt + 15_000 - Date.now()));
   const left = /(\d+):(\d\d)/.exec(W.validFor.exec(await footer(page).innerText())?.[0] ?? '');
   await page.clock.fastForward((Number(left![1]) * 60 + Number(left![2])) * 1000 + 2_000);
   await expect(page.getByRole('button', { name: W.authorize, exact: true })).toHaveCount(0);
   await snap(page, 'execute-expired');
+  await snapDetails(page, 'execute-expired-details');
 });

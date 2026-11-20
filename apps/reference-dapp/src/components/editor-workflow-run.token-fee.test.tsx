@@ -74,7 +74,8 @@ describe('review UX7: Technical details of a Circle-paid group say two signature
   it('never "One wallet confirmation", "calls in the batch" or "one per group" for it (EN/PT)', () => {
     const technical = technicalOf(render(state({})));
     expect(technical).toContain('All 2 steps run as ONE operation on Base from your own account: two signatures in your wallet');
-    expect(technical).toContain('Two signatures: a USDC permit for the fee, then the operation · 4 calls in the operation (2 token approvals)');
+    // BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002: how the group runs and its calls are separate labelled rows of "Fees and permissions".
+    expect(technical).toContain('<dd>Two signatures: a USDC permit for the fee, then the operation</dd></div><div><dt>Calls</dt><dd>4 calls in the operation (2 token approvals)</dd>');
     expect(technical).toContain('Network fee, at most 0.21 USDC — paid from your USDC through Circle');
     for (const wrong of ['One wallet confirmation: one atomic transaction', 'one per group', 'calls in the batch', 'ONE wallet confirmation'])
       expect(technical, wrong).not.toContain(wrong);
@@ -87,7 +88,7 @@ describe('review UX7: Technical details of a Circle-paid group say two signature
   });
   it('a native group keeps its own words', () => {
     const technical = technicalOf(render(state({ review: swapBridgeReview() })));
-    expect(technical).toContain('One wallet confirmation: one atomic transaction · 4 calls in the batch (2 token approvals)');
+    expect(technical).toContain('<dd>One wallet confirmation: one atomic transaction</dd></div><div><dt>Calls</dt><dd>4 calls in the batch (2 token approvals)</dd>');
     expect(technical).not.toContain('Circle');
   });
 });

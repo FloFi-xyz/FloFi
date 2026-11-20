@@ -38,7 +38,7 @@ test('a followed Send uses the swap output and the same workflow survives stage 
   await expect(page.locator('.simulate-flow-surface')).toHaveAttribute('data-viewport', 'fitted');
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): before a simulation, Simulate's contextual panel offers it (no authorization language).
   await expect(page.getByRole('heading', { name: 'Simulate workflow', exact: true })).toBeVisible();
-  await expect(page.getByText('You are authorizing', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/^(You are authorizing|Review before authorizing)$/)).toHaveCount(0);
   await openEditorSection(page, 'Build');
   await expect.poll(() => viewport(page).getAttribute('style')).toBe(view);
   expect(await ir(page)).toEqual(workflow);
