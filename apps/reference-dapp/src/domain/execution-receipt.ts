@@ -39,8 +39,17 @@ export type ExecutionReceipt = {
   readonly steps: readonly ReceiptStep[];
   /** What happened and what (if anything) needs the owner, for anything but a clean completion. */
   readonly notice: { readonly message: string; readonly items: readonly string[] } | null;
+  /**
+   * The record's own provenance when it is not a public-chain execution (a local, mocked or fork-reproduced run): said on the receipt itself,
+   * never only in Technical details, so a fixture or replay can never read as a real receipt (flofi-wallet-execution review).
+   */
+  readonly provenance: string | null;
+  /** Whether any request of the run reached a network (a hash is recorded): without one, no fee row is shown at all. */
+  readonly submitted: boolean;
 };
 
+/** Records that are not public-chain executions, by their recorded environment. */
+const PROVENANCE: Readonly<Record<string, string>> = { MOCKED: 'Mocked local execution', FORK_REPRODUCED: 'Local fork', LOCAL: 'Local execution' };
 const TONE: Readonly<Record<DashboardStatus, ReceiptTone>> = {
   Completed: 'success', 'Completed with attention': 'attention', 'In progress': 'progress', 'Needs attention': 'attention', 'Partially completed': 'attention',
   Failed: 'failed', Unresolved: 'attention', 'Transaction not submitted': 'neutral', 'Not started': 'neutral',
@@ -60,7 +69,9 @@ const SKIPPED = new Set(['Source debit confirmed · awaiting finality', 'Destina
 const SENT_FIRST = ['You sent', 'You supplied'];
 
 const networkName = (label: string) => label.split(' → ').map(part => part.replace(/\s*\(\d+\)$/, '')).join(' → ');
-const mainOperation = (operations: readonly LifecycleOperation[]) => [...operations].reverse().find(op => !op.approval && op.hash)
+/** The transaction the owner's wallet sent (a bridge's deposit, never the provider's fill or refund), else the last recorded one. */
+const mainOperation = (operations: readonly LifecycleOperation[]) => [...operations].reverse().find(op => op.wallet && !op.approval && op.hash)
+  ?? [...operations].reverse().find(op => !op.approval && op.hash)
   ?? [...operations].reverse().find(op => op.hash) ?? null;
 const link = (operation: LifecycleOperation | null): ReceiptLink | null => operation?.hash
   ? { hash: operation.hash, explorer: operation.explorer, network: networkName(operation.chain ? shellChainLabel(operation.chain) : '') } : null;
@@ -140,7 +151,12 @@ export function projectExecutionReceipt(view: DashboardRunView): ExecutionReceip
     transaction: single ? link(mainOperation(single.operations)) : null,
     steps: single ? [] : steps.map(step => ({ number: step.number, action: step.action, network: networkName(step.network), provider: step.provider,
       ...stepTone(step), values: stepValues(step, observed(step), status), transaction: link(mainOperation(step.operations)), recipient: ownRecipient(step.recipient ?? null, evidence?.wallet ?? view.run.ownerAccount ?? null) })),
-    notice: clean ? null : { message: view.message, items: view.attention.filter(item => item !== view.message) },
+    // A saved record never calls itself the current execution record (the wording the former run summary also rewrote).
+    notice: clean ? null : { message: view.current ? view.message : view.message.replaceAll('current execution record', 'saved execution record'),
+      items: view.attention.filter(item => item !== view.message) },
+    provenance: progress?.local ? 'Local execution · no public-chain transactions'
+      : PROVENANCE[view.run.provenance] ?? null,
+    submitted: steps.some(step => step.operations.some(op => op.hash)) || Boolean(view.run.attempts?.some(attempt => attempt.transactionHash)),
   };
 }
 

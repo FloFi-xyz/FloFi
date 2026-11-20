@@ -23,4 +23,5 @@ export const portugueseUxRefinement: Readonly<Record<string, string>> = {
   '{0} of {1}': '{0} de {1}', 'Copy {0}': 'Copiar {0}', 'opens in a new tab': 'abre em uma nova aba',
   'Execution record': 'Registro da execução', 'Current execution · read-only': 'Execução atual · somente leitura',
   'Saved execution · read-only': 'Execução salva · somente leitura', 'Recorded result': 'Resultado registrado',
+  'Mocked local execution': 'Execução local simulada', 'Local fork': 'Fork local',
 };

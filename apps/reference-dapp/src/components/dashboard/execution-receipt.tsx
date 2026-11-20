@@ -56,6 +56,7 @@ export function ExecutionReceipt({ view, execute }: { view: DashboardRunView; ex
         <h1 id="execution-receipt-title"><span className="execution-receipt-title" title={t(receipt.title)}>{t(receipt.title)}</span>{' '}
           <span className="execution-receipt-status" data-tone={receipt.tone}>— {t(receipt.status)}</span></h1>
         {when && <p className="execution-receipt-date"><time dateTime={receipt.at!}>{when}</time></p>}
+        {receipt.provenance && <p className="execution-receipt-provenance">{t(receipt.provenance)}</p>}
       </div>
     </header>
     {receipt.notice && <div className="execution-receipt-notice" data-tone={receipt.tone} role="status">
@@ -84,7 +85,7 @@ export function ExecutionReceipt({ view, execute }: { view: DashboardRunView; ex
       {receipt.protocol && <div><dt>{t('Protocol')}</dt><dd>{t(receipt.protocol)}</dd></div>}
       {receipt.recipient && <div><dt>{t('Recipient')}</dt><dd><CopyValue value={receipt.recipient} shown={shortAddress(receipt.recipient)} label="Recipient"/></dd></div>}
       {receipt.fees.length ? receipt.fees.map(fee => <div key={`${fee.label}:${fee.args?.join() ?? ''}`}><dt>{t(fee.label, ...fee.args ?? [])}</dt><dd><Amount row={fee}/></dd></div>)
-        : <div><dt>{t('Network fee')}</dt><dd className="execution-receipt-unrecorded">{t('Not recorded in this history')}</dd></div>}
+        : receipt.submitted && <div><dt>{t('Network fee')}</dt><dd className="execution-receipt-unrecorded">{t('Not recorded in this history')}</dd></div>}
       {receipt.wallet && <div><dt>{t('Wallet')}</dt><dd><CopyValue value={receipt.wallet} shown={shortAddress(receipt.wallet)} label="Wallet"/></dd></div>}
       {receipt.total !== null && <div><dt>{t('Steps completed')}</dt><dd>{t('{0} of {1}', String(receipt.completed ?? 0), String(receipt.total))}</dd></div>}
     </dl>

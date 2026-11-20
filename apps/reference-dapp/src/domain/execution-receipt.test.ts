@@ -86,6 +86,28 @@ describe('execution receipt', () => {
     const steps = view.progress!.steps.map(step => ({ ...step, recipient: 'CONNECTED_OWNER' }));
     expect(projectExecutionReceipt({ ...view, progress: { ...view.progress!, steps } }).recipient).toMatch(/^0x1{40}$/);
   });
+  it('says on the receipt itself when a record is not a public-chain execution (flofi-wallet-execution review)', () => {
+    expect(receipt('completed').provenance).toBeNull();
+    expect(receipt('cow-reconciled').provenance).toBe('Local execution · no public-chain transactions');
+    const { view } = runDetailFixture('completed');
+    expect(projectExecutionReceipt({ ...view, run: { ...view.run, provenance: 'MOCKED' } }).provenance).toBe('Mocked local execution');
+    expect(projectExecutionReceipt({ ...view, run: { ...view.run, provenance: 'FORK_REPRODUCED' } }).provenance).toBe('Local fork');
+    expect(portuguese['Mocked local execution']).toBeTruthy(); expect(portuguese['Local execution · no public-chain transactions']).toBeTruthy();
+  });
+  it('a saved record never calls itself the current execution record', () => {
+    const { view } = runDetailFixture('completed');
+    const value = projectExecutionReceipt({ ...view, current: false, attention: ['Awaiting an execution status check'], message: 'All workflow steps are confirmed in the current execution record.' });
+    expect(value.notice?.message).toBe('All workflow steps are confirmed in the saved execution record.');
+    expect(projectExecutionReceipt({ ...view, current: true, attention: ['x'], message: 'All workflow steps are confirmed in the current execution record.' }).notice?.message)
+      .toBe('All workflow steps are confirmed in the current execution record.');
+  });
+  it('links the transaction the owner\'s wallet sent (a bridge deposit), never the provider\'s fill', () => {
+    expect(receipt('bridge-completed').transaction?.hash).toBe(detailHash);
+  });
+  it('shows no fee row when nothing reached a network', () => {
+    expect(receipt('declined').submitted).toBe(false);
+    expect(receipt('completed').submitted).toBe(true);
+  });
   it('every receipt label has a Portuguese translation', () => {
     const labels = new Set<string>();
     for (const mode of ['completed', 'pending', 'partial', 'failed', 'declined', 'unresolved', 'bridge-completed', 'bridge-pending', 'cow-reconciled', 'recovered'] as const) {
