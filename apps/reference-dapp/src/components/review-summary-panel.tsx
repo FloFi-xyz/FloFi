@@ -7,7 +7,7 @@
  * is the footer's lifecycle button; on Simulate (BUILD-FLOFI-UX-EDITOR-FINOPS-001, B2) the panel hosts the shell's own Simulate control (`action`),
  * never an authorization. Nothing here quotes, signs, submits or retries; a balance that arrives never re-simulates by itself.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode, type RefObject } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { useLocale } from '../i18n/locale';
 import type { Workflow } from '../domain/initial-workflow';
@@ -50,10 +50,33 @@ function useRefreshAtExpiry(until: number | null) {
   }, [until]);
 }
 
+/** The props every root layout of the panel carries, so the panel (not one of its layouts) owns the owner's focus. */
+type PanelRoot = { ref: RefObject<HTMLElement | null>; onFocus: () => void; onBlur: (event: FocusEvent<HTMLElement>) => void };
+/**
+ * BUILD-FLOFI-EDITOR-VISUAL-FIDELITY-002 (post-merge red on main dc09621, brand-ux-001 at 320 px): the panel switches between its waiting, blocker,
+ * result and expired layouts as the simulation and the runtime's availability change, and each switch re-creates its root element. Focus the owner
+ * had given the panel (the phone's "Review" shortcut focuses it) then fell back to the page. When the panel held focus and a switch removed the
+ * focused element, focus returns to the panel's new root. Focus the owner moved elsewhere is never pulled back. Presentation only.
+ */
+function usePanelFocus(): PanelRoot {
+  const ref = useRef<HTMLElement | null>(null);
+  const held = useRef(false);
+  useLayoutEffect(() => {
+    const panel = ref.current, active = document.activeElement;
+    if (!held.current || !panel || (active && active !== document.body && active.isConnected)) return;
+    if (!panel.hasAttribute('tabindex')) panel.tabIndex = -1;
+    panel.focus({ preventScroll: true });
+  });
+  return { ref, onFocus: () => { held.current = true; },
+    // A blur to another element, or to the page while the panel is still on screen, is the owner's own move; a removed layout's blur is not.
+    onBlur: event => { if (event.currentTarget.isConnected && !event.currentTarget.contains(event.relatedTarget as Node | null)) held.current = false; } };
+}
+
 export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   const { t, language } = useLocale();
   const { workflow, context, source, authorization, wallet, invalidWorkflow = false } = props;
   const stage = props.stage ?? 'simulate';
+  const root = usePanelFocus();
   const now = Date.now();
   const sim = projectSimulation(workflow, context, source, now);
   const status = simulationStatusPresentation(sim, invalidWorkflow, source.state.busy);
@@ -72,7 +95,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
     blocked ? 'Technical details, for support' : 'Technical details') : null;
   const action = props.action ? <div className="simulation-panel-action">{props.action}</div> : null;
   if (blocked && !expired) return <BlockerPanel message={props.unavailableReason ?? status.message} title={status.label} error={source.state.error ?? null}
-    owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={action}/>;
+    owner={wallet.account} feeShortfall={props.feeShortfall ?? null} technical={technical} simulation={stage === 'simulate'} action={action} root={root}/>;
   const ready = !busy && sim.status !== 'blocked' && (review.status === 'ready' || review.status === 'approved');
   const step = sim.steps[sim.steps.length - 1];
   const canvas = props.canvasWorkflow ?? workflow;
@@ -103,7 +126,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   if (stage === 'execute') {
     // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): an expired Review keeps the workflow's summary (only what the owner configured) and marks the fee and
     // the permissions as needing a refreshed Review; no stale figure is shown as current and nothing can be authorized from it.
-    if (expired) return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="expired" data-position-operation={position?.management.operation}>
+    if (expired) return <section {...root} className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="expired" data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       <ExpiredReviewAlert/>
       {/* BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference, expired review): one white card — the operations as configured, the fee and
@@ -123,7 +146,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
           expiredAt={review.expiresAt !== null ? new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : null}/>)}
       </div>
     </section>;
-    if (!ready) return <section className="review-panel-approved review-panel-execute" aria-label={t('Simulation')} data-review-state={busy ? 'busy' : 'pending'} data-position-operation={position?.management.operation}>
+    if (!ready) return <section {...root} className="review-panel-approved review-panel-execute" aria-label={t('Simulation')} data-review-state={busy ? 'busy' : 'pending'} data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       <h2>{t('Workflow simulation')}</h2>
       <p className="review-panel-status" role="status">{t(busy ? 'Simulating workflow…' : props.unavailableReason ?? 'Simulation checks expected outcomes and costs before anything is signed or sent.')}</p>
@@ -131,7 +154,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
       {technical}
     </section>;
     // C1: the valid Review — what the owner authorizes, its costs and permissions, before any wallet request. The ONE action is the footer's.
-    return <section className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="ready" data-position-operation={position?.management.operation}>
+    return <section {...root} className="review-panel-approved review-panel-execute" aria-label={t('Review')} data-review-state="ready" data-position-operation={position?.management.operation}>
       {props.sequenceNote && <p className="review-panel-sequence" role="note">{props.sequenceNote}</p>}
       {until && <p className="review-panel-validity" data-tone="ready"><span className="simulation-status-dot" aria-hidden="true"/>{t('Review valid until {0}', until)}</p>}
       <p className="eyebrow">{t('REVIEW')}</p>
@@ -156,7 +179,7 @@ export function ReviewSummaryPanel(props: ReviewSummaryPanelProps) {
   // and holds the ONE primary action (Simulate workflow); a valid result states the expected outcome and costs with no authorization language
   // (the footer's "Review operation" leads to Execute, where the Review is authorized); an expired result shows no stale figure.
   const awaiting = !busy && !ready && !expired;
-  return <section className="review-panel-approved simulation-context-panel" aria-label={t(ready ? 'Simulation result' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'} data-position-operation={position?.management.operation}>
+  return <section {...root} className="review-panel-approved simulation-context-panel" aria-label={t(ready ? 'Simulation result' : 'Simulation')} data-review-state={busy ? 'busy' : expired ? 'expired' : ready ? 'ready' : 'pending'} data-position-operation={position?.management.operation}>
     <SimulationPanelHead title={ready ? 'Simulation result' : expired ? 'Simulation expired' : 'Simulate workflow'}
       subtitle={ready ? until ? t('Valid until {0}. Nothing has been signed or sent.', until) : t('Nothing has been signed or sent.')
         : expired ? t('Simulate again to refresh the expected result and costs. The previous values are no longer current.')
@@ -201,10 +224,12 @@ export function RefreshBadge({ text, hint = null }: { text: string; hint?: strin
 }
 
 /** Board 07: what blocks the simulation, the server's own numbers when it has them, and the one next action (the footer keeps "Simulate again"). */
-export function BlockerPanel({ title, message, error, owner, feeShortfall, technical, simulation = false, action = null }: { title: string; message: string; error: string | null; owner: string | null;
+export function BlockerPanel({ title, message, error, owner, feeShortfall, technical, simulation = false, action = null, root }: { title: string; message: string; error: string | null; owner: string | null;
   feeShortfall: NativeFeeShortfall | null; technical: ReactNode; simulation?: boolean;
   /** BUILD-FLOFI-UX-EDITOR-FINOPS-001 (B2): on Simulate, the panel holds the one primary action (Simulate again) after the blocker's own actions. */
-  action?: ReactNode }) {
+  action?: ReactNode;
+  /** The owning panel's root props (focus kept across layouts), when the blocker is one of its layouts. */
+  root?: PanelRoot }) {
   const { t } = useLocale();
   const [copied, setCopied] = useState<'copied' | 'failed' | null>(null);
   const fee = feeShortfallView(feeShortfall);
@@ -216,7 +241,7 @@ export function BlockerPanel({ title, message, error, owner, feeShortfall, techn
     try { await navigator.clipboard.writeText(address); setCopied('copied'); } catch { setCopied('failed'); }
   };
   const heading = fee ? t('Not enough {0} on {1} for the network fee', fee.symbol, t(fee.network)) : t(title);
-  return <section className="review-panel-approved review-panel-blocked" aria-label={t(simulation ? 'Simulation' : 'Before authorizing')} data-review-state="blocked">
+  return <section {...root} className="review-panel-approved review-panel-blocked" aria-label={t(simulation ? 'Simulation' : 'Before authorizing')} data-review-state="blocked">
     {!simulation && <p className="eyebrow">{t('BEFORE AUTHORIZING')}</p>}
     {simulation ? <><h2>{t('Workflow simulation')}</h2><h3>{heading}</h3></> : <h2>{heading}</h2>}
     {fee && <dl className="review-panel-rows">
