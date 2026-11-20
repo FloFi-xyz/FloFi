@@ -3,7 +3,7 @@
  * BUILD-FLOFI-SITE-001: the documentation of the owner-approved site (Claude Artifact "FloFi — site aprovado", version 1793715580-4561), PT and EN,
  * converted from its 26 documentation boards (Docs-*.dc.html / EN-Docs-*.dc.html) into structured data. Text is the approved copy; the boards' links
  * are mapped to FloFi's real routes (/docs/<slug>, /docs, /how-it-works, /developers, /app). Corrected where the boards contradict the product (see
- * docs/builds/BUILD-FLOFI-SITE-001.md): mainnet ids in the SDK examples, the sandbox key's real reach on a hosted deployment, the OpenAPI link served
+ * docs/builds/BUILD-FLOFI-SITE-001.md): local engineering SDK examples, the sandbox key's real reach on a hosted deployment, the OpenAPI link served
  * by this deployment, and each MCP surface's availability (WhatsApp is not live). Nothing here is fetched or executed.
  */
 import type { SiteLanguage } from './site-language';
@@ -990,7 +990,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "group": "Integre o FloFi",
     "title": "API para desenvolvedores",
     "status": "Sandbox · ativado pelo operador",
-    "lead": "Monte e pré-visualize estratégias a partir do seu servidor e passe a decisão financeira para o usuário no FloFi.",
+    "lead": "Consulte capacidades a partir do servidor e teste estratégias, prévias e aprovações em um sandbox local.",
     "sections": [
      {
       "id": "availability",
@@ -1001,13 +1001,13 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
         "tone": "warning",
         "title": "Integração sandbox no servidor",
         "text": [
-         "A API está implementada, com evidência de integração local/MOCKED controlada. Um operador precisa ativar a implantação e emitir uma chave sandbox. Chaves live e estratégias de mainnet são recusadas, e uma implantação hospedada não tem redes de teste; ali, uma chave sandbox só consulta capacidades: criar estratégias e aprovações exige chaves de produção, que esta versão não emite. Chaves de API não têm nenhuma autoridade financeira."
+         "O operador habilita a API e emite chaves sandbox. Em uma implantação hospedada, uma chave válida pode consultar capacidades. A API recusa estratégias de mainnet (403 MAINNET_DISABLED) e chaves live (403 FORBIDDEN, LIVE_MODE_DISABLED). Estratégias de teste recebem 400 INVALID_STRATEGY com a razão TEST_NETWORK_NOT_AVAILABLE no produto público. A integração completa usa um sandbox local de engenharia."
         ]
        },
        {
         "kind": "p",
         "text": [
-         "Caminho base: ",
+         "Defina FLOFI_BASE_URL como a origem da implantação. O caminho base é ",
          {
           "code": "https://<deployment>/api/developer/v1"
          },
@@ -1021,7 +1021,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Descoberta de capacidades · bash",
-        "code": "curl \"https://<deployment>/api/developer/v1/capabilities\" \\\n  -H \"Authorization: Bearer $FLOFI_API_KEY\""
+        "code": "curl --fail-with-body \"$FLOFI_BASE_URL/api/developer/v1/capabilities\" \\\n  -H \"Authorization: Bearer $FLOFI_API_KEY\""
        }
       ]
      },
@@ -1167,20 +1167,24 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
       "title": "Crie, valide e passe adiante",
       "blocks": [
        {
-        "kind": "code",
-        "label": "TypeScript no servidor · typescript",
-        "code": "const strategy = await flofi.strategies.create({\n  strategy: {\n    action: \"bridge\",\n    sourceNetwork: \"base\",\n    destinationNetwork: \"arbitrum-one\",\n    asset: \"USDC\", amount: \"5\",\n  },\n});\nconst check = await flofi.strategies.validate(strategy.id);\nif (!check.availability.approvable) {\n  throw new Error(check.availability.reason ?? \"NOT_APPROVABLE\");\n}\nconst approval = await flofi.approvals.create({ strategy });\n// Give approval.approvalUrl to the user."
-       },
-       {
         "kind": "p",
         "text": [
-         "Este é um exemplo documentado, não uma afirmação de que a aprovação para levar ativos a outra rede está ativa em todas as implantações. O usuário prova que a carteira é dele, simula de novo, revisa e assina no FloFi. Leia ",
+         "Use uma chave sandbox com os escopos strategies e approvals, o cliente do SDK configurado para a implantação local e o endereço público de teste em simulationSubject. As redes Base Sepolia e Arbitrum Sepolia do exemplo usam fixtures. A prévia não autoriza o fluxo. O usuário comprova a carteira, simula de novo, revisa e assina no FloFi. Consulte ",
          {
           "link": "Autorização na carteira",
           "href": "/docs/wallet-authorization"
          },
          "."
         ]
+       },
+       {
+        "kind": "code",
+        "label": "Sandbox local MOCKED · TypeScript",
+        "code": "const { data } = await flofi.capabilities.list({\n  network: \"base-sepolia\", action: \"bridge\",\n});\nconst row = data.find(r =>\n  r.destinationNetwork === \"arbitrum-sepolia\" &&\n  r.operations.compose.available &&\n  r.operations.simulate.available &&\n  r.operations.approve.available\n);\nif (!row?.availability.mockedHarness) {\n  throw new Error(\"Local MOCKED bridge flow unavailable\");\n}\nconst strategy = await flofi.strategies.create({ strategy: row.exampleStrategy });\nconst check = await flofi.strategies.validate(strategy.id);\nif (!check.availability.approvable) {\n  throw new Error(check.availability.reason ?? \"NOT_APPROVABLE\");\n}\nconst preview = await flofi.strategies.simulate(strategy.id, { simulationSubject });\nconst approval = await flofi.approvals.create({ strategy });\n// Display the preview and deliver approval.approvalUrl privately to the user."
+       },
+       {
+        "kind": "p",
+        "text": ["O teste de navegador MOCKED chega à revisão com a assinatura bloqueada. O status da aprovação inclui o andamento do handoff. Status de execuções e evidências de reconciliação só aparecem com o consentimento do usuário, desativado por padrão."]
        }
       ]
      },
@@ -1191,7 +1195,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Valores são strings decimais. Estratégias são imutáveis; crie uma nova se a intenção mudar. POSTs de criação usam uma Idempotency-Key válida por projeto, ambiente e operação durante 24 horas. A mesma chave com um corpo diferente gera IDEMPOTENCY_CONFLICT."
+         "Valores são strings decimais. Estratégias são imutáveis; crie uma nova se a intenção mudar. POSTs de criação aceitam uma Idempotency-Key válida por projeto, ambiente e operação durante 24 horas. A mesma chave com um corpo diferente gera IDEMPOTENCY_CONFLICT."
         ]
        },
        {
@@ -1246,7 +1250,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Inicialização no servidor · typescript",
-        "code": "import { FloFi, FloFiError, verifyWebhook }\n  from \"@defi-workflow-engine/developer-sdk\";\n\nconst flofi = new FloFi({\n  apiKey: process.env.FLOFI_API_KEY!,\n  baseUrl: \"https://<your FloFi deployment>\",\n});"
+        "code": "import { FloFi } from \"@defi-workflow-engine/developer-sdk\";\n\nconst flofi = new FloFi({\n  apiKey: process.env.FLOFI_API_KEY!,\n  baseUrl: process.env.FLOFI_BASE_URL!,\n});"
        }
       ]
      },
@@ -1257,12 +1261,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Capacidades · typescript",
-        "code": "const { data } = await flofi.capabilities.list({\n  network: \"base\", action: \"bridge\",\n});\nconst available = data.filter(row => row.operations.approve.available);"
+        "code": "const { data } = await flofi.capabilities.list();\nconst available = data.filter(row => row.operations.approve.available);"
        },
        {
         "kind": "p",
         "text": [
-         "Use o exampleStrategy de uma linha disponível e guarde a estratégia canônica e o hash retornados. Continue no ",
+         "Use a origem da implantação em FLOFI_BASE_URL. O SDK anexa o caminho da API. Em ambiente hospedado, use a consulta para descoberta. Em sandbox local, use exampleStrategy de uma linha disponível e guarde a estratégia canônica e o hash. Continue no ",
          {
           "link": "tutorial da API para desenvolvedores",
           "href": "/docs/developer-api#strategy-to-handoff"
@@ -1279,12 +1283,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Verificação do corpo bruto · typescript",
-        "code": "const event = await verifyWebhook({\n  payload: rawBody,\n  headers: request.headers,\n  secret: process.env.FLOFI_WEBHOOK_SECRET!,\n});\n// Deduplicate event.id before handling.\n// Fetch the resource again for its current state."
+        "code": "import { verifyWebhook } from \"@defi-workflow-engine/developer-sdk\";\n\nconst event = await verifyWebhook({\n  payload: await request.text(),\n  headers: request.headers,\n  secret: process.env.FLOFI_WEBHOOK_SECRET!,\n});\n// Deduplicate event.id before handling.\n// Fetch the resource again for its current state."
        },
        {
         "kind": "p",
         "text": [
-         "Verifique o corpo bruto do pedido antes de interpretar ou reserializar. A ordem de entrega não é garantida. Notificações execution.* só são emitidas enquanto o usuário compartilha o status. Notificações não autorizam um fluxo nem mudam o estado financeiro dele."
+         "Verifique o corpo bruto do pedido antes de interpretar ou reserializar. A ordem de entrega não é garantida. Eventos execution.* são gerados enquanto o usuário compartilha o status. Uma entrega já enfileirada ainda pode chegar depois que ele parar de compartilhar. Notificações não autorizam um fluxo nem mudam o estado financeiro dele."
         ]
        }
       ]
@@ -1296,7 +1300,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "FloFiError traz status, code, reason, requestId, issues e retryAfter. O cliente repete GETs seguros e POSTs com chave depois de erros de rede, 429, 502, 503 e 504, respeitando o Retry-After. Chamadas de criação reaproveitam a chave de idempotência nessas repetições."
+         "FloFiError traz status, code, reason, requestId, issues e retryAfter. O cliente repete GETs seguros e POSTs com chave depois de erros de rede, 409 IDEMPOTENCY_IN_PROGRESS, 429, 502, 503 e 504, respeitando o limite de espera do cliente para Retry-After. Chamadas de criação reaproveitam a chave de idempotência nessas repetições."
         ]
        },
        {
@@ -2917,7 +2921,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
     "group": "Integrate FloFi",
     "title": "Developer API",
     "status": "Sandbox · operator enabled",
-    "lead": "Compose and preview strategies from your server, then hand the financial decision to the user in FloFi.",
+    "lead": "Discover capabilities from your server and test strategies, previews and handoffs in a local sandbox.",
     "sections": [
      {
       "id": "availability",
@@ -2928,13 +2932,13 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
         "tone": "warning",
         "title": "Server-side sandbox integration",
         "text": [
-         "The API is implemented with controlled local/MOCKED integration evidence. An operator must enable the deployment and issue a sandbox key. Live keys and mainnet strategies are refused, and a hosted deployment has no test networks, so a sandbox key can only discover capabilities there: creating strategies and approvals needs production keys, which this release does not issue. API keys have zero financial authority."
+         "The operator enables the API and issues sandbox keys. On a hosted deployment, a valid key can discover capabilities. The API refuses mainnet strategies (403 MAINNET_DISABLED) and live keys (403 FORBIDDEN, LIVE_MODE_DISABLED). Test-network strategies return 400 INVALID_STRATEGY with reason TEST_NETWORK_NOT_AVAILABLE in the public product. Use a local engineering sandbox for the full integration."
         ]
        },
        {
         "kind": "p",
         "text": [
-         "Base path: ",
+         "Set FLOFI_BASE_URL to the deployment origin. The API base path is ",
          {
           "code": "https://<deployment>/api/developer/v1"
          },
@@ -2948,7 +2952,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Capability discovery · bash",
-        "code": "curl \"https://<deployment>/api/developer/v1/capabilities\" \\\n  -H \"Authorization: Bearer $FLOFI_API_KEY\""
+        "code": "curl --fail-with-body \"$FLOFI_BASE_URL/api/developer/v1/capabilities\" \\\n  -H \"Authorization: Bearer $FLOFI_API_KEY\""
        }
       ]
      },
@@ -3094,20 +3098,24 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
       "title": "Create, validate, hand off",
       "blocks": [
        {
-        "kind": "code",
-        "label": "Server-side TypeScript · typescript",
-        "code": "const strategy = await flofi.strategies.create({\n  strategy: {\n    action: \"bridge\",\n    sourceNetwork: \"base\",\n    destinationNetwork: \"arbitrum-one\",\n    asset: \"USDC\", amount: \"5\",\n  },\n});\nconst check = await flofi.strategies.validate(strategy.id);\nif (!check.availability.approvable) {\n  throw new Error(check.availability.reason ?? \"NOT_APPROVABLE\");\n}\nconst approval = await flofi.approvals.create({ strategy });\n// Give approval.approvalUrl to the user."
-       },
-       {
         "kind": "p",
         "text": [
-         "This is a documented example, not a claim that bridge approval is enabled on every deployment. The user proves wallet ownership, re-simulates, reviews and signs in FloFi. Read ",
+         "Use a sandbox key with strategies and approvals scopes, the SDK client configured for the local deployment and a public test wallet address as simulationSubject. The sample uses fixtures for Base Sepolia and Arbitrum Sepolia. The preview grants no authority. The user proves wallet ownership, runs a fresh simulation, reviews and signs in FloFi. See ",
          {
           "link": "Wallet Authorization",
           "href": "/docs/wallet-authorization"
          },
          "."
         ]
+       },
+       {
+        "kind": "code",
+        "label": "Local MOCKED sandbox · TypeScript",
+        "code": "const { data } = await flofi.capabilities.list({\n  network: \"base-sepolia\", action: \"bridge\",\n});\nconst row = data.find(r =>\n  r.destinationNetwork === \"arbitrum-sepolia\" &&\n  r.operations.compose.available &&\n  r.operations.simulate.available &&\n  r.operations.approve.available\n);\nif (!row?.availability.mockedHarness) {\n  throw new Error(\"Local MOCKED bridge flow unavailable\");\n}\nconst strategy = await flofi.strategies.create({ strategy: row.exampleStrategy });\nconst check = await flofi.strategies.validate(strategy.id);\nif (!check.availability.approvable) {\n  throw new Error(check.availability.reason ?? \"NOT_APPROVABLE\");\n}\nconst preview = await flofi.strategies.simulate(strategy.id, { simulationSubject });\nconst approval = await flofi.approvals.create({ strategy });\n// Display the preview and deliver approval.approvalUrl privately to the user."
+       },
+       {
+        "kind": "p",
+        "text": ["The MOCKED browser test reaches Review with signing blocked. Approval status tracks the handoff. Execution status and reconciliation evidence require the user’s consent, which is off by default."]
        }
       ]
      },
@@ -3118,7 +3126,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "Amounts are decimal strings. Strategies are immutable; create a new one for a changed intent. Creating POSTs use an Idempotency-Key scoped to project, environment and operation for 24 hours. Same key with a changed body yields IDEMPOTENCY_CONFLICT."
+         "Amounts are decimal strings. Strategies are immutable; create a new one for a changed intent. Creating POSTs accept an Idempotency-Key scoped to project, environment and operation for 24 hours. Same key with a changed body yields IDEMPOTENCY_CONFLICT."
         ]
        },
        {
@@ -3173,7 +3181,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Server initialization · typescript",
-        "code": "import { FloFi, FloFiError, verifyWebhook }\n  from \"@defi-workflow-engine/developer-sdk\";\n\nconst flofi = new FloFi({\n  apiKey: process.env.FLOFI_API_KEY!,\n  baseUrl: \"https://<your FloFi deployment>\",\n});"
+        "code": "import { FloFi } from \"@defi-workflow-engine/developer-sdk\";\n\nconst flofi = new FloFi({\n  apiKey: process.env.FLOFI_API_KEY!,\n  baseUrl: process.env.FLOFI_BASE_URL!,\n});"
        }
       ]
      },
@@ -3184,12 +3192,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Capabilities · typescript",
-        "code": "const { data } = await flofi.capabilities.list({\n  network: \"base\", action: \"bridge\",\n});\nconst available = data.filter(row => row.operations.approve.available);"
+        "code": "const { data } = await flofi.capabilities.list();\nconst available = data.filter(row => row.operations.approve.available);"
        },
        {
         "kind": "p",
         "text": [
-         "Use an available row’s exampleStrategy and retain the returned canonical strategy and hash. Continue with the ",
+         "Set FLOFI_BASE_URL to the deployment origin. The SDK appends the API path. Use this call for discovery on hosted deployments. In a local sandbox, use an available row’s exampleStrategy and retain the canonical strategy and hash. Continue with the ",
          {
           "link": "Developer API tutorial",
           "href": "/docs/developer-api#strategy-to-handoff"
@@ -3206,12 +3214,12 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "code",
         "label": "Raw-body verification · typescript",
-        "code": "const event = await verifyWebhook({\n  payload: rawBody,\n  headers: request.headers,\n  secret: process.env.FLOFI_WEBHOOK_SECRET!,\n});\n// Deduplicate event.id before handling.\n// Fetch the resource again for its current state."
+        "code": "import { verifyWebhook } from \"@defi-workflow-engine/developer-sdk\";\n\nconst event = await verifyWebhook({\n  payload: await request.text(),\n  headers: request.headers,\n  secret: process.env.FLOFI_WEBHOOK_SECRET!,\n});\n// Deduplicate event.id before handling.\n// Fetch the resource again for its current state."
        },
        {
         "kind": "p",
         "text": [
-         "Verify the raw request body before parsing or re-serialization. Delivery ordering is not guaranteed. execution.* notifications are emitted only while the user shares status. Notifications do not authorize a workflow or change its financial state."
+         "Verify the raw request body before parsing or re-serialization. Delivery ordering is not guaranteed. execution.* events are generated while the user shares status. A queued delivery can still arrive after sharing ends. Notifications do not authorize a workflow or change its financial state."
         ]
        }
       ]
@@ -3223,7 +3231,7 @@ export const DOCS: Readonly<Record<SiteLanguage, { readonly pages: readonly DocP
        {
         "kind": "p",
         "text": [
-         "FloFiError carries status, code, reason, requestId, issues and retryAfter. The client retries safe GETs and keyed POSTs after network errors, 429, 502, 503 and 504, honoring Retry-After. Creating calls reuse their idempotency key across those retries."
+         "FloFiError carries status, code, reason, requestId, issues and retryAfter. The client retries safe GETs and keyed POSTs after network errors, 409 IDEMPOTENCY_IN_PROGRESS, 429, 502, 503 and 504, using Retry-After up to the client’s delay ceiling. Creating calls reuse their idempotency key across those retries."
         ]
        },
        {

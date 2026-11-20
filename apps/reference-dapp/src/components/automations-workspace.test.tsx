@@ -2,16 +2,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { HookHarness, deferred } from '../test-utils/hook-harness';
+import { WALLET_PROOF_CHANGED } from '../domain/wallet-proof-events';
 import { AutomationInbox, AutomationsWorkspace, CreateForm, bpsToPercent, percentToBps } from './automations-workspace';
 import type { CapabilityView, OverviewView } from '../automations/views';
 const f = vi.hoisted(() => ({ overview: vi.fn(), create: vi.fn(), history: vi.fn(), enabled: true, availability: null as null | { enabled: boolean; code: string | null } | Error,
-  reads: [] as string[] }));
+  reads: [] as string[], signals: [] as (AbortSignal | undefined)[] }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 // BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: the reads go through ONE GET (`app/automation-reads.ts`): availability (first read only) and the
 // owner's overview together. This stand-in answers them from the same fixtures the Server Actions used to.
 vi.mock('../app/automation-reads', () => ({ AUTOMATIONS_OFF: new Set(['AUTOMATIONS_NOT_ENABLED', 'AUTOMATION_CONFIGURATION_INVALID']),
-  automationSnapshot: async (o: unknown, scope: 'all' | 'overview' | 'availability' = 'all') => {
+  automationSnapshot: async (o: unknown, scope: 'all' | 'overview' | 'availability' = 'all', signal?: AbortSignal) => {
     f.reads.push(scope);
+    f.signals.push(signal);
     if (scope !== 'overview' && f.availability instanceof Error) throw f.availability;
     const availability = scope !== 'overview' ? f.availability ?? { enabled: f.enabled, code: f.enabled ? null : 'AUTOMATIONS_NOT_ENABLED' } : null;
     return { availability, overview: o && scope !== 'availability' ? await f.overview(o) : null };
@@ -37,9 +39,24 @@ function textOf(value: ReactNode): string { return Array.isArray(value) ? value.
 function find(tree: ReactNode, match: (e: Element) => boolean) { const target = nodes(tree).find(match); expect(target).toBeDefined(); return target!.props; }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 let host: HookHarness;
-beforeEach(() => { host = new HookHarness(); vi.clearAllMocks(); f.enabled = true; f.availability = null; f.reads = []; vi.stubGlobal('requestAnimationFrame', (work: () => void) => work()); vi.stubGlobal('window', { location: { search: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() }); f.overview.mockResolvedValue({ ok: true, value: overview }); f.create.mockResolvedValue({ ok: true, value: { ruleId: 'persisted-rule' } }); });
-afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
+let tab: EventTarget & { visibilityState: 'visible' | 'hidden' };
+let browser: EventTarget;
+beforeEach(() => {
+  vi.clearAllMocks(); host = new HookHarness(); f.enabled = true; f.availability = null; f.reads = []; f.signals = [];
+  tab = Object.assign(new EventTarget(), { visibilityState: 'visible' as const });
+  browser = Object.assign(new EventTarget(), { location: { search: '' } });
+  vi.spyOn(browser, 'addEventListener'); vi.spyOn(browser, 'removeEventListener');
+  vi.stubGlobal('document', tab); vi.stubGlobal('window', browser);
+  vi.stubGlobal('requestAnimationFrame', (work: () => void) => work());
+  f.overview.mockResolvedValue({ ok: true, value: overview }); f.create.mockResolvedValue({ ok: true, value: { ruleId: 'persisted-rule' } });
+});
+afterEach(() => { host.unmount(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const work = (wallet = owner) => host.render(() => AutomationsWorkspace({ owner: wallet }));
+const focus = () => browser.dispatchEvent(new Event('focus'));
+function visibility(state: typeof tab.visibilityState) {
+  tab.visibilityState = state;
+  tab.dispatchEvent(new Event('visibilitychange'));
+}
 const form = (initial: Parameters<typeof CreateForm>[0]['initial'] = { name: 'Weekly ETH', amount: '10' }, caps = capabilities) => host.render(() => CreateForm({ owner, capabilities: caps, busy: false, run: async task => (await task()).ok, initial }));
 const submit = async (tree: ReactNode) => { await (find(tree, e => e.type === 'form').onSubmit as (event: { preventDefault(): void }) => Promise<void>)({ preventDefault() {} }); };
 const change = (tree: ReactNode, label: string, value: string) => (find(tree, e => e.props['aria-label'] === label).onChange as (e: unknown) => void)({ currentTarget: { value } });
@@ -96,19 +113,40 @@ describe('Automation management server authorization', () => {
   it('asks for real ownership verification when the session is missing or expired', async () => { f.overview.mockResolvedValue({ ok: false, code: 'WALLET_SESSION_REQUIRED' }); work(); await flush(); work(); await flush(); expect(textOf(work())).toContain('Verify wallet ownership to use automations.'); expect(textOf(work())).not.toContain('Recurring buy'); });
   it('does not let a late response for another account populate the workspace', async () => { const old = deferred<unknown>(); f.overview.mockReturnValueOnce(old.promise); work(); await flush(); work(); await flush(); work(other); await flush(); expect(textOf(work(other))).toContain('Wallet session verified'); old.resolve({ ok: true, value: { ...overview, rules: [{ name: 'PRIVATE OLD OWNER RECORD' }] } }); await flush(); expect(textOf(work(other))).not.toContain('PRIVATE OLD OWNER RECORD'); });
   it('preserves the selected creation flow during a transient refresh error', async () => {
-    const listeners = vi.mocked(window.addEventListener); work(); await flush(); work(); await flush();
+    work(); await flush(); work(); await flush();
     const tree = work(); (find(tree, e => e.props.className === 'automation-choice' && textOf(e).includes('Recurring buy')).onClick as () => void)();
     expect(nodes(work()).some(e => e.type === CreateForm)).toBe(true);
     f.overview.mockResolvedValueOnce({ ok: false, code: 'AUTOMATION_STORE_UNAVAILABLE' });
-    const focus = listeners.mock.calls.find(([type]) => type === 'focus')?.[1] as () => void; focus(); await flush();
+    focus(); await flush();
     expect(nodes(work()).some(e => e.type === CreateForm)).toBe(true); expect(textOf(work())).toContain('Retry');
   });
-  it('rejects an older same-wallet success after a newer failed ownership check', async () => {
-    work(); await flush(); work(); await flush(); const old = deferred<unknown>();
-    f.overview.mockReturnValueOnce(old.promise).mockResolvedValueOnce({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
-    const focus = vi.mocked(window.addEventListener).mock.calls.find(([type]) => type === 'focus')?.[1] as () => void;
-    focus(); focus(); await flush(); expect(textOf(work())).toContain('Verify wallet ownership');
-    old.resolve({ ok: true, value: overview }); await flush(); expect(textOf(work())).toContain('Verify wallet ownership');
+  it('rejects an older response after the proof session changes for the same wallet', async () => {
+    const old = deferred<unknown>();
+    const proof = (refresh: () => Promise<void>) => ({ proven: owner.address, refresh }) as NonNullable<Parameters<typeof AutomationsWorkspace>[0]['proof']>;
+    const first = proof(vi.fn()), next = proof(vi.fn());
+    const page = (value: typeof first) => host.render(() => AutomationsWorkspace({ owner, proof: value }));
+    page(first); await flush(); page(first);
+    f.overview.mockReturnValueOnce(old.promise).mockResolvedValue({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
+    focus();
+    expect(textOf(page(next))).not.toContain('Wallet session verified');
+    await flush(); expect(textOf(page(next))).toContain('Verify wallet ownership');
+    old.resolve({ ok: true, value: overview }); await flush();
+    expect(textOf(page(next))).toContain('Verify wallet ownership');
+  });
+  it('aborts a same-address request on renewed proof even when the proof reader and address stay the same', async () => {
+    const old = deferred<unknown>();
+    work(); await flush(); work();
+    f.overview.mockReturnValueOnce(old.promise);
+    focus();
+    browser.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: 'solana' } }));
+    expect(f.signals[1]?.aborted).toBe(false);
+    browser.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: owner.namespace } }));
+    expect(f.signals[1]?.aborted).toBe(true);
+    work(); await flush();
+    old.resolve({ ok: true, value: { ...overview, rules: [{ name: 'STALE WALLET SESSION' }] } });
+    await flush();
+    expect(textOf(work())).not.toContain('STALE WALLET SESSION');
+    expect(f.reads).toEqual(['all', 'overview', 'overview']);
   });
   it('keeps the manual draft and step through required verification for the same wallet', async () => {
     work(); await flush(); work(); await flush();
@@ -117,7 +155,7 @@ describe('Automation management server authorization', () => {
     (guided.onDraftChange as (draft: unknown) => void)({ kind: 'SCHEDULED_DCA', name: 'Preserved routine', amount: '15', network: 'base' });
     (guided.onStepChange as (step: number) => void)(2);
     f.overview.mockResolvedValueOnce({ ok: false, code: 'WALLET_SESSION_REQUIRED' });
-    const focus = vi.mocked(window.addEventListener).mock.calls.find(([type]) => type === 'focus')?.[1] as () => void; focus(); await flush();
+    focus(); await flush();
     expect(textOf(work())).toContain('Verify wallet ownership');
     const proof = { proven: owner.address } as NonNullable<Parameters<typeof AutomationsWorkspace>[0]['proof']>;
     host.render(() => AutomationsWorkspace({ owner, proof })); await flush();
@@ -135,7 +173,7 @@ describe('Automation management server authorization', () => {
     const pending = { occurrenceId: 'occ-1', ruleId: 'rule-1', ruleName: 'Weekly ETH', kind: 'SCHEDULE', state: 'PENDING_OWNER', dueAt: '2026-11-12T09:00:00.000Z',
       expiresAt: '2026-11-12T21:00:00.000Z', action: null, observations: [], outcome: null, decidedAt: null, approval: null, notifications: [] };
     f.overview.mockResolvedValue({ ok: true, value: { ...overview, pending: [pending] } });
-    const focus = vi.mocked(window.addEventListener).mock.calls.find(([type]) => type === 'focus')?.[1] as () => void; focus(); await flush();
+    focus(); await flush();
     text = textOf(page());
     expect(text).toContain('Waiting for you'); expect(text.indexOf('Waiting for you')).toBeLessThan(text.indexOf('Create an automation'));
   });
@@ -178,6 +216,67 @@ describe('Automation management server authorization', () => {
     expect(textOf(work())).toContain('Wallet session verified');
   });
   it('disables unsupported landing choices when policy and price source are unavailable', async () => { f.overview.mockResolvedValue({ ok: true, value: { ...overview, capabilities: { ...capabilities, routes: [], observable: [], priceSource: 'off' } } }); work(); await flush(); work(); await flush(); const tree = work(); for (const choice of nodes(tree).filter(e => e.props.className === 'automation-choice')) expect(choice.props.disabled).toBe(true); expect(textOf(tree)).toContain('A verified price source is required'); });
+});
+
+describe('Automation overview request counts', () => {
+  it('reads every 30 seconds while visible, pauses while hidden and refreshes once on each return', async () => {
+    vi.useFakeTimers();
+    work(); await flush(); work();
+    for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(30_000);
+    expect(f.reads).toEqual(['all', 'overview', 'overview', 'overview', 'overview']);
+    visibility('hidden'); focus();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(f.reads).toHaveLength(5);
+    visibility('visible'); await flush(); focus();
+    expect(f.reads).toHaveLength(6);
+    visibility('hidden');
+    tab.visibilityState = 'visible'; focus(); await flush(); visibility('visible');
+    expect(f.reads).toHaveLength(7);
+    await vi.advanceTimersByTimeAsync(29_999); expect(f.reads).toHaveLength(7);
+    await vi.advanceTimersByTimeAsync(1); expect(f.reads).toHaveLength(8);
+    host.unmount();
+    visibility('hidden'); visibility('visible'); focus();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.reads).toHaveLength(8);
+  });
+
+  it('coalesces slow polls and aborts an earlier request for a fresh post-mutation read', async () => {
+    vi.useFakeTimers();
+    work(); await flush(); work();
+    const old = deferred<unknown>();
+    f.overview.mockReturnValueOnce(old.promise);
+    focus(); focus();
+    f.signals[1]?.addEventListener('abort', () => old.reject(Error('aborted')));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.reads).toEqual(['all', 'overview']);
+    (find(work(), e => e.props.className === 'automation-choice' && textOf(e).includes('Recurring buy')).onClick as () => void)();
+    const create = find(work(), e => e.type === CreateForm).run as Parameters<typeof CreateForm>[0]['run'];
+    const update = vi.fn(async () => ({ ok: true }));
+    const done = create(update);
+    await flush();
+    expect(update).toHaveBeenCalledOnce();
+    expect(f.signals[1]?.aborted).toBe(true);
+    expect(await done).toBe(true);
+    expect(f.reads).toEqual(['all', 'overview', 'overview']);
+    expect(textOf(work())).toContain('Wallet session verified');
+    visibility('hidden');
+    (find(work(), e => e.type === 'button' && textOf(e) === 'Refresh').onClick as () => void)();
+    await flush();
+    expect(f.reads).toHaveLength(4);
+  });
+
+  it('refreshes on returning even while a mutation is pending', async () => {
+    work(); await flush(); work();
+    (find(work(), e => e.props.className === 'automation-choice' && textOf(e).includes('Recurring buy')).onClick as () => void)();
+    const create = find(work(), e => e.type === CreateForm).run as Parameters<typeof CreateForm>[0]['run'];
+    const update = deferred<{ ok: boolean }>();
+    const done = create(() => update.promise);
+    visibility('hidden'); visibility('visible'); focus();
+    await flush();
+    expect(f.reads).toEqual(['all', 'overview']);
+    update.resolve({ ok: false });
+    expect(await done).toBe(false);
+  });
 });
 
 describe('Automation proposals notice', () => {

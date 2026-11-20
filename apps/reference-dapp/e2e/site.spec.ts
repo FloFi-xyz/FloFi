@@ -282,15 +282,34 @@ for (const width of [320, 390, 1440]) test(`How it works and For developers at $
   await page.getByRole('navigation', { name: 'Navegação do rodapé' }).getByRole('link', { name: 'Para desenvolvedores' }).click();
   await expect(page).toHaveURL('/developers');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Coloque DeFi no seu produto.');
-  await expect(page.getByText('Hoje só chaves de teste')).toBeVisible();
-  // Only paths the Developer API v1 really serves (docs/developer/openapi.json).
-  const openapi = JSON.parse(await readFile(new URL('../../../docs/developer/openapi.json', import.meta.url), 'utf8')) as { paths: Record<string, unknown> };
-  for (const path of ['/capabilities', '/strategies', '/strategies/{id}/simulate', '/approvals']) expect(Object.keys(openapi.paths)).toContain(path);
-  for (const [, path] of DEVELOPER_ENDPOINTS) await expect(page.locator('main')).toContainText(path);
-  // Today's keys only discover capabilities; the page says so instead of promising strategies.
-  await expect(page.locator('main')).toContainText('Criar e simular estratégias exige as chaves de produção');
-  await expect(page.getByRole('link', { name: 'Ler a documentação' })).toHaveAttribute('href', '/docs');
-  await noOverflow(page);
+  for (const language of ['PT', 'EN'] as const) {
+    const pt = language === 'PT';
+    if (!pt) await chooseLanguage(page, 'Preferências', 'English');
+    await expect(page.locator('html')).toHaveAttribute('lang', pt ? 'pt-BR' : 'en');
+    await expect(page).toHaveTitle(pt ? 'Para desenvolvedores · FloFi' : 'For developers · FloFi');
+    const main = page.locator('main');
+    for (const [method, path] of DEVELOPER_ENDPOINTS) await expect(main).toContainText(`${method} ${path}`);
+    await expect(main.getByRole('list').last().locator('li')).toHaveCount(8);
+    await expect(main).toContainText(pt ? 'A API recusa estratégias de mainnet e chaves live.' : 'The API refuses mainnet strategies and live keys.');
+    await expect(main).toContainText(pt ? 'A assinatura on-chain fica bloqueada' : 'On-chain signing is blocked');
+    await expect(main.getByRole('link', { name: 'MCP', exact: true })).toHaveAttribute('href', '/docs/mcp-integrations');
+    await expect(main.getByRole('link', { name: 'Webhooks', exact: true })).toHaveAttribute('href', '/docs/typescript-sdk#webhooks');
+    await expect(main.getByRole('link', { name: pt ? 'Falar com a FloFi no X' : 'Contact FloFi on X' })).toHaveAttribute('href', 'https://x.com/FloFi_xyz');
+    await noOverflow(page);
+    await main.getByRole('link', { name: pt ? 'Ler o guia da API' : 'Read the API guide' }).click();
+    await expect(page).toHaveURL('/docs/developer-api');
+    await expect(page.locator('main')).toContainText('TEST_NETWORK_NOT_AVAILABLE');
+    const handoff = page.locator('section[aria-labelledby="strategy-to-handoff"]');
+    await expect(handoff).toContainText('base-sepolia');
+    await expect(handoff).toContainText('strategies.simulate');
+    await noOverflow(page);
+    await page.locator('main').getByRole('link', { name: /TypeScript/ }).last().click();
+    await expect(page).toHaveURL('/docs/typescript-sdk');
+    await expect(page.locator('section[aria-labelledby="webhooks"]')).toContainText('verifyWebhook');
+    await noOverflow(page);
+    await page.getByRole('navigation', { name: pt ? 'Navegação do rodapé' : 'Footer navigation' }).getByRole('link', { name: pt ? 'Para desenvolvedores' : 'For developers' }).click();
+    await expect(page).toHaveURL('/developers');
+  }
 });
 
 test('Docs: every guide in both languages, the sidebar search, the reading order and the links all resolve', async ({ page, request, baseURL }) => {

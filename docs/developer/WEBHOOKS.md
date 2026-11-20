@@ -4,6 +4,9 @@ FloFi tells your server when an approval or a shared execution changes, with sig
 [Standard Webhooks](https://www.standardwebhooks.com/). Webhooks are **notifications, never inputs**: no FloFi state depends on
 a delivery or on your response. A failing endpoint never blocks or alters an approval, a claim, a run or an API answer.
 
+Your deployment's operator enables the API. Use a sandbox key with the `webhooks` scope to register or delete an endpoint.
+A registered endpoint can receive events only when matching project activity generates them and the deployment dispatches them.
+
 ## Events
 
 | Type | When | `data` (beyond `approvalId`, `strategyId`, `workflowHash`) |
@@ -15,7 +18,8 @@ a delivery or on your response. A failing endpoint never blocks or alters an app
 | `execution.failed` | that run ended with an error, unreconciled | `executionId`, `status`, `errorCode` |
 | `execution.reconciled` | that run reconciled | `executionId`, `status`, `evidence {environment, outcome, bundleHash}` |
 
-`execution.*` events exist only while the end user shares this execution's status with your project (off by default). Payloads
+`execution.*` events exist only while the end user shares this execution's status with your project (off by default) at the time the event is generated.
+Previously queued events may still be delivered. Fetch the resource for its current share state and honor a resulting `404`. Payloads
 carry ids, states and evidence facts: never a wallet address, a secret, calldata or a transaction.
 
 ## Envelope
@@ -53,9 +57,8 @@ With the SDK:
 import { verifyWebhook, FloFiWebhookError } from '@defi-workflow-engine/developer-sdk';
 
 try {
-  const event = await verifyWebhook({ payload: rawBody, headers: request.headers, secret: process.env.FLOFI_WEBHOOK_SECRET! });
-  if (await alreadyProcessed(event.id)) return respond(200);
-  await handle(event);
+  const event = await verifyWebhook({ payload: await request.text(), headers: request.headers, secret: process.env.FLOFI_WEBHOOK_SECRET! });
+  await enqueueOnce(event.id, event); // Your durable queue must enforce uniqueness on event.id.
   return respond(200);
 } catch (error) {
   if (error instanceof FloFiWebhookError) return respond(400); // WEBHOOK_SIGNATURE_INVALID, WEBHOOK_TIMESTAMP_OUT_OF_RANGE, …

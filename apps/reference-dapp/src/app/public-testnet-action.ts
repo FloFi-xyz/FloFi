@@ -7,6 +7,7 @@ import { createPublicTestnetService, publicRecordingEnabled,
   type PublicTestnetService, type PublicRun, type PublicBegin, type PublicGaslessBegin } from '../server/public-testnet-service';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../server/public-testnet-rpc';
 import { cloudFlow, cloudFlowMode } from './cloud-flow';
+import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
   type CatalogNetworkRuntime } from '../server/catalog-networks';
 
@@ -121,28 +122,37 @@ export async function publicStatus(executionId: string): Promise<PublicResult<Pu
 
   });
 }
-export async function publicAvailability(): Promise<boolean> {
-  return withFlightAccess(async () => {
+async function testnetSwapAvailable(): Promise<boolean> {
   const cloud = await cloudFlowMode('base-sepolia-swap');
   if (cloud) return cloud === 'live';
   return publicRecordingEnabled(process.env);
-
-  });
+}
+export async function publicAvailability(): Promise<boolean> {
+  return withFlightAccess(testnetSwapAvailable);
 }
 /** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
-export async function catalogSwapAvailability(chain: string): Promise<boolean> {
-  return withFlightAccess(async () => {
+async function catalogSwapAvailable(chain: string): Promise<boolean> {
   const network = catalogNetworkOfChain(chain);
   if (!network) return false;
   const cloud = await cloudFlowMode(network.flows.swap);
   if (cloud) return cloud !== 'off';
   const dir = process.env[network.journalEnv];
   return localCatalogNetworkMode(network, process.env) !== 'off' && Boolean(dir && isAbsolute(dir));
-
+}
+export async function catalogSwapAvailability(chain: string): Promise<boolean> {
+  return withFlightAccess(() => catalogSwapAvailable(chain));
+}
+/** One authorized read for the swap store's initial view, with each network's own deployment checks. */
+export async function publicSwapAvailability(): Promise<{ testnet: boolean; catalogs: Record<string, boolean> }> {
+  return withFlightAccess(async () => {
+    const [testnet, catalogs] = await Promise.all([
+      testnetSwapAvailable(),
+      Promise.all(CATALOG_NETWORK_IDENTITIES.map(async ({ chain }) => [chain, await catalogSwapAvailable(chain)] as const)),
+    ]);
+    return { testnet, catalogs: Object.fromEntries(catalogs) };
   });
 }
 /** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet swaps (live or the MOCKED loopback harness). */
 export async function robinhoodSwapAvailability(): Promise<boolean> {
-  return withFlightAccess(async () => { return catalogSwapAvailability(CATALOG_NETWORKS.robinhood.chain);
-  });
+  return withFlightAccess(() => catalogSwapAvailable(CATALOG_NETWORKS.robinhood.chain));
 }

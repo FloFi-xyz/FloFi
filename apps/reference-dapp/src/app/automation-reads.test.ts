@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** BUILD-FLOFI-LIVE-CANVAS-WALLET-ACTIVITY-001: Automations reads share one in-flight GET; a read after a mutation never joins an earlier one. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationSnapshot } from './automation-reads';
 
@@ -18,19 +17,21 @@ describe('automationSnapshot', () => {
     release(answer({ availability: { enabled: true, code: null }, overview: null }));
     expect(await a).toBe(await b);
   });
-  it('a fresh read (after a mutation) never joins an earlier one, and later readers join the fresh one', async () => {
+  it('a session-scoped read is abortable and never joins a shared read for the same address', async () => {
     const pending: ((r: Response) => void)[] = [];
     const fetch = vi.fn(() => new Promise<Response>(resolve => { pending.push(resolve); }));
     vi.stubGlobal('fetch', fetch);
     const before = automationSnapshot(owner, 'overview');
-    const fresh = automationSnapshot(owner, 'overview', true);
-    const after = automationSnapshot(owner, 'overview');
+    const controller = new AbortController();
+    const fresh = automationSnapshot(owner, 'overview', controller.signal);
     expect(fetch).toHaveBeenCalledTimes(2);
     pending[0]!(answer({ availability: null, overview: { ok: true, value: 'old' } }));
     pending[1]!(answer({ availability: null, overview: { ok: true, value: 'new' } }));
     expect((await before).overview).toEqual({ ok: true, value: 'old' });
     expect((await fresh).overview).toEqual({ ok: true, value: 'new' });
-    expect(await after).toBe(await fresh);
+    const [, options] = fetch.mock.calls[1] as unknown as [string, RequestInit];
+    controller.abort();
+    expect(options.signal?.aborted).toBe(true);
     expect(fetch.mock.calls.every(call => (call as unknown[])[0] === '/api/automations/overview?scope=overview')).toBe(true);
   });
   it('availability alone is asked without any wallet', async () => {

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog } from '@defi-workflow-engine/action-registry';
 import { PublicTestnetProvider, usePublicTestnet } from './public-testnet-store';
-import { catalogSwapAvailability, publicAvailability, publicBegin, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
+import { publicSwapAvailability, publicBegin, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
 import type { PublicRun } from '../server/public-testnet-service';
 import type { Workflow } from '../domain/initial-workflow';
 import { initialEditor } from '../domain/editor';
@@ -19,8 +19,8 @@ vi.mock('react', async original => ({ ...await original<typeof import('react')>(
 const f = vi.hoisted(() => ({ workflow: null as Workflow | null, restore: vi.fn(), session: vi.fn() }));
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, runtimeWorkflow: f.workflow, restoreWorkflow: f.restore }) }));
 vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({ session: f.session }), injected: () => null }));
-vi.mock('../app/public-testnet-action', () => ({ publicAvailability: vi.fn(), publicStatus: vi.fn(), publicPrepare: vi.fn(), publicRefresh: vi.fn(),
-  publicReview: vi.fn(), publicBegin: vi.fn(), publicObserve: vi.fn(), publicReport: vi.fn(), catalogSwapAvailability: vi.fn(async () => false) }));
+vi.mock('../app/public-testnet-action', () => ({ publicSwapAvailability: vi.fn(), publicStatus: vi.fn(), publicPrepare: vi.fn(), publicRefresh: vi.fn(),
+  publicReview: vi.fn(), publicBegin: vi.fn(), publicObserve: vi.fn(), publicReport: vi.fn() }));
 let host: HookHarness, store: ReturnType<typeof usePublicTestnet>, run: PublicRun;
 function Probe() { store = usePublicTestnet(); return null; }
 const read = () => host.render(() => renderToStaticMarkup(<PublicTestnetProvider><Probe/></PublicTestnetProvider>));
@@ -33,8 +33,7 @@ beforeEach(() => {
   run = { ...fixture.source.state.run!, attempts: [{ step: 'approval', state: 'CONFIRMED' }] } as unknown as PublicRun;
   const values = new Map([['gryloo:public-testnet-execution-id', run.quote.executionId]]);
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
-  vi.mocked(publicAvailability).mockResolvedValue(true);
-  vi.mocked(catalogSwapAvailability).mockResolvedValue(false);
+  vi.mocked(publicSwapAvailability).mockResolvedValue({ testnet: true, catalogs: {} });
   vi.mocked(publicStatus).mockResolvedValue({ ok: true, value: run });
   vi.mocked(publicRefresh).mockResolvedValue({ ok: true, value: { ...run, quote: { ...run.quote, manifestHash: 'fresh-manifest' }, reviewedManifestHash: null } });
   vi.mocked(publicReview).mockImplementation(async () => ({ ok: true, value: { ...run, reviewedManifestHash: 'fresh-manifest' } }));
@@ -42,13 +41,29 @@ beforeEach(() => {
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); resetNetworkCatalogs(); });
 
 describe('public swap durable recovery and explicit fresh Review', () => {
+  it('loads all swap availability in one action and preserves individual network results', async () => {
+    vi.mocked(publicSwapAvailability).mockResolvedValue({ testnet: false, catalogs: { 'eip155:8453': true, 'eip155:42161': false } });
+    read(); await settle(); read();
+    expect(publicSwapAvailability).toHaveBeenCalledOnce();
+    expect(store.availabilityKnown).toBe(true);
+    expect(store.chainAvailable('eip155:8453')).toBe(true);
+    expect(store.chainAvailable('eip155:42161')).toBe(false);
+    expect(store.chainAvailable('eip155:84532')).toBe(false);
+  });
+  it('keeps availability closed if the authorized read fails', async () => {
+    vi.mocked(publicSwapAvailability).mockRejectedValue(new Error('BETA_SIGN_IN_REQUIRED'));
+    read(); await settle();
+    expect(store.availabilityKnown).toBe(true);
+    expect(store.chainAvailable('eip155:8453')).toBe(false);
+    expect(store.chainAvailable('eip155:84532')).toBe(false);
+  });
   it('prepares Arbitrum through the existing server action with the connected owner, without requesting a signature', async () => {
     const composed = composeStrategy({ action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' });
     if (!composed.ok) throw Error(composed.code);
     const workflow = composed.workflow as PublicRun['workflow'];
     f.workflow = workflow as Workflow;
     vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
-    vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
+    vi.mocked(publicSwapAvailability).mockResolvedValue({ testnet: true, catalogs: { 'eip155:42161': true, 'eip155:4663': true } });
     f.session.mockResolvedValue({ account: '0x1111111111111111111111111111111111111111', chainId: '0xa4b1' });
     vi.mocked(publicPrepare).mockResolvedValue({ ok: true, value: { ...run, workflow, quote: { ...run.quote, chainId: 42161 } } });
     read(); await settle(); store.simulate(); await settle();
@@ -61,7 +76,7 @@ describe('public swap durable recovery and explicit fresh Review', () => {
     const original = composed.workflow as Workflow;
     f.workflow = original;
     vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
-    vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
+    vi.mocked(publicSwapAvailability).mockResolvedValue({ testnet: true, catalogs: { 'eip155:42161': true, 'eip155:4663': true } });
     f.session.mockResolvedValue({ account: '0x1111111111111111111111111111111111111111', chainId: '0xa4b1' });
     const delayed = deferred<Awaited<ReturnType<typeof publicPrepare>>>();
     vi.mocked(publicPrepare).mockReturnValueOnce(delayed.promise);
@@ -90,7 +105,7 @@ describe('public swap durable recovery and explicit fresh Review', () => {
     const account = '0x1111111111111111111111111111111111111111';
     f.workflow = forward;
     vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
-    vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
+    vi.mocked(publicSwapAvailability).mockResolvedValue({ testnet: true, catalogs: { 'eip155:42161': true, 'eip155:4663': true } });
     f.session.mockResolvedValue({ account, chainId: '0x1237' });
     vi.mocked(publicPrepare).mockResolvedValueOnce({ ok: true, value: { ...run, attempts: [], workflow: buy.workflow as PublicRun['workflow'], quote: { ...run.quote, chainId: 4663 } } });
     read(); await settle(); store.simulate(); await settle();

@@ -12,15 +12,17 @@ export type { AutomationSnapshot };
 /** Codes after which this deployment genuinely does not serve automations ("Coming soon"); any other refusal is temporary. */
 export const AUTOMATIONS_OFF: ReadonlySet<string> = new Set(['AUTOMATIONS_NOT_ENABLED', 'AUTOMATION_CONFIGURATION_INVALID']);
 const inflight = new Map<string, Promise<AutomationSnapshot>>();
-/** `fresh`: never join a read that started earlier (after a mutation, an earlier read may predate it); later readers join this one instead. */
-export function automationSnapshot(owner: WorkflowOwner | null, scope: 'all' | 'overview' | 'availability' = 'all', fresh = false): Promise<AutomationSnapshot> {
+export function automationSnapshot(owner: WorkflowOwner | null, scope: 'all' | 'overview' | 'availability' = 'all', signal?: AbortSignal): Promise<AutomationSnapshot> {
   // Availability names nobody: no wallet is sent with it.
   const reader = scope === 'availability' ? null : owner;
   const key = `${scope}|${reader ? `${reader.namespace}:${reader.address}` : ''}`;
-  const shared = inflight.get(key);
-  if (shared && !fresh) return shared;
+  // A caller managing a session-specific read must never join a request started under previous credentials.
+  const shared = signal ? undefined : inflight.get(key);
+  if (shared) return shared;
   // Bounded: a stalled read ends (the route's own budget is 60 s), so the page shows Retry instead of loading forever.
-  const request = fetch(`/api/automations/overview${scope === 'all' ? '' : `?scope=${scope}`}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(65_000),
+  const timeout = AbortSignal.timeout(65_000);
+  const request = fetch(`/api/automations/overview${scope === 'all' ? '' : `?scope=${scope}`}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin',
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     headers: reader ? { 'x-flofi-account': reader.address } : {} })
     .then(async response => {
       const body = await response.json().catch(() => ({})) as { ok?: unknown; value?: unknown; code?: unknown };
@@ -28,6 +30,6 @@ export function automationSnapshot(owner: WorkflowOwner | null, scope: 'all' | '
       return body.value as AutomationSnapshot;
     })
     .finally(() => { if (inflight.get(key) === request) inflight.delete(key); });
-  inflight.set(key, request);
+  if (!signal) inflight.set(key, request);
   return request;
 }
