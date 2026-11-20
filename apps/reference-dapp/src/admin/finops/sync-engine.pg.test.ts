@@ -318,6 +318,23 @@ describe('autonomous Financial Sync on disposable PostgreSQL', () => {
     expect(await worker.runOnce()).toBe(true);
     expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_FORBIDDEN', active: false,
       coverage: [{ period: historical, quality: 'PARTIAL', meterCount: 1 }] });
+    // Any later answer from the provider proves the credential again and clears the refusal: an accepted export...
+    failure = 'FINOPS_PROVIDER_FORBIDDEN';
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_FORBIDDEN' });
+    const accepted = engine(h.tenantId, [target('circleci', async () => ({ kind: 'WAIT', checkpoint: 'accepted-export', retryAfterMs: 0 }))]);
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await accepted.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: null, active: true });
+    // ...or a historical result, even an empty one.
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: 'FINOPS_PROVIDER_FORBIDDEN' });
+    failure = 'FINOPS_PROVIDER_NO_COST_DATA';
+    await plan(h, 'circleci', [{ period: historical, historical: true }]);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await state()).toMatchObject({ errorCode: null, coverage: [{ period: historical, quality: 'PARTIAL', meterCount: 1 }] });
   });
 
   it('records an abandoned historical lease as its gap without replacing the provider status', async () => {

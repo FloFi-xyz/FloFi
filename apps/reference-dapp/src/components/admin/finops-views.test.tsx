@@ -150,6 +150,13 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     expect(page('2026-11-19T20:00:00.000Z')).toContain('Latest sync failed 2026-11-19 20:00 UTC');
   });
 
+  it('shows no English quality code in the Portuguese AI and workflow sections', () => {
+    for (const section of [FinopsAi, FinopsWorkflow]) {
+      const page = html(createElement(section, { report: report(), language: 'PT' }));
+      expect(page).not.toMatch(/\b(?:PARTIAL|UNAVAILABLE|VERIFIED|ESTIMATED)\b/);
+    }
+  });
+
   it('keeps the recorded AI cost visible when AI telemetry cannot be read', () => {
     const ai = html(createElement(FinopsAi, { report: { ...report(), ai: null }, language: 'EN' }));
     expect(ai).toContain('AI telemetry is temporarily unavailable.');

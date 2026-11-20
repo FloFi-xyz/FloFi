@@ -36,7 +36,8 @@ export type FinancialProviderState = {
 const MAX_ATTEMPTS = 5, MAX_POLLS = 20;
 const SECOND = 1_000, MINUTE = 60 * SECOND, HOUR = 60 * MINUTE;
 const providerFailure = 'FINOPS_PROVIDER_UNAVAILABLE';
-/** Refusals of the credential itself, not of a period: they replace the provider's status even when a historical period met them. */
+/** Refusals of the credential itself, not of a period: they replace the provider's status even when a historical period met them, and any
+ * later answer from the provider (a historical result or an accepted export) clears them. */
 const ACCOUNT_CODES: ReadonlySet<string> = new Set(['FINOPS_PROVIDER_AUTH_REQUIRED', 'FINOPS_PROVIDER_ACCESS_DENIED', 'FINOPS_PROVIDER_FORBIDDEN',
   'FINOPS_PROVIDER_NOT_ENTITLED', 'FINOPS_PROVIDER_SCOPE_MISMATCH', 'FINOPS_PROVIDER_NOT_CONFIGURED']);
 /** A coverage gap never replaces a snapshot that holds data. */
@@ -164,8 +165,9 @@ export async function waitFinancialSync(host: AdminHost, lease: FinancialSyncLea
     if (!await owned(tx, host, lease)) return false;
     await tx.query(`UPDATE finops_sync_jobs SET lease_token = NULL, lease_expires_at = NULL,
       next_run_at = clock_timestamp() + $3 * interval '1 millisecond', checkpoint = $4, polls = polls + 1,
-      last_error = CASE WHEN $5 THEN last_error ELSE NULL END
-      WHERE tenant_id = $1 AND provider = $2`, [host.tenantId, lease.id, Math.max(10 * SECOND, Math.min(30 * MINUTE, retryAfterMs)), checkpoint, lease.plans[0]?.historical === true]);
+      last_error = CASE WHEN NOT $5 OR last_error = ANY($6::text[]) THEN NULL ELSE last_error END
+      WHERE tenant_id = $1 AND provider = $2`, [host.tenantId, lease.id, Math.max(10 * SECOND, Math.min(30 * MINUTE, retryAfterMs)), checkpoint,
+      lease.plans[0]?.historical === true, [...ACCOUNT_CODES]]);
     return true;
   });
 }
@@ -222,10 +224,12 @@ export async function finishFinancialSync(host: AdminHost, lease: FinancialSyncL
       cycle_started_at = CASE WHEN $5 THEN NULL ELSE cycle_started_at END,
       last_success_at = CASE WHEN $6 THEN clock_timestamp() ELSE last_success_at END,
       historical_review_at = CASE WHEN $7 THEN clock_timestamp() ELSE historical_review_at END,
-      last_error = CASE WHEN $6 THEN NULL WHEN NOT $8 AND NOT $9 THEN 'FINOPS_PROVIDER_NO_DATA' ELSE last_error END
+      last_error = CASE WHEN $6 THEN NULL WHEN NOT $8 AND NOT $9 THEN 'FINOPS_PROVIDER_NO_DATA'
+        WHEN last_error = ANY($10::text[]) THEN NULL ELSE last_error END
       WHERE tenant_id = $1 AND provider = $2`,
     [host.tenantId, lease.id, completedCycle ? hours : 0, JSON.stringify(remaining), completedCycle,
-      !planned.historical && result.coverage !== 'UNAVAILABLE', historicalComplete, result.coverage !== 'UNAVAILABLE', planned.historical]);
+      !planned.historical && result.coverage !== 'UNAVAILABLE', historicalComplete, result.coverage !== 'UNAVAILABLE', planned.historical,
+      [...ACCOUNT_CODES]]);
     return true;
   });
 }
