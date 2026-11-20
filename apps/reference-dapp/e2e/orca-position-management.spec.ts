@@ -220,7 +220,9 @@ test('Dashboard → 50% withdrawal, then Close position: verified Orca facts, a 
     await expect(fact(page, held, W.principal)).toHaveText('0.662063 SOL + 15.9555 USDC');
     await expect(position(page, held)).toContainText(W.delegated);
     await expect(position(page, held).getByRole('group')).toHaveCount(0);
-    await expect(position(page, held).getByRole('button')).toHaveCount(0);
+    // A delegated position offers no action: its only control is the exact-value disclosure of a shortened amount (never an operation).
+    await expect(position(page, held).locator('button:not(.token-amount-short)')).toHaveCount(0);
+    await expect(position(page, held).getByRole('button', { name: /^(Collect|Remove|Close|Coletar|Remover|Fechar)/ })).toHaveCount(0);
 
     await actions(page, managed).getByRole('button', { name: W.remove, exact: true }).click();
     const share = position(page, managed).getByRole('group', { name: W.share, exact: true });
@@ -328,7 +330,9 @@ test('PT-BR: Coletar taxas — Simulate runs the fees-only collection; the owner
     await expect(actions(page, managed, 'PT').getByRole('button')).toHaveText([W.collect, W.remove, W.close]);
     await expect(position(page, managed)).toContainText(W.note);
     await expect(position(page, held)).toContainText(W.delegated);
-    await expect(position(page, held).getByRole('button')).toHaveCount(0);
+    // A delegated position offers no action: its only control is the exact-value disclosure of a shortened amount (never an operation).
+    await expect(position(page, held).locator('button:not(.token-amount-short)')).toHaveCount(0);
+    await expect(position(page, held).getByRole('button', { name: /^(Collect|Remove|Close|Coletar|Remover|Fechar)/ })).toHaveCount(0);
 
     await actions(page, managed, 'PT').getByRole('button', { name: W.collect, exact: true }).click();
     await prepared(page, 'COLLECT', 'PT');
