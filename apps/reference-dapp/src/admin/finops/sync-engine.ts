@@ -81,7 +81,8 @@ function validateResult(id: FinancialProviderId, requested: Period, result: Fina
   const meters = result.meters.map(({ scope, environment, project, service, metric, unit, amount, period, basis }) => {
     if (!allowed.includes(scope) || !FINOPS_ENVIRONMENTS.includes(environment) || !within(requested, period)
       || ![project, service, metric, unit].every(part => typeof part === 'string' && SAFE_DIMENSION.test(part) && !IDENTITY_SHAPED.test(part))
-      || typeof amount !== 'string' || !SAFE_AMOUNT.test(amount) || basis !== undefined && !SAFE_DIMENSION.test(basis)) throw invalid();
+      || typeof amount !== 'string' || !SAFE_AMOUNT.test(amount)
+      || basis !== undefined && (typeof basis !== 'string' || !SAFE_DIMENSION.test(basis) || IDENTITY_SHAPED.test(basis))) throw invalid();
     const key = JSON.stringify([scope, environment, project, service, metric, unit, period.from, period.to, basis]);
     if (facts.has(key)) throw invalid();
     facts.add(key);

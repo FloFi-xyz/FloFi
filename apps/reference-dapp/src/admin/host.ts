@@ -4,7 +4,7 @@
  * database and tenant as the Railway API and worker in production, the embedded runtime's pool elsewhere). No new database secret and
  * no Railway change. Missing or stale storage fails closed with a closed code.
  */
-import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import { SchemaCompatibilityError, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { platformStateHost } from '../server/platform-state-host.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -15,6 +15,7 @@ export async function adminHost(env: Env): Promise<AdminHost | { readonly code: 
   catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message === 'DATABASE_URL_REQUIRED') return { code: 'ADMIN_STORE_NOT_CONFIGURED' };
+    if (error instanceof SchemaCompatibilityError && error.state === 'unavailable') return { code: 'ADMIN_STORE_UNAVAILABLE' };
     if (message === 'SCHEMA_NOT_MIGRATED' || message === 'MIGRATION_HISTORY_MISMATCH') return { code: 'ADMIN_SCHEMA_NOT_CURRENT' };
     return { code: 'ADMIN_STORE_UNAVAILABLE' };
   }

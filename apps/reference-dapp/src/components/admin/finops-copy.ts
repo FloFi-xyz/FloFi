@@ -2,6 +2,56 @@
 import type { Language } from '../../i18n/language';
 
 const portuguese: Readonly<Record<string, string>> = {
+  'Approx. {0}': 'Aprox. {0}',
+  'BRL conversion unavailable': 'Conversão para BRL indisponível',
+  'USD with indicative BRL conversion': 'USD com conversão indicativa para BRL',
+  'Exchange-rate reference': 'Referência cambial',
+  'Banco Central do Brasil · PTAX sell rate': 'Banco Central do Brasil · PTAX de venda',
+  'Current indicative rate': 'Taxa indicativa atual',
+  'Selected period reference': 'Referência do período selecionado',
+  'Previous month reference': 'Referência do mês anterior',
+  'Historical period closing rate': 'Taxa histórica de fechamento do período',
+  'Closed days of the current month': 'Dias encerrados do mês atual',
+  'No closed UTC days in the current month': 'Nenhum dia UTC encerrado no mês atual',
+  '{0} BRL per USD · {1} (São Paulo time)': '{0} BRL por USD · {1} (horário de São Paulo)',
+  'Reference through {0}': 'Referência até {0}',
+  'USD is the accounting currency. BRL uses the latest published PTAX through the day before the report for open periods, or through the last day of a closed period. The quote may precede that cutoff by up to four days.': 'USD é a moeda contábil. Para períodos abertos, o valor em BRL usa a última PTAX publicada até o dia anterior ao relatório. Para períodos fechados, usa a última PTAX até o último dia do período. A cotação pode anteceder essa data em até quatro dias.',
+  'Recorded expenses include invoices and provider-reported costs. Usage and estimates are shown separately from recorded expenses.': 'Despesas registradas incluem faturas e custos informados pelos provedores. Uso e estimativas aparecem separadamente das despesas registradas.',
+  'Gas payer evidence': 'Evidências de pagamento de gas',
+  'Mainnet batch and user-operation groups use their last recorded update. Single-step and standalone transactions are outside this coverage. FloFi gas expense requires a reconciled debit or invoice.': 'Lotes e grupos de operações do usuário na mainnet usam a última atualização registrada. Transações de etapa única e independentes ficam fora da cobertura. Uma despesa de gas da FloFi exige débito conciliado ou fatura.',
+  'Paid natively by the user': 'Pago pelo usuário na moeda nativa',
+  'Native gas fronted by a third-party relayer': 'Gas nativo adiantado por um relayer externo',
+  'FloFi sponsorship observed': 'Patrocínio da FloFi observado',
+  'Gas payer evidence unresolved': 'Evidência de pagamento de gas pendente',
+  'The current plan or account does not provide access to this billing export.': 'O plano ou a conta atual não dá acesso a esta exportação de cobrança.',
+  'The provider denied this credential access to billing data.': 'O provedor negou acesso aos dados de cobrança para esta credencial.',
+  'Not entitled': 'Acesso indisponível no plano',
+  'Review billing access or record an invoice.': 'Verifique o acesso aos dados de cobrança ou registre uma fatura.',
+  'Verify the provider scope on the worker before retrying.': 'Verifique o escopo do provedor no worker antes de tentar novamente.',
+  'Usage synchronized': 'Uso sincronizado',
+  'Billing credential configured': 'Credencial de cobrança configurada',
+  'Import a scoped invoice': 'Importar fatura do escopo',
+  'Use a Console organization with workspace-level Admin Analytics access.': 'Use uma organização do Console com acesso administrativo às análises por workspace.',
+  'Confirm project-attributed FOCUS export access with the Vercel team owner.': 'Confirme o acesso à exportação FOCUS por projeto com o responsável pela equipe Vercel.',
+  'Verify consumption access for the inventoried Neon projects.': 'Verifique o acesso ao consumo dos projetos Neon inventariados.',
+  'Confirm exact FloFi app scope and plan access before enabling usage.': 'Confirme o escopo exato do aplicativo FloFi e o acesso do plano antes de ativar o uso.',
+  'Record a scoped invoice when a charge is available.': 'Registre uma fatura do escopo quando houver cobrança.',
+  'Recorded costs over the same number of closed UTC days at the start of each month.': 'Custos registrados pelo mesmo número de dias completos em UTC no início de cada mês.',
+  'Use an organization admin credential for project credit exports.': 'Use uma credencial de administrador da organização para exportar créditos do projeto.',
+  'Use a billing credential with Costs and Usage access for the FloFi project.': 'Use uma credencial de cobrança com acesso a custos e uso do projeto FloFi.',
+  'Verify billing access to the FloFi project with the Railway workspace owner.': 'Verifique o acesso à cobrança do projeto FloFi com o responsável pelo workspace Railway.',
+  'VERIFIED': 'VERIFICADO',
+  'PROVIDER_REPORTED': 'INFORMADO PELO PROVEDOR',
+  'METERED': 'MEDIDO',
+  'ESTIMATED': 'ESTIMADO',
+  'PARTIAL': 'PARCIAL',
+  'UNAVAILABLE': 'INDISPONÍVEL',
+  infrastructure: 'Infraestrutura',
+  ai: 'IA',
+  external: 'Serviços externos',
+  sponsorship: 'Patrocínio',
+  relayer: 'Relayer',
+  operating: 'Operação',
   'FinOps & Unit Economics': 'FinOps e economia unitária',
   'Infrastructure costs and unit economics': 'Custos de infraestrutura e economia unitária',
   'Consolidated costs, operating indicators, and financial assumptions for FloFi.': 'Custos consolidados, indicadores operacionais e premissas financeiras da FloFi.',
@@ -275,6 +325,7 @@ const portuguese: Readonly<Record<string, string>> = {
   'The provider returned data FloFi could not verify.': 'O provedor retornou dados que a FloFi não conseguiu verificar.',
   'The provider returned data for a project outside FloFi. Nothing was recorded.': 'O provedor retornou dados de um projeto fora da FloFi. Nada foi registrado.',
   'The provider export did not finish in time. FloFi will start a new export at the next synchronization.': 'A exportação do provedor não terminou a tempo. A FloFi iniciará uma nova exportação na próxima sincronização.',
+  'The provider export failed. FloFi will start a new export at the next synchronization.': 'A exportação do provedor falhou. A FloFi iniciará uma nova exportação na próxima sincronização.',
   'A newer synchronization for this period finished first. Refresh to view its records.': 'Uma sincronização mais recente deste período terminou antes. Atualize para ver os registros.',
   'The financial records could not be saved. FloFi will retry.': 'Não foi possível salvar os registros financeiros. A FloFi tentará novamente.',
   'A conflicting record overlaps this period. Review the manual records.': 'Há um registro conflitante neste período. Revise os registros manuais.',
@@ -286,6 +337,9 @@ const portuguese: Readonly<Record<string, string>> = {
   '{0} synchronized periods': '{0} períodos sincronizados',
   '{0} usage measurements': '{0} medições de uso',
   'No synchronized period': 'Nenhum período sincronizado',
+  '1 synchronized period': '1 período sincronizado',
+  '1 usage measurement': '1 medição de uso',
+  'Too many synchronization requests. Wait a minute before trying again.': 'Muitas solicitações de sincronização. Aguarde um minuto antes de tentar novamente.',
   'Provider': 'Provedor',
   'Connection': 'Conexão',
   'Current-period cost': 'Custo do período atual',
@@ -365,26 +419,34 @@ export function finopsCopy(language: Language) {
     const translated = language === 'PT' && Object.hasOwn(portuguese, text) ? portuguese[text]! : text;
     return translated.replace(/\{(\d+)\}/g, (key, index: string) => String(values[Number(index)] ?? key));
   };
-  const money = (value: string | number | null, currency = 'USD') => value === null ? copy('Unavailable')
-    : Number(value).toLocaleString(locale, { style: 'currency', currency, maximumFractionDigits: 8 });
-  const count = (value: number) => value.toLocaleString(locale, { maximumFractionDigits: 2 });
+  // Intl.NumberFormat accepts exact decimal strings as mathematical values on the supported runtime.
+  const formatMoney = (value: string | number, currency: string, options: Intl.NumberFormatOptions) =>
+    new Intl.NumberFormat(locale, { style: 'currency', currency, ...options }).format(value as number | `${number}`);
+  // Two decimals, except that a non-zero amount never reads as zero: below half a cent (below a cent for unit costs) it keeps four
+  // significant digits, so a converted BRL figure never stands beside a USD figure shown as $0.00.
+  const money = (value: string | number | null, currency = 'USD', unit = false) => {
+    if (value === null) return copy('Unavailable');
+    const magnitude = Math.abs(Number(value));
+    return formatMoney(value, currency, magnitude > 0 && magnitude < (unit ? 0.01 : 0.005)
+      ? { maximumSignificantDigits: 4 }
+      : { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const count = (value: number, maximumFractionDigits = 2) => value.toLocaleString(locale, { maximumFractionDigits });
   const time = (value: string | null) => value ? value.slice(0, 16).replace('T', ' ') + ' UTC' : copy('Unavailable');
   /**
    * BUILD-FLOFI-UX-EDITOR-FINOPS-001: a recorded amount for reading on the dashboard — never a changed number. From 1 unit up it shows cents; below
    * that it keeps four decimals (0.17676573 → $0.1768), and below one cent four significant digits (0.000012345 → $0.00001235), so a real
-   * micro-cost never reads as $0.00. A
-   * missing value stays "Unavailable", never zero. `exact` is the recorded value at full precision (`money`), for the tooltip and the detailed
-   * tables; exports and the investor report keep `money` itself.
+   * micro-cost never reads as $0.00. A missing value stays "Unavailable". `exact` is the recorded value for the tooltip.
    */
   const display = (value: string | number | null, currency = 'USD'): { readonly text: string; readonly exact: string } => {
     if (value === null) return { text: copy('Unavailable'), exact: copy('Unavailable') };
-    const number = Number(value), exact = money(value, currency);
+    const number = Number(value), exact = formatMoney(value, currency, { minimumFractionDigits: 2, maximumFractionDigits: 24 });
     if (!Number.isFinite(number)) return { text: exact, exact };
     const magnitude = Math.abs(number);
     const text = magnitude === 0 || magnitude >= 1
-      ? number.toLocaleString(locale, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      : magnitude >= 0.01 ? number.toLocaleString(locale, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 4 })
-      : number.toLocaleString(locale, { style: 'currency', currency, minimumSignificantDigits: 1, maximumSignificantDigits: 4 });
+      ? money(value, currency)
+      : magnitude >= 0.01 ? formatMoney(value, currency, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+      : money(value, currency, true);
     return { text, exact };
   };
   return { copy, money, count, time, display };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReactNode } from 'react';
 import { copilotSettingsView } from '../../../admin/copilot-view';
-import { healthReport } from '../../../admin/health';
+import { healthReport, schemaHealthLabels, schemaHealthy } from '../../../admin/health';
 import { copilotStatus, healthAttention, healthStatus } from '../../../admin/attention';
 import { AttentionList, Section, StatusTile, TechnicalDetails } from '../../../components/admin/admin-ui';
 import { adminPage } from '../../../admin/page-context';
@@ -27,7 +27,8 @@ export default async function AdminHealthPage() {
       <div className="admin-tiles">
         <StatusTile label="Services and queues" tone={overall.tone} value={overall.value} detail={overall.detail} href="#admin-health-services"/>
         <StatusTile label="AI Copilot" tone={ai.tone} value={ai.value} detail={ai.detail} href="/admin/ai-settings"/>
-        <StatusTile label="Recent incidents" tone={report.incidents.length ? 'warn' : 'ok'} value={report.incidents.length ? fmt(report.incidents.length) : 'None'}
+        <StatusTile label="Recent incidents" tone={!report.incidentsAvailable || report.incidents.length ? 'warn' : 'ok'}
+          value={!report.incidentsAvailable ? 'Unavailable' : report.incidents.length ? fmt(report.incidents.length) : 'None'}
           detail="Stopped work items" href="#admin-incidents"/>
       </div>
       <div style={{ marginTop: 14 }}><AttentionList items={[...healthAttention(report), ...ai.items]} allClear="All checks passed. Nothing needs your attention."/></div>
@@ -37,10 +38,10 @@ export default async function AdminHealthPage() {
       <section className="admin-card"><header><h2>Database</h2></header>
         {database.ok ? <table className="admin-table"><tbody>
           <tr><th scope="row">Reachable</th><td><Status ok warn={database.value.latencyMs > 500}>{database.value.latencyMs} ms</Status></td></tr>
-          <tr><th scope="row">Schema</th><td><Status ok={database.value.appliedMigrations === database.value.shippedMigrations}>
-            {database.value.appliedMigrations} of {database.value.shippedMigrations} shipped migrations</Status></td></tr>
+          <tr><th scope="row">Schema</th><td><Status ok={schemaHealthy(database.value.schema)}>{schemaHealthLabels[database.value.schema]}</Status>
+            <span className="admin-diff"> · Database {database.value.appliedMigrations} · Build {database.value.shippedMigrations}</span></td></tr>
           <tr><th scope="row">Tenant</th><td><code>{database.value.tenantId}</code></td></tr>
-        </tbody></table> : <Status ok={false}>{database.code}</Status>}
+        </tbody></table> : <Status ok={false}>{schemaHealthLabels.unavailable}</Status>}
       </section>
       <section className="admin-card"><header><h2>Backend API (Railway)</h2></header>
         {api.readiness === null ? <p className="admin-note">This deployment runs flows in-process, so there is no separate backend API to check.</p>
@@ -104,8 +105,9 @@ export default async function AdminHealthPage() {
         {copilot.activeCode ? <TechnicalDetails><p>Stored version code: <code>{copilot.activeCode}</code></p></TechnicalDetails> : null}
       </section>
     </div>
-    <section className="admin-card" id="admin-incidents"><header><h2>Recent incidents</h2><p>Work items that exhausted their observation budget (never resubmitted)</p></header>
-      {report.incidents.length === 0 ? <p className="admin-empty">No dead work items.</p> : <div className="admin-table-wrap"><table className="admin-table">
+    <section className="admin-card" id="admin-incidents"><header><h2>Recent incidents</h2><p>Most recent stopped work items and their recorded error codes</p></header>
+      {!report.incidentsAvailable ? <p role="status">Stopped-work history is unavailable.</p>
+        : report.incidents.length === 0 ? <p className="admin-empty">No stopped work items.</p> : <div className="admin-table-wrap"><table className="admin-table">
         <thead><tr><th>When (UTC)</th><th>Work kind</th><th>Code</th><th>Run</th></tr></thead>
         <tbody>{report.incidents.map((incident, i) => <tr key={i}><td className="admin-mono">{incident.at.replace('T', ' ').slice(0, 16)}</td><td><code>{incident.kind}</code></td>
           <td><code>{incident.code}</code></td><td>{incident.run ? <code>{incident.run}…</code> : '—'}</td></tr>)}</tbody>

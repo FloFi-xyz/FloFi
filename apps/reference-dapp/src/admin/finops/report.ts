@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AdminHost } from '../host.ts';
 import { readAiEconomics } from './ai.ts';
-import { addDays, consolidate, decimal, difference, divide, endOfMonth, FINOPS_SCOPES, finopsPeriod, isoDay, perUnit,
+import { addDays, consolidate, decimal, difference, divide, endOfMonth, entryQuality, FINOPS_SCOPES, finopsPeriod, isoDay, perUnit,
   periodDays, selectRecords, totalsFor, unavailable, units, type Indicator, type LedgerRecord, type Period } from './economics.ts';
 import { ledgerMissing, readLedger, readSyncState } from './store.ts';
 import { writeFinopsCsv } from './csv.ts';
 import { modelScenario, SCENARIO_FIELDS, SCENARIO_PRESETS, scenarioKeys, type Scenario } from './scenario.ts';
 import { readFinancialMeters, readFinancialSync } from './sync-store.ts';
+import { financialConnection } from './sync-labels.ts';
+import { brlOf, PTAX_REFERENCE, PTAX_SOURCE, type ReportFx, type ReportFxSet } from './report-fx.ts';
 
 const FINANCIAL_PROVIDER_NAMES = { neon: 'Neon', railway: 'Railway', vercel: 'Vercel', openai: 'OpenAI', anthropic: 'Anthropic',
   circleci: 'CircleCI', alchemy: 'Alchemy', resend: 'Resend' } as const;
@@ -85,18 +87,63 @@ async function readExecutionEconomics(host: AdminHost, period: Period) {
   });
 }
 
+/** Keep observed payer counts in the operations report. They cannot establish a FloFi invoice or debit. */
+async function readGasPayerEvidence(host: AdminHost, period: Period) {
+  return host.db.transaction(async tx => {
+    await tx.query("SET LOCAL statement_timeout = '4000'");
+    const { rows: [row] } = await tx.query<{ ownerNative: number; frontedByRelayer: number; sponsorObserved: number; unresolved: number }>(`WITH facts AS (
+      SELECT g.namespace, g.fee_payer, g.outcome->'gasPaid' AS gas
+      FROM workflow_run_groups g JOIN workflow_runs r ON r.tenant_id = g.tenant_id AND r.run_id = g.run_id
+      JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
+      WHERE g.tenant_id = $1 AND g.updated_at >= $2 AND g.updated_at < $3
+        AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS'
+        AND (g.submission IS NOT NULL OR jsonb_typeof(g.outcome->'gasPaid') = 'object')
+    ), classified AS (
+      SELECT CASE
+        WHEN gas->>'amount' ~ '^[1-9][0-9]{0,77}$'
+          AND (namespace = 'eip155' AND gas->>'unit' = 'wei' AND gas->>'source' IN ('RECEIPT', 'USER_OPERATION_EVENT')
+            AND gas->>'payer' ~* '^0x[0-9a-f]{40}$'
+          OR namespace = 'solana' AND gas->>'unit' = 'lamports' AND gas->>'source' = 'SOLANA_META'
+            AND gas->>'payer' ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+        THEN CASE
+          WHEN gas->'sponsored' = 'true'::jsonb AND NOT (gas ? 'paidInToken') AND gas->>'source' = 'USER_OPERATION_EVENT'
+            AND lower(gas->>'payer') <> fee_payer THEN 'sponsor'
+          WHEN NOT (gas ? 'sponsored') AND gas->'paidInToken'->>'amount' ~ '^(0|[1-9][0-9]{0,77})$' AND
+            CASE gas->'paidInToken'->>'mechanism'
+              WHEN 'CIRCLE_USDC_PAYMASTER' THEN gas->>'source' = 'USER_OPERATION_EVENT' AND lower(gas->>'payer') <> fee_payer
+              WHEN 'PIMLICO_KORA_SPL_FEE' THEN gas->>'source' = 'SOLANA_META' AND gas->>'payer' <> fee_payer
+              WHEN 'ZEROX_GASLESS_SWAP' THEN gas->>'source' = 'RECEIPT' AND lower(gas->>'payer') <> fee_payer
+            END THEN 'relayer'
+          WHEN NOT (gas ? 'sponsored' OR gas ? 'paidInToken') AND
+            CASE WHEN namespace = 'eip155' THEN lower(gas->>'payer') ELSE gas->>'payer' END = fee_payer THEN 'owner'
+        END
+      END AS payer FROM facts
+    )
+    SELECT count(*) FILTER (WHERE payer = 'owner')::int AS "ownerNative",
+      count(*) FILTER (WHERE payer = 'relayer')::int AS "frontedByRelayer",
+      count(*) FILTER (WHERE payer = 'sponsor')::int AS "sponsorObserved",
+      count(*) FILTER (WHERE payer IS NULL)::int AS unresolved FROM classified`,
+    [host.tenantId, period.from + 'T00:00:00Z', period.to + 'T00:00:00Z']);
+    return row!;
+  });
+}
+
 type Ledger = { status: 'available' | 'missing' | 'failed'; records: LedgerRecord[]; complete: boolean };
 async function readCosts(host: AdminHost, period: Period): Promise<Ledger> {
   try { return { status: 'available', ...await readLedger(host, period) }; }
   catch (error) { return { status: ledgerMissing(error) ? 'missing' : 'failed', records: [], complete: false }; }
 }
+const recordedAmount = (row: LedgerRecord) => row.source === 'INVOICE' || row.source === 'ACCOUNTING' || row.source === 'PROVIDER_COST';
+const reportedCosts = (ledger: Ledger, period: Period) => totalsFor(ledger.records.filter(recordedAmount), period, ledger.complete);
 const samePeriod = (a: Period, b: Period) => a.from === b.from && a.to === b.to;
+const comparableDays = (closed: Period, previous: Period) => Math.min(periodDays(closed), periodDays(previous));
 const allExpenses = (scope: (typeof FINOPS_SCOPES)[keyof typeof FINOPS_SCOPES]) => scope.category !== 'revenue';
 export const REPORT_LIMITATIONS = [
   'Reports use UTC periods with an inclusive first day and an exclusive end boundary. Indivisible billing records spanning a boundary are excluded.',
   'Higher-authority invoice records supersede overlapping provider reports and estimates for the same service and environment. No estimate is added to a bill.',
   'An invoice or accounting record also supersedes overlapping provider-reported costs of the same service in any environment. Provider-reported costs are shown as PROVIDER_REPORTED until reconciled.',
   'Missing provider coverage or exchange rates are unavailable. A partial total is the sum of covered amounts. Currency conversion uses the entry’s documented USD per unit rate.',
+  'Recorded expenses include invoices and provider-reported costs. Usage and estimates are shown separately from recorded expenses.',
   'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
   'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
   'The infrastructure-adjusted result excludes corporate expenses outside the available ledger and is an operating indicator.',
@@ -105,14 +152,15 @@ export const REPORT_LIMITATIONS = [
 export async function readFinopsReport(host: AdminHost, period: Period, now: Date) {
   const current = finopsPeriod(now, {}).period, previous = finopsPeriod(now, { range: 'previous' }).period;
   const ledgerPromise = readCosts(host, period);
-  const [ledger, month, prior, ai, workflow, sync, integrations, executions] = await Promise.all([
+  const [ledger, month, prior, ai, workflow, sync, integrations, executions, gas] = await Promise.all([
     ledgerPromise, samePeriod(current, period) ? ledgerPromise : readCosts(host, current),
     samePeriod(previous, period) ? ledgerPromise : readCosts(host, previous), readAiEconomics(host, period, now).catch(() => null),
     readWorkflowEconomics(host, period).catch(() => null), readSyncState(host).catch(() => []),
     readFinancialSync(host).catch(() => ({ available: false, providers: [] })),
     readExecutionEconomics(host, period).catch(() => null),
+    readGasPayerEvidence(host, period).catch(() => null),
   ]);
-  const totals = totalsFor(ledger.records, period, ledger.complete);
+  const totals = reportedCosts(ledger, period);
   const billing = 'Net scoped provider costs and reconciled invoices, including applicable credits, discounts and taxes.';
   const overall = consolidate(totals, allExpenses, billing);
   const infrastructure = consolidate(totals, scope => allExpenses(scope) && !scope.variable, billing);
@@ -126,7 +174,7 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
     : difference(revenue, overall, 'Reconciled revenue less identified variable, fixed and shared operating costs.');
   const closed = { from: current.from, to: isoDay(now) };
   const elapsed = periodDays(closed);
-  const knownClosed = consolidate(totalsFor(month.records, closed, month.complete), allExpenses, billing);
+  const knownClosed = consolidate(reportedCosts(month, closed), allExpenses, billing);
   const projectionSource = 'Covered closed UTC days in this month × calendar-month days ÷ elapsed days. Expenses are assumed to accrue linearly.';
   const projected = elapsed > 0 && knownClosed.amount !== null
     ? { amount: decimal(divide(units(knownClosed.amount) * BigInt(periodDays({ from: current.from, to: endOfMonth(now) })), BigInt(elapsed))),
@@ -141,32 +189,40 @@ export async function readFinopsReport(host: AdminHost, period: Period, now: Dat
   const breakEvenRevenue = overall.amount !== null && overall.quality !== 'PARTIAL'
     ? { ...overall, source: 'Reconciled revenue required to cover the selected period’s recorded operating costs.' }
     : unavailable('Complete cost coverage is required to calculate an actual break-even revenue target.');
-  const monthToDate = consolidate(totalsFor(month.records, current, month.complete), allExpenses, billing);
-  const previousMonth = consolidate(totalsFor(prior.records, previous, prior.complete), allExpenses, billing);
+  const currentTotals = reportedCosts(month, current);
+  const monthToDate = consolidate(currentTotals, allExpenses, billing);
+  const previousMonth = consolidate(reportedCosts(prior, previous), allExpenses, billing);
   // Like for like: this month's closed days against the same number of days at the start of the previous month.
-  const priorSameDays = { from: previous.from, to: addDays(previous.from, Math.min(elapsed, periodDays(previous))) };
-  const previousToDate = consolidate(totalsFor(prior.records, priorSameDays, prior.complete), allExpenses, billing);
-  const monthlyChange = elapsed > 0 && knownClosed.quality !== 'PARTIAL' && previousToDate.quality !== 'PARTIAL'
-    ? difference(knownClosed, previousToDate, 'Closed days of this month less the same number of days of the previous month.')
+  const matchedDays = comparableDays(closed, previous);
+  const thisSameDays = { from: closed.from, to: addDays(closed.from, matchedDays) };
+  const priorSameDays = { from: previous.from, to: addDays(previous.from, matchedDays) };
+  const currentToDate = samePeriod(closed, thisSameDays) ? knownClosed : consolidate(reportedCosts(month, thisSameDays), allExpenses, billing);
+  const previousToDate = consolidate(reportedCosts(prior, priorSameDays), allExpenses, billing);
+  const monthlyChange = matchedDays > 0 && currentToDate.amount !== null && previousToDate.amount !== null
+      && currentToDate.quality !== 'PARTIAL' && previousToDate.quality !== 'PARTIAL'
+    ? difference(currentToDate, previousToDate, 'Recorded costs over the same number of closed UTC days at the start of each month.')
     : unavailable('Comparable periods with complete coverage are required for a monthly cost change.');
   const metrics = { monthToDate, previousMonth, monthlyChange, projected, aiCost, variable, infrastructure, overall, costPerActive, costPerChat, costPerSimulated,
     costPerCompleted, directSimulated, directCompleted, revenue, contribution, result, breakEvenRevenue };
-  const currentTotals = totalsFor(month.records, current, month.complete);
   const providerRows = await Promise.all(integrations.providers.map(async provider => {
     // Alchemy reports compute units only; its cost cell is the whole RPC scope (any RPC invoice), labelled as such.
     const name = provider.id === 'alchemy' ? 'Alchemy (RPC providers total)' : FINANCIAL_PROVIDER_NAMES[provider.id];
     const cost = consolidate(currentTotals, scope => scope.provider === (provider.id === 'alchemy' ? 'RPC providers' : FINANCIAL_PROVIDER_NAMES[provider.id]), billing);
     const overlapping = provider.coverage.filter(coverage => coverage.period.from < period.to && coverage.period.to > period.from).slice(0, 3);
-    const meters = (await Promise.all(overlapping.map(coverage => readFinancialMeters(host, provider.id, coverage.period.from).catch(() => [])))).flat();
+    const meters = (await Promise.all(overlapping.map(async coverage => {
+      const measurements = await readFinancialMeters(host, provider.id, coverage.period.from).catch(() => []);
+      return measurements.map(meter => ({ ...meter, collectedAt: coverage.collectedAt }));
+    }))).flat();
     // A selected period can intersect a provider's monthly aggregate without
     // containing it. Include only meters whose whole period fits.
-    return { ...provider, name, cost, meters: meters.filter(meter => meter.period.from >= period.from && meter.period.to <= period.to) };
+    return { ...provider, name, cost, connection: financialConnection(provider, cost.amount, now),
+      meters: meters.filter(meter => meter.period.from >= period.from && meter.period.to <= period.to) };
   }));
   const selected = new Set((selectRecords(ledger.records)).map(record => record.id));
-  return { period, current, previous, metrics, ai, workflow, sync, integrations: { ...integrations, providers: providerRows }, executions, totals, ledger: { status: ledger.status, complete: ledger.complete,
+  return { period, current, previous, metrics, ai, workflow, sync, integrations: { ...integrations, providers: providerRows }, executions, gas, totals, ledger: { status: ledger.status, complete: ledger.complete,
     records: ledger.records.map(row => ({ ...row, selected: selected.has(row.id) })) } };
 }
-export type FinopsReport = Awaited<ReturnType<typeof readFinopsReport>>;
+export type FinopsReport = Awaited<ReturnType<typeof readFinopsReport>> & { readonly fx?: ReportFxSet };
 export type MetricId = keyof FinopsReport['metrics'];
 export const METRIC_LABELS: Record<MetricId, string> = {
   monthToDate: 'Month-to-date infrastructure and operating costs', previousMonth: 'Previous month infrastructure and operating costs',
@@ -182,21 +238,44 @@ export const METRIC_LABELS: Record<MetricId, string> = {
 export function metricPeriod(report: FinopsReport, key: MetricId): Period {
   if (key === 'monthToDate') return report.current;
   if (key === 'previousMonth') return report.previous;
+  if (key === 'monthlyChange') {
+    const closed = { from: report.current.from, to: addDays(report.current.to, -1) };
+    return { from: closed.from, to: addDays(closed.from, comparableDays(closed, report.previous)) };
+  }
   if (key === 'projected') return { from: report.current.from, to: endOfMonth(new Date(report.current.from + 'T00:00:00Z')) };
   return report.period;
+}
+
+export function metricFx(fx: ReportFxSet | undefined, key: MetricId) {
+  if (key === 'monthToDate' || key === 'projected' || key === 'monthlyChange') return fx?.indicative;
+  return key === 'previousMonth' ? fx?.previous : fx?.selected;
 }
 
 export function investorCsv(report: FinopsReport, scenario: Scenario | null = null): string {
   const { ai, workflow, period } = report;
   const rows: (string | number | null)[][] = [['section','indicator','start_utc','end_utc_exclusive','amount','unit','quality','source','freshness_utc']];
+  function addBrl(section: string, label: string, range: Period, amount: string | null, quality: string, fx: ReportFx | undefined) {
+    if (!fx) return;
+    const brl = brlOf(amount, fx);
+    rows.push([section + ' translation', label, range.from, range.to, brl, 'BRL', brl === null ? 'UNAVAILABLE' : quality,
+      `${PTAX_SOURCE} · indicative presentation · ${fx.policy} · as of ${fx.asOf} · ${fx.quote?.rate ?? 'unavailable'} BRL/USD · ${fx.quote?.publishedAt ?? 'unavailable'} America/Sao_Paulo · ${PTAX_REFERENCE}`, null]);
+  }
   for (const key of Object.keys(METRIC_LABELS) as MetricId[]) {
     const metric = report.metrics[key], range = metricPeriod(report, key);
     rows.push(['overview', METRIC_LABELS[key], range.from, range.to, metric.amount, 'USD', metric.quality, metric.source, null]);
+    addBrl('overview', METRIC_LABELS[key], range, metric.amount, metric.quality, metricFx(report.fx, key));
   }
   for (const total of report.totals) {
     const scope = FINOPS_SCOPES[total.id];
     rows.push(['providers', scope.provider + ' / ' + scope.name, period.from, period.to, total.amount, 'USD', total.quality,
       total.sources.join(', ') || 'No available scoped record', total.updatedAt]);
+    addBrl('providers', scope.provider + ' / ' + scope.name, period, total.amount, total.quality, report.fx?.selected);
+  }
+  for (const record of report.ledger.records) {
+    if (!record.selected || record.period.from < period.from || record.period.to > period.to) continue;
+    const section = recordedAmount(record) ? 'ledger originals' : 'ledger estimates and usage';
+    rows.push([section, record.scope + ' / ' + record.environment, record.period.from, record.period.to, record.net, record.currency, entryQuality(record),
+      [record.source, record.fxUsd ? `${record.fxUsd} USD per ${record.currency} · documented ledger FX rate` : ''].filter(Boolean).join(' · '), record.updatedAt]);
   }
   if (ai) {
     rows.push(['AI', 'Estimated list-price sample', period.from, period.to, ai.costEstimate.amount, 'USD', ai.costEstimate.quality, ai.costEstimate.source, ai.freshness]);
@@ -236,17 +315,25 @@ export function investorCsv(report: FinopsReport, scenario: Scenario | null = nu
   }
   if (report.executions) for (const [label, amount] of Object.entries(report.executions))
     rows.push(['executions', label, period.from, period.to, amount, 'count', 'PARTIAL', 'Durable mainnet execution records, separate from workflows', null]);
-  for (const provider of report.integrations.providers) for (const coverage of provider.coverage) {
-    if (coverage.period.from >= period.to || coverage.period.to <= period.from) continue;
-    rows.push(['financial integrations', provider.id, coverage.period.from, coverage.period.to, coverage.meterCount, 'metrics',
-      coverage.quality, coverage.limitations.join(', '), coverage.collectedAt]);
+  if (report.gas) for (const [label, amount] of Object.entries(report.gas))
+    rows.push(['gas payer evidence', label, period.from, period.to, amount, 'groups', 'PARTIAL', 'Recorded mainnet workflow groups, operational evidence only', null]);
+  for (const provider of report.integrations.providers) {
+    rows.push(['integration status', provider.id, period.from, period.to, null, null,
+      provider.connection,
+      provider.errorCode, provider.lastSuccess]);
+    for (const coverage of provider.coverage) {
+      if (coverage.period.from >= period.to || coverage.period.to <= period.from) continue;
+      rows.push(['financial integrations', provider.id, coverage.period.from, coverage.period.to, coverage.meterCount, 'metrics',
+        coverage.quality, coverage.limitations.join(', '), coverage.collectedAt]);
+    }
   }
   for (const provider of report.integrations.providers) for (const meter of provider.meters) {
     // Meters are detail, never additive: a USD meter repeats a provider cost row (or an estimate kept out of the totals).
     const money = meter.unit === 'USD', estimate = meter.metric.includes('estimate');
+    const qualifier = estimate ? 'Usage-based estimate. Exclude from costs. ' : money ? 'Detail of provider costs. Exclude from totals. ' : '';
     rows.push(['financial meters', provider.id + ' / ' + meter.service + ' / ' + meter.metric, meter.period.from, meter.period.to, meter.amount,
       meter.unit, estimate ? 'ESTIMATED' : money ? 'PROVIDER_REPORTED' : 'METERED',
-      (money ? 'Not additive: detail of provider costs. ' : '') + (meter.basis ?? 'Scoped provider usage API'), provider.lastSuccess]);
+      qualifier + (meter.basis ?? 'Scoped provider usage API'), meter.collectedAt]);
   }
   for (const limitation of REPORT_LIMITATIONS) rows.push(['methodology', limitation, period.from, period.to, null, null, null, null, null]);
   return writeFinopsCsv(rows);

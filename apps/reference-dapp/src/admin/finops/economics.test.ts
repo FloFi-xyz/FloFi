@@ -99,6 +99,7 @@ describe('FinOps periods and costs', () => {
     expect(difference(revenue, subtotal, 'margin')).toMatchObject({ amount: null, quality: 'UNAVAILABLE' });
     expect(difference(revenue, { ...subtotal, quality: 'VERIFIED' }, 'margin')).toMatchObject({ amount: '15', quality: 'VERIFIED' });
     expect(perUnit(subtotal, 4, 'subset', false)).toMatchObject({ amount: '2.5', quality: 'PARTIAL' });
+    expect(perUnit({ ...subtotal, amount: '0.00000001' }, 3, 'subset', false).amount).toBe('0.000000003333333333333333');
     expect(perUnit(subtotal, 0, 'no denominator', false)).toMatchObject({ amount: null, quality: 'UNAVAILABLE' });
   });
 });

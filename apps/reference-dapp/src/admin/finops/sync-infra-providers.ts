@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { addDays, contains, decimal, isoDay, periodDays, units, validDay, validateEntry, type Entry, type Period } from './economics.ts';
+import { addDays, contains, decimal, divide, isoDay, periodDays, units, validDay, validateEntry, type Entry, type Period } from './economics.ts';
 import type { FinancialSyncAdapter } from './sync-engine.ts';
 import type { FinancialMeter, FinancialSyncResult } from './sync-store.ts';
 import { financialJson, financialObject as record, requestFinancial } from './sync-transport.ts';
@@ -112,7 +112,12 @@ async function neonResources(input: ProviderRead, key: string, kind: 'projects' 
   }).toString();
   const items = new Map<string, NeonResource>(), seenCursors = new Set<string>();
   for (let page = 0; page < 4; page++) {
-    const result = neonPage(financialJson(await requestFinancial(url, { headers: bearer(key) }, input.fetch, input.signal, 750_000)), kind, input.period);
+    const raw = await requestFinancial(url, { headers: bearer(key) }, input.fetch, input.signal, 750_000).catch((cause: unknown) => {
+      // Consumption Metrics v2 returns 404 when the caller cannot access the org.
+      if (cause instanceof Error && cause.message === 'FINOPS_PROVIDER_NO_COST_DATA') throw new Error('FINOPS_PROVIDER_ACCESS_DENIED', { cause });
+      throw cause;
+    });
+    const result = neonPage(financialJson(raw), kind, input.period);
     for (const item of result.resources) {
       const id = item.project + ':' + (item.branch ?? '');
       if (items.has(id)) return invalid();
@@ -221,11 +226,13 @@ function railwayMeters(payload: unknown, period: Period): FinancialMeter[] {
   if (Array.isArray(payload.errors) && payload.errors.length) {
     const denied = payload.errors.some(e => record(e) && (record(e.extensions) && ['FORBIDDEN', 'UNAUTHENTICATED'].includes(String(e.extensions.code))
       || typeof e.message === 'string' && /unauthorized|not authorized|forbidden|permission denied|not authenticated/i.test(e.message)));
-    throw Error(denied ? 'FINOPS_PROVIDER_FORBIDDEN' : 'FINOPS_PROVIDER_RESPONSE_INVALID');
+    const limited = payload.errors.some(e => record(e) && typeof e.message === 'string' && /^Too many usage queries are running at once\./.test(e.message));
+    throw Error(denied ? 'FINOPS_PROVIDER_FORBIDDEN' : limited ? 'FINOPS_PROVIDER_RATE_LIMITED' : 'FINOPS_PROVIDER_RESPONSE_INVALID');
   }
   if (!record(payload.data) || !Array.isArray(payload.data.usage) || payload.data.usage.length > 10_000) return invalid();
   const meters: FinancialMeter[] = [];
-  const seen = new Set<string>(), estimates = new Map<string, { id: MeterId; cost: number }>();
+  const usageByMetric = new Map<string, { serviceId: keyof typeof RAILWAY_FINANCIAL_SERVICES; metric: RailwayMetric; usage: number }>();
+  const estimates = new Map<string, { id: MeterId; cost: number }>();
   for (const value of payload.data.usage as unknown[]) {
     if (!record(value) || !record(value.tags) || typeof value.measurement !== 'string') return invalid();
     const { serviceId, environmentId, projectId } = value.tags;
@@ -233,12 +240,15 @@ function railwayMeters(payload: unknown, period: Period): FinancialMeter[] {
         || !Object.hasOwn(RAILWAY_FINANCIAL_SERVICES, serviceId)) continue;
     if (!Object.hasOwn(RAILWAY_METRICS, value.measurement)) continue;
     const metric = value.measurement as RailwayMetric, key = serviceId + ':' + metric;
-    if (seen.has(key)) return invalid();
-    seen.add(key);
-    const [scope, service] = RAILWAY_FINANCIAL_SERVICES[serviceId as keyof typeof RAILWAY_FINANCIAL_SERVICES];
+    // The live Railway resolver emits additive fragments even with identical requested tags.
+    // Collapse them before creating the unique snapshot meter, retaining the exact production scope.
+    usageByMetric.set(key, { serviceId: serviceId as keyof typeof RAILWAY_FINANCIAL_SERVICES, metric,
+      usage: quantity((usageByMetric.get(key)?.usage ?? 0) + quantity(value.value)) });
+  }
+  for (const { serviceId, metric, usage } of usageByMetric.values()) {
+    const [scope, service] = RAILWAY_FINANCIAL_SERVICES[serviceId];
     const [unit, rate] = RAILWAY_METRICS[metric];
     const id: MeterId = { scope, service, project: RAILWAY_FINANCIAL_PROJECT, environment: 'production' };
-    const usage = quantity(value.value);
     meters.push(meter(id, period, metric, unit, usage));
     if (rate !== null) estimates.set(serviceId, { id, cost: (estimates.get(serviceId)?.cost ?? 0) + usage * rate });
   }
@@ -273,32 +283,55 @@ function vercelTags(value: unknown): Record<string, unknown> | null {
   const decoded = financialJson(value);
   return record(decoded) ? decoded : null;
 }
+
+/** Keep source precision until posting to the ledger's eight-decimal scale. */
+function vercelCost(value: unknown): bigint {
+  if (typeof value !== 'string') return invalid();
+  const match = /^(-?)(\d{1,10})(?:\.(\d{1,16}))?(?:[eE]([+-]?\d{1,2}))?$/.exec(value);
+  if (!match) return invalid();
+  const [, sign, whole, fraction = '', exponent = '0'] = match;
+  const scale = 16 - fraction.length + Number(exponent);
+  if (scale < 0 || scale > 25) return invalid();
+  const cost = BigInt(whole! + fraction) * 10n ** BigInt(scale);
+  if (cost >= 10n ** 26n) return invalid();
+  return sign === '-' ? -cost : cost;
+}
+const vercelLedgerAmount = (cost: bigint) => decimal(divide(cost, 100_000_000n));
+
 function vercelResult(raw: string, period: Period) {
   const rows = raw.split(/\r?\n/);
   if (rows.length > 30_000) return invalid();
   const daily = new Map<string, { currency: string; cost: bigint }>();
   const sums = new Map<string, { service: string; metric: string; unit: string; total: number }>();
+  const moneySums = new Map<string, { service: string; metric: string; total: bigint }>();
   const seen = new Set<string>();
   let sharedExcluded = false, estimatedExcluded = false, nonDailyExcluded = false;
   const add = (service: string, metric: string, unit: string, amount: number) => {
     const key = [service, metric, unit].join('|');
-    if (sums.size >= 300 && !sums.has(key)) return invalid();
+    if (sums.size + moneySums.size >= 300 && !sums.has(key)) return invalid();
     sums.set(key, { service, metric, unit, total: (sums.get(key)?.total ?? 0) + amount });
+  };
+  const addMoney = (service: string, metric: string, amount: bigint) => {
+    const key = [service, metric].join('|');
+    if (sums.size + moneySums.size >= 300 && !moneySums.has(key)) return invalid();
+    moneySums.set(key, { service, metric, total: (moneySums.get(key)?.total ?? 0n) + amount });
   };
   for (const line of rows) {
     if (!line.trim()) continue;
     if (line.length > 32_768) return invalid();
-    const row = financialJson(line);
+    // The documented format is a decimal string. Preserve numeric JSON tokens
+    // verbatim as well, using the pinned Node runtime's reviver source.
+    const row = financialJson(line, (key, value: unknown, context?: { source?: string }) =>
+      key === 'BilledCost' && typeof value === 'number' ? context?.source : value);
     if (!record(row)) return invalid();
     if (row.SubAccountId !== VERCEL_FINANCIAL_TEAM || vercelTags(row.Tags)?.ProjectId !== VERCEL_FINANCIAL_PROJECT) { sharedExcluded = true; continue; }
     const from = boundary(row.ChargePeriodStart), to = boundary(row.ChargePeriodEnd);
     if (to !== addDays(from, 1) || !contains(period, { from, to })) { nonDailyExcluded = true; continue; }
-    if (typeof row.BillingCurrency !== 'string' || !/^[A-Z]{3}$/.test(row.BillingCurrency)
-        || typeof row.BilledCost !== 'number' && (typeof row.BilledCost !== 'string' || !/^-?\d{1,10}(?:\.\d{1,16})?$/.test(row.BilledCost))) return invalid();
-    const value = Number(row.BilledCost), cost = units(amountString(value, true)), currency = row.BillingCurrency;
+    if (typeof row.BillingCurrency !== 'string' || !/^[A-Z]{3}$/.test(row.BillingCurrency)) return invalid();
+    const cost = vercelCost(row.BilledCost), currency = row.BillingCurrency;
     // The stream has no charge-ID field. A duplicate complete row is
     // ambiguous, so refuse the snapshot instead of recording it twice.
-    const identity = JSON.stringify(Object.keys(row).sort().map(key => [key, row[key]]));
+    const identity = JSON.stringify(Object.keys(row).sort().map(key => [key, key === 'BilledCost' ? cost.toString() : row[key]]));
     if (seen.has(identity)) return invalid();
     seen.add(identity);
     const service = providerLabel(row.ServiceName, 'Vercel');
@@ -312,22 +345,34 @@ function vercelResult(raw: string, period: Period) {
     }
     if (row.x_CostAttribution != null) {
       estimatedExcluded = true;
-      if (currency === 'USD' && ['calibrated_estimate', 'uncalibrated_estimate'].includes(String(row.x_CostAttribution))) add(service, 'allocated_cost_estimate', currency, value);
+      if (currency === 'USD' && ['calibrated_estimate', 'uncalibrated_estimate'].includes(String(row.x_CostAttribution))) addMoney(service, 'allocated_cost_estimate', cost);
       continue;
     }
     const prior = daily.get(from);
     if (prior && prior.currency !== currency) return invalid();
     daily.set(from, { currency, cost: (prior?.cost ?? 0n) + cost });
-    if (currency === 'USD') add(service, 'billed_cost', currency, value);
+    if (currency === 'USD') addMoney(service, 'billed_cost', cost);
   }
   const entries = [...daily].map(([start, day]) => validateEntry({ scope: 'vercel', environment: 'shared', start, end: addDays(start, 1),
-    source: 'PROVIDER_COST', reference: 'Vercel FOCUS v1.3 project-attributed BilledCost', currency: day.currency, net: decimal(day.cost), coverage: 'PARTIAL' }, true));
-  const meters = [...sums.values()].map(({ service, metric, unit, total }) => meter({ scope: 'vercel', project: VERCEL_FINANCIAL_PROJECT,
-    service, environment: 'shared' }, period, metric, unit, total));
+    source: 'PROVIDER_COST', reference: 'Vercel FOCUS v1.3 project-attributed BilledCost', currency: day.currency, net: vercelLedgerAmount(day.cost), coverage: 'PARTIAL' }, true));
+  const id = { scope: 'vercel', project: VERCEL_FINANCIAL_PROJECT, environment: 'shared' } as const;
+  const meters = [...sums.values()].map(({ service, metric, unit, total }) => meter({ ...id, service }, period, metric, unit, total));
+  for (const { service, metric, total } of moneySums.values()) {
+    meters.push({ ...id, service, period, metric, unit: 'USD', amount: vercelLedgerAmount(total) });
+  }
   return complete(entries, meters, ['VERCEL_PROJECT_FOCUS_ONLY',
     ...sharedExcluded ? ['VERCEL_UNALLOCATED_CHARGES_EXCLUDED'] : [],
     ...estimatedExcluded ? ['VERCEL_ESTIMATED_ALLOCATIONS_EXCLUDED'] : [],
     ...nonDailyExcluded ? ['VERCEL_NON_DAILY_CHARGES_EXCLUDED'] : []]);
+}
+
+function vercelNotFound(body: string) {
+  const payload = financialJson(body);
+  if (!record(payload) || !record(payload.error)) return 'FINOPS_PROVIDER_RESPONSE_INVALID';
+  const { code, message } = payload.error;
+  if (code === 'plan_not_found' || typeof message === 'string' && message.trim().toLowerCase() === 'plan not found') return 'FINOPS_PROVIDER_NOT_ENTITLED';
+  if (code === 'costs_not_found') return 'FINOPS_PROVIDER_NO_COST_DATA';
+  return 'FINOPS_PROVIDER_RESPONSE_INVALID';
 }
 
 const vercel: FinancialSyncAdapter = {
@@ -337,7 +382,7 @@ const vercel: FinancialSyncAdapter = {
     const key = required(input.env.FLOFI_FINOPS_VERCEL_BILLING_TOKEN);
     const url = new URL('https://api.vercel.com/v1/billing/charges');
     url.search = new URLSearchParams({ teamId: VERCEL_FINANCIAL_TEAM, from: dateTime(input.period.from), to: dateTime(input.period.to) }).toString();
-    const raw = await requestFinancial(url, { headers: bearer(key) }, input.fetch, input.signal, 3_000_000);
+    const raw = await requestFinancial(url, { headers: bearer(key) }, input.fetch, input.signal, 3_000_000, vercelNotFound);
     return vercelResult(raw, input.period);
   },
 };
@@ -355,7 +400,7 @@ async function alchemyWindow(input: ProviderRead, key: string, ids: readonly str
   const endpoint = new URL('https://admin-api.alchemy.com/v1/usage/time-series');
   const headers = { ...bearer(key), 'Content-Type': 'application/json' };
   const request = { startTime: dateTime(window.from), endTime: addDays(window.to, -1) + 'T23:59:59Z',
-    granularity: 'day', products: ['SUPERNODE_CU', 'SUPERNODE_ENHANCED_CU'], metrics: ['amount'], filters: { appIds: ids }, groupBy: ['app'] };
+    granularity: 'day', products: ['SUPERNODE_CU'], metrics: ['amount'], filters: { appIds: ids }, groupBy: ['app'] };
   const buckets = new Map<string, { id: MeterId; period: Period; amount: bigint }>();
   const cursors = new Set<string>();
   let cursor: string | null = null;
@@ -380,7 +425,7 @@ async function alchemyWindow(input: ProviderRead, key: string, ids: readonly str
       buckets.set(identity, { id, period, amount: (buckets.get(identity)?.amount ?? 0n) + units(row.amount) });
     }
     if (data.cursor == null) return [...buckets.values()].map(({ id, period, amount }) =>
-      ({ ...id, period, metric: 'compute_units', unit: 'CU', amount: decimal(amount) }));
+      ({ ...id, period, metric: 'compute_units', unit: 'CU', amount: decimal(amount), basis: 'SUPERNODE_CU' }));
     if (typeof data.cursor !== 'string' || !/^[!-~]{1,512}$/.test(data.cursor) || cursors.has(data.cursor)) return invalid();
     cursor = data.cursor;
     cursors.add(cursor);
@@ -394,6 +439,8 @@ const alchemy: FinancialSyncAdapter = {
   async read(input) {
     const config = alchemyConfig(input.env);
     if (!config) throw Error('FINOPS_PROVIDER_NOT_CONFIGURED');
+    // The Free plan does not provide the app breakdown needed to attribute CUs.
+    if (config.lookbackDays === 1) throw Error('FINOPS_PROVIDER_NOT_ENTITLED');
     const today = isoDay(new Date()), cutoff = addDays(today, -config.lookbackDays);
     const from = input.period.from < cutoff ? cutoff : input.period.from;
     const to = input.period.to > today ? today : input.period.to;

@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, schemaCompatibility, SHIPPED_MIGRATIONS, type Database,
+import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, schemaCompatibility, schemaCompatibilityState, SHIPPED_MIGRATIONS, type Database,
   type ForwardCompatibilityCertificate, type MigrationIdentity } from '../src/index.js';
 import * as baseline from './baseline/migrations-fa7816b.js';
 
@@ -125,6 +125,39 @@ describe('BUILD-DB-COMPAT-001 forward-compatibility manifest', () => {
 });
 
 describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
+  it('classifies each FinOps-era certificate prefix and keeps the legacy refusal messages', async () => {
+    const shipped = SHIPPED_MIGRATIONS.slice(0, 28);
+    const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
+    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31]);
+    expect(schemaCompatibilityState(shipped, shipped)).toBe('exact');
+    for (const [index, migration] of certificate.migrations.entries()) {
+      const ahead = [...shipped, ...certificate.migrations.slice(0, index + 1)];
+      expect(schemaCompatibilityState(ahead, shipped)).toBe('certified-ahead');
+      await expect(assertSchemaCompatible(fakeLedger(ahead), shipped)).resolves.toMatchObject({ version: migration.version, application: 28 });
+    }
+    const ahead = [...shipped, ...certificate.migrations];
+    const last = ahead.at(-1)!;
+    const cases = [
+      { ledger: shipped.slice(0, -1), state: 'behind', message: 'SCHEMA_NOT_MIGRATED' },
+      { ledger: [...ahead, { version: 32, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [...ahead.slice(0, -1), edit(last, { sha256: 'a'.repeat(64) })], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [edit(shipped[0]!, { name: 'edited' }), ...ahead.slice(1)], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [...shipped, last], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
+    ] as const;
+    for (const { ledger, state, message } of cases) {
+      expect(schemaCompatibilityState(ledger, shipped)).toBe(state);
+      await expect(assertSchemaCompatible(fakeLedger(ledger), shipped)).rejects.toMatchObject({ message, state });
+    }
+  });
+
+  it('distinguishes a missing ledger from a database outage without replacing the legacy error or cause', async () => {
+    for (const [pgCode, state] of [['42P01', 'behind'], ['57P01', 'unavailable']] as const) {
+      const cause = Object.assign(new Error('database probe failed'), { code: pgCode });
+      const db = { query: async () => { throw cause; } };
+      await expect(assertSchemaCompatible(db, SHIPPED_MIGRATIONS)).rejects.toMatchObject({ message: 'SCHEMA_NOT_MIGRATED', state, cause });
+    }
+  });
+
   it('accepts the exact history and a certified newer one; refuses behind, tampered, unknown and inconsistent histories', () => {
     expect(schemaCompatibility(PREVIOUS, PREVIOUS)).toEqual({ version: 11, application: 11, forward: [] });
     expect(schemaCompatibility([...PREVIOUS, V12], PREVIOUS)).toEqual({ version: 12, application: 11, forward: [V12] });

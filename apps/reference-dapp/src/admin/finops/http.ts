@@ -5,6 +5,7 @@ import { parseFinopsCsv } from './csv.ts';
 import { beginBillingSync, FinopsConflictError, FinopsSupersededError, ledgerMissing, writeLedger } from './store.ts';
 import { configuredBillingScopes, fetchBillingEntries } from './providers.ts';
 import { investorCsv, readFinopsReport } from './report.ts';
+import { readReportFx } from './report-fx.ts';
 import { parseScenario } from './scenario.ts';
 import { isFinancialProviderId, queueFinancialSync, readFinancialSync } from './sync-store.ts';
 
@@ -67,7 +68,7 @@ export async function handleFinopsImport(request: Request, options: Options = {}
   }
 }
 
-export async function handleFinopsExport(request: Request, options: AdminHttpOptions = {}) {
+export async function handleFinopsExport(request: Request, options: Options = {}) {
   const allowed = await adminMutation(request, options, 'read');
   if (allowed instanceof Response) return allowed;
   const { context, request: base } = allowed, body = await readJsonObject(request);
@@ -79,8 +80,9 @@ export async function handleFinopsExport(request: Request, options: AdminHttpOpt
     ? parseScenario(rawScenario as Record<string, unknown>) : null;
   if (rawScenario !== undefined && !scenario) return failed(400, 'FINOPS_SCENARIO_INVALID');
   try {
-    const report = await readFinopsReport(base.host, filter.period, base.now);
-    const csv = investorCsv(report, scenario);
+    const [report, fx] = await Promise.all([readFinopsReport(base.host, filter.period, base.now),
+      readReportFx(filter.period, base.now, options.fetch)]);
+    const csv = investorCsv({ ...report, fx }, scenario);
     await base.store.audit({ actor: context.principal.principalId, kind: 'ADMIN_FINOPS_EXPORTED', outcome: 'OK', target: 'finops',
       detail: { from: filter.period.from, through: filter.period.to, scenario: scenario !== null } });
     return new Response(csv, { status: 200, headers: {

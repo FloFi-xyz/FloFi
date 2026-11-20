@@ -518,8 +518,8 @@ logged, and never sent anywhere except the provider's fixed HTTPS endpoint. Requ
 [SCHEMA-COMPATIBILITY.md §22](SCHEMA-COMPATIBILITY.md#22-certificate-0030_finops_sync)); before activation the worker loop stays idle and
 Admin reports "awaiting database activation". The worker logs `finops.worker_enabled` (provider ids, cadence), `finops.worker_ineligible`
 (tenant mismatch) or `finops.worker_disabled` (load failure, closed code). Unset credentials leave that provider "Not configured"; Resend has
-no authoritative usage API and stays "Manual records only". Memory headroom: one provider read at a time holds at most about 50 MB of
-response data (CircleCI: up to six 8 MB CSV files), parsed on the worker's event loop.
+no authoritative usage API and stays "Manual records only". The worker reads one provider at a time. CircleCI exports can contain up to 32
+parts, retrieved four at a time with up to 8 MB per part and 100 MB of decoded response data per export. Parsed rows and deduplication also use memory.
 
 | Variable | Purpose / minimum permission | Secret | Where | Prod | Default / when missing |
 | --- | --- | --- | --- | --- | --- |
@@ -532,7 +532,7 @@ response data (CircleCI: up to six 8 MB CSV files), parsed on the worker's event
 | `FLOFI_FINOPS_OPENAI_ADMIN_KEY`, `FLOFI_FINOPS_OPENAI_PROJECT_ID` | OpenAI **Admin** key (organization Costs + Usage read) and the FloFi `proj_…` id; existing PR #215 variables (Vercel reads them only for the legacy manual OpenAI sync shown before schema 30) | **yes** / no | worker (Vercel before schema 30) | optional | OpenAI not configured |
 | `FLOFI_FINOPS_ANTHROPIC_ADMIN_KEY`, `FLOFI_FINOPS_ANTHROPIC_WORKSPACE_ID` | Anthropic **Admin** key (or `read:analytics` key) for the Usage and Cost Analytics API; the FloFi `wrkspc_…` workspace. API products only | **yes** / no | worker | optional | Anthropic not configured |
 | `FLOFI_FINOPS_CIRCLECI_BILLING_TOKEN` | CircleCI personal token of an organization admin (Usage Export API; 10 exports per hour per org) | **yes** | worker | optional | CircleCI not configured |
-| `FLOFI_FINOPS_ALCHEMY_USAGE_KEY`, `FLOFI_FINOPS_ALCHEMY_APP_IDS`, `FLOFI_FINOPS_ALCHEMY_LOOKBACK_DAYS` | Alchemy Admin API access key with `ADMIN_USAGE_READ`, up to 10 FloFi app ids, plan lookback `1`/`7`/`90` | **yes** / no / no | worker | optional | Alchemy not configured / 7 |
+| `FLOFI_FINOPS_ALCHEMY_USAGE_KEY`, `FLOFI_FINOPS_ALCHEMY_APP_IDS`, `FLOFI_FINOPS_ALCHEMY_LOOKBACK_DAYS` | Alchemy Admin API access key with `ADMIN_USAGE_READ`, up to 10 attributable FloFi app IDs, eligible plan lookback `7` or `90` days. The one-day Free setting has no verified per-app export access and reports unavailable. | **yes** / no / no | worker | optional | Alchemy not configured / 7 |
 
 Settlement reads (P0, same build): Universal bridge native deliveries through a contract (RelayRouter) need a read path that serves
 `trace_transaction` or `debug_traceTransaction` (callTracer). The public Base/Arbitrum endpoints refuse both, so at least one of the

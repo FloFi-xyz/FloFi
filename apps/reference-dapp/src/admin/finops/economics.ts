@@ -105,9 +105,13 @@ export function units(value: string): bigint {
   return (BigInt(whole!) * SCALE + BigInt(fraction.padEnd(8, '0'))) * (value.startsWith('-') ? -1n : 1n);
 }
 export function decimal(value: bigint): string {
-  const positive = value < 0n ? -value : value;
-  const fraction = (positive % SCALE).toString().padStart(8, '0').replace(/0+$/, '');
-  return (value < 0n ? '-' : '') + String(positive / SCALE) + (fraction ? '.' + fraction : '');
+  return scaledDecimal(value, 8);
+}
+export function scaledDecimal(value: bigint, places: number): string {
+  if (places === 0) return String(value);
+  const positive = (value < 0n ? -value : value).toString().padStart(places + 1, '0');
+  const fraction = positive.slice(-places).replace(/0+$/, '');
+  return (value < 0n ? '-' : '') + positive.slice(0, -places) + (fraction ? '.' + fraction : '');
 }
 export function divide(numerator: bigint, denominator: bigint): bigint {
   const magnitude = numerator < 0n ? -numerator : numerator;
@@ -222,7 +226,8 @@ const COMPLETE_QUALITIES: readonly Quality[] = ['VERIFIED', 'PROVIDER_REPORTED',
 export const unavailable = (source: string): Indicator => ({ amount: null, quality: 'UNAVAILABLE', source });
 export function perUnit(total: Indicator, count: number, source: string, completeDenominator: boolean): Indicator {
   return total.amount === null || !Number.isSafeInteger(count) || count <= 0 ? unavailable(source)
-    : { amount: decimal(divide(units(total.amount), BigInt(count))), quality: completeDenominator ? total.quality : 'PARTIAL', source };
+    : { amount: scaledDecimal(divide(units(total.amount) * 10n ** 16n, BigInt(count)), 24),
+      quality: completeDenominator ? total.quality : 'PARTIAL', source };
 }
 export function difference(revenue: Indicator, costs: Indicator, source: string): Indicator {
   // A margin on incomplete expenses would bias the result, so require both sides.

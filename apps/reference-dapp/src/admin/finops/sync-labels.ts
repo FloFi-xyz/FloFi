@@ -36,6 +36,8 @@ export const FINANCIAL_SYNC_ERROR_LABELS: Readonly<Record<string, string>> = Obj
   FINOPS_SYNC_SCHEMA_REQUIRED: 'Automatic synchronization is awaiting database activation.',
   FINOPS_PROVIDER_NOT_CONFIGURED: 'The provider credential is not configured on the worker.',
   FINOPS_PROVIDER_FORBIDDEN: 'The provider refused access. Check the billing permission.',
+  FINOPS_PROVIDER_NOT_ENTITLED: 'The current plan or account does not provide access to this billing export.',
+  FINOPS_PROVIDER_ACCESS_DENIED: 'The provider denied this credential access to billing data.',
   FINOPS_PROVIDER_RATE_LIMITED: 'The provider limited requests. FloFi will retry.',
   FINOPS_PROVIDER_RETRY_LATER: 'The provider asked FloFi to wait. FloFi will retry.',
   FINOPS_PROVIDER_UNAVAILABLE: 'The provider was unavailable. FloFi will retry.',
@@ -44,6 +46,7 @@ export const FINANCIAL_SYNC_ERROR_LABELS: Readonly<Record<string, string>> = Obj
   FINOPS_PROVIDER_SCOPE_MISMATCH: 'The provider returned data for a project outside FloFi. Nothing was recorded.',
   FINOPS_PROVIDER_NO_DATA: 'The provider returned no data for this period.',
   FINOPS_PROVIDER_POLL_LIMIT: 'The provider export did not finish in time. FloFi will start a new export at the next synchronization.',
+  FINOPS_PROVIDER_EXPORT_FAILED: 'The provider export failed. FloFi will start a new export at the next synchronization.',
   FINOPS_SYNC_SUPERSEDED: 'A newer synchronization for this period finished first. Refresh to view its records.',
   FINOPS_SYNC_STORE_UNAVAILABLE: 'The financial records could not be saved. FloFi will retry.',
   FINOPS_PERIOD_CONFLICT: 'A conflicting record overlaps this period. Review the manual records.',
@@ -53,10 +56,44 @@ export const FINANCIAL_SYNC_ERROR_LABELS: Readonly<Record<string, string>> = Obj
 /** Providers with no authoritative billing or usage API: their costs are recorded through manual invoice imports only. */
 export const MANUAL_ONLY_FINANCIAL_PROVIDERS: readonly string[] = Object.freeze(['resend']);
 
+export const FINANCIAL_CONNECTION_LABELS = {
+  SYNCHRONIZING: 'Synchronizing', MANUAL_ONLY: 'Manual records only', UNCONFIGURED: 'Not configured',
+  NOT_ENTITLED: 'Not entitled', ERROR: 'Needs attention', STALE: 'Stale', AWAITING_SYNC: 'Billing credential configured',
+  USAGE_SYNCHRONIZED: 'Usage synchronized', SYNCHRONIZED: 'Connected',
+} as const;
+
+export type FinancialConnection = keyof typeof FINANCIAL_CONNECTION_LABELS;
+
+export function financialConnection(provider: {
+  id: string; active: boolean; configured: boolean; errorCode: string | null; lastSuccess: string | null;
+  nextSync: string | null; coverage: readonly { quality: string; meterCount: number }[];
+}, cost: string | null, now: Date): FinancialConnection {
+  if (MANUAL_ONLY_FINANCIAL_PROVIDERS.includes(provider.id)) return 'MANUAL_ONLY';
+  if (!provider.configured) return 'UNCONFIGURED';
+  if (provider.active) return 'SYNCHRONIZING';
+  if (provider.errorCode === 'FINOPS_PROVIDER_NOT_ENTITLED') return 'NOT_ENTITLED';
+  if (provider.errorCode) return 'ERROR';
+  if (provider.lastSuccess && provider.nextSync && Date.parse(provider.nextSync) < now.getTime()) return 'STALE';
+  if (cost === null && provider.coverage.some(period => period.quality !== 'UNAVAILABLE' && period.meterCount > 0)) return 'USAGE_SYNCHRONIZED';
+  if (!provider.lastSuccess) return 'AWAITING_SYNC';
+  return 'SYNCHRONIZED';
+}
+
+export const FINANCIAL_CONNECTION_GUIDANCE: Readonly<Record<string, string>> = {
+  anthropic: 'Use a Console organization with workspace-level Admin Analytics access.',
+  neon: 'Verify consumption access for the inventoried Neon projects.',
+  railway: 'Verify billing access to the FloFi project with the Railway workspace owner.',
+  vercel: 'Confirm project-attributed FOCUS export access with the Vercel team owner.',
+  openai: 'Use a billing credential with Costs and Usage access for the FloFi project.',
+  circleci: 'Use an organization admin credential for project credit exports.',
+  alchemy: 'Confirm exact FloFi app scope and plan access before enabling usage.',
+  resend: 'Record a scoped invoice when a charge is available.',
+};
+
 export const FINANCIAL_INTEGRATION_COPY = Object.freeze([
   'Financial integrations', 'Sync all', 'Sync now', '{0} queued, {1} already scheduled or in progress.', 'Coverage limitations',
   '{0} synchronized periods', '{0} usage measurements', 'No synchronized period', 'Automatic synchronization is awaiting database activation.',
   'Provider', 'Connection', 'Current-period cost', 'Last successful sync', 'Next scheduled sync', 'Data quality', 'Historical coverage', 'Actions',
-  'Synchronizing', 'Not configured', 'Needs attention', 'Stale', 'Connected', 'Ready to synchronize', 'Manual records only',
   'Metered usage and estimates are shown separately from recorded costs.',
+  ...Object.values(FINANCIAL_CONNECTION_LABELS), ...Object.values(FINANCIAL_CONNECTION_GUIDANCE),
 ] as const);

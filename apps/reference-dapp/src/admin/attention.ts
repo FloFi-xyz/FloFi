@@ -6,7 +6,7 @@
  */
 import type { AttentionItem, Tone } from '../components/admin/admin-ui';
 import type { CopilotSettingsView } from './copilot-view.ts';
-import type { HealthReport } from './health.ts';
+import { schemaHealthLabels, schemaHealthy, type HealthReport } from './health.ts';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
@@ -14,9 +14,9 @@ export function healthAttention(report: HealthReport): AttentionItem[] {
   const items: AttentionItem[] = [], health = '/admin/health';
   const { database, api, queue, runs, scheduler } = report;
   if (!database.ok) items.push({ key: 'db', tone: 'bad', title: 'The database cannot be read', detail: `Check ${database.code}`, href: health, action: 'View health' });
-  else if (database.value.appliedMigrations !== database.value.shippedMigrations)
-    items.push({ key: 'schema', tone: 'bad', title: 'The database schema does not match this build',
-      detail: `${database.value.appliedMigrations} of ${database.value.shippedMigrations} migrations applied`, href: health, action: 'View health' });
+  else if (!schemaHealthy(database.value.schema))
+    items.push({ key: 'schema', tone: 'bad', title: schemaHealthLabels[database.value.schema],
+      detail: `Database: ${database.value.appliedMigrations} · Build: ${database.value.shippedMigrations}`, href: health, action: 'View health' });
   else if (database.value.latencyMs > 500) items.push({ key: 'db-slow', tone: 'warn', title: 'The database is answering slowly', detail: `${database.value.latencyMs} ms`, href: health, action: 'View health' });
   if (api.readiness && api.readiness.ok && api.readiness.value.latencyMs > 1500)
     items.push({ key: 'api-slow', tone: 'warn', title: 'The Railway API is answering slowly', detail: `${api.readiness.value.latencyMs} ms`, href: health, action: 'View health' });
@@ -24,11 +24,12 @@ export function healthAttention(report: HealthReport): AttentionItem[] {
   if (!queue.ok) items.push({ key: 'queue', tone: 'warn', title: 'The work queue could not be checked', detail: queue.code, href: health, action: 'View health' });
   else {
     if (queue.value.dead24h) items.push({ key: 'dead', tone: 'warn', title: `${plural(queue.value.dead24h, 'work item')} stopped in the last 24 hours`,
-      detail: 'They exhausted their observation budget and were not resubmitted.', href: health, action: 'See incidents' });
+      detail: 'Review the work kinds and recorded error codes.', href: health, action: 'See incidents' });
     if (queue.value.overdue) items.push({ key: 'overdue', tone: 'warn', title: `${plural(queue.value.overdue, 'work item')} waiting longer than 5 minutes`,
       detail: 'The worker may be stopped or overloaded.', href: health, action: 'View queue' });
     if (queue.value.expiredLeases) items.push({ key: 'leases', tone: 'warn', title: `${plural(queue.value.expiredLeases, 'expired lease')} in the work queue`, href: health, action: 'View queue' });
   }
+  if (!report.incidentsAvailable) items.push({ key: 'incidents', tone: 'warn', title: 'Stopped-work history is unavailable', href: health, action: 'View health' });
   if (!runs.ok) items.push({ key: 'runs', tone: 'warn', title: 'Executions under observation could not be checked', detail: runs.code, href: health, action: 'View health' });
   else {
     const a = runs.value.attention, open = a.active + a.underInvestigation;

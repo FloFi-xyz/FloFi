@@ -18,6 +18,7 @@ export type AdminPage = { readonly ok: true; readonly context: AdminContext; rea
 export async function adminPage(): Promise<AdminPage> {
   const config = adminConfig(process.env);
   if (!config.enabled) notFound();
+  // Storage must be ready for the database-backed grant check. Startup errors stay generic even with a sealed cookie.
   const host = await adminHost(process.env);
   if ('code' in host) return { ok: false, code: host.code };
   const store = createAdminStore(host.db, host.tenantId), now = new Date(), origin = await requestOrigin();

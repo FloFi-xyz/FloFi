@@ -1090,6 +1090,10 @@
       "path": "packages/cloud-runtime/test/forward-compatibility.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.forward-compatibility": {
+      "path": "packages/cloud-runtime/test/forward-compatibility.test.ts",
+      "stage": "unit"
+    },
     "cloud-runtime.http-drain": {
       "path": "packages/cloud-runtime/test/http-drain.test.ts",
       "stage": "unit"
@@ -1750,6 +1754,14 @@
       "path": "apps/reference-dapp/src/components/admin/finops-views.test.tsx",
       "stage": "unit"
     },
+    "app.admin.attention": {
+      "path": "apps/reference-dapp/src/admin/attention.test.ts",
+      "stage": "unit"
+    },
+    "app.admin.finops-fx": {
+      "path": "apps/reference-dapp/src/admin/finops/report-fx.test.ts",
+      "stage": "unit"
+    },
     "app.domain.product-areas": {
       "path": "apps/reference-dapp/src/domain/product-areas.test.ts",
       "stage": "unit"
@@ -1981,6 +1993,9 @@
     "app.admin.finops-sync-ai",
     "app.admin.finops-sync-circleci",
     "app.components.admin.finops-views",
+    "app.admin.attention",
+    "app.admin.finops-fx",
+    "cloud-runtime.forward-compatibility",
     "app.domain.editor-stages",
     "app.domain.product-areas",
     "app.server.universal-router.incident-replay",
@@ -2488,6 +2503,7 @@
         "apps/reference-dapp/src/admin/finops/economics.ts",
         "apps/reference-dapp/src/admin/finops/http.ts",
         "apps/reference-dapp/src/admin/finops/providers.ts",
+        "apps/reference-dapp/src/admin/finops/report-fx.ts",
         "apps/reference-dapp/src/admin/finops/report.ts",
         "apps/reference-dapp/src/admin/finops/scenario.ts",
         "apps/reference-dapp/src/admin/finops/store.ts",
@@ -2503,12 +2519,14 @@
       ],
       "suites": [
         "app.admin.analytics.workflows",
+        "app.admin.attention",
         "app.admin.http.pg",
         "app.admin.session",
         "app.admin.settings.pg",
         "app.server.copilot-metrics",
         "app.server.copilot-metrics.pg",
         "app.admin.finops-economics",
+        "app.admin.finops-fx",
         "app.admin.finops.pg",
         "app.admin.finops-sync-infra",
         "app.admin.finops-sync-ai",
@@ -3649,6 +3667,7 @@
         "app.platform.parity",
         "cloud-runtime.dispatch.pg",
         "cloud-runtime.evidence-telemetry",
+        "cloud-runtime.forward-compatibility",
         "cloud-runtime.http-drain",
         "cloud-runtime.http-request-target",
         "cloud-runtime.storage.pg",
