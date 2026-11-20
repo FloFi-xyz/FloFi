@@ -30,7 +30,8 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUnis
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
   encodeUniswapApprove, encodeUniswapMint, uniswapComposition, uniswapMinimum, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick, uniswapRangeState,
   type UniswapRangeState } from '@defi-workflow-engine/reference-compiler';
-import { hashArtifactBytes, readConcentratedLiquidity, readConcentratedLiquidityManagement, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { chargedNetworkFeeWithinAuthorization, hashArtifactBytes, l1FeeReviewBound, networkFeeWithinAuthorization, readConcentratedLiquidity, readConcentratedLiquidityManagement,
+  type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { catalogTokenPolicy, verifyCatalogToken, verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
@@ -392,7 +393,13 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     if (profile.gasPriceOracle === null) return 0n;
     try { return wordAt(await ethCall(profile.gasPriceOracle, SEL.l1FeeUpperBound + word(BigInt(dataBytes + 120)), at), 0); } catch { return null; }
   }
-  /** Exact executable step: current estimates must fit the frozen Review envelope, including OP fees where applicable. */
+  /**
+   * Exact executable step: the wallet-controlled fields (gas limit, max fee, priority fee) are the reviewed ones exactly, and the call's network fee
+   * at the current price and the current OP Stack L1 estimate must fit the one maximum the owner authorized for it (`networkFeeWithinAuthorization`).
+   * BUILD-FLOFI-LIQUIDITY-RELIABILITY-GLOBAL-PRECISION-001 (incident balp-3e4b…, 2026-11-20): this path compared the L1 part alone against the
+   * instantaneous bound read at Review, so any L1 move refused the request within seconds (the bridge incident of 2026-11-13, fixed there by
+   * BUILD-FLOFI-MAINNET-EXEC-002 and now applied here). A fee beyond the authorized maximum still needs a fresh Review.
+   */
   async function assertRequestFees(review: { readonly calls: readonly { readonly to: string; readonly data: string; readonly gasLimit: string; readonly l1FeeUpperBoundWei?: string | null | undefined }[];
     readonly owner: string; readonly fees: UniswapLiquidityReview['fees'] }, tx: UniswapTx, at: string): Promise<void> {
     if (quantity(await rpc('eth_chainId', [])) !== BigInt(profile.chainId)) fail('UNISWAP_WRONG_CHAIN');
@@ -407,7 +414,9 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     const estimate = quantity(await rpc('eth_estimateGas', [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value }, at]));
     if (estimate <= 0n || estimate > quantity(tx.gas)) fail('UNISWAP_GAS_CHANGED_REVIEW_REQUIRED');
     const l1 = await l1FeeUpperBound((tx.data.length - 2) / 2, at), bound = call.l1FeeUpperBoundWei === undefined ? review.fees.l1FeeUpperBoundWei : call.l1FeeUpperBoundWei;
-    if (l1 === null || bound === null || l1 > BigInt(bound)) fail('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    if (l1 === null || bound === null ||
+        !networkFeeWithinAuthorization({ gasLimit: quantity(tx.gas), maxFeePerGas: quantity(tx.maxFeePerGas), l1FeeBound: BigInt(bound) }, { gasPrice: price, l1Fee: l1 }))
+      fail('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
     if (quantity(await rpc('eth_getBalance', [tx.from, at])) < quantity(tx.gas) * quantity(tx.maxFeePerGas) + l1) fail('UNISWAP_INSUFFICIENT_GAS_ETH');
   }
   function assertMintBounds(review: UniswapLiquidityReview, state: ChainState, fresh: readonly SimulatedCall[]): void {
@@ -428,8 +437,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   }
   /**
    * The reviewed fee envelope of a call sequence (one policy for a mint and a position operation): EIP-1559 max fee = 2 × base fee + priority
-   * (Nitro: its own max fee, posting gas in the limit), gas limit = simulated gas × 1.3 + 25 000, the OP Stack L1 data fee bound per call, and
-   * the owner's native balance must cover the whole envelope.
+   * (Nitro: its own max fee, posting gas in the limit), gas limit = simulated gas × 1.3 + 25 000, the OP Stack L1 data fee bound per call with the
+   * shared Review headroom (`l1FeeReviewBound`: 2×, as the execution part), and the owner's native balance must cover the whole envelope.
    */
   async function feeEnvelope(owner: string, calls: readonly { to: string; data: string }[], gasUsed: readonly bigint[], at: string, native: bigint, baseFee: bigint) {
     const priority = nitro ? 0n : quantity(await rpc('eth_maxPriorityFeePerGas', []));
@@ -440,7 +449,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       const gas = gasUsed[index]!;
       if (gas <= 0n || gas > 30_000_000n) fail('UNISWAP_FEE_INVALID');
       const gasLimit = nitro ? nitroGasLimit(gas + await nitroPostingGas(rpc, owner, call, at, 'UNISWAP_NITRO_FEE_UNAVAILABLE')) : gas * 13n / 10n + 25_000n;
-      return { gasUsed: gas.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: (await l1FeeUpperBound((call.data.length - 2) / 2, at))?.toString() ?? null };
+      const l1 = await l1FeeUpperBound((call.data.length - 2) / 2, at);
+      return { gasUsed: gas.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1 === null ? null : l1FeeReviewBound(l1).toString() };
     }));
     const gasLimitTotal = reviewCalls.reduce((sum, c) => sum + BigInt(c.gasLimit), 0n);
     const l1Fees = reviewCalls.map(c => c.l1FeeUpperBoundWei === null ? null : BigInt(c.l1FeeUpperBoundWei));
@@ -669,8 +679,10 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > quantity(attempt.tx.gas) ||
         quantity(tx.maxFeePerGas ?? tx.gasPrice) > quantity(attempt.tx.maxFeePerGas) ||
         quantity(tx.maxPriorityFeePerGas ?? '0x0') > quantity(attempt.tx.maxPriorityFeePerGas) ||
-        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) ||
-        l1Bound === null || verified.l1Fee > BigInt(l1Bound))) {
+        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null ||
+        // The L1 data fee is charged at inclusion and no transaction can cap it: the charged total must be within the authorized network fee.
+        !chargedNetworkFeeWithinAuthorization({ gasLimit: quantity(attempt.tx.gas), maxFeePerGas: quantity(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound) },
+          { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee }))) {
       return save(replaceAttempt({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' },
         { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' }));
     }

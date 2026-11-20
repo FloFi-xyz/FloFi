@@ -21,7 +21,7 @@ import { decodeUniswapAmounts, decodeUniswapCollect, decodeUniswapDecreaseLiquid
   decodeUniswapPositionRequest, uniswapAmountsForLiquidity, uniswapMinimum, uniswapPositionPlan, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick,
   uniswapRangeState, UNISWAP_POSITION_TOPICS as PTOPIC, UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, type UniswapPositionInnerKind,
   type UniswapPositionOperation, type UniswapRangeState } from '@defi-workflow-engine/reference-compiler';
-import { hashArtifactBytes, type ConcentratedLiquidityManagement, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { chargedNetworkFeeWithinAuthorization, hashArtifactBytes, type ConcentratedLiquidityManagement, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { evmNonceUnusedAt, sameEvmIntent } from './evm-submission-discovery.ts';
@@ -638,7 +638,10 @@ export function createUniswapPositionRuntime(deps: UniswapPositionDeps) {
     const l1Bound = record.review.calls[0].l1FeeUpperBoundWei;
     if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > quantity(attempt.tx.gas) ||
         quantity(tx.maxFeePerGas ?? tx.gasPrice) > quantity(attempt.tx.maxFeePerGas) || quantity(tx.maxPriorityFeePerGas ?? '0x0') > quantity(attempt.tx.maxPriorityFeePerGas) ||
-        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null || verified.l1Fee > BigInt(l1Bound)))
+        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) || l1Bound === null ||
+        // The L1 data fee is charged at inclusion and no transaction can cap it: the charged total must be within the authorized network fee.
+        !chargedNetworkFeeWithinAuthorization({ gasLimit: quantity(attempt.tx.gas), maxFeePerGas: quantity(attempt.tx.maxFeePerGas), l1FeeBound: BigInt(l1Bound) },
+          { gasUsed: verified.gasUsed, effectiveGasPrice: verified.effectiveGasPrice, l1Fee: verified.l1Fee })))
       return save(replaceAttempt({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' },
         { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' }));
     if (verified.status === 0)
