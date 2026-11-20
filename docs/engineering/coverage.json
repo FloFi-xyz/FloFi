@@ -8029,7 +8029,8 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
-        "apps/reference-dapp/src/state/asset-catalog-store.ts"
+        "apps/reference-dapp/src/state/asset-catalog-store.ts",
+        "apps/reference-dapp/src/state/network-catalog-version.ts"
       ],
       "suites": [
         "action-registry.asset-registry",
