@@ -7,6 +7,22 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 — approved Editor refinement, execution receipt in history, post-merge red fixed
+
+**Status: pull request for CircleCI certification of its exact head; the owner authorized merge and deployment once every mandatory gate is
+green. Presentation, test and CI-fix build: no financial engine, gating, wallet, execution, reconciliation, schema, API, environment or dependency
+change. Evidence is local and MOCKED (unit suites, component harnesses and loopback browser profiles); nothing was signed or sent.
+Not accepted by product (the FloFi product team decides).**
+- Post-merge red on `main` `0ea35d58` (`swap-read-acceptance`): the Simulate panel showed a transient blocker while runtime availability was
+  unknown and re-created its opened Technical details closed. Fixed at the source (checking state; panel-owned disclosure) with a regression that
+  fails on the baseline.
+- Criar / Simular / Executar refined to the approved references of 19 Nov 2026 (docked named tools by default, network names, one CTA, collapsed
+  technical rows, expired-review notice and card); comparison sheets in the build record.
+- Workflow history opens on a receipt (outcome, date, sent/received as observed, network, protocol, recorded cost, wallet, steps, transaction);
+  every engineering detail kept under one collapsed Technical details.
+
+See the [build record](builds/BUILD-FLOFI-UX-REFINEMENT-HISTORY-001.md).
+
 ## BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001 — Mainnet liquidity position management (Orca, Uniswap v3)
 
 **Status: pull request for CircleCI certification of its exact head. The owner authorized the merge and deployment once every check is green.
