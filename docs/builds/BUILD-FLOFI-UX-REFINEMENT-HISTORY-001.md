@@ -99,3 +99,29 @@ no schema, API, record, evidence or reconciliation change; historical records re
 ## 5. Financial and security preservation
 
 (see §9)
+
+## 6. Independent specialist reviews (read-only `.claude/agents/flofi-*`, advisory) and dispositions
+
+Selection from `agent_guard.py impact --base origin/main` (17 domains touched through shared modules; at most three at once): flofi-security,
+flofi-workflow, flofi-frontend-ux (batch 1); flofi-wallet-execution, flofi-infrastructure-ci (batch 2). Domains not reviewed (automations, bridge,
+channels, chat, data-privacy, developers, lending, liquidity, mcp, protocol-integrations, swap, transfer-payments): reached only through the shared
+presentation modules reviewed by flofi-workflow/flofi-security; no runtime, API, channel or persistence code changed. Every finding was verified
+against the code before acting.
+
+| Reviewer | Finding (severity) | Disposition |
+| --- | --- | --- |
+| security + workflow | The new "checking availability" projection returned before a recorded run's verdict/binding/expiry checks; a recovered router/universal Review could read approvable while availability was unknown (medium) | **Fixed** (`367364b`): checking applies only when nothing is recorded; `projectReview` also treats it as not approvable (defence in depth); regression tests. |
+| workflow | A bridge destination's observed amount was labelled "You received" although it goes to the reviewed recipient (medium) | **Fixed**: "Delivered" ("Entregue"); test. |
+| workflow | Expired/cancelled/refunded steps read "Failed" (low) | **Fixed**: own words; test. |
+| workflow | A send to the connected owner showed the symbolic `CONNECTED_OWNER` (low) | **Fixed**: the owner's wallet ("Sua carteira" in summaries); test. |
+| workflow | The expired branch could reuse the Review's technical block (low) | **Fixed**: configured facts only. |
+| workflow | Wallet-request count of an expired Review may change after refresh (low) | **Kept** (pre-existing BUILD-FLOFI-UX-EDITOR-FINOPS-001 rule; the reference shows the count; the row appears only when the Review counted it). |
+| wallet-execution | Local/mocked provenance no longer visible on the receipt (medium) | **Fixed** (`e2c3a23`): provenance line on the receipt; tests. |
+| wallet-execution | Saved record notice could say "current execution record"; one-step bridge linked the provider's fill; fee row with nothing submitted (low) | **Fixed**; tests. |
+| frontend-ux | Local disclaimer hidden (major) | **Fixed** (as above). |
+| frontend-ux | Broad parameterized PT keys became catalog fallback patterns (could rewrite unrelated strings / workflow names) (medium) | **Fixed** (`5072b4c`): exact-lookup-only catalog; workflow names never translated. |
+| frontend-ux | Status / expired rows may overflow at 320 px; ARIA names on `<small>`/`<dl>`; copy failure announcement; per-step copy names; bridge direction for screen readers; badge reason separator; ISO timestamps; title punctuation (minor/low) | **Fixed**. |
+| frontend-ux | Decimal separators: PT receipt "0,0243" vs Technical details "0.0243" (low) | **Partly**: only "<number> <unit>" values are reformatted; the receipt follows the approved PT example, Technical details keep the recorded values verbatim (deliberate). |
+| frontend-ux | Grouped vs single-step disclosure persistence differ after a result (low) | **Kept**: the grouped result is a different panel (the whole-workflow Review) with its own disclosure; documented. |
+| infrastructure-ci | First certification will fail on screenshots; fail-fast shards can hide later profiles (medium) | **Mitigated**: every affected profile run locally before the PR; non-screenshot failures fixed (`canvas-ux`, `canvas-cta`, theme spec); screenshot baselines regenerated from CircleCI's own candidate renders (CI.md §5). |
+| infrastructure-ci | New suites unregistered; rail ARIA assertion dropped; disclosure spec clock/harness timing; evidence env not cleared (low) | **Fixed** (`5072b4c`). |
