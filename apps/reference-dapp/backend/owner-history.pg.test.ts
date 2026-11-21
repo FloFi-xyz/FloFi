@@ -71,3 +71,25 @@ it('never assigns an owner to a historic unowned Base simulation to make it dele
   expect(await backend.callHistory('change', ['EXECUTION_RUN',record.quote.executionId,'DELETE'], owner)).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
   expect((await t.db.query('SELECT count(*)::int AS n FROM execution_runs')).rows).toEqual([{ n: 1 }]);
 });
+
+it('refuses saved-workflow replay and recreation after deletion through the authenticated backend', async () => {
+  t = await createTestDatabase();
+  const options = { db: t.db, env: {}, tenantId: 'default', holderId: 'history-save-test', evidenceStore: null,
+    logger: createLogger({ service: 'history-save-test', sink: () => undefined }) };
+  const backend = createBackend(options);
+  const spec = composeStrategy({ action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' });
+  if (!spec.ok) throw Error(spec.code);
+  const path = '/v1/workflows/save', route = backend.routes.find(r => r.name === 'workflows')!;
+  const request = { method: 'POST', path, query: new URLSearchParams(), headers: { [WORKFLOW_OWNER_HEADER]: 'eip155:' + owner.address,
+    'idempotency-key': 'workflow-history-replay-test' }, body: { args: [{ workflow: spec.workflow, name: 'Disposable draft', expectedVersion: 0 }] },
+    requestId: 'workflow-history-replay-test' };
+  const match = route.pattern.exec(path)!;
+  const saved = await route.handler(request, match);
+  expect(saved.body).toMatchObject({ ok: true, value: { workflowId: spec.workflow.workflowId, version: 1 } });
+  expect(await route.handler(request, match)).toEqual(saved);
+  expect(await backend.callHistory('change', ['SAVED_WORKFLOW', spec.workflow.workflowId, 'DELETE'], owner)).toMatchObject({ ok: true, disposition: 'DELETED' });
+  expect((await route.handler(request, match)).body).toEqual({ ok: false, code: 'WORKFLOW_NOT_FOUND' });
+  expect((await route.handler({ ...request, headers: { ...request.headers, 'idempotency-key': 'workflow-history-fresh-test' } }, match)).body)
+    .toEqual({ ok: false, code: 'WORKFLOW_NOT_FOUND' });
+  expect((await t.db.query('SELECT workflow_id FROM saved_workflows')).rows).toEqual([]);
+});

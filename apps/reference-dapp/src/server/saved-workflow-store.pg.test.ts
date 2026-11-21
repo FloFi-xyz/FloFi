@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { assertSchemaCurrent, ensureTenant, loadMigrations, migrate, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
+import { assertSchemaCurrent, createOwnerHistory, ensureTenant, loadMigrations, migrate, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, initialEditor } from '../domain/editor';
@@ -60,6 +60,24 @@ describe('durable saved-workflow documents and compare-and-swap', () => {
   it('persists after the saving session closes and another session reopens', async () => {
     const w = workflow(), session = t.open(); await createSavedWorkflowStore(session, 'default', owner).save({ workflow: w, name: 'Durable', expectedVersion: 0 }); await session.close();
     expect((await createSavedWorkflowStore(t.open(), 'default', owner).get(w.workflowId))?.workflow).toEqual(w);
+  });
+  it('serializes permanent deletion with a stale create and preserves that same ID for other owners and tenants', async () => {
+    const w = validateSavedWorkflow({ ...workflow(), workflowId: 'workflow-history-disposable-draft' });
+    const input = { workflow: w, name: 'Disposable draft', expectedVersion: 0 };
+    await store().save(input);
+    const second = t.open();
+    const attempts = await Promise.allSettled([
+      createOwnerHistory(t.db, 'default').change(owner.address, 'SAVED_WORKFLOW', w.workflowId, 'DELETE'),
+      createSavedWorkflowStore(second, 'default', owner).save(input),
+    ]);
+    expect(attempts[0]).toMatchObject({ status: 'fulfilled', value: { ok: true, disposition: 'DELETED' } });
+    expect(attempts[1]).toMatchObject({ status: 'rejected' });
+    await expect(createSavedWorkflowStore(second, 'default', owner).save(input)).rejects.toThrow('WORKFLOW_NOT_FOUND');
+    expect(await createOwnerHistory(second, 'default').disposition(owner.address, 'SAVED_WORKFLOW', w.workflowId)).toEqual({ ok: true, disposition: 'DELETED' });
+    expect((await store().list()).items).toEqual([]);
+    expect(await store(other).save(input)).toMatchObject({ version: 1 });
+    expect(await store(owner, 'other-tenant').save(input)).toMatchObject({ version: 1 });
+    await second.close();
   });
   it('rejects corrupt stored hashes and invalid names without trusting the document', async () => {
     const w = workflow();

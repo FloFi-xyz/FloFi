@@ -4,11 +4,17 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'History changes are temporarily unavailable. Your records are preserved.': 'As alterações no histórico estão temporariamente indisponíveis. Os seus registros estão preservados.',
   'Delete': 'Excluir', 'Archive': 'Arquivar', 'Delete execution': 'Excluir execução', 'Archive execution': 'Arquivar execução',
   'Delete workflow': 'Excluir fluxo', 'Archive workflow': 'Arquivar fluxo', 'Delete permanently?': 'Excluir definitivamente?',
-  'Delete permanently': 'Excluir definitivamente', 'Deleting…': 'A excluir…', 'Archive instead': 'Arquivar em vez de excluir',
+  'Delete permanently': 'Excluir definitivamente', 'Deleting…': 'A excluir…', 'Archiving…': 'A arquivar…', 'Archive instead': 'Arquivar em vez de excluir',
   'This cannot be undone. Only records proven to have no financial submission or pending responsibility can be deleted.':
     'Esta ação é irreversível. Só podem ser excluídos registros comprovadamente sem submissão financeira ou responsabilidade pendente.',
-  'This record may have financial activity, authorization or pending dependencies. Archive it to preserve its history.':
-    'Este registro pode ter atividade financeira, autorização ou dependências pendentes. Arquive-o para preservar o histórico.',
+  'This record contains a previous execution authorization. Archive it to preserve its history.':
+    'Este registro contém uma autorização de execução anterior. Arquive-o para preservar o histórico.',
+  'This record has execution activity or evidence. Archive it to preserve its history.':
+    'Este registro contém atividade ou evidências de execução. Arquive-o para preservar o histórico.',
+  'This record is linked to another operation. Archive it to preserve its history.':
+    'Este registro está vinculado a outra operação. Arquive-o para preservar o histórico.',
+  'FloFi could not verify that this entire record is safe to delete. Archive it to preserve its history.':
+    'A FloFi não conseguiu verificar se é seguro excluir todo o registro. Arquive-o para preservar o histórico.',
   'This record is unavailable for the verified wallet. Refresh the history.': 'Este registro não está disponível para a carteira verificada. Atualize o histórico.',
   'The result could not be confirmed. Refresh the history before trying again.': 'Não foi possível confirmar o resultado. Atualize o histórico antes de tentar novamente.',
   'Base → Arbitrum → Uniswap v3 position': 'Base → Arbitrum → posição Uniswap v3',
