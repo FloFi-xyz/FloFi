@@ -62,7 +62,7 @@ html:has(.admin-root) body{background:var(--a-page)}
 .admin-nav a[aria-current="page"]{background:var(--a-blue-soft);color:var(--a-blue);font-weight:600;box-shadow:inset 3px 0 0 var(--a-blue)}
 .admin-nav-foot{margin-top:auto;font-size:.82rem;color:var(--a-muted);display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--a-line);padding-top:12px}
 .admin-account{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.admin-main{padding:28px 32px 56px;min-width:0;display:flex;flex-direction:column;gap:20px;max-width:1440px;width:100%}
+.admin-main{padding:28px clamp(18px,3vw,42px) 56px;min-width:0;display:flex;flex-direction:column;gap:16px;max-width:1440px;width:100%;margin-inline:auto}
 .admin-header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;padding-bottom:4px}
 .admin-header-text{display:flex;flex-direction:column;gap:4px;max-width:78ch}
 .admin-header p{color:var(--a-muted)}
@@ -87,14 +87,18 @@ html:has(.admin-root) body{background:var(--a-page)}
 .admin-kpi[data-tone="bad"] strong{color:var(--a-bad)}
 .admin-kpi[data-tone="warn"] strong{color:var(--a-warn)}
 
-.admin-table-wrap{overflow-x:auto}
+.admin-table-wrap{min-width:0;max-width:100%;overflow:auto}
+.admin-table-scroll{max-height:30rem;overscroll-behavior:contain}
+.admin-table-scroll thead th{position:sticky;top:0;z-index:1}
 .admin-table{width:100%;border-collapse:collapse;font-size:.88rem}
 .admin-table th{text-align:left;font-weight:600;color:var(--a-muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;padding:8px 10px;border-bottom:1px solid var(--a-line);
   background:var(--a-soft)}
 .admin-table tbody th{text-transform:none;letter-spacing:0;font-size:.86rem;color:var(--a-ink);font-weight:500;background:transparent;width:38%}
 .admin-table td{padding:9px 10px;border-bottom:1px solid var(--a-line);vertical-align:top}
 .admin-table tbody tr:hover td{background:color-mix(in srgb,var(--a-soft) 60%,transparent)}
-.admin-table td.num,.admin-table th.num{text-align:right;font-variant-numeric:tabular-nums}
+.admin-table :is(.num,.admin-num){text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.admin-table time{white-space:nowrap;font-variant-numeric:tabular-nums}
+.admin-table td:has(code){overflow-wrap:anywhere}
 .admin-table tr:last-child td{border-bottom:0}
 
 .admin-badge{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:1px 8px;font-size:.76rem;font-weight:600;white-space:nowrap;
@@ -140,7 +144,18 @@ html:has(.admin-root) body{background:var(--a-page)}
 .admin-attention li[data-tone="bad"] .admin-attention-glyph{background:var(--a-bad);color:var(--a-paper)}
 .admin-attention li[data-tone="warn"] .admin-attention-glyph{background:var(--a-warn);color:var(--a-paper)}
 .admin-allclear{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:var(--a-ok-soft);color:var(--a-ok);font-weight:500}
-.admin-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.admin-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px}
+.admin-nav-mobile{display:none}
+.admin-section-stack{display:grid;gap:14px;min-width:0}
+.admin-section-links{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.admin-section-links a{padding:7px 10px;border:1px solid var(--a-line);border-radius:8px;background:var(--a-paper);text-decoration:none}
+.admin-ops-disclosure>.admin-details-body{display:grid;gap:14px}
+.admin-card>.admin-tiles+.admin-details,.admin-card>.admin-details+.admin-details{margin-top:10px}
+.admin-incident-summary{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:10px;color:var(--a-muted);font-size:.86rem}
+.admin-incident-summary strong{margin-inline-start:5px;color:var(--a-ink);font-variant-numeric:tabular-nums}
+.admin-card>.admin-details+.admin-incidents{margin-top:12px}
+.admin-table .admin-finops-fx-source{white-space:normal;overflow-wrap:anywhere}
+.admin-incidents .admin-incident-next{margin:0}
 .admin-tile{display:flex;flex-direction:column;gap:3px;padding:14px 16px;border-radius:var(--a-radius);border:1px solid var(--a-line);background:var(--a-paper);color:var(--a-ink);
   text-decoration:none;box-shadow:inset 3px 0 0 var(--a-neutral)}
 .admin-root a.admin-tile{color:var(--a-ink)}
@@ -230,13 +245,12 @@ html:has(.admin-root) body{background:var(--a-page)}
 @media (max-width:760px){
   .admin-layout{grid-template-columns:minmax(0,1fr)}
   .admin-nav{position:static;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--a-line);padding:12px 16px;gap:10px}
-  .admin-nav-groups{flex-direction:row;gap:4px;overflow-x:auto;margin:0 -16px;padding:0 16px 4px;scrollbar-width:thin}
-  .admin-nav-group{display:flex;align-items:center;gap:2px;flex:none}
-  .admin-nav-group + .admin-nav-group{border-left:1px solid var(--a-line);padding-left:4px}
-  .admin-nav-group-label{display:none}
-  .admin-nav ul{flex-direction:row;flex-wrap:nowrap}
-  .admin-nav a:not(.admin-brand-link){white-space:nowrap;padding:8px 10px}
-  .admin-nav a[aria-current="page"]{box-shadow:inset 0 -2px 0 var(--a-blue)}
+  .admin-nav-desktop{display:none}
+  .admin-nav-mobile{display:block;border:1px solid var(--a-line);border-radius:10px;background:var(--a-soft)}
+  .admin-nav-mobile summary{cursor:pointer;padding:11px 12px;font-weight:600;min-height:44px}
+  .admin-nav-mobile summary span{margin-inline-start:8px;color:var(--a-muted);font-weight:400}
+  .admin-nav-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:8px}
+  .admin-nav a:not(.admin-brand-link){min-height:44px;padding:11px 10px}
   .admin-nav-foot{margin-top:0;flex-direction:row;flex-wrap:wrap;align-items:center;border-top:0;padding-top:0}
   .admin-main{padding:16px 16px 40px}
   .admin-bar-row{grid-template-columns:minmax(0,1fr) auto}
@@ -245,6 +259,7 @@ html:has(.admin-root) body{background:var(--a-page)}
   .admin-attention li > .admin-button{grid-column:2;justify-self:start}
   .admin-table tbody th{width:auto}
   .admin-button{min-height:44px}
+  .admin-section-links a{display:inline-flex;align-items:center;min-height:44px}
 }
 @media (prefers-reduced-motion:reduce){.admin-root *{transition:none !important}}
 

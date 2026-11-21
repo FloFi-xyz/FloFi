@@ -6,12 +6,18 @@ import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/w
 import { adminPage } from '../../admin/page-context';
 import { copilotStatus, healthAttention, healthStatus } from '../../admin/attention';
 import { copilotSettingsView } from '../../admin/copilot-view';
+import { finopsPeriod } from '../../admin/finops/economics';
+import { readFinopsReport, type FinopsReport } from '../../admin/finops/report';
 import { healthReport } from '../../admin/health';
 import { loadExecutionAttention } from '../../admin/support/lifecycle';
 import { AnalyticsFilters } from '../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../components/admin/admin-shell';
 import { DataNotes } from '../../components/admin/data-notes';
-import { AttentionList, Kpi, StatusTile } from '../../components/admin/admin-ui';
+import { AttentionList, Kpi, Section, StatusTile, TechnicalDetails } from '../../components/admin/admin-ui';
+import { Amount } from '../../components/admin/finops-views';
+import { finopsCopy } from '../../components/admin/finops-copy';
+import { requestLanguage } from '../../server/request-language';
+import type { Language } from '../../i18n/language';
 import { Donut, fmt, NetworkMark, OUTCOME_KEYS, OUTCOME_META, OutcomeLegend, pct, seriesColor, StackedBars, StackedColumns, TrendLines,
   type DonutSegment } from '../../components/admin/charts';
 
@@ -37,25 +43,37 @@ function donutSegments(rows: WorkflowAnalytics['networks']['rows']): { segments:
 }
 
 /** BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): status at a glance, then what needs attention, each linking to where it is handled. */
-function Glance({ health, copilot }: { health: Awaited<ReturnType<typeof healthReport>> | null; copilot: Awaited<ReturnType<typeof copilotSettingsView>> | null }) {
-  const system = health ? healthStatus(health) : { tone: 'warn' as const, value: 'Unknown', detail: 'The health checks could not run' };
-  const ai = copilot ? copilotStatus(copilot) : { tone: 'warn' as const, value: 'Unknown', detail: 'AI settings could not be read', items: [] };
-  const runs = health?.runs ?? null, open = runs?.ok ? runs.value.attention.active + runs.value.attention.underInvestigation : null;
-  const items = [...health ? healthAttention(health) : [{ key: 'health', tone: 'warn' as const, title: 'The health checks could not run', href: '/admin/health', action: 'View health' }],
-    ...ai.items];
-  return <section className="admin-card" aria-labelledby="admin-glance">
-    <header><div><h2 id="admin-glance">Status at a glance</h2><p>Live checks of this deployment. Select a card for details.</p></div></header>
+function Glance({ health, copilot, language }: { health: Awaited<ReturnType<typeof healthReport>> | null; copilot: Awaited<ReturnType<typeof copilotSettingsView>> | null; language: Language }) {
+  const { copy, count } = finopsCopy(language);
+  const items = health ? healthAttention(health).filter(item => !['attention', 'attention-partial', 'runs'].includes(item.key)) : [];
+  const system = health ? healthStatus(health, items) : { tone: 'warn' as const, value: 'Unavailable', detail: 'The health checks could not run' };
+  const ai = copilot ? copilotStatus(copilot) : { tone: 'warn' as const, value: 'Unavailable', detail: 'AI settings could not be read', items: [] };
+  const runs = health?.runs ?? null, open = runs?.ok ? runs.value.attention.activeRealFunds : null;
+  return <Section id="admin-glance" title={copy('Status at a glance')}>
     <div className="admin-tiles">
-      <StatusTile label="System health" tone={system.tone} value={system.value} detail={system.detail} href="/admin/health"/>
-      <StatusTile label="AI Copilot" tone={ai.tone} value={ai.value} detail={ai.detail} href="/admin/ai-settings"/>
-      <StatusTile label="Active execution incidents" tone={open === null ? 'warn' : open ? 'warn' : 'ok'}
-        value={open === null ? 'Unknown' : open ? fmt(open) : 'None'} href="/admin/support?lifecycle=OPEN"
-        detail={runs?.ok ? `Execution runs, all environments, all time${runs.value.attention.underInvestigation ? ` · ${fmt(runs.value.attention.underInvestigation)} under investigation` : ''}`
-          + (runs.value.attention.historical ? ` · ${fmt(runs.value.attention.historical)} historical flag${runs.value.attention.historical === 1 ? '' : 's'} (separate)` : '')
-          + (runs.value.truncated ? ' · at least' : '') : 'Could not be checked'}/>
+      <StatusTile label={copy('System health')} tone={system.tone} value={copy(system.value)} href="/admin/health"/>
+      <StatusTile label={copy('Active execution incidents')} tone={open === null || open || runs?.ok && runs.value.truncated ? 'warn' : 'ok'}
+        value={open === null ? copy('Unavailable') : runs?.ok && runs.value.truncated ? copy('At least {0}', count(open)) : count(open)}
+        href="/admin/support?lifecycle=OPEN" detail={copy('Mainnet and unknown environments')}/>
+      <StatusTile label={copy('AI Copilot')} tone={ai.tone} value={copy(ai.value)} href="/admin/ai-settings"/>
     </div>
-    <div style={{ marginTop: 14 }}><AttentionList items={items} allClear="Nothing needs your attention right now."/></div>
-  </section>;
+    {items.length || ai.items.length ? <TechnicalDetails summary={copy('Service and AI checks')}>
+      <AttentionList items={[...items, ...ai.items]} allClear={copy('No service warnings.')}/>
+    </TechnicalDetails> : null}
+  </Section>;
+}
+
+function FinanceSummary({ report, language }: { report: FinopsReport | null; language: Language }) {
+  const { copy } = finopsCopy(language);
+  return <Section id="admin-finance" title={copy('Financial overview')} description={copy('Current month · UTC')}
+    actions={<a className="admin-button" href="/admin/finops">{copy('Open FinOps')}</a>}>
+    {report ? <div className="admin-table-wrap"><table className="admin-table">
+      <thead><tr><th scope="col">{copy('Metric')}</th><th scope="col">{copy('Data quality')}</th><th scope="col" className="num">USD</th></tr></thead>
+      <tbody>{([['Recorded expenses', report.metrics.monthToDate], ['Reconciled revenue', report.metrics.revenue]] as const).map(([label, metric]) =>
+        <tr key={label}><th scope="row">{copy(label)}</th><td>{copy(metric.quality)}</td>
+          <td className="num"><Amount value={metric.amount} language={language}/></td></tr>)}</tbody>
+    </table></div> : <p className="admin-alert" data-tone="warn" role="status">{copy('Financial data unavailable.')}</p>}
+  </Section>;
 }
 
 /** BUILD-ADMIN-001: the operational overview — executions, outcomes, activity, network distribution, utilization and fee observability. */
@@ -68,10 +86,13 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
   // BUILD-ADMIN-AI-PROVIDERS-001 (Admin UX): the same probes System Health and AI Settings show, summarized first ("is everything normal?").
   // One read of the shared execution-attention model feeds both the glance (all time) and the range figures, so they cannot disagree.
   const shared = loadExecutionAttention(page.host.db, page.host.tenantId, page.now).catch(() => null);
-  const [view, health, copilot] = await Promise.all([workflowView(page.host, params, page.now, shared), healthReport(process.env, page.host, page.now, fetch, shared).catch(() => null),
-    copilotSettingsView(process.env, page.host).catch(() => null)]);
-  const glance = <Glance health={health} copilot={copilot}/>;
-  if (!view.ok) return <AdminShell active="overview" context={page.context} title="Overview">{glance}<p className="admin-alert" data-tone="bad">Analytics are unavailable ({view.code}).</p></AdminShell>;
+  const [{ language }, view, health, copilot, finance] = await Promise.all([requestLanguage(), workflowView(page.host, params, page.now, shared),
+    healthReport(process.env, page.host, page.now, fetch, shared).catch(() => null), copilotSettingsView(process.env, page.host).catch(() => null),
+    readFinopsReport(page.host, finopsPeriod(page.now, {}).period, page.now).catch(() => null)]);
+  const { copy, count } = finopsCopy(language);
+  const glance = <Glance health={health} copilot={copilot} language={language}/>;
+  const financial = <FinanceSummary report={finance} language={language}/>;
+  if (!view.ok) return <AdminShell active="overview" context={page.context} title="Overview">{glance}{financial}<p className="admin-alert" data-tone="bad" role="alert">{copy('Workflow analytics unavailable.')} <code>{view.code}</code></p></AdminShell>;
   const a = view.analytics, env = ENVIRONMENT_LABELS[view.environment];
   const { segments, named } = donutSegments(a.networks.rows);
   const trendSeries: { key: string; name: string; color: string; index: number }[] = [];
@@ -82,26 +103,34 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
     other: point.other + point.counts.reduce((n, v, i) => trendSeries.some(s => s.index === i) ? n : n + v, 0) }));
   const networkRows = a.networks.rows.filter(row => row.actions > 0 || row.asDestination > 0);
   const filtered = view.action !== 'ALL' || view.outcome !== 'ALL';
-  return <AdminShell active="overview" context={page.context} title="Overview" description="How FloFi is doing right now, and its workflow activity from durable execution records.">
+  return <AdminShell active="overview" context={page.context} title="Overview" actions={<>
+    <a className="admin-button" data-variant="primary" href="/admin/support">{copy('Open incident center')}</a>
+    <a className="admin-button" href="/admin/workflows">{copy('View workflows')}</a>
+  </>}>
     {glance}
-    <h2 className="admin-section-title">Workflow activity</h2>
+    <h2 className="admin-section-title">{copy('Workflow activity')}</h2>
     <AnalyticsFilters base="/admin" params={params} range={view.range} environment={view.environment} executedByEnvironment={a.executedByEnvironment} defaulted={view.environmentDefaulted}/>
     <DataNotes view={view}/>
 
     <section aria-labelledby="admin-kpis"><h2 id="admin-kpis" className="admin-sr">Key figures</h2>
       <div className="admin-kpis">
-        <Kpi label="Executed workflows" value={fmt(a.funnel.executed)} note={`${fmt(a.workflows.executed)} distinct workflows`}/>
-        <Kpi label="Completed & reconciled" value={fmt(a.outcomes.COMPLETED)} tone="ok" note={`${fmt(a.workflows.completed)} distinct workflows`}/>
-        <Kpi label="Failed (confirmed)" value={fmt(a.outcomes.FAILED)} tone={a.outcomes.FAILED ? 'bad' : undefined}/>
-        <Kpi label="Partial" value={fmt(a.outcomes.PARTIAL)} tone={a.outcomes.PARTIAL ? 'warn' : undefined}/>
-        <Kpi label="In progress" value={fmt(a.outcomes.IN_PROGRESS)} note={a.awaitingSignature ? `+${fmt(a.awaitingSignature)} awaiting a wallet signature` : undefined}/>
-        <Kpi label="Active incidents" value={fmt(a.attention)} tone={a.attention ? 'warn' : undefined}
-          note={`${view.attention ? `${view.attention.truncated ? 'at least · ' : ''}executions in this range and environment` : 'classifier only — attention model unavailable'} · ${fmt(a.outcomes.UNCERTAIN)} outcome unknown`}/>
-        <Kpi label="Success rate" value={pct(a.rates.success)} note={a.rates.denominator ? `of ${fmt(a.rates.denominator)} finished` : 'no finished executions'}/>
-        <Kpi label="Failure rate" value={pct(a.rates.failure)} note="confirmed failures only"/>
+        <Kpi label={copy('Executed workflows')} value={count(a.funnel.executed)} note={copy('{0} distinct workflows', count(a.workflows.executed))}/>
+        <Kpi label={copy('Completed & reconciled')} value={count(a.outcomes.COMPLETED)} tone="ok" note={copy('{0} distinct workflows', count(a.workflows.completed))}/>
+        <Kpi label={copy('Failed (confirmed)')} value={count(a.outcomes.FAILED)} tone={a.outcomes.FAILED ? 'bad' : undefined}/>
       </div>
+      <p className="admin-diff">{copy('Execution activity includes submissions reported by the wallet whose outcome is still uncertain.')}</p>
     </section>
+    {financial}
 
+    <TechnicalDetails summary={copy('Execution metrics and trends')} className="admin-ops-disclosure" open={filtered || undefined}>
+      <div className="admin-kpis">
+        <Kpi label={copy('Partial')} value={count(a.outcomes.PARTIAL)} tone={a.outcomes.PARTIAL ? 'warn' : undefined}/>
+        <Kpi label={copy('In progress')} value={count(a.outcomes.IN_PROGRESS)} note={a.awaitingSignature ? copy('{0} awaiting a wallet signature', count(a.awaitingSignature)) : undefined}/>
+        <Kpi label={copy('Incidents in this period')} value={view.attention ? `${view.attention.truncated ? '≥ ' : ''}${count(a.attention)}` : copy('Unavailable')}
+          note={copy('{0} outcome unknown', count(a.outcomes.UNCERTAIN))}/>
+        <Kpi label={copy('Success rate')} value={pct(a.rates.success)} note={a.rates.denominator ? copy('of {0} finished', count(a.rates.denominator)) : copy('No finished executions')}/>
+        <Kpi label={copy('Failure rate')} value={pct(a.rates.failure)} note={copy('Confirmed failures only')}/>
+      </div>
     <div className="admin-grid admin-grid-2">
       <section className="admin-card" aria-labelledby="admin-funnel">
         <header><h2 id="admin-funnel">Execution funnel</h2><p>{env} · one row per execution (re-simulations never start)</p></header>
@@ -109,7 +138,7 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
           { key: 'simulated', label: 'Simulated', title: 'Runs created by a simulation', total: a.funnel.simulated, counts: { IN_PROGRESS: a.funnel.simulated } },
           { key: 'authorized', label: 'Reviewed & authorized', title: 'Reached explicit review authorization', total: a.funnel.authorized, counts: { IN_PROGRESS: a.funnel.authorized } },
           { key: 'started', label: 'Execution started', title: 'The owner’s wallet was asked to sign', total: a.funnel.started, counts: { IN_PROGRESS: a.funnel.started } },
-          { key: 'executed', label: 'Submitted (executed)', title: 'At least one transaction submitted', total: a.funnel.executed, counts: { IN_PROGRESS: a.funnel.executed } },
+          { key: 'executed', label: 'Submitted or uncertain', title: 'Reported submission or an uncertain wallet result', total: a.funnel.executed, counts: { IN_PROGRESS: a.funnel.executed } },
           { key: 'completed', label: 'Completed & reconciled', title: 'Reconciled verdict, nothing left to observe', total: a.funnel.completed, counts: { COMPLETED: a.funnel.completed } },
         ]}/>
         <p className="admin-diff" style={{ marginTop: 10 }}>{view.savedInRange === null ? 'Saved workflows could not be counted.' : `${fmt(view.savedInRange)} workflows saved in this range (all environments).`}
@@ -229,5 +258,6 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
       </table></div>}
       <p className="admin-diff"><a href={withParams('/admin/workflows', params, {})}>Open Workflows</a> for the executions behind these figures. System incidents are on <a href="/admin/health">System Health</a>.</p>
     </section>
+    </TechnicalDetails>
   </AdminShell>;
 }
