@@ -215,4 +215,3 @@ describe('single-card attempts in History', () => {
     expect(index({ runs: [current] })).toContain(`href="/app/dashboard/runs/${wfr}"`);
   });
 });
-
