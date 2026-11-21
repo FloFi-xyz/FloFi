@@ -54,17 +54,24 @@ test('normal Simulate has concise safety details and no engineering or duplicate
   await expect(details.locator('button.primary')).toHaveCount(0);
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2): Simulate's ONE primary action (Simulate workflow) is in its contextual panel; the footer's one
-    // action is "Review operation", closed until the simulation is valid; the simulated canvas carries no action.
-    const graph = page.locator('.simulate-flow-surface'), footer = page.locator('footer.summary-bar'), action = footer.locator('.canvas-primary-action');
+    // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2) / UX-05: Simulate's ONE primary action (Simulate workflow) is in its contextual panel; the
+    // footer states the status only (no action of its own); the simulated canvas carries no action.
+    const graph = page.locator('.simulate-flow-surface'), footer = page.locator('footer.summary-bar'), action = simulationReviewPanel(page).locator('.simulation-panel-action');
     await expect(graph.locator('.canvas-primary-action')).toHaveCount(0);
     await expect(simulationReviewPanel(page).getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(1);
-    await expect(action.getByRole('button', { name: 'Review operation', exact: true })).toBeDisabled();
+    await expect(footer.locator('button[data-lifecycle-action]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^(Review operation|Continue to authorization)$/ })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Authorize (in wallet|workflow)$/ })).toHaveCount(0);
-    const surface = (await footer.boundingBox())!, button = (await action.boundingBox())!;
-    expect(button.x).toBeGreaterThanOrEqual(surface.x); expect(button.x + button.width).toBeLessThanOrEqual(surface.x + surface.width);
-    expect(button.y + button.height).toBeLessThanOrEqual(surface.y + surface.height);
+    // The panel re-lays itself out after a resize (beside the graph, then under it): the geometry is read once it is laid out, and every
+    // bound must hold on one and the same reading (a box read mid-remount is null, never a pass).
+    await expect(action).toBeVisible();
+    await expect(async () => {
+      const surface = await simulationReviewPanel(page).boundingBox(), button = await action.boundingBox();
+      expect(surface).not.toBeNull(); expect(button).not.toBeNull();
+      expect(button!.x).toBeGreaterThanOrEqual(surface!.x - 1); expect(button!.x + button!.width).toBeLessThanOrEqual(surface!.x + surface!.width + 1);
+      expect(button!.y + button!.height).toBeLessThanOrEqual(surface!.y + surface!.height + 1);
+    }).toPass({ timeout: 10_000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     await page.screenshot({ path: `.tmp/canvas-automation-simulate-${width}.png`, fullPage: true });
   }

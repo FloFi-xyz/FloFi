@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { useLocale } from '../i18n/locale';
 import { displayAmountExpression, displayTokenAmount, type DisplayAmountExpression, type DisplayRounding } from '../domain/token-amount-display';
 import { CopyValue } from './copy-value';
+import { adaptiveDisplayAmount, type UsdPriceEvidence } from '../domain/adaptive-amount-display';
 
 export function TokenAmountText({ value, rounding = 'nearest', marker, className }: { value: string; rounding?: DisplayRounding; marker?: boolean; className?: string }) {
   const { t, language } = useLocale();
@@ -18,13 +19,22 @@ export function TokenAmountText({ value, rounding = 'nearest', marker, className
   if (!shown) return <span className={className}>{t(value)}</span>;
   return <ShortAmount shown={shown} {...className ? { className } : {}}/>;
 }
-/** A balance or position amount in base units (`units`, `decimals`): the same presentation, for surfaces that hold base units. */
-export function TokenUnitsText({ units, decimals, symbol, rounding = 'down', className }: { units: string; decimals: number; symbol?: string; rounding?: DisplayRounding;
-  className?: string }) {
+/**
+ * A balance or position amount in base units (`units`, `decimals`): the same presentation, for surfaces that hold base units. UX-06: with a
+ * TRUSTED USD price (`price`: verified source, observation time) the decimals follow the amount's monetary and relative impact
+ * (`adaptiveDisplayAmount`); without one — every surface today — the six-significant-digit policy applies unchanged. Presentation only.
+ */
+export function TokenUnitsText({ units, decimals, symbol, rounding = 'down', className, price = null, estimate = false }: { units: string; decimals: number; symbol?: string; rounding?: DisplayRounding;
+  className?: string; price?: UsdPriceEvidence | null;
+  /** The amount is an estimate (a quote): it always reads "≈", even when its short form is exact (flofi-security review, UX-01/UX-03). */
+  estimate?: boolean }) {
   const { language } = useLocale();
-  const amount = displayTokenAmount({ units, decimals }, { rounding, language: language === 'PT' ? 'PT' : 'EN', symbol: symbol ?? null });
+  const options = { rounding, language: language === 'PT' ? 'PT' as const : 'EN' as const, symbol: symbol ?? null };
+  const amount = price ? adaptiveDisplayAmount({ units, decimals }, { ...options, price }) : displayTokenAmount({ units, decimals }, options);
   if (!amount) return <span className={className}>—</span>;
-  return <ShortAmount shown={{ text: amount.text, exactText: amount.exactText, exact: `${amount.exact}${symbol ? ` ${symbol}` : ''}`, approximate: amount.approximate }}
+  const text = estimate && !amount.text.startsWith('≈') ? `≈ ${amount.text}` : amount.text;
+  if (estimate && !amount.approximate) return <span className={className}>{text}</span>;
+  return <ShortAmount shown={{ text, exactText: amount.exactText, exact: `${amount.exact}${symbol ? ` ${symbol}` : ''}`, approximate: amount.approximate }}
     {...className ? { className } : {}}/>;
 }
 function ShortAmount({ shown, className }: { shown: DisplayAmountExpression; className?: string }) {

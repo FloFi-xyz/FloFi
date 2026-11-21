@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { useState, type ReactNode } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { useLocale } from '../i18n/locale';
+import { CopyValue } from './copy-value';
 import type { Workflow } from '../domain/initial-workflow';
 import { composerActions, composerSummary } from '../domain/composer-presentation';
 import { transferDetails } from '../domain/robinhood-transfer-authoring';
@@ -112,5 +114,67 @@ export function WorkflowTechnicalFacts({ workflow, context, expiredAt = null }: 
       {step.provider && <div><dt>{t('Provider')}</dt><dd>{t(step.provider)}</dd></div>}
       {step.recipient && <div><dt>{t('Recipient')}</dt><dd>{step.recipient === OWN_WALLET ? t('Your wallet') : <code className="workflow-technical-address">{step.recipient}</code>}</dd></div>}
     </dl>)}
+  </div>;
+}
+
+/** The icon of a step, by the Canvas action name or a whole-workflow Review's action code. */
+export function stepIcon(action: string): Parameters<typeof ActionIcon>[0]['action'] {
+  const code: Readonly<Record<string, Parameters<typeof ActionIcon>[0]['action']>> = { swap: 'swap', bridge: 'bridge', transfer: 'transfer', supply: 'supply',
+    borrow: 'borrow', repay: 'repay', withdraw: 'withdraw', add_liquidity: 'pool' };
+  return ICON[action] ?? code[action] ?? 'action';
+}
+
+/**
+ * UX-01 (Simulate, owner guidelines of 21-11-2026): a recipient shortened in a summary ("0x2820…912edc"), its full address one click away (a
+ * disclosure with a copy control); the accessible name starts with the visible short form (WCAG 2.5.3) and states the full address. Display only.
+ */
+export function RecipientShort({ address, own = false }: { address: string; own?: boolean }) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  if (own) return <small className="operation-summary-recipient">{t('Recipient')}: {t('Your wallet')}</small>;
+  const short = shortRecipient(address);
+  return <small className="operation-summary-recipient step-recipient" data-open={open || undefined}>{t('Recipient')}:{' '}
+    {short === address ? <code>{address}</code> : <>
+      <button type="button" className="step-recipient-toggle" aria-expanded={open} aria-label={t('{0}, show the full address {1}', short, address)}
+        onClick={() => setOpen(value => !value)}><code>{short}</code></button>
+      {open && <span className="step-recipient-full" role="group" aria-label={t('Full address')}><CopyValue value={address} shown={address} label="Recipient"/></span>}
+    </>}</small>;
+}
+/**
+ * UX-03 (Execute, flofi-security review): the Review the owner authorizes shows a transfer's recipient IN FULL as visible text, with its copy
+ * control — a shortened address on the decision surface invites look-alike (address-poisoning) mistakes. The owner's own wallet is named as such
+ * and still shown in full.
+ */
+export function RecipientFull({ address, own = false }: { address: string; own?: boolean }) {
+  const { t } = useLocale();
+  return <small className="operation-summary-recipient step-recipient step-recipient-visible">{t('Recipient')}{own ? ` (${t('Your wallet')})` : ''}:{' '}
+    <CopyValue value={address} shown={address} label="Recipient"/></small>;
+}
+
+export type StepSummaryItem = { readonly key: string; readonly action: string; readonly title: string;
+  /** The step's amounts as the panel words them (exact values one click away), or null when the Review has none for it. */
+  readonly amount: ReactNode | null; readonly network: string | null;
+  readonly recipient?: { readonly address: string; readonly own: boolean } | null };
+/**
+ * UX-01 (Simulate, `icons`) and UX-03 (Execute, `numbered`): the steps of the simulated or reviewed workflow in ONE rounded card — each step on its
+ * own row with its action icon (or its number in a circle and the icon beside its name), its amounts on their own line, its network in a small
+ * pill and its recipient (shortened on Simulate, in full on the Execute Review) — the same look as the Simulate panel before the simulation (`OperationSummary` `icons`). Presentation only.
+ */
+export function StepSummaryCard({ items, variant = 'icons', label = 'Steps' }: { items: readonly StepSummaryItem[]; variant?: 'icons' | 'numbered'; label?: string }) {
+  const { t } = useLocale();
+  if (!items.length) return null;
+  return <div className="operation-summary step-summary-card" data-variant={variant}>
+    <ol aria-label={t(label)}>{items.map((item, index) => <li key={item.key}>
+      {variant === 'icons' ? <span className="operation-summary-icon" aria-hidden="true"><ActionIcon action={stepIcon(item.action)}/></span>
+        : <span className="operation-summary-number" aria-hidden="true">{index + 1}</span>}
+      <div className="operation-summary-body">
+        <strong className="step-summary-title">{t(item.title)}
+          {variant === 'numbered' && <span className="step-summary-title-icon" aria-hidden="true"><ActionIcon action={stepIcon(item.action)}/></span>}</strong>
+        {item.amount && <span className="operation-summary-line step-summary-amount">{item.amount}</span>}
+        {item.recipient && (variant === 'numbered' ? <RecipientFull address={item.recipient.address} own={item.recipient.own}/>
+          : <RecipientShort address={item.recipient.address} own={item.recipient.own}/>)}
+      </div>
+      {item.network && <span className="operation-summary-chip">{t(networkName(item.network))}</span>}
+    </li>)}</ol>
   </div>;
 }

@@ -21,7 +21,7 @@ test('Simulate closed on an empty workflow visual baseline', async ({ page }) =>
   await expect(editorSteps(page).getByRole('status')).toHaveText('Add an action to your workflow first');
   await expectEditorSection(page, 'Build');
   await expect(page.locator('section.simulate-workspace, .review-workspace')).toHaveCount(0);
-  await expect(page.getByText(/^(You are authorizing|Review before authorizing)$/)).toHaveCount(0);
+  await expect(page.getByText(/^(You are authorizing|Review before authorizing|Check your operation)$/)).toHaveCount(0);
   await readyForVisualCapture(page);
   await expect(page).toHaveScreenshot('simulate.png', { fullPage: true });
 });

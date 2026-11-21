@@ -74,17 +74,19 @@ test('Swap → Supply → Borrow on Base: the Editor asks the wallet for ONE wal
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(3);
 
   // Review: read-only. The wallet is asked what it can do (no prompt) and nothing else. BUILD-FLOFI-UX-EDITOR-FINOPS-001 (Caio, B2/C1, intentional
-  // change): the whole-workflow Review is this workflow's simulation and runs from Simulate (its panel's one action); "Review operation" opens
+  // change): the whole-workflow Review is this workflow's simulation and runs from Simulate (its panel's one action); "Continue to authorization" (UX-05) opens
   // Execute, where it is authorized. Execute stays closed until then.
   await openEditorSection(page, 'Simulate');
   await page.locator('.simulation-panel-action').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expect(page.locator('.simulation-context-panel')).toHaveAttribute('data-review-state', 'ready', { timeout: 60_000 });
-  await footerAction(page).getByRole('button', { name: 'Review operation', exact: true }).click();
-  await expect(panel(page).getByRole('button')).toHaveCount(0);
+  // UX-05: the Simulate panel's "Continue to authorization" (navigation to Execute only; the footer states the status).
+  await page.locator('.simulation-panel-action').getByRole('button', { name: 'Continue to authorization', exact: true }).click();
+  // No action in the Review panel (the footer hosts Authorize); only disclosures (an exact value, a hint, a recipient) may be buttons here.
+  await expect(panel(page).locator('button:not([aria-expanded]):visible')).toHaveCount(0);
   // Board 06: what is being authorized in plain words; the group breakdown and the rest wait under the collapsed "Technical details".
-  await expect(panel(page).getByRole('heading', { name: 'Review before authorizing', exact: true })).toBeVisible({ timeout: 60_000 });
-  await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText('Swap 3 USDC → WETH · Base', { timeout: 60_000 });
-  await expect(panel(page).locator('.review-block-rows')).toContainText('Wallet requests1');
+  await expect(panel(page).getByRole('heading', { name: 'Check your operation', exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect(panel(page).getByRole('list', { name: 'Steps', exact: true }).first()).toContainText(/Swap\s*3 USDC → (≈ )?[\d.,]+ WETH/, { timeout: 60_000 });
+  await expect(panel(page).locator('.review-block-rows')).toContainText('Expected wallet confirmations1');
   await expect(panel(page).locator('.editor-run-mechanism')).toBeHidden();
   await panel(page).getByText('Technical details', { exact: true }).click();
   await expect(panel(page).locator('.editor-run-mechanism')).toBeVisible({ timeout: 60_000 });

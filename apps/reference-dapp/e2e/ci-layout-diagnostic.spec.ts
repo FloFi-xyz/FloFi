@@ -230,7 +230,8 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await expect(editorSteps(page).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
   await openEditorSection(page, 'Execute');
   await expect(page.locator('.execute-heading')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
+  // UX-02: the Execute header names the workflow through its rename control, as Create does ("Rename workflow: Your Workflow").
+  await expect(page.getByRole('heading', { name: /Your Workflow$/ }).first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toBeVisible();
   const graph = page.getByRole('region', { name: 'Execution workflow graph', exact: true });
   await expect(graph).toHaveAttribute('data-viewport', 'fitted');

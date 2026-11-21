@@ -4,7 +4,7 @@
  *
  *   Create (stage indicator in the Editor header, Execute closed until a simulation exists, no authorization copy) → "Simulate workflow" runs the
  *   read-only whole-workflow Review IN Simulate, whose panel states the result with no authorization copy and no Authorize control → the footer's
- *   "Review operation" opens Execute → the valid Review (C1: "Review before authorizing", "Authorize workflow" in the footer, once) → its validity passes
+ *   "Continue to authorization" (UX-05) opens Execute → the valid Review (C1: "Check your operation", "Authorize workflow" in the footer, once) → its validity passes
  *   (client clock only) → C2: "Your review expired", the fee and permission marked as needing a refreshed Review, no Authorize, "Refresh review"
  *   as the one action, the Assistant's local note → "Refresh review" prepares a fresh Review in place → Authorize is offered again.
  *
@@ -36,14 +36,14 @@ const BASE = '0x2105', BASE_HARNESS = 'http://127.0.0.1:8562', CHAIN_HARNESS = '
 const PT = process.env.FLOFI_UX_EVIDENCE_LANG === 'PT';
 const EVIDENCE = process.env.FLOFI_UX_EVIDENCE_DIR ?? null;
 /** The few visible words this proof reads, in the interface language it runs in. */
-const W = PT ? { simulate: 'Simular fluxo', review: 'Revisar operação', authorizing: 'Revise antes de autorizar', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
+const W = PT ? { simulate: 'Simular fluxo', review: 'Continuar para autorização', authorizing: 'Confira sua operação', authorize: 'Autorizar fluxo', validFor: /Revisão válida por \d+:\d\d/,
   expired: 'Sua revisão expirou', refreshFee: 'Precisa ser atualizada', refreshPermission: 'Depende da revisão atualizada', reviewExpired: 'Revisão expirada',
   refresh: 'Atualizar revisão', executeClosed: /Simule o fluxo primeiro/, simulateClosed: /Adicione uma ação ao seu fluxo primeiro/, operate: 'Operar', areas: 'Áreas do produto',
-  assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar 3 USDC → WETH · Base/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
-  : { simulate: 'Simulate workflow', review: 'Review operation', authorizing: 'Review before authorizing', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
+  assistant: 'Sua revisão expirou. Atualize os valores', result: 'Resultado da simulação', swap: /Trocar\s*3 USDC → (≈ )?[\d.,]+ WETH/, card: ['Trocar', 'Depositar', 'Pedir emprestado'] }
+  : { simulate: 'Simulate workflow', review: 'Continue to authorization', authorizing: 'Check your operation', authorize: 'Authorize workflow', validFor: /Review valid for \d+:\d\d/,
   expired: 'Your review expired', refreshFee: 'Needs to be refreshed', refreshPermission: 'Depends on the updated review', reviewExpired: 'Review expired',
   refresh: 'Refresh review', executeClosed: /Simulate the workflow first/, simulateClosed: /Add an action to your workflow first/, operate: 'Operate', areas: 'Product areas',
-  assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap 3 USDC → WETH · Base/, card: ['Swap', 'Supply', 'Borrow'] };
+  assistant: 'Your review expired. Refresh the values', result: 'Simulation result', swap: /Swap\s*3 USDC → (≈ )?[\d.,]+ WETH/, card: ['Swap', 'Supply', 'Borrow'] };
 /** Wallet methods that would ask the owner for anything (a signature, a transaction, a network or permission change). */
 const ASKING = /^(personal_sign|eth_sign|eth_signTypedData.*|eth_sendTransaction|eth_sendRawTransaction|wallet_sendCalls|wallet_switchEthereumChain|wallet_addEthereumChain|wallet_requestPermissions)$/;
 
@@ -164,15 +164,17 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await fitsViewport(page);
   await evidence(page, 'create-populated');
 
-  // Simulate before a simulation (B2): the stage indicator opens it; its panel lists the operations and holds the ONE primary action, and the
-  // footer's "Review operation" stays closed until a valid result. Nothing is simulated or requested by opening it.
+  // Simulate before a simulation (B2): the stage indicator opens it; its panel lists the operations and holds the ONE primary action. UX-05: no
+  // second action anywhere — the footer states the status only, and "Continue to authorization" appears only with a valid result. Nothing is
+  // simulated or requested by opening it.
   await editorStep(page, 'Simulate').click();
   await expectEditorSection(page, 'Simulate');
   const simulation = page.locator('.simulation-context-panel');
   await expect(simulation).toHaveAttribute('data-review-state', 'pending');
   await expect(simulation.getByRole('button', { name: W.simulate, exact: true })).toBeEnabled();
   await expect(page.locator('main, .summary-bar').getByRole('button', { name: W.simulate, exact: true })).toHaveCount(1);
-  await expect(footer(page).getByRole('button', { name: W.review, exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: W.review, exact: true })).toHaveCount(0);
+  await expect(footer(page).locator('button[data-lifecycle-action]')).toHaveCount(0);
   await expect(page.locator('main')).not.toContainText(W.authorizing);
   // BUILD-FLOFI-UX-REFINEMENT-HISTORY-001 (approved reference "Simular"): networks read as names (no chain number), the technical details are one
   // collapsed row (the chain identifiers live there), and Simulate has no creation tools.
@@ -198,8 +200,11 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(page.getByRole('button', { name: W.authorize, exact: true })).toHaveCount(0);
   // Simulate has no creation toolbar; the stage indicator marks Simulate.
   await expect(page.getByRole('toolbar', { name: /^(Canvas tools|Ferramentas do Canvas)$/ })).toHaveCount(0);
-  const reviewOperation = footer(page).getByRole('button', { name: W.review, exact: true });
+  // UX-05: the ONE next action of the valid result is in the panel (navigation only); the footer states the result's validity, with no action.
+  const reviewOperation = simulation.getByRole('button', { name: W.review, exact: true });
   await expect(reviewOperation).toBeEnabled();
+  await expect(page.getByRole('button', { name: W.review, exact: true })).toHaveCount(1);
+  await expect(footer(page).locator('button[data-lifecycle-action]')).toHaveCount(0);
   await evidence(page, 'simulate-result');
   expect(methods.filter(method => ASKING.test(method))).toEqual([]);
 
@@ -219,8 +224,12 @@ test('Create → Simulate → Execute: simulated in Simulate, authorized only fr
   await expect(validTechnical).toHaveCount(1); await expect(validTechnical).not.toHaveAttribute('open', '');
   // Before signing, the material rows are on screen — a three-step Review at 1440 × 900 with Technical details closed (flofi-security /
   // flofi-frontend-ux review).
-  for (const row of PT ? ['Taxa de rede, no máximo', 'Permissão de token', 'Pedidos à carteira'] : ['Network fee, at most', 'Token permission', 'Wallet requests'])
+  // UX-03: the fee ceiling, every token access (limit and spender) and the expected wallet confirmations.
+  for (const row of PT ? ['Taxa de rede máxima', 'Confirmações previstas na carteira'] : ['Max network fee', 'Expected wallet confirmations'])
     await expect(runPanel(page).locator('.review-block-rows > div').filter({ has: page.getByText(row, { exact: true }) })).toBeInViewport();
+  const access = runPanel(page).locator('.review-block-rows > .review-access-row');
+  expect(await access.count()).toBeGreaterThan(0);
+  for (const row of await access.all()) await expect(row).toBeInViewport();
   const actions: string[] = [];
   const recordAction = (request: Request) => { if (request.method() === 'POST' && request.headers()['next-action']) actions.push(request.url()); };
   page.on('request', recordAction);

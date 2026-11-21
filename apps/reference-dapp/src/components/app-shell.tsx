@@ -871,11 +871,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       manualSimulation: simulationSource.kind === 'universal' || (simulationSource.kind === 'router' && !routerState.session),
       pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error, networkErrorNotice: walletConnection.notice,
       simulationBlocked: walletIssue ?? (groupedPrimary ? workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
-        : 'This workflow runs as one workflow run: choose Simulate workflow, then Review operation and Authorize workflow.'
+        : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.'
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       // P0 hotfix (locale contract): the same reason in either language, so the chat's message follows the interface language.
       simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
-        : 'This workflow runs as one workflow run: choose Simulate workflow, then Review operation and Authorize workflow.')
+        : 'This workflow runs as one workflow run: choose Simulate workflow, then Continue to authorization and Authorize workflow.')
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone || groupedSingleDone, blocker: blockerView, editingPaused,
       workflowProgress } });
@@ -896,6 +896,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     { setup: actionSetup ? { id: actionSetup.id, action: setupSummary(actionSetup, context).action } : null, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs },
     Boolean(state.error || reviewError)) : EMPTY_EDITOR_OVERVIEW,
   [overviewShown, state.workflow, state.error, reviewError, context, workflowReview, actionSetup, amountInputs, cryptoSelections, bridgeNetworkInputs, recipientInputs]);
+  // UX-02: the Simulate and Execute headers name the same networks as the Create header (the configured steps' own networks; presentation only).
+  const headNetworks = useMemo(() => overviewShown ? overview.networks : editorOverview(state.workflow, context, null).networks, [overviewShown, overview, state.workflow, context]);
   const showStep = (nodeId: string) => { selectAction(nodeId); focusCanvasStep(nodeId); };
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001 (C2): the Review's validity ends at a known time; the Editor re-renders then, so Execute, its footer and the
   // Assistant say "expired" at once (the panels keep their own timers too). Never a request: only this render.
@@ -987,7 +989,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     closedReason={networkQuestion && !actionable ? 'Choose the network in the chat first' : null} stageReasons={stageReasons}/>;
   // BUILD-FLOFI-UX-EDITOR-FINOPS-001: the stage indicator lives in the Editor's own header (`editor-chrome.tsx`), never in the global top bar.
   if (authoringIncomplete && tab !== 'Build') return <div className="app-shell" inert={!interactive}><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry}
-    newWorkflow={startNewChatWorkflow}/>{betaNotice}<main className="main"><EditorChromeProvider value={{ stepper: <EditorStepper tab={tab} setTab={setTab} disabled incomplete/> }}>
+    newWorkflow={startNewChatWorkflow}/>{betaNotice}<main className="main"><EditorChromeProvider value={{ stepper: <EditorStepper tab={tab} setTab={setTab} disabled incomplete/>, networks: headNetworks, rename: setWorkflowName }}>
       <EditorStageHead workflowName={workflowName} steps={orderedActions.length}/></EditorChromeProvider>
     <section className="panel stage-empty"><p>{tr("Configure the action amount on the Canvas first.")}</p><button type="button" onClick={() => setTab('Build')}>{tr("Return to the Canvas")}</button></section></main></div>;
   // P0 approved UX (board 08): while this workflow's execution is live (not final), the Canvas shows "Editing paused during execution" (the shell
@@ -1037,8 +1039,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : !simulationSource.state.busy && (canvasAction.kind === 'approve' || canvasAction.kind === 'execute');
   const executionUnderway = groupedPrimary ? groupedRunOpen || Boolean(workflowRunHere.run || workflowRunHere.unloaded)
     : Boolean(liveExecution || executionProgress.started || executionStart.started || sequenceContinuing || sequenceFinishedIdle || sequenceRestore);
-  const reviewOperation = <button type="button" className="primary editor-review-operation" data-lifecycle-action="review-operation" disabled={!simulationReady && !executionUnderway}
-    onClick={() => setTab('Execute')}>{tr(executionUnderway && !simulationReady ? 'Open workflow progress' : 'Review operation')}<span aria-hidden="true">{' →'}</span></button>;
+  // UX-05 (owner guidelines of 21-11-2026): ONE primary action per moment, in the panel the owner reads — "Simulate workflow" before a result,
+  // then "Continue to authorization" once it is valid (or "Open workflow progress" for a run already started). It only opens Execute, where the
+  // mandatory Review is shown and "Authorize" asks the wallet after an explicit click; the Simulate footer then states the status only.
+  const continueToAuthorization = simulationReady || executionUnderway ? <button type="button" className="primary editor-review-operation editor-continue-authorization" data-lifecycle-action="review-operation"
+    onClick={() => setTab('Execute')}>{tr(executionUnderway && (groupedPrimary || !simulationReady) ? 'Open workflow progress' : 'Continue to authorization')}<span aria-hidden="true">{' →'}</span></button> : null;
   // C1/C2 (Execute): the one primary action sits in the Editor footer whenever Execute shows the Canvas; a step continuing in place and an
   // execution followed on its timeline keep their own action beside what they describe (never two of them).
   const executeContinuationShown = groupedPrimary ? null : executeContinuation;
@@ -1075,9 +1080,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
         {tr(canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Review operation' : 'Open workflow progress')}<span aria-hidden="true">{' →'}</span></button></div>
     : simulateActionFor(sequenceNote);
   const footerAction = tab === 'Execute' ? chatFirst ? executeFooterAction : reviewBlock ? reviewFooterAction : undefined
-    : tab === 'Build' ? createAction : tab === 'Simulate' && chatFirst ? reviewOperation : undefined;
+    : tab === 'Build' ? createAction : undefined;
   const footerStatusSource = !chatFirst ? undefined : tab === 'Execute' ? executeSimulation : tab === 'Simulate' && groupedPrimary ? groupedSimulationFooter : footerSimulation;
-  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
+  return <EstimateOwnersContext.Provider value={estimateOwners}><EditorChromeProvider value={{ stepper: editorStepper, networks: headNetworks, rename: setWorkflowName }}><div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering} entry={entry} newWorkflow={startNewChatWorkflow}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     {/* P0 workflow execution: after a reload, a whole-workflow run this browser started is offered (never followed silently). */}
     {workflowRunHere.earlier && tab !== 'Execute' && <div className="editor-run-earlier-notice" role="status">
@@ -1100,8 +1105,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
           panelLabel={groupedPrimary ? runReviewed && !groupedReviewExpired && !runReviewed.refusal ? 'Simulation result' : 'Workflow simulation'
             : canvasAction.kind === 'approve' || canvasAction.kind === 'execute' ? 'Simulation result' : 'Workflow simulation'}
           renderPanel={chatFirst ? technical => groupedPrimary
-            ? <GroupedSimulationPanel state={workflowRunHere} canvasWorkflow={state.workflow} context={context} action={simulatePanelAction}/>
-            : <ReviewSummaryPanel stage="simulate" action={simulatePanelAction} canvasWorkflow={state.workflow} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet}
+            ? <GroupedSimulationPanel state={workflowRunHere} canvasWorkflow={state.workflow} context={context} action={simulatePanelAction} next={continueToAuthorization}/>
+            : <ReviewSummaryPanel stage="simulate" action={simulatePanelAction} next={continueToAuthorization} canvasWorkflow={state.workflow} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet}
             invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason} sequenceNote={sequenceNote} technical={technical}/> : undefined}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
@@ -1110,7 +1115,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     </main>)}{/* BUILD-FLOFI-UX-EDITOR-FINOPS-001: one contextual footer on every stage of the public Editor (step count, the stage's status, ONE primary action). */}
     {(chatFirst || tab !== 'Execute' || reviewBlock) && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction primaryAction={footerAction ?? undefined} overview={overview} showStep={showStep}
       simulationBlocked={Boolean(walletIssue || simulationDisabled || !actionable || lifecycleState.invalidWorkflow)} simulation={footerStatusSource} networkQuestion={networkQuestion}
-      statusOverride={tab === 'Execute' && chatFirst ? executeStatus : null}
+      statusOverride={tab === 'Execute' && chatFirst ? executeStatus : null} stageBar={chatFirst && tab === 'Simulate'}
       stageNote={tab === 'Simulate' && chatFirst && !simulationReady && !executionUnderway && (groupedPrimary ? !runReviewed && !workflowRunHere.error
         : footerSimulation.status !== 'blocked' && footerSimulation.expiresAt === null) ? 'After simulating, you can review the details and then execute.' : null}/>}
   </div></EditorChromeProvider></EstimateOwnersContext.Provider>;

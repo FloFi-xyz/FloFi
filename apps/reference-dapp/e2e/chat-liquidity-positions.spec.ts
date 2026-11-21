@@ -18,7 +18,7 @@ import type { Page } from '@playwright/test';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { chooseLanguage } from './app-origin';
 import { expectEditorSection, openBuilder, openEditorSection } from './build-entry-navigation';
-import { CHAT_COMMITTED, expect, test } from './fixtures';
+import { CHAT_COMMITTED, expect, test, continueToAuthorization } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { BASE_CHAIN_HEX, harnessSends, ownerRuntime, POSITION_RUN_KEY, resetBasePositions } from './liquidity-position-fixtures';
 import type { SeededPosition } from './base-mainnet-serve';
@@ -48,7 +48,7 @@ const WORDS = {
     collect: 'Collect fees', half: '50%', decreased: 'Remove 50% of the liquidity of your Uniswap v3 WETH/USDC 0.05% position #9001 on Base',
     replaced: 'This replaces the position choice FloFi prepared before; only this one applies.', remove50: 'Remove 50% of liquidity',
     channel: 'Can I manage my liquidity positions through MCP?', unsupported: 'Telegram, WhatsApp, MCP and the Developer API cannot manage liquidity positions in this build.',
-    simulate: 'Simulate workflow', review: 'Review operation', subject: 'Uniswap v3 position #9001', graph: 'Simulation workflow graph', simulation: 'Simulation',
+    simulate: 'Simulate workflow', review: 'Continue to authorization', subject: 'Uniswap v3 position #9001', graph: 'Simulation workflow graph', simulation: 'Simulation',
     stale: 'The workflow or wallet has changed. Simulate again before continuing.' },
   PT: { verify: 'Verificar carteira para consultar o histórico', history: 'O histórico salvo está indisponível neste ambiente', positions: 'Minhas posições DeFi', list: 'Quais são as minhas pools?',
     listed: 'Você tem 2 posições de liquidez nas suas carteiras conectadas:', inRange: 'dentro da faixa', outOfRange: 'fora da faixa (acima dela)',
@@ -60,7 +60,7 @@ const WORDS = {
     collect: 'Coletar taxas', half: '50%', decreased: 'Remover 50% da liquidez da sua posição Uniswap v3 WETH/USDC 0.05% #9001 na Base',
     replaced: 'Isto substitui a escolha de posição que o FloFi preparou antes; só esta vale.', remove50: 'Remover 50% da liquidez',
     channel: 'Posso gerenciar minhas posições de liquidez pelo Telegram?', unsupported: 'Telegram, WhatsApp, MCP e a API para desenvolvedores não gerenciam posições de liquidez nesta versão.',
-    simulate: 'Simular fluxo', review: 'Revisar operação', subject: 'Posição Uniswap v3 #9001', graph: 'Grafo de simulação do fluxo', simulation: 'Simulação',
+    simulate: 'Simular fluxo', review: 'Continuar para autorização', subject: 'Posição Uniswap v3 #9001', graph: 'Grafo de simulação do fluxo', simulation: 'Simulação',
     stale: 'O fluxo ou a carteira mudou. Simule novamente antes de continuar.' },
 } as const;
 type Language = keyof typeof WORDS;
@@ -164,7 +164,7 @@ for (const language of ['EN', 'PT'] as const) {
       const first = (await positionRun(page))!;
       const runtime = ownerRuntime(), simulated = await runtime.positionStatus(first);
       expect(simulated).toMatchObject({ provenance: 'MOCKED', authorization: null, attempts: [], request: { operation: 'COLLECT', tokenId: '9001', partBps: null, close: false } });
-      await expect(footer(page).getByRole('button', { name: new RegExp(`^${W.review}`) })).toBeEnabled({ timeout: 30_000 });
+      await expect(continueToAuthorization(page)).toBeEnabled({ timeout: 30_000 });
 
       // "50%" right after (local): the same position, now a 50% withdrawal — a NEW revision that replaces the choice; the earlier simulation no
       // longer applies (Simulate is offered again), and the next simulation is of the withdrawal.
@@ -173,13 +173,13 @@ for (const language of ['EN', 'PT'] as const) {
       const decrease = conversation(page).locator('.message:not(.you)', { hasText: W.decreased }).last();
       await expect(decrease).toContainText(W.replaced);
       expect(await revision(page)).toBeGreaterThan(collected);
-      // Simulate (where the owner is) now shows the withdrawal, says the earlier result no longer applies and offers Simulate again; Review
-      // operation is closed until then.
+      // Simulate (where the owner is) now shows the withdrawal, says the earlier result no longer applies and offers Simulate again; UX-05: "Continue
+      // to authorization" is not offered until then.
       await expect(page.getByRole('region', { name: W.graph, exact: true })).toContainText(W.remove50);
       const panel = page.getByRole('region', { name: W.simulation, exact: true });
       await expect(panel).toContainText(W.stale);
       await expect(panel).not.toContainText(W.collect);
-      await expect(footer(page).getByRole('button', { name: new RegExp(`^${W.review}`) })).toBeDisabled();
+      await expect(continueToAuthorization(page)).toHaveCount(0);
       await panel.getByRole('button', { name: W.simulate, exact: true }).click();
       await expect.poll(async () => { const id = await positionRun(page); return id !== first && /^balp-[a-f0-9]{32}$/.test(id ?? ''); }, { timeout: 60_000 }).toBe(true);
       const second = await runtime.positionStatus((await positionRun(page))!);
