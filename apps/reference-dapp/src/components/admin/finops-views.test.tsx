@@ -34,6 +34,7 @@ function report(): FinopsReport {
       calls: { requests: 40, inputSamples: 38, outputSamples: 38, successes: 39, pricedRequests: 30, meanLatency: 812 }, chats: { web: 21, channels: 4, observed: 25 },
       toolCalls: 12, toolFailures: 1, costEstimate: metric('0.17676573', 'PARTIAL'), daily: [], models: [], legacy: [] },
     workflow: { created: 12, advanced: 9, completed: 7, failed: 1, abandoned: 2, averageSteps: 2.4, newest: '2026-11-19T08:00:00.000Z', dimensions: [] },
+    singleCards: { created: 5, advanced: 5, completed: 4, failed: 0, refunded: 0, pending: 1, abandoned: 0, averageSteps: 1, newest: '2026-11-19T07:00:00.000Z', dimensions: [] },
     sync: [], integrations: { available: true, providers: [] }, executions: null,
     totals: [
       { id: 'railway-api', amount: null, quality: 'UNAVAILABLE', complete: false, updatedAt: null, sources: [] },
@@ -214,6 +215,10 @@ describe('FinOps presentation (BUILD-FLOFI-UX-EDITOR-FINOPS-001)', () => {
     expect([...workflow.matchAll(/<li><span>([^<]+)<\/span><strong>/g)].map(match => match[1])).toEqual(['Created', 'Started mode', 'Completed and reconciled',
       'Failed or halted', 'Cancelled or expired']);
     expect(workflow).toContain('Single-flow and legacy operations are outside this counting cohort.');
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one-step single-card runs are their own cohort, never added to the workflow lifecycle above.
+    expect(workflow).toContain('Single-card runs');
+    expect(workflow).toMatch(/<dt>Completed and reconciled<\/dt><dd>4<\/dd>/);
+    expect(investorCsv(report()).split('\n').filter(line => line.startsWith('"single-card runs"'))).toHaveLength(6);
     const revenue = html(createElement(FinopsRevenue, { report: report(), language: 'EN' }));
     expect([...revenue.matchAll(/<h3 class="admin-finops-subhead">([^<]+)</g)].map(match => match[1])).toEqual(['Collected revenue', 'Operating costs', 'Margins', 'Break-even']);
     expect(revenue).toContain('Deferred 10 bps obligations do not contribute to collected revenue.');

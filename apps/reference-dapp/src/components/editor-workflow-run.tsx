@@ -40,6 +40,7 @@ import { useLocale } from '../i18n/locale';
 import { batchHandout, batchSponsorshipOf, evmWalletKind, isCirclePaid, keepBatchHandout, sendWalletBatch, signCirclePaidGroup, signSolanaGroup, signUserOperation,
   walletBatchHashes, walletProfile } from './user-funded-browser';
 import { useWalletProof } from './wallet-proof';
+import { OBSERVATION_TIMEOUT_MS } from '../domain/observation-schedule';
 import { FLIGHT_REFUSAL_MESSAGES } from '../domain/flight-refusal';
 import { EXECUTION_PHASE_LABEL } from '../domain/execution-phase';
 import { awaitedDelivery, runProgress, runStepPhase } from '../workflow-runs/run-step-phase';
@@ -146,8 +147,19 @@ const ANSWERED_STATES: readonly string[] = ['AUTHORIZED', 'SUBMITTED', 'UNCERTAI
  */
 const refusalSettled = (g: { readonly state: string; readonly signed: boolean; readonly code: string | null }) =>
   g.signed || ANSWERED_STATES.includes(g.state) || g.code === WALLET_BATCH_OUTCOME_UNKNOWN;
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (final wallet-execution review): every `wallet_getCallsStatus` read is bounded like an observation.
+ * An unanswered read rejects after OBSERVATION_TIMEOUT_MS and each caller treats it exactly as it treats a failed read (still pending, read back
+ * later): it never sends anything, so the panel's actions are never held for good by a wallet that does not answer.
+ */
+function batchStatus(batchId: string): ReturnType<typeof walletBatchHashes> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([walletBatchHashes(batchId),
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('WALLET_STATUS_TIMEOUT')), OBSERVATION_TIMEOUT_MS); })])
+    .finally(() => clearTimeout(timer));
+}
 /** Whether the wallet knows a batch id (`wallet_getCallsStatus` answers; EIP-5792 5730 or no answer: it does not) and its status if final. */
-const probe = (batchId: string) => walletBatchHashes(batchId).then(result => ({ known: true as const, result }), () => ({ known: false as const, result: null }));
+const probe = (batchId: string) => batchStatus(batchId).then(result => ({ known: true as const, result }), () => ({ known: false as const, result: null }));
 const CODE = /^[A-Z][A-Z0-9_:]{2,100}$/;
 const codeOf = (cause: unknown) => cause instanceof Error && CODE.test(cause.message) ? cause.message
   : (cause as { code?: unknown } | null)?.code === 4001 ? 'WALLET_REQUEST_REJECTED' : 'EDITOR_EXECUTION_FAILED';
@@ -504,7 +516,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   }
   async function followBatch(id: string, index: number, batchId: string) {
     for (let i = 0; i < 60; i++) {
-      const done = await walletBatchHashes(batchId).catch(() => null);
+      const done = await batchStatus(batchId).catch(() => null);
       if (done?.hashes.length) { await report(id, index, done.hashes); setPhase('running'); return; }
       if (done?.failed) { await report(id, index, [], true); setPhase('running'); return; }
       await new Promise(resolve => setTimeout(resolve, 2_000));
@@ -660,7 +672,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     const held = group ? await heldBatch(approvalId, group.index, group.batchId) : null;
     if (!group || !held) { await loadStatus(approvalId, interactive); return; }
     if (group.state === 'PREPARED') { await recordBatch(approvalId, group.index, held); return; }
-    const done = await walletBatchHashes(held).catch(() => null);
+    const done = await batchStatus(held).catch(() => null);
     if (done?.hashes.length) await report(approvalId, group.index, done.hashes);
     else if (done?.failed) await report(approvalId, group.index, [], true);
     else await loadStatus(approvalId, interactive);

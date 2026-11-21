@@ -21,6 +21,11 @@ export const ETHEREUM_SEPOLIA_HEX = '0xaa36a7';
 export const ROBINHOOD_HEX = '0x1237';
 type Chain = '0x1' | typeof BASE_HEX | typeof ARBITRUM_HEX | typeof BASE_SEPOLIA_HEX | typeof ROBINHOOD_TESTNET_HEX | typeof ETHEREUM_SEPOLIA_HEX | typeof ROBINHOOD_HEX;
 export type WalletSession = { readonly account: string; readonly chainId: string };
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a simulation FloFi starts by itself (`interactive: false`) never opens the wallet selector or asks
+ * for a sign-in: without a connected session it ends with the store's existing inline error, and the owner's own Simulate click asks as before.
+ */
+export type SimulateOptions = { readonly interactive?: boolean };
 type Wallet = { readonly available: boolean; readonly account: string | null; readonly chainId: string | null;
   /** Public identity of the provider in use (explicit choice, or the passive provider of an already-authorized wallet). */
   readonly provider: Pick<WalletChoice, 'key' | 'name' | 'icon'> | null;

@@ -104,6 +104,17 @@ export function editorApprovalContributor(env: Env, seams: EditorContributorSeam
   };
 }
 
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (final security review): a failed in-place Authorize withdraws the account's own Editor handoff only
+ * while NO workflow run exists for it (a refused claim, a run row the database refused). A run, live or ended, keeps its handoff as its record and
+ * its count against the pending limit (one that could not be ended is left to its run and its expiry). The requester scope is this account's own:
+ * another account's or another requester kind's handoff is never touched. Returns whether it was withdrawn.
+ */
+export async function withdrawUnstartedHandoff(deps: { readonly handoffs: Pick<ApprovalDeps['handoffs'], 'revokeForRequester'>;
+  readonly runFor: (handoffId: string) => Promise<unknown> }, accountId: string, approvalId: string, now: Date): Promise<boolean> {
+  if (!ACCOUNT_ID.test(accountId) || await deps.runFor(approvalId) !== null) return false;
+  return (await deps.handoffs.revokeForRequester(approvalId, editorScope(accountId), now))?.status === 'REVOKED';
+}
 export type EditorRunStarted = { readonly approvalId: string; readonly approvalUrl: string; readonly expiresAt: string; readonly stepCount: number;
   readonly walletNamespaces: readonly string[]; readonly authority: 'NONE' };
 export type EditorRunResult = { readonly ok: true; readonly value: EditorRunStarted } | { readonly ok: false; readonly code: string; readonly step?: number };

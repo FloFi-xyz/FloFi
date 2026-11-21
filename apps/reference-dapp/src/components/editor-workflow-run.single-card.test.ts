@@ -24,13 +24,15 @@ vi.mock('../app/editor-workflow-execution-action', () => ({ editorWorkflowExecut
   reviewEditorWorkflow: server.review, authorizeEditorWorkflow: server.authorize }));
 vi.mock('../app/approve-action', () => ({ workflowRunStatusHandoff: server.status, prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorizeGroup,
   reportUserFundedBatch: server.report, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: vi.fn() }));
-const wallet = vi.hoisted(() => ({ requests: [] as string[] }));
+/** `silent`: once the batch is sent, the wallet never answers `wallet_getCallsStatus` again (final wallet-execution review). */
+const wallet = vi.hoisted(() => ({ requests: [] as string[], silent: false }));
 vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined,
   walletProfile: async () => { wallet.requests.push('wallet_getCapabilities'); return { eip155: { wallet: 'INJECTED', atomic: { 'eip155:42161': 'supported' }, typedData: true } }; },
   sendWalletBatch: async (request: { id: string }, onSending: () => void) => { onSending(); wallet.requests.push('wallet_sendCalls'); return request.id; },
   // EIP-5792: an id the wallet never received is unknown (5730); once sent, its status reports the batch's transaction.
   walletBatchHashes: async () => { wallet.requests.push('wallet_getCallsStatus');
     if (!wallet.requests.includes('wallet_sendCalls')) throw Object.assign(new Error('Unknown bundle id'), { code: 5730 });
+    if (wallet.silent) return new Promise(() => undefined);
     return { hashes: ['0x' + 'ef'.repeat(32)], failed: false }; },
   signSolanaGroup: vi.fn(), signUserOperation: vi.fn() }));
 const proof = vi.hoisted(() => ({ proveEvm: vi.fn() }));
@@ -58,7 +60,7 @@ const render = (single = true) => { hooks.at = 0; return useEditorWorkflowRun({ 
 async function settle() { for (const effect of hooks.effects.filter(Boolean)) effect(); await new Promise(resolve => setTimeout(resolve, 0)); }
 
 beforeEach(() => {
-  hooks.slots = []; hooks.effects = []; storage.clear(); wallet.requests.length = 0; proof.proveEvm.mockReset();
+  hooks.slots = []; hooks.effects = []; storage.clear(); wallet.requests.length = 0; wallet.silent = false; proof.proveEvm.mockReset(); vi.useRealTimers();
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) });
   vi.stubGlobal('crypto', { randomUUID: () => 'nonce-' + Math.random().toString(16).slice(2) });
   server.review.mockReset().mockResolvedValue({ ok: true, value: review });
@@ -99,6 +101,28 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card in the Editor\'
     expect(render()).toMatchObject({ available: true, started: true, run: { state: 'COMPLETED' } });
     expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(1);
     expect(server.authorize).toHaveBeenCalledTimes(1);
+  });
+
+  it('a wallet that never answers its batch status after the one send never holds the panel: each read is bounded, nothing is reported or resent', async () => {
+    availability.value = { enabled: true, code: null, singleStep: true };
+    render(); await settle();
+    await render().startReview();
+    wallet.silent = true;
+    vi.useFakeTimers();
+    const authorizing = render().authorize();
+    // 60 bounded status reads (30 s each) with their 2 s pauses: the follow ends, the run keeps observing server-side.
+    await vi.advanceTimersByTimeAsync(60 * 32_000 + 1_000);
+    await authorizing;
+    vi.useRealTimers();
+    expect(render()).toMatchObject({ phase: 'running', error: null });
+    expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(1);
+    expect(wallet.requests.filter(m => m === 'wallet_getCallsStatus').length).toBeGreaterThanOrEqual(60);
+    expect(server.report).not.toHaveBeenCalled();
+    // The panel's actions are free again: the owner's "Check my wallet" reads the status once more (bounded too) and never sends.
+    wallet.silent = false;
+    await render().checkWallet();
+    expect(server.report).toHaveBeenCalledWith(APPROVAL, 0, ['0x' + 'ef'.repeat(32)], false);
+    expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(1);
   });
 
   it('a Review that plans the card step by step (no atomic batching) is offered step by step: the Editor goes back to the card\'s own flow', async () => {

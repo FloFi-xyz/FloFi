@@ -26,11 +26,13 @@ const f = vi.hoisted(() => ({
   afterObserve: null as (() => Promise<unknown> | void) | null,
   /** A scripted answer for the next observation instead of the service's. */
   nextObserve: [] as Observed[],
+  /** No connected wallet session (`wallet.session()` answers null), and how often the wallet selector was opened (`wallet.connect()`). */
+  noSession: false, connects: 0,
 }));
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ runtimeWorkflow: f.workflow }) }));
 vi.mock('./build009-wallet-store', () => ({
-  useBuild009Wallet: () => ({ account: f.owner, chainId: '0xb626', session: async () => ({ account: f.owner, chainId: '0xb626' }), connect: async () => null,
-    switchTo: async () => undefined }),
+  useBuild009Wallet: () => ({ account: f.owner, chainId: '0xb626', session: async () => f.noSession ? null : ({ account: f.owner, chainId: '0xb626' }),
+    connect: async () => { f.connects++; return null; }, switchTo: async () => undefined }),
   injected: () => f.provider,
 }));
 vi.mock('../domain/observation-schedule', async original => {
@@ -92,7 +94,7 @@ const mineOnObserve = () => { f.afterObserve = () => chain.rpc('MOCK_mine', [1])
 
 beforeEach(async () => {
   host = new HookHarness(); requests.length = 0; shown.length = 0; wallet.awaiting = false;
-  f.sleeps = []; f.calls = { begin: 0, handoff: 0, report: [], observe: 0, failure: 0 }; f.afterObserve = null; f.nextObserve = [];
+  f.sleeps = []; f.calls = { begin: 0, handoff: 0, report: [], observe: 0, failure: 0 }; f.afterObserve = null; f.nextObserve = []; f.noSession = false; f.connects = 0;
   f.owner = TRANSFER_OWNER;
   chain = createRobinhoodTransferChain();
   f.service = createRobinhoodTransferService({ rpc: chain.rpc, journalDir: await mkdtemp(join(tmpdir(), 'flofi-transfer-store-')), provenance: 'MOCKED' });
@@ -186,6 +188,27 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the transfer is followed
     expect(store.error).toBeNull();
     expect(sends()).toBe(1);
     expect(f.calls.begin).toBe(1);
+  });
+
+  it('a simulation FloFi starts by itself never opens the wallet selector; the owner\'s own Simulate still does (final wallet-execution review)', async () => {
+    read(); await settle();
+    f.noSession = true;
+    await act(() => store.simulate({ interactive: false }));
+    expect(f.connects).toBe(0);
+    expect(store.error).toBe('TRANSFER_WALLET_REQUIRED');
+    expect(store.record).toBeNull();
+    expect(requests).toEqual([]);
+    // The owner's own click asks for the wallet as before (the double declines).
+    await act(() => store.simulate());
+    expect(f.connects).toBe(1);
+    expect(store.error).toBe('TRANSFER_WALLET_REQUIRED');
+    // With a connected session the non-interactive simulation proceeds read-only.
+    f.noSession = false;
+    await act(() => store.simulate({ interactive: false }));
+    expect(f.connects).toBe(1);
+    expect(store.error).toBeNull();
+    expect(store.record?.review.commitment).toBeTruthy();
+    expect(sends()).toBe(0);
   });
 
   it('a classified observation code keeps its own meaning', async () => {

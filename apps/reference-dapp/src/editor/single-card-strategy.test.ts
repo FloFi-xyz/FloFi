@@ -11,12 +11,13 @@ import { createReviewContext } from '@defi-workflow-engine/reference-linter';
 import { parseLocalCommand } from '../domain/commands';
 import { editorReducer, initialEditor, type EditorState } from '../domain/editor';
 import type { Workflow } from '../domain/initial-workflow';
-import { deliveredByRun, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES } from '../domain/workflow-sequence';
+import { deliveredByRun, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES, singleCardFallsBack } from '../domain/workflow-sequence';
 import { composeWorkflow } from '../engine/strategy-engine';
 import { evaluateWorkflowGates, readHandoffPolicy, workflowPlan } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
 import { approvalLinkScheme, requestApproval, type ApprovalDeps, type HandoffRecord, type HandoffStore } from '../platform/index.ts';
 import { ensureForClaim } from '../workflow-runs/service.ts';
+import { withdrawUnstartedHandoff } from './approval';
 import { editorWorkflowStrategy } from './workflow-strategy';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id,
@@ -148,5 +149,32 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of ONE step exists
     const single = { handoffId: 'apr_' + 'a'.repeat(26), requesterKind: 'EDITOR_SESSION', requesterRef: 'ref', plan: workflowPlan(composed), workflowHash: composed.workflowHash,
       claimed: null } as unknown as HandoffRecord;
     await expect(ensureForClaim(deps, single, composed, wallets)).rejects.toThrow('WORKFLOW_RUN_NOT_SEQUENTIAL');
+  });
+
+  it('a failed Authorize withdraws only its own handoff, only while no run exists for it; an unreadable run store withdraws nothing (final security review)', async () => {
+    const ACCOUNT = 'acct_' + 'a'.repeat(32), APPROVAL = 'apr_' + 'b'.repeat(26), now = new Date();
+    const revoked: unknown[][] = [];
+    const handoffs = { revokeForRequester: async (...args: unknown[]) => { revoked.push(args); return { status: 'REVOKED' } as unknown as HandoffRecord; } };
+    expect(await withdrawUnstartedHandoff({ handoffs, runFor: async () => ({ runId: 'wfr_1' }) }, ACCOUNT, APPROVAL, now)).toBe(false);
+    expect(revoked).toEqual([]);
+    await expect(withdrawUnstartedHandoff({ handoffs, runFor: async () => { throw new Error('ECONNRESET'); } }, ACCOUNT, APPROVAL, now)).rejects.toThrow('ECONNRESET');
+    expect(revoked).toEqual([]);
+    expect(await withdrawUnstartedHandoff({ handoffs, runFor: async () => null }, 'not-an-account', APPROVAL, now)).toBe(false);
+    expect(revoked).toEqual([]);
+    expect(await withdrawUnstartedHandoff({ handoffs, runFor: async () => null }, ACCOUNT, APPROVAL, now)).toBe(true);
+    expect(revoked).toEqual([[APPROVAL, { kind: 'EDITOR_SESSION', ref: ACCOUNT }, now]]);
+  });
+
+  it('a single card goes back to its own flow when its Review is step by step, refuses, or could not answer at all; never once its run started', () => {
+    const base = { started: false, review: null, stepByStep: false, error: null, following: false };
+    expect(singleCardFallsBack(base)).toBe(false); // not reviewed yet: the whole-workflow path stays primary
+    expect(singleCardFallsBack({ ...base, review: { mode: 'ONE_WALLET_CONFIRMATION', refusal: null } })).toBe(false);
+    expect(singleCardFallsBack({ ...base, review: { mode: 'STEP_BY_STEP', refusal: null } })).toBe(true);
+    expect(singleCardFallsBack({ ...base, review: { mode: 'ONE_WALLET_CONFIRMATION', refusal: { code: 'SIMULATION_REVERTED' } } })).toBe(true);
+    // Final workflow review: a Review that could not answer (rate limited, RPC or server failure) never hides the card's own flow.
+    for (const error of ['EDITOR_REVIEW_RATE_LIMITED', 'USER_FUNDED_RPC_UNAVAILABLE', 'EDITOR_EXECUTION_FAILED']) expect(singleCardFallsBack({ ...base, error })).toBe(true);
+    expect(singleCardFallsBack({ ...base, error: 'EDITOR_EXECUTION_FAILED', following: true })).toBe(false);
+    // A started run always stays on its path, whatever its Review or errors say.
+    expect(singleCardFallsBack({ ...base, started: true, review: { mode: 'STEP_BY_STEP', refusal: null }, error: 'EDITOR_EXECUTION_FAILED', stepByStep: true })).toBe(false);
   });
 });

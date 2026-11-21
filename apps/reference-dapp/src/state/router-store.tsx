@@ -5,7 +5,7 @@ import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetW
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
-import { injected, useBuild009Wallet } from './build009-wallet-store';
+import { injected, useBuild009Wallet, type SimulateOptions } from './build009-wallet-store';
 import { crossChainRouterMode, routerBegin, routerHandoff, routerInfo, routerInvalidate, routerObserve, routerRefresh, routerReport, routerReview, routerRuns,
   routerSimulate, routerStatus, routerWalletFailure, type RouterRunSummary } from '../app/router-action';
 import { walletSessionStatus, walletSignIn, walletSignInChallenge, walletSignOut } from '../app/wallet-session-action';
@@ -47,7 +47,7 @@ type Store = { network: RouterNetwork; available: boolean; availability: Readonl
   runs: readonly RouterRunSummary[]; notice: string | null;
   /** BUILD-FLOFI-MAINNET-EXEC-002: the last automatic in-place re-quote (the refusal code and the material values it changed), or null. */
   requoted: { readonly code: string; readonly runId: string; readonly changes: readonly BridgeReviewChange[] } | null;
-  simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>; switchNetwork(): Promise<void>;
+  simulate(options?: SimulateOptions): Promise<void>; refresh(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>; switchNetwork(): Promise<void>;
   signIn(): Promise<void>; signOut(): Promise<void>; open(runId: string): Promise<void>; loadRuns(): Promise<void> };
 const Context = createContext<Store | null>(null);
 function errorValue(value: unknown): unknown {
@@ -187,19 +187,21 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; const code = cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED';
       setError(REQUOTED_IN_PLACE.test(code) ? null : code); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
-  async function ownerSession() {
-    let current = await wallet.session(); if (!current) current = await wallet.connect();
+  async function ownerSession(interactive = true) {
+    let current = await wallet.session(); if (!current && interactive) current = await wallet.connect();
     if (!current) throw new Error('ROUTER_WALLET_REQUIRED');
     return current;
   }
   /** One EIP-4361 `personal_sign` request; the server verifies the signer and sets the HttpOnly session. No transaction. */
-  async function establishSession(): Promise<WalletSession> {
-    const connected = await ownerSession();
+  async function establishSession(interactive = true): Promise<WalletSession> {
+    const connected = await ownerSession(interactive);
     if (latestSession.current?.account === connected.account) return latestSession.current;
     // BUILD-SOLANA-TRANSFER-UX-001: a sign-in this browser already completed for the same connected account (the approval proof just before
     // FloFi prepares the proposal's simulation) is adopted, as at mount, instead of asking the wallet to sign again. The server verified it.
     const existing = await walletSessionStatus().catch(() => null);
     if (existing && existing.account === connected.account) { setSession(existing); latestSession.current = existing; setNotice(null); return existing; }
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a simulation FloFi starts by itself never asks for a sign-in (the inline error instead).
+    if (!interactive) throw new Error('WALLET_SESSION_REQUIRED');
     const provider = injected(); if (!provider) throw new Error('ROUTER_WALLET_REQUIRED');
     const { message } = unwrap(await walletSignInChallenge(connected.account, Number.parseInt(connected.chainId, 16)));
     const signature = await provider.request({ method: 'personal_sign', params: [utf8Hex(message), connected.account] });
@@ -221,10 +223,10 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     accept(unwrap(await routerStatus(network, runId))); setRecovered(true);
   }); }
   async function loadRuns() { await operation(async () => { await refreshRuns(); }); }
-  async function simulate() { await operation(async () => {
+  async function simulate(options: SimulateOptions = {}) { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
-    const snapshot = latest.current, owner = await establishSession();
+    const snapshot = latest.current, owner = await establishSession(options.interactive !== false);
     if (latest.current !== snapshot) return;
     const result = await routerSimulate(network, snapshot, owner.account);
     if (latest.current !== snapshot || latestSession.current?.account !== owner.account) return;

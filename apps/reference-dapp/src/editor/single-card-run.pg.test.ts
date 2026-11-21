@@ -33,9 +33,9 @@ import { composeWorkflow, dappReviewContext } from '../engine/strategy-engine';
 import { assembleApprovalSurface, claimApproval, fixedWindow, requestApproval, workflowRunStatus, type HandoffPolicy } from '../platform/index.ts';
 import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve.ts';
 import { evmCallsOf, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
-import { singleStepRunsSupported } from '../workflow-runs/pg-store.ts';
+import { createPgWorkflowRunStore, singleStepRunsSupported } from '../workflow-runs/pg-store.ts';
 import { workflowRunHarness } from '../workflow-runs/workflow-run.test-harness.ts';
-import { editorApprovalScheme, editorClaimPolicy, startEditorRun, type EditorRunConfig } from './approval.ts';
+import { editorApprovalScheme, editorClaimPolicy, startEditorRun, withdrawUnstartedHandoff, type EditorRunConfig } from './approval.ts';
 import { bindingOf, runMatchesBinding } from './authorize-binding.ts';
 import { reviewEditorExecution } from './workflow-execution.ts';
 import { singleCardRunRecord } from './workflow-strategy.ts';
@@ -112,14 +112,14 @@ async function setup(t: TestDatabase, options: { readonly weth?: bigint; readonl
     return { approvalId: started.value.approvalId, proposal, prepared };
   }
   const runCount = async () => Number((await t.db.query('SELECT count(*)::int AS n FROM workflow_runs')).rows[0]!.n);
-  return { chain, h, owner, surface, start, review, authorize, wallet, wallets, runCount, batches: () => batches };
+  return { chain, h, owner, surface, start, review, authorize, wallet, wallets, runCount, batches: () => batches, accountId: session.accountId };
 }
 const groupOf = (prepared: { prepared: unknown }) => prepared.prepared as unknown as { group: EvmGroupCalls; request: { atomicRequired: boolean; id: string; calls: unknown[] } };
 
 describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on Arbitrum One in ONE wallet confirmation (MOCKED chain, PostgreSQL)', { timeout: 120_000 }, () => {
   it('acceptance: insufficient allowance → one Authorize, ONE atomic batch [exact approval, swap], automatic independent reconciliation, nothing resent', async () => {
     const t = await schema32();
-    const { chain, h, owner, review, authorize, wallet, wallets, surface, runCount, batches } = await setup(t);
+    const { chain, h, owner, review, authorize, wallet, wallets, surface, runCount, batches, accountId } = await setup(t);
     expect(await singleStepRunsSupported(t.db)).toBe(true);
     const canvas = canvasOf(SWAP);
     expect(canvas.nodes.filter(n => !n.actionType.startsWith('mock-'))).toHaveLength(1);
@@ -162,6 +162,10 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     expect(p.request).not.toHaveProperty('capabilities');
     expect(p.request.calls).toHaveLength(2);
     expect(await runCount()).toBe(1);
+    // A failed Authorize after this point never withdraws the handoff of the run that exists (final security review): it stays its run's record.
+    const runs = createPgWorkflowRunStore(t.db, h.d.tenantId);
+    expect(await withdrawUnstartedHandoff({ handoffs: h.handoffs, runFor: id => runs.byHandoff(id) }, accountId, approvalId, h.d.now())).toBe(false);
+    expect((await t.db.query('SELECT status FROM mcp_handoffs WHERE handoff_id = $1', [approvalId])).rows[0]!.status).toBe('CLAIMED');
 
 
     // ── The owner's ONE wallet confirmation: one atomic transaction from the owner's own account ─────────────────────────────────────
@@ -189,13 +193,16 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     const record = singleCardRunRecord(completed, canvas);
     expect(record).toEqual({ verdict: 'RECONCILED', workflow: { workflowId: canvas.workflowId, nodes: [{ nodeId: canvas.nodes.find(n => !n.actionType.startsWith('mock-'))!.nodeId }] },
       received: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: received.toString() }], owner });
-    // Another card (a different amount) is never this run's card.
+    // Another card (a different amount) is never this run's card; nor is a run of more than one step, whatever its hash.
     expect(singleCardRunRecord(completed, canvasOf({ ...SWAP, amount: '0.0007' }))).toBeNull();
+    expect(singleCardRunRecord({ ...completed, stepCount: 2, steps: [completed.steps[0]!, completed.steps[0]!] }, canvas)).toBeNull();
 
     // ── FinOps keeps its multi-step workflow cohort: a completed single card is never counted as a workflow (data-privacy review) ─────────
     const day = h.d.now().toISOString().slice(0, 10), next = new Date(h.d.now().getTime() + 86_400_000).toISOString().slice(0, 10);
     const report = await readFinopsReport({ db: t.db, tenantId: h.d.tenantId }, { from: day, to: next }, h.d.now());
     expect(report.workflow).toMatchObject({ created: 0, completed: 0 });
+    // …and is counted in its own single-card cohort instead (final workflow review: it has no execution_runs record, so it is never counted nowhere).
+    expect(report.singleCards).toMatchObject({ created: 1, completed: 1, failed: 0, pending: 0, averageSteps: 1 });
 
     // ── Reload: read back by its id; nothing is prepared or sent again ────────────────────────────────────────────────────────────────
     const reloaded = await workflowRunStatus(surface, approvalId, wallets);
@@ -305,13 +312,20 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
   it('dormant gate: without migration 0032 no one-step run is offered (the database refuses it); MCP and channels keep SINGLE_FLOW', async () => {
     const shipped = await createTestDatabase(); opened.push(shipped);
     expect(await singleStepRunsSupported(shipped.db)).toBe(false);
-    const { h, start, surface, wallets } = await setup(shipped);
+    const { h, start, surface, wallets, accountId } = await setup(shipped);
     // Even a forced one-step handoff cannot become a run on such a database: its row is refused by 0015's CHECK at the claim (fail closed).
     const started = await start(canvasOf(SWAP));
     if (!started.ok) throw new Error(started.code);
     await expect(claimApproval(surface, decodeURIComponent(new URL(started.value.approvalUrl).hash.slice(1)), wallets, true, h.d.now()))
       .rejects.toThrow('WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED');
     expect(Number((await shipped.db.query('SELECT count(*)::int AS n FROM workflow_runs')).rows[0]!.n)).toBe(0);
+    // No run exists for it, so the Editor's failed Authorize withdraws its own handoff (it never lingers against the pending limit); another account
+    // never can.
+    const runs = createPgWorkflowRunStore(shipped.db, h.d.tenantId), withdraw = (account: string) =>
+      withdrawUnstartedHandoff({ handoffs: h.handoffs, runFor: id => runs.byHandoff(id) }, account, started.value.approvalId, h.d.now());
+    expect(await withdraw('acct_' + 'f'.repeat(32))).toBe(false);
+    expect(await withdraw(accountId)).toBe(true);
+    expect((await shipped.db.query('SELECT status FROM mcp_handoffs WHERE handoff_id = $1', [started.value.approvalId])).rows[0]!.status).toBe('REVOKED');
     // A tampered ledger row (another SHA-256 under 0032's version) is not 0032.
     const t = await schema32();
     await t.db.query(`UPDATE schema_migrations SET sha256 = repeat('a', 64) WHERE version = 32`);

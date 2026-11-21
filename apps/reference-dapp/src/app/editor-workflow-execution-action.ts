@@ -17,10 +17,10 @@ import { flightWalletRefusal, withFlightAccess, withFlightOwner } from '../serve
  */
 import { cookies, headers } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
-import { editorScope, readEditorRunConfig, startEditorRun, type EditorRunStarted } from '../editor/approval';
+import { readEditorRunConfig, startEditorRun, withdrawUnstartedHandoff, type EditorRunStarted } from '../editor/approval';
 import { createPgHandoffStore } from '../platform/index';
 import { EMBEDDED_APPROVAL_PATH } from '../server/embedded-approval';
-import { singleStepRunsSupported } from '../workflow-runs/pg-store';
+import { createPgWorkflowRunStore, singleStepRunsSupported } from '../workflow-runs/pg-store';
 import { bindingOf, runMatchesBinding } from '../editor/authorize-binding';
 import { editorWorkflowStrategy, singleCardRunRecord, type SingleRunRecord } from '../editor/workflow-strategy';
 import { prepareCatalogs } from '../server/editor-catalogs';
@@ -134,12 +134,13 @@ async function startSingleCardRun(workflow: unknown): Promise<Result<EditorRunSt
   return await startEditorRun({ config, origin: config.origin, handoffs: createPgHandoffStore(host.db, host.tenantId), allow: fixedWindow(host.db, host.tenantId).allow,
     runtime: deploymentEngineRuntime(env), now: new Date() }, session.accountId, workflow, { singleStepRun: true });
 }
-/** Withdraws this account's own Editor handoff (the requester's scope only; a claimed or applied one is left to its run). */
+/** Withdraws this account's own Editor handoff only while no workflow run exists for it (`withdrawUnstartedHandoff`: a run keeps its handoff). */
 async function revokeOwnHandoff(approvalId: string): Promise<void> {
   const env = process.env, accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
   if (!session) return;
   const host = await platformStateHost(env);
-  await createPgHandoffStore(host.db, host.tenantId).revokeForRequester(approvalId, editorScope(session.accountId), new Date());
+  await withdrawUnstartedHandoff({ handoffs: createPgHandoffStore(host.db, host.tenantId), runFor: id => createPgWorkflowRunStore(host.db, host.tenantId).byHandoff(id) },
+    session.accountId, approvalId, new Date());
 }
 export type EditorAuthorization = { readonly approvalId: string; readonly proposal: ClaimedProposal; readonly prepared: PreparedGroupView };
 /**
@@ -193,8 +194,9 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     // Nothing was signed or sent: a started run that could not reach its wallet request is ended (it stays readable as ended).
     let ended = false;
     if (approvalId) { try { await workflowRunCancel(await surface(), approvalId, await currentWalletPrincipals()); ended = true; } catch { /* already ended or not created */ } }
-    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): no run was created (a refused claim, a run row the database refused): the
-    // account's own handoff is withdrawn, so it never lingers against the account's pending limit. Nothing was signed or sent either way.
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): a run that could not be ended here keeps its handoff; only when NO run exists
+    // for it (a refused claim, a run row the database refused) is the account's own handoff withdrawn, so it never lingers against the account's
+    // pending limit. Nothing was signed or sent either way.
     if (approvalId && !ended) await revokeOwnHandoff(approvalId).catch(() => undefined);
     const refused = failure(cause);
     return ended && refused.code === 'GAS_MECHANISM_CHANGED_REVIEW_REQUIRED' ? { ok: false, code: 'EDITOR_MECHANISM_CHANGED_NOT_STARTED' } : refused;
@@ -217,8 +219,10 @@ export async function editorSingleRunRecord(approvalId: unknown, card: unknown):
     const jar = await cookies();
     const status = await workflowRunStatus(await approvalSurface(process.env, name => jar.get(name)?.value), approvalId, await currentWalletPrincipals());
     const run = status.view.workflowRun?.run;
+    // Only a one-step run can be a single card's (checked before the caller's card is read at all).
+    if (!run || run.stepCount !== 1) return { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };
     await prepareCatalogs(card);
-    const record = run ? singleCardRunRecord(run, card) : null;
+    const record = singleCardRunRecord(run, card);
     return record ? { ok: true, value: record } : { ok: false, code: 'WORKFLOW_RUN_NOT_THIS_CARD' };
   } catch (cause) { return failure(cause); }
 

@@ -131,3 +131,32 @@ and is not claimed by this build.
   - The ledger read follows the Review limiter.
   - The fallback auto-simulate never reaches a sign-in or the wallet selector.
   - Stale comments were corrected.
+
+### 6.1 Final review of the committed branch (workflow, security, wallet execution at `d377224`)
+
+No blocker or major finding. Every earlier finding was confirmed fixed. The minor findings were fixed in this PR:
+
+- **Handoff withdrawal (security).** A failed Authorize withdraws the account's own Editor handoff only while no workflow run exists for it
+  (`withdrawUnstartedHandoff`). A run that could not be ended keeps its handoff, its record and its count against the pending limit. A claimed
+  handoff whose claim was refused (no run) is withdrawn too.
+- **Restore read (security).** `editorSingleRunRecord` refuses anything but a one-step run before it reads the caller's card.
+- **Automatic fallback simulation (wallet execution).** It is non-interactive: the Router and Transfer stores never open the wallet selector or
+  ask for a sign-in then; without a connected session they end with their existing inline error. The owner's own Simulate click asks as before.
+- **Wallet status reads (wallet execution).** Every `wallet_getCallsStatus` read of the Editor run panel is bounded at 30 s and treated like a
+  failed read (still pending, read back later). A wallet that never answers can no longer hold the panel's actions; nothing is resent.
+- **Canvas lock (workflow).** This workflow's own run, stored in this browser but not loaded yet (before its first status read, or until the
+  owner signs in again), locks the Canvas, so a completed single card is never lost to an edit made before its run loaded. "Forget this
+  workflow in this browser" releases it.
+- **Review that cannot answer (workflow).** A rate-limited, RPC or server failure of a single card's Review falls back to the card's own flow
+  (`singleCardFallsBack`), which was always available for it.
+- **FinOps (workflow).** One-step single-card runs have no `execution_runs` record. They are now counted as their own cohort (FinOps view and
+  investor CSV), never as workflows. Gas payer evidence states that it includes them.
+
+Documented, not changed:
+
+- **Restore proof binds by content.** A `workflow-run` record proves the run is the owner's and has exactly the card's canonical single-step
+  hash; the card's Canvas ids are echoed, not stored with the run. Another completed one-step run of the same wallet with an identical card can
+  satisfy this browser's pointer. The step is then shown as executed (skipped), never executed again.
+- **Wording after a returned hash.** An observation timeout after the wallet returned a hash uses the existing "submission result unknown"
+  words, which err on the safe side ("do not send it again").
+- **Uniswap follows** keep their manual check visible during the automatic follow (a second read-only observation, no safety impact).

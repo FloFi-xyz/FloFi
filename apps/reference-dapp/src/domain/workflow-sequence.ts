@@ -124,6 +124,16 @@ export const SEQUENCE_RUNTIMES: readonly string[] = Object.freeze(['public', 'ro
  * the card's own flow). The universal Router, Uniswap positions and Solana cards keep their own flow (Solana cards already sign once).
  */
 export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'transfer', 'supply']);
+/**
+ * Whether a single card that took the whole-workflow path goes back to its own flow: never once its run started (a started run always stays); when
+ * its Review is not one grouped interaction or refuses the batch (its own flow re-checks, simulates and reviews it and shows its own errors); and
+ * when the Review could not answer at all (rate limited, an RPC or server failure: final workflow review), since its own flow was always available.
+ */
+export function singleCardFallsBack(run: { readonly started: boolean; readonly review: { readonly mode: string; readonly refusal: unknown } | null;
+  readonly stepByStep: boolean; readonly error: string | null; readonly following: boolean }): boolean {
+  if (run.started) return false;
+  return run.review ? run.review.mode === 'STEP_BY_STEP' || run.review.refusal !== null : run.stepByStep || run.error !== null && !run.following;
+}
 /** Runtimes whose reconciled record proves the delivered amount a funded later step spends (`deliveredByRecord`). */
 export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply', 'workflow-run']);
 /** The canonical form of a node, to prove an executed step is still exactly what the workflow holds. */

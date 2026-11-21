@@ -4,7 +4,7 @@ import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
-import { injected, useBuild009Wallet } from './build009-wallet-store';
+import { injected, useBuild009Wallet, type SimulateOptions } from './build009-wallet-store';
 import { TRANSFER_NETWORKS } from '../domain/robinhood-transfer-authoring';
 import { transferBegin, transferHandoff, transferInvalidate, transferObserve, transferRecoverReview, transferReport, transferReview,
   transferSimulate, transferStatus, transferWalletFailure } from '../app/robinhood-transfer-action';
@@ -37,7 +37,7 @@ function afterHash(cause: unknown): string {
 type Store = { record: TransferRecord | null; busy: boolean; error: string | null; retired: boolean; signing: boolean;
   /** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the submitted request is being followed by itself (read-only); no manual check is offered meanwhile. */
   following: boolean;
-  simulate(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>; recoverReview(): Promise<void>; switchNetwork(): Promise<void> };
+  simulate(options?: SimulateOptions): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>; recoverReview(): Promise<void>; switchNetwork(): Promise<void> };
 const Context = createContext<Store | null>(null);
 function quantity(value: unknown): bigint {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return BigInt(value);
@@ -105,10 +105,11 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
     try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'TRANSFER_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
-  async function simulate() { await operation(async () => {
+  async function simulate(options: SimulateOptions = {}) { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
-    let session = await wallet.session(); if (!session) session = await wallet.connect();
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a simulation FloFi starts by itself never opens the wallet selector (no session → the inline error).
+    let session = await wallet.session(); if (!session && options.interactive !== false) session = await wallet.connect();
     if (!session) throw new Error('TRANSFER_WALLET_REQUIRED');
     const snapshot = latest.current, value = unwrap(await transferSimulate(snapshot, session.account));
     if (latest.current !== snapshot) throw new Error('TRANSFER_SEMANTIC_REVISION_CHANGED');
