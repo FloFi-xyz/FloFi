@@ -577,8 +577,18 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: owner deletion of a sing
       await decidePrivacyRequest(db, 'default', requestId, 'APPROVED', 'IDENTITY_VERIFIED', 'ticket-7');
       return requestId;
     };
-    expect(((await privacyAccess(db, 'default', await request('ACCESS'), key, OWNER, false)).supportTexts as unknown[])).toHaveLength(2);
-    expect(await privacyErase(db, 'default', await request('ERASURE'), key, OWNER)).toMatchObject({ supportTextsErased: 2, keptByLegalHold: 0 });
+    // A kept attempt (still open) and a note keyed by its approval handoff id (data-privacy review: matched like a run id).
+    const kept = await attempt(db, store);
+    await db.query(`INSERT INTO admin_support_texts (tenant_id, text_id, purpose, body, salt, run_id, incident_id, created_by, expires_at)
+      VALUES ('default', $1, 'SUPPORT_NOTE', 'Owner asked about a kept attempt.', $2, $3, NULL, 'cli', now() + interval '30 days')`, [typedId('stx'), randomBytes(32), kept.handoffId]);
+    const access = await privacyAccess(db, 'default', await request('ACCESS'), key, OWNER, false);
+    expect(access.supportTexts as unknown[]).toHaveLength(3);
+    // Single-card workflow runs and the tombstones of deleted attempts are reported (counts and identities only).
+    expect(access.workflowRuns).toEqual([{ state: 'PENDING', stepCount: 1, count: 1 }]);
+    expect(access.deletedWorkflowRunAttempts).toEqual([{ runId: a.runId, shape: 'NO_WALLET_REQUEST', finalState: 'CANCELLED', createdAt: expect.any(String),
+      deletedAt: expect.any(String) }]);
+    expect(await privacyErase(db, 'default', await request('ERASURE'), key, OWNER)).toMatchObject({ supportTextsErased: 3, keptByLegalHold: 0,
+      workflowRunRecordsNotInScope: true, deletedAttemptTombstonesRetained: true });
     expect((await db.query('SELECT count(*)::int AS n FROM admin_support_texts')).rows).toEqual([{ n: 0 }]);
   });
 });

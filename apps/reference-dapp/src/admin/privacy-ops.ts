@@ -232,6 +232,7 @@ const TEXT_LIMIT = 5000;
  */
 const PURGED_WORKFLOW_RUNS = `
       OR t.run_id IN (SELECT run_id FROM workflow_run_purge_audit WHERE tenant_id = $1 AND owner_account = $2)
+      OR t.run_id IN (SELECT handoff_id FROM workflow_run_purge_audit WHERE tenant_id = $1 AND owner_account = $2)
       OR t.incident_id IN (SELECT 'wfr:' || run_id FROM workflow_run_purge_audit WHERE tenant_id = $1 AND owner_account = $2)`;
 /**
  * The texts about a subject: notes and reasons on their execution runs (including runs they purged, through the purge audit), on their
@@ -242,6 +243,8 @@ const subjectText = (purged: boolean) => `t.tenant_id = $1 AND (($2::text IS NOT
       t.run_id IN (SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND owner_account = $2)
       OR t.run_id IN (SELECT run_id FROM execution_purge_audit WHERE tenant_id = $1 AND owner_account = $2)
       OR t.incident_id IN (SELECT 'wfr:' || run_id FROM workflow_runs WHERE tenant_id = $1 AND owner_account = $2)
+      OR t.run_id IN (SELECT run_id FROM workflow_runs WHERE tenant_id = $1 AND owner_account = $2)
+      OR t.run_id IN (SELECT handoff_id FROM workflow_runs WHERE tenant_id = $1 AND owner_account = $2)
       OR t.incident_id IN (SELECT 'dex:' || execution_id FROM delegated_executions WHERE tenant_id = $1 AND owner_account = $2)${purged ? PURGED_WORKFLOW_RUNS : ''}))
     OR ($3::text IS NOT NULL AND t.created_by = $3))`;
 /** Whether 0033's tombstone table exists here (read in the request's own transaction; finding more texts is the safe side). */
@@ -261,10 +264,19 @@ export async function privacyAccess(db: Database, tenantId: string, requestId: s
     const request = await loadRequest(tx, tenantId, requestId);
     need(request.kind === 'ACCESS' && request.state === 'APPROVED', 'PRIVACY_REQUEST_STATE_INVALID');
     const s = subjectOf(request, adminKey, wallet);
-    const [runs, texts] = await Promise.all([
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (data-privacy review): single cards (0032) write workflow runs, not execution runs, and an attempt
+    // the owner deleted (0033) leaves its identity tombstone: both are reported, counts and identities only (no strategy, amount or recipient).
+    const purges = await workflowPurges(tx);
+    const [runs, texts, workflowRuns, deletedAttempts] = await Promise.all([
       s.account ? tx.query<{ flow: string; n: number }>(`SELECT flow, count(*)::int AS n FROM execution_runs WHERE tenant_id = $1 AND owner_account = $2 GROUP BY flow ORDER BY flow`,
         [tenantId, s.account]) : Promise.resolve({ rows: [] as { flow: string; n: number }[] }),
-      subjectTexts(tx, tenantId, s)]);
+      subjectTexts(tx, tenantId, s),
+      s.account ? tx.query<{ state: string; step_count: number; n: number }>(`SELECT state, step_count, count(*)::int AS n FROM workflow_runs
+        WHERE tenant_id = $1 AND owner_account = $2 GROUP BY state, step_count ORDER BY step_count, state`, [tenantId, s.account])
+        : Promise.resolve({ rows: [] as { state: string; step_count: number; n: number }[] }),
+      s.account && purges ? tx.query<{ run_id: string; shape: string; final_state: string; run_created_at: Date; purged_at: Date }>(`SELECT run_id, shape, final_state,
+          run_created_at, purged_at FROM workflow_run_purge_audit WHERE tenant_id = $1 AND owner_account = $2 ORDER BY purged_at LIMIT 1000`, [tenantId, s.account])
+        : Promise.resolve({ rows: [] as { run_id: string; shape: string; final_state: string; run_created_at: Date; purged_at: Date }[] })]);
     let lookups: { event_id: string; at: Date; actor: string; type: string }[] = [], unlinkablePeriods: string[] = [];
     if (s.account && adminKey) {
       const prints = await candidateFingerprints(tx, tenantId, adminKey, s.account);
@@ -278,9 +290,14 @@ export async function privacyAccess(db: Database, tenantId: string, requestId: s
       GROUP BY kind ORDER BY kind`, [tenantId, s.principal])).rows : [];
     const truncated = texts.rows.length > TEXT_LIMIT;
     await complete(tx, tenantId, requestId, { runs: runs.rows.reduce((n, r) => n + r.n, 0), supportTexts: Math.min(texts.rows.length, TEXT_LIMIT), textsTruncated: truncated,
-      lookups: lookups.length, unlinkablePeriods: unlinkablePeriods.length });
+      lookups: lookups.length, unlinkablePeriods: unlinkablePeriods.length, workflowRuns: workflowRuns.rows.reduce((n, r) => n + r.n, 0),
+      deletedWorkflowRunAttempts: deletedAttempts.rows.length });
     return { requestId, subjectKind: request.subject_kind, textsTruncated: truncated,
-      executionRuns: runs.rows, supportTexts: texts.rows.slice(0, TEXT_LIMIT).map(t => ({ textRef: t.text_id, purpose: t.purpose, runId: t.run_id, createdAt: t.created_at.toISOString(),
+      executionRuns: runs.rows,
+      workflowRuns: workflowRuns.rows.map(r => ({ state: r.state, stepCount: r.step_count, count: r.n })),
+      deletedWorkflowRunAttempts: deletedAttempts.rows.map(r => ({ runId: r.run_id, shape: r.shape, finalState: r.final_state, createdAt: r.run_created_at.toISOString(),
+        deletedAt: r.purged_at.toISOString() })),
+      supportTexts: texts.rows.slice(0, TEXT_LIMIT).map(t => ({ textRef: t.text_id, purpose: t.purpose, runId: t.run_id, createdAt: t.created_at.toISOString(),
         expiresAt: t.expires_at.toISOString(), ...includeText ? { body: t.body } : {} })),
       supportLookups: lookups.map(l => ({ eventId: l.event_id, at: l.at.toISOString(), administrator: l.actor, identifierType: l.type })),
       administratorAuditEvents: principalEvents,
@@ -304,7 +321,7 @@ export async function privacyErase(db: Database, tenantId: string, requestId: st
     const deleted = (await tx.query(`DELETE FROM admin_support_texts t WHERE ${subject} AND NOT ${HELD_TEXT}`, params)).rowCount;
     const held = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM admin_support_texts t WHERE ${subject}`, params)).rows[0]!.n;
     const result = { supportTextsErased: deleted, keptByLegalHold: held, auditSkeletonRetained: true, executionRecordsNotInScope: true,
-      lookupFingerprintsRetainedUntilQuarterKeyDestroyed: true };
+      workflowRunRecordsNotInScope: true, deletedAttemptTombstonesRetained: true, lookupFingerprintsRetainedUntilQuarterKeyDestroyed: true };
     await recordAudit(tx, tenantId, { actor: 'cli', kind: 'PRIVACY_ERASURE_APPLIED', outcome: 'OK', target: requestId, detail: { erased: deleted, keptByLegalHold: result.keptByLegalHold } });
     await complete(tx, tenantId, requestId, result);
     return { requestId, ...result };

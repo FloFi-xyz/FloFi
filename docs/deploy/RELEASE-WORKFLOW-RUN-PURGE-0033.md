@@ -69,11 +69,17 @@ Support texts written later about a deleted attempt through the tombstone.
    `finops-sync-migrate`, `position-purge-migrate`, `single-step-runs-migrate`; see RELEASE-SINGLE-STEP-RUNS-0032.md). The command refuses anything
    below 32 and, on 33, applies nothing.
 3. **Retention basis approved (owner / legal)** for the records single-card runs keep (every attempt that is not one of the two deletable shapes)
-   and for the tombstone of a deleted attempt (precondition 3 of RELEASE-SINGLE-STEP-RUNS-0032.md).
-4. **Irreversibility accepted.** After the first owner deletion, 0033 can no longer be reversed (a deletion cannot be undone; its tombstone is
+   and for the tombstone of a deleted attempt (precondition 3 of RELEASE-SINGLE-STEP-RUNS-0032.md). The tombstone (`workflow_run_purge_audit`:
+   run and handoff ids, the owner's public wallet address, shape, final state, created and deleted times) and the owner-history `DELETED` event are
+   **permanent**: no procedure erases them, privacy erasure included (it reports them as retained). Legal either accepts that indefinite retention
+   or requires a later certified tombstone-retention migration. Record the decision's reference.
+4. **The public privacy notice describes it** (`/privacy`, "Execution history and deletion" / "Histórico de execuções e exclusão", EN and PT,
+   shipped with this build): what is kept, the narrow deletion scope, the permanent tombstone and the backup window.
+5. **Irreversibility accepted.** After the first owner deletion, 0033 can no longer be reversed (a deletion cannot be undone; its tombstone is
    permanent), and because the 0032 reversal refuses unless 0032 is the newest migration, 0032 — and with it 0031, 0030 and 0029 — cannot be reversed
    either. A one-step run, which already makes 0032 irreversible, can only disappear through this guarded deletion, which makes 0033 irreversible.
-5. The owner explicitly approves the activation. Implementation approval of this build is not that approval.
+6. The owner explicitly approves the activation. Implementation approval of this build is not that approval. Record the approval's reference
+   (who, when, where) with the activation, together with the retention decision of precondition 3.
 
 ## Staged rollout
 
@@ -94,8 +100,11 @@ Support texts written later about a deleted attempt through the tombstone.
      History (expect `DELETED`); reject one in the wallet, end it once the batch has expired on chain and delete it (expect `DELETED`); confirm one,
      let it complete, and confirm Delete answers `RUN_DELETE_REFUSED` while Archive works.
 4. **Production activation (owner decision, not authorized by this build).** Take a Neon restore point or branch **immediately before**
-   activation. It exists only to undo a failed activation **before any owner deletion**: restoring it later would bring back personal data and
-   identities owners deleted (and tombstoned), so delete that branch once activation is verified and never use it as a general backup. Then, from the
+   activation. It exists only to undo a failed activation **before any traffic writes on schema 33**: single-card runs can start the moment 0033
+   commits (`singleStepRunsSupported` reads the ledger on every call), so restoring it later would lose real financial evidence, and after an owner
+   deletion it would bring back personal data and identities owners deleted (and tombstoned). Delete that branch, and every rehearsal branch made
+   from production (each is a copy of production data), once activation is verified; never use them as backups. Neon point-in-time history keeps a
+   deleted attempt's content (strategy, amounts, recipients, wallets) until its history window passes. Then, from the
    reviewed checkout with the direct production `DATABASE_MIGRATION_URL`:
 
    ```sh
@@ -115,7 +124,11 @@ SELECT version, name, sha256 FROM schema_migrations WHERE version >= 28 ORDER BY
 SELECT md5(pg_get_functiondef('workflow_run_append_only()'::regprocedure));
 SELECT to_regclass('workflow_run_purge_audit') AS tombstones, to_regclass('workflow_run_purge_permits') AS permits;
 SELECT (SELECT count(*) FROM workflow_run_purge_audit) AS deleted, (SELECT count(*) FROM workflow_run_purge_permits) AS open_permits,
-  has_function_privilege('public', 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS public_execute;
+  has_function_privilege('public', 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS public_execute,
+  has_function_privilege(current_user, 'purge_unsubmitted_workflow_run(text,text,text)', 'EXECUTE') AS runtime_execute,
+  has_table_privilege(current_user, 'workflow_run_purge_audit', 'SELECT') AS runtime_reads_tombstones;
+-- Run the last query as the role the API and the web tier connect with: both runtime_* columns must be true (EXECUTE and SELECT are revoked
+-- from PUBLIC, so the runtime role must own these objects, as it owns 0016's).
 -- On a database with at least one workflow run: a plain DELETE is still refused with 0015's error, and nothing changes.
 BEGIN;
 DELETE FROM workflow_run_events WHERE event_id = (SELECT min(event_id) FROM workflow_run_events);
@@ -156,3 +169,12 @@ Local evidence only: disposable loopback PostgreSQL 16 (CI runs PostgreSQL 18 in
 application's (`decline-proof.ts`, exercised on MOCKED chains); the database trusts the verification event, which only the application writes, and
 does not read the chain. No production, preview or Neon database was touched; no migration was applied outside disposable test databases; no
 environment variable, gate or fee policy changed.
+
+## Notes
+
+- **Legal holds per subject.** A RUN hold names one run (or its handoff) and a TENANT hold covers every owner; there is no hold for one subject's
+  future attempts. To keep one person's future attempts, place RUN holds as they appear, or a TENANT hold.
+- **FinOps.** Deleted attempts leave the single-card counts, including for closed periods (stated in the report's limitations); completed runs
+  and costs are unaffected.
+- **Data-subject requests.** Access reports the subject's workflow runs (by state and step count) and the tombstones of deleted attempts;
+  erasure reports both as retained (`workflowRunRecordsNotInScope`, `deletedAttemptTombstonesRetained`).

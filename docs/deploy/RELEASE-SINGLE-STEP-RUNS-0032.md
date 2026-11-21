@@ -58,7 +58,9 @@ with its own procedure**; the 0032 command never applies them and refuses any sc
    single actions; they are excluded from workflow counts, average steps and cost per completed workflow, and named in the report's limitations.
    Single cards paid by a wallet batch no longer add `execution_runs` rows, so execution counts change at activation. Note the activation date
    for investor reporting.
-6. The owner explicitly approves the activation. Implementation approval of this build is not that approval.
+6. The owner explicitly approves the activation. Implementation approval of this build is not that approval. Record the approval's reference
+   (who, when, where) and the retention decision of precondition 3 with the activation.
+7. **The public privacy notice describes these records** (`/privacy`, "Execution history and deletion", EN and PT, shipped with this build).
 
 ## Staged rollout
 
