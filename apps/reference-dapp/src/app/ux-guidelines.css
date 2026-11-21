@@ -53,6 +53,8 @@
    narrow for the words beside a centred indicator. "Needs attention" always keeps its words on screen (the footer also names the step). */
 @media(max-width:1899px){
   .editor-head-row .editor-state-pill:not([data-editor-state="attention"]) .editor-state-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  /* "Needs attention" needs the room: the header's step count (also stated in the footer, "WORKFLOW 1 step") stays for assistive technology. */
+  .editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-head-meta>.revision{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 }
 /* A medium frame (a 1280–1740 px desktop): the identity column takes more of the free space than the controls column, with the same proportions
    on every stage — the indicator sits at the same place on Create, Simulate and Execute. */
