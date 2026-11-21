@@ -107,5 +107,27 @@ and is not claimed by this build.
 - **Reconciliation of a wallet batch needs the hash from the browser.** The wallet's `wallet_getCallsStatus` report supplies it. If the tab
   closes after the wallet sends, the run waits (never expires a sent batch) until the owner reopens the page, where it is read back
   automatically.
-- **Executed-first-step restoration after a reload.** It relies on the Editor's own stored run record. A one-step run pointer is not yet one
-  of `RESTORABLE_RUNTIMES`, the same as today's transfer and Uniswap cards.
+- **In-app chat.** While the one-confirmation path is active for a single card, the chat treats it as it already treats multi-step runs: it
+  points to the existing "Simulate workflow → Review operation → Authorize workflow" actions instead of driving the Review itself. This is a
+  visible change for chat-driven single cards once 0032 is active. Authoring, explanations and the per-flow fallback are unchanged.
+- **Same-chain wallet prompt.** If the wallet is on another chain, the batch sender asks `wallet_switchEthereumChain` inside Authorize. This is
+  one more wallet prompt. Before, the per-flow path asked for the same switch behind a separate "Switch to …" click.
+
+## 6. Specialist review (read-only reviewers, findings resolved in this PR)
+
+- **Wallet execution**
+  - A stored run now dominates the shell whatever the availability answer, so a started card is never offered again through its own flow.
+  - Automatic observations are bounded at 30 s, so `following` can never hide the manual check forever.
+  - The supply follow reads the latest attempt of its step.
+  - Uniswap follows end quietly on a thrown read.
+- **Workflow**
+  - A completed single-card run is restorable after a reload (`workflow-run` in `RESTORABLE_RUNTIMES`). It is proven server-side by
+    `editorSingleRunRecord` / `singleCardRunRecord`: one step, the card's own canonical hash, and its state.
+  - The executed step's wallet is the run's own.
+- **Security**
+  - The single-card run is EVM-only server-side and only ever starts an EVM batch group.
+  - A failed Authorize withdraws its own handoff.
+  - The availability helper fails closed.
+  - The ledger read follows the Review limiter.
+  - The fallback auto-simulate never reaches a sign-in or the wallet selector.
+  - Stale comments were corrected.
