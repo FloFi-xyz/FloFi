@@ -65,9 +65,15 @@ export function assertRunWallets(run: RunRecord, wallets: readonly WalletRef[]):
     if (!wallets.some(w => w.namespace === namespace && w.address === address)) refuse(wallets.some(w => w.namespace === namespace) ? 'WORKFLOW_RUN_OWNER_MISMATCH' : proofCode(namespace));
 }
 
-/** The run of a claimed SEQUENTIAL handoff (created once; only for the same proven wallets). */
+/**
+ * The run of a claimed SEQUENTIAL handoff (created once; only for the same proven wallets). BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a run of
+ * ONE step exists only for the Editor's own single-card handoff (`requestApproval`'s `singleStepRun`, EDITOR_SESSION only; its row needs migration
+ * 0032). Every other requester's run still needs at least two steps.
+ */
 export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, workflow: WorkflowComposition, wallets: readonly WalletRef[]): Promise<RunRecord> {
-  if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < 2 || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
+  const minimumSteps = h.requesterKind === 'EDITOR_SESSION' ? 1 : 2;
+  if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < minimumSteps || h.plan.steps.length !== workflow.steps.length
+    || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
   const bound: Partial<Record<WalletRef['namespace'], string>> = {};
   for (const namespace of planNamespaces(h.plan)) bound[namespace] = (wallets.find(w => w.namespace === namespace) ?? refuse(proofCode(namespace))).address;
   const primary = planNamespace(h.plan), owner = { namespace: primary, address: bound[primary]! };
@@ -84,7 +90,8 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
 export async function ownerAuthorizationPlan(deps: WorkflowRunDeps, run: RunRecord, wallets?: WalletProfile): Promise<AuthorizationPlan> {
   const workflow = composeWorkflowBound(run.strategy, run.workflowHash);
   if (!workflow.ok) return refuse('WORKFLOW_RUN_STALE');
-  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policyFor(run.requester.kind));
+  // A run is always evaluated as a run (also the Editor's run of one step: its per-step facts and the workflow-run gate).
+  const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policyFor(run.requester.kind), { run: true });
   const grants = deps.delegationFacts && deps.grantsOf ? await deps.grantsOf(run.owner) : null;
   return authorizationPlan(workflow, gates, deps.delegationFacts, grants ? { grants, now: deps.now().getTime() } : undefined,
     deps.userFundedFacts ? { facts: deps.userFundedFacts, ...wallets ? { wallets } : {}, evmOwner: run.wallets.eip155 ?? null } : undefined);

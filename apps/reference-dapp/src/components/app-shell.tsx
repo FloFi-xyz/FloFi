@@ -9,7 +9,7 @@ import type { LiquidityPositionPoolInput } from '../domain/commands';
 import { flightWalletAccess } from '../app/flight-wallet-action';
 import { FLIGHT_REFUSAL_HREF, flightRefusal } from '../domain/flight-refusal';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
-import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
+import { compositionWorkflow, deliveredByRun, DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES, SINGLE_CARD_RUNTIMES, sequenceOrder, stepAssets } from '../domain/workflow-sequence';
 import { universalBridgeDetails } from '../domain/universal-bridge-authoring';
 import { routerDetails } from '../domain/router-authoring';
 import { ownerByRecord } from '../domain/sequence-restore';
@@ -570,11 +570,48 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // fallback when the whole-workflow Review says a step needs its own flow (and why), or when this deployment does not offer it.
   const localSequenceStarted = Boolean(currentExecution(executionProgress)) || executionProgress.started || executionStart.started
     || Boolean(sequence && (sequence.cursor > 0 || sequence.completed.length > 0));
-  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account,
-    enabled: Boolean(sequence) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE EVM financial card whose action FloFi's user-funded execution groups build (a catalog swap, a
+  // certified Router bridge, a transfer, an Aave supply / borrow / repay / withdraw) runs through the SAME whole-workflow path as a multi-step
+  // workflow: one Authorize, ONE wallet confirmation (an atomic batch with any exact approval folded in, only where the allowance is short), then
+  // automatic reconciliation. Only where the deployment's database accepts one-step runs (the hook's availability); otherwise, and whenever its
+  // Review shows the card cannot run as one confirmation, the card keeps its own flow exactly as before.
+  const singleCardRun = !sequence && soleAction.length === 1 && SINGLE_CARD_RUNTIMES.includes(runtime.kind ?? '') && soleAction[0]!.chainId.startsWith('eip155:')
+    && !compositionWorkflow(state.workflow);
+  const workflowRunHere = useEditorWorkflowRun({ workflow: state.workflow, evmAccount: connectedWallet.account, single: singleCardRun,
+    enabled: (Boolean(sequence) || singleCardRun) && !approvalSlot && !autoPrepare && surface === 'workspace' && !sequenceRestore && !localSequenceStarted });
+  // A single card goes back to its own flow when its Review is not one grouped interaction or refuses the batch (its own flow re-checks, simulates
+  // and reviews it and shows its own errors); a started run of it always stays here.
+  const singleCardReview = singleCardRun ? workflowRunHere.review : null;
+  const singleCardFallback = Boolean(singleCardRun && !workflowRunHere.started
+    && (singleCardReview ? singleCardReview.mode === 'STEP_BY_STEP' || singleCardReview.refusal !== null : workflowRunHere.stepByStep));
   // The whole-workflow path is primary until its Review shows this workflow must run step by step (it cannot be grouped, the RPC cannot simulate
   // it, or the path cannot run here); a safety refusal keeps it primary, so the workflow is fixed before anything runs (a started run always is).
-  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.stepByStep);
+  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.stepByStep && !singleCardFallback);
+  // A single card that falls back to its own flow right after its Review continues there at once (read-only: its own fresh simulation). The owner's
+  // Simulate click already asked for it; a flow whose simulation may open a wallet sign-in (the Router without a session, the universal Router)
+  // waits for the owner's own click.
+  const singleFallbackKey = singleCardFallback && (singleCardReview || workflowRunHere.error) ? `${state.workflow.workflowId}:${state.workflow.revision}` : null;
+  const singleFallbackSimulated = useRef<string | null>(null);
+  useEffect(() => {
+    if (!singleFallbackKey || singleFallbackSimulated.current === singleFallbackKey) return;
+    if (walletIssue || networkAction || simulationDisabled || !actionable || lifecycleState.invalidWorkflow) return;
+    if (canvasAction.kind !== 'simulate' || canvasAction.disabled || simulationSource.state.busy) return;
+    if (simulationSource.kind === 'universal' || simulationSource.kind === 'router' && !routerState.session) return;
+    singleFallbackSimulated.current = singleFallbackKey;
+    void simulateAgain();
+  }, [singleFallbackKey, walletIssue, Boolean(networkAction), simulationDisabled, lifecycleState.invalidWorkflow, canvasAction.kind, canvasAction.disabled,
+    simulationSource.state.busy, simulationSource.kind, Boolean(routerState.session)]);
+  // A single card's run that completed and reconciled is kept as this workflow's executed first step (as its own flow's run is), so an action added
+  // afterwards is its own next step, never a repeat of this one. Its delivery is what the run reconciled for the card's output asset.
+  const groupedSingleRun = singleCardRun || !sequence && soleAction.length === 1 ? workflowRunHere.run : null;
+  const groupedSingleDone = Boolean(groupedSingleRun && groupedSingleRun.state === 'COMPLETED' && groupedSingleRun.stepCount === 1
+    && groupedSingleRun.steps[0]?.state === 'RECONCILED' && workflowRunHere.authorizedFor?.workflowId === state.workflow.workflowId
+    && workflowRunHere.authorizedFor.revision === state.workflow.revision && !workflowRunHere.following);
+  const groupedSingleDelivered = groupedSingleDone ? deliveredByRun(groupedSingleRun!.steps[0]?.outcome?.received ?? [], stepAssets(soleAction[0]!).output) : null;
+  useEffect(() => {
+    if (groupedSingleDone && groupedSingleRun) recordExecutedAction({ received: groupedSingleDelivered, runKey: groupedSingleRun.approvalId, kind: 'workflow-run',
+      owner: connectedWallet.account?.toLowerCase() ?? null });
+  }, [groupedSingleDone, groupedSingleDelivered, groupedSingleRun?.approvalId, recordExecutedAction]);
   // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
   // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own
   // fresh, read-only Review. FloFi prepares it at once — exactly as the chat already does — instead of sending the owner back to "Simulate"; the
@@ -822,7 +859,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       simulationBlockedIn: shown => walletIssueIn(shown) ?? (groupedPrimary ? translate(shown, workflowRunHere.started ? 'This workflow runs as one workflow run: follow it in Execute.'
         : 'This workflow runs as one workflow run: choose Simulate workflow, then Review operation and Authorize workflow.')
         : simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReasonIn(shown) ?? translate(shown, 'Simulation is not available for this workflow.') : null),
-      connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone, blocker: blockerView, editingPaused,
+      connectWallet: () => void walletConnection.connect(), startNewWorkflow, executedActions, continuable: Boolean(sequence?.finished) || actionDone || groupedSingleDone, blocker: blockerView, editingPaused,
       workflowProgress } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas
   // beside it, with their summaries in an optional details surface (approval surfaces and the engineering workspace keep their side panels).

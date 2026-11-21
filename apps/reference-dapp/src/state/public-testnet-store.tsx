@@ -46,6 +46,8 @@ type Store = { readonly available: boolean;
   readonly availabilityKnown: boolean;
   readonly run: PublicRun | null; readonly recoveryOnly: boolean;
   readonly retired: boolean; readonly busy: string | null; readonly signing: boolean; readonly error: string | null;
+  /** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a submitted swap is being followed by itself (read-only); no manual check is offered meanwhile. */
+  readonly following?: boolean;
   simulate(): void; review(): void; execute(): void; observe(): void; switchNetwork(): void };
 const Context = createContext<Store | null>(null);
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T {
@@ -140,6 +142,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const [recoveryOnly, setRecoveryOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [signingAttempt, setSigningAttempt] = useState<string | null>(null);
+  /** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the run whose submitted swap is being followed by itself (read-only), if any. */
+  const [followingRun, setFollowingRun] = useState<string | null>(null);
+  const tracked = <T,>(id: string, follow: Promise<T>): Promise<T> => { setFollowingRun(id); return follow.finally(() => setFollowingRun(current => current === id ? null : current)); };
   const [error, setError] = useState<string | null>(null);
   // BUILD-FIX-UX-001: an earlier attempt's message (e.g. a declined wallet request) belongs to that workflow; a new one starts without it.
   const workflowId = state.workflow.workflowId;
@@ -205,12 +210,12 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
           // Applied only while that run is still the page's run: a newer simulation is never replaced by an older run's observation.
           const sameRun = (current: PublicRun | null) => current?.quote.executionId === id;
           let following = true;
-          void observeUntilSettled(async () => {
+          void tracked(id, observeUntilSettled(async () => {
             const observed = unwrap(await publicObserve(id));
             if (!cancelled) setRun(current => { following = sameRun(current); return following ? observed : current; });
             return observed;
           }, observed => gaslessFollowed ? gaslessSettled(observed) : Boolean(observed.divergence || observed.outcome) || (observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH'),
-          { active: () => !cancelled && following }).catch(() => undefined);
+          { active: () => !cancelled && following })).catch(() => undefined);
         }
       }
     }).catch(() => undefined);
@@ -325,11 +330,11 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     acceptCurrent(submitted.value);
     journey.mark('submission');
     try {
-      const followed = await observeUntilSettled(async () => {
+      const followed = await tracked(id, observeUntilSettled(async () => {
         const observed = unwrap(await publicObserve(id)); acceptCurrent(observed);
         if (observed.outcome) { journey.mark('confirmation'); journey.mark('reconciliation'); }
         return observed;
-      }, gaslessSettled, { active: () => mountedRef.current });
+      }, gaslessSettled, { active: () => mountedRef.current }));
       finish(followed.value?.outcome ? 'reconciled' : followed.value?.gasless?.at(-1)?.state === 'FAILED' ? 'failed' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause }); }
   }, []);
@@ -422,7 +427,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     // The wallet sent it and returned its hash: for this flow submission and the hash are the same moment.
     journey.mark('submission'); journey.mark('hash');
     try {
-      const followed = await observeUntilSettled(async () => {
+      const followed = await tracked(run.quote.executionId, observeUntilSettled(async () => {
         const observed = unwrap(await publicObserve(run.quote.executionId)); acceptCurrent(observed);
         const state = observed.attempts.at(-1)?.state;
         if (state === 'CONFIRMED' || state === 'REVERTED') journey.mark('confirmation');
@@ -430,13 +435,13 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         return observed;
       // The same stopping rule as the follow after a reload: a hash without a receipt yet (HASH) keeps being followed.
       }, observed => Boolean(observed.divergence || observed.outcome) || !['PENDING', 'HASH'].includes(observed.attempts.at(-1)?.state ?? ''),
-      { active: () => mountedRef.current });
+      { active: () => mountedRef.current }));
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw afterHash(cause); }
   }), [guarded, run, retired, wallet, executeGasless]);
   const signing = Boolean(signingAttempt && (run?.attempts.some(attempt => attempt.attemptId === signingAttempt) || run?.gasless?.some(attempt => attempt.attemptId === signingAttempt)));
-  return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error,
+  return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error, following: Boolean(followingRun && followingRun === run?.quote.executionId),
     simulate, review, execute, observe, switchNetwork }}>{children}</Context.Provider>;
 }
 export function usePublicTestnet(): Store { const value = useContext(Context); if (!value) throw new Error('PUBLIC_TESTNET_PROVIDER_MISSING'); return value; }

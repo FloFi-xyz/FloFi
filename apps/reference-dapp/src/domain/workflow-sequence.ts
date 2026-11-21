@@ -117,6 +117,13 @@ export function workflowSequence(workflow: Workflow, lint: (workflow: Workflow) 
  * alone. Others (positions, the Solana composition, fork and engineering paths) are not offered in a sequence: the owner is told which step.
  */
 export const SEQUENCE_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'solana-transfer', 'transfer', 'supply', 'uniswap-pool', 'solana-pool']);
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the owner-wallet runtimes of a SINGLE EVM card whose action FloFi's user-funded execution groups
+ * build (`workflow-runs/execution-groups.ts` USER_FUNDED_BUILDABLE eip155): a catalog swap, a certified Router bridge, a transfer, an Aave supply /
+ * borrow / repay / withdraw. Such a card is offered the Editor's one-confirmation run (its Review still decides; anything it cannot batch keeps
+ * the card's own flow). The universal Router, Uniswap positions and Solana cards keep their own flow (Solana cards already sign once).
+ */
+export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'transfer', 'supply']);
 /** Runtimes whose reconciled record proves the delivered amount a funded later step spends (`deliveredByRecord`). */
 export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply']);
 /** The canonical form of a node, to prove an executed step is still exactly what the workflow holds. */
@@ -209,6 +216,21 @@ export function sequenceCursor(sequence: WorkflowSequence, completed: readonly C
 export function stepRuntimeWorkflow(step: SequenceStep, before: readonly CompletedStep[], context: ReviewContext): { readonly bound: string | null; readonly workflow: Workflow | null } {
   const bound = boundAmount(step, before);
   return { bound, workflow: boundProjection(step, bound, context, before) };
+}
+
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: what a reconciled workflow-run step received for exactly `output` (native units), from the run's
+ * own reconciled step outcome (`received`, keyed like `delegation/steps.ts` `assetKey`: `<chain>/erc20:<address>`, `<chain>/native:ETH`,
+ * `<chain>/token:<mint>`); null when nothing is proven for exactly that asset.
+ */
+export function deliveredByRun(received: readonly { readonly asset: string; readonly amount: string }[], output: SequenceAsset | null): string | null {
+  if (!output) return null;
+  const evm = output.chainId.startsWith('eip155:');
+  const key = output.address === null ? evm ? `${output.chainId}/native:ETH` : null : `${output.chainId}/${output.chainId.startsWith('solana:') ? 'token' : 'erc20'}:${output.address}`;
+  if (key === null) return null;
+  const same = (asset: string) => evm ? asset.toLowerCase() === key.toLowerCase() : asset === key;
+  const hits = received.filter(item => same(item.asset));
+  return hits.length === 1 && UNITS.test(hits[0]!.amount) ? hits[0]!.amount : null;
 }
 
 /** What a step's reconciled record proves it delivered, in native units of `output`; null when nothing is proven for exactly that asset. */

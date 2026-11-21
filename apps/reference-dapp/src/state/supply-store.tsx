@@ -10,6 +10,30 @@ import { supplySimulate, supplyReview, supplyBegin, supplyReport, supplyObserve,
 import type { SupplyRecord, SupplyWalletDiagnostic } from '../server/supply-service';
 import { isPristineDraft } from '../domain/initial-workflow';
 import { observeWalletNonce, reviewNonceRefusal } from '../domain/wallet-nonce';
+import { observeUntilSettled } from '../domain/observation-schedule';
+type Step='APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW';
+/** A request that may have reached the network and has no final outcome yet: `supply-service.ts` `observe` keeps resolving it (read-only). */
+const UNSETTLED=['SUBMITTING','SUBMISSION_RESULT_UNKNOWN','PENDING'];
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: whether following `step`'s attempt (else the attempt the server observes: its first unreconciled
+ * one) can stop. Final: any run verdict other than PENDING (RECONCILED, DIVERGENT, INCONCLUSIVE), a request proven not submitted, or an
+ * attempt that is reconciled or in a final state (CONFIRMED, REVERTED, RECONCILIATION_REQUIRED, CANCELLED, NOT_FOUND). A reconciled approval
+ * ends its own follow: the Supply after it is a separate wallet request the owner starts.
+ */
+export function supplyFollowSettled(value:SupplyRecord,step?:Step):boolean{
+  if(value.verdict!=='PENDING'||value.notSubmitted)return true;
+  const attempt=step?value.attempts.find(a=>a.step===step):value.attempts.find(a=>!a.reconciled);
+  return !attempt||attempt.reconciled||!UNSETTLED.includes(attempt.state);
+}
+/** A recovered run whose submitted attempt (its hash is known) has no final outcome yet keeps being followed after a reload. */
+export function supplyFollowable(value:SupplyRecord):boolean{
+  return Boolean(value.attempts.find(a=>!a.reconciled)?.transactionHash)&&!supplyFollowSettled(value);
+}
+/** After the wallet returned a hash, a failed observation never reads as "nothing was sent": a classified code keeps its meaning, else unknown. */
+function afterHash(cause:unknown):string{
+  const code=cause instanceof Error?cause.message:'';
+  return /^(?:SUPPLY|BORROW|REPAY|WITHDRAW)_[A-Z0-9_]+$/.test(code)&&!/_UNAVAILABLE$|TIMEOUT/.test(code)?code:'SUPPLY_SUBMISSION_UNKNOWN_OBSERVE_EXISTING';
+}
 function walletValue(value:unknown,depth=0,seen=new Set<object>()):unknown{
   if(value===undefined)return null;
   if(value===null||typeof value==='boolean'||typeof value==='number')return value;
@@ -28,7 +52,9 @@ function walletValue(value:unknown,depth=0,seen=new Set<object>()):unknown{
 }
 const key='gryloo:build012a:supply';
 type RecoveryPointer={id?:string;step?:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW';hash?:string};
-type Store={record:SupplyRecord|null;busy:boolean;signing:boolean;error:string|null;retired:boolean;recovered:boolean;simulate():Promise<void>;review():Promise<void>;execute():Promise<void>;observe():Promise<void>;recoverReview():Promise<void>;switchNetwork():Promise<void>};
+type Store={record:SupplyRecord|null;busy:boolean;signing:boolean;error:string|null;retired:boolean;recovered:boolean;
+  /** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the submitted request is being followed by itself (read-only); no manual check is offered meanwhile. */
+  following:boolean;simulate():Promise<void>;review():Promise<void>;execute():Promise<void>;observe():Promise<void>;recoverReview():Promise<void>;switchNetwork():Promise<void>};
 const Context=createContext<Store|null>(null);
 export function SupplyProvider({children}:{children:ReactNode}){
   const {runtimeWorkflow}=useWorkflow(),wallet=useBuild009Wallet();
@@ -37,16 +63,35 @@ export function SupplyProvider({children}:{children:ReactNode}){
   const latest=useRef(workflow);latest.current=workflow;
   const latestWallet=useRef(wallet);latestWallet.current=wallet;
   const busyRef=useRef(false),operationEpoch=useRef(0);
+  // The run currently shown (set with every record the store shows) and whether the provider is mounted: a follow applies only to its own run.
+  const shownRun=useRef<string|null>(null),mountedRef=useRef(true);
+  const [following,setFollowing]=useState<string|null>(null);
+  useEffect(()=>{mountedRef.current=true;return()=>{mountedRef.current=false;};},[]);
   const equal=record&&JSON.stringify(record.review.workflow)===JSON.stringify(workflow);
   const pristineRecovery=recovered&&isPristineDraft(workflow);
   const retired=Boolean(record&&!equal&&!pristineRecovery);
   function accept(value:SupplyRecord){
-    setRecord(value);
+    shownRun.current=value.id;setRecord(value);
     let prior:RecoveryPointer|null=null;
     try{prior=JSON.parse(window.localStorage.getItem(key)??'null') as RecoveryPointer|null;}catch{ /* The server's durable attempt remains authoritative. */ }
     const attempt=value.attempts.at(-1);
     const hash=attempt?.transactionHash??(prior?.id===value.id?prior.hash:undefined);
     window.localStorage.setItem(key,JSON.stringify({id:value.id,...hash?{step:attempt?.step??prior?.step,hash}:{}}));
+  }
+  /**
+   * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: follows a submitted request by itself until its outcome is final (`supplyFollowSettled`) on the
+   * shared schedule (domain/observation-schedule.ts), instead of one observation and a manual check. Strictly read-only: only the run's
+   * `observe` (chain reads and reconciliation of what was already submitted); it never begins, hands off, reports, signs or sends. Each result
+   * is applied only while that run is still the one shown, so a newer run is never replaced; it stops on unmount. The manual check stays.
+   */
+  function follow(id:string,step?:Step){
+    const shown=()=>mountedRef.current&&shownRun.current===id;
+    setFollowing(id);
+    return observeUntilSettled(async()=>{
+      const observed=await supplyObserve(id);if(!observed.ok)throw new Error(observed.code);
+      if(shown())accept(observed.value);
+      return observed.value;
+    },value=>supplyFollowSettled(value,step),{active:shown}).finally(()=>setFollowing(current=>current===id?null:current));
   }
   useEffect(()=>{
     let mounted=true;
@@ -55,7 +100,10 @@ export function SupplyProvider({children}:{children:ReactNode}){
         if(typeof pointer.hash==='string'&&/^0x[0-9a-f]{64}$/.test(pointer.hash)&&(pointer.step==='APPROVAL'||pointer.step==='SUPPLY'||pointer.step==='BORROW'||pointer.step==='REPAY'||pointer.step==='WITHDRAW'))
           await supplyReport(pointer.id as string,pointer.step,{kind:'HASH',hash:pointer.hash}).catch(()=>undefined);
         return supplyStatus(pointer.id as string);
-      })().then(result=>{if(mounted&&result.ok){setRecord(result.value);setRecovered(true);}}).catch(()=>undefined);
+      })().then(result=>{if(mounted&&result.ok){shownRun.current=result.value.id;setRecord(result.value);setRecovered(true);
+        // A run that came back with a submitted request and no final outcome keeps being followed (read-only), as right after the wallet.
+        // A failed follow keeps the recovered pending record; the manual check and the durable worker remain.
+        if(supplyFollowable(result.value))void follow(result.value.id).catch(()=>undefined);}}).catch(()=>undefined);
     }catch{setError('SUPPLY_RECOVERY_POINTER_INVALID');}
     return()=>{mounted=false;};
   },[]);
@@ -86,6 +134,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
     await wallet.switchTo(profile.chainHex);
   });}
   async function execute(){await operation(async()=>{
+    const epoch=operationEpoch.current;
     if(!record||retired||record.authorization!==record.review.commitment)throw new Error('SUPPLY_REVIEW_REQUIRED');
     // The reviewed chain fixes the only chain the wallet may be on; it is checked again before the single send.
     const reviewedChain=lendingProfileOfChain(record.review.chain)?.chainHex;if(!reviewedChain)throw new Error('SUPPLY_WRONG_CHAIN');
@@ -158,8 +207,12 @@ export function SupplyProvider({children}:{children:ReactNode}){
       if(step){const report=await supplyReport(record.id,step,{kind:rejected?'REJECTED':'UNKNOWN',code:diagnostic.code});if(report.ok)accept(report.value);}
       throw new Error(rejected?(step==='APPROVAL'?'SUPPLY_APPROVAL_REJECTED':'SUPPLY_REJECTED'):'SUPPLY_SUBMISSION_UNKNOWN_OBSERVE_EXISTING',{cause});
     }
-    const observed=await supplyObserve(record.id);if(observed.ok)accept(observed.value);
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the owner's one wallet confirmation is followed to its final outcome by itself (read-only;
+    // see `follow`), not observed once and left to a manual check. Busy was cleared before the wallet, so the follow blocks no other action.
+    // A failure keeps the honest pending record; its message is shown only while this run and this operation are still the current ones.
+    const id=record.id;
+    await follow(id,step??undefined).catch(cause=>{if(operationEpoch.current===epoch&&mountedRef.current&&shownRun.current===id)setError(afterHash(cause));});
   });}
-  return <Context.Provider value={{record,busy,signing,error,retired,recovered,simulate,review,execute,observe,recoverReview,switchNetwork}}>{signing&&<WalletPendingNotice/>}<div data-supply-wallet-pending={signing?'true':undefined}>{children}</div></Context.Provider>;
+  return <Context.Provider value={{record,busy,signing,error,retired,recovered,following:following!==null&&following===record?.id,simulate,review,execute,observe,recoverReview,switchNetwork}}>{signing&&<WalletPendingNotice/>}<div data-supply-wallet-pending={signing?'true':undefined}>{children}</div></Context.Provider>;
 }
 export function useSupply(){const value=useContext(Context);if(!value)throw new Error('SUPPLY_PROVIDER_MISSING');return value;}

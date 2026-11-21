@@ -219,12 +219,19 @@ export type EditorWorkflowRunState = {
 
 /**
  * The Editor's whole-workflow run for this Canvas workflow and connected EVM wallet. `enabled`: the Editor shows a multi-step sequence that has not
- * started through its per-step path in this visit.
+ * started through its per-step path in this visit — or (BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001, `single`) ONE financial card the user-funded
+ * execution groups can build, which runs here as a workflow run of that one step only where the deployment's database accepts one-step runs
+ * (the availability's `singleStep`); otherwise the card keeps its own flow, exactly as before.
  */
 export function useEditorWorkflowRun(input: { readonly workflow: { readonly workflowId: string; readonly revision: number }; readonly evmAccount: string | null;
-  readonly enabled: boolean }): EditorWorkflowRunState {
-  const { workflow, evmAccount, enabled } = input;
-  const [available, setAvailable] = useState(false);
+  readonly enabled: boolean; readonly single?: boolean }): EditorWorkflowRunState {
+  const { workflow, evmAccount } = input;
+  const [availability, setAvailability] = useState<{ readonly enabled: boolean; readonly singleStep: boolean }>({ enabled: false, singleStep: false });
+  const available = availability.enabled;
+  // A single card is reviewed and authorized here only where one-step runs exist. A run of this workflow already stored in this browser is
+  // followed whatever that answer (or before it arrives): a started card is never offered again through its own flow.
+  const followable = input.enabled;
+  const enabled = followable && (!input.single || availability.singleStep);
   const [phase, setPhase] = useState<EditorRunPhase>('idle');
   const [review, setReview] = useState<EditorExecutionReview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -270,7 +277,8 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   const evmChains = [...new Set(((workflow as { nodes?: readonly { chainId?: string }[] }).nodes ?? []).map(n => n.chainId ?? '').filter(c => c.startsWith('eip155:')))];
   const evmWorkflow = evmChains.length > 0;
   // Re-read when the wallet changes (a FloFi sign-in usually comes with it): without an account session the step-by-step path stays primary.
-  useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailable(r.enabled)).catch(() => setAvailable(false)); }, [evmAccount]);
+  useEffect(() => { void editorWorkflowExecutionAvailability().then(r => setAvailability({ enabled: r.enabled, singleStep: r.enabled && r.singleStep === true }))
+    .catch(() => setAvailability({ enabled: false, singleStep: false })); }, [evmAccount]);
   // A Review describes one workflow revision and one wallet: any edit or wallet change makes it stale (nothing was started).
   const reviewKey = `${workflow.workflowId}:${workflow.revision}:${evmAccount ?? ''}`;
   const reviewedFor = useRef<string | null>(null);
@@ -325,7 +333,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
     }
     if (approvalId) { setEarlier(null); return; }
     const all = readAll(), mine = all.find(s => s.workflowId === workflow.workflowId) ?? null;
-    if (!mine || !enabled) {
+    if (!mine || !followable) {
       setEarlier(all.find(s => s.workflowId !== workflow.workflowId && (!evmAccount || s.owner === evmAccount.toLowerCase())) ?? null);
       return;
     }
@@ -340,7 +348,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
       else setError(FORGOTTEN.test(result.code) || result.code === 'EVM_WALLET_PROOF_REQUIRED' ? 'EDITOR_RUN_SIGN_IN_REQUIRED' : result.code);
     }).catch(() => undefined);
     return () => { current = false; };
-  }, [enabled, workflow.workflowId, approvalId, evmAccount, adopt, actingNow]);
+  }, [followable, workflow.workflowId, approvalId, evmAccount, adopt, actingNow]);
   // Status poll while the run is open (the server observes the chain exactly as its worker does; nothing is resolved or sent by a poll).
   useEffect(() => {
     if (!approvalId || !run || !OPEN_RUN.includes(run.state)) return;
@@ -717,7 +725,7 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   // A followed earlier run is this tab's view only: it never counts as THIS workflow's run (its primary action and Review stay its own).
   const ownRun = Boolean(approvalId) && !following;
   const authorizedFor = ownRun && run && authorizedRevision.current !== null ? { workflowId: shownWorkflow.current, revision: authorizedRevision.current } : null;
-  return { available: available && enabled, phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
+  return { available: available && (enabled || Boolean(approvalId) && !following), phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
     canReview: available && enabled && evmWorkflow && !approvalId,
     visible: available && (enabled || Boolean(approvalId) || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
     stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)
@@ -1151,6 +1159,9 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
     <TechnicalGroup title="Operations">
         {/* Review round 2 (ADR-0009): who pays the one confirmation's network fee follows its sponsorship — FloFi offers to pay a REQUIRED one (the
             wallet must take it, or nothing is sent); an OFFERED one is paid by the wallet only when it cannot take the sponsorship. */}
+        {/* BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card in one wallet confirmation needs no mechanism sentence (the Review already shows its
+            one wallet request); every other plan keeps its own words. */}
+        {!(review.stepCount === 1 && review.mode === 'ONE_WALLET_CONFIRMATION' && !review.groups.some(g => g.gasPayment) && !bridgeTo) &&
         <p className="editor-run-mechanism" data-mode={review.mode}>{tr(review.mode !== 'STEP_BY_STEP' && review.groups.some(g => g.gasPayment)
           ? review.groups.length === 1
             ? 'All {0} steps run as ONE operation on {1} from your own account: two signatures in your wallet (a USDC permit for the network fee, then the operation), then FloFi relays it and Circle\'s paymaster takes the network fee from your USDC.'
@@ -1163,7 +1174,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
             : 'All {0} steps run as ONE wallet confirmation on {1}: one atomic transaction from your own wallet, which pays the network fee.'
           : review.mode === 'GROUPED' ? 'All {0} steps run in {2} wallet confirmations, one per group; a later group is asked when it becomes due.'
           : 'This workflow needs a confirmation in your wallet for each step on its own.', String(review.stepCount), review.groups[0]?.network ?? '', String(review.counts.walletPrompts))}
-          {bridgeTo && review.mode !== 'STEP_BY_STEP' ? <> {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</> : null}</p>
+          {bridgeTo && review.mode !== 'STEP_BY_STEP' ? <> {tr('Then FloFi waits for the bridge delivery on {0} and completes the workflow once it has verified it; you can leave this page meanwhile.', tr(bridgeTo))}</> : null}</p>}
         {bridgeTo && review.mode === 'STEP_BY_STEP' && <p className="muted">{tr('The bridge then runs through its own review: its token approval and its deposit may each ask your wallet once more.')}</p>}
         {review.mode === 'STEP_BY_STEP' && review.reasons.length > 0 && <ul className="editor-run-reasons">{review.reasons.map(code => <li key={code}>{tr(EXECUTION_REASON[code.split(':')[0]!] ?? 'Not available for this step ({0}).', code)}</li>)}</ul>}
       <ol className="editor-run-steps" aria-label={tr('Steps')}>

@@ -11,7 +11,7 @@
  *
  * Every query names the tenant; owner reads name the owner too. Nothing stored here is key material, calldata or a signature.
  */
-import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runtime';
+import { CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS, type Database, type Queryable, type Row } from '@defi-workflow-engine/cloud-runtime';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platform/handoff-store.ts';
 import { WALLET_BATCH_OUTCOME_UNKNOWN, WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, groupInFlight, walletBatchUnanswered, type RunMode, type RunState,
@@ -392,6 +392,24 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
   };
 }
 export type WorkflowRunStore = ReturnType<typeof createPgWorkflowRunStore>;
+
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: migration 0032 (`single_step_runs`) widens `workflow_runs.step_count` from 2..8 to 1..8, so the
+ * Editor can run ONE financial card through the user-funded execution groups (one atomic wallet batch). It is certified for the v28 build and
+ * applied by an operator command, never by the deployment's own migration (docs/deploy/RELEASE-SINGLE-STEP-RUNS-0032.md). Until the database
+ * holds exactly that migration — the certified (or, once shipped, the shipped) identity, version, name and SHA-256 — a single card keeps its
+ * own flow: nothing offers a run the database would refuse. Any read failure answers false (fail closed to today's path).
+ */
+export const SINGLE_STEP_RUNS_VERSION = 32;
+export async function singleStepRunsSupported(db: Queryable): Promise<boolean> {
+  const identity = SHIPPED_MIGRATIONS.find(m => m.version === SINGLE_STEP_RUNS_VERSION)
+    ?? CERTIFIED_FORWARD_MIGRATIONS.flatMap(c => c.migrations).find(m => m.version === SINGLE_STEP_RUNS_VERSION);
+  if (!identity || identity.name !== 'single_step_runs') return false;
+  try {
+    const row = (await db.query('SELECT version, name, sha256 FROM schema_migrations WHERE version = $1', [SINGLE_STEP_RUNS_VERSION])).rows[0];
+    return Boolean(row && Number(row.version) === identity.version && row.name === identity.name && row.sha256 === identity.sha256);
+  } catch { return false; }
+}
 /** What `WorkflowRunStore.atomically` hands its work: one run's reads and compare-and-sets, all inside one transaction under the run lock. */
 export type RunScope = {
   readonly steps: (runId: string) => Promise<readonly RunStepRecord[]>;

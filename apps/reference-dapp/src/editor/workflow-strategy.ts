@@ -14,7 +14,8 @@
  *              inputs, constraints, protocols, failure policy, authorization class — the comparison automations use); any difference is refused
  *
  * The result's workflow hash is the engine's sequence hash, which the approval service re-derives from the strategy alone. Pure: no IO, no
- * authority; single-step workflows keep their own per-flow execution path and are refused here.
+ * authority; single-step workflows keep their own per-flow execution path and are refused here, unless the Editor asks for its single-card run
+ * (`singleStep`, BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001).
  */
 import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
 import { parseArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -22,7 +23,7 @@ import { nodeSemantics } from '../automations/binding.ts';
 import { strategyOfCommand } from '../channels/core/strategy.ts';
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
-import { compositionWorkflow, sequenceOrder, workflowSequence } from '../domain/workflow-sequence';
+import { compositionWorkflow, sequenceOrder, stepProjection, workflowSequence } from '../domain/workflow-sequence';
 import { workflowSteps, type StepDetail } from '../domain/workflow-steps';
 import { composeWorkflow, dappReviewContext, reviewContextOf, type WorkflowComposition } from '../engine/strategy-engine';
 import { editorReducer, initialEditor } from '../domain/editor';
@@ -73,36 +74,53 @@ function canonicalWorkflow(input: unknown): Workflow | null {
 }
 const financialNodes = (workflow: Pick<Workflow, 'nodes'>) => workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
 
-/** The Editor's Canvas workflow → its canonical multi-step strategy (see the module comment), or a closed refusal. */
-export function editorWorkflowStrategy(input: unknown): EditorWorkflowStrategy | EditorWorkflowRefusal {
+/**
+ * The Editor's Canvas workflow → its canonical multi-step strategy (see the module comment), or a closed refusal.
+ *
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: `singleStep` also accepts ONE financial card — the same rules as each step of a sequence (it lints
+ * alone with its own network's trusted context, it is read into the authoring command FloFi's chat produces for it, and the composed step must
+ * reproduce the node exactly). A one-step strategy composes to the step's own strategy and hash (the identity MCP and the Developer API use).
+ * Only the Editor's single-card run asks for it, on a deployment whose database accepts one-step runs; the default refuses one step as before.
+ */
+export function editorWorkflowStrategy(input: unknown, options: { readonly singleStep?: boolean } = {}): EditorWorkflowStrategy | EditorWorkflowRefusal {
   const workflow = canonicalWorkflow(input);
   if (!workflow) return { ok: false, code: 'EDITOR_WORKFLOW_INVALID' };
   const ordered = sequenceOrder(workflow);
   if (!ordered.length) return { ok: false, code: 'EDITOR_WORKFLOW_EMPTY' };
   // A workflow one of FloFi's composition runtimes executes as a whole keeps that path; it is not a sequence of independent steps.
   if (compositionWorkflow(workflow)) return { ok: false, code: 'EDITOR_WORKFLOW_COMPOSITION' };
-  if (ordered.length < EDITOR_RUN_MIN_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
+  const single = ordered.length === 1 && options.singleStep === true;
+  if (ordered.length < EDITOR_RUN_MIN_STEPS && !single) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
   if (ordered.length > EDITOR_RUN_MAX_STEPS) return { ok: false, code: 'EDITOR_WORKFLOW_TOO_LONG' };
-  // Exactly the Canvas's own sequence: every step must lint alone with its own network's trusted context, as its runtime receives it.
-  const sequence = workflowSequence(workflow, step => lintWorkflow(step, reviewContextOf(step)));
-  if (!sequence || sequence.steps.length !== ordered.length) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
+  // Exactly the Canvas's own sequence: every step must lint alone with its own network's trusted context, as its runtime receives it. One card
+  // is its own one-step sequence (it funds nothing and nothing funds it).
+  const lintAlone = (step: Workflow) => lintWorkflow(step, reviewContextOf(step));
+  let steps: readonly { readonly index: number; readonly nodeId: string; readonly funding: readonly { readonly fundedBy: number }[] }[];
+  if (single) {
+    try { lintAlone(stepProjection(workflow, ordered[0]!)); } catch { return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' }; }
+    steps = [{ index: 0, nodeId: ordered[0]!.nodeId, funding: [] }];
+  } else {
+    const sequence = workflowSequence(workflow, lintAlone);
+    if (!sequence || sequence.steps.length !== ordered.length) return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };
+    steps = sequence.steps;
+  }
   const context = reviewContextOf(workflow), described = new Map(workflowSteps(workflow, context).map(step => [step.nodeId, step.detail]));
   const specs: StrategySpec[] = [];
-  for (const [index, step] of sequence.steps.entries()) {
+  for (const [index, step] of steps.entries()) {
     const detail = described.get(step.nodeId), command = detail ? authoringCommandOf(detail) : null;
     const spec = command ? strategyOfCommand(command) : null;
     if (!spec) return { ok: false, code: 'EDITOR_WORKFLOW_STEP_NOT_REPRESENTABLE', step: index };
     specs.push(spec);
   }
   // The Canvas's own funding (what an earlier step delivers to the owner, spent by a later one) as the engine's typed bindings.
-  const bindings = sequence.steps.flatMap(step => step.funding.map(funding => ({ step: step.index, amountFrom: funding.fundedBy })));
+  const bindings = steps.flatMap(step => step.funding.map(funding => ({ step: step.index, amountFrom: funding.fundedBy })));
   const unique = [...new Map(bindings.map(binding => [`${binding.step}:${binding.amountFrom}`, binding])).values()];
   const strategy = { version: 2, steps: specs, ...unique.length ? { bindings: unique } : {} } as StrategyInput;
   const composed = composeWorkflow(strategy);
   if (!composed.ok) return { ok: false, code: composed.code };
-  if (composed.steps.length !== sequence.steps.length) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED' };
+  if (composed.steps.length !== steps.length) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED' };
   // Every composed step must be exactly its Canvas node: the run executes the engine's composition, so anything else is not this workflow.
-  for (const [index, step] of sequence.steps.entries()) {
+  for (const [index, step] of steps.entries()) {
     const reproduced = financialNodes(composed.steps[index]!.workflow), node = ordered.find(candidate => candidate.nodeId === step.nodeId);
     if (!node || reproduced.length !== 1 || nodeSemantics(reproduced[0]!) !== nodeSemantics(node)) return { ok: false, code: 'EDITOR_WORKFLOW_PARITY_FAILED', step: index };
   }

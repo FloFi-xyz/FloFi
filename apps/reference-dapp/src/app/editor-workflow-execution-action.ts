@@ -15,9 +15,12 @@ import { flightWalletRefusal, withFlightAccess } from '../server/flight-access';
  *
  * Every refusal is a closed code. A run that was started but could not reach its wallet request is ended (nothing was signed or sent).
  */
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { accountHost, currentAccountSession } from '../accounts/account-host';
-import { readEditorRunConfig } from '../editor/approval';
+import { readEditorRunConfig, startEditorRun, type EditorRunStarted } from '../editor/approval';
+import { createPgHandoffStore } from '../platform/index';
+import { EMBEDDED_APPROVAL_PATH } from '../server/embedded-approval';
+import { singleStepRunsSupported } from '../workflow-runs/pg-store';
 import { bindingOf, runMatchesBinding } from '../editor/authorize-binding';
 import { editorWorkflowStrategy } from '../editor/workflow-strategy';
 import { prepareCatalogs } from '../server/editor-catalogs';
@@ -40,8 +43,24 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const REVIEW_LIMIT = 30, REVIEW_WINDOW_SECONDS = 600;
 /** Only the deployment and code facts of a bridge step's gates are read for the Review (the run's start applies its requester's own policy). */
 const REVIEW_GATE_POLICY: HandoffPolicy = { ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' };
-/** Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. */
-export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null }> {
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: whether a Canvas workflow is ONE financial card (the Editor's single-card run). Only a hint for
+ * choosing the path; the workflow itself is re-read and re-validated by `editorWorkflowStrategy`.
+ */
+const singleCard = (workflow: unknown): boolean => {
+  const nodes = workflow && typeof workflow === 'object' ? (workflow as { nodes?: unknown }).nodes : null;
+  return Array.isArray(nodes) && nodes.filter(node => node && typeof node === 'object' && typeof (node as { actionType?: unknown }).actionType === 'string'
+    && !(node as { actionType: string }).actionType.startsWith('mock-')).length === 1;
+};
+/** Whether this deployment's database accepts a one-step workflow run (migration 0032, exact identity; any failure: no). */
+const singleStepRunsHere = async (env: NodeJS.ProcessEnv): Promise<boolean> =>
+  singleStepRunsSupported((await platformStateHost(env)).db).catch(() => false);
+/**
+ * Whether the Editor can run a whole workflow as one run with user-funded grouped authorization on this deployment. `singleStep`
+ * (BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001): whether ONE financial card can run that way too — only once the database accepts one-step runs
+ * (migration 0032, applied by an operator); until then a single card keeps its own flow.
+ */
+export async function editorWorkflowExecutionAvailability(): Promise<{ readonly enabled: boolean; readonly code: string | null; readonly singleStep?: boolean }> {
   return withFlightAccess(async () => {
   const env = process.env, editor = readEditorRunConfig(env);
   if (!editor.enabled) return { enabled: false, code: editor.code };
@@ -49,7 +68,8 @@ export async function editorWorkflowExecutionAvailability(): Promise<{ readonly 
   if (!facts.enabled) return { enabled: false, code: facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
   // Without a FloFi account session the run cannot start: the Editor keeps its step-by-step path primary instead of a Review that would refuse.
   const accounts = await accountHost(env).catch(() => null);
-  return await currentAccountSession(accounts, env) ? { enabled: true, code: null } : { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+  if (!await currentAccountSession(accounts, env)) return { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+  return { enabled: true, code: null, singleStep: await singleStepRunsHere(env) };
 
   });
 }
@@ -70,6 +90,9 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
     const flight = await flightWalletRefusal(owner, env);
     if (flight) return { ok: false, code: flight };
     const host = await platformStateHost(env);
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card is reviewed as a run of that one step only where the database accepts such a run.
+    const singleStep = singleCard(workflow) && await singleStepRunsSupported(host.db).catch(() => false);
+    if (singleCard(workflow) && !singleStep) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
     if (!await fixedWindow(host.db, host.tenantId).allow(`editor-review:${session.accountId}`, REVIEW_LIMIT, REVIEW_WINDOW_SECONDS, new Date()))
       return { ok: false, code: 'EDITOR_REVIEW_RATE_LIMITED' };
     // The workflow's listed tokens resolve exactly as on the Canvas (the run's own start does the same).
@@ -83,12 +106,28 @@ export async function reviewEditorWorkflow(workflow: unknown, owner: string, pro
       return !gates.supportedByCode.execute ? gates.supportedByCode.reason ?? 'OWNER_EXECUTION_NOT_IMPLEMENTED'
         : !gates.enabledByDeployment.enabled ? gates.enabledByDeployment.reason ?? 'FLOW_NOT_ENABLED' : null;
     };
-    return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date(), stepRefusal });
+    return await reviewEditorExecution({ workflow, owner, profile: walletProfileOf(profile), facts: runtime.facts, deps: runtime.deps, now: new Date(), stepRefusal,
+      singleStep });
   } catch (cause) { return failure(cause); }
 
   });
 }
 
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the Editor's own one-step run of ONE card, started only from the in-place Authorize below (never
+ * exported as an action: "Run workflow" keeps handing off multi-step workflows only). The same requester, account session, deployment check and
+ * approval service as `startEditorWorkflowRun`; the handoff is a SEQUENTIAL plan of that one step.
+ */
+async function startSingleCardRun(workflow: unknown): Promise<Result<EditorRunStarted>> {
+  const env = process.env, config = readEditorRunConfig(env);
+  if (!config.enabled) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
+  if ((await headers()).get('x-flofi-pathname') === EMBEDDED_APPROVAL_PATH) return { ok: false, code: 'EDITOR_RUNS_NOT_ENABLED' };
+  const accounts = await accountHost(env).catch(() => null), session = await currentAccountSession(accounts, env);
+  if (!session) return { ok: false, code: 'ACCOUNT_SESSION_REQUIRED' };
+  const host = await platformStateHost(env);
+  return await startEditorRun({ config, origin: config.origin, handoffs: createPgHandoffStore(host.db, host.tenantId), allow: fixedWindow(host.db, host.tenantId).allow,
+    runtime: deploymentEngineRuntime(env), now: new Date() }, session.accountId, workflow, { singleStepRun: true });
+}
 export type EditorAuthorization = { readonly approvalId: string; readonly proposal: ClaimedProposal; readonly prepared: PreparedGroupView };
 /**
  * The owner's Authorize: starts the shared workflow run of this Canvas workflow, claims it for the proven wallet, starts it in user-funded mode
@@ -111,9 +150,12 @@ export async function authorizeEditorWorkflow(workflow: unknown, profile: unknow
     if (!wallets.some(w => w.namespace === 'eip155')) return { ok: false, code: 'EVM_WALLET_PROOF_REQUIRED' };
     // The workflow sent is the reviewed one before anything is created (no handoff or run for a workflow that changed since the Review).
     await prepareCatalogs(workflow);
-    const converted = editorWorkflowStrategy(workflow);
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: ONE card runs as a workflow run of that one step only where the database accepts it (0032).
+    const singleStep = singleCard(workflow) && await singleStepRunsHere(process.env);
+    if (singleCard(workflow) && !singleStep) return { ok: false, code: 'EDITOR_WORKFLOW_SINGLE_STEP' };
+    const converted = editorWorkflowStrategy(workflow, { singleStep });
     if (!converted.ok || converted.workflowHash !== binding.workflowHash) return { ok: false, code: 'EDITOR_EXECUTION_PLAN_CHANGED' };
-    const started = await startEditorWorkflowRun(workflow);
+    const started = singleStep ? await startSingleCardRun(workflow) : await startEditorWorkflowRun(workflow);
     if (!started.ok) return started;
     approvalId = started.value.approvalId;
     const secret = new URL(started.value.approvalUrl).hash.slice(1);

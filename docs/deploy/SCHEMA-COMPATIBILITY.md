@@ -1045,4 +1045,45 @@ never-authorized simulation deleted through the authenticated owner-history rout
 
 **Activation, rollout and rollback**: [RELEASE-POSITION-PURGE-0031.md](./RELEASE-POSITION-PURGE-0031.md). Not applied anywhere by this build.
 Once 0031 is active, a build carrying only the §22 certificate (0029–0030) refuses the database: §22's rollback targets become builds carrying this
-certificate.
+certificate. Once 0032 (§24) is also active, a build carrying only this section's certificate (0029–0031) refuses the database too: the rollback
+targets then become builds carrying the §24 certificate (0029–0032).
+
+## 24. Certificate 0032_single_step_runs
+
+| Base history | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0028 `saved_recipients` plus certified 0029 `finops_ledger`, 0030 `finops_sync` and 0031 `position_history_purge` | 0032 `single_step_runs` | `1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c` |
+
+BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 lets the Editor run ONE financial card as a one-step USER_FUNDED workflow run (one owner confirmation,
+one wallet batch the owner's own wallet authorizes and pays for). 0015's column check limits a run to 2..8 steps, so the database refuses a one-step
+run today. 0032 widens that check and changes nothing else:
+
+- It **widens only `workflow_runs_step_count_check`** (0015's column check, verified by name and definition on a migrated schema-31 database) from
+  `step_count BETWEEN 2 AND 8` to `step_count BETWEEN 1 AND 8`, dropping and re-adding it under the same name in one `ALTER TABLE` statement —
+  the shape 0010/0022/0023 used. No table, column, index, function, trigger, privilege or row is added, changed or removed; every other constraint
+  is byte-identical (proven by a catalog diff).
+- 0015's `workflow_run_transition` trigger is unchanged and already bounds a one-step run: `current_step` starts at 0 and can never reach
+  `step_count` (`NEW.current_step >= OLD.step_count` refuses 1), and `step_count` stays immutable. 0023's group rules (USER_FUNDED only, the
+  owner's own wallet as fee payer) apply unchanged to the single group covering step 0. `workflow_run_steps` (0..7) is unchanged.
+- Every row valid under 0031 is valid under 0032 unchanged, so the `ADD CONSTRAINT` validation scan cannot fail on existing data.
+  `SET LOCAL lock_timeout = '5s'`: the short ACCESS EXCLUSIVE lock on `workflow_runs` waits at most 5 s for an open transaction holding the table,
+  then the migration rolls back completely (proven); approval and workflow-run writes wait at most for that short transaction.
+
+**Compatibility.** A v28 build carrying this certificate serves schema 32; a build carrying only the previous certificate (0029–0031, i.e. `main`
+before this build) refuses it with `MIGRATION_HISTORY_MISMATCH`, so this build must serve every database consumer before 0032 is applied.
+Builds before this one never create one-step runs: their claim path refuses fewer than two steps (`WORKFLOW_RUN_NOT_SEQUENTIAL`), so nothing they
+write depends on the widened bound. The application enables single-card runs only when the ledger holds exactly this 0032 identity
+(`singleStepRunsSupported`). The v28 runner never changes a database ahead of it, and the ordinary deployment migration still ships schema 28.
+
+**Evidence** (disposable PostgreSQL 16 locally; CI runs PostgreSQL 18): `packages/cloud-runtime/test/certificate-0032.pg.test.ts` — exact bytes and
+certificate (one `ALTER TABLE` and the lock timeout, nothing else), schema 32 served for the v28 build only through it (the previous certificate,
+the empty certificate set and the strict check refuse it; the v28 runner and an edited 0032 change nothing), a catalog diff of exactly one changed
+constraint (columns, other constraints, indexes, functions, triggers and privileges identical), existing 2-, 3- and 8-step runs, steps and groups
+surviving unchanged, a one-step run refused at schema 31 and accepted at schema 32 and driven through 0015's unchanged trigger to COMPLETED,
+0, 9 and −1 steps still refused, a failing 0032 and a lock timeout (a reader holding `workflow_runs`) rolling back completely, and the documented
+emergency reversal restoring the exact schema-31 catalog while no one-step run exists and refusing otherwise. `certificate-0031.pg.test.ts` keeps
+its proofs on the extended certificate. `apps/reference-dapp/backend/single-step-runs-migrate.pg.test.ts` — the operator command refusing
+schemas below 31 (never applying 0029–0031 itself), applying only 0032 on exact schema 31, a rerun applying nothing, and the 0029, 0030 and 0031
+commands applying nothing on schema 32.
+
+**Activation, rollout and rollback**: [RELEASE-SINGLE-STEP-RUNS-0032.md](./RELEASE-SINGLE-STEP-RUNS-0032.md). Not applied anywhere by this build.

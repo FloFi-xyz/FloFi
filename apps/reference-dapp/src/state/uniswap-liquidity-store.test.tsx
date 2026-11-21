@@ -20,6 +20,7 @@ import { editorReducer, initialEditor } from '../domain/editor';
 import { uniswapBandInput } from '../domain/uniswap-liquidity-authoring';
 import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
 import { createUniswapLiquidityService, type UniswapLiquidityService } from '../server/uniswap-liquidity-service';
+import { OBSERVATION_DELAYS_MS } from '../domain/observation-schedule';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({
@@ -27,7 +28,15 @@ const f = vi.hoisted(() => ({
   // Stable, as the real store's callbacks are (useCallback with no dependencies).
   track: (read: Promise<unknown>) => read,
   refreshes: 0, failures: [] as string[],
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: observations made, observations that still find no receipt (scripted), and the follow's delays.
+  observes: 0, pendingObservations: 0, sleeps: [] as number[],
 }));
+// The real observation loop runs; only its waiting is skipped (the delays it asked for are recorded).
+vi.mock('../domain/observation-schedule', async original => {
+  const real = await original<typeof import('../domain/observation-schedule')>();
+  return { ...real, observeUntilSettled: <T,>(observe: () => Promise<T>, settled: (value: T) => boolean, options: { readonly active?: () => boolean } = {}) =>
+    real.observeUntilSettled(observe, settled, { ...options, sleep: async ms => { f.sleeps.push(ms); await new Promise(resolve => setTimeout(resolve, 0)); } }) };
+});
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, restoreLiquidityCanvas: f.restore, trackCanvasRestoration: f.track }) }));
 vi.mock('./build009-wallet-store', () => ({
   useBuild009Wallet: () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34', session: async () => ({ account: '0x5555555555555555555555555555555555555555', chainId: '0x14a34' }),
@@ -48,7 +57,12 @@ vi.mock('../app/uniswap-liquidity-action', () => {
     uniswapLiquidityHandoff: (id: string) => wrap(() => svc().handoff(id)),
     uniswapLiquidityReport: (id: string, result: Parameters<UniswapLiquidityService['report']>[1]) => wrap(() => svc().report(id, result)),
     uniswapLiquidityWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['walletFailure']>[1]) => { f.failures.push(diagnostic.code); return wrap(() => svc().walletFailure(id, diagnostic)); },
-    uniswapLiquidityObserve: (id: string) => wrap(() => svc().observe(id)),
+    uniswapLiquidityObserve: (id: string) => {
+      f.observes++;
+      // A scripted observation that finds no receipt yet: the durable record as it stands (its submitted attempt still PENDING), read-only.
+      if (f.pendingObservations > 0) { f.pendingObservations--; return wrap(() => svc().load(id)); }
+      return wrap(() => svc().observe(id));
+    },
     uniswapLiquidityStatus: (id: string) => wrap(() => svc().load(id)),
   };
 });
@@ -81,6 +95,7 @@ async function act(action: () => Promise<void>) { const done = action(); await s
 
 beforeEach(async () => {
   host = new HookHarness(); sent.length = 0; shown.length = 0; f.refreshes = 0; f.failures = []; wallet.slowSessionRead = 0;
+  f.observes = 0; f.pendingObservations = 0; f.sleeps = [];
   chain = createUniswapLiquidityChain();
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unilp-store-'));
   f.service = createUniswapLiquidityService({ storage: createFileExecutionStorage(dir, 'UNISWAP_LIQUIDITY_BUSY'), rpc: chain.rpc, provenance: 'MOCKED',
@@ -190,5 +205,20 @@ describe('EXEC-01: the store continues the same run after its Review expired bet
     await act(() => store.review());
     expect(store.record?.authorization).toBe(store.record?.review.commitment);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the follow after the wallet uses the shared observation schedule', () => {
+  it('keeps observing read-only past the former 20 × 2 s cap until the request is confirmed, with one wallet request and no owner action', async () => {
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // 24 observations find no receipt yet (the former loop gave up after 20); the 25th reconciles the approval.
+    f.pendingObservations = 24;
+    await act(() => store.execute());
+    expect(f.observes).toBe(25);
+    expect(f.sleeps).toEqual(OBSERVATION_DELAYS_MS.slice(0, 24));
+    expect(store.record?.attempts.map(a => [a.step, a.state])).toEqual([['APPROVE_TOKEN0', 'CONFIRMED']]);
+    expect(store.error).toBeNull();
+    expect(sent).toHaveLength(1);
   });
 });

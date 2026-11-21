@@ -26,10 +26,19 @@ import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type Uniswa
 import { baseAsset, baseCatalog } from '../server/base-mainnet.test-harness';
 import { createUniswapLiquidityService, type UniswapLiquidityService } from '../server/uniswap-liquidity-service';
 import type { Rpc } from '../server/public-testnet-service';
+import { OBSERVATION_DELAYS_MS } from '../domain/observation-schedule';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({ workflow: null as unknown, staged: null as unknown, service: null as unknown, provider: null as unknown, restore: vi.fn(),
-  track: (read: Promise<unknown>) => read, refreshes: 0, failures: [] as string[], begin: null as null | ((value: unknown) => unknown) }));
+  track: (read: Promise<unknown>) => read, refreshes: 0, failures: [] as string[], begin: null as null | ((value: unknown) => unknown),
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: observations made, observations that still find no receipt (scripted), and the follow's delays.
+  observes: 0, pendingObservations: 0, sleeps: [] as number[] }));
+// The real observation loop runs; only its waiting is skipped (the delays it asked for are recorded).
+vi.mock('../domain/observation-schedule', async original => {
+  const real = await original<typeof import('../domain/observation-schedule')>();
+  return { ...real, observeUntilSettled: <T,>(observe: () => Promise<T>, settled: (value: T) => boolean, options: { readonly active?: () => boolean } = {}) =>
+    real.observeUntilSettled(observe, settled, { ...options, sleep: async ms => { f.sleeps.push(ms); await new Promise(resolve => setTimeout(resolve, 0)); } }) };
+});
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, runtimeWorkflow: f.workflow, newWorkflow: false, context: null,
   stagedPosition: f.staged, restoreLiquidityCanvas: f.restore, trackCanvasRestoration: f.track }) }));
 vi.mock('./build009-wallet-store', () => ({
@@ -53,7 +62,12 @@ vi.mock('../app/uniswap-liquidity-action', () => {
     uniswapPositionHandoff: (id: string) => wrap(() => svc().positionHandoff(id)),
     uniswapPositionReport: (id: string, result: Parameters<UniswapLiquidityService['positionReport']>[1]) => wrap(() => svc().positionReport(id, result)),
     uniswapPositionWalletFailure: (id: string, diagnostic: Parameters<UniswapLiquidityService['positionWalletFailure']>[1]) => { f.failures.push(diagnostic.code); return wrap(() => svc().positionWalletFailure(id, diagnostic)); },
-    uniswapPositionObserve: (id: string) => wrap(() => svc().positionObserve(id)),
+    uniswapPositionObserve: (id: string) => {
+      f.observes++;
+      // A scripted observation that finds no receipt yet: the durable record as it stands (its submitted attempt still PENDING), read-only.
+      if (f.pendingObservations > 0) { f.pendingObservations--; return wrap(() => svc().positionStatus(id)); }
+      return wrap(() => svc().positionObserve(id));
+    },
     uniswapPositionStatus: (id: string) => wrap(() => svc().positionStatus(id)),
   };
 });
@@ -95,6 +109,7 @@ beforeAll(() => registerNetworkCatalog(catalog));
 afterAll(() => resetNetworkCatalogs());
 beforeEach(async () => {
   host = new HookHarness(); sent.length = 0; f.refreshes = 0; f.failures = []; f.begin = null; wallet.mode = 'SEND';
+  f.observes = 0; f.pendingObservations = 0; f.sleeps = [];
   chain = createUniswapLiquidityChain({ profile: PROFILE, tick: TICK, usdc: USDC_IS_0 ? 1_000_000_000n : 10_000_000n, weth: USDC_IS_0 ? 10_000_000n : 1_000_000_000n });
   const dir = await mkdtemp(join(tmpdir(), 'flofi-unipm-store-'));
   const sepolia: Rpc = async () => { throw new Error('BASE_SEPOLIA_CLIENT_MUST_NOT_BE_USED'); };
@@ -264,5 +279,23 @@ describe('BUILD-FLOFI-LIQUIDITY-LIFECYCLE-001: the Uniswap position store (MOCKE
     // The deposit runtime refuses the same workflow outright.
     await expect((f.service as UniswapLiquidityService).simulate(f.workflow as SemanticWorkflow, UNI_OWNER)).rejects.toThrow(/UNISWAP_LIQUIDITY_WORKFLOW_MANAGES_POSITION|UNISWAP_LIQUIDITY_DECLARATION_INVALID/);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the follow after the wallet uses the shared observation schedule', () => {
+  it('keeps observing read-only past the former 20 × 2 s cap until the run is reconciled, with one wallet request and no owner action', async () => {
+    const tokenId = chain.seedPosition({ tickLower: LOWER, tickUpper: UPPER, liquidity: 5_000_000_000n });
+    chain.accrueFees(tokenId, 1_234n, 5_678n);
+    stage(choiceOf(tokenId)); read(); await settle();
+    await act(() => store.simulate());
+    await act(() => store.review());
+    // 24 observations find no receipt yet (the former loop gave up after 20); the 25th reconciles the run.
+    f.pendingObservations = 24;
+    await act(() => store.execute());
+    expect(f.observes).toBe(25);
+    expect(f.sleeps).toEqual(OBSERVATION_DELAYS_MS.slice(0, 24));
+    expect(store.error).toBeNull();
+    expect(store.record).toMatchObject({ verdict: 'RECONCILED', result: { operation: 'COLLECT', collected0: '1234', collected1: '5678' } });
+    expect(sent).toHaveLength(1);
   });
 });

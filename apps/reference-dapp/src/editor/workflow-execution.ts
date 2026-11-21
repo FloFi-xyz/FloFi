@@ -139,11 +139,17 @@ export async function reviewEditorExecution(input: { readonly workflow: unknown;
    * The run's start and every group preparation re-check these gates; the Review asks the same question, so it never promises one wallet
    * confirmation that Authorize would then refuse. Absent: not consulted (tests and callers without an engine runtime).
    */
-  readonly stepRefusal?: ((step: Parameters<typeof requirementOf>[0]['steps'][number], index: number) => Promise<string | null>) | undefined }): Promise<ReviewResult> {
+  readonly stepRefusal?: ((step: Parameters<typeof requirementOf>[0]['steps'][number], index: number) => Promise<string | null>) | undefined;
+  /**
+   * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a ONE-card Canvas workflow is reviewed as a workflow run of that one step (only where the database
+   * accepts one-step runs, migration 0032). Its plan, prepared calls (an exact approval folded into the batch only when the owner's current
+   * allowance is short), simulation and counts are exactly a multi-step group's.
+   */
+  readonly singleStep?: boolean }): Promise<ReviewResult> {
   const owner = input.owner.toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(owner)) return { ok: false, code: 'EVM_WALLET_REQUIRED' };
   if (!input.facts.enabled || !input.deps) return { ok: false, code: input.facts.code ?? 'USER_FUNDED_NOT_ENABLED' };
-  const converted = editorWorkflowStrategy(input.workflow);
+  const converted = editorWorkflowStrategy(input.workflow, { singleStep: input.singleStep === true });
   if (!converted.ok) return converted;
   const composed = composeWorkflowBound(converted.strategy, converted.workflowHash);
   if (!composed.ok) return { ok: false, code: composed.code };

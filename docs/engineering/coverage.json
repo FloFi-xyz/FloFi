@@ -1782,6 +1782,14 @@
       "path": "apps/reference-dapp/backend/uniswap-position-purge.pg.test.ts",
       "stage": "postgres"
     },
+    "cloud-runtime.certificate-0032.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0032.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.single-step-runs-migrate.pg": {
+      "path": "apps/reference-dapp/backend/single-step-runs-migrate.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.components.app-shell-position-simulation": {
       "path": "apps/reference-dapp/src/components/app-shell-position-simulation.test.tsx",
       "stage": "unit"
@@ -2534,7 +2542,8 @@
         "app.admin.finops-sync.pg",
         "app.e2e.admin-console",
         "app.backend.plain-node-closure",
-        "app.backend.uniswap-position-purge.pg"
+        "app.backend.uniswap-position-purge.pg",
+        "app.backend.single-step-runs-migrate.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
@@ -3595,7 +3604,9 @@
         "app.admin.support-privacy.pg",
         "app.backend.nonce-conflict-cloud.pg",
         "cloud-runtime.certificate-0031.pg",
-        "app.backend.uniswap-position-purge.pg"
+        "app.backend.uniswap-position-purge.pg",
+        "cloud-runtime.certificate-0032.pg",
+        "app.backend.single-step-runs-migrate.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -3678,7 +3689,8 @@
         "reference-linter.composition",
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
-        "cloud-runtime.certificate-0031.pg"
+        "cloud-runtime.certificate-0031.pg",
+        "cloud-runtime.certificate-0032.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -8967,6 +8979,8 @@
     "app.admin.finops-sync.pg",
     "app.admin.support.historical-reconciliation.pg",
     "cloud-runtime.certificate-0031.pg",
-    "app.backend.uniswap-position-purge.pg"
+    "app.backend.uniswap-position-purge.pg",
+    "cloud-runtime.certificate-0032.pg",
+    "app.backend.single-step-runs-migrate.pg"
   ]
 }

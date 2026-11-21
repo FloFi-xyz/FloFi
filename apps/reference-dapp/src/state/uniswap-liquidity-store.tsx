@@ -13,6 +13,7 @@ import { CATALOG_NETWORK_IDENTITIES, networkIdentity } from '../domain/network-r
 import type { UniswapLiquidityPrice, UniswapLiquidityRecord, UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 import { UNISWAP_REFRESH_IN_PLACE, uniswapRunResumable } from '../domain/uniswap-liquidity-continuation';
+import { observeUntilSettled } from '../domain/observation-schedule';
 
 const KEY = 'flofi:uniswap-liquidity:run';
 const REFUSALS = [4001, 4100, 4200];
@@ -51,11 +52,14 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const busyRef = useRef(false), operationEpoch = useRef(0);
+  // The run currently shown (set with every record the store shows) and whether the provider is mounted: a follow applies only to its own run.
+  const shownRun = useRef<string | null>(null), mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   // A recovered run stays visible on the untouched template; any other workflow change retires its Review.
   const retired = Boolean(record && JSON.stringify(record.workflow) !== JSON.stringify(workflow) &&
     !(recovered && workflow.revision === 0 && workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
   function accept(value: UniswapLiquidityRecord) {
-    setRecord(value);
+    shownRun.current = value.id; setRecord(value);
     const hash = value.attempts.at(-1)?.transactionHash;
     try { window.localStorage.setItem(KEY, JSON.stringify({ id: value.id, ...hash ? { hash } : {} })); } catch { /* The server run remains authoritative. */ }
   }
@@ -80,7 +84,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
         return trackCanvasRestoration(uniswapLiquidityStatus(pointer.id as string));
       })().then(result => {
         if (!mounted || !result.ok) return;
-        setRecord(result.value); setRecovered(true);
+        shownRun.current = result.value.id; setRecord(result.value); setRecovered(true);
         // EXEC-01: a started run that still needs the owner (a confirmed approval, the rest not sent) shows its own workflow on the untouched
         // Canvas again, so the owner can refresh its Review and continue it after a reload. Finished runs stay in the Dashboard.
         if (result.value.verdict === 'PENDING' && result.value.attempts.length > 0) restoreLiquidityCanvas(result.value.workflow);
@@ -245,14 +249,18 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       }
       throw cause;
     }
-    for (let i = 0; i < 20; i++) {
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the shared observation schedule (domain/observation-schedule.ts: about four and a half minutes
+    // instead of 20 × 2 s) with the same stopping rule, so a slow confirmation no longer ends in a manual check. Read-only (observe only); a result
+    // is applied only while this run is still the one shown (a newer run is never replaced) and the follow stops on unmount. As before, an
+    // unanswered observation ends it quietly and the manual check stays.
+    const shown = () => mountedRef.current && shownRun.current === id;
+    await observeUntilSettled(async () => {
       const observed = await uniswapLiquidityObserve(id);
-      if (!observed.ok) break;
-      accept(observed.value);
-      const last = observed.value.attempts.at(-1);
-      if (!last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || observed.value.verdict !== 'PENDING') break;
-      await new Promise(resolve => setTimeout(resolve, 2_000));
-    }
+      if (!observed.ok) return null;
+      if (shown()) accept(observed.value);
+      return observed.value;
+    }, value => { const last = value?.attempts.at(-1); return !value || !last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || value.verdict !== 'PENDING'; },
+    { active: shown });
   }
   return <Context.Provider value={{ available, executionEnabled, record, busy, signing, error, retired, recovered, price, priceChain,
     requoted: requoted && requoted.runId === record?.id ? requoted : null, simulate, refresh, review, execute, observe, switchNetwork, fetchPrice }}>

@@ -35,6 +35,7 @@ import { projectExecutionRecovery, type ExecutionRecovery } from '../domain/exec
 import { projectExecutionStepEvidence } from '../domain/execution-step-evidence';
 import { projectExecutionEvidence } from '../domain/execution-evidence';
 import type { ReviewWallet } from '../domain/review-presentation';
+import { observeUntilSettled } from '../domain/observation-schedule';
 
 export const UNISWAP_POSITION_RUN_KEY = 'flofi:uniswap-position:run';
 const REFUSALS = [4001, 4100, 4200];
@@ -74,6 +75,9 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const busyRef = useRef(false), operationEpoch = useRef(0);
+  // The run currently shown (set with every record the store shows) and whether the provider is mounted: a follow applies only to its own run.
+  const shownRun = useRef<string | null>(null), mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const attaches = Boolean(record && JSON.stringify(record.workflow) === JSON.stringify(workflow));
   // A run of another workflow, of another staged operation or of another owner never stands for the current choice.
   const retired = Boolean(record && (!attaches || stagedRequest && !sameRequest(stagedRequest, record.request) || staged && staged.position.owner !== record.owner));
@@ -81,7 +85,7 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
   const chain = staged?.position.chain ?? (record ? `eip155:${record.review.chainId}` : marker?.chain ?? null);
   const { available, executionEnabled } = (chain ? networks[chain] : undefined) ?? { available: false, executionEnabled: false };
   function accept(value: UniswapPositionRecord) {
-    setRecord(value);
+    shownRun.current = value.id; setRecord(value);
     const hash = value.attempts.at(-1)?.transactionHash;
     try { window.localStorage.setItem(UNISWAP_POSITION_RUN_KEY, JSON.stringify({ id: value.id, ...hash ? { hash } : {} })); } catch { /* The server run remains authoritative. */ }
   }
@@ -104,7 +108,7 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
         return trackCanvasRestoration(uniswapPositionStatus(pointer.id as string));
       })().then(result => {
         if (!mounted || !result.ok) return;
-        setRecord(result.value); setRecovered(true);
+        shownRun.current = result.value.id; setRecord(result.value); setRecovered(true);
         // An unresolved run shows its own workflow on the untouched Canvas again, so its request keeps being observed after a reload.
         if (result.value.verdict === 'PENDING' && result.value.attempts.length > 0) restoreLiquidityCanvas(result.value.workflow);
       }).catch(() => undefined);
@@ -257,14 +261,18 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
       }
       throw cause;
     }
-    for (let i = 0; i < 20; i++) {
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the shared observation schedule (domain/observation-schedule.ts: about four and a half minutes
+    // instead of 20 × 2 s) with the same stopping rule, so a slow confirmation no longer ends in a manual check. Read-only (observe only); a result
+    // is applied only while this run is still the one shown (a newer run is never replaced) and the follow stops on unmount. As before, an
+    // unanswered observation ends it quietly and the manual check stays.
+    const shown = () => mountedRef.current && shownRun.current === id;
+    await observeUntilSettled(async () => {
       const observed = await uniswapPositionObserve(id);
-      if (!observed.ok) break;
-      accept(observed.value);
-      const last = observed.value.attempts.at(-1);
-      if (!last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || observed.value.verdict !== 'PENDING') break;
-      await new Promise(resolve => setTimeout(resolve, 2_000));
-    }
+      if (!observed.ok) return null;
+      if (shown()) accept(observed.value);
+      return observed.value;
+    }, value => { const last = value?.attempts.at(-1); return !value || !last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || value.verdict !== 'PENDING'; },
+    { active: shown });
   }
   return <Context.Provider value={{ available, executionEnabled, record, busy, signing, error, retired, recovered, engaged,
     request: stagedRequest ?? (attaches ? record?.request ?? null : null),

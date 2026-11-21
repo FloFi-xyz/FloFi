@@ -128,7 +128,9 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
   it('classifies each FinOps-era certificate prefix and keeps the legacy refusal messages', async () => {
     const shipped = SHIPPED_MIGRATIONS.slice(0, 28);
     const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
-    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31]);
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (intentional): the v28 certificate now also names 0032 `single_step_runs`, so the
+    // uncertified example below moved from version 32 to version 33. Every prefix is still classified.
+    expect(certificate.migrations.map(m => m.version)).toEqual([29, 30, 31, 32]);
     expect(schemaCompatibilityState(shipped, shipped)).toBe('exact');
     for (const [index, migration] of certificate.migrations.entries()) {
       const ahead = [...shipped, ...certificate.migrations.slice(0, index + 1)];
@@ -139,7 +141,7 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
     const last = ahead.at(-1)!;
     const cases = [
       { ledger: shipped.slice(0, -1), state: 'behind', message: 'SCHEMA_NOT_MIGRATED' },
-      { ledger: [...ahead, { version: 32, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
+      { ledger: [...ahead, { version: 33, name: 'new_migration', sha256: 'a'.repeat(64) }], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...ahead.slice(0, -1), edit(last, { sha256: 'a'.repeat(64) })], state: 'uncertified-ahead', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [edit(shipped[0]!, { name: 'edited' }), ...ahead.slice(1)], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
       { ledger: [...shipped, last], state: 'invalid-history', message: 'MIGRATION_HISTORY_MISMATCH' },
