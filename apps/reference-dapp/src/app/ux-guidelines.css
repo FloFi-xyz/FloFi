@@ -34,8 +34,13 @@
    (with an ellipsis; its full name stays in the rename control's accessible name). */
 .editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-head-meta,
 .editor-head-row .editor-state-pill[data-editor-state="attention"]{flex:0 0 auto}
-.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name,
 .editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-name .workflow-name-text{flex:0 1 auto;min-width:48px}
+/* The whole name chain shrinks, never below its own content (a legacy `.workflow-rename{flex:none}` or a zero minimum would let the pencil
+   spill over the New workflow control): the name keeps at least 48 px and the pencil stays inside its button (85 px = 48 + gap 6 + pencil 15
+   + padding 16). */
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"])>.canvas-name,
+.editor-head-identity:has(.editor-state-pill[data-editor-state="attention"]) .canvas-name :is(h2,.workflow-rename){flex:0 1 auto;min-width:85px}
+.editor-head-row .canvas-name .workflow-new{flex:none}
 .editor-head-row>.canvas-head-stages{justify-self:center;margin:0;padding:0;border:0;min-width:0}
 .editor-head-row>.canvas-head-actions{justify-self:end;margin:0;min-width:0}
 .editor-head-row>.editor-head-end{min-height:40px}
