@@ -1119,6 +1119,11 @@ exactly such an attempt from History, decided by the database under the run's ro
   (0015's three, 0023's one) are untouched. This is 0031's precedent (a redefined body behind an unchanged signature): **compatible with the v28
   build**, because no v28 code path ever deletes or updates a workflow-run record — every such statement fails before and after 0033 with the same
   message and SQLSTATE (proven for each of the four tables and for UPDATE of an event), and a v28 build never creates a permit.
+- **Runtime role (environment, not part of the migration).** 0033 names no role. Where the objects belong to a migration role and the services
+  connect as a separate runtime role whose table rights come from `ALTER DEFAULT PRIVILEGES` (FloFi production), 0033 alone leaves the runtime role
+  without EXECUTE on the procedure and WITH write access to the private permit table and the tombstone (a forged permit could delete any run's
+  rows). `docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql` (operator step right after 0033; see its release document) revokes
+  those writes, keeps SELECT on the tombstone and grants EXECUTE; the certificate test proves both the defect and the fix with such a role.
 - **One new function: `purge_unsubmitted_workflow_run(tenant, owner, id) RETURNS jsonb`**, `SECURITY DEFINER`, the same `search_path`, EXECUTE revoked
   from PUBLIC (the owner role only). It locks the run (as every run-store write), its steps and groups (as cancellation), the approval handoff, the
   run's `workflow-run.advance` work items, then the tenant's privacy lock (as legal-hold placement and erasure), and answers a closed result:

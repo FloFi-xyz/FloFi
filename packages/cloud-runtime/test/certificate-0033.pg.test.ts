@@ -9,15 +9,18 @@
  * surviving; plain DELETE on each workflow-run table and UPDATE of an event still refused with 0015's error; a permit of another transaction or
  * another run unlocking nothing; no permit left behind; a failing 0033 and a lock timeout rolling back completely; and the documented reversal
  * restoring the exact schema-32 catalog only while no attempt was deleted, only on 0033 as head (the 0032 reversal refuses while 0033 is
- * head). Synthetic rows only; the owner-facing behaviour is proven by `apps/reference-dapp/backend/owner-history.pg.test.ts` and the operator
- * command by `apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts`.
+ * head). With a separate runtime role holding production's default privileges, the runtime-role provisioning file
+ * (`docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql`) and its documented verification: without it the runtime role can forge a
+ * permit and delete any run's rows and cannot call the procedure; with it, neither, and the procedure deletes as the runtime role. Synthetic rows
+ * only; the owner-facing behaviour is proven by `apps/reference-dapp/backend/owner-history.pg.test.ts` and the operator command by
+ * `apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts`.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, loadMigrations, migrate, SHIPPED_MIGRATIONS, type Database,
-  type ForwardCompatibilityCertificate, type Migration } from '../src/index.js';
-import { createTestDatabase, type TestDatabase } from './pg-harness.js';
+import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, createDatabase, loadMigrations, migrate, SHIPPED_MIGRATIONS,
+  type Database, type ForwardCompatibilityCertificate, type Migration } from '../src/index.js';
+import { createTestDatabase, testDatabaseUrl, type TestDatabase } from './pg-harness.js';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const CERTIFICATE = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
@@ -28,7 +31,14 @@ const SHA_0033 = '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2
 const HASH = '0x' + '1'.repeat(64), OWNER = '0x' + 'ab'.repeat(20), ACCOUNT = 'acct_' + 'a'.repeat(32);
 const APPEND_ONLY = 'WORKFLOW_RUN_RECORD_APPEND_ONLY';
 const opened: TestDatabase[] = [];
-afterEach(async () => { await Promise.all(opened.splice(0).map(t => t.drop())); });
+/** Cluster-wide test roles, dropped after the databases that hold their privileges. */
+const roles: string[] = [];
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map(t => t.drop()));
+  if (!roles.length) return;
+  const admin = createDatabase({ connectionString: testDatabaseUrl().toString(), maxConnections: 1 });
+  try { for (const role of roles.splice(0)) await admin.query(`DROP ROLE IF EXISTS ${role}`); } finally { await admin.close(); }
+});
 
 async function fixture(version: number): Promise<Migration> {
   const identity = CERTIFICATE.migrations.find(m => m.version === version)!;
@@ -123,6 +133,22 @@ async function reversal0032(): Promise<string> {
   const start = doc.indexOf('```sql\n-- Emergency reversal of 0032_single_step_runs');
   expect(start).toBeGreaterThan(0);
   return doc.slice(start + '```sql\n'.length, doc.indexOf('\n```', start + 1));
+}
+/** The runtime-role provisioning file, with the identifier psql substitutes for `:"runtime_role"` (`-v runtime_role=<role>`). */
+async function runtimePrivileges(role: string): Promise<string> {
+  const sql = await readFile(new URL('../../../docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql', import.meta.url), 'utf8');
+  expect(sql.match(/:"runtime_role"/g)).toHaveLength(4);
+  expect(sql.match(new RegExp(SHA_0033, 'g'))).toHaveLength(1);
+  return sql.replaceAll(':"runtime_role"', `"${role}"`);
+}
+/** The runtime-role verification query exactly as documented (the fenced SQL block of the release document), for `:'runtime_role'`. */
+async function runtimeVerification(role: string): Promise<string> {
+  const doc = await readFile(new URL('../../../docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.md', import.meta.url), 'utf8');
+  const start = doc.indexOf('```sql\n-- Runtime-role verification of 0033');
+  expect(start).toBeGreaterThan(0);
+  const sql = doc.slice(start + '```sql\n'.length, doc.indexOf('\n```', start + 1));
+  expect(sql.match(/:'runtime_role'/g)).toHaveLength(4);
+  return sql.replaceAll(":'runtime_role'", `'${role}'`);
 }
 
 describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: certificate for 0033 workflow_run_purge (v28 build, PostgreSQL)', { timeout: 120_000 }, () => {
@@ -303,5 +329,87 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: certificate for 0033 wor
     expect(await catalog(t.db)).toEqual(deleted);
     expect(await head(t.db)).toBe(33);
     expect(await assertSchemaCompatible(t.db, V28)).toMatchObject({ version: 33, application: 28 });
+  });
+
+  it('with a separate runtime role (production’s default privileges) the provisioning file closes permit forgery and leaves deletion to the procedure', async () => {
+    const { t, v32, m33 } = await schema32();
+    const role = `flofi_test_runtime_${randomBytes(6).toString('hex')}`;
+    roles.push(role);
+    // Production's model: a migration role owns every object; the runtime role holds table rights by grant and, for every table created later, by
+    // default privileges; 0016's procedure was granted to it explicitly. 0033 itself names no role.
+    await t.db.query(`CREATE ROLE ${role} NOLOGIN`);
+    await t.db.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+    await t.db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`);
+    await t.db.query(`GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
+    await t.db.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role}`);
+    await t.db.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${role}`);
+    await t.db.query(`GRANT EXECUTE ON FUNCTION purge_unstarted_execution(text, text, text) TO ${role}`);
+    const deletable = await run(t.db, 1, true), kept = await run(t.db, 2);
+    const asRuntime = <T>(work: (tx: Pick<Database, 'query'>) => Promise<T>) =>
+      t.db.transaction(async tx => { await tx.query(`SET LOCAL ROLE ${role}`); return work(tx); });
+    /** As the runtime role, without the checked procedure: a forged tombstone and permit, then a DELETE of the run's events; always rolled back. */
+    const forge = (runId: string) => failure(asRuntime(async tx => {
+      await tx.query(`INSERT INTO workflow_run_purge_audit (tenant_id, run_id, handoff_id, owner_namespace, owner_account, shape, final_state, run_created_at,
+        event_count) VALUES ('default', $1, $2, 'eip155', $3, 'NO_WALLET_REQUEST', 'CANCELLED', now(), 1)`, [runId, id('apr'), OWNER]);
+      await tx.query(`INSERT INTO workflow_run_purge_permits (tenant_id, run_id, transaction_id) VALUES ('default', $1, txid_current())`, [runId]);
+      const { rowCount } = await tx.query('DELETE FROM workflow_run_events WHERE run_id = $1', [runId]);
+      throw new Error(`FORGED_DELETE_ROLLED_BACK:${rowCount}`);
+    }));
+    const purgeAsRuntime = (runId: string) => asRuntime(async tx =>
+      (await tx.query<{ result: unknown }>('SELECT purge_unsubmitted_workflow_run($1, $2, $3) AS result', ['default', OWNER, runId])).rows[0]!.result);
+    const verification = async () => (await t.db.query(await runtimeVerification(role))).rows;
+    const provision = async () => reverse(t, await runtimePrivileges(role));
+    const events = async (runId: string) => (await t.db.query<{ n: number }>('SELECT count(*)::int AS n FROM workflow_run_events WHERE run_id = $1', [runId])).rows[0]!.n;
+
+    // Below 0033 the file refuses and changes nothing.
+    const at32 = await catalog(t.db);
+    expect(await provision()).toBe('WORKFLOW_RUN_PURGE_NOT_ACTIVE');
+    expect(await catalog(t.db)).toEqual(at32);
+    expect(await migrate(t.db, [...v32, m33])).toEqual([33]);
+    // The hazard the file exists for: the default privileges let the runtime role forge a permit and delete a run the procedure refuses; and the
+    // runtime role cannot call the procedure (History's Delete fails closed).
+    expect(await forge(kept)).toBe(':FORGED_DELETE_ROLLED_BACK:1');
+    expect(await failure(purgeAsRuntime(deletable))).toBe('42501:permission denied for function purge_unsubmitted_workflow_run');
+    expect(await verification()).toEqual([{ runtime_execute: false, runtime_reads_tombstones: true, runtime_writes_tombstones: true,
+      runtime_touches_permits: true, public_execute: false }]);
+
+    // Provisioned: only privileges of 0033's own objects change, and a rerun changes nothing.
+    const before = await catalog(t.db);
+    expect(await provision()).toBeNull();
+    const after = await catalog(t.db);
+    for (const key of ['tables', 'columns', 'constraints', 'indexes', 'triggers'] as const) expect(after[key], key).toEqual(before[key]);
+    const changed = (key: 'functions' | 'privileges') => [...after[key].filter(i => !before[key].includes(i)), ...before[key].filter(i => !after[key].includes(i))];
+    expect(changed('functions').map(f => f.split(':')[0])).toEqual(['purge_unsubmitted_workflow_run', 'purge_unsubmitted_workflow_run']);
+    expect(changed('privileges').every(p => /^workflow_run_purge_(audit|permits):/.test(p) && p.includes(`:${role}:`))).toBe(true);
+    expect(await provision()).toBeNull();
+    expect(await catalog(t.db)).toEqual(after);
+    expect(await verification()).toEqual([{ runtime_execute: true, runtime_reads_tombstones: true, runtime_writes_tombstones: false,
+      runtime_touches_permits: false, public_execute: false }]);
+
+    // The documented reversal still restores the exact schema-32 catalog (the grants go with the objects); re-applying 0033 brings the default
+    // privileges back, so the file is needed again after every application of 0033.
+    expect(await reverse(t, await reversal0033())).toBeNull();
+    expect(await head(t.db)).toBe(32);
+    expect(await catalog(t.db)).toEqual(at32);
+    expect(await migrate(t.db, [...v32, m33])).toEqual([33]);
+    expect(await forge(kept)).toBe(':FORGED_DELETE_ROLLED_BACK:1');
+    expect(await provision()).toBeNull();
+
+    // As the runtime role now: no forgery, no permit access, no tombstone write; plain DELETE keeps 0015's refusal; the procedure alone deletes.
+    expect(await forge(kept)).toBe('42501:permission denied for table workflow_run_purge_audit');
+    expect(await failure(asRuntime(tx => tx.query(`INSERT INTO workflow_run_purge_permits (tenant_id, run_id, transaction_id) VALUES ('default', $1, txid_current())`,
+      [kept])))).toBe('42501:permission denied for table workflow_run_purge_permits');
+    expect(await failure(asRuntime(tx => tx.query('SELECT count(*) FROM workflow_run_purge_permits')))).toBe('42501:permission denied for table workflow_run_purge_permits');
+    expect(await failure(asRuntime(tx => tx.query('DELETE FROM workflow_run_purge_audit')))).toBe('42501:permission denied for table workflow_run_purge_audit');
+    expect(await failure(asRuntime(tx => tx.query('DELETE FROM workflow_runs WHERE run_id = $1', [kept])))).toBe(`23000:${APPEND_ONLY}`);
+    expect(await purgeAsRuntime(kept)).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(await purgeAsRuntime(id('wfr'))).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
+    expect(await purgeAsRuntime(deletable)).toEqual({ ok: true, disposition: 'DELETED' });
+    expect(await purgeAsRuntime(deletable)).toEqual({ ok: true, disposition: 'DELETED' });
+    expect(await asRuntime(async tx => (await tx.query('SELECT shape, final_state FROM workflow_run_purge_audit WHERE run_id = $1', [deletable])).rows))
+      .toEqual([{ shape: 'NO_WALLET_REQUEST', final_state: 'CANCELLED' }]);
+    expect(await events(deletable)).toBe(0);
+    expect(await events(kept)).toBe(1);
+    expect((await t.db.query('SELECT count(*)::int AS n FROM workflow_run_purge_permits')).rows).toEqual([{ n: 0 }]);
   });
 });

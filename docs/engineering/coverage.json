@@ -3644,7 +3644,8 @@
         "packages/cloud-runtime/src/owner-history.ts",
         "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql",
         "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql",
-        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.reversal.sql"
+        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.reversal.sql",
+        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.runtime-privileges.sql"
       ],
       "suites": [
         "app.learning.automatic",
