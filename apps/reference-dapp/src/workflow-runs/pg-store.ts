@@ -383,6 +383,8 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     },
     /** Schedules (or keeps) the run's advance work item. */
     advanceLater: (runId: string, delayMs = 0) => enqueue(db, runId, delayMs),
+    /** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: whether this database accepts a run of ONE step (migration 0032; `singleStepRunsSupported`). */
+    singleStepRuns: () => singleStepRunsSupported(db),
     /** Open runs whose advance item is missing (defense in depth; the sweep re-arms them). */
     async openWithoutWork(limit = 50): Promise<readonly string[]> {
       return (await db.query(`SELECT r.run_id FROM workflow_runs r WHERE r.tenant_id = $1 AND r.state IN ('RUNNING', 'ATTENTION', 'PENDING')

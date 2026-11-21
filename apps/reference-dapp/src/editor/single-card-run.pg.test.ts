@@ -39,6 +39,7 @@ import { editorApprovalScheme, editorClaimPolicy, startEditorRun, type EditorRun
 import { bindingOf, runMatchesBinding } from './authorize-binding.ts';
 import { reviewEditorExecution } from './workflow-execution.ts';
 import { singleCardRunRecord } from './workflow-strategy.ts';
+import { readFinopsReport } from '../admin/finops/report.ts';
 
 const CHAIN = 'eip155:42161', CHAINS = [CHAIN];
 const USDC = ARBITRUM_MAINNET_SWAP.usdc.toLowerCase(), WETH = ARBITRUM_MAINNET_SWAP.weth.toLowerCase(), ROUTER = ARBITRUM_MAINNET_SWAP.router.toLowerCase();
@@ -191,6 +192,11 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     // Another card (a different amount) is never this run's card.
     expect(singleCardRunRecord(completed, canvasOf({ ...SWAP, amount: '0.0007' }))).toBeNull();
 
+    // ── FinOps keeps its multi-step workflow cohort: a completed single card is never counted as a workflow (data-privacy review) ─────────
+    const day = h.d.now().toISOString().slice(0, 10), next = new Date(h.d.now().getTime() + 86_400_000).toISOString().slice(0, 10);
+    const report = await readFinopsReport({ db: t.db, tenantId: h.d.tenantId }, { from: day, to: next }, h.d.now());
+    expect(report.workflow).toMatchObject({ created: 0, completed: 0 });
+
     // ── Reload: read back by its id; nothing is prepared or sent again ────────────────────────────────────────────────────────────────
     const reloaded = await workflowRunStatus(surface, approvalId, wallets);
     expect(reloaded.view.workflowRun!.run).toMatchObject({ state: 'COMPLETED', groups: [{ state: 'RECONCILED', submissions: [{ hash }] }] });
@@ -303,7 +309,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     // Even a forced one-step handoff cannot become a run on such a database: its row is refused by 0015's CHECK at the claim (fail closed).
     const started = await start(canvasOf(SWAP));
     if (!started.ok) throw new Error(started.code);
-    await expect(claimApproval(surface, decodeURIComponent(new URL(started.value.approvalUrl).hash.slice(1)), wallets, true, h.d.now())).rejects.toThrow();
+    await expect(claimApproval(surface, decodeURIComponent(new URL(started.value.approvalUrl).hash.slice(1)), wallets, true, h.d.now()))
+      .rejects.toThrow('WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED');
     expect(Number((await shipped.db.query('SELECT count(*)::int AS n FROM workflow_runs')).rows[0]!.n)).toBe(0);
     // A tampered ledger row (another SHA-256 under 0032's version) is not 0032.
     const t = await schema32();

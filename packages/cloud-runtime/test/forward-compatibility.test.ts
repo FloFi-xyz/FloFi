@@ -125,6 +125,14 @@ describe('BUILD-DB-COMPAT-001 forward-compatibility manifest', () => {
 });
 
 describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
+  it('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the base-28 certificate is extended, never edited — its released identities stay pinned', () => {
+    const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
+    expect(certificate.migrations).toEqual([
+      { version: 29, name: 'finops_ledger', sha256: '9c04f837b7409622b6b485a21facafb25ce1d579ea2bd492ae859e71795c8de7' },
+      { version: 30, name: 'finops_sync', sha256: '63b3c6ca82f69787fcb1d5527b7e3fe28b93b01cc8f5af0df85cc8efd597508b' },
+      { version: 31, name: 'position_history_purge', sha256: 'c7d4a08223df2a3d5f32d70902d1d5b2efd5ec961b67f146ea20c2a4afeb898d' },
+      { version: 32, name: 'single_step_runs', sha256: '1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c' }]);
+  });
   it('classifies each FinOps-era certificate prefix and keeps the legacy refusal messages', async () => {
     const shipped = SHIPPED_MIGRATIONS.slice(0, 28);
     const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;

@@ -74,6 +74,9 @@ export async function ensureForClaim(deps: WorkflowRunDeps, h: HandoffRecord, wo
   const minimumSteps = h.requesterKind === 'EDITOR_SESSION' ? 1 : 2;
   if (h.plan.kind !== 'SEQUENTIAL' || workflow.steps.length < minimumSteps || h.plan.steps.length !== workflow.steps.length
     || workflow.workflowHash !== h.workflowHash) refuse('WORKFLOW_RUN_NOT_SEQUENTIAL');
+  // A database without migration 0032 refuses the row by its CHECK: refused here with a closed code first (e.g. a one-step handoff issued before an
+  // emergency reversal of 0032), never a raw constraint violation.
+  if (workflow.steps.length === 1 && !await deps.store.singleStepRuns().catch(() => false)) refuse('WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED');
   const bound: Partial<Record<WalletRef['namespace'], string>> = {};
   for (const namespace of planNamespaces(h.plan)) bound[namespace] = (wallets.find(w => w.namespace === namespace) ?? refuse(proofCode(namespace))).address;
   const primary = planNamespace(h.plan), owner = { namespace: primary, address: bound[primary]! };

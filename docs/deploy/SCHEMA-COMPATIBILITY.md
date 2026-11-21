@@ -53,7 +53,9 @@ tenant (e.g. a new Preview branch) still inserts.
 
 ## 2. Certificates
 
-`CERTIFIED_FORWARD_MIGRATIONS` in `packages/cloud-runtime/src/migrations.ts`:
+`CERTIFIED_FORWARD_MIGRATIONS` in `packages/cloud-runtime/src/migrations.ts`. While a build still ships the same base, a later forward migration
+**extends** that base's certificate (contiguously) and never edits or removes an identity already certified: 0030, 0031 and 0032 extended the
+base-28 certificate this way, and `forward-compatibility.test.ts` pins the released identities.
 
 ```ts
 { base: { version: 11, name: 'delegated_execution', sha256: '0c6572af…' },              // the build assessed
@@ -1002,7 +1004,7 @@ The application still ships 0028 for the ordinary deployment migration. Its exac
 2. Before activating 0030, verify that each database consumer and restart path runs the certificate-bearing release. Keep a build with this exact certificate available for rollback. Confirm the intended database and tenant out of band.
 3. From that reviewed checkout, with a direct `DATABASE_MIGRATION_URL` set in the operator environment, run `node apps/reference-dapp/backend/admin-cli.ts finops-sync-migrate --tenant default`. For an isolated preview, pass `--preview-branch <branch>` instead. The command requires exact existing schema 29, validates both SQL digests and the history, and applies only the missing certified migration. A successful repeat applies nothing. Do not edit the ledger or issue ad hoc DDL.
 4. Configure dedicated billing credentials and enable `FLOFI_FINOPS_SYNC=enabled` on the existing worker only after activation. Set the matching `FLOFI_FINOPS_BILLING_TENANT`. The default cadence is 24 hours and `FLOFI_FINOPS_SYNC_HOURS` accepts whole hours from 6 through 168. On the first activation, verify provider scope and currency using the Admin coverage and an independently obtained billing extract.
-5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Once 0031 (§23) is also active, only a build carrying the §23 certificate (0029–0031) is a rollback target. Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.
+5. To stop collection, disable the sync flag on the worker. To roll back the application after activation, use a build carrying the exact 0030 certificate with collection disabled and leave the tables and existing ledger intact. Once 0031 (§23) is also active, only a build carrying the §23 certificate (0029–0031) is a rollback target; once 0032 (§24) is active, only a build carrying the §24 certificate (0029–0032). Builds predating that certificate reject schema 30. Before activation, the schema-29-compatible production release is also a rollback target.
 
 ## 23. Certificate 0031_position_history_purge
 
@@ -1067,13 +1069,17 @@ run today. 0032 widens that check and changes nothing else:
   owner's own wallet as fee payer) apply unchanged to the single group covering step 0. `workflow_run_steps` (0..7) is unchanged.
 - Every row valid under 0031 is valid under 0032 unchanged, so the `ADD CONSTRAINT` validation scan cannot fail on existing data.
   `SET LOCAL lock_timeout = '5s'`: the short ACCESS EXCLUSIVE lock on `workflow_runs` waits at most 5 s for an open transaction holding the table,
-  then the migration rolls back completely (proven); approval and workflow-run writes wait at most for that short transaction.
+  then the migration rolls back completely (proven). While it holds the lock, every read of `workflow_runs` (status polls, owner history, the FinOps
+  report) and every insert into `workflow_run_steps` / `workflow_run_groups` / `workflow_run_events` (their foreign keys need `workflow_runs`) waits
+  for that short transaction and its validation scan. Approval-handoff writes do not.
 
 **Compatibility.** A v28 build carrying this certificate serves schema 32; a build carrying only the previous certificate (0029–0031, i.e. `main`
 before this build) refuses it with `MIGRATION_HISTORY_MISMATCH`, so this build must serve every database consumer before 0032 is applied.
 Builds before this one never create one-step runs: their claim path refuses fewer than two steps (`WORKFLOW_RUN_NOT_SEQUENTIAL`), so nothing they
 write depends on the widened bound. The application enables single-card runs only when the ledger holds exactly this 0032 identity
 (`singleStepRunsSupported`). The v28 runner never changes a database ahead of it, and the ordinary deployment migration still ships schema 28.
+
+**Cold starts on schema 32.** `apps/reference-dapp/backend/schema-compatibility.pg.test.ts` applies the extended certificate (0029–0032). It runs the Railway API, the worker, the real `main.ts` / CLI cold starts and the Vercel paths (embedded runtime, platform state, Developer API, MCP OAuth) on schema 32 (3/3 locally).
 
 **Evidence** (disposable PostgreSQL 16 locally; CI runs PostgreSQL 18): `packages/cloud-runtime/test/certificate-0032.pg.test.ts` — exact bytes and
 certificate (one `ALTER TABLE` and the lock timeout, nothing else), schema 32 served for the v28 build only through it (the previous certificate,

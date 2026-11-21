@@ -19,6 +19,8 @@ export type WorkflowEconomics = {
 };
 async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<WorkflowEconomics> {
   // Keep this cohort separate from execution_runs, where each component can also have its own record. Mainnet intent does not prove settlement.
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the cohort stays the MULTI-STEP workflows (step_count >= 2): one-step Editor runs of a single card
+  // (migration 0032) are single actions, never counted as workflows (their meaning, average steps and cost per completed workflow stay unchanged).
   return host.db.transaction(async tx => {
     await tx.query("SET LOCAL statement_timeout = '4000'");
     const params = [host.tenantId, period.from + 'T00:00:00Z', period.to + 'T00:00:00Z'];
@@ -53,13 +55,14 @@ async function readWorkflowEconomics(host: AdminHost, period: Period): Promise<W
       avg(r.step_count) FILTER (WHERE r.created_at >= $2 AND r.created_at < $3)::float AS average_steps,
       max(r.updated_at) AS newest
       FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
-      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at < $3 AND r.updated_at >= $2`, params);
+      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at < $3 AND r.updated_at >= $2
+        AND r.step_count >= 2`, params);
     // The plan already provides bounded operation/network/protocol identifiers. No resource, amount, wallet or transaction is selected.
     const { rows } = await tx.query<{ action: string; network: string; protocol: string; count: number }>(`SELECT
       substr(step->>'action', 1, 48) AS action, substr(step->>'network', 1, 48) AS network, substr(step->>'protocol', 1, 48) AS protocol, count(*)::integer
       FROM workflow_runs r JOIN mcp_handoffs h ON h.tenant_id = r.tenant_id AND h.handoff_id = r.handoff_id
       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(h.plan->'steps') = 'array' THEN h.plan->'steps' ELSE '[]'::jsonb END) step
-      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at >= $2 AND r.created_at < $3
+      WHERE r.tenant_id = $1 AND h.network_environment = 'MAINNET' AND h.funds_class = 'REAL_FUNDS' AND r.created_at >= $2 AND r.created_at < $3 AND r.step_count >= 2
       GROUP BY 1, 2, 3 ORDER BY 4 DESC, 1, 2, 3 LIMIT 100`, params);
     return { created: data!.created, completed: data!.completed, failed: data!.failed, refunded: data!.refunded, pending: data!.pending,
       abandoned: data!.abandoned, advanced: data!.advanced,
@@ -144,7 +147,7 @@ export const REPORT_LIMITATIONS = [
   'An invoice or accounting record also supersedes overlapping provider-reported costs of the same service in any environment. Provider-reported costs are shown as PROVIDER_REPORTED until reconciled.',
   'Missing provider coverage or exchange rates are unavailable. A partial total is the sum of covered amounts. Currency conversion uses the entry’s documented USD per unit rate.',
   'Recorded expenses include invoices and provider-reported costs. Usage and estimates are shown separately from recorded expenses.',
-  'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
+  'Workflow counts cover canonical multi-step mainnet workflow runs. Legacy or single-flow runs, one-step single-card runs, draft creation, complete simulation and approval counts, and exact cross-channel attribution are unavailable.',
   'Collected revenue uses reconciled accounting records. Deferred 10 bps obligations, nominal step values, and user-paid network fees are excluded. Gross volume and fee eligibility are unavailable.',
   'The infrastructure-adjusted result excludes corporate expenses outside the available ledger and is an operating indicator.',
 ] as const;

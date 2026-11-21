@@ -40,7 +40,20 @@ with its own procedure**; the 0032 command never applies them and refuses any sc
    (`MIGRATION_HISTORY_MISMATCH`), so a consumer left behind would stop serving the moment 0032 is applied.
 2. **The database is at exactly schema 31**: 0029, 0030 and 0031 already applied by their own owner-run procedures (`finops-migrate`,
    `finops-sync-migrate`, `position-purge-migrate`; see RELEASE-POSITION-PURGE-0031.md). The command refuses anything below 31.
-3. The owner explicitly approves the activation. Implementation approval of this build is not that approval.
+3. **Retention basis approved (owner / legal).** After activation, a single card the owner authorizes in the Editor writes `workflow_runs`,
+   `workflow_run_steps`, `workflow_run_groups` and `workflow_run_events`. These are append-only and cannot be deleted: 0015/0023 no-delete triggers;
+   owner history archives but refuses `WORKFLOW_RUN` deletion; privacy erasure leaves execution records out of scope. Today such a card writes
+   `execution_runs`, whose unstarted runs an owner may delete (0016 `purge_unstarted_execution`). The row is created at the owner's Authorize, never
+   by a read-only Review. It holds the owner's wallets, the canonical strategy (assets, amounts, any recipient) and the FloFi account id, even when
+   the wallet then declines. The retention basis (LGPD/GDPR) for these records must be accepted before activation. A reviewed deletion path for
+   never-authorized one-step runs would need its own certified migration.
+4. **Irreversibility accepted.** Once one single-card run exists, 0032 can no longer be reversed (see Rollback). Because the 0031 reversal refuses
+   unless 0031 is the newest migration, 0031, 0030 and 0029 then become irreversible too.
+5. **The FinOps cohort stays multi-step.** The FinOps report counts only workflow runs with `step_count >= 2`. One-step single-card runs are
+   single actions; they are excluded from workflow counts, average steps and cost per completed workflow, and named in the report's limitations.
+   Single cards paid by a wallet batch no longer add `execution_runs` rows, so execution counts change at activation. Note the activation date
+   for investor reporting.
+6. The owner explicitly approves the activation. Implementation approval of this build is not that approval.
 
 ## Staged rollout
 
@@ -79,7 +92,9 @@ SELECT count(*) FROM pg_constraint WHERE conrelid = 'workflow_runs'::regclass;
 
 Expected: the ledger ends with `32 | single_step_runs | 1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c`; the constraint reads
 `CHECK (((step_count >= 2) AND (step_count <= 8)))` before 0032 and `CHECK (((step_count >= 1) AND (step_count <= 8)))` after (disposable
-PostgreSQL 16.15); the constraint count is the same before and after (25 on a fresh schema-31 database). Any other difference stops the activation.
+PostgreSQL 16.15). The constraint count must be the **same before and after on the target database**: record it before activation and compare.
+Do not compare it with a fixed number. PostgreSQL 18 (Neon, CI) also records NOT NULL constraints in `pg_constraint`, so its count differs from
+PostgreSQL 16; filter with `AND contype <> 'n'` to compare across versions. Any other difference stops the activation.
 
 ## Rollback
 
@@ -91,7 +106,9 @@ PostgreSQL 16.15); the constraint count is the same before and after (25 on a fr
   rollback target that carries both this certificate and the single-card feature, and let open single-card runs settle first. Financial
   observation and reconciliation continue throughout.
 - **Emergency reversal (owner decision, last resort):** valid **only while no `workflow_runs` row has `step_count = 1`** (runs are append-only and
-  never deleted, so after the first single-card run the reversal is no longer possible and the code-level rollback above is the only path). Run the
+  never deleted, so after the first single-card run the reversal is no longer possible and the code-level rollback above is the only path; from then
+  on 0031–0029 cannot be reversed either). One-step Editor approvals issued while 0032 was active are refused at their claim with the closed code
+  `WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED` after a reversal. Let open ones expire (15 minutes) before relying on that. Run the
   block below in one session with the migration connection (for example `psql "$DATABASE_MIGRATION_URL" -v ON_ERROR_STOP=1 -f <file>`). It takes
   the migration runner's advisory lock, refuses unless 0032 (exact identity) is the newest migration (`NOT_CERTIFIED_0032_HEAD`), locks
   `workflow_runs`, refuses if any one-step run exists (`SINGLE_STEP_RUNS_PRESENT`), restores the exact schema-31 constraint and removes only the
