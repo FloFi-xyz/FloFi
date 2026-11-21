@@ -24,7 +24,8 @@ import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
 import type { GrantView } from '../delegation/authority.ts';
 import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from './authorization-plan.ts';
-import type { RunRecord, RunStepRecord, WorkflowRunStore } from './pg-store.ts';
+import type { RunRecord, RunStepRecord, VerifiedDecline, WorkflowRunStore } from './pg-store.ts';
+import { proveDeclinedBatchUnsent } from '../user-funded/decline-proof.ts';
 import { advanceRun, type RunnerDeps } from './runner.ts';
 import { stopRunFromCurrent } from './user-funded-pass.ts';
 import { CONFIRM_RUN_SECONDS, MAYBE_SUBMITTED, WALLET_BATCH_OUTCOME_UNKNOWN, WALLET_BATCH_SETTLE_MS, walletBatchUnanswered } from './state-machine.ts';
@@ -159,9 +160,52 @@ export async function observeRun(deps: WorkflowRunDeps, run: RunRecord, wallets:
 }
 
 /** The owner ends a run that cannot continue (HALTED), or one that never submitted anything; remaining steps are SKIPPED. */
-export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED'): Promise<RunRecord> {
+export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED', options: {
+  /**
+   * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): end the run only when every unanswered wallet batch of it is a rejection the
+   * server proved, from the chain, was never sent (History's Delete of a rejected attempt); otherwise refuse and change nothing.
+   */
+  readonly onlyIfDeclineVerified?: boolean } = {}): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  return deps.store.cancel(run.runId, run.version, code, deps.now());
+  const { verified, unanswered } = await verifiedDeclinesOf(deps, run);
+  if (options.onlyIfDeclineVerified && (unanswered === 0 || verified.size !== unanswered)) refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+  return deps.store.cancel(run.runId, run.version, code, deps.now(), { verifiedDeclines: verified });
+}
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's browser reports that the wallet rejected group `groupIndex`'s batch
+ * `requestId` (EIP-1193 4001). An append-only fact for exactly the current preparation; no state changes and nothing is proven by it alone.
+ */
+export async function recordWalletDecline(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], groupIndex: number, requestId: string): Promise<void> {
+  assertRunWallets(run, wallets);
+  if (!Number.isInteger(groupIndex) || groupIndex < 0 || !/^0x[0-9a-f]{64}$/i.test(requestId)) refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  const g = (await deps.store.groups(run.runId)).find(x => x.groupIndex === groupIndex) ?? refuse('WORKFLOW_RUN_GROUP_NOT_FOUND');
+  const preparedAt = (g.prepared as { readonly preparedAt?: unknown } | null)?.preparedAt;
+  if (typeof preparedAt !== 'string') refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+  await deps.store.recordDecline(run.runId, groupIndex, requestId, preparedAt as string);
+}
+/**
+ * The run's unanswered wallet batches past their on-chain deadline that the owner's wallet rejected (a GROUP_WALLET_DECLINED fact for exactly
+ * the current, only preparation), each proven from the chain never sent (`proveDeclinedBatchUnsent`). Any doubt leaves a batch out: it is then
+ * ended with its outcome unknown, exactly as before.
+ */
+async function verifiedDeclinesOf(deps: WorkflowRunDeps, run: RunRecord): Promise<{ readonly verified: ReadonlyMap<number, VerifiedDecline>; readonly unanswered: number }> {
+  const verified = new Map<number, VerifiedDecline>();
+  if (run.mode !== 'USER_FUNDED') return { verified, unanswered: 0 };
+  const groups = (await deps.store.groups(run.runId)).filter(g => g.state === 'PREPARED' && walletBatchUnanswered(g));
+  if (!groups.length || !deps.userFunded) return { verified, unanswered: groups.length };
+  const events = await deps.store.events(run.runId, 500);
+  for (const g of groups) {
+    const prepared = (g.prepared ?? {}) as { readonly request?: { readonly id?: unknown }; readonly preparedAt?: unknown };
+    const requestId = prepared.request?.id, preparedAt = prepared.preparedAt;
+    if (g.strategy !== 'EVM_WALLET_BATCH' || typeof requestId !== 'string' || typeof preparedAt !== 'string' || !g.validUntil) continue;
+    const of = (kind: string) => events.filter(e => e.kind === kind && e.detail?.group === g.groupIndex);
+    if (of('GROUP_PREPARED_AGAIN').length || !of('GROUP_WALLET_DECLINED').some(e => e.detail?.requestId === requestId && e.detail?.preparedAt === preparedAt)) continue;
+    const settledAt = new Date(new Date(g.validUntil).getTime() + WALLET_BATCH_SETTLE_MS);
+    const proof = await proveDeclinedBatchUnsent(deps.userFunded.evm(g.chain), g.prepared, settledAt, deps.now());
+    if (proof.proven) verified.set(g.groupIndex, { requestId, preparedAt, ownerNonce: proof.ownerNonce, fromBlock: proof.fromBlock, toBlock: proof.toBlock });
+    else deps.log('workflow_run.decline_unproven', { runId: run.runId, group: g.groupIndex, reason: proof.reason });
+  }
+  return { verified, unanswered: groups.length };
 }
 
 const groupAt = (groups: readonly GroupRecord[], step: number) => groups.find(x => x.stepFrom <= step && step <= x.stepTo);

@@ -91,10 +91,14 @@ export async function startSequential(deps: WorkflowRunSurface, run: RunRecord, 
   const started = await startConfirm(deps, run, wallets);
   return proposalOf(deps, started, await currentStep(deps, started, wallets), base);
 }
-export async function cancelSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {
+export async function cancelSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView,
+  options: { readonly onlyIfDeclineVerified?: boolean } = {}) {
   // A delegated run is stopped by revoking its authorization; the executor then blocks before anything new is submitted.
-  if (run.mode === 'DELEGATED') { assertRunWallets(run, wallets); await (deps.delegationOps ?? refuse('DELEGATION_NOT_ENABLED')).revoke(run.owner, run.runId); return proposalOf(deps, await observeRun(deps, run, wallets), null, base); }
-  return proposalOf(deps, await cancelRun(deps, run, wallets), null, base);
+  if (run.mode === 'DELEGATED') {
+    if (options.onlyIfDeclineVerified) refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+    assertRunWallets(run, wallets); await (deps.delegationOps ?? refuse('DELEGATION_NOT_ENABLED')).revoke(run.owner, run.runId); return proposalOf(deps, await observeRun(deps, run, wallets), null, base);
+  }
+  return proposalOf(deps, await cancelRun(deps, run, wallets, 'OWNER_CANCELLED', options), null, base);
 }
 export async function resumeSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {
   const resumed = await resumeRun(deps, run, wallets);

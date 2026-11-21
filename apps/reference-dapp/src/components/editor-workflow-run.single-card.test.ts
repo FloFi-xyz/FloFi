@@ -19,16 +19,18 @@ vi.mock('react', async importOriginal => {
     useEffect: (f: () => unknown) => { hooks.effects[hooks.at++] = f; } };
 });
 const availability = vi.hoisted(() => ({ value: { enabled: true, code: null as string | null, singleStep: false } }));
-const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn() }));
+const server = vi.hoisted(() => ({ review: vi.fn(), authorize: vi.fn(), status: vi.fn(), prepare: vi.fn(), authorizeGroup: vi.fn(), report: vi.fn(), rejected: vi.fn() }));
 vi.mock('../app/editor-workflow-execution-action', () => ({ editorWorkflowExecutionAvailability: async () => availability.value,
   reviewEditorWorkflow: server.review, authorizeEditorWorkflow: server.authorize }));
 vi.mock('../app/approve-action', () => ({ workflowRunStatusHandoff: server.status, prepareUserFundedGroup: server.prepare, authorizeUserFundedGroup: server.authorizeGroup,
-  reportUserFundedBatch: server.report, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: vi.fn() }));
-/** `silent`: once the batch is sent, the wallet never answers `wallet_getCallsStatus` again (final wallet-execution review). */
-const wallet = vi.hoisted(() => ({ requests: [] as string[], silent: false }));
+  reportUserFundedBatch: server.report, reportUserFundedRejection: server.rejected, cancelWorkflowRunHandoff: vi.fn(), resumeWorkflowRunHandoff: vi.fn() }));
+/** `silent`: once the batch is sent, the wallet never answers `wallet_getCallsStatus` again (final wallet-execution review). `reject`: the owner rejects. */
+const wallet = vi.hoisted(() => ({ requests: [] as string[], silent: false, reject: false }));
 vi.mock('./user-funded-browser', () => ({ evmWalletKind: () => 'INJECTED', batchHandout: () => undefined, batchSponsorshipOf: () => null, keepBatchHandout: () => undefined,
   walletProfile: async () => { wallet.requests.push('wallet_getCapabilities'); return { eip155: { wallet: 'INJECTED', atomic: { 'eip155:42161': 'supported' }, typedData: true } }; },
-  sendWalletBatch: async (request: { id: string }, onSending: () => void) => { onSending(); wallet.requests.push('wallet_sendCalls'); return request.id; },
+  sendWalletBatch: async (request: { id: string }, onSending: () => void) => { onSending(); wallet.requests.push('wallet_sendCalls');
+    if (wallet.reject) throw Object.assign(new Error('WALLET_REQUEST_REJECTED'), { code: 4001 });
+    return request.id; },
   // EIP-5792: an id the wallet never received is unknown (5730); once sent, its status reports the batch's transaction.
   walletBatchHashes: async () => { wallet.requests.push('wallet_getCallsStatus');
     if (!wallet.requests.includes('wallet_sendCalls')) throw Object.assign(new Error('Unknown bundle id'), { code: 5730 });
@@ -60,7 +62,8 @@ const render = (single = true) => { hooks.at = 0; return useEditorWorkflowRun({ 
 async function settle() { for (const effect of hooks.effects.filter(Boolean)) effect(); await new Promise(resolve => setTimeout(resolve, 0)); }
 
 beforeEach(() => {
-  hooks.slots = []; hooks.effects = []; storage.clear(); wallet.requests.length = 0; wallet.silent = false; proof.proveEvm.mockReset(); vi.useRealTimers();
+  hooks.slots = []; hooks.effects = []; storage.clear(); wallet.requests.length = 0; wallet.silent = false; wallet.reject = false; proof.proveEvm.mockReset(); vi.useRealTimers();
+  server.rejected.mockReset().mockResolvedValue({ ok: true, value: null });
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v) });
   vi.stubGlobal('crypto', { randomUUID: () => 'nonce-' + Math.random().toString(16).slice(2) });
   server.review.mockReset().mockResolvedValue({ ok: true, value: review });
@@ -122,6 +125,33 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card in the Editor\'
     wallet.silent = false;
     await render().checkWallet();
     expect(server.report).toHaveBeenCalledWith(APPROVAL, 0, ['0x' + 'ef'.repeat(32)], false);
+    expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(1);
+  });
+
+  it('a rejection in the wallet (4001) is reported to FloFi for exactly that request, never retried, and the inline answer stays the same', async () => {
+    availability.value = { enabled: true, code: null, singleStep: true };
+    render(); await settle();
+    await render().startReview();
+    wallet.reject = true;
+    await render().authorize();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(render().error).toBe('WALLET_REQUEST_REJECTED');
+    expect(server.rejected).toHaveBeenCalledTimes(1);
+    expect(server.rejected).toHaveBeenCalledWith(APPROVAL, 0, GROUP_ID);
+    expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(1);
+    expect(server.authorizeGroup).not.toHaveBeenCalled();
+  });
+
+  it('a rejection report that cannot reach FloFi changes nothing for the owner (the attempt only stays archive-only)', async () => {
+    availability.value = { enabled: true, code: null, singleStep: true };
+    server.rejected.mockRejectedValue(new Error('NETWORK'));
+    render(); await settle();
+    await render().startReview();
+    wallet.reject = true;
+    await render().authorize();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(render().error).toBe('WALLET_REQUEST_REJECTED');
+    expect(server.rejected).toHaveBeenCalledTimes(1);
     expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(1);
   });
 

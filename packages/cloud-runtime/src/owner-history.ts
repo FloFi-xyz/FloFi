@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto';
 import type { Database, Queryable } from './db.js';
+import { CERTIFIED_FORWARD_MIGRATIONS, SHIPPED_MIGRATIONS } from './migrations.js';
 
 export type HistoryKind = 'EXECUTION_RUN' | 'WORKFLOW_RUN' | 'SAVED_WORKFLOW';
 export type HistoryDeleteRefusal = 'AUTHORIZATION' | 'EXECUTION_ACTIVITY' | 'DEPENDENCY';
@@ -23,6 +24,21 @@ export async function savedWorkflowDeleted(db: Queryable, tenantId: string, owne
     WHERE tenant_id=$1 AND owner_account=$2 AND kind='SAVED_WORKFLOW' AND record_id=$3 AND action='DELETED'
       AND NOT EXISTS (SELECT 1 FROM saved_workflows WHERE tenant_id=$1 AND owner_account=$2 AND workflow_id=$3) LIMIT 1`, [tenantId, owner, id]);
   return result.rowCount > 0;
+}
+
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): migration 0033 (`workflow_run_purge`) lets an owner delete a single-card
+ * attempt that provably never reached a chain (`purge_unsubmitted_workflow_run`, which alone decides). It is certified for the v28 build and
+ * applied by an operator command (docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.md). Only when the ledger holds exactly that identity — version,
+ * name and SHA-256, certified or (once shipped) shipped — is the procedure called; otherwise a workflow run keeps today's refusal.
+ */
+const WORKFLOW_RUN_PURGE_MIGRATION = { version: 33, name: 'workflow_run_purge' } as const;
+async function workflowRunPurgeInstalled(db: Queryable): Promise<boolean> {
+  const { version, name } = WORKFLOW_RUN_PURGE_MIGRATION;
+  const identity = SHIPPED_MIGRATIONS.find(m => m.version === version) ?? CERTIFIED_FORWARD_MIGRATIONS.flatMap(c => c.migrations).find(m => m.version === version);
+  if (!identity || identity.name !== name) return false;
+  const row = (await db.query<{ version: number; name: string; sha256: string }>('SELECT version, name, sha256 FROM schema_migrations WHERE version = $1', [version])).rows[0];
+  return Boolean(row && Number(row.version) === identity.version && row.name === identity.name && row.sha256 === identity.sha256);
 }
 
 const REFUSAL_LOG_LIMIT = 512 * 1024;
@@ -69,6 +85,10 @@ export function createOwnerHistory(db: Database, tenantId: string) {
       if (kind === 'EXECUTION_RUN' && (await db.query('SELECT 1 FROM execution_purge_audit WHERE tenant_id=$1 AND owner_account=$2 AND run_id=$3', [tenantId, owner, id])).rowCount)
         return { ok: true, disposition: 'DELETED' };
       if (kind === 'SAVED_WORKFLOW' && await savedWorkflowDeleted(db, tenantId, owner, id)) return { ok: true, disposition: 'DELETED' };
+      // A deleted single-card attempt: its 0033 tombstone (the table exists only with that migration; any read failure answers "not deleted").
+      if (kind === 'WORKFLOW_RUN' && await workflowRunPurgeInstalled(db).catch(() => false)
+        && (await db.query('SELECT 1 FROM workflow_run_purge_audit WHERE tenant_id=$1 AND owner_account=$2 AND run_id=$3', [tenantId, owner, id])).rowCount)
+        return { ok: true, disposition: 'DELETED' };
       const archived = await db.query('SELECT 1 FROM owner_history_visibility WHERE tenant_id=$1 AND owner_account=$2 AND kind=$3 AND record_id=$4', [tenantId, owner, kind, id]);
       return { ok: true, disposition: archived.rowCount ? 'ARCHIVED' : 'VISIBLE' };
     },
@@ -77,8 +97,16 @@ export function createOwnerHistory(db: Database, tenantId: string) {
         return { ok: false, code: 'HISTORY_INVALID' };
       const disposition = await db.transaction(async (tx): Promise<HistoryDisposition> => {
         let result: HistoryDisposition;
+        // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: READ COMMITTED, so a delete that waited for a concurrent one sees its committed tombstone.
+        if (kind === 'WORKFLOW_RUN' && action === 'DELETE') await tx.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         if (kind === 'EXECUTION_RUN' && action === 'DELETE') {
           result = (await tx.query<{ result: HistoryDisposition }>('SELECT purge_unstarted_execution($1,$2,$3) AS result', [tenantId, owner, id])).rows[0]!.result;
+        } else if (kind === 'WORKFLOW_RUN' && action === 'DELETE' && await workflowRunPurgeInstalled(tx)) {
+          // The database procedure alone decides (both deletable shapes, the closed event allowlist, every dependency), under the run's lock.
+          result = (await tx.query<{ result: HistoryDisposition }>('SELECT purge_unsubmitted_workflow_run($1,$2,$3) AS result', [tenantId, owner, id])).rows[0]!.result;
+          // An idempotent repeat (the tombstone already answered) records no second DELETED event.
+          if (result.ok && (await tx.query(`SELECT 1 FROM owner_history_events WHERE tenant_id=$1 AND owner_account=$2 AND kind='WORKFLOW_RUN' AND record_id=$3
+            AND action='DELETED' LIMIT 1`, [tenantId, owner, id])).rowCount) return result;
         } else {
           if (kind === 'SAVED_WORKFLOW' && action === 'DELETE') await lockSavedWorkflowHistory(tx, tenantId, owner, id);
           const table = kind === 'WORKFLOW_RUN' ? 'workflow_runs' : kind === 'EXECUTION_RUN' ? 'execution_runs' : 'saved_workflows';
@@ -96,6 +124,7 @@ export function createOwnerHistory(db: Database, tenantId: string) {
           }
           if (action === 'DELETE') {
             // Composition histories retain their separate append-only lifecycle. They may be archived, never guessed safe from a conventional run's state.
+            // Without the certified 0033 procedure (above) no workflow run is ever deleted.
             if (kind === 'WORKFLOW_RUN') return { ok: false, code: 'RUN_DELETE_REFUSED' };
             const linked = await tx.query(`SELECT 1 WHERE
               EXISTS (SELECT 1 FROM execution_runs WHERE tenant_id=$1 AND owner_account=$2 AND workflow_id=$3)

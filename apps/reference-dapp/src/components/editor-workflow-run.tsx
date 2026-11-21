@@ -21,7 +21,7 @@ import { TokenAmountText } from './token-amount-text';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { eip5792 } from '@defi-workflow-engine/reference-compiler';
 import { authorizeEditorWorkflow, editorWorkflowExecutionAvailability, reviewEditorWorkflow } from '../app/editor-workflow-execution-action';
-import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, resumeWorkflowRunHandoff,
+import { authorizeUserFundedGroup, cancelWorkflowRunHandoff, permitUserFundedGroup, prepareUserFundedGroup, reportUserFundedBatch, reportUserFundedRejection, resumeWorkflowRunHandoff,
   workflowRunStatusHandoff } from '../app/approve-action';
 import { CIRCLE_FEE_CAP_ROSE_CONFIRM, CIRCLE_FEE_CONFIRM, CIRCLE_NOTHING_SENT, CIRCLE_ON_APPROVAL, CIRCLE_REFUSAL, EDITOR_MECHANISM_CHANGED,
   EDITOR_MECHANISM_CHANGED_NOT_STARTED, feeAmountText, KORA_RECOVERY_INCOMPLETE, KORA_RECOVERY_INCOMPLETE_TEXT,
@@ -435,6 +435,11 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
         };
         try { batchId = await sendWalletBatch(request, handOver, batchSponsorshipOf(p)); }
         catch (cause) {
+          // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the wallet's explicit rejection (EIP-1193 4001) of exactly this request
+          // is reported to FloFi as a fact; FloFi proves it against the chain before an ended attempt may be deleted from History. It never blocks
+          // or changes this answer (a failed report only leaves the attempt archive-only).
+          if (codeOf(cause) === 'WALLET_REQUEST_REJECTED' && typeof request.id === 'string')
+            void Promise.resolve().then(() => reportUserFundedRejection(id, index, request.id!)).catch(() => undefined);
           if (NOTHING_SENT.has(codeOf(cause))) {
             // Only this send's own attempt (none exists when the wallet was never asked to send; another tab's record stays, and so does what
             // it means: the group may still be in the wallet).

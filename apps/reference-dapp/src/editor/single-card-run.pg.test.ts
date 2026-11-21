@@ -31,7 +31,8 @@ import { ARBITRUM_MAINNET_SWAP } from '../domain/public-testnet-swap.ts';
 import { createEvmDouble } from '../delegation/harness/evm-double.ts';
 import { composeWorkflow, dappReviewContext } from '../engine/strategy-engine';
 import { assembleApprovalSurface, claimApproval, fixedWindow, requestApproval, workflowRunStatus, type HandoffPolicy } from '../platform/index.ts';
-import { workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve.ts';
+import { workflowRunCancel, workflowRunEndVerifiedDecline, workflowRunUserFundedAuthorize, workflowRunUserFundedPrepare, workflowRunUserFundedReport, workflowRunUserFundedStart,
+  workflowRunUserFundedWalletRejected } from '../platform/approve.ts';
 import { evmCallsOf, type EvmGroupCalls } from '../user-funded/evm-calls.ts';
 import { createPgWorkflowRunStore, singleStepRunsSupported } from '../workflow-runs/pg-store.ts';
 import { workflowRunHarness } from '../workflow-runs/workflow-run.test-harness.ts';
@@ -51,16 +52,19 @@ const CLOSED: HandoffPolicy = { ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' };
 const opened: TestDatabase[] = [];
 afterEach(async () => { await Promise.all(opened.splice(0).map(t => t.drop())); });
 
-/** A disposable database exactly as the operator release leaves it: shipped migrations, then the certified 0029–0032 fixtures. */
-async function schema32(): Promise<TestDatabase> {
+/**
+ * A disposable database exactly as the operator release leaves it: shipped migrations, then the certified 0029–`upTo` fixtures. Single-card
+ * runs are active only with 0033 (History deletion of a rejected attempt) on top of 0032.
+ */
+async function schema32(upTo = 33): Promise<TestDatabase> {
   const t = await createTestDatabase({ migrated: false }); opened.push(t);
   const certificate = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28)!;
-  const ahead: Migration[] = await Promise.all(certificate.migrations.filter(m => m.version <= 32).map(async m => {
+  const ahead: Migration[] = await Promise.all(certificate.migrations.filter(m => m.version <= upTo).map(async m => {
     const sql = await readFile(new URL(`../../../../packages/cloud-runtime/test/fixtures/${String(m.version).padStart(4, '0')}_${m.name}.sql`, import.meta.url), 'utf8');
     expect(createHash('sha256').update(sql).digest('hex')).toBe(m.sha256);
     return { ...m, sql };
   }));
-  expect(ahead.map(m => m.version)).toEqual([29, 30, 31, 32]);
+  expect(ahead.map(m => m.version)).toEqual([29, 30, 31, 32, 33].filter(v => v <= upTo));
   await migrate(t.db, [...await loadMigrations(), ...ahead]);
   return t;
 }
@@ -257,6 +261,69 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     expect(chain.control.allowance(WETH, owner, ROUTER)).toBe(0n);
   });
 
+  it('rejected in the wallet (4001): recorded, proven from the chain never sent once the batch expired on chain, ended as nothing sent', async () => {
+    const t = await schema32();
+    const { chain, h, owner, authorize, wallets, surface, batches } = await setup(t);
+    const { approvalId, prepared } = await authorize(canvasOf(SWAP));
+    const p = groupOf(prepared);
+    const runId = (await t.db.query<{ run_id: string }>('SELECT run_id FROM workflow_runs WHERE handoff_id = $1', [approvalId])).rows[0]!.run_id;
+    const group = async () => (await t.db.query<{ prepared: Record<string, unknown>; valid_until: Date; state: string; code: string | null }>(
+      'SELECT prepared, valid_until, state, code FROM workflow_run_groups WHERE run_id = $1 AND group_index = 0', [runId])).rows[0]!;
+    // The preparation recorded the owner's nonce and block BEFORE the request left FloFi.
+    expect((await group()).prepared).toMatchObject({ ownerNonce: '0', fromBlock: expect.stringMatching(/^[0-9]+$/) });
+    // The page reports the wallet's rejection of exactly this request; a report naming another request is refused and records nothing.
+    await expect(workflowRunUserFundedWalletRejected(surface, approvalId, wallets, 0, '0x' + '00'.repeat(32))).rejects.toThrow('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
+    await workflowRunUserFundedWalletRejected(surface, approvalId, wallets, 0, p.request.id);
+    expect((await group()).state).toBe('PREPARED');
+    // Before the batch's on-chain deadline (plus the settle margin) nothing is proven and nothing changes.
+    await expect(workflowRunEndVerifiedDecline(surface, approvalId, wallets)).rejects.toThrow('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+    expect((await workflowRunStatus(surface, approvalId, wallets)).view.workflowRun!.run.state).toBe('RUNNING');
+    h.d.advance((await group()).valid_until.getTime() + 2 * 60_000 + 1_000 - h.d.now().getTime());
+    const ended = (await workflowRunEndVerifiedDecline(surface, approvalId, wallets)).view.workflowRun!.run;
+    expect(ended).toMatchObject({ state: 'CANCELLED', groups: [{ state: 'SKIPPED', code: 'WALLET_REQUEST_REJECTED' }] });
+    expect(ended.steps[0]).toMatchObject({ state: 'SKIPPED' });
+    const events = (await t.db.query<{ kind: string; code: string | null; detail: Record<string, unknown> }>(
+      'SELECT kind, code, detail FROM workflow_run_events WHERE run_id = $1 ORDER BY event_id', [runId])).rows;
+    expect(events.filter(e => e.kind === 'GROUP_WALLET_DECLINED')).toEqual([{ kind: 'GROUP_WALLET_DECLINED', code: 'WALLET_REQUEST_REJECTED',
+      detail: { group: 0, requestId: p.request.id, preparedAt: (await group()).prepared.preparedAt } }]);
+    expect(events.filter(e => e.kind === 'GROUP_DECLINE_VERIFIED')).toEqual([{ kind: 'GROUP_DECLINE_VERIFIED', code: 'WALLET_REQUEST_REJECTED',
+      detail: { group: 0, requestId: p.request.id, preparedAt: (await group()).prepared.preparedAt, ownerNonce: '0', fromBlock: (await group()).prepared.fromBlock,
+        toBlock: expect.stringMatching(/^[0-9]+$/) } }]);
+    expect(events.map(e => `${e.kind}:${e.detail?.state ?? ''}:${e.code ?? ''}`)).toEqual(['RUN_CREATED::', 'MODE_CHOSEN::', 'GROUP_STATE:PREPARED:',
+      'GROUP_WALLET_DECLINED::WALLET_REQUEST_REJECTED', 'GROUP_DECLINE_VERIFIED::WALLET_REQUEST_REJECTED', 'GROUP_STATE:SKIPPED:WALLET_REQUEST_REJECTED',
+      'STEP_STATE:SKIPPED:WALLET_REQUEST_REJECTED', 'RUN_CANCELLED:CANCELLED:OWNER_CANCELLED']);
+    // Nothing was ever sent: no batch, no FloFi transaction, the owner's funds and allowance untouched.
+    expect(batches()).toBe(0);
+    expect(chain.control.sends()).toBe(0);
+    expect(chain.control.allowance(WETH, owner, ROUTER)).toBe(0n);
+  });
+
+  it('a claimed rejection the chain contradicts is never proven (the batch ran, the owner transacted or has a pending transaction, a relayed operation): ended as unknown', async () => {
+    for (const contradiction of ['batch-executed', 'owner-transacted', 'owner-transaction-pending', 'relayed-operation'] as const) {
+      const t = await schema32();
+      const { chain, h, owner, authorize, wallet, wallets, surface } = await setup(t);
+      const { approvalId, prepared } = await authorize(canvasOf(SWAP));
+      const p = groupOf(prepared);
+      const runId = (await t.db.query<{ run_id: string }>('SELECT run_id FROM workflow_runs WHERE handoff_id = $1', [approvalId])).rows[0]!.run_id;
+      // The page says the wallet rejected it, yet before its deadline the chain shows otherwise.
+      await workflowRunUserFundedWalletRejected(surface, approvalId, wallets, 0, p.request.id);
+      if (contradiction === 'batch-executed') wallet(evmCallsOf(p.group));
+      else if (contradiction === 'owner-transacted') chain.control.setNonce(owner, 1n);
+      else if (contradiction === 'owner-transaction-pending') chain.control.setPendingNonce(owner, 1n);
+      else chain.control.sponsoredOperation(owner, evmCallsOf(p.group), { userOpHash: '0x' + '77'.repeat(32), paymaster: '0x' + '88'.repeat(20), bundler: '0x' + '99'.repeat(20),
+        actualGasCost: 1n });
+      const validUntil = (await t.db.query<{ valid_until: Date }>('SELECT valid_until FROM workflow_run_groups WHERE run_id = $1', [runId])).rows[0]!.valid_until;
+      h.d.advance(validUntil.getTime() + 2 * 60_000 + 1_000 - h.d.now().getTime());
+      await expect(workflowRunEndVerifiedDecline(surface, approvalId, wallets), contradiction).rejects.toThrow('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+      expect((await workflowRunStatus(surface, approvalId, wallets)).view.workflowRun!.run.state, contradiction).toBe('RUNNING');
+      // The owner's own "End workflow" still ends it — with the outcome unknown (may have executed), exactly as before; nothing is verified.
+      const ended = (await workflowRunCancel(surface, approvalId, wallets)).view.workflowRun!.run;
+      expect(ended, contradiction).toMatchObject({ state: 'CANCELLED', groups: [{ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] });
+      expect(Number((await t.db.query(`SELECT count(*)::int AS n FROM workflow_run_events WHERE run_id = $1 AND kind = 'GROUP_DECLINE_VERIFIED'`, [runId])).rows[0]!.n),
+        contradiction).toBe(0);
+    }
+  });
+
   it('insufficient balance and provider failure: refused at Review, before anything is stored or asked of the wallet', async () => {
     const poor = await schema32();
     const short = await setup(poor, { weth: AMOUNT_IN - 1n });
@@ -326,6 +393,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     expect(await withdraw('acct_' + 'f'.repeat(32))).toBe(false);
     expect(await withdraw(accountId)).toBe(true);
     expect((await shipped.db.query('SELECT status FROM mcp_handoffs WHERE handoff_id = $1', [started.value.approvalId])).rows[0]!.status).toBe('REVOKED');
+    // 0032 alone is not enough: single-card runs start only once 0033 (deleting a rejected attempt) is active too.
+    expect(await singleStepRunsSupported((await schema32(32)).db)).toBe(false);
     // A tampered ledger row (another SHA-256 under 0032's version) is not 0032.
     const t = await schema32();
     await t.db.query(`UPDATE schema_migrations SET sha256 = repeat('a', 64) WHERE version = 32`);

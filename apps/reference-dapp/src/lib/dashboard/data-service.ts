@@ -6,7 +6,7 @@ import { WALLET_PRINCIPAL_HEADER, normalizePrincipal } from '../../server/run-ow
 import { embeddedRuntime, flowRuntimeKind } from '../../server/flow-runtime';
 import { workflowOwner, WORKFLOW_OWNER_HEADER } from '../../domain/saved-workflow';
 import { betaIdentityHeaders, currentBetaIdentity } from '../../flight/beta-context';
-import { dashboardRunId, object, optionalText, textValue, toDashboardAttempts, toDashboardRun } from './run-mapping';
+import { dashboardRunId, object, optionalText, textValue, toDashboardAttempts, toDashboardRun, workflowRunId } from './run-mapping';
 import { attemptDependentStatus } from '../../domain/landed-attempts';
 import { settledWithEvidence } from '../../domain/canonical-execution-status';
 import type { DashboardDetailResponse, DashboardRun, DashboardSnapshot } from './types';
@@ -56,8 +56,9 @@ async function cloudGet(base: URL, path: string, account: string, signal?: Abort
 async function withAttempts(base: URL, account: string, runs: readonly DashboardRun[], budgetMs = 10_000): Promise<DashboardRun[]> {
   // BUILD-FLOFI-E2E-RELIABILITY-001 (workflow review): a run that verified evidence already settled needs no read, and all reads share one
   // total budget — a hung API marks the rest as unreadable (never "nothing was sent") instead of holding the whole Dashboard.
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single-card attempt (`wfr_`) has no execution record to read; its summary is its own truth.
   const out = [...runs], pending = out.map((run, index) => ({ run, index }))
-    .filter(({ run }) => !run.attempts && attemptDependentStatus(run.status) && !(settledWithEvidence(run) && !run.needsObservation));
+    .filter(({ run }) => !workflowRunId(run.runId) && !run.attempts && attemptDependentStatus(run.status) && !(settledWithEvidence(run) && !run.needsObservation));
   const budget = AbortSignal.timeout(budgetMs);
   const expired = new Promise<never>((_, reject) => { budget.addEventListener('abort', () => reject(new Error('DASHBOARD_ATTEMPT_BUDGET')), { once: true }); });
   expired.catch(() => undefined);
@@ -91,7 +92,9 @@ export async function loadDashboardRunDetail(expectedAccount: string, runId: str
   const scope = await connection(expectedAccount);
   const empty: DashboardDetailResponse = { connection: scope.connection, account: scope.account, detail: null };
   if (!scope.base || !scope.account) return empty;
-  if (!dashboardRunId(runId)) return { ...empty, connection: 'NOT_FOUND' };
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single-card attempt (`wfr_`) has no execution record behind `/v1/runs/:id` (which answers
+  // 404 for it): it is not found here without a read.
+  if (!dashboardRunId(runId) || workflowRunId(runId)) return { ...empty, connection: 'NOT_FOUND' };
   try {
     const raw = await cloudGet(scope.base, `v1/runs/${encodeURIComponent(runId)}`, scope.account);
     const run = toDashboardRun(raw, scope.account);

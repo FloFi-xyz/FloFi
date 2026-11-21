@@ -14,6 +14,12 @@ export const textValue = (value: unknown) => typeof value === 'string' ? value :
 export const optionalText = (value: unknown) => typeof value === 'string' && value.length > 0 ? value : null;
 export const sameOwner = (left: string | null | undefined, right: string | null | undefined) => Boolean(left && right &&
   (/^0x[0-9a-f]{40}$/i.test(left) && /^0x[0-9a-f]{40}$/i.test(right) ? left.toLowerCase() === right.toLowerCase() : left === right));
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): a single-card attempt the history lists is a workflow run (`wfr_…`, the same
+ * prefix History's Archive/Delete routes to WORKFLOW_RUN in `app/dashboard-action.ts`). It has no execution record behind `/v1/runs/:id`: no
+ * detail, attempts, evidence or Dashboard record page, so nothing reads one per run and its row offers no "Open".
+ */
+export const workflowRunId = (runId: string) => runId.startsWith('wfr_');
 
 /** The recorded attempts of a run read model (`v1/runs/:id`), reduced to public facts. */
 export function toDashboardAttempts(value: unknown): DashboardAttempt[] {
@@ -93,7 +99,36 @@ export function dashboardRunTitle(run: Pick<DashboardRun, 'flow' | 'attempts'>):
   const step = run.attempts?.map(attempt => attempt.step).find(step => Object.hasOwn(POSITION_TITLES, step));
   return step ? POSITION_TITLES[step]! : base;
 }
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): a single-card attempt's summary carries the WORKFLOW RUN's own state
+ * (`packages/cloud-runtime/src/queries.ts`), never an execution status, so it is worded here and never by the execution groups below (where
+ * PENDING, COMPLETED, CANCELLED or EXPIRED mean something else). Existing wording only, and only what the run's state proves:
+ * - COMPLETED: the engine writes 0015's one completion fact only after every step (here: the one step) reconciled, so it is completed and
+ *   reconciled; no evidence bundle is claimed.
+ * - PENDING / RUNNING: in progress; ATTENTION / HALTED: the run needs its owner. Both are followed in the Editor's execution view.
+ * - EXPIRED: 0015 lets a run expire only from PENDING, before any mode, authorization or step started, so it records no execution start.
+ * - CANCELLED / FAILED: whether a wallet request was sent (a cancelled batch whose answer never arrived, a reverted transaction) is not
+ *   knowable from this summary, so neither is called "not submitted": the final outcome is not established. Delete stays the server's decision.
+ * - Anything else: unresolved.
+ */
+function projectWorkflowRunAttempt(run: DashboardRun, title: string, current: boolean): DashboardRunView {
+  const open = 'Check execution status in the Editor\'s execution view', unknown = 'FloFi has not established the final workflow outcome.';
+  const said = (status: DashboardStatus, message: string, attention: readonly string[] = []) => ({ status, message, attention: [...attention] });
+  const issue = run.attentionRequired || Boolean(run.errorCode);
+  const { status, message, attention } = run.status === 'COMPLETED'
+    ? said(issue ? 'Completed with attention' : 'Completed', 'The run records a reconciled outcome.', issue ? ['A recorded issue needs review'] : [])
+    : run.status === 'PENDING' || run.status === 'RUNNING' ? said('In progress', 'The recorded execution is still awaiting its final outcome.', [open])
+    : run.status === 'ATTENTION' || run.status === 'HALTED' ? said('Needs attention', unknown, ['This execution record needs attention', open])
+    : run.status === 'EXPIRED' ? said('Not started', 'The run has no recorded execution start.')
+    : run.status === 'CANCELLED' ? said('Needs attention', unknown, ['The request was cancelled'])
+    : run.status === 'FAILED' ? said('Needs attention', unknown, ['Review the incomplete action'])
+    : said('Unresolved', unknown, ['Execution status unresolved']);
+  return { run, title, status, message, attention, landed: null, networks: [], completed: null, total: null, recovered: false,
+    reconciled: run.status === 'COMPLETED', current, progress: null };
+}
+
 export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = dashboardRunTitle(run), current = false): DashboardRunView {
+  if (!progress && workflowRunId(run.runId)) return projectWorkflowRunAttempt(run, title, current);
   const result = projectExecutionResult(progress);
   // A recorded unknown wallet or submission result: something may have been sent (the canonical lifecycle's INCONCLUSIVE).
   const unproven = recordedResultUnknown(run.errorCode);

@@ -51,10 +51,31 @@ pieces unchanged:
 | One-step runs only for `EDITOR_SESSION` handoffs (others still need ≥ 2) | `workflow-runs/service.ts` `ensureForClaim` |
 | `editorWorkflowStrategy(input, { singleStep })`: the card lints alone, is read into its chat command and must reproduce exactly. Its strategy and hash are the step's own (the MCP / Developer identity) | `editor/workflow-strategy.ts` |
 | Review / Authorize pass the opt-in only when `singleStepRunsSupported(db)` finds the exact certified 0032 identity in `schema_migrations` (fail closed). Availability reports `singleStep`. A non-exported `startSingleCardRun` keeps "Run workflow" multi-step only | `app/editor-workflow-execution-action.ts`, `workflow-runs/pg-store.ts`, `editor/approval.ts`, `editor/workflow-execution.ts` |
-| A single EVM card whose runtime the groups build (`SINGLE_CARD_RUNTIMES`: catalog swap, Router bridge, transfer, Aave) enables the hook when single-step runs exist. A Review that is not one confirmation, or that refuses the batch, falls back to the card's own flow, whose read-only simulation continues at once (Router / Relay wait for the click, because they may ask a sign-in). A completed one-step run is recorded as the executed first step, so an added action continues from it | `components/app-shell.tsx`, `domain/workflow-sequence.ts` |
+| A single EVM card whose runtime the groups build (`SINGLE_CARD_RUNTIMES`: catalog swap, Router bridge, transfer, Aave) enables the hook when single-step runs exist. A Review that must run step by step, refuses the batch, or cannot answer (rate limit, RPC or server failure) falls back to the card's own flow, whose read-only simulation continues at once and never opens the wallet selector or a sign-in (`simulateQuietly`). A Circle-paid Review stays on this path and shows its two signatures (§3). A completed one-step run is recorded as the executed first step, so an added action continues from it | `components/app-shell.tsx`, `domain/workflow-sequence.ts` |
 | A stored run of the shown workflow is followed whatever the availability answer, so a started card is never offered again. The one-confirmation mechanism sentence is omitted for one step | `components/editor-workflow-run.tsx` |
 | `0032_single_step_runs`: `step_count BETWEEN 1 AND 8`, nothing else. Certified for the v28 build, operator-applied on exact schema 31 (`single-step-runs-migrate`) | `packages/cloud-runtime`, `admin/cli-commands.ts`, `docs/deploy/SCHEMA-COMPATIBILITY.md` §24 |
 | Per-flow stores follow a submitted request automatically to its final verdict, strictly read-only, and expose `following`. The Canvas shows the existing "Reconciling…" status instead of a manual check, which returns only if the follow ends unsettled | `state/{supply,robinhood-transfer,uniswap-liquidity,uniswap-position,public-testnet}-store.tsx`, `state/execution-controls.ts` |
+
+### 2.1 History deletion of a single-card attempt (owner requirement)
+
+An attempt can be **deleted** (not archived) from History through the existing Delete control only when the server can prove it never
+moved funds. Everything else stays as financial evidence (Archive remains available).
+
+| Deletable shape | What the server proves |
+| --- | --- |
+| **No wallet request existed** (e.g. Authorize refused at preparation, a run that expired before it started) | No group was ever prepared, authorized, submitted or reconciled — from the rows *and* the append-only events |
+| **The wallet rejected the request** (EIP-1193 4001) | The browser reports the rejection of exactly that request (`GROUP_WALLET_DECLINED`). After the batch's on-chain deadline plus the settle margin, the server's own chain reads prove it was never sent (`user-funded/decline-proof.ts`): the owner's latest and pending nonce still equal the nonce recorded at preparation (before the request left FloFi), and since the preparation block no Transfer/Approval names the owner as sender, no Transfer names the owner as recipient, and no ERC-4337 `UserOperationEvent` names the owner as sender. Only unsponsored batches without native value, prepared once, qualify. The proof is kept as an append-only fact (`GROUP_DECLINE_VERIFIED`) and the run ends with `WALLET_REQUEST_REJECTED` (nothing sent) |
+
+- **Delete flow:** History Delete → the server action first ends a still-open rejected attempt, only if the chain proof holds
+  (`server/workflow-run-history.ts`), then the API calls migration 0033's guarded `purge_unsubmitted_workflow_run` (row locks, closed event
+  allowlist, transaction-scoped permit, immutable tombstone, the approval handoff deleted so it can never be replayed).
+- **Refused, always:** anything signed, submitted, pending, uncertain/unknown, partially executed or completed; a Circle permit or user
+  operation; a re-prepared group; a sponsored or native-value batch; another requester or a multi-step run; a live worker lease, legal hold or
+  dependent record.
+- **Activation:** single-card runs start only where both 0032 and 0033 are active with their exact certified identities
+  (`singleStepRunsSupported`).
+- **Residual, stated:** a transaction the wallet signed in contradiction to its own rejection and never broadcast is beyond any server's
+  view. After the deadline it can only revert, so no transfer, approval or call of the batch can take effect.
 
 ## 3. Wallet interaction matrix (owner wallet prompts; the target wallet is MetaMask reporting EIP-5792 `atomic` on the card's chain)
 
@@ -98,7 +119,15 @@ and is not claimed by this build.
 
 ## 5. Limitations (honest)
 
-- **Dormant until 0032 is applied.** The operator procedure requires schema 31, i.e. 0029–0031 applied by their own procedures first.
+- **Dormant until 0032 and 0033 are applied.** The operator procedures require schema 31, i.e. 0029–0031 applied by their own procedures
+  first, then 0032 and 0033.
+- **Deleting a rejected attempt waits for the batch's on-chain deadline.** About 12 minutes after preparation (10-minute validity plus the
+  2-minute settle margin). Before that, Delete refuses with the existing "could not verify" words and Archive stays available. An attempt
+  whose rejection could not be reported (offline page), or whose owner transacted on that chain before the proof ran, stays archive-only. So
+  do sponsored, native-value, Circle-paid and re-prepared attempts.
+- **A stored run before runtime detection answers.** After a reload, a stored single-card run is followed once the card's runtime is known
+  (for a catalog swap, after the catalog answers). In that short read-only window the card's own Simulate is shown; executing anything
+  still needs a fresh Review and a wallet confirmation.
 - **EIP-5792 atomic is wallet-dependent.**
   - Wallets without it, and FloFi Wallet (Privy has no `wallet_sendCalls`), keep the per-flow flows.
   - MetaMask's `ready` → in-confirmation EIP-7702 upgrade is wallet behaviour, not verified against a real wallet here.
@@ -160,3 +189,16 @@ Documented, not changed:
 - **Wording after a returned hash.** An observation timeout after the wallet returned a hash uses the existing "submission result unknown"
   words, which err on the safe side ("do not send it again").
 - **Uniswap follows** keep their manual check visible during the automatic follow (a second read-only observation, no safety impact).
+
+### 6.2 Frontend-UX and swap reviews (af21be9), resolved
+
+- **F1 (live after deploy):** a per-flow store's automatic follow counts only for this workflow's live execution, so a request of a
+  previous workflow never blocks a new one (HOTFIX-WORKFLOW-CONCURRENCY-001). Covered by a test.
+- **F2:** once a single card falls back to its own flow, Execute shows only that flow: no whole-workflow Review, mechanism sentence or second
+  primary action. Browser test 4 asserts it.
+- **F3:** no connected wallet keeps the connect reason, with no silent flip between paths.
+- **F4:** before the first status read of a stored run answers, the Canvas header reads "Loading…".
+- **F6:** a completed single card's run is kept as its result (no "Close" back into an offer to run it again).
+- **F7, F8:** no "All 1 steps" sentence and no workflow-run note for one card.
+- **F5:** documented in §5.
+- **Swap:** §2 now says a Circle-paid Review stays on this path with its two signatures.

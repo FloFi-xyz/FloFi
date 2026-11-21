@@ -28,6 +28,7 @@ import { authorizationReviewSequential, authorizeSequential, cancelSequential, c
 import type { OwnerAnswer, WalletProfile } from '../workflow-runs/execution-groups.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
+import { recordWalletDecline } from '../workflow-runs/service.ts';
 
 /** A requester kind's own rule for who may claim its handoffs (e.g. only an intended wallet). Evaluated on the handoff's immutable data. */
 export type ClaimPolicy = (handoff: HandoffRecord, wallet: WalletRef) => Promise<ClaimVerdict> | ClaimVerdict;
@@ -228,6 +229,20 @@ export async function workflowRunStart(surface: ApprovalSurface, approvalId: unk
 export async function workflowRunCancel(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
   const c = await runContext(surface, approvalId, wallets);
   return cancelSequential(c.runs, c.run, wallets, c.base);
+}
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): ends a run ONLY when each of its unanswered wallet batches is a rejection the
+ * server proved from the chain was never sent; anything else is refused and nothing changes (History's Delete of a rejected attempt).
+ */
+export async function workflowRunEndVerifiedDecline(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return cancelSequential(c.runs, c.run, wallets, c.base, { onlyIfDeclineVerified: true });
+}
+/** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's wallet rejected group `groupIndex`'s batch `requestId` (EIP-1193 4001). */
+export async function workflowRunUserFundedWalletRejected(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[], groupIndex: unknown,
+  requestId: unknown): Promise<void> {
+  const c = await runContext(surface, approvalId, wallets);
+  await recordWalletDecline(c.runs, c.run, wallets, groupIndexOf(groupIndex), typeof requestId === 'string' ? requestId : refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST'));
 }
 /** The owner resumes a halted run whose stopped step submitted nothing. */
 export async function workflowRunResume(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {

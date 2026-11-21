@@ -22,7 +22,7 @@ import { applyApproval, claimApproval, openBrowserApproval, previewApproval, res
   workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
   type ApprovalSurface, type ClaimedProposal } from '../platform/index';
 import { workflowRunUserFundedAuthorize, workflowRunUserFundedConsent, workflowRunUserFundedDecline, workflowRunUserFundedPermit, workflowRunUserFundedUpgrade, workflowRunUserFundedPrepare,
-  workflowRunUserFundedReport, workflowRunUserFundedStart } from '../platform/approve';
+  workflowRunUserFundedReport, workflowRunUserFundedStart, workflowRunUserFundedWalletRejected } from '../platform/approve';
 import type { PreparedGroupView } from '../workflow-runs/service';
 import { canvasWorkflowOfStrategy } from '../editor/workflow-strategy';
 import type { WalletWorkflowReviewView } from '../delegation/views';
@@ -224,6 +224,16 @@ export async function authorizeUserFundedGroup(approvalId: string, groupIndex: n
 export async function reportUserFundedBatch(approvalId: string, groupIndex: number, hashes: string[], notSent = false): Promise<Result<ClaimedProposal>> {
   return withFlightOwner(async () => {
   return runAction((s, w) => workflowRunUserFundedReport(s, approvalId, w, groupIndex, hashes, notSent === true));
+
+  });
+}
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): the owner's wallet rejected this group's batch (EIP-1193 4001). Recorded as a
+ * fact only; the server proves it against the chain before an ended attempt may be deleted. Nothing is prepared, signed or sent.
+ */
+export async function reportUserFundedRejection(approvalId: string, groupIndex: number, requestId: string): Promise<Result<null>> {
+  return withFlightOwner(async () => {
+  return runAction(async (s, w) => { await workflowRunUserFundedWalletRejected(s, approvalId, w, groupIndex, requestId); return null; });
 
   });
 }

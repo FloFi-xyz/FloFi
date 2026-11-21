@@ -180,3 +180,39 @@ describe('Dashboard foundation inside the canonical shell', () => {
     expect(html).not.toContain('Actual received'); expect(html).not.toContain('0 ETH'); expect(html).not.toContain('Retry');
   });
 });
+
+// BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): a listed single-card attempt (`wfr_`) offers History's Archive/Delete exactly
+// like any record, but no link to a Dashboard record page it does not have (its detail is not found).
+describe('single-card attempts in History', () => {
+  const wfr = 'wfr_' + 'c'.repeat(26);
+  const attempt = (status: string): DashboardRun => ({ ...row, runId: wfr, workflowId: '', flow: 'arbitrum-swap', status, provenance: 'WORKFLOW_RUN', hasEvidence: false,
+    updatedAt: '2026-11-20T12:01:00Z' });
+  const history = { change: () => async () => ({ ok: true as const, disposition: 'ARCHIVED' as const }), changed: noop };
+  it.each(['CANCELLED', 'COMPLETED', 'EXPIRED', 'HALTED'])('a %s attempt has the ⋯ Archive/Delete menu and no Open link; an execution record keeps both', status => {
+    const html = records({ runs: [projectDashboardRun(attempt(status)), projectDashboardRun(row)], history });
+    const card = html.slice(html.indexOf('Show details for Swap'), html.indexOf('Show details for Aave workflow') > html.indexOf('Show details for Swap')
+      ? html.indexOf('Show details for Aave workflow') : undefined);
+    expect(card).toContain('Swap');
+    expect(card).toContain('aria-label="More execution actions"'); expect(card).toContain('<span aria-hidden="true">⋯</span>');
+    expect(card).toContain('aria-label="Archive execution"'); expect(card).toContain('aria-label="Delete execution"');
+    expect(card).toContain('Delete permanently?');
+    expect(card).not.toContain('Open record'); expect(card).not.toContain('>Open</a>');
+    expect(html).not.toContain(`/app/dashboard/runs/${wfr}`);
+    // The execution record next to it is unchanged: its Open link and its own menu.
+    expect(html).toContain(`href="/app/dashboard/runs/${row.runId}"`);
+    expect(html.match(/aria-label="More execution actions"/g)).toHaveLength(2);
+  });
+  it('an attempt that needs its owner is listed in "Needs you" without a link to a record page it does not have', () => {
+    const overview = index({ runs: [projectDashboardRun(attempt('HALTED')), projectDashboardRun({ ...row, runId: 'interrupted-run', status: 'UNKNOWN' })], openRecords: noop });
+    expect(overview).toContain('Needs you'); expect(overview).toContain('aria-label="2 records need you"');
+    expect(overview).toContain('Swap'); expect(overview).toContain('Needs attention');
+    expect(overview).not.toContain(`/app/dashboard/runs/${wfr}`);
+    expect(overview.match(/See what to do/g)).toHaveLength(2); // one link (its label and accessible name) for the execution record only
+    expect(overview).toContain('href="/app/dashboard/runs/interrupted-run"');
+  });
+  it('a current run keeps its own in-app view whatever its id', () => {
+    const current = projectDashboardRun(attempt('RUNNING'), null, 'Current workflow', true);
+    expect(index({ runs: [current] })).toContain(`href="/app/dashboard/runs/${wfr}"`);
+  });
+});
+
