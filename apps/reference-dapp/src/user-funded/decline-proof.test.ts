@@ -6,22 +6,32 @@
  */
 import { describe, expect, it } from 'vitest';
 import { erc4337, erc7710 } from '@defi-workflow-engine/reference-compiler';
-import { APPROVAL_TOPIC, declineProofFacts, MAX_SCAN_BLOCKS, proveDeclinedBatchUnsent, SCAN_CHUNK_BLOCKS } from './decline-proof.ts';
+import { APPROVAL_TOPIC, CHAIN_DEADLINE_MARGIN_S, declineProofFacts, MAX_SCAN_BLOCKS, proveDeclinedBatchUnsent, SCAN_CHUNK_BLOCKS } from './decline-proof.ts';
 import { TRANSFER_TOPIC } from './evm-reconcile.ts';
 
 const OWNER = '0x' + 'ab'.repeat(20), OWNER_TOPIC = '0x' + '0'.repeat(24) + 'ab'.repeat(20);
 const SETTLED = new Date('2026-11-21T10:00:00.000Z'), AFTER = new Date('2026-11-21T10:00:01.000Z');
+/** The batch's on-chain deadline (unix seconds): the swap's own SwapRouter02 deadline. */
+const DEADLINE = 1_795_250_000n;
 const prepared = (over: Record<string, unknown> = {}) => ({ kind: 'EVM_WALLET_BATCH', owner: OWNER, fromBlock: '1000', ownerNonce: '7',
-  request: { id: '0x' + '12'.repeat(32), calls: [{ to: '0x' + '56'.repeat(20), value: '0x0', data: '0x095ea7b3' }, { to: '0x' + '68'.repeat(20), value: '0x0', data: '0x5ae401dc' }] }, ...over });
+  group: { calls: [{ kind: 'ERC20_APPROVE' }, { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', deadline: DEADLINE.toString() }] },
+  request: { id: '0x' + '12'.repeat(32), atomicRequired: true, calls: [{ to: '0x' + '56'.repeat(20), value: '0x0', data: '0x095ea7b3' }, { to: '0x' + '68'.repeat(20), value: '0x0', data: '0x5ae401dc' }] }, ...over });
 type Filter = { fromBlock: string; toBlock: string; topics: (string | null)[] };
-/** A read-only transport double: nonces, head and the logs answering each filter (every call recorded). */
-function chain(o: { latest?: bigint; pending?: bigint; head?: bigint; logs?: (f: Filter) => unknown[]; fail?: string; nonceAfterScan?: bigint } = {}) {
+/**
+ * A read-only transport double: nonces, the head block (number, hash, timestamp) and the logs answering each filter (every call recorded).
+ * `headTime`: the head's own block timestamp (default well past the deadline). `reorged`: the scanned head is replaced by another block afterwards.
+ */
+function chain(o: { latest?: bigint; pending?: bigint; head?: bigint; headTime?: bigint; reorged?: boolean; logs?: (f: Filter) => unknown[]; fail?: string;
+  nonceAfterScan?: bigint } = {}) {
   const calls: { method: string; params: unknown[] }[] = [];
   let scans = 0;
   const t = { rpc: async (method: string, params: unknown[]) => {
     calls.push({ method, params });
     if (method === o.fail) throw new Error('ECONNRESET');
-    if (method === 'eth_blockNumber') return '0x' + (o.head ?? 1500n).toString(16);
+    if (method === 'eth_getBlockByNumber') {
+      const head = o.head ?? 1500n, replaced = o.reorged && params[0] !== 'latest';
+      return { number: '0x' + head.toString(16), hash: '0x' + (replaced ? 'ee' : 'bb').repeat(32), timestamp: '0x' + (o.headTime ?? DEADLINE + 3_600n).toString(16) };
+    }
     if (method === 'eth_getTransactionCount') {
       const n = scans > 0 && o.nonceAfterScan !== undefined ? o.nonceAfterScan : params[1] === 'pending' ? o.pending ?? o.latest ?? 7n : o.latest ?? 7n;
       return '0x' + n.toString(16);
@@ -45,7 +55,9 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: proof that a rejected wa
     expect(filters).toEqual([[TRANSFER_TOPIC, OWNER_TOPIC], [APPROVAL_TOPIC, OWNER_TOPIC], [TRANSFER_TOPIC, null, OWNER_TOPIC], [erc4337.USER_OPERATION_EVENT_TOPIC, null, OWNER_TOPIC]]);
     expect(calls.filter(c => c.method === 'eth_getTransactionCount').map(c => c.params[1])).toEqual(['latest', 'pending', 'latest', 'pending']);
     // Read-only: nothing is ever sent.
-    expect(calls.every(c => ['eth_blockNumber', 'eth_getTransactionCount', 'eth_getLogs'].includes(c.method))).toBe(true);
+    expect(calls.every(c => ['eth_getBlockByNumber', 'eth_getTransactionCount', 'eth_getLogs'].includes(c.method))).toBe(true);
+    // The scanned head is read again by its own number after the scan (a reorg would change its hash).
+    expect(calls.filter(c => c.method === 'eth_getBlockByNumber').map(c => c.params[0])).toEqual(['latest', '0x' + (1500n).toString(16)]);
   });
 
   it('scans the whole range in bounded chunks, and never claims a range wider than the limit', async () => {
@@ -57,8 +69,19 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: proof that a rejected wa
     expect(await proveDeclinedBatchUnsent(chain({ head: 1000n + MAX_SCAN_BLOCKS + 1n }).t, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_RANGE_TOO_WIDE' });
   });
 
-  it('not proven before the on-chain deadline plus the settle margin', async () => {
+  it('not proven before the deadline: by FloFi\'s clock, and above all by the chain\'s own head (an RPC that lags or an L2 catching up)', async () => {
     expect(await proveDeclinedBatchUnsent(chain().t, prepared(), SETTLED, new Date(SETTLED.getTime() - 1))).toEqual({ proven: false, reason: 'DECLINE_PROOF_NOT_SETTLED' });
+    // FloFi's clock says it is over, yet the chain's head is still before the deadline plus the margin: blocks able to execute it may still come.
+    for (const headTime of [DEADLINE - 5n, DEADLINE, DEADLINE + CHAIN_DEADLINE_MARGIN_S])
+      expect(await proveDeclinedBatchUnsent(chain({ headTime }).t, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_NOT_SETTLED' });
+    expect((await proveDeclinedBatchUnsent(chain({ headTime: DEADLINE + CHAIN_DEADLINE_MARGIN_S + 1n }).t, prepared(), SETTLED, AFTER)).proven).toBe(true);
+    // The earliest deadline of the batch counts (a guard before a later swap deadline).
+    const guarded = prepared({ group: { calls: [{ kind: 'DEADLINE_GUARD', deadline: (DEADLINE - 600n).toString() }, { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE', deadline: DEADLINE.toString() }] } });
+    expect((await proveDeclinedBatchUnsent(chain({ headTime: DEADLINE - 600n + CHAIN_DEADLINE_MARGIN_S + 1n }).t, guarded, SETTLED, AFTER)).proven).toBe(true);
+  });
+
+  it('not proven when the scanned head was replaced while the range was scanned (a reorg)', async () => {
+    expect(await proveDeclinedBatchUnsent(chain({ reorged: true }).t, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_CHAIN_REORG' });
   });
 
   it('not proven when the owner transacted: a mined or pending transaction, or one appearing while the range was scanned', async () => {
@@ -83,6 +106,11 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: proof that a rejected wa
       [{ fromBlock: 12 }, 'DECLINE_PROOF_NOT_RECORDED'],
       [{ kind: 'EVM_USER_OPERATION' }, 'DECLINE_PROOF_NOT_A_WALLET_BATCH'],
       [{ owner: 'not-an-address' }, 'DECLINE_PROOF_OWNER_UNKNOWN'],
+      [{ request: { ...prepared().request, atomicRequired: false } }, 'DECLINE_PROOF_NOT_ATOMIC'],
+      [{ group: { calls: [{ kind: 'ERC20_APPROVE' }, { kind: 'WETH9_WITHDRAW' }] } }, 'DECLINE_PROOF_CALL_UNPROVABLE'],
+      [{ group: { calls: [{ kind: 'ERC20_APPROVE' }] } }, 'DECLINE_PROOF_CALL_UNPROVABLE'],
+      [{ group: { calls: [{ kind: 'ERC20_APPROVE' }, { kind: 'AAVE_V3_SUPPLY' }] } }, 'DECLINE_PROOF_NO_DEADLINE'],
+      [{ group: { calls: [{ kind: 'ERC20_APPROVE' }, { kind: 'UNISWAP_V3_EXACT_INPUT_SINGLE' }] } }, 'DECLINE_PROOF_NO_DEADLINE'],
     ];
     for (const [over, reason] of cases) {
       expect(declineProofFacts(prepared(over))).toEqual({ reason });
@@ -93,7 +121,7 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: proof that a rejected wa
   });
 
   it('fails closed on any unreadable answer or a missing transport', async () => {
-    for (const fail of ['eth_getTransactionCount', 'eth_blockNumber', 'eth_getLogs'])
+    for (const fail of ['eth_getTransactionCount', 'eth_getBlockByNumber', 'eth_getLogs'])
       expect(await proveDeclinedBatchUnsent(chain({ fail }).t, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_RPC_UNAVAILABLE' });
     expect(await proveDeclinedBatchUnsent(chain({ logs: () => 'oops' as never }).t, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_RPC_UNAVAILABLE' });
     expect(await proveDeclinedBatchUnsent(null, prepared(), SETTLED, AFTER)).toEqual({ proven: false, reason: 'DECLINE_PROOF_RPC_UNAVAILABLE' });

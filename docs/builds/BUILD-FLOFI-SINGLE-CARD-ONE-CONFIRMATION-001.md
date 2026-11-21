@@ -71,7 +71,10 @@ moved funds. Everything else stays as financial evidence (Archive remains availa
   allowlist, transaction-scoped permit, immutable tombstone, the approval handoff deleted so it can never be replayed).
 - **Refused, always:** anything signed, submitted, pending, uncertain/unknown, partially executed or completed; a Circle permit or user
   operation; a re-prepared group; a sponsored or native-value batch; another requester or a multi-step run; a live worker lease, legal hold or
-  dependent record.
+  dependent record; a wallet answer arriving after a verified rejection (refused, logged and kept as a fact).
+- **The chain's own clock:** the proof requires the chain's head block to be past the batch's own on-chain deadline (its earliest swap deadline
+  or `DEADLINE_GUARD`) by 60 s, never FloFi's clock alone. The scan ends at that block, which must still be there afterwards (no reorg). Only
+  atomic batches made of call kinds whose execution emits a Transfer or Approval naming the owner qualify.
 - **Activation:** single-card runs start only where both 0032 and 0033 are active with their exact certified identities
   (`singleStepRunsSupported`).
 - **Residual, stated:** a transaction the wallet signed in contradiction to its own rejection and never broadcast is beyond any server's
@@ -202,3 +205,21 @@ Documented, not changed:
 - **F7, F8:** no "All 1 steps" sentence and no workflow-run note for one card.
 - **F5:** documented in §5.
 - **Swap:** §2 now says a Circle-paid Review stays on this path with its two signatures.
+
+### 6.3 Deletion reviews (security and data-privacy, at 97c8612), resolved
+
+- **Security F1 (medium):** the proof now checks the chain's own head timestamp against the batch's on-chain deadline (plus 60 s) and that the
+  scanned head was not replaced. Covered by tests.
+- **Security F2:** only atomic batches whose call kinds all emit an owner-topic log qualify, with a deadline taken from the calls.
+- **Security F3:** a late wallet answer for a verified rejection is refused, logged and recorded (`GROUP_ANSWER_AFTER_STOP`), so 0033 refuses
+  the deletion.
+- **Security F4:** one rejection fact per preparation; a repeated unproven proof within a minute is not re-run.
+- **Security F5:** "end only if verified" is also enforced under the store lock.
+- **Data-privacy major 1:** the public privacy notice (EN/PT) describes execution history, the narrow deletion scope, the permanent tombstone
+  and the backup window. The release procedures require it and state the tombstone is permanent.
+- **Data-privacy major 2:** data-subject access reports workflow runs and deleted-attempt tombstones; erasure reports both as retained.
+- **Data-privacy minor 4:** the FinOps limitations state that deleted attempts leave the single-card counts.
+- **Data-privacy minor 5:** the restore point is limited to before any traffic writes on schema 33; PITR and branch deletion are stated.
+- **Data-privacy minor 6:** Support texts are matched by run id, handoff id or incident, live or deleted.
+- **Data-privacy nits 7 and 9:** runtime-role privilege checks are in the verification; per-subject legal holds are noted.
+- **Data-privacy minor 3:** the release procedures require recording the approval and retention-decision references; no new CLI flag.

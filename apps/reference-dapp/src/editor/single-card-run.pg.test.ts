@@ -312,6 +312,30 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     expect(await history.change(owner, 'WORKFLOW_RUN', runId, 'ARCHIVE')).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
   });
 
+  it('a wallet answer arriving after a verified rejection is refused, logged and kept as a fact: the attempt can then never be deleted', async () => {
+    const t = await schema32();
+    const { h, owner, authorize, wallets, surface } = await setup(t);
+    const { approvalId, prepared } = await authorize(canvasOf(SWAP));
+    const p = groupOf(prepared);
+    const runId = (await t.db.query<{ run_id: string }>('SELECT run_id FROM workflow_runs WHERE handoff_id = $1', [approvalId])).rows[0]!.run_id;
+    await workflowRunUserFundedWalletRejected(surface, approvalId, wallets, 0, p.request.id);
+    await workflowRunUserFundedWalletRejected(surface, approvalId, wallets, 0, p.request.id);
+    // One fact per preparation, however often the page reports it.
+    expect(Number((await t.db.query(`SELECT count(*)::int AS n FROM workflow_run_events WHERE run_id = $1 AND kind = 'GROUP_WALLET_DECLINED'`, [runId])).rows[0]!.n)).toBe(1);
+    const validUntil = (await t.db.query<{ valid_until: Date }>('SELECT valid_until FROM workflow_run_groups WHERE run_id = $1', [runId])).rows[0]!.valid_until;
+    h.d.advance(validUntil.getTime() + 2 * 60_000 + 1_000 - h.d.now().getTime());
+    expect((await workflowRunEndVerifiedDecline(surface, approvalId, wallets)).view.workflowRun!.run).toMatchObject({ state: 'CANCELLED',
+      groups: [{ code: 'WALLET_REQUEST_REJECTED' }] });
+    // The wallet later answers with this batch's id: the strongest sign the proof was wrong — refused, and recorded.
+    await expect(workflowRunUserFundedAuthorize(surface, approvalId, wallets, 0, { kind: 'EVM_WALLET_BATCH', batchId: p.request.id }))
+      .rejects.toThrow('WALLET_BATCH_ANSWERED_AFTER_STOP');
+    expect((await t.db.query(`SELECT code FROM workflow_run_events WHERE run_id = $1 AND kind = 'GROUP_ANSWER_AFTER_STOP'`, [runId])).rows)
+      .toEqual([{ code: 'WALLET_BATCH_ANSWERED_AFTER_STOP' }]);
+    const deleted = await createOwnerHistory(t.db, h.d.tenantId).change(owner, 'WORKFLOW_RUN', runId, 'DELETE');
+    expect(deleted).toMatchObject({ ok: false, code: 'RUN_DELETE_REFUSED' });
+    expect(Number((await t.db.query('SELECT count(*)::int AS n FROM workflow_runs WHERE run_id = $1', [runId])).rows[0]!.n)).toBe(1);
+  });
+
   it('a claimed rejection the chain contradicts is never proven (the batch ran, the owner transacted or has a pending transaction, a relayed operation): ended as unknown', async () => {
     for (const contradiction of ['batch-executed', 'owner-transacted', 'owner-transaction-pending', 'relayed-operation'] as const) {
       const t = await schema32();

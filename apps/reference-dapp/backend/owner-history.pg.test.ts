@@ -252,7 +252,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: owner deletion of a sing
     expect((await route.handler({ method: 'POST', path, query: new URLSearchParams(), headers: { [WORKFLOW_OWNER_HEADER]: 'eip155:' + OWNER },
       body: { args: ['WORKFLOW_RUN', rejected.runId, 'DELETE'] }, requestId: 'workflow-run-delete' }, route.pattern.exec(path)!)).body).toEqual(DELETED);
     expect(await counts(db, rejected.runId, rejected.handoffId)).toEqual(GONE);
-    expect(await tombstone(db, rejected.runId)).toMatchObject([{ shape: 'WALLET_REJECTED_VERIFIED', final_state: 'CANCELLED', event_count: 9 }]);
+    // A repeated rejection report records one fact per preparation (security review), so the history holds 8 events.
+    expect(await tombstone(db, rejected.runId)).toMatchObject([{ shape: 'WALLET_REJECTED_VERIFIED', final_state: 'CANCELLED', event_count: 8 }]);
     expect((await db.query('SELECT count(*)::int AS n FROM workflow_run_purge_permits')).rows).toEqual([{ n: 0 }]);
 
     // Idempotent: a repeat answers DELETED and records no second event; History shows it DELETED; it can no longer be archived.

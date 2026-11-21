@@ -238,9 +238,21 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
       const prepared = (g.prepared ?? {}) as { readonly request?: { readonly id?: unknown }; readonly preparedAt?: unknown };
       if (g.state !== 'PREPARED' || g.strategy !== 'EVM_WALLET_BATCH' || g.authorization !== null || prepared.request?.id !== requestId || prepared.preparedAt !== preparedAt)
         refuse('WORKFLOW_RUN_DECLINE_NOT_THIS_REQUEST');
-      await event(tx, runId, null, 'GROUP_WALLET_DECLINED', 'WALLET_REQUEST_REJECTED', { group: groupIndex, requestId, preparedAt });
+      // One fact per preparation (security review): a repeated report records nothing more.
+      const known = (await tx.query(`SELECT 1 FROM workflow_run_events WHERE tenant_id = $1 AND run_id = $2 AND kind = 'GROUP_WALLET_DECLINED'
+        AND detail->>'group' = $3 AND detail->>'requestId' = $4 AND detail->>'preparedAt' = $5 LIMIT 1`, [tenantId, runId, String(groupIndex), requestId, preparedAt])).rows.length > 0;
+      if (!known) await event(tx, runId, null, 'GROUP_WALLET_DECLINED', 'WALLET_REQUEST_REJECTED', { group: groupIndex, requestId, preparedAt });
       return g;
     }),
+    /**
+     * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (security review): a wallet answer (a batch id, transactions or "not sent") arrived for a group
+     * that ended as a verified rejection. Kept as an append-only fact under the run's lock (any state): the attempt is then never deletable.
+     */
+    recordAnswerAfterStop: (runId: string, groupIndex: number, detail: { readonly batchIdReported: boolean; readonly hashes: number | null; readonly notSent: boolean | null }) =>
+      db.transaction(async tx => {
+        await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
+        await event(tx, runId, null, 'GROUP_ANSWER_AFTER_STOP', 'WALLET_BATCH_ANSWERED_AFTER_STOP', { group: groupIndex, ...detail });
+      }),
     /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */
     cancel: (runId: string, version: number, code: string, now: Date = new Date(), options: {
       /**
@@ -249,7 +261,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
        * say WALLET_REQUEST_REJECTED (nothing was sent) instead of an unknown outcome, and the proof is kept as an append-only fact. Anything else
        * is cancelled exactly as before.
        */
-      readonly verifiedDeclines?: ReadonlyMap<number, VerifiedDecline> } = {}) => db.transaction(async tx => {
+      readonly verifiedDeclines?: ReadonlyMap<number, VerifiedDecline>;
+      /** End the run only if every unanswered wallet batch is one of `verifiedDeclines` here, under the lock; otherwise refuse and change nothing. */
+      readonly onlyIfDeclineVerified?: boolean } = {}) => db.transaction(async tx => {
       const run = await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
       if (run.version !== version) refuse('WORKFLOW_RUN_CHANGED');
       if (!['PENDING', 'RUNNING', 'HALTED'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.state}`);
@@ -265,6 +279,12 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         // The same rule the owner's "End workflow" uses (`groupInFlight`): FloFi never relays a skipped user operation or Solana signature, and
         // the owner is shown how to revoke a signed operation.
         if (groups.some(g => groupInFlight(g, now))) refuse('WORKFLOW_RUN_GROUP_IN_FLIGHT');
+        if (options.onlyIfDeclineVerified) {
+          const unanswered = groups.filter(g => g.state === 'PREPARED' && walletBatchUnanswered(g));
+          const matches = (g: GroupRecord) => { const v = options.verifiedDeclines?.get(g.groupIndex), p = (g.prepared ?? {}) as { request?: { id?: unknown }; preparedAt?: unknown };
+            return Boolean(v && p.request?.id === v.requestId && p.preparedAt === v.preparedAt); };
+          if (!unanswered.length || !unanswered.every(matches)) refuse('WORKFLOW_RUN_DECLINE_NOT_PROVEN');
+        }
         for (const g of groups) if (['PLANNED', 'PREPARED', 'EXPIRED', 'BLOCKED', 'AUTHORIZED'].includes(g.state)) {
           // A wallet batch handed to the owner's wallet whose answer never reached FloFi is past its validity here (else it would be in flight),
           // yet it may have executed before its on-chain deadline: it is still SKIPPED (nothing more of it is sent or taken), but its group and
