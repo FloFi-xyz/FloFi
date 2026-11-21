@@ -13,12 +13,10 @@
  * user-funded-chain-serve.ts) and disposable PostgreSQL. The wallet is this spec's double; nothing reaches a public network, nothing is
  * signed with a real key, and none of this is evidence of a mainnet execution.
  */
-import { request as apiRequest, type APIRequestContext, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { createAccountStore } from '../src/accounts/account-store';
-import { ACCOUNT_SESSION_COOKIE, sealAccountSession } from '../src/accounts/account-session';
-import { APP_ORIGIN } from './app-origin';
+import { BASE, chainControl as control, disposeChainControl, installBatchWallet, signedIn, type SentBatch } from './batch-wallet-fixtures';
 import { openBuilder, openEditorSection } from './build-entry-navigation';
 import { expect, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
@@ -36,85 +34,16 @@ if (SELECTED && MISSING.length) throw new Error(`USER_FUNDED_E2E_PREREQUISITE_MI
 test.skip(!SELECTED, 'Runs only in the MOCKED user-funded profile (FLOFI_USER_FUNDED_E2E=MOCKED_LOOPBACK_ONLY)');
 test.setTimeout(240_000);
 
-const BASE = '0x2105', CHAIN_HARNESS = 'https://127.0.0.1:8567', BASE_HARNESS = 'http://127.0.0.1:8562';
+const BASE_HARNESS = 'http://127.0.0.1:8562';
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', BASE_WETH = '0x4200000000000000000000000000000000000006';
-type SentBatch = { version: string; id?: string; chainId: string; from: string; atomicRequired: boolean; calls: { to: string; data: string; value: string }[]; capabilities?: unknown };
 
-let api: APIRequestContext | null = null;
-test.afterAll(async () => { await api?.dispose(); api = null; });
-/** The chain double's test-only control (loopback only); its per-run certificate is self-signed, as for the other loopback harnesses. */
-async function control<T>(method: string, params: unknown[] = []): Promise<T> {
-  api ??= await apiRequest.newContext({ ignoreHTTPSErrors: true });
-  const response = await api.post(`${CHAIN_HARNESS}/control`, { data: { jsonrpc: '2.0', id: 1, method, params } });
-  expect(response.ok()).toBe(true);
-  const value = await response.json() as { result?: T; error?: { message: string } };
-  if (value.error) throw new Error(value.error.message);
-  return value.result as T;
-}
+test.afterAll(disposeChainControl);
 async function query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
   try { return (await db.query(sql, params)).rows as T[]; } finally { await db.close(); }
 }
-/** A FloFi account holding the test wallet, signed in through the account store as an email sign-in leaves it. */
-async function signedIn(page: Page, wallet: string) {
-  const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
-  try {
-    const store = createAccountStore(db, 'default');
-    const session = await store.signIn({ kind: 'email', subject: `wallet-batch-${Date.now()}@flofi-e2e.test`, label: null });
-    await store.setOnboarding(session.accountId, 'completed');
-    await store.saveWallet(session.accountId, { ecosystem: 'evm', address: wallet, origin: 'external', provider: 'io.metamask', providerName: 'MetaMask',
-      providerResource: null, label: 'MetaMask' });
-    await page.context().addCookies([{ name: ACCOUNT_SESSION_COOKIE, url: APP_ORIGIN, httpOnly: true, sameSite: 'Lax',
-      value: sealAccountSession({ FLOFI_SESSION_SECRET: process.env.FLOFI_E2E_SESSION_SECRET! }, session, new URL(APP_ORIGIN).host, new Date()) }]);
-  } finally { await db.close(); }
-}
-/**
- * The owner's EIP-5792 wallet: it reports atomic batching on Base, and for `wallet_sendCalls` it does what MetaMask does with an EIP-7702 account —
- * executes exactly the requested calls as ONE transaction from the owner's own account (here on the MOCKED chain) and answers the batch id; it
- * honours the app-provided id (a second request with it is refused 5720) and reports the receipts through `wallet_getCallsStatus`.
- * Every request is logged in the test process, across reloads.
- */
-async function installBatchWallet(page: Page, owner: string) {
-  const methods: string[] = [], sent: SentBatch[] = [];
-  const batches = new Map<string, { hash: string }>();
-  await page.exposeFunction('flofiBatchWallet', async (method: string, params: unknown[]) => {
-    methods.push(method);
-    if (method === 'wallet_getCapabilities') return { result: { [BASE]: { atomic: { status: 'supported' } } } };
-    if (method === 'wallet_sendCalls') {
-      const request = params[0] as SentBatch;
-      sent.push(request);
-      if (request.id && batches.has(request.id)) return { error: { code: 5720, message: 'Duplicate id' } };
-      if (request.chainId !== BASE || request.from.toLowerCase() !== owner || request.atomicRequired !== true) return { error: { code: 5700, message: 'Unsupported request' } };
-      const hash = await control<string>('MOCK_walletBatch', [owner, request.calls]);
-      const id = request.id ?? `0x${'b'.repeat(64)}`;
-      batches.set(id, { hash });
-      return { result: { id } };
-    }
-    if (method === 'wallet_getCallsStatus') {
-      const batch = batches.get(String(params[0]));
-      if (!batch) return { error: { code: 5730, message: 'Unknown bundle id' } };
-      const receipt = await control<{ status: number; blockNumber: number }>('MOCK_receipt', [batch.hash]);
-      return { result: { version: '2.0.0', id: params[0], chainId: BASE, atomic: true, status: 200,
-        receipts: [{ transactionHash: batch.hash, status: receipt.status === 1 ? '0x1' : '0x0', blockNumber: '0x' + receipt.blockNumber.toString(16), gasUsed: '0x30d40', logs: [] }] } };
-    }
-    return { passthrough: true };
-  });
-  await page.addInitScript(() => {
-    type Answer = { result?: unknown; error?: { code: number; message: string }; passthrough?: boolean };
-    const w = window as unknown as { ethereum: { request: (input: { method: string; params?: unknown[] }) => Promise<unknown> };
-      flofiBatchWallet: (method: string, params: unknown[]) => Promise<Answer> };
-    const request = w.ethereum.request;
-    w.ethereum.request = async input => {
-      const answer = await w.flofiBatchWallet(input.method, input.params ?? []);
-      if (answer.passthrough) return request(input);
-      if (answer.error) throw Object.assign(new Error(answer.error.message), { code: answer.error.code });
-      return answer.result;
-    };
-    window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
-      detail: { provider: w.ethereum, info: { rdns: 'io.metamask', name: 'MetaMask', uuid: 'wallet-batch-metamask' } } })));
-  });
-  return { methods, sent };
-}
+// The owner's EIP-5792 wallet (atomic batching on Base; `wallet_sendCalls` executed as ONE transaction from the owner's own account on the MOCKED
+// chain; every request logged in the test process, across reloads) and the FloFi account session: e2e/batch-wallet-fixtures.ts.
 /** One command of the Canvas's own grammar; it adds exactly one card (`label`) to the workflow. */
 async function say(page: Page, text: string, label: string) {
   const cards = page.locator('.build-flow-surface .composer-card'), before = await cards.count();
