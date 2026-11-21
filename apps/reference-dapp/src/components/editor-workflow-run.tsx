@@ -1424,7 +1424,7 @@ export function EditorWorkflowRunPanel({ state, actionsOutside = false, stage = 
       {phase === 'confirm-update' && <button type="button" className="primary" onClick={() => void state.confirmUpdate()}>{tr(state.updated.every(u => u.reviewed && u.kind !== 'fee') ? 'Confirm the updated minimums' : 'Confirm and continue in my wallet')}</button>}
       {resumable && !busy && <button type="button" className="primary" onClick={() => void state.resume()}>{tr('Resume the workflow')}</button>}
       {run && approvalSlotHref(run) && <p><a className="secondary" href={approvalSlotHref(run)!}>{tr('Continue step {0} on the signing page', String(run.currentStep + 1))}</a></p>}
-      {due && !mechanismChanged && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
+      {due && !mechanismChanged && <button type="button" className="primary" onClick={() => void state.authorizeDue()}>{run?.stepCount === 1 ? tr('Authorize workflow') : tr('Authorize steps {0}–{1} now', String(currentGroup!.steps[0] + 1), String(currentGroup!.steps[1] + 1))}</button>}
       {(run?.nextAction === 'OWNER_CONFIRMS_BATCH' || state.unrecorded) && !['wallet', 'confirming'].includes(phase) && <button type="button" className="secondary" onClick={() => void state.checkWallet()}>{tr('Check my wallet for the batch')}</button>}
       {endable && !['wallet', 'confirming'].includes(phase) && <>
           {state.unrecorded && <p className="muted" role="note">{tr('Your wallet may already have sent this batch. Check your wallet\'s activity before ending the workflow: ending it does not stop a batch already on chain.')}</p>}

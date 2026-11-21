@@ -255,6 +255,14 @@ if (process.env.FLOFI_USER_FUNDED_E2E && !userFundedHarness) throw new Error('Us
 if (userFundedHarness && (!swapReadHarness || !baseMainnetHarness || !workflowRunsHarness))
   throw new Error('User-funded E2E needs the swap-read TLS harness, the Base mainnet harness and workflow runs on the loopback runtime');
 for (const key of Object.keys(process.env)) if (/^FLOFI_(USER_FUNDED_RPC|BUNDLER_RPC|DELEGATION_RPC)_/.test(key)) throw new Error(`Browser E2E refuses an inherited ${key}`);
+// BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the single-card profile only (FLOFI_E2E_SINGLE_CARD), on the user-funded harness above. Its disposable
+// database is migrated through this build's certified forward migrations up to `single_step_runs` (e2e/cloud-runtime-setup.ts: as an operator release
+// leaves it, each fixture checked against the certificate's SHA-256), and its server runs as a deployment does — without the local-fork Mode A runtime
+// (never enabled on a hosted deployment), so a Base USDC ⇄ WETH card is the shared owner-wallet catalog swap there, as in production. Every other
+// profile, editor-wallet-batch included, keeps the shipped schema and the local-fork runtime.
+const singleCardHarness = process.env.FLOFI_E2E_SINGLE_CARD === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.FLOFI_E2E_SINGLE_CARD && !singleCardHarness) throw new Error('Single-card E2E permits only the MOCKED loopback harness');
+if (singleCardHarness && !userFundedHarness) throw new Error('Single-card E2E runs on the MOCKED user-funded harness (FLOFI_USER_FUNDED_E2E)');
 const userFundedServerEnv: Record<string, string> = userFundedHarness ? { FLOFI_USER_FUNDED_EXECUTION: 'enabled', FLOFI_USER_FUNDED_CHAINS: 'eip155:8453',
   FLOFI_USER_FUNDED_RPC_8453: 'https://127.0.0.1:8567/rpc/8453', FLOFI_EDITOR_HANDOFF_MAINNET_NETWORKS: 'base' } : { FLOFI_USER_FUNDED_EXECUTION: 'disabled' };
 
@@ -360,6 +368,8 @@ export default defineConfig({
         FLOFI_LEARNING_AUTOMATIC: 'consent' } : {}),
       ...mcpServerEnv, ...swapReadEnv,
       ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv, ...workflowRunsServerEnv, ...userFundedServerEnv,
-      GRYLOO_MODE_A: 'fork', GRYLOO_MODE_A_PROFILE: join(runtime, 'profile.json'), GRYLOO_MODE_A_JOURNAL: join(runtime, 'journal') },
+      // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the single-card profile's server has no local-fork Mode A runtime (see `singleCardHarness`).
+      ...(singleCardHarness ? { GRYLOO_MODE_A: 'off' }
+        : { GRYLOO_MODE_A: 'fork', GRYLOO_MODE_A_PROFILE: join(runtime, 'profile.json'), GRYLOO_MODE_A_JOURNAL: join(runtime, 'journal') }) },
   }],
 });
