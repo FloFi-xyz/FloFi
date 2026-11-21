@@ -19,11 +19,15 @@ import type { Workflow } from './initial-workflow';
  * (2026-11-13, FIX 2): the universal Router too — a reconciled Swap → universal Bridge reloaded after the bridge settled re-proves the bridge from
  * its own record (verdict, workflow, owner, proven `received`) instead of making it the current step again.
  */
-export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap', 'router', 'universal']);
+export const RESTORABLE_RUNTIMES: readonly string[] = Object.freeze(['public', 'supply', 'solana-swap', 'router', 'universal',
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card the Editor ran as a one-step workflow run (its record is proven server-side for exactly
+  // this card: one step, the card's own canonical hash, its state; `editorSingleRunRecord`).
+  'workflow-run']);
 export const SEQUENCE_RUN_STORAGE_KEY = 'flofi:sequence-run:v1:';
 export type StoredCompletion = { readonly nodeId: string; readonly node: string; readonly kind: string; readonly runKey: string; readonly received: string | null };
 /** Reads a runtime's durable record by its run id (null when it cannot be read); `sourceChain` is the step's input chain when known. */
-export type RecordReader = (kind: string, runKey: string, sourceChain?: string | null) => Promise<unknown>;
+export type RecordReader = (kind: string, runKey: string, sourceChain?: string | null,
+  /** The step alone, as its runtime received it (a `workflow-run` record is proven against exactly this card). */ card?: Workflow) => Promise<unknown>;
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const RUN_KEY = /^[A-Za-z0-9._:-]{8,160}$/;
@@ -42,7 +46,7 @@ export function storedCompletions(value: unknown, workflowId: string): readonly 
 /** A runtime's durable record is final, reconciled and is the run of this workflow's node. */
 export function completedByRecord(kind: string, record: unknown, workflowId: string, nodeId: string): boolean {
   if (!isObject(record)) return false;
-  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : ['supply', 'solana-swap', 'router', 'universal'].includes(kind) && record.verdict === 'RECONCILED';
+  const final = kind === 'public' ? isObject(record.outcome) && !record.divergence : ['supply', 'solana-swap', 'router', 'universal', 'workflow-run'].includes(kind) && record.verdict === 'RECONCILED';
   const workflow = isObject(record.workflow) ? record.workflow : isObject(record.review) && isObject(record.review.workflow) ? record.review.workflow : null;
   return final && Boolean(workflow) && workflow!.workflowId === workflowId && Array.isArray(workflow!.nodes) &&
     workflow!.nodes.some(node => isObject(node) && node.nodeId === nodeId);
@@ -52,7 +56,7 @@ export function ownerByRecord(kind: string, record: unknown): string | null {
   if (!isObject(record)) return null;
   const value = kind === 'public' && Array.isArray(record.attempts) && isObject(record.attempts.at(-1)) ? (record.attempts.at(-1) as Record<string, unknown>).account
     : kind === 'supply' && isObject(record.review) ? record.review.account : kind === 'solana-swap' && isObject(record.review) ? record.review.owner
-    : kind === 'router' ? record.owner
+    : kind === 'router' || kind === 'workflow-run' ? record.owner
     // A universal route's owner deposited on the source chain. Review (round 2): across ecosystems the funds land with the wallet the Review bound
     // as recipient (the owner's wallet of the other ecosystem, possibly resolved from the account or Credentials): a later step that spends that
     // delivery continues only with that wallet (never "nobody", which skipped the wallet-continuity check).
@@ -73,7 +77,7 @@ export async function proveCompletions(stored: readonly StoredCompletion[], work
     const step = sequence.steps[index], node = step && workflow.nodes.find(candidate => candidate.nodeId === step.nodeId);
     if (!step || !node || step.nodeId !== item.nodeId || stepNodeKey(node) !== item.node) break;
     let record: unknown;
-    try { record = await read(item.kind, item.runKey, step.input?.chainId ?? null); } catch { return { proven, unreadable: true }; }
+    try { record = await read(item.kind, item.runKey, step.input?.chainId ?? null, step.projection); } catch { return { proven, unreadable: true }; }
     if (record === null || record === undefined) return { proven, unreadable: true };
     if (!completedByRecord(item.kind, record, workflow.workflowId, item.nodeId)) break;
     const received = deliveredByRecord(item.kind, record, step.output), owner = ownerByRecord(item.kind, record);

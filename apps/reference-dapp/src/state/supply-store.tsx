@@ -10,7 +10,7 @@ import { supplySimulate, supplyReview, supplyBegin, supplyReport, supplyObserve,
 import type { SupplyRecord, SupplyWalletDiagnostic } from '../server/supply-service';
 import { isPristineDraft } from '../domain/initial-workflow';
 import { observeWalletNonce, reviewNonceRefusal } from '../domain/wallet-nonce';
-import { observeUntilSettled } from '../domain/observation-schedule';
+import { OBSERVATION_TIMEOUT_MS, observeUntilSettled } from '../domain/observation-schedule';
 type Step='APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW';
 /** A request that may have reached the network and has no final outcome yet: `supply-service.ts` `observe` keeps resolving it (read-only). */
 const UNSETTLED=['SUBMITTING','SUBMISSION_RESULT_UNKNOWN','PENDING'];
@@ -22,7 +22,7 @@ const UNSETTLED=['SUBMITTING','SUBMISSION_RESULT_UNKNOWN','PENDING'];
  */
 export function supplyFollowSettled(value:SupplyRecord,step?:Step):boolean{
   if(value.verdict!=='PENDING'||value.notSubmitted)return true;
-  const attempt=step?value.attempts.find(a=>a.step===step):value.attempts.find(a=>!a.reconciled);
+  const attempt=step?value.attempts.findLast(a=>a.step===step):value.attempts.find(a=>!a.reconciled);
   return !attempt||attempt.reconciled||!UNSETTLED.includes(attempt.state);
 }
 /** A recovered run whose submitted attempt (its hash is known) has no final outcome yet keeps being followed after a reload. */
@@ -91,7 +91,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
       const observed=await supplyObserve(id);if(!observed.ok)throw new Error(observed.code);
       if(shown())accept(observed.value);
       return observed.value;
-    },value=>supplyFollowSettled(value,step),{active:shown}).finally(()=>setFollowing(current=>current===id?null:current));
+    },value=>supplyFollowSettled(value,step),{active:shown,timeoutMs:OBSERVATION_TIMEOUT_MS}).finally(()=>setFollowing(current=>current===id?null:current));
   }
   useEffect(()=>{
     let mounted=true;

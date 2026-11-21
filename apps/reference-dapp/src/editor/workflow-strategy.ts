@@ -29,7 +29,7 @@ import { composeWorkflow, dappReviewContext, reviewContextOf, type WorkflowCompo
 import { editorReducer, initialEditor } from '../domain/editor';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 
-/** The workflow-run limits (`workflow_runs.step_count BETWEEN 2 AND 8`). */
+/** The Editor's workflow-run limits: 2..8 steps for a sequence (0015), and one step only on the single-card opt-in (`workflow_runs.step_count BETWEEN 1 AND 8` from migration 0032). */
 export const EDITOR_RUN_MIN_STEPS = 2;
 export const EDITOR_RUN_MAX_STEPS = 8;
 const MAX_WORKFLOW_BYTES = 262_144;
@@ -163,4 +163,24 @@ export function canvasWorkflowOfStrategy(input: unknown): CanvasOfStrategy {
   if (!back.ok) return back;
   if (back.workflowHash !== composed.workflowHash) return { ok: false, code: 'CANVAS_PARITY_FAILED' };
   return { ok: true, workflow: state.workflow, workflowHash: back.workflowHash };
+}
+
+/**
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (workflow review): what a single-card run proves about ONE Canvas card — or null when the run is not
+ * exactly that card's run: it must have exactly one step and the canonical hash of exactly this card (`editorWorkflowStrategy` single-step; the
+ * run's engine workflow carries no Canvas ids, so the card's own ids are echoed only once it is proven). `verdict` RECONCILED only for a completed
+ * run whose step reconciled; `received` is the step's reconciled delivery; `owner` the run's own EVM wallet (its group's fee payer). Pure.
+ */
+export type SingleRunRecord = { readonly verdict: string; readonly workflow: { readonly workflowId: string; readonly nodes: readonly { readonly nodeId: string }[] };
+  readonly received: readonly { readonly asset: string; readonly amount: string }[]; readonly owner: string | null };
+export function singleCardRunRecord(run: { readonly state: string; readonly stepCount: number; readonly workflowHash: string;
+  readonly steps: readonly { readonly state: string; readonly outcome?: { readonly received?: readonly { readonly asset: string; readonly amount: string }[] } | null }[];
+  readonly groups: readonly { readonly feePayer?: string | null }[] }, card: unknown): SingleRunRecord | null {
+  const workflow = canonicalWorkflow(card);
+  if (!workflow) return null;
+  const nodes = financialNodes(workflow), converted = editorWorkflowStrategy(workflow, { singleStep: true });
+  if (!converted.ok || nodes.length !== 1 || run.stepCount !== 1 || run.steps.length !== 1 || run.workflowHash !== converted.workflowHash) return null;
+  const step = run.steps[0]!;
+  return { verdict: run.state === 'COMPLETED' && step.state === 'RECONCILED' ? 'RECONCILED' : run.state,
+    workflow: { workflowId: workflow.workflowId, nodes: [{ nodeId: nodes[0]!.nodeId }] }, received: step.outcome?.received ?? [], owner: run.groups[0]?.feePayer ?? null };
 }

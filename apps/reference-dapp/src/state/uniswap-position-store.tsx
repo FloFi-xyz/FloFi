@@ -35,7 +35,7 @@ import { projectExecutionRecovery, type ExecutionRecovery } from '../domain/exec
 import { projectExecutionStepEvidence } from '../domain/execution-step-evidence';
 import { projectExecutionEvidence } from '../domain/execution-evidence';
 import type { ReviewWallet } from '../domain/review-presentation';
-import { observeUntilSettled } from '../domain/observation-schedule';
+import { OBSERVATION_TIMEOUT_MS, observeUntilSettled } from '../domain/observation-schedule';
 
 export const UNISWAP_POSITION_RUN_KEY = 'flofi:uniswap-position:run';
 const REFUSALS = [4001, 4100, 4200];
@@ -266,13 +266,15 @@ export function UniswapPositionProvider({ children }: { children: ReactNode }) {
     // is applied only while this run is still the one shown (a newer run is never replaced) and the follow stops on unmount. As before, an
     // unanswered observation ends it quietly and the manual check stays.
     const shown = () => mountedRef.current && shownRun.current === id;
+    // A thrown observation (a lost response, a network failure) ends the follow quietly too: the submitted request is never called "not sent"
+    // and the manual check stays; each observation is bounded (`OBSERVATION_TIMEOUT_MS`).
     await observeUntilSettled(async () => {
-      const observed = await uniswapPositionObserve(id);
-      if (!observed.ok) return null;
+      const observed = await uniswapPositionObserve(id).catch(() => null);
+      if (!observed?.ok) return null;
       if (shown()) accept(observed.value);
       return observed.value;
     }, value => { const last = value?.attempts.at(-1); return !value || !last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || value.verdict !== 'PENDING'; },
-    { active: shown });
+    { active: shown, timeoutMs: OBSERVATION_TIMEOUT_MS }).catch(() => undefined);
   }
   return <Context.Provider value={{ available, executionEnabled, record, busy, signing, error, retired, recovered, engaged,
     request: stagedRequest ?? (attaches ? record?.request ?? null : null),

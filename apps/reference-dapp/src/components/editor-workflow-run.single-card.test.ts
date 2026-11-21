@@ -110,4 +110,15 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one card in the Editor\'
     expect(render()).toMatchObject({ grouped: false, stepByStep: true });
     expect(wallet.requests.filter(m => m === 'wallet_sendCalls')).toHaveLength(0);
   });
+  it('a stored run of this card dominates whatever the deployment answers (an expired account session): never offered through its own flow', async () => {
+    availability.value = { enabled: false, code: 'ACCOUNT_SESSION_REQUIRED', singleStep: false };
+    storage.set('flofi.editor-workflow-runs.v2', JSON.stringify([{ workflowId: 'wf-single', approvalId: APPROVAL, workflowHash: review.workflowHash, owner: OWNER, revision: 3,
+      at: '2026-11-21T00:00:00.000Z' }]));
+    server.status.mockResolvedValue({ ok: false, code: 'EVM_WALLET_PROOF_REQUIRED' });
+    render(); await settle(); render(); await settle();
+    // The run is this workflow's (started), shown (the panel offers to load its progress), and available: the shell keeps it primary.
+    expect(render()).toMatchObject({ started: true, available: true, visible: true, canReview: false, unloaded: true, error: 'EDITOR_RUN_SIGN_IN_REQUIRED' });
+    expect(wallet.requests).toEqual([]);
+    expect(proof.proveEvm).not.toHaveBeenCalled();
+  });
 });

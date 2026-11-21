@@ -13,7 +13,7 @@ import { CATALOG_NETWORK_IDENTITIES, networkIdentity } from '../domain/network-r
 import type { UniswapLiquidityPrice, UniswapLiquidityRecord, UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
 import { observeWalletNonce, walletNonceRefusal } from '../domain/wallet-nonce';
 import { UNISWAP_REFRESH_IN_PLACE, uniswapRunResumable } from '../domain/uniswap-liquidity-continuation';
-import { observeUntilSettled } from '../domain/observation-schedule';
+import { OBSERVATION_TIMEOUT_MS, observeUntilSettled } from '../domain/observation-schedule';
 
 const KEY = 'flofi:uniswap-liquidity:run';
 const REFUSALS = [4001, 4100, 4200];
@@ -254,13 +254,15 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     // is applied only while this run is still the one shown (a newer run is never replaced) and the follow stops on unmount. As before, an
     // unanswered observation ends it quietly and the manual check stays.
     const shown = () => mountedRef.current && shownRun.current === id;
+    // A thrown observation (a lost response, a network failure) ends the follow quietly too: the submitted request is never called "not sent"
+    // and the manual check stays; each observation is bounded (`OBSERVATION_TIMEOUT_MS`).
     await observeUntilSettled(async () => {
-      const observed = await uniswapLiquidityObserve(id);
-      if (!observed.ok) return null;
+      const observed = await uniswapLiquidityObserve(id).catch(() => null);
+      if (!observed?.ok) return null;
       if (shown()) accept(observed.value);
       return observed.value;
     }, value => { const last = value?.attempts.at(-1); return !value || !last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || value.verdict !== 'PENDING'; },
-    { active: shown });
+    { active: shown, timeoutMs: OBSERVATION_TIMEOUT_MS }).catch(() => undefined);
   }
   return <Context.Provider value={{ available, executionEnabled, record, busy, signing, error, retired, recovered, price, priceChain,
     requoted: requoted && requoted.runId === record?.id ? requoted : null, simulate, refresh, review, execute, observe, switchNetwork, fetchPrice }}>

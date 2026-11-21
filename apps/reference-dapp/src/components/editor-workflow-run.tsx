@@ -725,9 +725,9 @@ export function useEditorWorkflowRun(input: { readonly workflow: { readonly work
   // A followed earlier run is this tab's view only: it never counts as THIS workflow's run (its primary action and Review stay its own).
   const ownRun = Boolean(approvalId) && !following;
   const authorizedFor = ownRun && run && authorizedRevision.current !== null ? { workflowId: shownWorkflow.current, revision: authorizedRevision.current } : null;
-  return { available: available && (enabled || Boolean(approvalId) && !following), phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
+  return { available: Boolean(approvalId) && !following || available && enabled, phase, review, error, run, authorizedFor, updated, started: ownRun, grouped, unrecorded, refusedGroup, following, hide, resume, signing, endAndReview,
     canReview: available && enabled && evmWorkflow && !approvalId,
-    visible: available && (enabled || Boolean(approvalId) || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
+    visible: Boolean(approvalId) || available && (enabled || Boolean(earlier)), earlier: Boolean(available && earlier && !approvalId), followEarlier,
     stepByStep: !ownRun && (!evmWorkflow || (review ? reviewOffersStepByStep(review)
       : error !== null && !following && !TRANSIENT_REVIEW_FAILURE.has(error))),
     unloaded: Boolean(approvalId && !run),

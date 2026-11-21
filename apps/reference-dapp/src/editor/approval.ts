@@ -133,7 +133,7 @@ export async function startEditorRun(deps: Omit<ApprovalDeps, 'policy' | 'rules'
     rules: EDITOR_HANDOFF_RULES }, editorRequester(accountId), converted.strategy, converted.workflowHash, single ? { singleStepRun: true } : {});
   if (!result.ok) return { ok: false, code: result.code };
   const value = result.value;
-  // Only a multi-step workflow is handed to the run; a one-step plan keeps its own per-flow execution path (never reached: 2..8 steps only).
+  // Only a run plan is handed to the run (2..8 steps, or the single-card run's one step); any other plan keeps its own per-flow path (not reached).
   if (value.executionPlan !== 'SEQUENTIAL') {
     await deps.handoffs.revokeForRequester(value.approvalId, editorScope(accountId), deps.now).catch(() => null);
     return { ok: false, code: 'EDITOR_WORKFLOW_NOT_SEQUENCE' };

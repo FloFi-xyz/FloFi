@@ -38,6 +38,7 @@ import { workflowRunHarness } from '../workflow-runs/workflow-run.test-harness.t
 import { editorApprovalScheme, editorClaimPolicy, startEditorRun, type EditorRunConfig } from './approval.ts';
 import { bindingOf, runMatchesBinding } from './authorize-binding.ts';
 import { reviewEditorExecution } from './workflow-execution.ts';
+import { singleCardRunRecord } from './workflow-strategy.ts';
 
 const CHAIN = 'eip155:42161', CHAINS = [CHAIN];
 const USDC = ARBITRUM_MAINNET_SWAP.usdc.toLowerCase(), WETH = ARBITRUM_MAINNET_SWAP.weth.toLowerCase(), ROUTER = ARBITRUM_MAINNET_SWAP.router.toLowerCase();
@@ -182,6 +183,13 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     // ONE wallet batch, and FloFi itself never submitted any transaction.
     expect(batches()).toBe(1);
     expect(chain.control.sends()).toBe(0);
+
+    // ── What the run proves about this card (restoring it as an executed first step after a reload): exactly this card, reconciled ───────
+    const record = singleCardRunRecord(completed, canvas);
+    expect(record).toEqual({ verdict: 'RECONCILED', workflow: { workflowId: canvas.workflowId, nodes: [{ nodeId: canvas.nodes.find(n => !n.actionType.startsWith('mock-'))!.nodeId }] },
+      received: [{ asset: `${CHAIN}/erc20:${USDC}`, amount: received.toString() }], owner });
+    // Another card (a different amount) is never this run's card.
+    expect(singleCardRunRecord(completed, canvasOf({ ...SWAP, amount: '0.0007' }))).toBeNull();
 
     // ── Reload: read back by its id; nothing is prepared or sent again ────────────────────────────────────────────────────────────────
     const reloaded = await workflowRunStatus(surface, approvalId, wallets);

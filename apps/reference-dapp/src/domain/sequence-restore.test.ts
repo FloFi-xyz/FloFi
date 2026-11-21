@@ -128,4 +128,28 @@ describe('BUILD AAVE-V3-EXPANSION-001 sequence restoration after a refresh', () 
       .toBe(solanaRecipient);
     expect(ownerByRecord('universal', universal('RECONCILED', { review: { route: { sourceChain: 'eip155:8453', destinationChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' } } }))).toBeNull();
   });
+  it('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card run as a one-step workflow run is restored from its server-proven record, never dropped', async () => {
+    const { s, sequence, swapNode } = composed();
+    const pointer: StoredCompletion = { nodeId: swapNode.nodeId, node: stepNodeKey(swapNode), kind: 'workflow-run', runKey: 'apr_' + 'a'.repeat(26), received: '31000000000000000' };
+    expect(storedCompletions({ workflowId: s.workflow.workflowId, completed: [pointer] }, s.workflow.workflowId)).toEqual([pointer]);
+    const record = (verdict: string, received = '31000000000000000', nodeId = swapNode.nodeId) => ({ verdict, workflow: { workflowId: s.workflow.workflowId, nodes: [{ nodeId }] },
+      received: [{ asset: `eip155:8453/erc20:${WETH}`, amount: received }], owner: OWNER });
+    const cards: unknown[] = [];
+    const read: RecordReader = async (kind, runKey, _chain, card) => { cards.push(card); return kind === 'workflow-run' && runKey === pointer.runKey ? record('RECONCILED') : null; };
+    const { proven, unreadable } = await proveCompletions([pointer], s.workflow, sequence, read);
+    expect(unreadable).toBe(false);
+    expect(proven).toEqual([{ ...pointer, owner: OWNER, allocations: [] }]);
+    // The reader is asked about exactly that card (its own one-step projection), which the server proves the run against.
+    expect(cards).toEqual([sequence.steps[0]!.projection]);
+    // The executed card is never offered again: the sequence resumes at the next step.
+    expect(validCompletions(sequence, s.workflow, proven)).toHaveLength(1);
+    // Never trusted blindly: a run that is not complete, a delivery other than the pointer's, another card, or an unreadable record restore nothing.
+    const prove = async (value: unknown) => (await proveCompletions([pointer], s.workflow, sequence, async () => value));
+    expect((await prove(record('RUNNING'))).proven).toEqual([]);
+    expect((await prove(record('RECONCILED', '99'))).proven).toEqual([]);
+    expect((await prove(record('RECONCILED', '31000000000000000', 'node-999'))).proven).toEqual([]);
+    expect(await prove(null)).toEqual({ proven: [], unreadable: true });
+    expect(completedByRecord('workflow-run', record('RECONCILED'), s.workflow.workflowId, swapNode.nodeId)).toBe(true);
+    expect(ownerByRecord('workflow-run', record('RECONCILED'))).toBe(OWNER);
+  });
 });

@@ -7,6 +7,8 @@
  * the page then keeps following for about four more minutes at 4 s and 10 s instead of stopping after 60 s and waiting for a click. The
  * durable worker keeps reconciling after that, and a page that comes back resumes from the durable record.
  */
+/** BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the bound of one automatic observation (the manual check's own response deadline is 30 s too). */
+export const OBSERVATION_TIMEOUT_MS = 30_000;
 export const OBSERVATION_DELAYS_MS: readonly number[] = Object.freeze([
   ...Array<number>(15).fill(2_000), ...Array<number>(15).fill(4_000), ...Array<number>(18).fill(10_000),
 ]);
@@ -18,13 +20,25 @@ export type ObservationOutcome<T> = { readonly value: T | null; readonly settled
  * loop with its error, as the stores' loops always did; the person can check again. Returns the last value seen.
  */
 export async function observeUntilSettled<T>(observe: () => Promise<T>, settled: (value: T) => boolean, options: {
-  readonly delays?: readonly number[]; readonly sleep?: (ms: number) => Promise<void>; readonly active?: () => boolean } = {}): Promise<ObservationOutcome<T>> {
+  readonly delays?: readonly number[]; readonly sleep?: (ms: number) => Promise<void>; readonly active?: () => boolean;
+  /**
+   * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the longest one observation may take (milliseconds). An observation still unanswered then ends
+   * the follow with `OBSERVATION_TIMEOUT` (an unknown outcome, never "nothing was sent"), so a lost read response never keeps a page following —
+   * and its manual check hidden — forever; the person checks again. Absent: no bound (as before).
+   */
+  readonly timeoutMs?: number } = {}): Promise<ObservationOutcome<T>> {
   const delays = options.delays ?? OBSERVATION_DELAYS_MS, active = options.active ?? (() => true);
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const bounded = (): Promise<T> => {
+    if (options.timeoutMs === undefined) return observe();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([observe(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('OBSERVATION_TIMEOUT')), options.timeoutMs); })])
+      .finally(() => clearTimeout(timer));
+  };
   let value: T | null = null, observations = 0;
   for (let i = 0; i <= delays.length; i++) {
     if (!active()) return { value, settled: false, observations };
-    value = await observe(); observations++;
+    value = await bounded(); observations++;
     if (settled(value)) return { value, settled: true, observations };
     if (i === delays.length) break;
     await sleep(delays[i]!);

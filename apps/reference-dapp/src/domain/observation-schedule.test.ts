@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from 'vitest';
-import { OBSERVATION_DELAYS_MS, observeUntilSettled } from './observation-schedule';
+import { describe, expect, it, vi } from 'vitest';
+import { OBSERVATION_DELAYS_MS, OBSERVATION_TIMEOUT_MS, observeUntilSettled } from './observation-schedule';
 
 describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 observation schedule', () => {
   it('asks every 2 s for the first 30 s (as before), then backs off and keeps following for about four more minutes', () => {
@@ -27,5 +27,21 @@ describe('BUILD-FLOFI-EXECUTION-PERFORMANCE-001 observation schedule', () => {
     let n = 0;
     await expect(observeUntilSettled(async () => { n++; throw new Error('PUBLIC_RPC_UNAVAILABLE'); }, () => false, { sleep: async () => undefined })).rejects.toThrow('PUBLIC_RPC_UNAVAILABLE');
     expect(n).toBe(1);
+  });
+  it('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a bounded observation that never answers ends the follow with OBSERVATION_TIMEOUT', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const follow = observeUntilSettled(() => { calls++; return new Promise<never>(() => undefined); }, () => false, { timeoutMs: OBSERVATION_TIMEOUT_MS });
+      const outcome = expect(follow).rejects.toThrow('OBSERVATION_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(OBSERVATION_TIMEOUT_MS + 1);
+      await outcome;
+      expect(calls).toBe(1);
+      expect(OBSERVATION_TIMEOUT_MS).toBe(30_000);
+    } finally { vi.useRealTimers(); }
+  });
+  it('without a bound an observation is awaited as before; a timely answer is never cut short', async () => {
+    const outcome = await observeUntilSettled(async () => 'done', value => value === 'done', { timeoutMs: 1_000 });
+    expect(outcome).toEqual({ value: 'done', settled: true, observations: 1 });
   });
 });

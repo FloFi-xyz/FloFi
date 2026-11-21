@@ -13,7 +13,7 @@ import { useWorkflow } from './workflow-store';
 import { watchWalletResponse } from './wallet-request-lifecycle';
 import { bindFloFiSigning, usesFloFiWallet } from '../wallet/flofi-wallet-channel';
 import { floFiWalletMessage, PRE_SIGNATURE_CODES, signingContextOf } from '../wallet/flofi-signing';
-import { observeUntilSettled } from '../domain/observation-schedule';
+import { OBSERVATION_TIMEOUT_MS, observeUntilSettled } from '../domain/observation-schedule';
 import { gaslessUnsettled } from '../domain/gas-payment';
 import { createJourney, reportJourney, type Journey } from '../domain/journey-metrics';
 import { editorStorage, readPersistedEditor } from '../domain/editor-persistence';
@@ -215,7 +215,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
             if (!cancelled) setRun(current => { following = sameRun(current); return following ? observed : current; });
             return observed;
           }, observed => gaslessFollowed ? gaslessSettled(observed) : Boolean(observed.divergence || observed.outcome) || (observed.attempts.at(-1)?.state !== 'PENDING' && observed.attempts.at(-1)?.state !== 'HASH'),
-          { active: () => !cancelled && following })).catch(() => undefined);
+          { active: () => !cancelled && following, timeoutMs: OBSERVATION_TIMEOUT_MS })).catch(() => undefined);
         }
       }
     }).catch(() => undefined);
@@ -334,7 +334,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         const observed = unwrap(await publicObserve(id)); acceptCurrent(observed);
         if (observed.outcome) { journey.mark('confirmation'); journey.mark('reconciliation'); }
         return observed;
-      }, gaslessSettled, { active: () => mountedRef.current }));
+      }, gaslessSettled, { active: () => mountedRef.current, timeoutMs: OBSERVATION_TIMEOUT_MS }));
       finish(followed.value?.outcome ? 'reconciled' : followed.value?.gasless?.at(-1)?.state === 'FAILED' ? 'failed' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause }); }
   }, []);
@@ -435,7 +435,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         return observed;
       // The same stopping rule as the follow after a reload: a hash without a receipt yet (HASH) keeps being followed.
       }, observed => Boolean(observed.divergence || observed.outcome) || !['PENDING', 'HASH'].includes(observed.attempts.at(-1)?.state ?? ''),
-      { active: () => mountedRef.current }));
+      { active: () => mountedRef.current, timeoutMs: OBSERVATION_TIMEOUT_MS }));
       const state = followed.value?.attempts.at(-1)?.state;
       finish(state === 'REVERTED' ? 'failed' : state === 'UNKNOWN' ? 'inconclusive' : followed.value?.outcome ? 'reconciled' : 'in_progress');
     } catch (cause) { finish('in_progress'); throw afterHash(cause); }

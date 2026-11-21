@@ -125,7 +125,7 @@ export const SEQUENCE_RUNTIMES: readonly string[] = Object.freeze(['public', 'ro
  */
 export const SINGLE_CARD_RUNTIMES: readonly string[] = Object.freeze(['public', 'router', 'transfer', 'supply']);
 /** Runtimes whose reconciled record proves the delivered amount a funded later step spends (`deliveredByRecord`). */
-export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply']);
+export const DELIVERY_READABLE: readonly string[] = Object.freeze(['public', 'router', 'universal', 'solana-swap', 'supply', 'workflow-run']);
 /** The canonical form of a node, to prove an executed step is still exactly what the workflow holds. */
 export const stepNodeKey = (node: Node) => JSON.stringify(node);
 /**
@@ -258,6 +258,10 @@ export function deliveredByRecord(kind: string, record: unknown, output: Sequenc
     const units = isObject(observation) && observation.verdict === 'RECONCILED' ? observation.outputReceived : null;
     return same(record.review.chain, token.mint) && token.decimals === output.decimals && typeof units === 'string' && UNITS.test(units) ? units : null;
   }
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: a single card's one-step workflow run (its server-proven record, `editorSingleRunRecord`).
+  if (kind === 'workflow-run' && record.verdict === 'RECONCILED' && Array.isArray(record.received))
+    return deliveredByRun(record.received.filter((item): item is { asset: string; amount: string } => isObject(item) && typeof item.asset === 'string'
+      && typeof item.amount === 'string'), output);
   if (kind === 'supply' && record.verdict === 'RECONCILED' && isObject(record.review) && (record.review.borrow || record.review.withdraw) && Array.isArray(record.observations)) {
     const observation = record.observations.at(-1), units = isObject(observation) && observation.verdict === 'RECONCILED' ? observation.walletDelta : null;
     return same(record.review.chain, record.review.asset) && typeof units === 'string' && UNITS.test(units) ? units : null;

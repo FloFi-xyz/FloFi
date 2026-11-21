@@ -586,7 +586,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     && (singleCardReview ? singleCardReview.mode === 'STEP_BY_STEP' || singleCardReview.refusal !== null : workflowRunHere.stepByStep));
   // The whole-workflow path is primary until its Review shows this workflow must run step by step (it cannot be grouped, the RPC cannot simulate
   // it, or the path cannot run here); a safety refusal keeps it primary, so the workflow is fixed before anything runs (a started run always is).
-  const groupedPrimary = workflowRunHere.available && (workflowRunHere.started || !workflowRunHere.stepByStep && !singleCardFallback);
+  // A run of this workflow (started here, or followed after a reload) always dominates: whatever the deployment's availability answers (an expired
+  // account session, before the answer arrives), the workflow is never offered again through its per-step or own-card path.
+  const groupedPrimary = workflowRunHere.started || workflowRunHere.available && !workflowRunHere.stepByStep && !singleCardFallback;
   // A single card that falls back to its own flow right after its Review continues there at once (read-only: its own fresh simulation). The owner's
   // Simulate click already asked for it; a flow whose simulation may open a wallet sign-in (the Router without a session, the universal Router)
   // waits for the owner's own click.
@@ -596,11 +598,12 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     if (!singleFallbackKey || singleFallbackSimulated.current === singleFallbackKey) return;
     if (walletIssue || networkAction || simulationDisabled || !actionable || lifecycleState.invalidWorkflow) return;
     if (canvasAction.kind !== 'simulate' || canvasAction.disabled || simulationSource.state.busy) return;
-    if (simulationSource.kind === 'universal' || simulationSource.kind === 'router' && !routerState.session) return;
+    if (simulationSource.kind === 'universal' || !connectedWallet.account) return;
+    if (simulationSource.kind === 'router' && routerState.session?.account?.toLowerCase() !== connectedWallet.account.toLowerCase()) return;
     singleFallbackSimulated.current = singleFallbackKey;
     void simulateAgain();
   }, [singleFallbackKey, walletIssue, Boolean(networkAction), simulationDisabled, lifecycleState.invalidWorkflow, canvasAction.kind, canvasAction.disabled,
-    simulationSource.state.busy, simulationSource.kind, Boolean(routerState.session)]);
+    simulationSource.state.busy, simulationSource.kind, routerState.session?.account, connectedWallet.account]);
   // A single card's run that completed and reconciled is kept as this workflow's executed first step (as its own flow's run is), so an action added
   // afterwards is its own next step, never a repeat of this one. Its delivery is what the run reconciled for the card's output asset.
   const groupedSingleRun = singleCardRun || !sequence && soleAction.length === 1 ? workflowRunHere.run : null;
@@ -609,8 +612,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     && workflowRunHere.authorizedFor.revision === state.workflow.revision && !workflowRunHere.following);
   const groupedSingleDelivered = groupedSingleDone ? deliveredByRun(groupedSingleRun!.steps[0]?.outcome?.received ?? [], stepAssets(soleAction[0]!).output) : null;
   useEffect(() => {
+    // The wallet that executed it is the run's own (its group's fee payer: the run's bound EVM wallet), never whatever is connected now.
     if (groupedSingleDone && groupedSingleRun) recordExecutedAction({ received: groupedSingleDelivered, runKey: groupedSingleRun.approvalId, kind: 'workflow-run',
-      owner: connectedWallet.account?.toLowerCase() ?? null });
+      owner: groupedSingleRun.groups[0]?.feePayer?.toLowerCase() ?? null });
   }, [groupedSingleDone, groupedSingleDelivered, groupedSingleRun?.approvalId, recordExecutedAction]);
   // P0 workflow execution (production 2026-11-08, OWNER_STATE_CHANGED_REVIEW_REQUIRED after the USDC approval): on an owner-bound network
   // (Arbitrum One, Ethereum) a swap's Review binds the exact approval transaction, so once THIS run's own approval reconciled the swap needs its own

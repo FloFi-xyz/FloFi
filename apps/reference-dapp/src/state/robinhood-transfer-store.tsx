@@ -12,7 +12,7 @@ import type { TransferRecord, TransferWalletDiagnostic } from '../server/robinho
 import { bindFloFiSigning } from '../wallet/flofi-wallet-channel';
 import { signingContextOf } from '../wallet/flofi-signing';
 import { observeWalletNonce, reviewNonceRefusal } from '../domain/wallet-nonce';
-import { observeUntilSettled } from '../domain/observation-schedule';
+import { OBSERVATION_TIMEOUT_MS, observeUntilSettled } from '../domain/observation-schedule';
 
 const key = 'gryloo:rh-demo-001:transfer';
 const REFUSALS = [4001, 4100, 4200];
@@ -80,7 +80,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
       const observed = await transferObserve(id); if (!observed.ok) throw new Error(observed.code);
       if (shown()) accept(observed.value);
       return observed.value;
-    }, transferFollowSettled, { active: shown }).finally(() => setFollowing(current => current === id ? null : current));
+    }, transferFollowSettled, { active: shown, timeoutMs: OBSERVATION_TIMEOUT_MS }).finally(() => setFollowing(current => current === id ? null : current));
   }
   useEffect(() => {
     let mounted = true;
