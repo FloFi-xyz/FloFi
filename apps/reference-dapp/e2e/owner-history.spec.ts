@@ -152,6 +152,8 @@ test('financial authorization refuses deletion, offers Archive, and preserves th
 test('dismissed history actions release focus and clear refusal messages across rows', async ({ page }, info) => {
   const owner = createTestWallet(), first = await seed(owner, true), second = await seed(owner, true);
   await open(page, [owner]);
+  const walletActions = async () => (await walletRequests(page)).filter(method => /sign|send/i.test(method));
+  const signedIn = await walletActions();
   const more = (id: string) => card(page, id).getByRole('button', { name: 'More execution actions', exact: true });
   const dialog = page.getByRole('dialog', { name: 'Delete permanently?', exact: true });
   const alerts = page.locator('.history-actions [role="alert"]');
@@ -213,7 +215,7 @@ test('dismissed history actions release focus and clear refusal messages across 
   await page.getByRole('heading', { name: 'Your workflows', exact: true }).click();
   await expect(alerts).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('history-after-outside.png') });
-  expect((await walletRequests(page)).filter(method => /send|signTransaction/i.test(method))).toEqual([]);
+  expect(await walletActions()).toEqual(signedIn);
 });
 
 test('Portuguese confirmation remains usable on a narrow screen and keeps the cancel action safe', async ({ page }, info) => {

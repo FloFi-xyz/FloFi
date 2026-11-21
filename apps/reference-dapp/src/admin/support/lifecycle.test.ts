@@ -242,6 +242,21 @@ describe('BUILD-FLOFI-ADMIN-SUPPORT-RECOVERY-001 attention lifecycle', () => {
       expect([text, identifierShaped(text)]).toEqual([text, false]);
   });
 
+  it('distinguishes external evidence failure, a queued read and a stable stop without changing the financial outcome', () => {
+    const { run, facts } = shape({ ...EXECUTION_A, attention: false, stoppedKinds: [],
+      latest: { reconcile: task('reconcile', 'READY', null, '72') } });
+    const checkedAt = now.toISOString();
+    const blocked = { ...run, nonceCheck: { code: 'RPC_UNAVAILABLE', checkedAt, verifiedAt: null } };
+    expect(executionIncident(blocked, facts, now)).toMatchObject({ lifecycle: 'ACTIVE', submitted: 'UNKNOWN', outcomeKnown: false,
+      eligibility: 'WAITING_EXTERNAL', transactionCheck: { state: 'WAITING_EXTERNAL', checkedAt, verifiedAt: null } });
+    const retried = { ...facts, stoppedKinds: [stopped('reconcile', 'READY')] };
+    expect(executionIncident(run, retried, now)).toMatchObject({ transactionCheck: { state: 'RETRYING' }, outcomeKnown: false });
+    const stable = { ...facts, latest: { reconcile: task('reconcile', 'DEAD', 'NONCE_CONFLICT_STABLE_OPERATOR_REVIEW') } };
+    expect(executionIncident({ ...run, nonceCheck: { code: null, checkedAt, verifiedAt: checkedAt } }, stable, now))
+      .toMatchObject({ eligibility: 'INVESTIGATION', outcomeKnown: false, transactionCheck: { state: 'OPERATOR_REVIEW', verifiedAt: checkedAt },
+        actions: [{ id: 'execution.resume-observation', eligible: true }] });
+  });
+
   it('wallet-execution review: a divergent verdict is never verified resolved; proven non-execution is; an uncertain status stays unknown while retried', () => {
     // H1: the check stopped, a later check completed, but the verdict is DIVERGENT (funds moved differently from the review).
     const divergent: Shape = { runId: 'w1', flow: 'crosschain-universal', status: 'DIVERGENT', provenance: 'PUBLIC_MAINNET', needsObservation: false,

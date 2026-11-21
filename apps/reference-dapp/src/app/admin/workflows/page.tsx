@@ -8,7 +8,11 @@ import { AnalyticsFilters } from '../../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../../components/admin/admin-shell';
 import { DataNotes } from '../../../components/admin/data-notes';
 import { fmt, OUTCOME_KEYS, OUTCOME_META, OutcomeBadge } from '../../../components/admin/charts';
-import { CONDITION_LABELS, LIFECYCLE_LABELS, LIFECYCLE_ORDER, type AttentionEntry, type Lifecycle } from '../../../admin/support/lifecycle';
+import { CONDITION_LABELS, isOpen, LIFECYCLE_LABELS, LIFECYCLE_ORDER, OBSERVATION_LABELS, type AttentionEntry, type Lifecycle } from '../../../admin/support/lifecycle';
+import { TechnicalDetails } from '../../../components/admin/admin-ui';
+import { finopsCopy } from '../../../components/admin/finops-copy';
+import { requestLanguage } from '../../../server/request-language';
+import type { Language } from '../../../i18n/language';
 
 const LIFECYCLE_TONE: Readonly<Record<Lifecycle, 'warn' | 'info' | undefined>> = { ACTIVE: 'warn', UNDER_INVESTIGATION: 'info', HISTORICAL: undefined, VERIFIED_RESOLVED: undefined };
 const incidentHref = (runId: string) => `/admin/support/incident?id=${encodeURIComponent(`run:${runId}`)}`;
@@ -20,17 +24,24 @@ const worst = (runIds: readonly string[], byRun: ReadonlyMap<string, Lifecycle>)
   LIFECYCLE_ORDER.find(lifecycle => runIds.some(id => byRun.get(id) === lifecycle)) ?? null;
 
 /** Runs from the shared attention model: outcome and lifecycle side by side, with why. */
-function AttentionRows({ entries }: { entries: readonly AttentionEntry[] }) {
-  return <div className="admin-table-wrap"><table className="admin-table">
-    <thead><tr><th>Updated (UTC)</th><th>Flow</th><th>Environment</th><th>Transaction outcome</th><th>Incident</th><th>Why</th><th>Error code</th><th>Run</th></tr></thead>
+function AttentionRows({ entries, language }: { entries: readonly AttentionEntry[]; language: Language }) {
+  const { copy, time } = finopsCopy(language);
+  return <div className="admin-table-wrap admin-table-scroll" tabIndex={0} role="region" aria-label={copy('Execution incidents')}><table className="admin-table">
+    <thead><tr>{['Updated (UTC)', 'Flow', 'Environment', 'Transaction outcome', 'Incident', 'Diagnostics'].map(label => <th scope="col" key={label}>{copy(label)}</th>)}</tr></thead>
     <tbody>{entries.map(({ run, attention }) => <tr key={run.runId}>
-      <td className="admin-mono">{when(run.updatedAt)}</td><td><code>{run.flow}</code></td><td><code>{run.provenance}</code></td>
-      <td><OutcomeBadge outcome={attention.outcome}/></td>
-      <td>{attention.lifecycle ? <LifecycleBadge lifecycle={attention.lifecycle}/> : '—'}{attention.flagged ? <span className="admin-diff"> · flag kept</span> : null}</td>
-      <td>{attention.conditions.length ? attention.conditions.map(code => CONDITION_LABELS[code]).join('; ') : attention.explanation}
-        {attention.ownerReviewPending ? <span className="admin-diff"> · owner review pending (not an incident)</span> : null}</td>
-      <td>{run.errorCode ? <code>{run.errorCode}</code> : '—'}</td>
-      <td><a href={incidentHref(run.runId)} aria-label={`Diagnose run ${short(run.runId)}`}><code>{short(run.runId)}</code></a></td>
+      <td><time dateTime={run.updatedAt.toISOString()}>{time(run.updatedAt.toISOString())}</time></td><td>{run.flow}</td><td><code>{run.provenance}</code></td>
+      <td>{attention.conditions.includes('RESULT_DIVERGED') ? <span className="admin-badge" data-tone="warn">{copy('Diverged from the review')}</span>
+        : <OutcomeBadge outcome={attention.outcome}/>}</td>
+      <td>{attention.lifecycle ? <span className="admin-badge" data-tone={LIFECYCLE_TONE[attention.lifecycle]}>{copy(LIFECYCLE_LABELS[attention.lifecycle])}</span> : '—'}
+        {attention.observation ? <p className="admin-diff">{copy(OBSERVATION_LABELS[attention.observation])}</p> : null}</td>
+      <td><a href={incidentHref(run.runId)}>{copy('Diagnose')} <code>{short(run.runId)}</code></a>
+        <TechnicalDetails summary={copy('Details')}>
+          <p>{attention.conditions.length ? attention.conditions.map(code => copy(CONDITION_LABELS[code])).join(' · ') : copy(attention.explanation)}</p>
+          {run.errorCode ? <code>{run.errorCode}</code> : null}
+          {attention.flagged ? <p>{copy('Original attention flag retained.')}</p> : null}
+          {attention.ownerReviewPending ? <p>{copy('Owner review pending for future execution.')}</p> : null}
+        </TechnicalDetails>
+      </td>
     </tr>)}</tbody>
   </table></div>;
 }
@@ -67,36 +78,42 @@ export default async function AdminWorkflowsPage({ searchParams }: { searchParam
   const search = await searchParams;
   const params: AnalyticsParams = Object.fromEntries((['range', 'from', 'to', 'env', 'outcome'] as const).flatMap(key => {
     const value = param(search[key]); return value ? [[key, value]] : []; }));
-  const view = await workflowView(page.host, params, page.now);
+  const [{ language }, view] = await Promise.all([requestLanguage(), workflowView(page.host, params, page.now)]);
+  const { copy, count } = finopsCopy(language);
   if (!view.ok) return <AdminShell active="workflows" context={page.context} title="Workflows"><p className="admin-alert" data-tone="bad">Analytics are unavailable ({view.code}).</p></AdminShell>;
   const a = view.analytics, scoped = view.executions.filter(e => e.environment === view.environment && e.classification.started)
     .sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime());
   const listed = scoped.filter(e => view.outcome === 'ALL' || e.classification.outcome === view.outcome);
   const shared = view.attention, byRun = shared ? view.lifecycleByRun : null;
-  const open = shared ? shared.entries.filter(e => e.attention.lifecycle === 'ACTIVE' || e.attention.lifecycle === 'UNDER_INVESTIGATION') : [];
+  const open = shared?.entries.filter(e => isOpen(e.attention.lifecycle) && e.attention.realFunds) ?? [];
+  const test = shared?.entries.filter(e => isOpen(e.attention.lifecycle) && !e.attention.realFunds) ?? [];
   const past = shared ? shared.entries.filter(e => e.attention.lifecycle === 'HISTORICAL' || e.attention.lifecycle === 'VERIFIED_RESOLVED') : [];
   const fallback = shared ? [] : scoped.filter(e => e.classification.attention).slice(0, 25);
-  return <AdminShell active="workflows" context={page.context} title="Workflows" description="Every started execution, how it ended, and — separately — whether an incident about it is active, historical or resolved.">
+  return <AdminShell active="workflows" context={page.context} title="Workflows"
+    actions={<a className="admin-button" href="/admin/support">{copy('Open incident center')}</a>}>
     <AnalyticsFilters base="/admin/workflows" params={params} range={view.range} environment={view.environment} executedByEnvironment={a.executedByEnvironment}
       defaulted={view.environmentDefaulted}/>
     <DataNotes view={view}/>
     {shared ? <>
       <section className="admin-card" aria-labelledby="admin-attention" data-tone={open.length ? 'warn' : undefined}>
-        <header><h2 id="admin-attention">Requiring attention</h2>
-          <p>Execution runs with an active or under-investigation incident · all environments, all time — the same count as System Health and Support &amp; Recovery
-            ({fmt(open.length)}{shared.truncated ? ', at least' : ''}) · newest 25</p></header>
-        {open.length === 0 ? <p className="admin-empty">No execution has an active incident.</p> : <AttentionRows entries={open.slice(0, 25)}/>}
+        <header><h2 id="admin-attention">{copy('Requiring attention')}</h2>
+          <p>{copy('Mainnet and unknown environments')} · {shared.truncated ? copy('At least {0}', count(open.length)) : count(open.length)}</p></header>
+        {open.length === 0 ? <p className="admin-empty">{copy(shared.truncated ? 'No matching records in the available results.' : 'No incidents match this view.')}</p>
+          : <AttentionRows entries={open.slice(0, 25)} language={language}/>}
+        {test.length ? <TechnicalDetails summary={copy('Test and mock incidents ({0})', count(test.length))}>
+          <AttentionRows entries={test.slice(0, 25)} language={language}/>
+        </TechnicalDetails> : null}
       </section>
       <section className="admin-card" aria-labelledby="admin-historical">
-        <header><h2 id="admin-historical">Historical attention</h2>
-          <p>Flagged earlier, no active condition now · {fmt(shared.counts.historical)} historical (not verified), {fmt(shared.counts.resolved)} verified resolved · the original flag is kept</p></header>
-        {past.length === 0 ? <p className="admin-empty">No historical attention flags.</p> : <details><summary>Show {fmt(Math.min(25, past.length))} newest</summary>
-          <AttentionRows entries={past.slice(0, 25)}/></details>}
+        <header><h2 id="admin-historical">{copy('Historical attention')}</h2>
+          <p>{copy('{0} historical · {1} verified resolved', count(shared.counts.historical), count(shared.counts.resolved))}{shared.truncated ? ` · ${copy('Partial results')}` : ''}</p></header>
+        {past.length === 0 ? <p className="admin-empty">{copy('No matching records in the available results.')}</p> : <TechnicalDetails summary={copy('Show {0} newest', count(Math.min(25, past.length)))}>
+          <AttentionRows entries={past.slice(0, 25)} language={language}/></TechnicalDetails>}
       </section>
     </> : <section className="admin-card" aria-labelledby="admin-attention" data-tone={fallback.length ? 'warn' : undefined}>
-      <header><h2 id="admin-attention">Requiring attention</h2><p>The attention model could not be read: showing the outcome classifier and the raw flag in this range, which
-        mixes historical flags with active incidents · newest 25</p></header>
-      {fallback.length === 0 ? <p className="admin-empty">Nothing requires attention in this range.</p> : <ExecutionRows executions={fallback} lifecycleByRun={null}/>}
+      <header><h2 id="admin-attention">{copy('Requiring attention')}</h2></header>
+      <p className="admin-alert" data-tone="warn" role="status">{copy('Execution incident data is unavailable.')}</p>
+      {fallback.length > 0 ? <TechnicalDetails summary={copy('Execution records with raw attention flags')}><ExecutionRows executions={fallback} lifecycleByRun={null}/></TechnicalDetails> : null}
     </section>}
     <section className="admin-card" aria-labelledby="admin-flows">
       <header><h2 id="admin-flows">By flow</h2><p>{ENVIRONMENT_LABELS[view.environment]} · executed workflows</p></header>
