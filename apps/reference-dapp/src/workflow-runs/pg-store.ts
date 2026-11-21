@@ -250,7 +250,7 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
      */
     recordAnswerAfterStop: (runId: string, groupIndex: number, detail: { readonly batchIdReported: boolean; readonly hashes: number | null; readonly notSent: boolean | null }) =>
       db.transaction(async tx => {
-        await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
+        if (!await lockRun(tx, runId)) refuse('WORKFLOW_RUN_NOT_FOUND');
         await event(tx, runId, null, 'GROUP_ANSWER_AFTER_STOP', 'WALLET_BATCH_ANSWERED_AFTER_STOP', { group: groupIndex, ...detail });
       }),
     /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */
