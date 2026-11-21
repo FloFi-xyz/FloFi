@@ -83,7 +83,7 @@ DECLARE
   v_forms jsonb;
   v_request text; v_prepared_at text;
   v_common boolean; v_p boolean; v_d boolean; v_shape text;
-  v_activity boolean; v_authorization boolean; v_dependency boolean; v_guard boolean;
+  v_activity boolean; v_authorization boolean; v_requested boolean; v_dependency boolean; v_guard boolean;
 BEGIN
   SELECT * INTO r FROM workflow_runs WHERE tenant_id = p_tenant AND run_id = p_id AND owner_account = p_owner FOR UPDATE;
   IF NOT FOUND THEN
@@ -170,7 +170,7 @@ BEGIN
     AND s.state = 'SKIPPED' AND s.code = 'WALLET_REQUEST_REJECTED'
     AND v_groups = 1 AND g.step_from = 0 AND g.step_to = 0 AND g.namespace = 'eip155' AND g.fee_payer = p_owner AND g.strategy = 'EVM_WALLET_BATCH'
     AND g.state = 'SKIPPED' AND g.code = 'WALLET_REQUEST_REJECTED' AND g.owner_authorization IS NULL AND g.submission IS NULL AND g.outcome IS NULL
-    AND g.prepared IS NOT NULL AND g.prepared ->> 'kind' = 'EVM_WALLET_BATCH' AND g.prepared ->> 'owner' = p_owner
+    AND g.prepared IS NOT NULL AND g.prepared ->> 'kind' = 'EVM_WALLET_BATCH' AND lower(g.prepared ->> 'owner') = p_owner
     AND coalesce(g.prepared -> 'sponsorship', 'null'::jsonb) = 'null'::jsonb AND coalesce(g.prepared #> '{fee,sponsorship}', 'null'::jsonb) = 'null'::jsonb
     AND coalesce(g.prepared -> 'superseded', '[]'::jsonb) = '[]'::jsonb
     AND v_request ~ '^0x[0-9a-f]{64}$' AND v_prepared_at IS NOT NULL
@@ -217,24 +217,28 @@ BEGIN
     IF v_shape IS NOT NULL THEN
       RETURN CASE WHEN v_dependency THEN '{"ok":false,"code":"RUN_DELETE_REFUSED","reason":"DEPENDENCY"}' ELSE '{"ok":false,"code":"RUN_DELETE_REFUSED"}' END;
     END IF;
-    -- The reason class, as owner history explains an execution refusal: activity first, then an authorization, then a dependency.
+    -- The reason class, as owner history explains an execution refusal: something reached (or may have reached) a chain; else an owner
+    -- authorization; else a wallet request that existed without the proof it was never sent; else a dependency; else generic.
     v_activity := r.state IN ('COMPLETED', 'ATTENTION') OR r.completed_at IS NOT NULL OR r.code = ANY (v_unsure)
       OR EXISTS (SELECT 1 FROM workflow_run_steps WHERE tenant_id = p_tenant AND run_id = p_id
         AND (state IN ('AWAITING_OWNER', 'RECONCILED', 'FAILED', 'UNCERTAIN') OR outcome IS NOT NULL OR claimed_at IS NOT NULL OR code = ANY (v_unsure)))
       OR EXISTS (SELECT 1 FROM workflow_run_groups WHERE tenant_id = p_tenant AND run_id = p_id
-        AND (state IN ('SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED') OR submission IS NOT NULL OR outcome IS NOT NULL OR prepared IS NOT NULL
-          OR code = ANY (v_unsure)))
+        AND (state IN ('SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED') OR submission IS NOT NULL OR outcome IS NOT NULL OR code = ANY (v_unsure)))
       OR EXISTS (SELECT 1 FROM workflow_run_events WHERE tenant_id = p_tenant AND run_id = p_id AND (code = ANY (v_unsure)
-        OR kind IN ('STEP_LOADED', 'GROUP_PREPARED_AGAIN', 'GROUP_TOKEN_GAS_PREPARED', 'GROUP_KORA_RELAY', 'GROUP_BRIDGE_OBSERVED', 'GAS_MECHANISM_SWITCHED',
-          'RUN_COMPLETED', 'RUN_STEP_ADVANCED', 'GROUP_WALLET_DECLINED')
-        OR (kind = 'GROUP_STATE' AND detail ->> 'state' IN ('PREPARED', 'SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED', 'EXPIRED'))));
+        OR kind IN ('STEP_LOADED', 'GROUP_KORA_RELAY', 'GROUP_BRIDGE_OBSERVED', 'RUN_COMPLETED', 'RUN_STEP_ADVANCED')
+        OR (kind = 'GROUP_STATE' AND detail ->> 'state' IN ('SUBMITTED', 'UNCERTAIN', 'RECONCILED', 'FAILED'))));
     v_authorization := r.authorization_id IS NOT NULL OR r.mode = 'DELEGATED'
       OR EXISTS (SELECT 1 FROM delegated_authorizations WHERE tenant_id = p_tenant AND workflow_run_id = p_id)
       OR EXISTS (SELECT 1 FROM workflow_run_groups WHERE tenant_id = p_tenant AND run_id = p_id AND (owner_authorization IS NOT NULL OR state = 'AUTHORIZED'))
       OR EXISTS (SELECT 1 FROM workflow_run_events WHERE tenant_id = p_tenant AND run_id = p_id AND (kind IN ('GROUP_AUTHORIZED', 'GROUP_PERMIT_SIGNED',
         'GROUP_UPGRADE_CONSENTED', 'GROUP_UPGRADE_AUTHORIZED', 'GROUP_CIRCLE_ANSWERED') OR (kind = 'GROUP_STATE' AND detail ->> 'state' = 'AUTHORIZED')));
+    v_requested := EXISTS (SELECT 1 FROM workflow_run_groups WHERE tenant_id = p_tenant AND run_id = p_id AND prepared IS NOT NULL)
+      OR EXISTS (SELECT 1 FROM workflow_run_events WHERE tenant_id = p_tenant AND run_id = p_id AND (kind IN ('GROUP_PREPARED_AGAIN',
+        'GROUP_TOKEN_GAS_PREPARED', 'GAS_MECHANISM_SWITCHED', 'GROUP_WALLET_DECLINED', 'GROUP_DECLINE_VERIFIED')
+        OR (kind = 'GROUP_STATE' AND detail ->> 'state' IN ('PREPARED', 'EXPIRED'))));
     RETURN CASE WHEN coalesce(v_activity, false) THEN '{"ok":false,"code":"RUN_DELETE_REFUSED","reason":"EXECUTION_ACTIVITY"}'
       WHEN coalesce(v_authorization, false) THEN '{"ok":false,"code":"RUN_DELETE_REFUSED","reason":"AUTHORIZATION"}'
+      WHEN coalesce(v_requested, false) THEN '{"ok":false,"code":"RUN_DELETE_REFUSED","reason":"EXECUTION_ACTIVITY"}'
       WHEN v_dependency THEN '{"ok":false,"code":"RUN_DELETE_REFUSED","reason":"DEPENDENCY"}'
       ELSE '{"ok":false,"code":"RUN_DELETE_REFUSED"}' END;
   END IF;

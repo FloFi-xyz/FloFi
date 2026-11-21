@@ -103,9 +103,11 @@ async function reverse(t: TestDatabase): Promise<string | null> {
 describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: certificate for 0032 single_step_runs (v28 build, PostgreSQL)', { timeout: 120_000 }, () => {
   it('certifies the exact fixture bytes after 0029–0031 for the v28 build; 0015 stays immutable and the migration stays a fixture', async () => {
     expect(CERTIFICATE.base).toEqual(V28[27]);
+    // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion, intentional): the same certificate was extended with 0033 (its assessment
+    // anchor moved to §25, which keeps §24); 0029–0032 keep their exact identities and order (certificate-0033.pg.test.ts).
     expect(CERTIFICATE.migrations.map(m => [m.version, m.name])).toEqual([[29, 'finops_ledger'], [30, 'finops_sync'], [31, 'position_history_purge'],
-      [32, 'single_step_runs']]);
-    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#24-certificate-0032_single_step_runs');
+      [32, 'single_step_runs'], [33, 'workflow_run_purge']]);
+    expect(CERTIFICATE.assessment).toBe('docs/deploy/SCHEMA-COMPATIBILITY.md#25-certificate-0033_workflow_run_purge');
     expect((await fixture(32)).sha256).toBe('1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c');
     // 0015, which created the constraint, is immutable and unchanged; 0032 is not shipped by this build.
     expect(SHIPPED_MIGRATIONS.find(m => m.version === 15)!.sha256).toBe('5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f');
@@ -151,7 +153,8 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: certificate for 0032 sin
     expect(await snapshot(t.db)).toEqual(rows);
 
     // The v28 build serves 32 through this certificate; the previous certificate (0029–0031 only) and a strict check refuse it.
-    expect(await assertSchemaCompatible(t.db, V28)).toMatchObject({ version: 32, application: 28, forward: CERTIFICATE.migrations.map(m => ({ version: m.version })) });
+    expect(await assertSchemaCompatible(t.db, V28)).toMatchObject({ version: 32, application: 28,
+      forward: CERTIFICATE.migrations.slice(0, 4).map(m => ({ version: m.version })) });
     await expect(assertSchemaCompatible(t.db, V28, [PREVIOUS])).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
     await expect(assertSchemaCompatible(t.db, V28, [])).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
     await expect(assertSchemaCurrent(t.db, V28)).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');

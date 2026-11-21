@@ -52,8 +52,11 @@ it('applies only the certified 0032 on exact schema 31; refuses below 31; reruns
   expect(applied).toMatchObject({ code: 0, stderr: '' });
   expect(JSON.parse(applied.stdout)).toEqual({ tenantId: 'default', applied: [32] });
   expect(await stepCount()).toEqual(['CHECK (((step_count >= 1) AND (step_count <= 8)))']);
-  expect((await db.query('SELECT version, name, sha256 FROM schema_migrations WHERE version >= 29 ORDER BY version')).rows).toEqual(CERTIFICATE.migrations.map(m => ({ ...m })));
-  expect(CERTIFICATE.migrations.at(-1)).toEqual({ version: 32, name: 'single_step_runs', sha256: '1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c' });
+  // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion, intentional): the certificate now continues with 0033, which this command
+  // never applies (`workflow-run-purge-migrate` does); the ledger ends at 0032.
+  expect((await db.query('SELECT version, name, sha256 FROM schema_migrations WHERE version >= 29 ORDER BY version')).rows)
+    .toEqual(CERTIFICATE.migrations.slice(0, 4).map(m => ({ ...m })));
+  expect(CERTIFICATE.migrations[3]).toEqual({ version: 32, name: 'single_step_runs', sha256: '1f388788b8e788fcc412585b38569260acea1e1cb24ec2cab3f2208270e5d14c' });
 
   // A rerun, and every earlier operator command on schema 32, verifies the ledger and applies nothing; so does the ordinary deployment migration.
   expect(await run('single-step-runs-migrate')).toEqual({ applied: [] });

@@ -24,7 +24,7 @@ const CERTIFICATE = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.base.version === 28
 const V28 = SHIPPED_MIGRATIONS.slice(0, 28);
 /** The certificate before this change (0029–0032). A build carrying only it must refuse schema 33. */
 const PREVIOUS: ForwardCompatibilityCertificate = { ...CERTIFICATE, migrations: CERTIFICATE.migrations.slice(0, 4) };
-const SHA_0033 = '966a6f4cffc9518154e1c9b932cd0a2525b764a01a025d7f20e4ed4d3e8d79ab';
+const SHA_0033 = '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2';
 const HASH = '0x' + '1'.repeat(64), OWNER = '0x' + 'ab'.repeat(20), ACCOUNT = 'acct_' + 'a'.repeat(32);
 const APPEND_ONLY = 'WORKFLOW_RUN_RECORD_APPEND_ONLY';
 const opened: TestDatabase[] = [];

@@ -226,18 +226,30 @@ function subjectOf(request: RequestRow, adminKey: Buffer | null, wallet: string 
 type TextRow = { text_id: string; purpose: string; run_id: string | null; created_at: Date; expires_at: Date; body: string; held: boolean };
 const TEXT_LIMIT = 5000;
 /**
- * The texts about a subject: notes and reasons on their execution runs (including runs they purged, through the purge audit), on their
- * multi-step workflow runs and delegated executions, or written by them as an administrator. Platform and AI notes are about no one.
+ * BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001 (History deletion): an owner-deleted single-card attempt (migration 0033) leaves its identity
+ * tombstone, `workflow_run_purge_audit`, exactly as a purged execution run leaves `execution_purge_audit`. Texts written about it (by run id or
+ * as incident `wfr:<run>`) stay the subject's. The table exists only once the operator applied 0033; before that it is not named at all.
  */
-const SUBJECT_TEXT = `t.tenant_id = $1 AND (($2::text IS NOT NULL AND (
+const PURGED_WORKFLOW_RUNS = `
+      OR t.run_id IN (SELECT run_id FROM workflow_run_purge_audit WHERE tenant_id = $1 AND owner_account = $2)
+      OR t.incident_id IN (SELECT 'wfr:' || run_id FROM workflow_run_purge_audit WHERE tenant_id = $1 AND owner_account = $2)`;
+/**
+ * The texts about a subject: notes and reasons on their execution runs (including runs they purged, through the purge audit), on their
+ * multi-step workflow runs (including single-card attempts they deleted, through 0033's tombstone) and delegated executions, or written by them
+ * as an administrator. Platform and AI notes are about no one.
+ */
+const subjectText = (purged: boolean) => `t.tenant_id = $1 AND (($2::text IS NOT NULL AND (
       t.run_id IN (SELECT run_id FROM execution_runs WHERE tenant_id = $1 AND owner_account = $2)
       OR t.run_id IN (SELECT run_id FROM execution_purge_audit WHERE tenant_id = $1 AND owner_account = $2)
       OR t.incident_id IN (SELECT 'wfr:' || run_id FROM workflow_runs WHERE tenant_id = $1 AND owner_account = $2)
-      OR t.incident_id IN (SELECT 'dex:' || execution_id FROM delegated_executions WHERE tenant_id = $1 AND owner_account = $2)))
+      OR t.incident_id IN (SELECT 'dex:' || execution_id FROM delegated_executions WHERE tenant_id = $1 AND owner_account = $2)${purged ? PURGED_WORKFLOW_RUNS : ''}))
     OR ($3::text IS NOT NULL AND t.created_by = $3))`;
-const subjectTexts = (tx: Queryable, tenantId: string, s: { account: string | null; principal: string | null }) => tx.query<TextRow>(`SELECT t.text_id, t.purpose, t.run_id,
-    t.created_at, t.expires_at, t.body, ${HELD_TEXT} AS held FROM admin_support_texts t WHERE ${SUBJECT_TEXT} ORDER BY t.created_at LIMIT ${TEXT_LIMIT + 1}`,
-[tenantId, s.account, s.principal]);
+/** Whether 0033's tombstone table exists here (read in the request's own transaction; finding more texts is the safe side). */
+const workflowPurges = async (tx: Queryable) =>
+  (await tx.query<{ present: boolean }>(`SELECT to_regclass('workflow_run_purge_audit') IS NOT NULL AS present`)).rows[0]!.present;
+const subjectTexts = async (tx: Queryable, tenantId: string, s: { account: string | null; principal: string | null }) => tx.query<TextRow>(`SELECT t.text_id,
+    t.purpose, t.run_id, t.created_at, t.expires_at, t.body, ${HELD_TEXT} AS held FROM admin_support_texts t WHERE ${subjectText(await workflowPurges(tx))}
+    ORDER BY t.created_at LIMIT ${TEXT_LIMIT + 1}`, [tenantId, s.account, s.principal]);
 
 /**
  * ACCESS: what the Support & Recovery records hold about the subject, for the operator to compile the reply. Read-only apart from completing the
@@ -287,10 +299,10 @@ export async function privacyErase(db: Database, tenantId: string, requestId: st
     await serialize(tx, tenantId);
     const request = await loadRequest(tx, tenantId, requestId);
     need(request.kind === 'ERASURE' && request.state === 'APPROVED', 'PRIVACY_REQUEST_STATE_INVALID');
-    const s = subjectOf(request, adminKey, wallet), params = [tenantId, s.account, s.principal];
+    const s = subjectOf(request, adminKey, wallet), params = [tenantId, s.account, s.principal], subject = subjectText(await workflowPurges(tx));
     // One statement over every matching text (no row cap), never one a hold covers.
-    const deleted = (await tx.query(`DELETE FROM admin_support_texts t WHERE ${SUBJECT_TEXT} AND NOT ${HELD_TEXT}`, params)).rowCount;
-    const held = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM admin_support_texts t WHERE ${SUBJECT_TEXT}`, params)).rows[0]!.n;
+    const deleted = (await tx.query(`DELETE FROM admin_support_texts t WHERE ${subject} AND NOT ${HELD_TEXT}`, params)).rowCount;
+    const held = (await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM admin_support_texts t WHERE ${subject}`, params)).rows[0]!.n;
     const result = { supportTextsErased: deleted, keptByLegalHold: held, auditSkeletonRetained: true, executionRecordsNotInScope: true,
       lookupFingerprintsRetainedUntilQuarterKeyDestroyed: true };
     await recordAudit(tx, tenantId, { actor: 'cli', kind: 'PRIVACY_ERASURE_APPLIED', outcome: 'OK', target: requestId, detail: { erased: deleted, keptByLegalHold: result.keptByLegalHold } });

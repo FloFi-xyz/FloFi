@@ -1873,6 +1873,30 @@
     "app.e2e.editor-single-card": {
       "path": "apps/reference-dapp/e2e/editor-single-card.spec.ts",
       "stage": "browser"
+    },
+    "app.user-funded.decline-proof": {
+      "path": "apps/reference-dapp/src/user-funded/decline-proof.test.ts",
+      "stage": "unit"
+    },
+    "app.state.router-store": {
+      "path": "apps/reference-dapp/src/state/router-store.test.tsx",
+      "stage": "unit"
+    },
+    "cloud-runtime.certificate-0033.pg": {
+      "path": "packages/cloud-runtime/test/certificate-0033.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.workflow-run-purge-migrate.pg": {
+      "path": "apps/reference-dapp/backend/workflow-run-purge-migrate.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.list-runs-single-card.pg": {
+      "path": "packages/cloud-runtime/test/list-runs-single-card.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.backend.owner-history.pg": {
+      "path": "apps/reference-dapp/backend/owner-history.pg.test.ts",
+      "stage": "postgres"
     }
   },
   "requiredUnitSuites": [
@@ -2054,7 +2078,9 @@
     "app.server.defi-positions-cache",
     "app.editor.single-card-review",
     "app.editor.single-card-strategy",
-    "app.components.editor-workflow-run-single-card"
+    "app.components.editor-workflow-run-single-card",
+    "app.user-funded.decline-proof",
+    "app.state.router-store"
   ],
   "modules": [
     {
@@ -2574,7 +2600,8 @@
         "app.e2e.admin-console",
         "app.backend.plain-node-closure",
         "app.backend.uniswap-position-purge.pg",
-        "app.backend.single-step-runs-migrate.pg"
+        "app.backend.single-step-runs-migrate.pg",
+        "app.backend.workflow-run-purge-migrate.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery.",
@@ -3616,7 +3643,8 @@
         "packages/cloud-runtime/migrations/0028_saved_recipients.sql",
         "packages/cloud-runtime/src/owner-history.ts",
         "packages/cloud-runtime/migrations/0027_reconciliation_privacy.sql",
-        "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql"
+        "docs/deploy/RELEASE-POSITION-PURGE-0031.reversal.sql",
+        "docs/deploy/RELEASE-WORKFLOW-RUN-PURGE-0033.reversal.sql"
       ],
       "suites": [
         "app.learning.automatic",
@@ -3637,7 +3665,10 @@
         "cloud-runtime.certificate-0031.pg",
         "app.backend.uniswap-position-purge.pg",
         "cloud-runtime.certificate-0032.pg",
-        "app.backend.single-step-runs-migrate.pg"
+        "app.backend.single-step-runs-migrate.pg",
+        "cloud-runtime.certificate-0033.pg",
+        "app.backend.workflow-run-purge-migrate.pg",
+        "app.backend.owner-history.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -3721,7 +3752,9 @@
         "reference-reconciler.evidence",
         "workflow-contracts.revision-state",
         "cloud-runtime.certificate-0031.pg",
-        "cloud-runtime.certificate-0032.pg"
+        "cloud-runtime.certificate-0032.pg",
+        "cloud-runtime.certificate-0033.pg",
+        "cloud-runtime.list-runs-single-card.pg"
       ],
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
@@ -7364,7 +7397,8 @@
         "apps/reference-dapp/src/server/learning-web.ts",
         "apps/reference-dapp/src/server/owner-history.ts",
         "apps/reference-dapp/src/server/postgres-config.ts",
-        "apps/reference-dapp/src/server/saved-workflow-store.ts"
+        "apps/reference-dapp/src/server/saved-workflow-store.ts",
+        "apps/reference-dapp/src/server/workflow-run-history.ts"
       ],
       "suites": [
         "app.learning.automatic",
@@ -7372,7 +7406,8 @@
         "app.learning.learning.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
-        "cloud-runtime.tenancy.pg"
+        "cloud-runtime.tenancy.pg",
+        "app.backend.owner-history.pg"
       ],
       "gaps": [
         "Disposable PostgreSQL does not establish hosted Neon operational compatibility, retention operations or legal LGPD compliance."
@@ -8000,7 +8035,8 @@
         "reference-executor.bridge",
         "reference-reconciler.bridge",
         "app.state.settlement-sync",
-        "app.domain.execution-ux-reliability"
+        "app.domain.execution-ux-reliability",
+        "app.state.router-store"
       ],
       "gaps": [
         "Provider settlement and arbitrary public cross-domain compositions are not certified by offline route fixtures."
@@ -8295,7 +8331,8 @@
         "apps/reference-dapp/src/user-funded/circle-facts.ts",
         "apps/reference-dapp/src/user-funded/circle-gas.ts",
         "apps/reference-dapp/src/user-funded/gasless-groups.ts",
-        "apps/reference-dapp/src/workflow-runs/owner-step-circle.ts"
+        "apps/reference-dapp/src/workflow-runs/owner-step-circle.ts",
+        "apps/reference-dapp/src/user-funded/decline-proof.ts"
       ],
       "suites": [
         "app.user-funded.groups",
@@ -8325,7 +8362,8 @@
         "app.editor.single-card-run.pg",
         "app.editor.single-card-review",
         "app.components.editor-workflow-run-single-card",
-        "app.e2e.editor-single-card"
+        "app.e2e.editor-single-card",
+        "app.user-funded.decline-proof"
       ],
       "gaps": [
         "MOCKED loopback chain doubles and fakes only: no owner-signed mainnet user-funded execution recorded. The browser suite (app.e2e.editor-wallet-batch) proves the Editor sends ONE EIP-5792 wallet_sendCalls batch to a scripted wallet double on the MOCKED Base chain; real wallet behaviour (MetaMask EIP-5792 atomic batches and 7702 upgrade prompts, Phantom/Solflare multi-input solana:signTransaction prompts) and real bundlers are not exercised in CI."
@@ -9026,6 +9064,10 @@
     "app.backend.uniswap-position-purge.pg",
     "cloud-runtime.certificate-0032.pg",
     "app.backend.single-step-runs-migrate.pg",
-    "app.editor.single-card-run.pg"
+    "app.editor.single-card-run.pg",
+    "cloud-runtime.certificate-0033.pg",
+    "app.backend.workflow-run-purge-migrate.pg",
+    "cloud-runtime.list-runs-single-card.pg",
+    "app.backend.owner-history.pg"
   ]
 }

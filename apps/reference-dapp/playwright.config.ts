@@ -256,7 +256,7 @@ if (userFundedHarness && (!swapReadHarness || !baseMainnetHarness || !workflowRu
   throw new Error('User-funded E2E needs the swap-read TLS harness, the Base mainnet harness and workflow runs on the loopback runtime');
 for (const key of Object.keys(process.env)) if (/^FLOFI_(USER_FUNDED_RPC|BUNDLER_RPC|DELEGATION_RPC)_/.test(key)) throw new Error(`Browser E2E refuses an inherited ${key}`);
 // BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: the single-card profile only (FLOFI_E2E_SINGLE_CARD), on the user-funded harness above. Its disposable
-// database is migrated through this build's certified forward migrations up to `single_step_runs` (e2e/cloud-runtime-setup.ts: as an operator release
+// database is migrated through this build's certified forward migrations up to `workflow_run_purge` (e2e/cloud-runtime-setup.ts: as an operator release
 // leaves it, each fixture checked against the certificate's SHA-256), and its server runs as a deployment does — without the local-fork Mode A runtime
 // (never enabled on a hosted deployment), so a Base USDC ⇄ WETH card is the shared owner-wallet catalog swap there, as in production. Every other
 // profile, editor-wallet-batch included, keeps the shipped schema and the local-fork runtime.

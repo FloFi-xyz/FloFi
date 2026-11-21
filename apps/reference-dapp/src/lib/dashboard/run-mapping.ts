@@ -106,7 +106,8 @@ export function dashboardRunTitle(run: Pick<DashboardRun, 'flow' | 'attempts'>):
  * - COMPLETED: the engine writes 0015's one completion fact only after every step (here: the one step) reconciled, so it is completed and
  *   reconciled; no evidence bundle is claimed.
  * - PENDING / RUNNING: in progress; ATTENTION / HALTED: the run needs its owner. Both are followed in the Editor's execution view.
- * - EXPIRED: 0015 lets a run expire only from PENDING, before any mode, authorization or step started, so it records no execution start.
+ * - EXPIRED: 0015 lets a run expire only from PENDING, and the engine leaves PENDING at every start (a mode chosen, a delegated activation),
+ *   so an expired run records no execution start. Nothing more is claimed ("nothing was sent" is not said).
  * - CANCELLED / FAILED: whether a wallet request was sent (a cancelled batch whose answer never arrived, a reverted transaction) is not
  *   knowable from this summary, so neither is called "not submitted": the final outcome is not established. Delete stays the server's decision.
  * - Anything else: unresolved.

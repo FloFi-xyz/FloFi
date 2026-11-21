@@ -21,7 +21,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CERTIFIED_FORWARD_MIGRATIONS, loadMigrations, migrate, type Migration } from '@defi-workflow-engine/cloud-runtime';
+import { CERTIFIED_FORWARD_MIGRATIONS, createOwnerHistory, loadMigrations, migrate, type Migration } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { createAccountStore } from '../accounts/account-store.ts';
 import type { Command } from '../domain/commands';
@@ -113,7 +113,7 @@ async function setup(t: TestDatabase, options: { readonly weth?: bigint; readonl
     await claimApproval(surface, secret, wallets, true, h.d.now());
     const proposal = await workflowRunUserFundedStart(surface, started.value.approvalId, wallets, METAMASK);
     const prepared = await workflowRunUserFundedPrepare(surface, started.value.approvalId, wallets, 0);
-    return { approvalId: started.value.approvalId, proposal, prepared };
+    return { approvalId: started.value.approvalId, proposal, prepared, secret };
   }
   const runCount = async () => Number((await t.db.query('SELECT count(*)::int AS n FROM workflow_runs')).rows[0]!.n);
   return { chain, h, owner, surface, start, review, authorize, wallet, wallets, runCount, batches: () => batches, accountId: session.accountId };
@@ -264,7 +264,7 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
   it('rejected in the wallet (4001): recorded, proven from the chain never sent once the batch expired on chain, ended as nothing sent', async () => {
     const t = await schema32();
     const { chain, h, owner, authorize, wallets, surface, batches } = await setup(t);
-    const { approvalId, prepared } = await authorize(canvasOf(SWAP));
+    const { approvalId, prepared, secret } = await authorize(canvasOf(SWAP));
     const p = groupOf(prepared);
     const runId = (await t.db.query<{ run_id: string }>('SELECT run_id FROM workflow_runs WHERE handoff_id = $1', [approvalId])).rows[0]!.run_id;
     const group = async () => (await t.db.query<{ prepared: Record<string, unknown>; valid_until: Date; state: string; code: string | null }>(
@@ -296,6 +296,20 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
     expect(batches()).toBe(0);
     expect(chain.control.sends()).toBe(0);
     expect(chain.control.allowance(WETH, owner, ROUTER)).toBe(0n);
+
+    // ── History Delete: the proven rejection is deleted (not archived) by migration 0033's guarded purge, completely and idempotently ─────
+    const history = createOwnerHistory(t.db, h.d.tenantId);
+    expect(await history.change(owner, 'WORKFLOW_RUN', runId, 'DELETE')).toEqual({ ok: true, disposition: 'DELETED' });
+    expect(await history.change(owner, 'WORKFLOW_RUN', runId, 'DELETE')).toEqual({ ok: true, disposition: 'DELETED' });
+    expect(await history.disposition(owner, 'WORKFLOW_RUN', runId)).toEqual({ ok: true, disposition: 'DELETED' });
+    for (const table of ['workflow_runs', 'workflow_run_steps', 'workflow_run_groups', 'workflow_run_events'])
+      expect(Number((await t.db.query(`SELECT count(*)::int AS n FROM ${table} WHERE run_id = $1`, [runId])).rows[0]!.n), table).toBe(0);
+    expect((await t.db.query('SELECT shape, final_state FROM workflow_run_purge_audit WHERE run_id = $1', [runId])).rows)
+      .toEqual([{ shape: 'WALLET_REJECTED_VERIFIED', final_state: 'CANCELLED' }]);
+    // Replay protection: the approval link can never be claimed again, the run is gone for its owner, and Archive finds nothing.
+    await expect(claimApproval(surface, decodeURIComponent(secret), wallets, true, h.d.now())).rejects.toThrow('HANDOFF_NOT_FOUND');
+    await expect(workflowRunStatus(surface, approvalId, wallets)).rejects.toThrow('WORKFLOW_RUN_NOT_FOUND');
+    expect(await history.change(owner, 'WORKFLOW_RUN', runId, 'ARCHIVE')).toEqual({ ok: false, code: 'RUN_NOT_FOUND' });
   });
 
   it('a claimed rejection the chain contradicts is never proven (the batch ran, the owner transacted or has a pending transaction, a relayed operation): ended as unknown', async () => {
@@ -321,6 +335,11 @@ describe('BUILD-FLOFI-SINGLE-CARD-ONE-CONFIRMATION-001: one Uniswap V3 card on A
       expect(ended, contradiction).toMatchObject({ state: 'CANCELLED', groups: [{ state: 'SKIPPED', code: 'WALLET_BATCH_OUTCOME_UNKNOWN' }] });
       expect(Number((await t.db.query(`SELECT count(*)::int AS n FROM workflow_run_events WHERE run_id = $1 AND kind = 'GROUP_DECLINE_VERIFIED'`, [runId])).rows[0]!.n),
         contradiction).toBe(0);
+      // History keeps it as evidence: Delete is refused (a wallet request existed and its outcome is unknown); Archive stays available.
+      const history = createOwnerHistory(t.db, h.d.tenantId);
+      expect(await history.change(owner, 'WORKFLOW_RUN', runId, 'DELETE'), contradiction).toEqual({ ok: false, code: 'RUN_DELETE_REFUSED', reason: 'EXECUTION_ACTIVITY' });
+      expect(Number((await t.db.query('SELECT count(*)::int AS n FROM workflow_runs WHERE run_id = $1', [runId])).rows[0]!.n), contradiction).toBe(1);
+      expect(await history.change(owner, 'WORKFLOW_RUN', runId, 'ARCHIVE'), contradiction).toEqual({ ok: true, disposition: 'ARCHIVED' });
     }
   });
 

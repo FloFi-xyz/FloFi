@@ -11,7 +11,7 @@ SET LOCAL lock_timeout = '5s';
 SELECT pg_advisory_xact_lock(7340032001);
 DO $$ BEGIN
   IF (SELECT max(version) FROM schema_migrations) <> 33 OR NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 33 AND name = 'workflow_run_purge'
-    AND sha256 = '966a6f4cffc9518154e1c9b932cd0a2525b764a01a025d7f20e4ed4d3e8d79ab') THEN RAISE EXCEPTION 'NOT_CERTIFIED_0033_HEAD'; END IF;
+    AND sha256 = '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2') THEN RAISE EXCEPTION 'NOT_CERTIFIED_0033_HEAD'; END IF;
 END $$;
 -- No deletion can start or commit between the check below and the drops (a running one holds the tombstone table and is waited for, up to 5 s).
 LOCK TABLE workflow_run_purge_audit IN ACCESS EXCLUSIVE MODE;
@@ -27,5 +27,5 @@ $$;
 DROP FUNCTION purge_unsubmitted_workflow_run(text, text, text);
 DROP TABLE workflow_run_purge_permits;
 DROP TABLE workflow_run_purge_audit;
-DELETE FROM schema_migrations WHERE version = 33 AND name = 'workflow_run_purge' AND sha256 = '966a6f4cffc9518154e1c9b932cd0a2525b764a01a025d7f20e4ed4d3e8d79ab';
+DELETE FROM schema_migrations WHERE version = 33 AND name = 'workflow_run_purge' AND sha256 = '26b8a6dbf15dddbca24924e10bf8748748691c400fcb0c70e1d63038607be2c2';
 COMMIT;

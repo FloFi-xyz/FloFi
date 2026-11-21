@@ -11,10 +11,11 @@ confirmation, one wallet batch that the owner's own wallet authorizes and pays f
 2..8 steps (`workflow_runs_step_count_check`), so the database refuses a one-step run today. 0032 widens exactly that CHECK to 1..8 and changes
 nothing else.
 
-The application enables single-card runs **only** when the database ledger holds exactly this 0032 identity (version, name and SHA-256):
-`singleStepRunsSupported` in `apps/reference-dapp/src/workflow-runs/pg-store.ts`. Until 0032 is applied, or if the ledger row differs in any
-way, or if the read fails, a single card keeps its existing flow and nothing offers a run the database would refuse. Multi-card workflows are
-unchanged either way.
+The application enables single-card runs **only** when the database ledger holds exactly this 0032 identity (version, name and SHA-256)
+**and** the 0033 `workflow_run_purge` identity ([RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md): the owner's deletion of
+an attempt that provably never reached a chain): `singleStepRunsSupported` in `apps/reference-dapp/src/workflow-runs/pg-store.ts`. Until both are
+applied, or if a ledger row differs in any way, or if the read fails, a single card keeps its existing flow and nothing offers a run the database
+would refuse. Multi-card workflows are unchanged either way.
 
 ## Identities
 
@@ -41,14 +42,18 @@ with its own procedure**; the 0032 command never applies them and refuses any sc
 2. **The database is at exactly schema 31**: 0029, 0030 and 0031 already applied by their own owner-run procedures (`finops-migrate`,
    `finops-sync-migrate`, `position-purge-migrate`; see RELEASE-POSITION-PURGE-0031.md). The command refuses anything below 31.
 3. **Retention basis approved (owner / legal).** After activation, a single card the owner authorizes in the Editor writes `workflow_runs`,
-   `workflow_run_steps`, `workflow_run_groups` and `workflow_run_events`. These are append-only and cannot be deleted: 0015/0023 no-delete triggers;
-   owner history archives but refuses `WORKFLOW_RUN` deletion; privacy erasure leaves execution records out of scope. Today such a card writes
-   `execution_runs`, whose unstarted runs an owner may delete (0016 `purge_unstarted_execution`). The row is created at the owner's Authorize, never
-   by a read-only Review. It holds the owner's wallets, the canonical strategy (assets, amounts, any recipient) and the FloFi account id, even when
-   the wallet then declines. The retention basis (LGPD/GDPR) for these records must be accepted before activation. A reviewed deletion path for
-   never-authorized one-step runs would need its own certified migration.
+   `workflow_run_steps`, `workflow_run_groups` and `workflow_run_events`. These are append-only (0015/0023 no-delete triggers; privacy erasure
+   leaves execution records out of scope). Today such a card writes `execution_runs`, whose unstarted runs an owner may delete (0016
+   `purge_unstarted_execution`). The row is created at the owner's Authorize, never by a read-only Review. It holds the owner's wallets, the
+   canonical strategy (assets, amounts, any recipient) and the FloFi account id, even when the wallet then declines. The reviewed deletion path is
+   the certified 0033 ([RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md)), which single-card runs require: the owner
+   may delete, from History, only an attempt that ended before any wallet request existed, or whose one wallet batch the wallet rejected and the
+   server proved from the chain was never sent; the deletion leaves an identity tombstone (ids, owner, shape, final state, times, event count).
+   Every attempt that was authorized, signed, submitted, pending, uncertain, partially or fully executed stays (Archive only). The retention basis
+   (LGPD/GDPR) for the retained records, and for the tombstone, must be accepted before activation.
 4. **Irreversibility accepted.** Once one single-card run exists, 0032 can no longer be reversed (see Rollback). Because the 0031 reversal refuses
-   unless 0031 is the newest migration, 0031, 0030 and 0029 then become irreversible too.
+   unless 0031 is the newest migration, 0031, 0030 and 0029 then become irreversible too. 0033 sits on top of 0032 and is reversed first; once an
+   owner deleted one attempt under 0033 (its tombstone is permanent), 0033 can no longer be reversed, and 0032 cannot either.
 5. **The FinOps cohort stays multi-step.** The FinOps report counts only workflow runs with `step_count >= 2`. One-step single-card runs are
    single actions; they are excluded from workflow counts, average steps and cost per completed workflow, and named in the report's limitations.
    Single cards paid by a wallet batch no longer add `execution_runs` rows, so execution counts change at activation. Note the activation date
@@ -100,14 +105,17 @@ PostgreSQL 16; filter with `AND contype <> 'n'` to compare across versions. Any 
 
 - **Before activation:** any build is a rollback target exactly as before (schema unchanged).
 - **After activation, application rollback (code level): nothing to do in the database.** Any build carrying this certificate keeps serving schema
-  32; a build carrying only the previous certificate (0029–0031) refuses it and must not be deployed. A rollback target that predates the
+  32; a build carrying only the previous certificate (0029–0031) refuses it and must not be deployed. Once 0033 is active too, only a build
+  carrying the 0029–0033 certificate serves the database. A rollback target that predates the
   single-card feature never creates a one-step run (its claim path refuses fewer than two steps, `WORKFLOW_RUN_NOT_SEQUENTIAL`). How such a
   build presents a one-step run created before the rollback is application behaviour, not proven by this build's database suites: prefer a
   rollback target that carries both this certificate and the single-card feature, and let open single-card runs settle first. Financial
   observation and reconciliation continue throughout.
-- **Emergency reversal (owner decision, last resort):** valid **only while no `workflow_runs` row has `step_count = 1`** (runs are append-only and
-  never deleted, so after the first single-card run the reversal is no longer possible and the code-level rollback above is the only path; from then
-  on 0031–0029 cannot be reversed either). One-step Editor approvals issued while 0032 was active are refused at their claim with the closed code
+- **Emergency reversal (owner decision, last resort):** valid **only while 0032 is the newest migration and no `workflow_runs` row has
+  `step_count = 1`**. With 0033 applied, reverse 0033 first ([RELEASE-WORKFLOW-RUN-PURGE-0033.md](./RELEASE-WORKFLOW-RUN-PURGE-0033.md); possible
+  only while no attempt was ever deleted): the block below refuses while 0033 is the newest migration. A one-step run can disappear only through
+  0033's guarded deletion, whose permanent tombstone makes 0033 (and so this reversal) impossible, so after the first single-card run the reversal
+  is no longer possible and the code-level rollback above is the only path; from then on 0031–0029 cannot be reversed either. One-step Editor approvals issued while 0032 was active are refused at their claim with the closed code
   `WORKFLOW_RUN_SINGLE_STEP_NOT_ENABLED` after a reversal. Let open ones expire (15 minutes) before relying on that. Run the
   block below in one session with the migration connection (for example `psql "$DATABASE_MIGRATION_URL" -v ON_ERROR_STOP=1 -f <file>`). It takes
   the migration runner's advisory lock, refuses unless 0032 (exact identity) is the newest migration (`NOT_CERTIFIED_0032_HEAD`), locks
@@ -136,7 +144,8 @@ DELETE FROM schema_migrations WHERE version = 32 AND name = 'single_step_runs' A
 COMMIT;
 ```
 
-- Never delete workflow runs, edit the ledger by hand, or run other ad hoc DDL.
+- Never delete workflow runs by hand (only an owner, through 0033's guarded procedure from History), edit the ledger by hand, or run other ad hoc
+  DDL.
 
 ## Evidence and limits
 
